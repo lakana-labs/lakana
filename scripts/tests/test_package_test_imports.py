@@ -132,6 +132,7 @@ def _test_files(package: str) -> list[Path]:
 
 
 @pytest.mark.parametrize("package", sorted(FORBIDDEN))
+@pytest.mark.slow
 def test_a_package_s_tests_do_not_import_what_the_package_must_not_depend_on(
     package: str,
 ) -> None:
@@ -149,6 +150,7 @@ def test_a_package_s_tests_do_not_import_what_the_package_must_not_depend_on(
     )
 
 
+@pytest.mark.slow
 def test_only_the_query_child_imports_duckdb_in_the_packages_source() -> None:
     """The query process is the one place DuckDB runs; every other module goes through it."""
     allowed = ROOT / "packages" / "lakana-worker" / "src" / "lakana_worker" / "query_child.py"

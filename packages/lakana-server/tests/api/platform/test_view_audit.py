@@ -114,6 +114,7 @@ def test_a_managers_list_of_someone_elses_query_is_recorded_once(client: TestCli
     assert [e["detail"]["view"] for e in listed.json()["items"]] == ["queries", "queries"]
 
 
+@pytest.mark.slow
 def test_a_list_that_cannot_be_audited_is_a_503_without_rows(client: TestClient) -> None:
     _environment(client)
     query_id = _submit(client, _person(client, "bob", "ANALYST"))

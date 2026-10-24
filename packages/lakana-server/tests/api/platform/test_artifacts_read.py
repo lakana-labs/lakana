@@ -194,6 +194,7 @@ _BAD_VERSIONS = [
 
 
 @pytest.mark.parametrize("bad", _BAD_VERSIONS)
+@pytest.mark.slow
 def test_a_version_that_is_not_a_bounded_number_is_a_validation_error(
     stored: TestClient, bad: str
 ) -> None:

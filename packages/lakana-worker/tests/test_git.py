@@ -1535,6 +1535,7 @@ def test_archive_git_closing_stdout_without_exiting_times_out(tmp_path: Path) ->
     assert time.monotonic() - started < 10
 
 
+@pytest.mark.slow
 def test_slow_https_server_leaves_no_git_process_behind(
     tmp_path: Path, served: tuple[Path, str]
 ) -> None:
@@ -2291,6 +2292,7 @@ def test_no_proxy_bypasses_the_proxy(tmp_path: Path, served: tuple[Path, str]) -
     assert proxy.connects == []
 
 
+@pytest.mark.slow
 def test_proxy_credentials_are_sent_and_never_shown(
     tmp_path: Path, served: tuple[Path, str]
 ) -> None:

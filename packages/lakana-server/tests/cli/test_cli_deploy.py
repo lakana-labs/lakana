@@ -85,6 +85,7 @@ def _ok(result: Result) -> Result:
     return result
 
 
+@pytest.mark.slow
 def test_deploy_dry_run_redeploy_and_rollback(
     client: TestClient,
     tmp_path: Path,
@@ -133,6 +134,7 @@ def test_deploy_dry_run_redeploy_and_rollback(
     assert '"orphans": []' in orphans  # silver.more was never materialized, so it does not exist
 
 
+@pytest.mark.slow
 def test_init_output_deploys_unchanged(
     client: TestClient,
     tmp_path: Path,

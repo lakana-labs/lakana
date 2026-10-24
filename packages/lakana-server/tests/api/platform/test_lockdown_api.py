@@ -97,6 +97,7 @@ def test_arrow_writes_are_403(client: TestClient, method: str) -> None:
     assert response.status_code == 403, response.text
 
 
+@pytest.mark.slow
 def test_break_glass_append_and_drop_succeed(client: TestClient) -> None:
     """A break-glass reason as query parameter or body field lets exactly that write through."""
     _protected(client)

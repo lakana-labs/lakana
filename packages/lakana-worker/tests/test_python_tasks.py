@@ -4037,6 +4037,7 @@ def test_nothing_about_an_unreadable_upstream_is_looked_up(
 
 
 @pytest.mark.parametrize("recorded", ["table", "artifact"])
+@pytest.mark.slow
 def test_a_readable_upstream_outside_the_selection_that_was_never_built_is_named(
     py: PyWorld, recorded: str
 ) -> None:
@@ -4990,6 +4991,7 @@ def test_a_python_asset_that_replaced_a_table_is_set_back_when_its_check_fails(
 
 
 @pytest.mark.parametrize("passes", [True, False])
+@pytest.mark.slow
 def test_a_python_asset_that_replaced_a_not_published_table_publishes_or_not_by_its_checks(
     py: PyWorld, monkeypatch: pytest.MonkeyPatch, passes: bool
 ) -> None:
@@ -6161,6 +6163,7 @@ def test_a_cancel_that_arrives_after_a_failed_build_hands_the_task_back_to_be_se
 
 
 @pytest.mark.parametrize("tip_before", ["a snapshot", "none"])
+@pytest.mark.slow
 def test_an_append_of_no_rows_into_its_own_asset_does_not_break_the_tasks_chain(
     py: PyWorld, tip_before: str
 ) -> None:

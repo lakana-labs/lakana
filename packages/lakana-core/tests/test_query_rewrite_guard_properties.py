@@ -68,6 +68,7 @@ def _flip_case(text: str, flips: list[bool]) -> str:
     wrappers=st.lists(st.sampled_from(_WRAPPERS), min_size=1, max_size=4),
     flips=st.lists(st.booleans(), min_size=1, max_size=8),
 )
+@pytest.mark.slow
 def test_no_nesting_of_reads_lets_a_statement_through(
     statement: str, wrappers: list[str], flips: list[bool]
 ) -> None:

@@ -11,6 +11,8 @@ concern with no dedicated resource, called straight from `lakana.client`.
 
 import pathlib
 
+import pytest
+
 import lakana.client
 import lakana.resources as resources_pkg
 from lakana._routes import ROUTES
@@ -41,6 +43,7 @@ def _server_routes(settings: Settings) -> set[tuple[str, str]]:
     }
 
 
+@pytest.mark.slow
 def test_every_sdk_route_exists_on_the_server(settings: Settings) -> None:
     """The SDK never calls a method/path the server does not serve."""
     sdk = {(r.method, r.path) for r in ROUTES.values()}
@@ -48,6 +51,7 @@ def test_every_sdk_route_exists_on_the_server(settings: Settings) -> None:
     assert not missing, f"SDK routes not on the server: {sorted(missing)}"
 
 
+@pytest.mark.slow
 def test_every_server_route_has_an_sdk_method(settings: Settings) -> None:
     """Every platform route is reachable through the SDK."""
     sdk = {(r.method, r.path) for r in ROUTES.values()}

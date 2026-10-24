@@ -6,6 +6,7 @@ import json
 from collections.abc import Callable
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 from typer.testing import Result
 
@@ -15,6 +16,7 @@ from tests.cli.conftest import ADMIN_TOKEN, make_cli_state
 _ALL_ROWS = "SELECT id, region FROM gold.customers ORDER BY id"
 
 
+@pytest.mark.slow
 def test_the_row_filter_how_to_does_what_the_page_says(
     client: TestClient,
     cli_state: CliState,

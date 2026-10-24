@@ -468,6 +468,7 @@ def test_a_slow_head_is_cut_off(tmp_path: Path) -> None:
         server.server_close()
 
 
+@pytest.mark.slow
 def test_a_tunnel_ends_when_its_token_expires(proxy: Running) -> None:
     """A token's time bounds the tunnels it opened, not only their start."""
     status, connection = _connect(

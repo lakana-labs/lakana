@@ -1075,6 +1075,7 @@ def test_every_public_catalog_method_is_placed() -> None:
     assert all(reason.strip() for reason in _NOTHING_OF_A_KEPT_TABLE.values())
 
 
+@pytest.mark.slow
 def test_no_other_caller_reads_a_table_for_a_task() -> None:
     """A new way to a table's rows or files must go through `load_table`, or be listed here.
 

@@ -500,6 +500,7 @@ def test_a_task_runs_cancel_event_stops_the_child() -> None:
     assert seconds < 30
 
 
+@pytest.mark.slow
 def test_a_cancel_request_stops_the_child_and_is_read_about_once_a_second() -> None:
     calls: list[float] = []
 
@@ -907,6 +908,7 @@ def test_the_batch_stream_of_run_answers_the_same_question() -> None:
         assert list(batches) == []  # a failed stream stays finished
 
 
+@pytest.mark.slow
 def test_a_cancel_read_that_raises_counts_as_no_and_is_logged_once(
     caplog: pytest.LogCaptureFixture,
 ) -> None:

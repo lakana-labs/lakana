@@ -217,6 +217,7 @@ def test_the_guard_finds_a_raw_name_and_accepts_a_shown_one() -> None:
     assert raw_names_in_log_calls(good) == []
 
 
+@pytest.mark.slow
 def test_no_product_log_call_prints_a_raw_name() -> None:
     packages = Path(__file__).resolve().parents[2]
     offenders = [

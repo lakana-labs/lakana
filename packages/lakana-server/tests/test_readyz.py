@@ -84,6 +84,7 @@ def test_readyz_names_the_failed_check_and_nothing_else(client: TestClient) -> N
     assert response.headers["cache-control"] == "no-store"
 
 
+@pytest.mark.slow
 def test_readyz_is_not_part_of_the_platform_api(client: TestClient) -> None:
     paths = client.get("/openapi.json").json()["paths"]
 

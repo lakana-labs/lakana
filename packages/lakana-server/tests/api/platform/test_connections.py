@@ -715,6 +715,7 @@ def test_audit_kind_connection(client: TestClient, client_as: ClientAs) -> None:
     assert unknown.json()["detail"] == "kind must be connection"
 
 
+@pytest.mark.slow
 def test_a_task_token_may_not_list_or_show_connections(
     client: TestClient, client_as: ClientAs
 ) -> None:
