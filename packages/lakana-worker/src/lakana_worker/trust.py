@@ -30,6 +30,7 @@ from cryptography.hazmat.primitives import serialization
 
 from lakana_worker.ca_bundle import scan_pem
 from lakana_worker.launcher.requests import TRUST_FILE
+from lakana_worker.processes import is_private_directory
 
 MAX_OPERATOR_BYTES = 1024 * 1024
 """The largest operator file accepted; a CA bundle of a company is a few kilobytes."""
@@ -41,6 +42,18 @@ _CERTIFICATE_BLOCK = re.compile(
     rb"-----BEGIN CERTIFICATE-----[A-Za-z0-9+/=\s]*?-----END CERTIFICATE-----"
 )
 """One PEM certificate block: header, base64 body, footer."""
+
+_CERTIFICATE_HEADER = b"-----BEGIN CERTIFICATE-----"
+"""The header of a certificate block the bundle takes."""
+
+_ANY_CERTIFICATE_HEADER = re.compile(rb"-----BEGIN [^-\r\n]*CERTIFICATE-----")
+"""Any certificate header: ``CERTIFICATE`` and other spellings (``X509 CERTIFICATE``)."""
+
+_DAMAGED = (
+    "holds a certificate block that is not a valid certificate: it is damaged or cut off, or "
+    "not in the plain BEGIN CERTIFICATE form; export the certificate again as PEM"
+)
+"""The cause of a refusal for a block the bundle could not take whole."""
 
 _TRUSTED_CERTIFICATE = b"-----BEGIN TRUSTED CERTIFICATE-----"
 """OpenSSL's ``-trustout`` form, which carries trust settings that uv and Python ignore."""
@@ -161,6 +174,11 @@ def build_trust_bundle(operator: Path | None) -> bytes | None:
             "first certificate of a file, so convert each block on its own."
         )
     blocks = _CERTIFICATE_BLOCK.findall(data)
+    headers = _ANY_CERTIFICATE_HEADER.findall(data)
+    # A block without its footer, with a character that is not base64 or under another header
+    # matches no block: dropping it would start the worker without the operator's authority.
+    if any(header != _CERTIFICATE_HEADER for header in headers) or len(headers) != len(blocks):
+        raise TrustBundleError(_refusal(operator, _DAMAGED))
     if not blocks:
         raise TrustBundleError(_refusal(operator, "holds no PEM certificate"))
     pem = b""
@@ -168,9 +186,7 @@ def build_trust_bundle(operator: Path | None) -> bytes | None:
         try:
             certificate = x509.load_pem_x509_certificate(block)
         except ValueError:
-            raise TrustBundleError(
-                _refusal(operator, "holds a certificate block that is not a valid certificate")
-            ) from None
+            raise TrustBundleError(_refusal(operator, _DAMAGED)) from None
         pem += certificate.public_bytes(serialization.Encoding.PEM)
     roots_path = certifi.where()
     try:
@@ -206,11 +222,19 @@ def write_trust_file(bundle: bytes, directory: Path) -> Path:
     Raises
     ------
     TrustBundleError
-        If the file cannot be written; the message names the path and the cause.
+        If the file cannot be written, or the directory is not private (a link, another
+        owner, writable by others); the message names the path and the cause.
     """
     target = directory / f"trust-{hashlib.sha256(bundle).hexdigest()[:16]}.pem"
     try:
         directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if not is_private_directory(directory, 0o022):
+            raise TrustBundleError(
+                f"cannot write the trust bundle to {target}: the worker's cache directory "
+                f"{directory} is not private (it must be a real directory, not a link, owned by "
+                "the worker's user, that no other user can write to; an operator must fix it, "
+                "for example with chmod 0700)"
+            )
         _write(target, bundle)
     except OSError as exc:
         raise TrustBundleError(

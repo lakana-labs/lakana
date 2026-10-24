@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import threading
+from collections.abc import Callable
 from pathlib import Path
 
 import certifi
@@ -259,3 +260,117 @@ def test_an_untrusted_certificate_in_a_build_names_the_setting(output: str) -> N
     assert certificate_hint(output) == CERTIFICATE_HINT
     assert "LAKANA_RUN__CA_BUNDLE" in CERTIFICATE_HINT
     assert certificate_hint("error: No solution found") is None
+
+
+def _two_authorities(tmp_path: Path) -> tuple[str, str]:
+    """Make two private authorities and return their certificates, PEM.
+
+    Parameters
+    ----------
+    tmp_path
+        Where their files are written.
+
+    Returns
+    -------
+    tuple of (str, str)
+        The first and the second certificate.
+    """
+    first = make_authority(tmp_path, "First CA").ca_file.read_text()
+    second = make_authority(tmp_path, "Second CA").ca_file.read_text()
+    return first, second
+
+
+def _cut_off(pem: str) -> str:
+    """Drop a certificate's END line, as a paste cut short does.
+
+    Parameters
+    ----------
+    pem
+        One certificate.
+
+    Returns
+    -------
+    str
+        Its header and body only.
+    """
+    return pem.replace("-----END CERTIFICATE-----\n", "")
+
+
+def _stray_character(pem: str) -> str:
+    """Put a character that is not base64 into a certificate's body.
+
+    Parameters
+    ----------
+    pem
+        One certificate.
+
+    Returns
+    -------
+    str
+        The certificate with a ``.`` line after its header.
+    """
+    return pem.replace("-----BEGIN CERTIFICATE-----\n", "-----BEGIN CERTIFICATE-----\n.\n")
+
+
+def _x509_header(pem: str) -> str:
+    """Spell a certificate's header and footer ``X509 CERTIFICATE``.
+
+    Parameters
+    ----------
+    pem
+        One certificate.
+
+    Returns
+    -------
+    str
+        The certificate with the other spelling.
+    """
+    return pem.replace("BEGIN CERTIFICATE", "BEGIN X509 CERTIFICATE").replace(
+        "END CERTIFICATE", "END X509 CERTIFICATE"
+    )
+
+
+@pytest.mark.parametrize(
+    "damage", [_cut_off, _stray_character, _x509_header], ids=["cut-off", "stray", "x509"]
+)
+@pytest.mark.parametrize("position", ["first", "last"])
+def test_a_damaged_certificate_block_next_to_a_good_one_stops_the_worker(
+    tmp_path: Path, damage: Callable[[str], str], position: str
+) -> None:
+    """A block the bundle would drop silently stops the worker instead, naming the fix."""
+    good, corporate = _two_authorities(tmp_path)
+    broken = damage(corporate)
+    operator = tmp_path / "ca.pem"
+    operator.write_text(good + broken if position == "last" else broken + good)
+    with pytest.raises(TrustBundleError) as caught:
+        build_trust_bundle(operator)
+    message = str(caught.value)
+    assert "damaged or cut off" in message, message
+    assert "export" in message and str(operator) in message
+
+
+def test_a_file_of_two_good_certificates_reaches_the_bundle_whole(tmp_path: Path) -> None:
+    """The count check accepts a clean file: both certificates are in the bundle."""
+    first, second = _two_authorities(tmp_path)
+    operator = tmp_path / "ca.pem"
+    operator.write_text(first + "\n" + second)
+    bundle = build_trust_bundle(operator)
+    assert bundle is not None
+    assert first.strip().encode() in bundle and second.strip().encode() in bundle
+
+
+@pytest.mark.parametrize("kind", ["writable", "link"])
+def test_the_local_trust_file_is_never_written_into_a_cache_others_can_change(
+    tmp_path: Path, kind: str
+) -> None:
+    """Another user who could replace the file would choose what every local task trusts."""
+    cache = tmp_path / "cache"
+    if kind == "writable":
+        cache.mkdir()
+        cache.chmod(0o777)
+    else:
+        (tmp_path / "elsewhere").mkdir(mode=0o700)
+        cache.symlink_to(tmp_path / "elsewhere")
+    with pytest.raises(TrustBundleError, match=r"cache.*not private|must be a real directory"):
+        write_trust_file(b"one", cache)
+    assert not list(tmp_path.glob("**/trust-*.pem"))
