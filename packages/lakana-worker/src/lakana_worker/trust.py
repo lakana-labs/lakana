@@ -155,8 +155,10 @@ def build_trust_bundle(operator: Path | None) -> bytes | None:
         raise TrustBundleError(
             f"LAKANA_RUN__CA_BUNDLE names {operator}, which holds a TRUSTED CERTIFICATE block "
             "(OpenSSL's -trustout form, as in RHEL's ca-bundle.trust.crt) that builds and tasks "
-            f"cannot read. Convert each certificate with `openssl x509 -in {operator} -out "
-            "plain.pem` and point LAKANA_RUN__CA_BUNDLE at the plain PEM file."
+            "cannot read. Point LAKANA_RUN__CA_BUNDLE at a plain PEM file instead: on RHEL, "
+            "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem, or your authority's certificate "
+            "converted with `openssl x509 -in cert.pem -out plain.pem`, which converts only the "
+            "first certificate of a file, so convert each block on its own."
         )
     blocks = _CERTIFICATE_BLOCK.findall(data)
     if not blocks:

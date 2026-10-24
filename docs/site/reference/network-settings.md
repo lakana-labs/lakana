@@ -114,7 +114,7 @@ and the cause, never the file's content:
 | `… which holds no PEM certificate.` | Give a PEM file (`-----BEGIN CERTIFICATE-----`). Convert a DER file with `openssl x509 -inform der -in ca.der -out ca.pem`. |
 | `… which holds a certificate block that is not a valid certificate.` | A block is damaged or cut off; export the certificate again. |
 | `… which also holds a private key, and every task could read it.` | Give a file of certificates only; never the CA's key. |
-| `… which holds a TRUSTED CERTIFICATE block (OpenSSL's -trustout form, as in RHEL's ca-bundle.trust.crt) …` | Convert it: `openssl x509 -in ca-bundle.trust.crt -out plain.pem` (once per certificate), and point the setting at `plain.pem`. On RHEL, `/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem` is already plain PEM. |
+| `… which holds a TRUSTED CERTIFICATE block (OpenSSL's -trustout form, as in RHEL's ca-bundle.trust.crt) …` | Point the setting at a plain PEM file. On RHEL, `/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem` is the system's bundle in plain PEM. For your own authority's file, `openssl x509 -in cert.pem -out plain.pem` converts it, but only the first certificate of a file: split a file of several blocks and convert each block on its own. |
 | `cannot write the trust bundle to /…/trust-<digest>.pem (…); check that the worker's cache directory is writable.` | Local runner only: make the worker's cache directory (`$XDG_CACHE_HOME/lakana-worker`, else `~/.cache/lakana-worker`) writable by the worker's user. |
 | `the worker cannot read Mozilla's certificate roots at /… (…); reinstall the worker's certifi package.` | The worker's installation is damaged: reinstall it (or pull the image again). |
 

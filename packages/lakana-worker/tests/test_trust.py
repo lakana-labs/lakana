@@ -120,6 +120,8 @@ def test_a_trusted_certificate_block_is_refused_naming_the_conversion(
     message = str(caught.value)
     assert "TRUSTED CERTIFICATE" in message
     assert "openssl x509 -in" in message and "-out" in message
+    assert "only the" in message and "first certificate" in message
+    assert "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem" in message
     assert str(operator) in message
     assert "holds no PEM certificate" not in message
 
