@@ -815,7 +815,7 @@ def _project(directory: Path, value: str) -> dict[str, bytes]:
     return files
 
 
-def test_build_caches_are_private_unless_wheels_only_and_never_share_a_localmake_wheel(
+def test_build_caches_are_private_unless_wheels_only_and_never_share_a_local_wheel(
     running: Stack, tmp_path: Path
 ) -> None:
     """PR 2 security review C1 and R1, end to end, plus what a wheels-only build runs.

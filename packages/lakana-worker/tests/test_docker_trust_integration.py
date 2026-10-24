@@ -40,7 +40,9 @@ from tls_fixture import issue_leaf, make_authority
 
 from lakana_worker.trust import build_trust_bundle, certificate_hint
 
-pytestmark = [pytest.mark.integration, pytest.mark.docker]
+pytestmark = [pytest.mark.integration, pytest.mark.docker, pytest.mark.slow]
+"""Each case takes seconds (containers, a build). The slow-test ratchet reads only the unit
+shards' reports, which never hold an integration test, so the marker does not count there."""
 
 _HOST = "index.lakana.test"
 _PORT = 8443
