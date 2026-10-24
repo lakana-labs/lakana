@@ -1031,9 +1031,10 @@ the test, the budget, and the next step.
   uv run python scripts/time_budgets.py slow-tests --update ~/.cache/lakana-junit/*/*.xml
   ```
 
-  `--update` never records a rise. The tests marked when the ratchet started were those at 1.5 s
-  or more in CI, a margin below the threshold so that runner noise does not fail an unrelated pull
-  request; a test that drifts over 2 s unmarked is still a failure to fix.
+  `--update` never records a rise. The 205 tests marked when the ratchet started were those at
+  1.5 s or more in one CI run, a margin below the threshold, and one that took 2.1 s on its own in
+  a later run; a test that drifts over 2 s unmarked, and stays there when run again, is a failure
+  to fix.
 - **Locally**, `uv run pytest -m "not slow"` skips the slow tests for a quick loop while you
   work; before a push, run the selection of "Local gates" without it.
 
