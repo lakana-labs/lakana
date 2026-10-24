@@ -85,6 +85,7 @@ def make_authority(directory: Path, name: str = "Lakana Test CA") -> Authority:
         .not_valid_before(now - dt.timedelta(minutes=5))
         .not_valid_after(now + _VALID)
         .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
+        .add_extension(x509.SubjectKeyIdentifier.from_public_key(key.public_key()), critical=False)
         .add_extension(
             x509.KeyUsage(
                 digital_signature=True,
@@ -121,23 +122,58 @@ def _leaf(authority: Authority, directory: Path) -> tuple[Path, Path]:
     tuple of (Path, Path)
         The certificate file and the key file.
     """
+    return issue_leaf(authority, directory)
+
+
+def issue_leaf(
+    authority: Authority,
+    directory: Path,
+    names: tuple[str, ...] = ("127.0.0.1", "localhost"),
+) -> tuple[Path, Path]:
+    """Issue a server certificate for some names and write it with its key.
+
+    Parameters
+    ----------
+    authority
+        The authority that signs it.
+    directory
+        Where the two PEM files are written (``<authority>-leaf.pem`` and ``.key``).
+    names
+        Its subject-alternative names: an IP literal becomes an ``IPAddress``, anything else a
+        ``DNSName``. The first is also the common name.
+
+    Returns
+    -------
+    tuple of (Path, Path)
+        The certificate file and the key file.
+    """
+    alternatives: list[x509.GeneralName] = []
+    for name in names:
+        try:
+            alternatives.append(x509.IPAddress(ipaddress.ip_address(name)))
+        except ValueError:
+            alternatives.append(x509.DNSName(name))
     key = ec.generate_private_key(ec.SECP256R1())
     now = dt.datetime.now(dt.UTC)
     certificate = (
         x509.CertificateBuilder()
-        .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "127.0.0.1")]))
+        .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, names[0])]))
         .issuer_name(authority.certificate.subject)
         .public_key(key.public_key())
         .serial_number(x509.random_serial_number())
         .not_valid_before(now - dt.timedelta(minutes=5))
         .not_valid_after(now + _VALID)
         .add_extension(
-            x509.SubjectAlternativeName(
-                [x509.IPAddress(ipaddress.ip_address("127.0.0.1")), x509.DNSName("localhost")]
-            ),
+            x509.SubjectAlternativeName(alternatives),
             critical=False,
         )
         .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+        # Python 3.13's default context verifies strictly (VERIFY_X509_STRICT): a leaf without
+        # its issuer's key identifier is refused, as a real company CA's leaf never is.
+        .add_extension(
+            x509.AuthorityKeyIdentifier.from_issuer_public_key(authority.key.public_key()),
+            critical=False,
+        )
         .add_extension(
             x509.ExtendedKeyUsage([x509.oid.ExtendedKeyUsageOID.SERVER_AUTH]), critical=False
         )

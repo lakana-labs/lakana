@@ -15,11 +15,8 @@ never hands a project another project's local wheel, and runs no installed code)
 
 from __future__ import annotations
 
-import base64
 import concurrent.futures
 import dataclasses
-import hashlib
-import io
 import ipaddress
 import json
 import os
@@ -30,7 +27,6 @@ import sys
 import threading
 import time
 import uuid
-import zipfile
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
@@ -44,6 +40,7 @@ from docker_stack import (
     build_task_image,
     docker_client,
     host_processes,
+    make_wheel,
     serve,
     stack,
 )
@@ -508,6 +505,7 @@ def test_a_worker_that_disappears_leaves_no_container_and_no_process(
         "kill_grace_seconds": 2,
         "stdin": '{"asset_path": "probe.py"}',
         "roots": [],
+        "trust": False,
     }
     try:
         client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -750,45 +748,6 @@ _PTH = (
 _VALUE = "import probe_pkg\nprint(probe_pkg.VALUE, flush=True)\n"
 
 
-def _wheel(name: str, version: str, files: dict[str, str]) -> tuple[str, bytes]:
-    """Make a pure-Python wheel.
-
-    Parameters
-    ----------
-    name
-        The distribution name.
-    version
-        Its version.
-    files
-        Path in the wheel to text.
-
-    Returns
-    -------
-    tuple
-        The wheel's file name and its bytes.
-    """
-    dist = f"{name.replace('-', '_')}-{version}"
-    entries = {
-        **files,
-        f"{dist}.dist-info/METADATA": f"Metadata-Version: 2.1\nName: {name}\nVersion: {version}\n",
-        f"{dist}.dist-info/WHEEL": (
-            "Wheel-Version: 1.0\nGenerator: lakana-test\nRoot-Is-Purelib: true\nTag: py3-none-any\n"
-        ),
-    }
-    record = []
-    for path, text in entries.items():
-        digest = hashlib.sha256(text.encode()).digest()
-        encoded = base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
-        record.append(f"{path},sha256={encoded},{len(text.encode())}")
-    record.append(f"{dist}.dist-info/RECORD,,")
-    entries[f"{dist}.dist-info/RECORD"] = "\n".join(record) + "\n"
-    buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, "w") as archive:
-        for path, text in entries.items():
-            archive.writestr(path, text)
-    return f"{dist}-py3-none-any.whl", buffer.getvalue()
-
-
 def _project(directory: Path, value: str) -> dict[str, bytes]:
     """Write and lock a project whose only dependencies are two wheels in its repository.
 
@@ -812,8 +771,10 @@ def _project(directory: Path, value: str) -> dict[str, bytes]:
         if os.environ.get("LAKANA_TEST_DOCKER") == "1":
             pytest.fail("the build tests lock a project with uv, which is not on the PATH")
         pytest.skip("uv is not on the PATH")
-    lakana = _wheel("lakana", "0.0.0", {"lakana/__init__.py": "", "lakana/runner.py": STUB_HARNESS})
-    probe = _wheel(
+    lakana = make_wheel(
+        "lakana", "0.0.0", {"lakana/__init__.py": "", "lakana/runner.py": STUB_HARNESS}
+    )
+    probe = make_wheel(
         "probe-pkg",
         "1.0",
         {"probe_pkg/__init__.py": f"VALUE = {value!r}\n", "probe_pkg_marker.pth": _PTH},
@@ -854,7 +815,7 @@ def _project(directory: Path, value: str) -> dict[str, bytes]:
     return files
 
 
-def test_build_caches_are_private_unless_wheels_only_and_never_share_a_local_wheel(
+def test_build_caches_are_private_unless_wheels_only_and_never_share_a_localmake_wheel(
     running: Stack, tmp_path: Path
 ) -> None:
     """PR 2 security review C1 and R1, end to end, plus what a wheels-only build runs.

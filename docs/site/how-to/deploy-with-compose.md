@@ -217,13 +217,28 @@ logs a warning, and fails Python tasks, if `attempts` is a link or not private. 
 
 The environment build downloads packages. With the docker runner a build reaches the hosts the
 project's `uv.lock` names (PyPI by default) through `egress` only, and `LAKANA_RUN__HTTPS_PROXY`
-and `LAKANA_RUN__CA_BUNDLE` are refused (set `LAKANA_EGRESS_UPSTREAM_PROXY` in `.env` for a proxy;
-an index signed by a private certificate authority needs `LAKANA_RUNNER=local`). With the local
-runner the worker needs outbound HTTPS to those hosts, or `LAKANA_RUN__INDEX_URL`, `LAKANA_RUN__HTTPS_PROXY`,
-`LAKANA_RUN__NO_PROXY` and `LAKANA_RUN__CA_BUNDLE` set on the `worker` service by hand (same rules
+is refused (set `LAKANA_EGRESS_UPSTREAM_PROXY` in `.env` for a proxy). With the local
+runner the worker needs outbound HTTPS to those hosts, or `LAKANA_RUN__INDEX_URL`, `LAKANA_RUN__HTTPS_PROXY`
+and `LAKANA_RUN__NO_PROXY` set on the `worker` service by hand (same rules
 as the `LAKANA_GIT__*` settings below; put a credential in the URL's `user:token@` part: a query string is refused). Without network access a Python task fails at its
 environment build, and the task's log has uv's error. Whether a worker can run Python assets is
 logged when it starts (`Python assets: enabled` or `disabled: <reason>. To enable it: <fix>`).
+
+If your package index, or a source your tasks read, uses a certificate of a private certificate
+authority, mount that authority's PEM file into the `worker` service read-only and point
+`LAKANA_RUN__CA_BUNDLE` at it, with either runner (by hand in `compose.yaml`, next to
+`<<: *lakana-env`, like the `LAKANA_GIT__CA_BUNDLE` example below):
+
+```yaml
+    environment:
+      LAKANA_RUN__CA_BUNDLE: /certs/corp-ca.pem
+    volumes: ["./certs/corp-ca.pem:/certs/corp-ca.pem:ro"]
+```
+
+Builds and tasks then trust Mozilla's roots plus that file; the worker mounts it into each build
+and task container itself. A file with a private key, without a certificate or over 1 MiB stops
+the worker with a message that names the cause:
+[The trust bundle of builds and tasks](../reference/network-settings.md#the-trust-bundle-of-builds-and-tasks).
 
 `LAKANA_TASK_TOKENS__MAX_TTL_SECONDS` caps the lifetime of every task token, and the server and the
 worker both read it. If you change it, set it to the same value on the `server` and the `worker`

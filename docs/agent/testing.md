@@ -1149,6 +1149,24 @@ package code gets a private cache that is gone when it ends, two wheels-only bui
 cache yet each gets its own repository's wheel at the same path, and no installed code runs
 while uv builds.
 
+`test_docker_trust_integration.py` proves the trust bundle (#292) end to end. Its module fixture
+makes a private authority (`tls_fixture.make_authority`, a leaf for `index.lakana.test` with
+`issue_leaf`), starts a TLS index container on a labelled network `<stack>-index` (the task
+image runs `index_fixture.py`, copied in, on `0.0.0.0:8443`, with that network alias), and the
+egress service on that network through `docker_stack.start_egress(stack, network=…,
+reachable=<its subnet>)`: the proxy otherwise refuses an address on a network it is attached to,
+and `EgressSettings.reachable` is not a setting, so the entry sets it in code. The project
+(`index_fixture.project_files` plus the stub `lakana` wheel) is locked on the host against the
+loopback index and then rewritten to `https://index.lakana.test:8443`. The cases: a build with
+the bundle (`Stack.build(..., targets=..., trust=True)`) completes; one without fails with uv's
+`invalid peer certificate`, which `trust.certificate_hint` recognises (it is not wheels-only, so
+the shared cache of the trusting build cannot spare it the connection); a task's Python trusts a
+TLS server of the authority on the container's own loopback with the mount and refuses it
+without, and sees `SSL_CERT_FILE` and `LAKANA_CA_BUNDLE` only with it; and `/trust` refuses a
+write with `EROFS` and holds `trust.pem` alone. `tls_fixture` leaves carry the issuer's key
+identifier, which Python 3.13's strict default context requires. `start_egress` also serves
+`test_docker_egress_integration.py`; `stack()` removes the networks a test made with its labels.
+
 The test's Docker client and the launcher use one socket: `DOCKER_HOST` when it is
 `unix://<path>`, else `/var/run/docker.sock`; another `DOCKER_HOST` skips them (fails with
 `LAKANA_TEST_DOCKER=1`), since the launcher speaks to Docker only over a Unix socket.
@@ -1168,4 +1186,5 @@ systemd-run --user --scope -q -p MemoryMax=4G -p MemorySwapMax=0 timeout 900 \
   --basetemp ~/.cache/lakana-docker-tmp -q -p no:cacheprovider
 rm -rf ~/.cache/lakana-docker-tmp
 docker ps -a --filter label=lakana-test=1 -q; docker volume ls --filter label=lakana-test=1 -q
+docker network ls --filter label=lakana-test=1 -q
 ```

@@ -470,8 +470,9 @@ class RunConfig(BaseModel):
     ca_bundle
         Absolute path of a PEM file of certificate authorities to trust in addition to the public
         ones: for a package index or proxy signed by a private certificate authority, and for the
-        sources of ingestion tasks behind one. Builds and tasks trust it under both runners.
-        Certificates only, at most 1 MiB; the worker checks the file at start.
+        sources of ingestion tasks behind one. Builds and tasks trust it under both runners,
+        added to Mozilla's roots. Only its certificate blocks are used; a file over 1 MiB, without
+        a certificate or with a private key stops the worker at start.
     runner
         How Python tasks run: `local` (the default: as processes of the worker, not isolated
         from it) or `docker` (each task and each environment build in a container of its own,
