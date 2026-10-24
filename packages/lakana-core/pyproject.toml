@@ -26,7 +26,7 @@ classifiers = [
 urls = { Homepage = "https://github.com/lakana-labs/lakana", Documentation = "https://lakana-labs.github.io/lakana/", Repository = "https://github.com/lakana-labs/lakana", Issues = "https://github.com/lakana-labs/lakana/issues", Changelog = "https://github.com/lakana-labs/lakana/blob/main/CHANGELOG.md" }
 dynamic = ["version"]
 dependencies = [
-    "sqlalchemy>=2.1.5",
+    "sqlalchemy>=2.1.6",
     "alembic>=1.13",
     "pydantic>=2.7",
     "pydantic-settings>=2.16.0",
