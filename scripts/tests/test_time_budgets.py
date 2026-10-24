@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -19,6 +20,7 @@ from scripts.time_budgets import (
     parse_junit,
     read_baseline,
     read_budgets,
+    remeasure,
 )
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -238,9 +240,9 @@ def test_the_junit_report_is_read() -> None:
         _case("a/test_y.py", "test_three", 9.0, skipped=True),
     )
     assert parse_junit(text) == [
-        TestTime("a/test_x.py", "test_one", 0.5, slow=False, skipped=False),
-        TestTime("a/test_x.py", "test_two[1]", 3.25, slow=True, skipped=False),
-        TestTime("a/test_y.py", "test_three", 9.0, slow=False, skipped=True),
+        TestTime("a/test_x.py", "test_one", 0.5, False, False, "a.test_x"),
+        TestTime("a/test_x.py", "test_two[1]", 3.25, True, False, "a.test_x"),
+        TestTime("a/test_y.py", "test_three", 9.0, False, True, "a.test_y"),
     ]
 
 
@@ -477,3 +479,121 @@ def test_main_refuses_a_broken_durations_file(
     (in_tmp / "one.xml").write_text(_junit(_case("a.py", "t", 2.5)))
     assert main(["durations", "--output", str(output), "one.xml"]) == 1
     assert "d.json" in capsys.readouterr().err
+
+
+def test_a_test_is_named_by_its_node_id() -> None:
+    """A function by ``file::name``, a method by ``file::Class::name``."""
+    function = TestTime("a/test_x.py", "t[1]", 1.0, slow=False, skipped=False, classname="a.test_x")
+    method = TestTime("a/test_x.py", "t", 1.0, slow=False, skipped=False, classname="a.test_x.C")
+    other = TestTime("a/test_x.py", "t", 1.0, slow=False, skipped=False, classname="elsewhere")
+    assert function.nodeid == "a/test_x.py::t[1]"
+    assert method.nodeid == "a/test_x.py::C::t"
+    assert other.nodeid == "a/test_x.py::t"
+
+
+def test_the_junit_report_keeps_the_classname() -> None:
+    """The class of a method is part of its node id."""
+    (test,) = parse_junit(_junit(_case("a/test_x.py", "t", 0.5)))
+    assert test.classname == "a.test_x"
+    assert test.nodeid == "a/test_x.py::t"
+
+
+def _remeasured(seconds: dict[str, float]) -> Callable[[list[TestTime]], dict[str, float]]:
+    """Stand in for the re-run: fixed seconds by node id, recording what it was asked.
+
+    Parameters
+    ----------
+    seconds
+        The answer.
+
+    Returns
+    -------
+    callable
+        The stand-in; its ``asked`` attribute lists the node ids of each call.
+    """
+    asked: list[list[str]] = []
+
+    def again(tests: list[TestTime]) -> dict[str, float]:
+        asked.append([t.nodeid for t in tests])
+        return seconds
+
+    again.asked = asked  # ty: ignore[unresolved-attribute]
+    return again
+
+
+def test_a_test_that_is_fast_on_its_own_is_noise() -> None:
+    """Only the unmarked tests over the threshold are run again; fast again means a pass."""
+    tests = [
+        TestTime("a.py", "noisy", 2.4, slow=False, skipped=False),
+        TestTime("a.py", "fast", 0.1, slow=False, skipped=False),
+        TestTime("a.py", "marked", 9.0, slow=True, skipped=False),
+    ]
+    again = _remeasured({"a.py::noisy": 0.6})
+    errors, notes = check_slow_tests(tests, threshold=2.0, baseline=1, remeasure=again)
+    assert errors == []
+    assert again.asked == [["a.py::noisy"]]  # ty: ignore[unresolved-attribute]
+    assert any("a.py::noisy took 2.4 s in its shard but 0.6 s on its own" in n for n in notes)
+
+
+def test_a_test_that_is_slow_again_fails_with_both_times() -> None:
+    """Slow twice is slow; a test the re-run did not report keeps its first time."""
+    tests = [
+        TestTime("a.py", "slow", 2.4, slow=False, skipped=False),
+        TestTime("a.py", "lost", 3.0, slow=False, skipped=False),
+    ]
+    errors, _ = check_slow_tests(
+        tests, threshold=2.0, baseline=0, remeasure=_remeasured({"a.py::slow": 2.2})
+    )
+    assert len(errors) == 2
+    assert "a.py::slow took 2.4 s (and 2.2 s on its own)" in errors[0]
+    assert "a.py::lost took 3.0 s," in errors[1]
+
+
+def test_nothing_is_run_again_when_nothing_is_over() -> None:
+    """No re-run without a candidate."""
+    again = _remeasured({})
+    check_slow_tests(
+        [TestTime("a.py", "t", 0.1, slow=False, skipped=False)],
+        threshold=2.0,
+        baseline=0,
+        remeasure=again,
+    )
+    assert again.asked == []  # ty: ignore[unresolved-attribute]
+
+
+def test_remeasure_runs_the_tests_under_coverage_apart_from_the_run(tmp_path: Path) -> None:
+    """Serially, with coverage into its own file, and the times read from its own report."""
+    calls: list[tuple[list[str], dict[str, str]]] = []
+
+    def run(command: list[str], *, env: dict[str, str], check: bool) -> None:
+        calls.append((command, env))
+        report = next(c for c in command if c.startswith("--junitxml="))
+        Path(report.removeprefix("--junitxml=")).write_text(
+            _junit(_case("a.py", "t", 0.4), _case("a.py", "u", 5.0, skipped=True))
+        )
+
+    tests = [TestTime("a.py", "t", 2.5, slow=False, skipped=False, classname="a")]
+    assert remeasure(tests, tmp_path, run=run) == {"a.py::t": 0.4}
+    ((command, env),) = calls
+    assert command[1:4] == ["-m", "pytest", "a.py::t"]
+    assert "--cov" in command
+    assert "-n" not in command
+    assert "-o" in command and "junit_family=xunit1" in command
+    assert env["COVERAGE_FILE"] == str(tmp_path / ".coverage.remeasured")
+
+
+def test_remeasure_without_a_report_answers_nothing(tmp_path: Path) -> None:
+    """A re-run that crashed leaves the first measurement standing."""
+    tests = [TestTime("a.py", "t", 2.5, slow=False, skipped=False)]
+    assert remeasure(tests, tmp_path, run=lambda *a, **k: None) == {}
+
+
+def test_main_confirms_before_failing(
+    in_tmp: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``--confirm`` runs the candidates again; without it the first time decides."""
+    (in_tmp / "one.xml").write_text(_junit(_case("a.py", "t", 2.5)))
+    monkeypatch.setattr("scripts.time_budgets.remeasure", lambda tests, workdir: {"a.py::t": 0.5})
+    assert main(["slow-tests", "--confirm", "one.xml"]) == 0
+    assert "counted as noise" in capsys.readouterr().out
+    assert main(["slow-tests", "one.xml"]) == 1

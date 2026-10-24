@@ -556,7 +556,7 @@ def test_the_3_14_shards_hand_their_coverage_data_and_junit_reports_on() -> None
         < names.index("Coverage ratchet")
     )
     assert test["Slow-test ratchet"]["run"] == (
-        "uv run python scripts/time_budgets.py slow-tests junit/*.xml"
+        "uv run python scripts/time_budgets.py slow-tests --confirm junit/*.xml"
     )
     assert test["Slow-test ratchet"]["if"] == MEASURED
     assert test["Download the shards' junit reports"]["with"]["pattern"] == "junit-unit-*"
@@ -1700,8 +1700,8 @@ def test_the_macos_job_runs_the_unit_suite_and_the_getting_started_example() -> 
     macOS (#153) a failure fails the run like any other job's.
     """
     job = _jobs("ci.yml")[MACOS_JOB]
-    assert job["name"] == "unit (macos, ${{ matrix.shard }}/2)"
-    assert job["strategy"]["matrix"]["shard"] == [1, 2]
+    assert job["name"] == "unit (macos, ${{ matrix.shard }}/3)"
+    assert job["strategy"]["matrix"]["shard"] == [1, 2, 3]
     assert "continue-on-error" not in job
     assert job["runs-on"] == "macos-latest"
     assert "CI_RUNNER" not in str(job)
@@ -1716,7 +1716,7 @@ def test_the_macos_job_runs_the_unit_suite_and_the_getting_started_example() -> 
     assert setup["with"]["python-version"] == "3.14"
     assert any("run_docs_examples.sh getting-started" in c for c in commands)
     example = next(s for s in job["steps"] if "getting-started" in s.get("run", ""))
-    assert example["if"].endswith("&& matrix.shard == 2")
+    assert example["if"].endswith("&& matrix.shard == 3")
     assert (
         (ROOT / "docs/examples/getting-started/run.sh")
         .read_text()

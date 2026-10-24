@@ -25,10 +25,13 @@ import argparse
 import fnmatch
 import json
 import math
+import os
+import subprocess
 import sys
+import tempfile
 import tomllib
 import xml.etree.ElementTree as ET
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -87,6 +90,8 @@ class TestTime:
         Whether it carries ``@pytest.mark.slow``.
     skipped
         Whether it was skipped.
+    classname
+        The report's ``classname``: the module, dotted, and the class of a method.
     """
 
     __test__ = False  # a data class, not a test class for pytest to collect
@@ -96,6 +101,23 @@ class TestTime:
     seconds: float
     slow: bool
     skipped: bool
+    classname: str = ""
+
+    @property
+    def nodeid(self) -> str:
+        """Name the test as pytest does, so it can be run again.
+
+        Returns
+        -------
+        str
+            ``file::name``, or ``file::Class::name`` for a method.
+        """
+        module = self.file.removesuffix(".py").replace("/", ".")
+        prefix = module + "."
+        classes = self.classname.removeprefix(prefix).split(".")
+        if not self.classname.startswith(prefix):
+            classes = []
+        return "::".join([self.file, *classes, self.name])
 
 
 def _is_number(value: object) -> bool:
@@ -338,7 +360,8 @@ def parse_junit(text: str) -> list[TestTime]:
         slow = any(
             p.get("name") == "slow" and p.get("value") == "true" for p in case.iter("property")
         )
-        tests.append(TestTime(file, name, seconds, slow, case.find("skipped") is not None))
+        skipped = case.find("skipped") is not None
+        tests.append(TestTime(file, name, seconds, slow, skipped, case.get("classname", "")))
     return tests
 
 
@@ -359,9 +382,17 @@ def _tests(count: int) -> str:
 
 
 def check_slow_tests(
-    tests: Sequence[TestTime], *, threshold: float, baseline: int
+    tests: Sequence[TestTime],
+    *,
+    threshold: float,
+    baseline: int,
+    remeasure: Callable[[list[TestTime]], dict[str, float]] | None = None,
 ) -> tuple[list[str], list[str]]:
     """Check the slow-test rule and the ratchet.
+
+    One measurement in a busy shard is noisy (a test of 0.6 s once took 2.4 s), so with
+    `remeasure` an unmarked test over the threshold fails only when it takes that long again,
+    run on its own.
 
     Parameters
     ----------
@@ -371,24 +402,38 @@ def check_slow_tests(
         From this many seconds an unmarked test fails.
     baseline
         The most tests that may be marked slow.
+    remeasure
+        Runs the given tests again and returns their seconds by node id; None trusts the first
+        measurement. A test missing from its answer keeps its first measurement.
 
     Returns
     -------
     tuple of two lists of str
         The errors, and notes for the log (the count, and a request to lower the baseline).
     """
+    over = [t for t in tests if not t.slow and not t.skipped and t.seconds >= threshold]
+    again = remeasure(over) if (remeasure is not None and over) else {}
     errors: list[str] = []
-    for test in tests:
-        if not test.slow and not test.skipped and test.seconds >= threshold:
-            errors.append(
-                f"{test.file}::{test.name} took {test.seconds:.1f} s, and a unit test that takes "
-                f"{threshold:g} s or more must be marked slow. Next step: make it faster (a "
-                "smaller fixture, no real sleep, a shared app), or mark it @pytest.mark.slow; "
-                f"the number of slow tests may not rise above the baseline in {BASELINE}, so a "
-                f"new slow test needs another to become fast ({DOCS})."
+    notes: list[str] = []
+    for test in over:
+        second = again.get(test.nodeid)
+        if second is not None and second < threshold:
+            notes.append(
+                f"{test.nodeid} took {test.seconds:.1f} s in its shard but {second:.1f} s on its "
+                "own: counted as noise."
             )
+            continue
+        measured = f"{test.seconds:.1f} s" + (f" (and {second:.1f} s on its own)" if second else "")
+        errors.append(
+            f"{test.nodeid} took {measured}, and a unit test that takes "
+            f"{threshold:g} s or more must be marked slow. Next step: make it faster (a "
+            "smaller fixture, no real sleep, a shared app), or mark it @pytest.mark.slow; "
+            f"the number of slow tests may not rise above the baseline in {BASELINE}, so a "
+            f"new slow test needs another to become fast ({DOCS})."
+        )
     count = sum(1 for test in tests if test.slow)
-    notes = [f"{_tests(count)} {'is' if count == 1 else 'are'} marked slow (baseline {baseline})."]
+    verb = "is" if count == 1 else "are"
+    notes.append(f"{_tests(count)} {verb} marked slow (baseline {baseline}).")
     if count > baseline:
         errors.append(
             f"{_tests(count)} {'is' if count == 1 else 'are'} marked slow, above the baseline of "
@@ -453,6 +498,49 @@ def read_baseline(path: Path) -> int:
             "Restore it from git."
         )
     return value
+
+
+def remeasure(
+    tests: Sequence[TestTime], workdir: Path, run: Callable[..., object] = subprocess.run
+) -> dict[str, float]:
+    """Run tests again, on their own and serially, under coverage as in the shards.
+
+    Parameters
+    ----------
+    tests
+        The tests to measure again.
+    workdir
+        A directory for the junit report and the coverage data, so neither touches the
+        combined report of the run.
+    run
+        Runs the command; `subprocess.run` unless a test replaces it.
+
+    Returns
+    -------
+    dict
+        Seconds by node id, for the tests the new report holds; empty when it cannot be read.
+    """
+    report = workdir / "remeasured.xml"
+    command = [
+        sys.executable,
+        "-m",
+        "pytest",
+        *[test.nodeid for test in tests],
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "--cov",
+        "--cov-report=",
+        f"--junitxml={report}",
+        "-o",
+        "junit_family=xunit1",
+    ]
+    env = {**os.environ, "COVERAGE_FILE": str(workdir / ".coverage.remeasured")}
+    run(command, env=env, check=False)
+    try:
+        return {t.nodeid: t.seconds for t in parse_junit(report.read_text()) if not t.skipped}
+    except (OSError, ValueError):
+        return {}
 
 
 def _read_reports(paths: Sequence[Path]) -> list[TestTime]:
@@ -535,7 +623,13 @@ def _run_slow_tests(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 1
-    errors, notes = check_slow_tests(tests, threshold=budgets.threshold_seconds, baseline=baseline)
+    with tempfile.TemporaryDirectory() as workdir:
+        errors, notes = check_slow_tests(
+            tests,
+            threshold=budgets.threshold_seconds,
+            baseline=baseline,
+            remeasure=(lambda over: remeasure(over, Path(workdir))) if args.confirm else None,
+        )
     for note in notes:
         print(note)
     for error in errors:
@@ -603,6 +697,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     jobs.set_defaults(run=_run_jobs)
     slow = commands.add_parser("slow-tests", help="check the slow-test rule and its ratchet")
     slow.add_argument("--update", action="store_true", help="lower the baseline after a fall")
+    slow.add_argument(
+        "--confirm",
+        action="store_true",
+        help="run an unmarked test over the threshold again on its own before failing it",
+    )
     slow.add_argument("reports", type=Path, nargs="+", help="junit reports (xunit1)")
     slow.set_defaults(run=_run_slow_tests)
     durations = commands.add_parser("durations", help="write the seconds per test file")
