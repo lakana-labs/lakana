@@ -425,6 +425,7 @@ def _unexpected_allow_all_references(relative: str, tree: ast.AST) -> list[ast.A
     return references
 
 
+@pytest.mark.slow
 def test_only_the_bootstrap_builds_an_allow_all_service() -> None:
     """If another product module built one, the three actions would be open there.
 

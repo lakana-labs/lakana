@@ -882,6 +882,7 @@ def test_a_deployed_asset_is_never_expired(
 
 
 @pytest.mark.parametrize("status", [QueryRunStatus.QUEUED, QueryRunStatus.RUNNING])
+@pytest.mark.slow
 def test_a_table_with_a_query_writing_it_is_postponed(
     session: Session, catalog: CatalogService, principal: PrincipalRef, status: QueryRunStatus
 ) -> None:

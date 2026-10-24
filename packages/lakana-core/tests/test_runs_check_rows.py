@@ -970,6 +970,7 @@ def _other_mentions() -> dict[str, set[str]]:
     return found
 
 
+@pytest.mark.slow
 def test_only_the_rows_of_a_check_bind_a_query_run_to_a_check_result() -> None:
     """Every construction of a query run is listed, and one of them sets the binding.
 
@@ -985,6 +986,7 @@ def test_only_the_rows_of_a_check_bind_a_query_run_to_a_check_result() -> None:
     }
 
 
+@pytest.mark.slow
 def test_nothing_sets_the_binding_on_a_query_run_that_exists() -> None:
     """No assignment, update, raw SQL or field of a request names the binding.
 

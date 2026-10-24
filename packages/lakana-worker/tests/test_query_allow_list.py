@@ -238,6 +238,7 @@ def foreign(tmp_path: Path, authority: Authority) -> Iterator[tuple[Serving, Aut
         yield server, stranger
 
 
+@pytest.mark.slow
 def test_a_store_certificate_of_a_foreign_authority_fails_once_and_is_not_retried(
     foreign: tuple[Serving, Authority], authority: Authority
 ) -> None:

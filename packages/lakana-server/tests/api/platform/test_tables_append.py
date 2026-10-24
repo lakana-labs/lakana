@@ -445,6 +445,7 @@ def test_append_schema_mismatch_is_422_naming_column(client: TestClient) -> None
     assert "id" in response.json()["detail"]
 
 
+@pytest.mark.slow
 def test_append_records_audit_event(client: TestClient) -> None:
     """A successful append records TABLE_APPENDED with no data values in its detail."""
     create_environment(client)
@@ -954,6 +955,7 @@ def _build_dictionary_length_corrupted_stream() -> bytes:
     return bytes(corrupted)
 
 
+@pytest.mark.slow
 def test_decode_arrow_stream_survives_a_deterministic_dictionary_length_corruption(
     tmp_path: Path,
 ) -> None:

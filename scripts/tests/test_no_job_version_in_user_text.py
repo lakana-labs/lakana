@@ -315,6 +315,7 @@ def test_no_developer_page_says_job_version_outside_the_code_names() -> None:
     assert not hits, f"{len(hits)} lines say 'job version':\n" + "\n".join(hits[:60])
 
 
+@pytest.mark.slow
 def test_the_api_schema_and_the_sdk_fields_do_not_carry_the_old_name(tmp_path: Path) -> None:
     import dataclasses
     import inspect
@@ -346,11 +347,13 @@ def test_the_api_schema_and_the_sdk_fields_do_not_carry_the_old_name(tmp_path: P
     assert not hits, f"the API schema or the SDK still carries the old name: {hits}"
 
 
+@pytest.mark.slow
 def test_no_message_or_docstring_says_job_version() -> None:
     hits = _source_hits()
     assert not hits, f"{len(hits)} string literals say 'job version':\n" + "\n".join(hits[:80])
 
 
+@pytest.mark.slow
 def test_no_command_help_says_job_version() -> None:
     texts = _help_texts()
     assert len(texts) > 30  # the walk really reached the sub-commands

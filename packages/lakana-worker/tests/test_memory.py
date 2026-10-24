@@ -1486,6 +1486,7 @@ def _wait_until_exited(child: object) -> None:
 
 @_linux_only()
 @pytest.mark.usefixtures("child_leak_check")
+@pytest.mark.slow
 def test_a_child_that_has_exited_is_never_signalled_and_the_next_largest_is_stopped(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

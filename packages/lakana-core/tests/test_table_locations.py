@@ -473,6 +473,7 @@ def test_lock_location_reads_the_record_again(
     session.rollback()
 
 
+@pytest.mark.slow
 def test_a_create_that_failed_before_its_commit_deletes_its_files_and_its_claim(
     session: Session, other: Session, principal: PrincipalRef, store: Path
 ) -> None:

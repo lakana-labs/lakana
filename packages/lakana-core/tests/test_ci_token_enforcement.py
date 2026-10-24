@@ -666,6 +666,7 @@ def _deploy_checks(packages: Path) -> dict[str, int]:
     return found
 
 
+@pytest.mark.slow
 def test_every_deploy_check_is_covered() -> None:
     found = _deploy_checks(Path(__file__).resolve().parents[2])
     expected = {key: count for key, (count, _) in _DEPLOY_CHECKS.items()}

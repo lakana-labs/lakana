@@ -303,6 +303,7 @@ def test_a_pivot_with_its_values_listed_returns_rows(
 
 
 @pytest.mark.parametrize("operator", ["//", "%"])
+@pytest.mark.slow
 def test_an_integer_division_by_zero_fails_and_says_how_to_get_null(
     session: Session, principal: PrincipalRef, tmp_path: Path, operator: str
 ) -> None:

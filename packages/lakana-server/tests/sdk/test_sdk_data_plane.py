@@ -315,6 +315,7 @@ def _competing_append_ipc_bytes(table: pa.Table) -> bytes:
     return sink.getvalue()
 
 
+@pytest.mark.slow
 def test_sdk_two_concurrent_appends_one_conflicts_and_the_sdk_retry_succeeds(
     lakana_client: lakana.Client,
     client: TestClient,

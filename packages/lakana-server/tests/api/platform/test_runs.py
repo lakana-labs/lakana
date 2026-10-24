@@ -645,6 +645,7 @@ def test_a_check_without_a_checked_snapshot_is_409_with_the_reason(client: TestC
     assert answer.json()["detail"] == no_checked_snapshot_message(uuid.UUID(run_id))
 
 
+@pytest.mark.slow
 def test_a_check_whose_sql_is_no_longer_stored_is_409_with_the_way_to_the_count(
     client: TestClient,
 ) -> None:
@@ -727,6 +728,7 @@ def test_the_rows_route_refuses_a_body_that_is_not_one_check(client: TestClient)
     assert client.post(route, headers=AUTH_HEADER, json=extra).status_code == 422
 
 
+@pytest.mark.slow
 def test_no_request_can_bind_a_query_to_a_check_result(client: TestClient) -> None:
     """No request schema of the API has a field that names a check result or a snapshot."""
     spec = client.get("/openapi.json").json()

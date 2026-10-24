@@ -944,6 +944,7 @@ def test_the_files_of_an_artifact_are_checked_against_the_database_in_batches(
 # ---- the release budget ---------------------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_pruning_versions_that_free_no_file_still_costs_a_request_at_most_its_budget(
     session: Session, tmp_path: Path, principal: PrincipalRef, monkeypatch: pytest.MonkeyPatch
 ) -> None:

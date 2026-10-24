@@ -81,6 +81,7 @@ def _child(
     )
 
 
+@pytest.mark.slow
 def test_serving_prints_a_lakana_info_line_with_time_level_and_name(tmp_path: Path) -> None:
     """The suppressed-denial line of the audit logger reaches stderr when the server serves."""
     done = _child(_SERVE, tmp_path)
@@ -91,6 +92,7 @@ def test_serving_prints_a_lakana_info_line_with_time_level_and_name(tmp_path: Pa
     ), done.stderr
 
 
+@pytest.mark.slow
 def test_a_uvicorn_line_is_printed_once(tmp_path: Path) -> None:
     """Uvicorn's loggers do not propagate to the root handler this adds, so nothing doubles."""
     done = _child(_SERVE, tmp_path)
@@ -98,6 +100,7 @@ def test_a_uvicorn_line_is_printed_once(tmp_path: Path) -> None:
     assert sum("uvicorn line" in line for line in done.stderr.splitlines()) == 1, done.stderr
 
 
+@pytest.mark.slow
 def test_a_handler_the_embedding_process_installed_is_the_only_one(tmp_path: Path) -> None:
     """With a root handler in place the entry point adds none: each line is printed once."""
     done = _child(
@@ -110,6 +113,7 @@ def test_a_handler_the_embedding_process_installed_is_the_only_one(tmp_path: Pat
     assert done.stdout.split() == ["1", str(logging.WARNING)]
 
 
+@pytest.mark.slow
 def test_importing_the_server_package_configures_no_logging(tmp_path: Path) -> None:
     """A process that imports `lakana_server` as a library keeps its own logging."""
     done = _child(
@@ -123,6 +127,7 @@ def test_importing_the_server_package_configures_no_logging(tmp_path: Path) -> N
 
 
 @pytest.mark.parametrize("level", ["debug", "INFO", "Warning", "ERROR"])
+@pytest.mark.slow
 def test_each_level_prints_each_line_once_with_uvicorns_real_logging_configuration(
     tmp_path: Path, level: str
 ) -> None:
@@ -154,6 +159,7 @@ _ACCESS_FLAG = (
 
 
 @pytest.mark.parametrize(("setting", "expected"), [(None, "True"), ("false", "False")])
+@pytest.mark.slow
 def test_the_access_log_follows_lakana_log_access(
     tmp_path: Path, setting: str | None, expected: str
 ) -> None:

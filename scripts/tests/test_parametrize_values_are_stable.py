@@ -249,6 +249,7 @@ def _test_files() -> list[Path]:
     return sorted(path for root in roots for path in root.rglob("*.py"))
 
 
+@pytest.mark.slow
 def test_no_parametrize_value_differs_between_processes() -> None:
     """No test file draws a ``parametrize`` value from a random source or the clock."""
     problems = [

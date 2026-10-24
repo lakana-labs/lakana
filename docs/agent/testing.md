@@ -4,25 +4,30 @@ Referenced from `CLAUDE.md` when you are writing or changing tests.
 
 ## `unit` vs `integration`
 
-`pyproject.toml` registers three pytest markers:
+`pyproject.toml` registers five pytest markers:
 
 ```toml
 markers = [
     "unit: fast tests requiring no external services",
     "integration: tests requiring Postgres or object storage",
     "docker: tests that start containers through the Docker Engine (also marked integration)",
+    "slow: a unit test that takes 2 s or more; their number may fall, never rise (scripts/slow-tests-baseline.json)",
+    "quarantine(issue): a flaky test, skipped in the required jobs until its issue is fixed",
 ]
 addopts = "-m 'not integration'"
 ```
 
 Plain `uv run pytest` therefore runs only unit tests by default — `addopts` excludes
-anything marked `integration`. CI's `ci.yml` `test` job runs that same selection (unit tests
-on the 3.11/3.14 matrix; 3.11 in parallel, see the next section), and a separate
-`integration` job runs `pytest -m "integration and not docker"`, then the `docker` tests in a
-step of their own (see "Docker isolation tests (M7b)").
-It is separate rather than folded into `test` so a Docker or testcontainers hiccup shows up
-as its own failure instead of masking unit results. Run it locally with
-`uv run pytest -m integration` (that includes the `docker` tests, which skip without Docker).
+anything marked `integration`. CI's `unit` jobs run that same selection in shards (see the next
+section), and the integration tier runs in jobs of its own, side by side:
+`integration (services, 1/2)` and `(services, 2/2)` run `pytest -m "integration and not docker"`,
+`integration (docker)` the `docker` tests (see "Docker isolation tests (M7b)") and
+`integration (python assets)` the Python-asset tests with their wheel index. The required check
+`integration` passes only when all of them did. They are separate rather than folded into the
+unit jobs so a Docker or testcontainers hiccup shows up as its own failure instead of masking
+unit results. Run them locally with `uv run pytest -m integration` (that includes the `docker`
+tests, which skip without Docker). `slow` and `quarantine` are described in "Time budgets" and
+"Flaky tests: the same-day rule"; `uv run pytest -m "not slow"` is the quick local loop.
 
 **Integration tests are for Postgres or object storage, and must use testcontainers against
 real services — never mocks.** This is architectural intent: core is
@@ -65,11 +70,33 @@ in a unit test without root; `scripts/compose_smoke_test.sh` pins it end to end.
 
 ## Running the unit suite in parallel
 
-CI's `test (3.11)` run uses `-n auto --maxprocesses 3 --dist loadfile` (pytest-xdist). **The
-3.14 run, which measures coverage, uses `--maxprocesses 2`**: it needs more memory per process
-(below). `addopts` carries no `-n`, so a plain `uv run pytest` stays serial. The default Python of
-a checkout is 3.14 (`.python-version`; the image runs 3.14 too), so a plain `uv run` is the
-3.14 run. Locally, inside the capped scope, use `-n 2` (on 3.11, `uv run --python 3.11`, `-n 3`):
+CI runs the unit suite in **three shards per Python version**, side by side: the jobs
+`unit (3.11, 1/3)` to `unit (3.14, 3/3)`. `LAKANA_TEST_SHARD=I/N` (read by
+`scripts/pytest_selection.py`, which both `conftest.py` files load) keeps shard I of N: whole test
+files, spread over the shards by the seconds in `scripts/test-durations.json`, the longest first,
+each to the shard with the least time so far; a file without an entry counts one second. Every
+shard and every xdist worker computes the same split from the same collection, so the shards
+together run every test once. When the shards drift apart (a budget failure shows it), refresh the
+file from the junit artifacts of a green run (`junit-unit-*`, `junit-integration-*`):
+
+```bash
+gh run download RUN_ID -p 'junit-*' -D ~/.cache/lakana-junit
+uv run python scripts/time_budgets.py durations --output scripts/test-durations.json ~/.cache/lakana-junit/*/*.xml
+```
+
+Within a shard the run is parallel too: the 3.11 shards use `-n auto --maxprocesses 3 --dist
+loadfile` (pytest-xdist). **The 3.14 shards, which measure coverage, use `--maxprocesses 2`**:
+they need more memory per process (below). The required checks `test (3.11)` and `test (3.14)`
+wait for the shards and pass only when every shard did (`needs.unit.result` covers both versions,
+so a failing shard fails both checks; the shard's own job names the test). `test (3.14)` also
+downloads each shard's coverage data, runs `coverage combine`, `coverage json` and `coverage report
+--skip-covered --show-missing`, then the coverage ratchet and the slow-test ratchet (see "Time
+budgets").
+
+`addopts` carries no `-n`, so a plain `uv run pytest` stays serial. The default Python of a
+checkout is 3.14 (`.python-version`; the image runs 3.14 too), so a plain `uv run` is the 3.14
+run. Locally, a pull request runs the tests its change selects (see "Local gates"); to run the
+whole suite the way the 3.14 shards do together, inside the capped scope, use `-n 2`:
 
 ```bash
 systemd-run --user --scope -q -p MemoryMax=6G -p MemorySwapMax=0 timeout 900 \
@@ -103,7 +130,7 @@ systemd-run --user --scope -q -p MemoryMax=6G -p MemorySwapMax=0 timeout 900 \
   `[tool.coverage.run] core = "ctrace"` in `pyproject.toml` selects the C tracer that 3.11 to
   3.13 use anyway. With it, measured 2026-10-11 under a 6 GB cap, coverage 100 % each time:
   serial 797 s / 1.9 GB; `-n 2` 397 s / 4.2 GB; `-n 3` 274 s / 5.0 GB; `-n 4` killed at 96 %.
-  The 3.14 processes are still heavier than those of 3.11 and 3.13, so CI and the local gate use two.
+  The 3.14 processes are still heavier than those of 3.11 and 3.13, so CI uses two, and so does a local run.
   If a parallel 3.14 run is killed again, check first that the setting is still there.
 - **The cap can end a run before the watchdog does.** The watchdog counts resident anonymous
   and shared pages; a cgroup cap also counts page cache and the files in `/tmp` (a RAM disk,
@@ -143,13 +170,43 @@ The time falls to a fifth on both versions. The memory of this package alone was
 since `core = "ctrace"` (see "Memory, Python 3.14" above) and falls by about 5 %; the 3.14
 processes stay heavier than those of 3.13 by about 20 to 30 MB here.
 
+### The server tests copy one catalog and skip fsync (#327)
+
+Every server test still gets its own SQLite file and its own app; two costs are shared instead.
+
+- **The schema is created once per process.** `catalog_template` (session scope, in
+  `packages/lakana-server/tests/conftest.py`) runs `Base.metadata.create_all` into a read-only
+  file; `settings` copies it into the test's `tmp_path` (under a millisecond, against about
+  0.7 s for the schema). A test that builds its own `Settings` with a fresh file still pays the
+  0.7 s; copy `catalog_template` instead when there are many of them.
+- **SQLite commits do not wait for the disk.** `_sqlite_commits_without_fsync` registers a
+  `connect` listener on every engine of the server test process that sets
+  `PRAGMA synchronous=OFF`. No unit test can observe durability across a power cut; WAL,
+  foreign keys and the busy timeout still come from `lakana_core.db`. Postgres connections
+  are left alone.
+- `tests/test_test_hygiene.py` pins both: each test's copy has the full schema and sees no
+  other test's write (in either order), the template is read-only, and the production pragmas
+  are still in force.
+
+Measured 2026-10-24, `packages/lakana-server` alone, Python 3.14, `-n 2 --dist loadfile`, no
+coverage, 6 GB scope, `--basetemp` on disk: 1,099 s before, 116 s after; the 902 tests under
+`tests/api/` from 1.99 s to 0.17 s each on average (setup and teardown included). Random order
+(`uv run --with pytest-randomly`, two seeds) passes too.
+
+Almost all of that was waiting for the disk: the schema takes about 1 s with `fsync` on that disk
+and 14 ms without. Where `fsync` is cheap (a `tmpfs` such as `/tmp` on this machine, or CI's
+runners) the gain is small: CI's unit steps took as long after the change as before (3.14 with
+coverage 19.3 against 18.4 min, 3.11 15.2 against 13.9 min, within run-to-run noise). The
+change pays off for a `--basetemp` on a real disk, as the agents' capped runs use.
+
 ## Pull requests that change documentation only
 
-A pull request that changes nothing but documentation skips the heavy jobs: `lint`,
-`integration`, `five-minute`, `compose-smoke`, `docs-examples` and `static`. The `test` job still
+A pull request that changes nothing but documentation skips the heavy jobs: `lint`, the `unit`
+shards, `integration` and its jobs, `five-minute`, `compose-smoke`, `docs-examples`, the macOS
+jobs, `quarantined tests` and `static`. The `test` job still
 runs on both Python versions, but only `scripts/tests`, which holds every test that reads the
 documentation (the legacy-name check among them). `docs` (the block check, the strict build and the
-check of the built site), `changes`, `conventional`, `secrets` and `cla` run as always. For a
+check of the built site), `changes`, `conventional`, `secrets`, `cla` and `time budgets` run as always. For a
 documentation-only change the `docs` job and the `test` job's `scripts/tests` together are the
 guard against a broken page, so `docs` has no condition. `scripts/tests/test_docs_site.py`,
 which reads `mkdocs.yml` (the navigation, `docs_dir`), is among those `scripts/tests`, so a
@@ -171,7 +228,8 @@ Two things keep this from weakening the required checks:
   cannot change the rule it is judged by. A change to the rule takes effect for the pull
   requests after it.
 - `test (3.11)` and `test (3.14)` are required checks, and a skipped matrix job would never
-  report under those names. The `test` job therefore always runs and switches its steps (the
+  report under those names. The `test` job therefore always runs and switches its steps: the
+  documentation tests for a docs-only change, otherwise the check of the `unit` shards (the
   one thing that does change its matrix is a draft, below).
 
 A test that reads a documentation file belongs in `scripts/tests`. Placed anywhere else, it
@@ -185,16 +243,16 @@ every missing output of it means "run everything".
 
 | Event | Runs |
 |---|---|
-| Pull request, **draft** | `lint`, `docs`, `docs-examples`, `test (3.14)` (with coverage and the ratchet) |
-| Pull request, **ready for review** (also the moment it leaves draft) | everything: the above plus `test (3.11)`, `test (macos)` (only if the pull request touches `packages/`), `integration`, `five-minute`, `compose-smoke` |
+| Pull request, **draft** | `lint`, `docs`, `docs-examples`, the 3.14 `unit` shards and `test (3.14)` (with coverage and the ratchets), `quarantined tests`, `time budgets` |
+| Pull request, **ready for review** (also the moment it leaves draft) | everything: the above plus the 3.11 shards and `test (3.11)`, the macOS shards and `test (macos)` (they test only if the pull request touches `packages/`), the `integration` jobs, `five-minute`, `compose-smoke` |
 | Dependabot's pull requests | everything (they are never drafts) |
 | Documentation-only pull request | see the section above; a draft also lacks `test (3.11)` |
-| Push to `main`: the squash merge of an up-to-date pull request whose last run was complete | `lint`, `docs` (the rest was just tested on the same tree), `test (macos)` |
+| Push to `main`: the squash merge of an up-to-date pull request whose last run was complete | `lint`, `docs` (the rest was just tested on the same tree), the macOS jobs, `time budgets` |
 | Push to `main`: anything else (a direct push, a draft's last run, a re-run that failed, any doubt) | everything |
 
-- **Drafts.** A draft skips `integration`, `five-minute`, `compose-smoke` and the 3.11 leg of
-  `test`. The 3.11 leg is not skipped by a condition: the `test` matrix is built from the
-  `changes` job's `python_versions` output (`["3.14"]` on a draft, both versions otherwise), so
+- **Drafts.** A draft skips the `integration` jobs, `five-minute`, `compose-smoke`, the macOS
+  jobs and the 3.11 legs of `unit` and `test`. The 3.11 legs are not skipped by a condition: the
+  `unit` and `test` matrices are built from the `changes` job's `python_versions` output (`["3.14"]` on a draft, both versions otherwise), so
   on a draft the required check `test (3.11)` does not exist, which blocks a merge. A job
   skipped by a condition on a matrix cell would show as a green check that ran nothing.
   `ready_for_review` is a trigger type of the workflow (it is not a default), so leaving draft
@@ -202,8 +260,8 @@ every missing output of it means "run everything".
 - **The merge to `main`.** After a squash merge of an up-to-date pull request, the tree on `main`
   is the tree of the pull request's head commit, which CI has just tested. On a push to `main`
   the `changes` job runs `scripts/ci_already_tested.py` (fetched from the pushed commit), and if
-  it proves that, `test`, `integration`, `five-minute`, `compose-smoke` and `docs-examples`
-  skip. It says "already tested" only if the commit has exactly one pull request, merged with
+  it proves that, `unit`, `test`, the `integration` jobs, `five-minute`, `compose-smoke`,
+  `docs-examples` and `quarantined tests` skip. It says "already tested" only if the commit has exactly one pull request, merged with
   this very commit into the repository's default branch, whose base was never changed (no
   `base_ref_changed` or `base_ref_force_pushed` event: a run made against another branch
   proves nothing about `main`) and whose head commit no other pull request shares (runs are
@@ -223,32 +281,41 @@ every missing output of it means "run everything".
 - **Agents keep their pull requests in draft while they iterate** (`gh pr create --draft`) and
   mark them ready (`gh pr ready`) when the work is done, which starts the full run once instead
   of on every push.
-- **`integration`** runs its steps in this order: the integration tests that install nothing and
-  start no task container (`-m "integration and not docker"`), the "Docker isolation tests" step
-  (`-m docker` with `LAKANA_TEST_DOCKER=1`, see "Docker isolation tests (M7b)"), then the wheel
-  index and the Python-asset tests. Each later step runs even when an earlier one failed
-  (`!cancelled()`), so each failure is named by its own step.
+- **The integration jobs** run side by side, so each failure is named by its own job and none
+  waits for another: `integration (services, 1/2)` and `(services, 2/2)` run the integration tests
+  that install nothing and start no task container (`-m "integration and not docker"`, sharded
+  like the unit suite, each writing a junit report), `integration (docker)` the "Docker isolation
+  tests" (`-m docker` with `LAKANA_TEST_DOCKER=1`, see "Docker isolation tests (M7b)"), and
+  `integration (python assets)` builds the wheel index (only it needs one) and runs the
+  Python-asset tests. The required check `integration` waits for the three and fails naming each
+  one that did not succeed. Each has a 30-minute timeout.
 - **`compose-smoke`** starts the real console scripts in containers, so it runs for any change under
   `packages/*/src/` as well as for the bundle, packaging and script files in the filter of its
-  "Did the bundle change?" step. `test` has a 30-minute timeout.
-- **Coverage** is measured on 3.14 only (see the coverage ratchet below). The job uploads the
-  report it measured, `coverage.json`, as the artifact `coverage-report` (kept 7 days), also when the
-  ratchet fails, and its log lists every file below 100 % with the missed lines.
+  "Did the bundle change?" step. A `unit` shard has a 25-minute timeout, `test` 15 minutes.
+- **Coverage** is measured on 3.14 only, by the three 3.14 shards, and combined in exactly one
+  job, `test (3.14)` (see the coverage ratchet below). That job uploads the combined report,
+  `coverage.json`, as the artifact `coverage-report` (kept 7 days), also when the ratchet fails,
+  and its log lists every file below 100 % with the missed lines.
+- **Time budgets** are checked by `time budgets`, the last job, and by the slow-test ratchet in
+  `test (3.14)` (see "Time budgets" below).
+- **`quarantined tests`** runs the tests in quarantine and never fails the run (see "Flaky tests:
+  the same-day rule").
 - **Duplication** is measured by the `lint` job: `jscpd`, pinned in `tools/jscpd`, scans
   `packages/*/src` (not the tests) and `scripts/duplication_ratchet.py` fails when the duplicated
   lines or the clones rise (see "The duplication ratchet" below).
 - **`test (macos)`** (job `test-macos`) is the macOS check: Lakana's local mode supports macOS
-  (Python 3.13 and later), and this job runs what a macOS user runs, on GitHub's `macos-latest`
-  (Apple Silicon, 3 cores, 7 GB) with Python 3.14. It runs the `packages/` unit suite (not
+  (Python 3.13 and later), and the three shards it collects, `unit (macos, 1/3)` to `(macos, 3/3)`
+  (job `unit-macos`), run what a macOS user runs, on GitHub's `macos-latest`
+  (Apple Silicon, 3 cores, 7 GB) with Python 3.14. They run the `packages/` unit suite (not
   `scripts/`, which is Linux tooling whose tests need GNU tools) with
   `pytest packages -m "not integration" -n 2`, without coverage (the ratchet stays on the Linux 3.14 job), and
-  `scripts/run_docs_examples.sh getting-started`, which ends with `lakana server reset --local`.
+  the third shard runs `scripts/run_docs_examples.sh getting-started`, which ends with `lakana server reset --local`.
   Docker-based tests (`integration`, `five-minute`, `compose-smoke`) do not run: macOS runners
   have no Docker. `scripts/pytest_memory_limit.py` needs `/proc`, so on macOS it does nothing and
   the limit's 6 GB default (below the runner's 7 GB) is not enforced; two workers fit. The example
   runner needs GNU `timeout` and `setsid` and bash 4, so the job installs Homebrew's `bash` and
-  `coreutils` and puts a small Python `setsid` in front of the path. The job always runs on
-  GitHub's runner, never the `CI_RUNNER` switch (see "CI runners"); a pull request runs it only if
+  `coreutils` and puts a small Python `setsid` in front of the path. The shards always run on
+  GitHub's runner, never the `CI_RUNNER` switch (see "CI runners"); a pull request runs them only if
   it changes `packages/`, the root `pyproject.toml`, `uv.lock`, `docs/examples/` or the files the job runs, and it skips a
   draft and a documentation-only change like the other heavy jobs. A failure fails the run (the
   first runs' 50 failures were fixed in #153). It is **not a required check yet**; the maintainer
@@ -560,7 +627,7 @@ maintainer who wants to run CI on a runner of their own.
 - **What moves:** every job of `ci.yml`, `security.yml`, `conventional.yml`, `mutation.yml` and
   `security-deep.yml`, and the `release-please` job of `release.yml`, which only opens and merges
   the release pull request.
-- **What never moves:** `test (macos)` (macOS runs only on GitHub's own runners) and every job
+- **What never moves:** the macOS shards `unit (macos, N/3)` (macOS runs only on GitHub's own runners) and every job
   that builds or publishes a release. What users install is
   built on GitHub's runners, not on someone's machine.
 - **A pull request from a fork always uses GitHub's runner.** The `runs-on` expression honours
@@ -885,10 +952,14 @@ Because of the staleness check, `pytest` and the ratchet are one step, not two: 
 than quietly score the previous one.
 
 CI measures coverage on Python 3.14 only (the 3.11 run executes the same tests without `--cov`,
-which saves about a third of its time), and prints `term-missing:skip-covered`, so a branch that
-fails the ratchet is named by file and line in the job log.
+which saves about a third of its time). The three 3.14 shards each keep their coverage data
+(`.coverage.shard-N`, artifact `coverage-data-N`); `test (3.14)` combines them with `coverage
+combine` into one report and prints `coverage report --skip-covered --show-missing`, so a branch
+that fails the ratchet is named by file and line in that job's log. One shard alone is not the
+suite: the ratchet only ever reads the combined report.
 
-Run it locally the same way CI does:
+The ratchet is a CI gate (see "Local gates"); to reproduce a failure locally, run it the
+same way CI does, over the whole suite:
 
 ```bash
 uv run pytest --cov --cov-report=json --cov-report=term
@@ -954,6 +1025,123 @@ uv run python scripts/duplication_ratchet.py --update # lower the baseline after
 later: older npm versions leave out the `license` fields that the licence check needs.
 How to handle a finding: "Duplicated code" in `docs/agent/conventions.md`.
 
+## Time budgets
+
+CI's time is the main cost of each change, so it has budgets, enforced like coverage. They live in
+`scripts/time-budgets.toml` and `scripts/time_budgets.py` checks them; its messages name the job or
+the test, the budget, and the next step.
+
+- **Minutes per job.** `[jobs]` maps check names (`fnmatch` patterns, the first match wins) to
+  minutes: a `unit` shard at most 15, each integration job at most 15, the collecting jobs and
+  the small ones less. The job `time budgets` runs last (`!cancelled()`, so also after a failure),
+  reads the jobs of its own run attempt from the API (`actions: read`, nothing else) and fails for
+  a job that took longer than its budget, or that has none. `scripts/tests/test_workflows.py`
+  finds a job without a budget before CI does. It is not a required check: a red `time budgets`
+  says the suite outgrew its shards. Next step: find what grew (the job's slowest steps,
+  `pytest --durations=20`), make it faster, refresh `scripts/test-durations.json` if the shards
+  drifted apart, or add a shard; a budget is raised only with the maintainer's agreement.
+- **The slow-test ratchet.** A unit test that takes `threshold_seconds` (2 s) or more — setup,
+  call and teardown, as the 3.14 shards in CI measure them, under coverage — must carry
+  `@pytest.mark.slow`, and the number of tests that carry it may fall, never rise: the baseline is
+  `scripts/slow-tests-baseline.json`. The 3.14 shards write junit reports
+  (`--junitxml=junit-N.xml -o junit_family=xunit1`: only that family names each test's file), in
+  which `scripts/pytest_selection.py` adds the property `slow=true` to every marked test;
+  `test (3.14)` runs `time_budgets.py slow-tests --confirm junit/*.xml` over them. One
+  measurement in a busy shard is noisy (between two runs a test of 0.6 s once took 2.4 s), so an
+  unmarked test over the threshold is run again on its own, serially and under coverage, and
+  fails only if it takes `confirm_seconds` (2.5 s, in `scripts/time-budgets.toml` beside the
+  threshold) or more there: a margin, because a test that sits at the 2 s threshold passed and
+  failed on the same code. The in-shard threshold stays 2 s for flagging; the log names each one
+  counted as noise. A new test over
+  the threshold fails with its name and both times: make it faster (a smaller fixture, no real sleep, a shared app;
+  see "The CLI tests share one app" for what that once saved), or mark it slow and make another
+  slow test fast. Each case of a parametrized test counts. When the number falls the check passes
+  and says to lower the baseline in the same pull request:
+
+  ```bash
+  gh run download RUN_ID -p 'junit-unit-*' -D ~/.cache/lakana-junit
+  uv run python scripts/time_budgets.py slow-tests --update ~/.cache/lakana-junit/*/*.xml
+  ```
+
+  `--update` never records a rise. The 206 tests marked when the ratchet started were those at
+  1.5 s or more in one CI run, a margin below the threshold, one that took 2.1 s on its own in
+  a later run, and the test of `scripts/select_tests.py` that reads every test file's imports; a test that drifts over 2 s unmarked, and stays there when run again, is a failure
+  to fix.
+- **Locally**, `uv run pytest -m "not slow"` skips the slow tests for a quick loop while you
+  work; before a push, run the selection of "Local gates" without it.
+
+## Flaky tests: the same-day rule
+
+A test that fails without a code cause (it passes on a re-run of the same commit) is quarantined
+**the same day**, so it stops costing every other pull request a re-run:
+
+1. File an issue labelled `flaky` (and `area:...`, `type:test`) with the failing run's link and
+   the error.
+2. Mark the test `@pytest.mark.quarantine(issue=N)`, in its own small pull request.
+   `scripts/pytest_selection.py` skips it in every job, with the reason "in quarantine until
+   issue #N is fixed"; a quarantine without an issue number stops the run.
+3. Fix it in the next batch of non-feature issues, and remove the marker in the fix's pull
+   request.
+
+The non-blocking job `quarantined tests` runs only the quarantined tests
+(`LAKANA_TEST_QUARANTINED=1`, `-m ""` so a quarantined integration test runs too) and never fails
+the run: its step summary says whether they passed, failed, or that none is quarantined, so a fix
+can be seen to hold before the marker comes off. Run them locally the same way:
+
+```bash
+LAKANA_TEST_QUARANTINED=1 uv run pytest -m "" -rA -p no:cacheprovider
+```
+
+**Cause labels for CI failures.** So that the share of failed runs can be broken down, a pull
+request whose CI failed at least once carries one label per cause: `flaky` (a test that failed
+without a code cause, quarantined as above), `ci:infrastructure` (a runner, an action, a package
+index, a registry or the GitHub API failed, not our code or tests), or `ci:code` (the change
+itself broke a check, which is what CI is for). The same labels go on an issue filed for a
+failure on `main`.
+
+## Local gates
+
+Local runs before a push are lean and **selected by the package graph**: the static checks always,
+and the tests that import a package the change touches, read from the test files themselves. Nothing
+local replaces a CI gate: **the coverage ratchet, Python 3.11 and 3.13, the oldest Polars and
+macOS run only in CI** (`test (3.14)`, `test (3.11)`, the 3.11 shard's Polars step,
+`test (macos)`). A local run of them is for reproducing a failure CI showed, and a coverage number
+from a local run of some packages is not a ratchet result: never report it as one.
+
+Always, whatever changed:
+
+```bash
+uv run ruff check . && uv run ruff format --check .
+uv run ty check packages && uv run lint-imports
+```
+
+Then the tests the change selects (from `git diff --name-only origin/main...HEAD`):
+
+| The change touches | Run |
+|---|---|
+| `packages/lakana/`, `packages/lakana-server/` or `packages/lakana-worker/` (not their `pyproject.toml`) | the changed packages' own tests, and **every test file that imports a changed package** (`lakana`, `lakana_server`, `lakana_worker`): directly, through its `conftest.py` chain, or through a local helper module it imports (`tests.server_test_helpers`, `from .near import`, a sibling `task_run_helpers.py`) |
+| `packages/lakana-core/`, a shared `conftest.py` or fixture (`packages/conftest.py`, `scripts/`), `pyproject.toml`, `uv.lock`, or anything not named here | everything (`uv run pytest`) |
+| only documentation (as `scripts/docs_only.py` defines it) | the documentation checks: `scripts/docs_blocks.py`, `scripts/generate_reference.py --check`, the strict build, and `pytest scripts/tests` |
+
+So an SDK change also runs the server's CLI and SDK tests and the worker tests of `lakana.runner`;
+a worker change also runs `tests/sdk/test_sdk_admin.py` of the server; a server change also runs
+`scripts/tests/test_generate_reference.py`. The imports are read with `ast` on every call (about
+1 s), nothing is cached, so a new import counts at once; a test file that cannot be parsed is
+always selected.
+
+`scripts/select_tests.py` prints this selection for the current branch, as the commands to run
+(the static checks first). It reads the changed files from `git diff --name-only BASE...HEAD`
+(`--base`, default `origin/main`), or from standard input with `-`:
+
+```bash
+uv run python -m scripts.select_tests
+git diff --name-only | uv run python -m scripts.select_tests -
+```
+
+Run the tests it prints inside the capped scope, in parallel (`-n 2 --dist loadfile`, see
+"Running the unit suite in parallel"). The integration tier runs locally only for the area a
+change touches (`uv run pytest -m integration PATH`), as described in its sections.
+
 ## Property-based testing for the policy rewriter (M3)
 
 Row filters and column masks (see `docs/security/threat-model.md`) work by rewriting SQL to wrap base-table
@@ -998,7 +1186,7 @@ it, the kill-or-record-equivalent policy, and the current exit-run results.
 
 `lakana[assets]` accepts `polars>=1.30` with no upper bound, and `uv.lock` holds Polars 2.x, so
 the whole suite runs on what new projects get. The oldest supported version runs as one extra
-step of `test (3.11)` in `ci.yml` (about 30 s): a first command asserts that `polars.__version__`
+step of the `unit (3.11, 3/3)` shard in `ci.yml` (about 3 min, not sharded itself): a first command asserts that `polars.__version__`
 starts with `1.30.` (the `--with` overlay shadows the locked 2.x; a change in uv's layering
 must fail the step, not pass it on Polars 2), then `uv run --with 'polars==1.30.*' pytest` runs the
 test files that touch Polars (the harness, the SDK data plane, the worker's Python tasks and
@@ -1047,9 +1235,10 @@ server (uvicorn on a loopback port, `python_asset_helpers.serving`) on Postgres 
   `scripts/build_wheelhouse.sh DIR` builds the `lakana` wheel of the working tree and downloads
   the locked wheels of `lakana[assets]`, checked against the hashes in `uv.lock`
   (`--require-hashes`). That is the only step that needs the network, and only for wheels the
-  directory does not hold yet. CI runs the tests that install no packages first, then restores
-  the directory from a cache keyed on `uv.lock` and `.python-version`, runs the script as its own step, and runs this
-  module with `LAKANA_TEST_WHEELHOUSE` set; the job has `timeout-minutes: 45` (22 to 24 minutes before the Docker isolation step). Each test project commits
+  directory does not hold yet. CI runs this module in a job of its own, `integration (python
+  assets)`, beside the tests that install no packages: it restores the directory from a cache keyed
+  on `uv.lock` and `.python-version`, runs the script as its own step, and runs this module with
+  `LAKANA_TEST_WHEELHOUSE` set; the job has `timeout-minutes: 30` and a budget of 15 minutes. Each test project commits
   a copy as `wheelhouse/` and sets `[tool.uv] no-index = true`, `find-links = ["wheelhouse"]`;
   the worker under test has its proxy pointed at the discard port, so a build that reached for
   an index would fail. The directory is never committed to this repository.
