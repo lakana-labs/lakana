@@ -6,6 +6,7 @@ import os
 import threading
 from collections.abc import Callable
 from pathlib import Path
+from typing import NoReturn
 
 import certifi
 import pytest
@@ -374,3 +375,83 @@ def test_the_local_trust_file_is_never_written_into_a_cache_others_can_change(
     with pytest.raises(TrustBundleError, match=r"cache.*not private|must be a real directory"):
         write_trust_file(b"one", cache)
     assert not list(tmp_path.glob("**/trust-*.pem"))
+
+
+def test_an_operator_path_that_opens_but_is_not_a_regular_file_is_named(tmp_path: Path) -> None:
+    """A named pipe opens without blocking; it is refused as not a regular file, never read."""
+    operator = tmp_path / "ca.pem"
+    os.mkfifo(operator)
+    with pytest.raises(TrustBundleError, match=r"ca\.pem, which is not a regular file"):
+        build_trust_bundle(operator)
+
+
+@pytest.mark.parametrize("failing", ["write", "replace"])
+def test_a_failed_write_leaves_no_temporary_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failing: str
+) -> None:
+    """A full disk or a failed rename removes the temporary file and keeps the old one."""
+    attempt = tmp_path / "attempt"
+    attempt.mkdir(mode=0o700)
+    install_trust(b"old", attempt)
+
+    def fail(*args: object) -> None:
+        """Fail like a full disk.
+
+        Parameters
+        ----------
+        *args
+            Ignored.
+
+        Raises
+        ------
+        OSError
+            Always.
+        """
+        raise OSError(28, "No space left on device")
+
+    if failing == "replace":
+        monkeypatch.setattr(os, "replace", fail)
+    else:
+        monkeypatch.setattr(os, "fdopen", lambda *a, **k: _FailingFile())
+    with pytest.raises(OSError, match="No space left"):
+        install_trust(b"new", attempt)
+    assert sorted(p.name for p in (attempt / "trust").iterdir()) == ["trust.pem"]
+    assert (attempt / "trust" / "trust.pem").read_bytes() == b"old"
+
+
+class _FailingFile:
+    """A file whose write fails like a full disk."""
+
+    def __enter__(self) -> _FailingFile:
+        """Open it.
+
+        Returns
+        -------
+        _FailingFile
+            Itself.
+        """
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        """Close it.
+
+        Parameters
+        ----------
+        *args
+            The exception, if any.
+        """
+
+    def write(self, data: bytes) -> NoReturn:
+        """Fail.
+
+        Parameters
+        ----------
+        data
+            Ignored.
+
+        Raises
+        ------
+        OSError
+            Always.
+        """
+        raise OSError(28, "No space left on device")

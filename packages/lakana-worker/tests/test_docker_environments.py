@@ -798,6 +798,19 @@ def test_with_a_trust_bundle_the_build_gets_a_copy_and_asks_for_the_mount(tmp_pa
     assert oct(copied.stat().st_mode & 0o777) == "0o644"
 
 
+def test_a_trust_bundle_that_cannot_be_installed_fails_the_build_before_the_launcher(
+    tmp_path: Path,
+) -> None:
+    """A file planted where `trust` belongs is named, and no build is asked for."""
+    launcher = FakeLauncher(scripts={"status": _status(False)})
+    code = _project(tmp_path)
+    (code.parent / "trust").write_bytes(b"planted")
+
+    with pytest.raises(VenvBuildError, match="could not copy the trust bundle into the attempt"):
+        _acquire(_environments(launcher, trust=b"bundle"), code)
+    assert [request["op"] for request in launcher.requests] == ["status"]
+
+
 def test_without_a_trust_bundle_the_build_asks_for_no_mount(tmp_path: Path) -> None:
     """`trust: false` and no `trust` directory."""
     launcher = FakeLauncher(
