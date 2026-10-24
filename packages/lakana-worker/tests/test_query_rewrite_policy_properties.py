@@ -100,6 +100,7 @@ def customers_parquet(tmp_path: Path) -> Path:
     return path
 
 
+@pytest.mark.slow
 @given(shape=st.sampled_from(_SHAPES))
 @settings(
     deadline=None,

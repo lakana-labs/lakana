@@ -1,6 +1,8 @@
 """Shared fixtures for lakana-server tests."""
 
 import base64
+import shutil
+import sqlite3
 from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
@@ -9,6 +11,7 @@ from typing import cast
 import pytest
 from fastapi import Request
 from fastapi.testclient import TestClient
+from sqlalchemy import Engine, event
 from sqlalchemy.orm import Session
 
 from lakana_core.audit.denial_limiter import DenialAuditLimiter
@@ -51,25 +54,94 @@ def session() -> Iterator[Session]:
     engine.dispose()
 
 
+def _skip_fsync(dbapi_connection: object, connection_record: object) -> None:
+    """Turn off SQLite's flush to disk on commit for a connection a test opened.
+
+    Parameters
+    ----------
+    dbapi_connection
+        The new DB-API connection; anything but a `sqlite3.Connection` is left alone.
+    connection_record
+        SQLAlchemy's record of the connection (unused).
+    """
+    if isinstance(dbapi_connection, sqlite3.Connection):
+        dbapi_connection.execute("PRAGMA synchronous=OFF")
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _sqlite_commits_without_fsync() -> Iterator[None]:
+    """Let every SQLite engine in this test process commit without flushing to disk.
+
+    Each commit otherwise waits for an `fsync`, which made it the largest cost of an
+    API test after the schema. No unit test can observe durability across a power cut;
+    the pragmas a test can observe (WAL, foreign keys, busy timeout) still come from
+    `lakana_core.db`, whose listener runs on the same connections.
+
+    Yields
+    ------
+    None
+        The listener stays registered for the session and is removed afterwards.
+    """
+    event.listen(Engine, "connect", _skip_fsync)
+    yield
+    event.remove(Engine, "connect", _skip_fsync)
+
+
+@pytest.fixture(scope="session")
+def catalog_template(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Create the catalog schema once per test process, in a read-only SQLite file.
+
+    Creating the schema costs about 0.7 s (each of the hundreds of `CREATE` statements
+    is a commit); copying the finished file costs under a millisecond. `settings` hands
+    every test its own copy, so no test sees another's rows. The file is left in
+    SQLite's default journal mode, so it is complete on its own (no `-wal` file to copy),
+    and is made read-only, so a test that opened it by mistake fails instead of leaking.
+
+    Parameters
+    ----------
+    tmp_path_factory
+        Pytest's session-wide temporary directory factory.
+
+    Returns
+    -------
+    Path
+        The template database file.
+    """
+    template = tmp_path_factory.mktemp("catalog-template") / "lakana.db"
+    engine = create_engine(DatabaseConfig(url=f"sqlite:///{template}"))
+    try:
+        Base.metadata.create_all(engine)
+        with engine.connect() as connection:
+            connection.exec_driver_sql("PRAGMA journal_mode=DELETE")
+    finally:
+        engine.dispose()
+    template.chmod(0o444)
+    return template
+
+
 @pytest.fixture
-def settings(tmp_path: Path) -> Settings:
+def settings(tmp_path: Path, catalog_template: Path) -> Settings:
     """Provide settings backed by a fresh SQLite database.
+
+    The database is a private copy of `catalog_template`: the same schema
+    `Base.metadata.create_all` creates, without paying for it per test.
 
     Parameters
     ----------
     tmp_path
         Pytest's per-test temporary directory.
+    catalog_template
+        The session's read-only database with the schema already created.
 
     Returns
     -------
     Settings
         Configuration pointed at an isolated database.
     """
-    engine = create_engine(DatabaseConfig(url=f"sqlite:///{tmp_path}/lakana.db"))
-    Base.metadata.create_all(engine)
-    engine.dispose()
+    database = tmp_path / "lakana.db"
+    shutil.copyfile(catalog_template, database)
     return Settings(
-        database=DatabaseConfig(url=f"sqlite:///{tmp_path}/lakana.db"),
+        database=DatabaseConfig(url=f"sqlite:///{database}"),
         bootstrap_pat_key_id="testkey",
         bootstrap_pat_secret="testsecret",
         secrets=SecretsConfig(master_key=_TEST_MASTER_KEY),
