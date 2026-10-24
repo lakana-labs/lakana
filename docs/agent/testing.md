@@ -166,6 +166,12 @@ coverage, 6 GB scope, `--basetemp` on disk: 1,099 s before, 116 s after; the 902
 `tests/api/` from 1.99 s to 0.17 s each on average (setup and teardown included). Random order
 (`uv run --with pytest-randomly`, two seeds) passes too.
 
+Almost all of that was waiting for the disk: the schema takes about 1 s with `fsync` on that disk
+and 14 ms without. Where `fsync` is cheap (a `tmpfs` such as `/tmp` on this machine, or CI's
+runners) the gain is small: CI's unit steps took as long after the change as before (3.14 with
+coverage 19.3 against 18.4 min, 3.11 15.2 against 13.9 min, within run-to-run noise). The
+change pays off for a `--basetemp` on a real disk, as the agents' capped runs use.
+
 ## Pull requests that change documentation only
 
 A pull request that changes nothing but documentation skips the heavy jobs: `lint`,
