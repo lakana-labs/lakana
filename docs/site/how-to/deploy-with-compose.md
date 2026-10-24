@@ -226,13 +226,27 @@ logged when it starts (`Python assets: enabled` or `disabled: <reason>. To enabl
 
 If your package index, or a source your tasks read, uses a certificate of a private certificate
 authority, mount that authority's PEM file into the `worker` service read-only and point
-`LAKANA_RUN__CA_BUNDLE` at it, with either runner (by hand in `compose.yaml`, next to
-`<<: *lakana-env`, like the `LAKANA_GIT__CA_BUNDLE` example below):
+`LAKANA_RUN__CA_BUNDLE` at it, with either runner. In `compose.yaml`, **add** one line to the
+`worker` service's `environment:` and one to its `volumes:`, and keep every entry that is there:
+the worker needs its cache, the launcher's socket and the task volume, and the docker runner
+fails without them. `worker-interactive` and `worker-pipeline` take both lists from `worker`
+(`<<: *worker`, `<<: *worker-env`), so they get the file too:
 
 ```yaml
-    environment:
-      LAKANA_RUN__CA_BUNDLE: /certs/corp-ca.pem
-    volumes: ["./certs/corp-ca.pem:/certs/corp-ca.pem:ro"]
+  worker: &worker
+    # ...
+    environment: &worker-env
+      # <<: *lakana-env stays the first entry, as in the bundle
+      LAKANA_REPO_ROOTS: '["/repos"]'
+      LAKANA_RUN__SERVER_URL: http://server:8000
+      LAKANA_RUN__RUNNER: ${LAKANA_RUNNER:-docker}
+      LAKANA_RUN__CA_BUNDLE: /certs/corp-ca.pem              # added
+    volumes:
+      - ./repos:/repos:ro
+      - worker-cache:/home/lakana/.cache/lakana-worker
+      - launcher-socket:/run/lakana-launcher
+      - task-work:/home/lakana/.cache/lakana-worker/attempts
+      - ./certs/corp-ca.pem:/certs/corp-ca.pem:ro            # added
 ```
 
 Builds and tasks then trust Mozilla's roots plus that file; the worker mounts it into each build
@@ -1525,15 +1539,29 @@ docker volume ls -q --filter "label=lakana.launcher.stack=lakana" | xargs -r doc
 
 Workers fetch `https` repositories with git, which never sees the container's `HTTPS_PROXY`
 or CA variables. Set `LAKANA_GIT__HTTPS_PROXY`, `LAKANA_GIT__NO_PROXY` and `LAKANA_GIT__CA_BUNDLE`
-instead, by hand in `compose.yaml` on the `worker` service only (next to `<<: *lakana-env`; the
-server and `migrate` need neither), and mount the CA file read-only next to the `repos` mount:
+instead, by hand in `compose.yaml` on the `worker` service only (the server and `migrate` need
+neither), and mount the CA file read-only. **Add** the lines to the `worker` service's
+`environment:` and `volumes:` and keep every entry that is there (the worker's cache, the
+launcher's socket and the task volume are needed by Python assets); `worker-interactive` and
+`worker-pipeline` take both lists from `worker`:
 
 ```yaml
-    environment:
-      LAKANA_GIT__HTTPS_PROXY: http://proxy.corp:3128
-      LAKANA_GIT__NO_PROXY: gitlab.corp,.internal
-      LAKANA_GIT__CA_BUNDLE: /certs/corp-ca.pem
-    volumes: ["./repos:/repos:ro", "./certs/corp-ca.pem:/certs/corp-ca.pem:ro"]
+  worker: &worker
+    # ...
+    environment: &worker-env
+      # <<: *lakana-env stays the first entry, as in the bundle
+      LAKANA_REPO_ROOTS: '["/repos"]'
+      LAKANA_RUN__SERVER_URL: http://server:8000
+      LAKANA_RUN__RUNNER: ${LAKANA_RUNNER:-docker}
+      LAKANA_GIT__HTTPS_PROXY: http://proxy.corp:3128        # added
+      LAKANA_GIT__NO_PROXY: gitlab.corp,.internal            # added
+      LAKANA_GIT__CA_BUNDLE: /certs/corp-ca.pem              # added
+    volumes:
+      - ./repos:/repos:ro
+      - worker-cache:/home/lakana/.cache/lakana-worker
+      - launcher-socket:/run/lakana-launcher
+      - task-work:/home/lakana/.cache/lakana-worker/attempts
+      - ./certs/corp-ca.pem:/certs/corp-ca.pem:ro            # added
 ```
 
 The worker refuses to start if the CA file is not a readable file; the proxy must be an
