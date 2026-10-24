@@ -166,6 +166,7 @@ def test_a_set_of_paths_is_judged_alike(paths: list[str]) -> None:
     assert [sdk.fold_path(p) for p in paths] == [core.fold_path(p) for p in paths]
 
 
+@pytest.mark.slow
 def test_every_code_point_is_judged_alike() -> None:
     for code in range(sys.maxunicode + 1):
         path = f"a{chr(code)}b"

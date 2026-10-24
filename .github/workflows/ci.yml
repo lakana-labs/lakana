@@ -135,19 +135,26 @@ jobs:
       - name: duplication (ratchet)
         run: uv run python scripts/duplication_ratchet.py
 
-  # `test (3.11)` and `test (3.14)` are required checks, so this job always runs and
-  # reports; for a docs-only change it runs the tests that read the documentation.
-  # On a draft the matrix holds 3.14 alone (see `python_versions` above).
-  test:
+  # The unit suite in three shards per Python version, side by side. `LAKANA_TEST_SHARD=I/N`
+  # (scripts/pytest_selection.py) keeps whole test files, spread by the seconds in
+  # scripts/test-durations.json. Only the 3.14 shards measure coverage; `test (3.14)` combines
+  # their data and runs the ratchets. Within a shard the run is parallel, a test file never split
+  # across processes. The 3.14 run stops at two processes: with coverage's C tracer
+  # (`core = "ctrace"` in pyproject.toml) it peaks at 4.2 GB with two, 5.0 GB with three, and is
+  # killed under 6 GB with four (measured 2026-10-11 over the whole suite). The other run stops at
+  # three: at four it peaked at 5,956-6,100 MB in October 2026, within 200 MB of the 6 GB limit of
+  # scripts/pytest_memory_limit.py. Measuring costs about a third of a run, so 3.11 does not.
+  unit:
+    name: unit (${{ matrix.python-version }}, ${{ matrix.shard }}/3)
     needs: changes
-    # Not skipped for a pull request, whose `test (3.11)` and `test (3.14)` are required checks.
-    if: ${{ !cancelled() && needs.changes.outputs.already_tested != 'true' }}
-    timeout-minutes: 30
+    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.already_tested != 'true' }}
+    timeout-minutes: 25
     runs-on: ${{ (github.actor != 'dependabot[bot]' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.CI_RUNNER) || 'ubuntu-latest' }}
     strategy:
       fail-fast: false
       matrix:
         python-version: ${{ fromJSON(needs.changes.outputs.python_versions || '["3.11","3.14"]') }}
+        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
@@ -157,30 +164,27 @@ jobs:
           enable-cache: true
           python-version: ${{ matrix.python-version }}
       - run: uv sync --all-packages --locked
-      - name: Documentation tests
-        if: needs.changes.outputs.docs_only == 'true'
-        run: uv run pytest scripts/tests
-      # Both runs are parallel, a test file never split across processes. The 3.14 run
-      # measures coverage and stops at two processes: with coverage's C tracer (`core = "ctrace"`
-      # in pyproject.toml) it peaks at 4.2 GB with two, 5.0 GB with three, and is killed under
-      # 6 GB with four (measured 2026-10-11). Without that setting it does not fit at all.
-      # The other run stops at three: at four it peaked at 5,956-6,100 MB in October 2026, within
-      # 200 MB of the 6 GB limit of scripts/pytest_memory_limit.py, and a pull request crossed it.
-      # Only the 3.14 run measures coverage: the ratchet reads that report and nothing reads
-      # the other one, and measuring costs about a third of a run.
+      # The junit report (xunit1 names each test's file) feeds the slow-test ratchet of
+      # `test (3.14)` and `scripts/time_budgets.py durations`.
       - name: Unit tests (with coverage)
-        if: matrix.python-version == '3.14' && needs.changes.outputs.docs_only != 'true'
-        run: uv run pytest -n auto --maxprocesses 2 --dist loadfile --cov --cov-report=json --cov-report=term-missing:skip-covered
+        if: matrix.python-version == '3.14'
+        env:
+          LAKANA_TEST_SHARD: ${{ matrix.shard }}/3
+        run: >-
+          uv run pytest -n auto --maxprocesses 2 --dist loadfile --cov --cov-report=
+          --junitxml=junit-${{ matrix.shard }}.xml -o junit_family=xunit1
       - name: Unit tests
-        if: matrix.python-version != '3.14' && needs.changes.outputs.docs_only != 'true'
+        if: matrix.python-version != '3.14'
+        env:
+          LAKANA_TEST_SHARD: ${{ matrix.shard }}/3
         run: uv run pytest -n auto --maxprocesses 3 --dist loadfile
       - name: Unit tests on the oldest supported Polars
         # `lakana[assets]` accepts polars>=1.30 and the lock holds 2.x. The tests that touch
-        # Polars run once more on 1.30 (about 30 s); a type that exists only in Polars 2 is
-        # skipped there. The first command fails the step if `--with` ever stops shadowing the
-        # locked Polars. A test file that imports Polars must be in this list or in the
-        # exclusions of scripts/tests/test_workflows.py (docs/agent/testing.md, "Polars 1 and 2").
-        if: matrix.python-version == '3.11' && needs.changes.outputs.docs_only != 'true'
+        # Polars run once more on 1.30 (about 3 min), in one 3.11 shard; a type that exists only
+        # in Polars 2 is skipped there. The first command fails the step if `--with` ever stops
+        # shadowing the locked Polars. A test file that imports Polars must be in this list or in
+        # the exclusions of scripts/tests/test_workflows.py (docs/agent/testing.md, "Polars 1 and 2").
+        if: matrix.python-version == '3.11' && matrix.shard == 3
         run: |
           uv run --with 'polars==1.30.*' python -c "import polars; assert polars.__version__.startswith('1.30.'), polars.__version__"
           uv run --with 'polars==1.30.*' pytest -p no:cacheprovider \
@@ -193,9 +197,97 @@ jobs:
             packages/lakana-worker/tests/test_runners.py \
             packages/lakana-worker/tests/test_harness_server_messages.py \
             packages/lakana-worker/tests/test_discovery_harness_parity.py
+      # Each shard's coverage data under a name of its own, for `coverage combine` in `test (3.14)`.
+      - name: Keep the coverage data of this shard
+        if: matrix.python-version == '3.14'
+        run: mv .coverage ".coverage.shard-${{ matrix.shard }}"
+      - name: Upload the coverage data of this shard
+        if: matrix.python-version == '3.14'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
+        with:
+          name: coverage-data-${{ matrix.shard }}
+          path: .coverage.shard-${{ matrix.shard }}
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+      - name: Upload the junit report of this shard
+        if: ${{ !cancelled() && matrix.python-version == '3.14' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
+        with:
+          name: junit-unit-${{ matrix.shard }}
+          path: junit-${{ matrix.shard }}.xml
+          if-no-files-found: warn
+          retention-days: 7
+
+  # `test (3.11)` and `test (3.14)` are required checks, so this job always runs and reports:
+  # it passes only when every `unit` shard did, and for a docs-only change it runs the tests that
+  # read the documentation instead. `test (3.14)` combines the shards' coverage and runs the
+  # coverage ratchet and the slow-test ratchet. On a draft the matrix holds 3.14 alone (see
+  # `python_versions` above). `needs.unit.result` covers every shard of both versions, so a
+  # failing shard fails both checks; its own job names it.
+  test:
+    needs: [changes, unit]
+    # Not skipped for a pull request, whose `test (3.11)` and `test (3.14)` are required checks.
+    if: ${{ !cancelled() && needs.changes.outputs.already_tested != 'true' }}
+    timeout-minutes: 15
+    runs-on: ${{ (github.actor != 'dependabot[bot]' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.CI_RUNNER) || 'ubuntu-latest' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ${{ fromJSON(needs.changes.outputs.python_versions || '["3.11","3.14"]') }}
+    steps:
+      - name: Unit test shards
+        if: needs.changes.outputs.docs_only != 'true'
+        env:
+          RESULT: ${{ needs.unit.result }}
+        run: |
+          if [ "$RESULT" != "success" ]; then
+            echo "::error::A unit shard ended with '$RESULT': the failing job of this run is named 'unit (VERSION, N/3)', and its log names the test."
+            exit 1
+          fi
+      - if: needs.changes.outputs.docs_only == 'true' || matrix.python-version == '3.14'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          fetch-depth: 0          # hatch-vcs needs tags to compute a version
+      - if: needs.changes.outputs.docs_only == 'true' || matrix.python-version == '3.14'
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
+        with:
+          enable-cache: true
+          python-version: ${{ matrix.python-version }}
+      - if: needs.changes.outputs.docs_only == 'true' || matrix.python-version == '3.14'
+        run: uv sync --all-packages --locked
+      - name: Documentation tests
+        if: needs.changes.outputs.docs_only == 'true'
+        run: uv run pytest scripts/tests
+      - name: Download the shards' coverage data
+        if: matrix.python-version == '3.14' && needs.changes.outputs.docs_only != 'true'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8
+        with:
+          pattern: coverage-data-*
+          path: coverage-data
+          merge-multiple: true
+      # One report from the three shards; it lists every file below 100 % with the missed lines.
+      - name: Combine the coverage of the shards
+        if: matrix.python-version == '3.14' && needs.changes.outputs.docs_only != 'true'
+        run: |
+          uv run coverage combine coverage-data
+          uv run coverage json
+          uv run coverage report --skip-covered --show-missing
       - name: Coverage ratchet
         if: matrix.python-version == '3.14' && needs.changes.outputs.docs_only != 'true'
         run: uv run python scripts/coverage_ratchet.py
+      - name: Download the shards' junit reports
+        if: matrix.python-version == '3.14' && needs.changes.outputs.docs_only != 'true'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8
+        with:
+          pattern: junit-unit-*
+          path: junit
+          merge-multiple: true
+      # A unit test of 2 s or more must be marked slow, and the number of slow tests may fall,
+      # never rise (scripts/time-budgets.toml, scripts/slow-tests-baseline.json).
+      - name: Slow-test ratchet
+        if: matrix.python-version == '3.14' && needs.changes.outputs.docs_only != 'true'
+        run: uv run python scripts/time_budgets.py slow-tests junit/*.xml
       # The report the ratchet read, kept for a week so a missed line can be looked up without
       # running the suite again (the step log also lists every file below 100 %).
       - name: Upload the coverage report
@@ -207,22 +299,26 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
-  # Lakana's local mode runs on macOS (Python 3.13 and later), so this job runs what a macOS user
-  # runs: the unit suite and the "Getting started" example, which ends with
-  # `lakana server reset --local`. Docker-based tests and coverage stay on Linux. It is pinned to
-  # GitHub's macOS runner, never the `CI_RUNNER` switch (GitHub hosts no macOS on a
-  # self-hosted machine, and a fork's code must not reach one); it is not a required check yet.
-  # The runner has 3 cores and 7 GB: two test workers fit (the memory limit of
-  # scripts/pytest_memory_limit.py, 6 GB by default, only enforces on Linux). A pull request
-  # runs it when it touches packages/ (and the files the job itself uses); only packages/ is tested here,
-  # scripts/ is repository tooling that runs on Linux; every push to `main`
-  # runs it, and the push that merges a release pull request is the release's check.
-  test-macos:
-    name: test (macos)
+  # Lakana's local mode runs on macOS (Python 3.13 and later), so these jobs run what a macOS user
+  # runs: the unit suite, in two shards, and the "Getting started" example (in the second), which
+  # ends with `lakana server reset --local`. Docker-based tests and coverage stay on Linux. They
+  # are pinned to GitHub's macOS runner, never the `CI_RUNNER` switch (GitHub hosts no macOS on a
+  # self-hosted machine, and a fork's code must not reach one). The runner has 3 cores and 7 GB:
+  # two test workers fit (the memory limit of scripts/pytest_memory_limit.py, 6 GB by default,
+  # only enforces on Linux). A pull request runs them when it touches packages/ (and the files
+  # the jobs use); only packages/ is tested here, scripts/ is repository tooling that runs on
+  # Linux; every push to `main` runs them, and the push that merges a release pull request is the
+  # release's check. `test (macos)` collects the shards; it is not a required check yet.
+  unit-macos:
+    name: unit (macos, ${{ matrix.shard }}/2)
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.draft != 'true' }}
     runs-on: macos-latest
-    timeout-minutes: 40
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
@@ -234,7 +330,7 @@ jobs:
         run: |
           # Anything but a pull request that provably changes nothing relevant runs the job.
           if [ "$EVENT" != "pull_request" ] || ! git rev-parse --verify --quiet "$BASE_SHA" > /dev/null \
-            || git diff --name-only "$BASE_SHA" HEAD | grep -qE '^(packages/|docs/examples/|pyproject\.toml|uv\.lock|scripts/run_docs_examples\.sh|\.github/workflows/ci\.yml)'; then
+            || git diff --name-only "$BASE_SHA" HEAD | grep -qE '^(packages/|docs/examples/|pyproject\.toml|uv\.lock|scripts/run_docs_examples\.sh|scripts/pytest_selection\.py|scripts/test-durations\.json|\.github/workflows/ci\.yml)'; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "No change under packages/: skipping the macOS run."
@@ -248,11 +344,13 @@ jobs:
         run: uv sync --all-packages --locked
       - name: Unit tests
         if: steps.scope.outputs.run == 'true'
+        env:
+          LAKANA_TEST_SHARD: ${{ matrix.shard }}/2
         run: uv run pytest packages -m "not integration" -n 2 --dist loadfile -p no:cacheprovider
       # scripts/run_docs_examples.sh uses GNU `timeout` and `setsid` and bash 4: Homebrew has the
       # first and the last, and a few lines of Python stand in for `setsid`, which macOS lacks.
       - name: Tools the example runner needs
-        if: steps.scope.outputs.run == 'true'
+        if: steps.scope.outputs.run == 'true' && matrix.shard == 2
         env:
           HOMEBREW_NO_AUTO_UPDATE: "1"       # a slow `brew update` must not eat the time budget
           HOMEBREW_NO_INSTALL_CLEANUP: "1"
@@ -272,10 +370,26 @@ jobs:
           echo "$(brew --prefix coreutils)/libexec/gnubin" >> "$GITHUB_PATH"
           echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
       - name: Getting-started example (init, start, deploy, run, query, reset)
-        if: steps.scope.outputs.run == 'true'
+        if: steps.scope.outputs.run == 'true' && matrix.shard == 2
         env:
           LAKANA_DOCS_EXAMPLE_BUDGET: "240"
         run: uv run bash scripts/run_docs_examples.sh getting-started
+
+  test-macos:
+    name: test (macos)
+    needs: [changes, unit-macos]
+    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.draft != 'true' }}
+    runs-on: ${{ (github.actor != 'dependabot[bot]' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.CI_RUNNER) || 'ubuntu-latest' }}
+    timeout-minutes: 5
+    steps:
+      - name: macOS shards
+        env:
+          RESULT: ${{ needs.unit-macos.result }}
+        run: |
+          if [ "$RESULT" != "success" ]; then
+            echo "::error::A macOS shard ended with '$RESULT': the failing job of this run is named 'unit (macos, N/2)'."
+            exit 1
+          fi
 
   # The documentation site: every code block checked, the site built in strict mode.
   # Fast, and it guards a documentation-only change, so it has no condition.
@@ -351,17 +465,24 @@ jobs:
           include-hidden-files: false
           retention-days: 7
 
-  integration:
+  # The integration tier, in jobs side by side so each failure is named by its own job and no
+  # job waits for another: the tests against Postgres and SeaweedFS in two shards, the Docker
+  # isolation tests, and the Python-asset tests with their wheel index. `integration`, the
+  # required check, passes only when all of them did. No test waits without a bound, and nothing
+  # here may hold a runner if one does. Every pytest here keeps its temp files under
+  # $RUNNER_TEMP, on the work disk: /tmp on GitHub's hosted runners can have a disk quota, and
+  # the Python-asset tests, which copy the wheel directory into every project and build a venv
+  # per project, exceeded it.
+  integration-services:
+    name: integration (services, ${{ matrix.shard }}/2)
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.draft != 'true' && needs.changes.outputs.already_tested != 'true' }}
     runs-on: ${{ (github.actor != 'dependabot[bot]' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.CI_RUNNER) || 'ubuntu-latest' }}
-    # No test waits without a bound, and nothing here may hold a runner if one does. 45, not
-    # 30: the job took 22-24 minutes before the Docker isolation step, which adds an image
-    # build and about two minutes of tests.
-    timeout-minutes: 45
-    # A separate job, rather than folded into `test` above, so a Docker or
-    # testcontainers hiccup shows up as its own failure instead of masking
-    # unit test results in the same job.
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
@@ -370,46 +491,133 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync --all-packages --locked
-      # Every pytest here keeps its temp files under $RUNNER_TEMP, on the work disk: /tmp on
-      # GitHub's hosted runners can have a disk quota, and the Python-asset tests, which copy
-      # the wheel directory into every project and build a venv per project, exceeded it.
-      # First, and on their own, the tests that install no packages: a package index
-      # outage must not take them down with the Python-asset tests.
+      # The tests that install no packages and start no task container: a package index outage
+      # must not take them down with the Python-asset tests.
       - name: Integration tests
+        env:
+          LAKANA_TEST_SHARD: ${{ matrix.shard }}/2
         run: >-
           uv run pytest -m "integration and not docker" --basetemp "$RUNNER_TEMP/pytest-integration"
           --ignore=packages/lakana-server/tests/test_python_assets_integration.py
-      # The exit criterion of task isolation, against this runner's Docker Engine (28 or later:
-      # GitHub's ubuntu-latest has it). Its own step, so a Docker failure is named as such.
-      # LAKANA_TEST_DOCKER=1 turns "no Docker here" from a skip into a failure.
-      - name: Docker isolation tests
+          --junitxml=junit-integration-${{ matrix.shard }}.xml -o junit_family=xunit1
+      - name: Upload the junit report of this shard
         if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
+        with:
+          name: junit-integration-${{ matrix.shard }}
+          path: junit-integration-${{ matrix.shard }}.xml
+          if-no-files-found: warn
+          retention-days: 7
+
+  # The exit criterion of task isolation, against this runner's Docker Engine (28 or later:
+  # GitHub's ubuntu-latest has it). LAKANA_TEST_DOCKER=1 turns "no Docker here" from a skip into
+  # a failure.
+  integration-docker:
+    name: integration (docker)
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.draft != 'true' && needs.changes.outputs.already_tested != 'true' }}
+    runs-on: ${{ (github.actor != 'dependabot[bot]' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.CI_RUNNER) || 'ubuntu-latest' }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          fetch-depth: 0          # hatch-vcs needs tags to compute a version
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
+        with:
+          enable-cache: true
+      - run: uv sync --all-packages --locked
+      - name: Docker isolation tests
         env:
           LAKANA_TEST_DOCKER: "1"
         run: uv run pytest -m docker --basetemp "$RUNNER_TEMP/pytest-docker" packages/lakana-worker/tests
-      # The Python-asset tests install from an offline wheel directory. Building it is
-      # the only step that may ask a package index, and only for wheels the cache does
-      # not hold: the locked wheels are cached by uv.lock, the lakana wheel is rebuilt
-      # from this checkout every time. Its own step, so its failure is named as such.
+
+  # The Python-asset tests install from an offline wheel directory. Building it is the only step
+  # that may ask a package index, and only for wheels the cache does not hold: the locked wheels
+  # are cached by uv.lock, the lakana wheel is rebuilt from this checkout every time. Its own
+  # step, so its failure is named as such. Only this job needs the index, so it builds it itself.
+  integration-assets:
+    name: integration (python assets)
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.draft != 'true' && needs.changes.outputs.already_tested != 'true' }}
+    runs-on: ${{ (github.actor != 'dependabot[bot]' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.CI_RUNNER) || 'ubuntu-latest' }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          fetch-depth: 0          # hatch-vcs needs tags to compute a version
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
+        with:
+          enable-cache: true
+      - run: uv sync --all-packages --locked
       - name: Restore the wheel index
-        if: ${{ !cancelled() }}
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6
         with:
           path: ${{ runner.temp }}/wheelhouse
           key: wheelhouse-${{ runner.os }}-${{ hashFiles('uv.lock', '.python-version') }}
       - name: Build the wheel index for the Python-asset tests
-        id: wheelhouse
-        if: ${{ !cancelled() }}
         run: bash scripts/build_wheelhouse.sh "$RUNNER_TEMP/wheelhouse"
       # Without LAKANA_TEST_WHEELHOUSE these tests skip locally and fail here.
-      # Only when the index was built: otherwise its failure above is the one cause.
       - name: Python-asset integration tests
-        if: ${{ !cancelled() && steps.wheelhouse.outcome == 'success' }}
         env:
           LAKANA_TEST_WHEELHOUSE: ${{ runner.temp }}/wheelhouse
         run: >-
           uv run pytest -m integration --basetemp "$RUNNER_TEMP/pytest-assets"
           packages/lakana-server/tests/test_python_assets_integration.py
+
+  # The required check `integration`: green only when every integration job above was.
+  integration:
+    needs: [changes, integration-services, integration-docker, integration-assets]
+    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.draft != 'true' && needs.changes.outputs.already_tested != 'true' }}
+    runs-on: ${{ (github.actor != 'dependabot[bot]' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.CI_RUNNER) || 'ubuntu-latest' }}
+    timeout-minutes: 5
+    steps:
+      - name: Integration jobs
+        env:
+          SERVICES: ${{ needs.integration-services.result }}
+          DOCKER: ${{ needs.integration-docker.result }}
+          ASSETS: ${{ needs.integration-assets.result }}
+        run: |
+          failed=0
+          for pair in "services:$SERVICES" "docker:$DOCKER" "python assets:$ASSETS"; do
+            if [ "${pair#*:}" != "success" ]; then
+              echo "::error::The job 'integration (${pair%%:*}...)' ended with '${pair#*:}': its log names the test."
+              failed=1
+            fi
+          done
+          exit "$failed"
+
+  # Tests in quarantine (`@pytest.mark.quarantine(issue=N)`) are skipped in every job above and
+  # run here, where a failure never fails the run: the step summary says how they did, so a fix
+  # can be seen to hold before the marker comes off (docs/agent/testing.md, "Flaky tests: the
+  # same-day rule"). `-m ""` lifts the default `not integration`: a quarantined integration test
+  # runs here too.
+  quarantine:
+    name: quarantined tests
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.already_tested != 'true' }}
+    runs-on: ${{ (github.actor != 'dependabot[bot]' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.CI_RUNNER) || 'ubuntu-latest' }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          fetch-depth: 0          # hatch-vcs needs tags to compute a version
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
+        with:
+          enable-cache: true
+      - run: uv sync --all-packages --locked
+      - name: Quarantined tests (never fail the run)
+        env:
+          LAKANA_TEST_QUARANTINED: "1"
+        run: |
+          status=0
+          uv run pytest -m "" -rA -p no:cacheprovider --basetemp "$RUNNER_TEMP/pytest-quarantine" || status=$?
+          case "$status" in
+            0) message="The quarantined tests passed in this run." ;;
+            5) message="No test is in quarantine." ;;
+            *) message="A quarantined test failed (pytest exit status $status): see this job's log." ;;
+          esac
+          echo "::notice::$message"
+          echo "$message" >> "$GITHUB_STEP_SUMMARY"
 
   five-minute:
     needs: changes
@@ -466,3 +674,27 @@ jobs:
           docker build -t lakana:ci .
           docker build -f Dockerfile.task --build-arg PYTHON=3.14 -t lakana-task:ci-py3.14 .
           uv run --locked bash scripts/compose_smoke_test.sh lakana:ci lakana-task:ci
+
+  # Each job of this run against its budget in scripts/time-budgets.toml (a unit or integration
+  # job at most 15 minutes). It waits for every other job and reads their times from the API,
+  # hence `actions: read`; the slow-test ratchet runs in `test (3.14)`. See docs/agent/testing.md,
+  # "Time budgets".
+  budgets:
+    name: time budgets
+    needs: [lint, test, test-macos, docs, docs-examples, integration, five-minute, compose-smoke, quarantine]
+    if: ${{ !cancelled() }}
+    runs-on: ${{ (github.actor != 'dependabot[bot]' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.CI_RUNNER) || 'ubuntu-latest' }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read           # the jobs of this run, with their start and end
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+      - name: Job budgets
+        shell: bash --noprofile --norc -eo pipefail {0}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}/jobs?per_page=100" \
+            --paginate --jq '.jobs[] | tojson' > "$RUNNER_TEMP/jobs.jsonl"
+          python3 scripts/time_budgets.py jobs "$RUNNER_TEMP/jobs.jsonl"

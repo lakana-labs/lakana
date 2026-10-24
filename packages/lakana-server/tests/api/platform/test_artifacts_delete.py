@@ -270,6 +270,7 @@ def test_an_open_upload_is_a_reason_and_names_nobody(client: TestClient) -> None
     ],
     ids=lambda value: value if len(str(value)) < 20 else "5000-digits",
 )
+@pytest.mark.slow
 def test_a_version_must_be_a_bounded_positive_number(
     client: TestClient, version: str, status: int
 ) -> None:

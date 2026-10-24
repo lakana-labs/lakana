@@ -116,6 +116,7 @@ def _under_broad_handler(tree: ast.AST, call: ast.Call) -> bool:
     return False
 
 
+@pytest.mark.slow
 def test_only_the_known_sites_decrypt_a_secret() -> None:
     """Another caller of any decrypting function would read a secret for any use."""
     callers = sorted(

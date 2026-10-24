@@ -266,6 +266,7 @@ def test_a_budget_file_sets_the_budget_of_its_example(tmp_path: Path) -> None:
     assert "budget 300 s" in result.stdout
 
 
+@pytest.mark.slow
 def test_the_longer_of_the_file_and_the_environment_applies(tmp_path: Path) -> None:
     """A shorter file does not lower `LAKANA_DOCS_EXAMPLE_BUDGET`; a longer one raises it."""
     shorter = _run_with_budget_file(tmp_path / "a", "200", LAKANA_DOCS_EXAMPLE_BUDGET="240")
@@ -321,6 +322,7 @@ def test_without_a_capture_directory_the_runner_captures_nothing(tmp_path: Path)
     assert not list(tmp_path.rglob("first.txt"))
 
 
+@pytest.mark.slow
 def test_a_region_in_a_failing_example_is_shown_and_its_capture_kept(tmp_path: Path) -> None:
     """A command that fails inside a region must not swallow what the region printed."""
     script = "set -euo pipefail\n# docs:start boom\necho partial-output\nfalse\n# docs:end boom\n"
@@ -356,6 +358,7 @@ def test_a_region_inside_an_existing_capture_nests(tmp_path: Path) -> None:
     assert (capture / "demo" / "nested.txt").read_text() == "inner\n"
 
 
+@pytest.mark.slow
 def test_the_failure_trace_still_names_the_line_of_the_original_script(tmp_path: Path) -> None:
     """The runner runs a copy with the markers replaced; line numbers must not move."""
     script = "set -euo pipefail\n# docs:start a\n# docs:end a\nfalse\n"
@@ -378,6 +381,7 @@ exit "$status"
 
 
 @pytest.mark.parametrize("command", ["true", "(exit 3)", "false"])
+@pytest.mark.slow
 def test_a_region_leaves_the_status_of_its_last_command_for_the_next_line(
     tmp_path: Path, command: str
 ) -> None:
@@ -402,6 +406,7 @@ def test_the_status_before_a_region_is_still_there_inside_it(tmp_path: Path) -> 
     assert "status=4" in result.stdout
 
 
+@pytest.mark.slow
 def test_a_failing_region_under_set_e_stops_with_the_same_status(tmp_path: Path) -> None:
     """The capture neither hides a failure nor lets the script go on."""
     script = "set -euo pipefail\n# docs:start r\n(exit 3)\n# docs:end r\necho NOT-REACHED\n"

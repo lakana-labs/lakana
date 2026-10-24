@@ -167,6 +167,7 @@ def _create_the_documented_rules(
     return state
 
 
+@pytest.mark.slow
 def test_the_github_rules_accept_the_workflow_s_jobs_and_nothing_else(
     app: TestClient, tmp_path: Path
 ) -> None:
@@ -187,6 +188,7 @@ def test_the_github_rules_accept_the_workflow_s_jobs_and_nothing_else(
     assert _verdict(app, "prod", {**push, "repository_id": "654321"}).startswith("refused")
 
 
+@pytest.mark.slow
 def test_the_gitlab_rules_accept_the_pipeline_s_jobs_and_nothing_else(
     app: TestClient, tmp_path: Path
 ) -> None:
@@ -214,6 +216,7 @@ def test_the_gitlab_rules_accept_the_pipeline_s_jobs_and_nothing_else(
     assert _verdict(app, "prod", {**main, "ref_type": "tag"}).startswith("refused")
 
 
+@pytest.mark.slow
 def test_the_gitlab_job_that_dry_runs_then_deploys_is_accepted(
     app: TestClient, tmp_path: Path
 ) -> None:
@@ -248,6 +251,7 @@ def test_the_gitlab_job_that_dry_runs_then_deploys_is_accepted(
     assert _verdict(app, "prod", claims).startswith("accepted")
 
 
+@pytest.mark.slow
 def test_lakana_deploy_exchanges_the_job_s_id_token_once(app: TestClient, tmp_path: Path) -> None:
     state = _create_the_documented_rules(app, tmp_path)
     state.ci_client_factory = lambda state, environment, repository: lakana.Client.from_ci_oidc(
@@ -270,6 +274,7 @@ def test_lakana_deploy_exchanges_the_job_s_id_token_once(app: TestClient, tmp_pa
 
 
 @pytest.mark.parametrize("provider", ["github", "gitlab"])
+@pytest.mark.slow
 def test_explain_accepts_the_documented_claims_of_a_deploy(
     app: TestClient, tmp_path: Path, provider: str
 ) -> None:
@@ -281,6 +286,7 @@ def test_explain_accepts_the_documented_claims_of_a_deploy(
     assert result.stdout.startswith("Verdict: accepted by rule")
 
 
+@pytest.mark.slow
 def test_disabling_a_rule_ends_its_ci_tokens(app: TestClient, tmp_path: Path) -> None:
     state = _create_the_documented_rules(app, tmp_path, ("accounts", "github"))
     id_token = _sign(_claims(environment="prod"))

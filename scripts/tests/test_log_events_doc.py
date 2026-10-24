@@ -12,6 +12,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pytest
+
 from lakana_core.log_events import WHERE, LogEvent
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -69,6 +71,7 @@ def test_the_table_names_the_process_the_source_names() -> None:
     assert dict(_documented()) == {code.value: where for code, where in WHERE.items()}
 
 
+@pytest.mark.slow
 def test_every_code_is_logged_by_the_process_the_table_names() -> None:
     for code in LogEvent:
         processes = WHERE[code].split(", ")

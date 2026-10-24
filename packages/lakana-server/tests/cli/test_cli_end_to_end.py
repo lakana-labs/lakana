@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pyarrow as pa
 import pyarrow.parquet as pq
+import pytest
 from fastapi.testclient import TestClient
 from typer.testing import Result
 
@@ -33,6 +34,7 @@ def _ok(result: Result) -> Result:
     return result
 
 
+@pytest.mark.slow
 def test_login_create_append_and_query(
     cli_state: CliState, invoke_cli: Callable[..., Result], worker: None, tmp_path: Path
 ) -> None:
@@ -110,6 +112,7 @@ def test_login_create_append_and_query(
     assert actual.equals(expected)
 
 
+@pytest.mark.slow
 def test_every_command_group_against_the_real_app(
     cli_state: CliState,
     invoke_cli: Callable[..., Result],
@@ -271,6 +274,7 @@ def test_every_command_group_against_the_real_app(
     _ok(run(cli_state, "env", "delete", "dev", "--yes"))
 
 
+@pytest.mark.slow
 def test_sql_into_and_views_through_the_cli(
     cli_state: CliState, invoke_cli: Callable[..., Result], worker: None, tmp_path: Path
 ) -> None:

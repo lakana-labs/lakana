@@ -92,6 +92,7 @@ def test_env_py_fallback_survives_a_percent_sign_in_the_database_url(
         engine.dispose()
 
 
+@pytest.mark.slow
 def test_0011_binds_grants_and_policies_to_ids_and_revokes_stale_rows(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -854,6 +855,7 @@ _REVISION_0012 = "c8d4e2f1a6b3"
 _REVISION_0013 = "d1e5f3a7b9c2"
 
 
+@pytest.mark.slow
 def test_0012_adds_the_m5a_schema_and_downgrades_cleanly(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -908,6 +910,7 @@ def test_0012_adds_the_m5a_schema_and_downgrades_cleanly(
         engine.dispose()
 
 
+@pytest.mark.slow
 def test_0012_downgrade_leaves_nothing_the_previous_release_cannot_load(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1066,6 +1069,7 @@ def test_0014_adds_the_m5c1_schema_and_downgrades_cleanly(
 _REVISION_0014 = "e7f2a9c4b1d3"
 
 
+@pytest.mark.slow
 def test_0015_adds_the_claim_counter_seeded_from_attempt_and_downgrades_cleanly(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1143,6 +1147,7 @@ def test_running_migrations_leaves_existing_loggers_enabled(
 _REVISION_0015 = "f4b8d2a6c9e1"
 
 
+@pytest.mark.slow
 def test_0016_adds_the_bound_token_columns_and_its_downgrade_deletes_bound_tokens(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1223,6 +1228,7 @@ def test_0016_adds_the_bound_token_columns_and_its_downgrade_deletes_bound_token
 _REVISION_0016 = "a6c3e9d1f7b2"
 
 
+@pytest.mark.slow
 def test_0017_adds_the_nullable_error_cause_and_downgrades_cleanly(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1292,6 +1298,7 @@ def test_0017_adds_the_nullable_error_cause_and_downgrades_cleanly(
 _REVISION_0017 = "c8e1a5d7f3b9"
 
 
+@pytest.mark.slow
 def test_0018_adds_the_artifact_tables_and_its_downgrade_removes_artifact_rows(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1354,6 +1361,7 @@ def test_0018_adds_the_artifact_tables_and_its_downgrade_removes_artifact_rows(
 _REVISION_0018 = "e2a7c4f1b6d8"
 
 
+@pytest.mark.slow
 def test_0019_adds_the_format_version_and_key_id_and_downgrade_drops_new_format_rows(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1453,6 +1461,7 @@ def _utc_text() -> str:
     return datetime.now(UTC).replace(tzinfo=None).isoformat(sep=" ")
 
 
+@pytest.mark.slow
 def test_0020_adds_package_indexes_and_widens_the_action_column(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1556,6 +1565,7 @@ def test_0020_adds_package_indexes_and_widens_the_action_column(
 _REVISION_0020 = "c3f8a6d1e9b4"
 
 
+@pytest.mark.slow
 def test_0021_adds_cancel_requested_and_its_downgrade_turns_cancelled_runs_into_failed_ones(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1638,6 +1648,7 @@ def test_0021_adds_cancel_requested_and_its_downgrade_turns_cancelled_runs_into_
 _REVISION_0021 = "e4b7d2a9c6f1"
 
 
+@pytest.mark.slow
 def test_0022_adds_workers_the_worker_ids_and_the_status_index_and_downgrades_cleanly(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1751,6 +1762,7 @@ def test_0022_adds_workers_the_worker_ids_and_the_status_index_and_downgrades_cl
 _REVISION_0022 = "f6c1a8d3b5e2"
 
 
+@pytest.mark.slow
 def test_0023_adds_takes_and_a_worker_registered_before_it_reads_all(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1824,6 +1836,7 @@ _COLUMNS_0024_ADDS: dict[str, dict[str, tuple[str, bool]]] = {
 }
 
 
+@pytest.mark.slow
 def test_0024_adds_what_checks_need_and_older_rows_read_as_no_checks(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2296,6 +2309,7 @@ _DELIVERY_COLUMNS = {
 }
 
 
+@pytest.mark.slow
 def test_0029_adds_the_notification_deliveries_and_downgrades_cleanly(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

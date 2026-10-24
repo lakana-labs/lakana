@@ -523,6 +523,7 @@ def test_a_stop_before_the_build_runs_no_uv(fake: Fake) -> None:
     assert fake.calls() == []
 
 
+@pytest.mark.slow
 def test_a_stop_while_another_task_builds_the_same_venv_ends_the_wait(fake: Fake) -> None:
     """#291: a stopped task does not wait for another task's build of its venv."""
     fake.behave(sleep=3)
