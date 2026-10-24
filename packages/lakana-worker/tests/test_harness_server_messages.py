@@ -18,6 +18,7 @@ from lakana import runner
 from lakana.errors import ValidationError
 from lakana.resources import artifacts
 from lakana_core.artifacts.service import FILES_NOT_STORED, UPLOAD_GONE
+from lakana_core.catalog.merge import COMPOSITE_KEY_MAX_ROWS
 from lakana_core.catalog.schema_compat import ColumnType, SchemaDiff, SchemaMismatchError
 
 
@@ -44,3 +45,8 @@ def test_the_sdk_recognises_the_servers_files_not_stored_text() -> None:
     text = FILES_NOT_STORED.format(count=3)
     assert artifacts._NOT_STORED in text
     assert text == "3 of this upload's files are not stored yet; upload them and commit again."
+
+
+def test_the_harness_refuses_a_merge_over_the_servers_own_cap() -> None:
+    """The harness checks a merge on several key columns before it sends it, at the same cap."""
+    assert runner.COMPOSITE_KEY_MAX_ROWS == COMPOSITE_KEY_MAX_ROWS

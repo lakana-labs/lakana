@@ -26,6 +26,7 @@ import pytest
 import lakana_worker.runners as runners_module
 from lakana.runner import TaskDescription, parse_description
 from lakana_core.runs.failures import FailureCode
+from lakana_core.secrets.forms import secret_forms
 from lakana_worker.processes import remove_private_tree
 from lakana_worker.runners import (
     MAX_ERROR_MESSAGE_CHARS,
@@ -811,6 +812,111 @@ def test_the_sdk_parses_the_description_of_an_artifact_task(harness: Harness) ->
     assert parsed.work_dir == str(harness.attempt)
 
 
+def _description(harness: Harness, **fields: object) -> dict[str, object]:
+    """Write the description of a task directly, without a process.
+
+    Parameters
+    ----------
+    harness
+        The harness, for its task.
+    **fields
+        Fields of `PythonTask` to replace.
+
+    Returns
+    -------
+    dict
+        The decoded document.
+    """
+    document = runners_module.task_description(
+        dataclasses.replace(harness.task(), **fields),
+        result_path="/r/result.json",
+        work_dir="/r",
+        parent_pid=None,
+    )
+    return json.loads(document)
+
+
+def test_a_replace_without_connections_keeps_description_version_2(harness: Harness) -> None:
+    """A harness of the previous release reads it: no key of version 3 is sent."""
+    description = _description(harness, hidden=("s3cr3t",))
+    assert description["version"] == 2
+    assert not {"write", "key", "watermark", "connections", "hidden"} & set(description)
+
+
+@pytest.mark.parametrize(
+    ("fields", "expected"),
+    [
+        (
+            {
+                "write": "append",
+                "watermark_column": "ts",
+                "watermark": "long:41",
+                "table_exists": True,
+            },
+            {
+                "write": "append",
+                "key": [],
+                "watermark": {"column": "ts", "value": "long:41"},
+                "connections": {},
+                "table_exists": True,
+            },
+        ),
+        (
+            {"write": "append", "watermark_column": "ts"},
+            {
+                "write": "append",
+                "key": [],
+                "watermark": {"column": "ts", "value": None},
+                "connections": {},
+                "table_exists": False,
+            },
+        ),
+        (
+            {"write": "merge", "key": ("id", "day")},
+            {"write": "merge", "key": ["id", "day"], "watermark": None, "connections": {}},
+        ),
+        (
+            {"connections": {"crm-db": {"kind": "postgresql"}}},
+            {
+                "write": "replace",
+                "key": [],
+                "watermark": None,
+                "connections": {"crm-db": {"kind": "postgresql"}},
+            },
+        ),
+    ],
+    ids=["append", "append-first-run", "merge", "replace-with-connections"],
+)
+def test_an_asset_that_uses_its_fields_gets_description_version_3(
+    harness: Harness, fields: dict[str, object], expected: dict[str, object]
+) -> None:
+    description = _description(harness, **fields)
+    assert description["version"] == 3
+    assert {key: description[key] for key in expected} == expected
+    assert "hidden" not in description
+
+
+def test_the_sdk_parses_a_version_3_description(harness: Harness) -> None:
+    """I4 for version 3: the harness reads what the runner writes."""
+    harness.fields = {
+        "write": "merge",
+        "key": ("id",),
+        "watermark_column": "at",
+        "watermark": "timestamptz:2026-10-22T08:00:00+00:00",
+        "connections": {"crm-db": {"kind": "postgresql"}},
+        "expected_snapshot_id": 17,
+    }
+    parsed = _real_parse(harness)
+    assert (parsed.write, parsed.key, parsed.watermark_column) == ("merge", ("id",), "at")
+    assert parsed.watermark is not None
+    assert parsed.connections == {"crm-db": {"kind": "postgresql"}}
+    assert parsed.expected_snapshot_id == 17
+
+
+def test_the_secret_values_to_hide_stay_out_of_the_repr(harness: Harness) -> None:
+    assert "s3cr3t" not in repr(harness.task(hidden=("s3cr3t",)))
+
+
 def _failed(**fields: object) -> str:
     """Build the harness body that writes a failed record and exits 1.
 
@@ -928,6 +1034,75 @@ def test_a_token_straddling_the_forced_flush_boundary_is_hidden(harness: Harness
     assert "s3cr3t" not in harness.output()
     assert "lakana_task" not in harness.output()
     assert harness.output().count("***") == 3
+
+
+def test_a_declared_connections_secret_is_hidden_even_split_across_two_writes(
+    harness: Harness,
+) -> None:
+    """`PythonTask.hidden` joins the token in the redaction of the log and the message."""
+    harness.fields["hidden"] = ("conn-s3cr3t-value",)
+    outcome = harness.run(
+        "sys.stdout.write('password conn-s3cr')\n"
+        "sys.stdout.flush()\n"
+        "time.sleep(0.15)\n"
+        "sys.stdout.write('3t-value\\n')\n"
+        "sys.stdout.flush()\n"
+        "write({'status': 'failed', 'error_type': 'E', 'message': 'login conn-s3cr3t-value',"
+        " 'retryable': True})\nsys.exit(1)\n"
+    )
+    assert "s3cr3t" not in harness.output()
+    assert harness.output().startswith("password ***\n")
+    assert outcome.error_message == "login ***"
+
+
+_TRICKY_PASSWORD = "Tr0ub\\4dor\"&'x\x01é"
+
+
+def test_every_form_of_a_declared_connections_secret_is_hidden(harness: Harness) -> None:
+    """repr, JSON (both), URL quoting, bytes, a dict, a log record: none reaches the log."""
+    harness.fields["hidden"] = tuple(secret_forms(_TRICKY_PASSWORD))
+    outcome = harness.run(
+        "import json, logging\n"
+        "from urllib.parse import quote, quote_plus\n"
+        f"pw = {_TRICKY_PASSWORD!r}\n"
+        "print('raw', pw)\n"
+        "print('repr', repr(pw))\n"
+        "print('dict', {'password': pw})\n"
+        "print('json', json.dumps({'password': pw}))\n"
+        "print('json8', json.dumps({'password': pw}, ensure_ascii=False))\n"
+        "print('quote', quote(pw), quote(pw, safe=''), quote_plus(pw))\n"
+        "print('bytes', pw.encode())\n"
+        "sys.stdout.flush()\n"
+        "logging.warning('%r', pw)\n"
+        "write({'status': 'succeeded', 'snapshot_id': 1, 'rows': 1})\n"
+    )
+    assert outcome.succeeded
+    out = harness.output()
+    for form in secret_forms(_TRICKY_PASSWORD) | {"Tr0ub", "4dor"}:
+        assert form not in out, form
+    assert out.count("***") == 10
+
+
+@pytest.mark.parametrize("password", ["Zürich-Pass-2026", 'Zq-quote"Pass'])
+def test_a_json_body_printed_again_hides_the_secret(harness: Harness, password: str) -> None:
+    """A second layer: a JSON body as bytes, in a dict's repr, or JSON-encoded again."""
+    harness.fields["hidden"] = tuple(secret_forms(password))
+    outcome = harness.run(
+        "import json\n"
+        f"pw = {password!r}\n"
+        "for ascii_only in (True, False):\n"
+        "    body = json.dumps({'password': pw}, ensure_ascii=ascii_only)\n"
+        "    print(body.encode())\n"
+        "    print({'body': body})\n"
+        "    print(json.dumps(body))\n"
+        "    print(json.dumps(body, ensure_ascii=False))\n"
+        "print(json.dumps(json.dumps(pw)))\n"
+        "write({'status': 'succeeded', 'snapshot_id': 1, 'rows': 1})\n"
+    )
+    assert outcome.succeeded
+    out = harness.output()
+    assert "Pass" not in out
+    assert out.count("***") == 9
 
 
 def test_the_token_is_only_on_stdin(harness: Harness) -> None:
@@ -1909,3 +2084,19 @@ def test_the_timeout_message_keeps_a_fraction_of_a_second(seconds: float, text: 
     """A timeout under a second no longer reads "0s"."""
     outcome = _outcome(None, code=-9, stopped=True, timed_out=True, timeout_seconds=seconds)
     assert outcome.error_message == f"timed out after {text}"
+
+
+@pytest.mark.parametrize(
+    "value", ["pass\xa0word123", "pass​word123", "pass\x1bword123", "pässword123"]
+)
+def test_a_secret_with_a_character_that_is_not_printable_is_hidden_in_the_record(
+    value: str,
+) -> None:
+    """Redaction sees the text as written; only then are such characters replaced with `?`."""
+    hidden = sorted(secret_forms(value))
+    cleaned = runners_module._clean(f"connect failed for {value} at host", hidden, 2000)
+    assert cleaned == "connect failed for *** at host"
+
+
+def test_a_lone_surrogate_in_a_record_is_still_replaced() -> None:
+    assert runners_module._clean("bad \ud800 text \x00", [], 2000) == "bad ? text ?"

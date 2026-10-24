@@ -267,10 +267,11 @@ def bound_attempt(
     *,
     asset: str,
     inputs: dict[str, str],
-    lease_seconds: int = 300,
+    lease_seconds: int | None = 300,
     output: str = "table",
     keep_versions: int | None = None,
     input_kinds: dict[str, str] | None = None,
+    connections: list[str] | None = None,
 ) -> BoundAttempt:
     """Put a Python task into `running` for a service account, and mint its token.
 
@@ -291,7 +292,8 @@ def bound_attempt(
     inputs
         The asset's declared inputs, parameter → table.
     lease_seconds
-        How long the lease lasts on the database's clock.
+        How long the lease lasts on the database's clock (PostgreSQL); `None` sets no lease
+        expiry, for a test on SQLite.
     output
         What the asset produces, ``table`` or ``artifact``; the manifest records it.
     keep_versions
@@ -299,6 +301,9 @@ def bound_attempt(
     input_kinds
         The kind of each input, parameter → ``table`` or ``artifact``; every input is a table
         when omitted.
+    connections
+        The connections the asset declares; the manifest entry has no `connections` when
+        omitted.
 
     Returns
     -------
@@ -341,6 +346,7 @@ def bound_attempt(
                         "output": output,
                         "keep_versions": keep_versions,
                         "input_kinds": input_kinds or dict.fromkeys(inputs, "table"),
+                        **({} if connections is None else {"connections": connections}),
                     }
                 ],
                 "edges": [],
@@ -386,13 +392,14 @@ def bound_attempt(
                 started_at=db_now(session),
             )
         )
-        session.execute(
-            text(
-                "UPDATE task_runs SET lease_expires_at = now() + make_interval(secs => :s) "
-                "WHERE id = :id"
-            ),
-            {"s": lease_seconds, "id": task.id},
-        )
+        if lease_seconds is not None:
+            session.execute(
+                text(
+                    "UPDATE task_runs SET lease_expires_at = now() + make_interval(secs => :s) "
+                    "WHERE id = :id"
+                ),
+                {"s": lease_seconds, "id": task.id},
+            )
         session.commit()
         minted = TaskTokenService(session, GrantAuthorization(session)).mint_for_task(
             task.id, 1, ttl_seconds=300

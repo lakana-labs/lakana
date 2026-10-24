@@ -2875,3 +2875,34 @@ def test_the_connection_check_names_every_missing_connection_of_every_asset(
         "assets/bronze/orders.py:4",
     ]
     assert "connection `erp`" in lines[2]
+
+
+_OLD_SPELLING_SQL = (
+    "/* lakana\nmaterialize: incremental\nincremental_key: ts\n*/\nSELECT 1 AS id, 2 AS ts\n"
+)
+
+
+@pytest.mark.parametrize("kind", [DeployKind.DEPLOY, DeployKind.DRY_RUN])
+def test_the_old_incremental_spelling_deploys_with_one_hint_per_asset(
+    session: Session, principal: PrincipalRef, world: World, kind: DeployKind
+) -> None:
+    commit(
+        world.repo_path,
+        {
+            "assets/bronze/customers.sql": _OLD_SPELLING_SQL,
+            "assets/bronze/orders.sql": (
+                "/* lakana\nwrite: append\nwatermark: ts\n*/\nSELECT 1 AS id, 2 AS ts\n"
+            ),
+        },
+    )
+    run = _submit_and_run(session, principal, world, kind)
+    assert (run.status, run.error_message) == (DeployStatus.SUCCEEDED, None)
+    assert run.diff_json is not None
+    assert run.diff_json["hints"] == [
+        "bronze.customers: `materialize: incremental` is now written `write: append` with "
+        "`watermark: ts`; both work"
+    ]
+    assert (
+        DeployService(session, AllowAllAuthorization()).get(principal, "dev", run.id).diff
+        == run.diff_json
+    )

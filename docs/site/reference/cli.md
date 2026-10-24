@@ -578,6 +578,25 @@ Without --evolve-schema the file is conformed to the table's columns first, exac
 | `--break-glass` | flag | off | Write to a protected environment outside a run (needs MANAGE_ENVIRONMENT; audited). |
 | `--reason` | text | none | Why, 10-500 characters on one line (with --break-glass). |
 
+### `lakana table merge`
+
+Usage: `lakana table merge [OPTIONS] {name} {file}`
+
+Merge FILE (Parquet, CSV or Arrow) into table NAME on --key.
+
+A row whose key the table has replaces that row; any other row is added; nothing is deleted, all in one snapshot. The file is conformed to the table's columns first, exactly as `table append` does. The file must not repeat a key and no key may be empty.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `NAME` | text | required |  |
+| `FILE` | path | required |  |
+| `--key` | text, repeatable | required | A column that identifies a row (repeat it for a key of several columns). |
+| `--env` | text | none | Environment (default: the profile's). |
+| `--format` | text | none | parquet, csv or arrow (default: from the extension). |
+| `--source` | text, repeatable | none | A table the data came from (repeatable); recorded as lineage. |
+| `--break-glass` | flag | off | Write to a protected environment outside a run (needs MANAGE_ENVIRONMENT; audited). |
+| `--reason` | text | none | Why, 10-500 characters on one line (with --break-glass). |
+
 ### `lakana table maintain`
 
 Usage: `lakana table maintain [OPTIONS] {name}`

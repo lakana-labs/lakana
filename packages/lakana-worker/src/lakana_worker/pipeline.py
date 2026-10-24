@@ -57,7 +57,7 @@ import re
 import threading
 import time
 import uuid
-from collections.abc import Callable, Generator, Mapping, Sequence
+from collections.abc import Callable, Generator, Iterable, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -89,10 +89,16 @@ from lakana_core.catalog.maintenance import (
     DEFAULT_ORPHAN_AGE_HOURS,
     MaintenanceStopped,
 )
-from lakana_core.catalog.schema_compat import arrow_to_iceberg_schema, view_columns
+from lakana_core.catalog.merge import SQL_ADVICE
+from lakana_core.catalog.schema_compat import SchemaDiff, arrow_to_iceberg_schema, view_columns
 from lakana_core.catalog.service import CatalogService
 from lakana_core.catalog.watermark import check_incremental_key, wrap_incremental
-from lakana_core.catalog.writes import SnapshotPin, target_changed_message
+from lakana_core.catalog.writes import (
+    SnapshotPin,
+    WriteResult,
+    max_rows_message,
+    target_changed_message,
+)
 from lakana_core.config import DEFAULT_MAINTENANCE_TIMEOUT, QueryLimitsConfig
 from lakana_core.db import rowcount
 from lakana_core.errors import (
@@ -2068,8 +2074,9 @@ def _run_write(
     pin = prepared.pins.get(ref)
     watermark = None
     # An incremental asset's first run is a create: there is no table to read a
-    # watermark from, and every row of the result is new.
-    if run.incremental_key is not None and run.write_mode is WriteMode.APPEND:
+    # watermark from, and every row of the result is new. A merge asset's later runs read it
+    # as an append does.
+    if run.incremental_key is not None and run.write_mode in (WriteMode.APPEND, WriteMode.MERGE):
         watermark, watermark_pin = catalog.read_watermark(principal, ref, run.incremental_key)
         if pin is not None and pin != watermark_pin:
             raise ConflictError(target_changed_message(ref.dotted()))
@@ -2086,34 +2093,54 @@ def _run_write(
             raise ValidationError(
                 f"Incremental key {run.incremental_key!r} is not a column of the result."
             )
-        if run.incremental_key is not None and run.write_mode is not WriteMode.APPEND:
+        if run.incremental_key is not None and run.write_mode not in (
+            WriteMode.APPEND,
+            WriteMode.MERGE,
+        ):
             # The next run reads the key from the table this run creates: refuse a key it
             # could not use now, rather than leave a table that fails that run.
             check_incremental_key(
                 arrow_to_iceberg_schema(schema), run.incremental_key, table_name=ref.dotted()
             )
         try:
-            result = catalog.write_batches(
-                principal,
-                ref,
-                mode=run.write_mode,
-                schema=schema,
-                batches=batches,
-                evolve_schema=bool(run.evolve_schema),
-                max_rows=limits.max_write_rows,
-                sources=sources,
-                query_run_id=run.id,
-                watermark=encoded,
-                pin=pin,
-            )
+            if run.merge_key is not None:
+                result = _merge_result(
+                    catalog,
+                    principal,
+                    ref,
+                    run,
+                    schema,
+                    batches,
+                    sources=dotted_refs,
+                    max_rows=limits.max_write_rows,
+                    pin=pin,
+                    watermark=encoded,
+                )
+            else:
+                result = catalog.write_batches(
+                    principal,
+                    ref,
+                    mode=run.write_mode,
+                    schema=schema,
+                    batches=batches,
+                    evolve_schema=bool(run.evolve_schema),
+                    max_rows=limits.max_write_rows,
+                    sources=sources,
+                    query_run_id=run.id,
+                    watermark=encoded,
+                    pin=pin,
+                )
         except PermissionDenied as exc:
-            first_run = run.incremental_key is not None and run.write_mode is WriteMode.CREATE
+            first_run = run.write_mode is WriteMode.CREATE and (
+                run.incremental_key is not None or run.merge_key is not None
+            )
             # The guard refuses with the same error for other reasons (a superseded attempt);
             # advice about a right would be false there.
             if not first_run or Action.CREATE_TABLE.value not in str(exc):
                 raise
+            kind = "a merge" if run.merge_key is not None else "an incremental"
             raise PermissionDenied(
-                f"{str(exc).rstrip('.')}. The first run of an incremental asset creates "
+                f"{str(exc).rstrip('.')}. The first run of {kind} asset creates "
                 f"{ref.dotted()}, which "
                 "needs the CREATE_TABLE right on it. Grant it to the run's principal, or create "
                 "the table first."
@@ -2124,6 +2151,92 @@ def _run_write(
     run.watermark = encoded
     run.schema_diff = None if result.schema_diff.is_empty() else result.schema_diff.to_json()
     return result.rows
+
+
+def _merge_result(
+    catalog: CatalogService,
+    principal: PrincipalRef,
+    ref: TableRef,
+    run: QueryRun,
+    schema: pa.Schema,
+    batches: Iterable[pa.RecordBatch],
+    *,
+    sources: Sequence[str],
+    max_rows: int,
+    pin: SnapshotPin | None,
+    watermark: str | None,
+) -> WriteResult:
+    """Merge a SQL asset's result into its table on the run's key (`CatalogService.merge`).
+
+    The rows are collected into one Arrow table, at most `max_rows` of them, because a merge
+    compares the whole batch with the table. A `CREATE` run (the asset's first) merges with
+    ``expected_snapshot_id="none"``, which creates the table after the same key checks as every
+    later merge; a `MERGE` run commits against `pin` when its rows depend on the table.
+
+    Parameters
+    ----------
+    catalog
+        The catalog.
+    principal
+        The run's principal.
+    ref
+        The target.
+    run
+        The write run; `merge_key` is set.
+    schema
+        The result's schema.
+    batches
+        The result's rows; consumed once.
+    sources
+        Dotted names of what the SELECT read, one lineage edge each.
+    max_rows
+        `QueryLimitsConfig.max_write_rows`.
+    pin
+        The snapshot the rows were computed from, or `None`.
+    watermark
+        The encoded watermark the SELECT filtered on, or `None`.
+
+    Returns
+    -------
+    WriteResult
+        The table, the rows inserted and updated together, and the snapshot.
+
+    Raises
+    ------
+    ValidationError
+        When the result has more than `max_rows` rows, and anything `merge` refuses.
+    LakanaError
+        If `merge` named no table, which it always does.
+    """
+    collected: list[pa.RecordBatch] = []
+    rows = 0
+    for batch in batches:
+        rows += batch.num_rows
+        if rows > max_rows:
+            raise ValidationError(max_rows_message(max_rows))
+        collected.append(batch)
+    creates = run.write_mode is WriteMode.CREATE
+    merged = catalog.merge(
+        principal,
+        ref,
+        pa.Table.from_batches(collected, schema=schema),
+        key=run.merge_key or (),
+        sources=sources,
+        expected_snapshot_id="none" if creates else None,
+        pin=None if creates else pin,
+        query_run_id=run.id,
+        watermark=watermark,
+        advice=SQL_ADVICE,
+    )
+    if merged.table_id is None:  # pragma: no cover - `merge` always names the table
+        raise LakanaError("A merge returned no table.")
+    return WriteResult(
+        table_id=merged.table_id,
+        rows=merged.rows_inserted + merged.rows_updated,
+        files=0,
+        snapshot_id=merged.snapshot_id,
+        schema_diff=SchemaDiff(),
+    )
 
 
 def _cancel_requested(session: Session, query_run_id: uuid.UUID) -> bool:

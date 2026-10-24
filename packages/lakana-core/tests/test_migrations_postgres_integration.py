@@ -2507,3 +2507,46 @@ def test_0049_on_postgres() -> None:
         ):
             secret(conn, "CONNECTION", target)
         engine.dispose()
+
+
+def test_0050_on_postgres() -> None:
+    """0050 adds `query_runs.merge_key`; a downgrade records a merge run as an append."""
+    revision_0049 = "a7c3e9f1b2d4"
+    revision_0050 = "b8d4f0a2c3e5"
+    now = datetime.now(UTC)
+
+    with PostgresContainer("postgres:16", driver="pg8000") as pg:
+        url = pg.get_connection_url()
+        migrate.upgrade(url, revision_0049)
+        migrate.upgrade(url, revision_0050)
+        engine = sqlalchemy.create_engine(url)
+        assert _alembic_version(engine) == revision_0050
+        merged, replaced = uuid.uuid4(), uuid.uuid4()
+        with engine.begin() as conn:
+            conn.execute(sqlalchemy.text("SET LOCAL session_replication_role = replica"))
+            for run_id, mode, key in ((merged, "MERGE", '["id"]'), (replaced, "REPLACE", None)):
+                conn.execute(
+                    sqlalchemy.text(
+                        "INSERT INTO query_runs (id, environment_id, sql_text, status, "
+                        "cancel_requested, write_mode, merge_key, created_at, updated_at) VALUES "
+                        "(:id, :env, 'SELECT 1', 'SUCCEEDED', false, :mode, CAST(:key AS json), "
+                        ":now, :now)"
+                    ),
+                    {"id": run_id, "env": uuid.uuid4(), "mode": mode, "key": key, "now": now},
+                )
+        with engine.connect() as conn:
+            stored = conn.execute(
+                sqlalchemy.text("SELECT merge_key FROM query_runs WHERE id = :id"), {"id": merged}
+            ).scalar_one()
+        assert stored == ["id"]
+
+        migrate.downgrade(url, revision_0049)
+        assert _alembic_version(engine) == revision_0049
+        columns = {c["name"] for c in sqlalchemy.inspect(engine).get_columns("query_runs")}
+        assert "merge_key" not in columns
+        with engine.connect() as conn:
+            modes = dict(
+                conn.execute(sqlalchemy.text("SELECT id, write_mode FROM query_runs")).all()
+            )
+        assert modes == {merged: "APPEND", replaced: "REPLACE"}
+        engine.dispose()

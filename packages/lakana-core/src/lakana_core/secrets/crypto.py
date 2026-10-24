@@ -337,7 +337,7 @@ def decrypt_secret_row(
         The environment's name, for the error message only.
     accept_format_1
         Whether to read a format-1 row (`LAKANA_SECRETS__ACCEPT_FORMAT_1`).
-        The four product call sites pass the process's setting; the default
+        The five product call sites pass the process's setting; the default
         refuses.
 
     Returns

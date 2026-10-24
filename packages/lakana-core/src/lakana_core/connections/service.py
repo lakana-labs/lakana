@@ -195,9 +195,9 @@ def _refuse_task(p: PrincipalRef) -> None:
     """Refuse a principal acting with a task token, bound to a run or not.
 
     `READ_ENVIRONMENT` is an action a task token carries, but a task must not see the hosts,
-    users, secret names or declaring assets of the environment's connections (a run-time fetch
-    of the connections its asset declares is added in a later change). The refusal names no
-    connection.
+    users, secret names or declaring assets of the environment's connections; a running task
+    fetches only the connections its asset declares (`lakana_core.connections.fetch`). The
+    refusal names no connection.
 
     Parameters
     ----------

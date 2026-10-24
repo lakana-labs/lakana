@@ -1685,3 +1685,259 @@ def test_a_write_that_failed_before_the_commit_still_fails(
         session, principal, "SELECT 1::BIGINT AS id", WriteTarget("gold.daily", WriteMode.CREATE)
     )
     assert run.status == QueryRunStatus.FAILED
+
+
+def _customers(ids: list[int], names: list[str], days: list[int]) -> pa.Table:
+    """Build customer rows with an `updated_at` day of January 2026.
+
+    Parameters
+    ----------
+    ids
+        The keys.
+    names
+        A name per key.
+    days
+        The day of `updated_at` per key.
+
+    Returns
+    -------
+    pa.Table
+        The rows.
+    """
+    return pa.table(
+        {
+            "id": pa.array(ids, pa.int64()),
+            "name": pa.array(names, pa.string()),
+            "updated_at": pa.array([dt.datetime(2026, 1, day) for day in days], pa.timestamp("us")),
+        }
+    )
+
+
+def _merge_run(
+    session: Session,
+    principal: PrincipalRef,
+    sql: str,
+    table: str,
+    *,
+    watermark: str | None = None,
+    limits: QueryLimitsConfig | None = None,
+) -> QueryRun:
+    """Run what a task's later run of a `write: merge` asset is: a merge on `id`.
+
+    `WriteTarget` refuses `merge`, which only assets and `tables.merge` write; the worker builds
+    the write run of a task itself, as `_first_incremental_run` does for a create.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    principal
+        The submitter.
+    sql
+        The SELECT.
+    table
+        The target, which exists.
+    watermark
+        The watermark column, if the asset has one.
+    limits
+        The worker's limits.
+
+    Returns
+    -------
+    QueryRun
+        The finished run, refreshed.
+    """
+    run = QueryService(session, AllowAllAuthorization()).submit_write(
+        principal, "dev", sql, WriteTarget(table=table, mode=WriteMode.REPLACE)
+    )
+    run.write_mode = WriteMode.MERGE
+    run.merge_key = ["id"]
+    run.incremental_key = watermark
+    session.commit()
+    run_one(session, run.id, AllowAllAuthorization(), limits=limits)
+    session.refresh(run)
+    return run
+
+
+def _by_id(catalog: CatalogService, principal: PrincipalRef, dotted: str) -> list[tuple]:
+    """Read `(id, name)` of every row, sorted.
+
+    Parameters
+    ----------
+    catalog
+        The catalog.
+    principal
+        The acting principal.
+    dotted
+        The table.
+
+    Returns
+    -------
+    list of tuple
+        The rows.
+    """
+    return [(row["id"], row["name"]) for row in _rows(catalog, principal, dotted)]
+
+
+def test_a_merge_run_updates_matching_rows_and_inserts_the_rest_without_a_pin(
+    session: Session, principal: PrincipalRef, catalog: CatalogService
+) -> None:
+    """A merge that neither reads its target nor has a watermark commits unpinned."""
+    _seed(
+        catalog,
+        principal,
+        "gold.customers",
+        _customers([1, 2], ["a", "b"], [1, 2]),
+        WriteMode.CREATE,
+    )
+    _seed(
+        catalog,
+        principal,
+        "bronze.customers",
+        _customers([2, 3], ["B", "c"], [3, 4]),
+        WriteMode.CREATE,
+    )
+
+    run = _merge_run(
+        session, principal, "SELECT id, name, updated_at FROM bronze.customers", "gold.customers"
+    )
+
+    assert run.status == QueryRunStatus.SUCCEEDED, run.error_message
+    assert _by_id(catalog, principal, "gold.customers") == [(1, "a"), (2, "B"), (3, "c")]
+    loaded = catalog.load_table(principal, TableRef.from_dotted("dev", "gold.customers"))
+    assert (run.rows_written, run.snapshot_id, run.target_table_id, run.watermark) == (
+        2,
+        loaded.metadata.current_snapshot_id,
+        loaded.uuid,
+        None,
+    )
+    write = (
+        session.execute(
+            select(AuditEvent).where(
+                AuditEvent.event_type == AuditEventType.TABLE_WRITE,
+                AuditEvent.detail["target"].as_string() == "gold.customers",
+            )
+        )
+        .scalars()
+        .all()[-1]
+    )
+    assert (write.detail["mode"], write.detail["run_id"], write.detail["key"]) == (
+        "merge",
+        str(run.id),
+        ["id"],
+    )
+    assert (write.detail["rows_inserted"], write.detail["rows_updated"]) == (1, 1)
+    edge = session.execute(
+        select(LineageEdge).where(LineageEdge.query_run_id == run.id)
+    ).scalar_one()
+    assert (edge.source_name, edge.target_name) == ("bronze.customers", "gold.customers")
+
+
+def test_a_merge_with_a_watermark_takes_only_rows_past_it(
+    session: Session, principal: PrincipalRef, catalog: CatalogService
+) -> None:
+    """Row 1 changed in the source before the watermark: the wrapped SELECT leaves it out."""
+    _seed(
+        catalog,
+        principal,
+        "gold.customers",
+        _customers([1, 2], ["a", "b"], [1, 2]),
+        WriteMode.CREATE,
+    )
+    source = _customers([1, 2, 3], ["x", "B", "c"], [1, 3, 4])
+    _seed(catalog, principal, "bronze.customers", source, WriteMode.CREATE)
+
+    run = _merge_run(
+        session,
+        principal,
+        "SELECT id, name, updated_at FROM bronze.customers",
+        "gold.customers",
+        watermark="updated_at",
+    )
+
+    assert run.status == QueryRunStatus.SUCCEEDED, run.error_message
+    assert run.watermark == "timestamp:2026-01-02T00:00:00"
+    assert run.rows_written == 2
+    assert _by_id(catalog, principal, "gold.customers") == [(1, "a"), (2, "B"), (3, "c")]
+
+
+def test_a_merge_conflicts_when_its_target_moves_after_the_watermark_was_read(
+    session: Session,
+    principal: PrincipalRef,
+    catalog: CatalogService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The merge commits against the watermark's pin; a writer in between makes it retry."""
+    _seed(catalog, principal, "gold.customers", _customers([1], ["a"], [1]), WriteMode.CREATE)
+    _seed(catalog, principal, "bronze.customers", _customers([2], ["b"], [2]), WriteMode.CREATE)
+    _interleave(
+        monkeypatch,
+        lambda: _seed(
+            catalog, principal, "gold.customers", _customers([9], ["z"], [9]), WriteMode.APPEND
+        ),
+    )
+
+    run = _merge_run(
+        session,
+        principal,
+        "SELECT id, name, updated_at FROM bronze.customers",
+        "gold.customers",
+        watermark="updated_at",
+    )
+
+    assert run.status == QueryRunStatus.FAILED
+    assert run.error_message == "gold.customers changed during the write; retry."
+    assert _by_id(catalog, principal, "gold.customers") == [(1, "a"), (9, "z")]
+
+
+def test_a_merge_of_more_rows_than_max_write_rows_writes_nothing(
+    session: Session, principal: PrincipalRef, catalog: CatalogService
+) -> None:
+    _seed(catalog, principal, "gold.customers", _customers([1], ["a"], [1]), WriteMode.CREATE)
+    _seed(
+        catalog,
+        principal,
+        "bronze.customers",
+        _customers([2, 3], ["b", "c"], [2, 3]),
+        WriteMode.CREATE,
+    )
+    before = catalog.load_table(principal, TableRef.from_dotted("dev", "gold.customers"))
+
+    run = _merge_run(
+        session,
+        principal,
+        "SELECT id, name, updated_at FROM bronze.customers",
+        "gold.customers",
+        limits=QueryLimitsConfig(max_write_rows=1),
+    )
+
+    assert run.status == QueryRunStatus.FAILED
+    assert run.error_message == "The write exceeds max_write_rows (1); nothing was committed."
+    after = catalog.load_table(principal, TableRef.from_dotted("dev", "gold.customers"))
+    assert after.metadata_location == before.metadata_location
+
+
+def test_a_merge_that_reads_its_own_target_commits_against_the_snapshot_it_read(
+    session: Session,
+    principal: PrincipalRef,
+    catalog: CatalogService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed(catalog, principal, "gold.customers", _customers([1], ["a"], [1]), WriteMode.CREATE)
+    _interleave(
+        monkeypatch,
+        lambda: _seed(
+            catalog, principal, "gold.customers", _customers([2], ["b"], [2]), WriteMode.APPEND
+        ),
+    )
+
+    run = _merge_run(
+        session,
+        principal,
+        "SELECT id, upper(name) AS name, updated_at FROM gold.customers",
+        "gold.customers",
+    )
+
+    assert run.status == QueryRunStatus.FAILED
+    assert run.error_message == "gold.customers changed during the write; retry."
+    assert _by_id(catalog, principal, "gold.customers") == [(1, "a"), (2, "b")]

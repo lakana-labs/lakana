@@ -4144,3 +4144,67 @@ def test_0049_adds_connections_and_the_connection_secret_use(
             _insert_secret(connection, "CONNECTION", target, "refused-again")
     finally:
         engine.dispose()
+
+
+_REVISION_0050 = "b8d4f0a2c3e5"
+
+
+def test_0050_adds_the_merge_key_and_maps_merge_runs_down_to_append(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Revision `0050`: `query_runs.merge_key`; a downgrade leaves no `MERGE` the old code reads.
+
+    Parameters
+    ----------
+    tmp_path
+        Holds the throwaway SQLite file.
+    monkeypatch
+        Points `lakana_core.config.Settings` at that file.
+    """
+    db_path = tmp_path / "migrated.db"
+    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    config = Config(str(ALEMBIC_INI))
+    command.upgrade(config, _REVISION_0049)
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        assert "merge_key" not in {c["name"] for c in inspect(engine).get_columns("query_runs")}
+    finally:
+        engine.dispose()
+
+    command.upgrade(config, _REVISION_0050)
+    engine = create_engine(f"sqlite:///{db_path}")
+    merged, replaced = uuid.uuid4().hex, uuid.uuid4().hex
+    try:
+        (column,) = [
+            c for c in inspect(engine).get_columns("query_runs") if c["name"] == "merge_key"
+        ]
+        assert column["nullable"] is True
+        with engine.begin() as connection:
+            connection.execute(sa.text("PRAGMA foreign_keys=OFF"))
+            for run_id, mode, key in ((merged, "MERGE", '["id"]'), (replaced, "REPLACE", None)):
+                connection.execute(
+                    sa.text(
+                        "INSERT INTO query_runs (id, environment_id, sql_text, status, write_mode,"
+                        " merge_key, created_at, updated_at) VALUES (:id, :env, 'SELECT 1',"
+                        " 'SUCCEEDED', :mode, :key, :now, :now)"
+                    ),
+                    {
+                        "id": run_id,
+                        "env": uuid.uuid4().hex,
+                        "mode": mode,
+                        "key": key,
+                        "now": _utc_text(),
+                    },
+                )
+    finally:
+        engine.dispose()
+
+    command.downgrade(config, _REVISION_0049)
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        assert "merge_key" not in {c["name"] for c in inspect(engine).get_columns("query_runs")}
+        with engine.begin() as connection:
+            modes = dict(connection.execute(sa.text("SELECT id, write_mode FROM query_runs")).all())
+        assert modes == {merged: "APPEND", replaced: "REPLACE"}
+    finally:
+        engine.dispose()

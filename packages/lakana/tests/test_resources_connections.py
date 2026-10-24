@@ -13,6 +13,7 @@ from lakana._http import HttpTransport
 from lakana._models import Connection, DeclaringAsset
 from lakana.errors import InvalidResponse
 from lakana.resources.connections import Connections
+from lakana.resources.task_connections import TaskConnections
 
 _CONFIG = ResolvedConfig(url="http://api.example", token="lakana_pat_abc_supersecret")
 _VALUE = "s3cr3t-value"
@@ -162,3 +163,47 @@ def test_an_answer_that_is_not_a_connection_is_an_invalid_response(body: bytes) 
         _connections(body, []).get("prod", "crm-db")
     with pytest.raises(InvalidResponse):
         _connections(body, []).list("prod")
+
+
+def _task_connections(body: Any, sent: list[httpx.Request]) -> TaskConnections:  # ruff: ignore[any-type]
+    """Build the task resource over a transport that records requests and answers with `body`.
+
+    Parameters
+    ----------
+    body
+        The JSON the fake server sends, or bytes for a body that is not JSON.
+    sent
+        Receives every request.
+
+    Returns
+    -------
+    TaskConnections
+        The resource.
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent.append(request)
+        if isinstance(body, bytes):
+            return httpx.Response(200, content=body)
+        return httpx.Response(200, json=body)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler), base_url=_CONFIG.url)
+    return TaskConnections(HttpTransport(_CONFIG, http_client=client))
+
+
+def test_a_task_fetches_its_connection_by_name_and_gets_the_body_as_sent() -> None:
+    sent: list[httpx.Request] = []
+    body = {"name": "crm-db", "kind": "postgresql", "secret": {"password": _VALUE}}
+
+    answer = _task_connections(body, sent).get("crm-db")
+
+    (request,) = sent
+    assert (request.method, request.url.path) == ("GET", "/api/v1/tasks/self/connections/crm-db")
+    assert request.content == b""
+    assert answer == body
+
+
+@pytest.mark.parametrize("body", [b"not json", ["crm-db"]], ids=["not-json", "a-list"])
+def test_a_task_fetch_whose_answer_is_not_an_object_is_refused(body: Any) -> None:  # ruff: ignore[any-type]
+    with pytest.raises(InvalidResponse, match="a connection"):
+        _task_connections(body, []).get("crm-db")

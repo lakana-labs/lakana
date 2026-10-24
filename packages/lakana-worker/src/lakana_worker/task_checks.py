@@ -509,6 +509,7 @@ def _set_back(
     written: Written | None,
     failed_checks: Sequence[str],
     foreign: bool = False,
+    unchanged: bool = False,
 ) -> tuple[Rollback, bool]:
     """Ask the catalog, once, to set the task's table back to what it was before the run.
 
@@ -539,6 +540,9 @@ def _set_back(
     foreign
         The task run has no write of its own, and the table is not what it was before the run:
         the catalog records ``changed_since`` and touches nothing (`foreign_change`).
+    unchanged
+        The build committed nothing and `written` is `None` because there is no write: the
+        outcome is ``nothing_written``, noted on the failed results without asking the catalog.
 
     Returns
     -------
@@ -556,7 +560,9 @@ def _set_back(
     """
     worker = engine.settings.worker_id
     refused = False
-    if written is None:
+    if unchanged:
+        rollback = Rollback(RollbackOutcome.NOTHING_WRITTEN)
+    elif written is None:
         rollback = Rollback(RollbackOutcome.FAILED, _NOT_RECORDED_REASON)
     else:
         actor = dataclasses.replace(
@@ -586,7 +592,11 @@ def _set_back(
             rollback = Rollback(RollbackOutcome.FAILED, failure_message(exc, str(exc)))
             refused = True
     if not mark_rollback_failed(
-        session, task_run_id=claimed.task_run_id, worker=worker, claim=claimed.claim
+        session,
+        task_run_id=claimed.task_run_id,
+        worker=worker,
+        claim=claimed.claim,
+        outcome=rollback.outcome,
     ):
         raise LeaseLost
     return rollback, refused
@@ -1534,10 +1544,14 @@ def _checks_under(
             session, claimed, phase, [*found.blocking, *found.kept], noted_table, kept_refusals
         )
     else:
+        # A build that committed nothing and has no record of an earlier write left the table
+        # as it was: there is nothing of this run to set back.
+        unchanged = built.wrote_nothing and written is None
         # A Python asset (it has a baseline) without a tip wrote nothing of its own: whatever
         # is in the table and failed the check is another writer's, and stays.
         foreign = (
-            read_baseline(session, claimed.task_run_id) is not None
+            not unchanged
+            and read_baseline(session, claimed.task_run_id) is not None
             and read_own_tip(session, claimed.task_run_id) is None
         )
         session.rollback()
@@ -1551,6 +1565,7 @@ def _checks_under(
             written,
             [result.check_name for result in found.blocking],
             foreign=foreign,
+            unchanged=unchanged,
         )
         lines = (*lines, f"  rollback: {_rollback_word(rollback, refused)}")
         message = check_failure_message(

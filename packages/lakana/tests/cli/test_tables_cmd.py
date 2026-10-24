@@ -736,6 +736,64 @@ def test_table_replace_with_evolve_schema_sends_the_file_as_it_is(tmp_path: Path
     assert sent.column_names == ["id", "extra"]
 
 
+def test_table_merge_conforms_the_file_and_posts_it_with_the_key(tmp_path: Path) -> None:
+    """`table merge` conforms like `append`, sends each `--key`, and prints the counts."""
+    api = FakeApi()
+    api.on("GET", f"{_BASE}/sales", json=_TABLE)
+    api.on(
+        "POST",
+        f"{_BASE}/sales/merge",
+        json={"snapshot_id": 12, "rows_inserted": 1, "rows_updated": 2},
+    )
+    csv = tmp_path / "data.csv"
+    csv.write_text("region,id\neu,1\nus,2\n,3\n")
+
+    result = invoke(
+        make_state(tmp_path, api),
+        "table",
+        "merge",
+        "bronze.sales",
+        str(csv),
+        "--key",
+        "id",
+        "--key",
+        "region",
+        "--source",
+        "bronze.raw",
+        "--env",
+        "dev",
+    )
+
+    assert result.exit_code == 0, result.stderr
+    assert "Merged into dev/bronze.sales: 1 rows inserted, 2 updated" in result.stdout
+    post = api.requests[-1]
+    assert post.method == "POST"
+    assert post.url.params.multi_items() == [
+        ("key", "id"),
+        ("key", "region"),
+        ("source", "bronze.raw"),
+    ]
+    sent = pyarrow.ipc.open_stream(io.BytesIO(post.content)).read_all()
+    assert sent.schema == pa.schema(
+        [pa.field("id", pa.int64(), nullable=False), pa.field("region", pa.string())]
+    )
+
+
+def test_table_merge_needs_a_key(tmp_path: Path) -> None:
+    """Without `--key` nothing is read or sent, and the error names the option."""
+    api = FakeApi()
+    csv = tmp_path / "data.csv"
+    csv.write_text("id,region\n1,eu\n")
+
+    result = invoke(
+        make_state(tmp_path, api), "table", "merge", "bronze.sales", str(csv), "--env", "dev"
+    )
+
+    assert result.exit_code != 0
+    assert "--key" in _plain(result.stderr)
+    assert api.requests == []
+
+
 def test_table_append_passes_sources_through(tmp_path: Path) -> None:
     """`--source` on `table append` becomes the route's `source` parameter."""
     api = FakeApi()

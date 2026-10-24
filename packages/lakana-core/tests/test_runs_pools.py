@@ -66,6 +66,7 @@ MODE_KINDS: dict[WriteMode | None, str] = {
     WriteMode.CREATE: INTERACTIVE,
     WriteMode.REPLACE: INTERACTIVE,
     WriteMode.APPEND: INTERACTIVE,
+    WriteMode.MERGE: INTERACTIVE,
     WriteMode.VIEW: INTERACTIVE,
     WriteMode.MAINTAIN: PIPELINE,
 }

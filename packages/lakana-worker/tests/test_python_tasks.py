@@ -17,6 +17,7 @@ import gzip
 import hashlib
 import io
 import json
+import logging
 import os
 import re
 import sys
@@ -43,6 +44,7 @@ from check_run_helpers import (
     _outside_table,
     _refused_text,
 )
+from sqlalchemy import delete as sqlalchemy_delete
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
@@ -73,6 +75,8 @@ from lakana_core.catalog.query_service import QueryService
 from lakana_core.catalog.service import ROLLBACK_NOT_KNOWN_REASON, CatalogService, Rollback
 from lakana_core.catalog.writes import ExpectedSnapshot, WriteResult
 from lakana_core.config import DatabaseConfig, StorageConfig
+from lakana_core.connections.kinds import ConnectionKind
+from lakana_core.connections.service import ConnectionService
 from lakana_core.db import create_engine
 from lakana_core.errors import (
     ConflictError,
@@ -91,6 +95,7 @@ from lakana_core.models import (
     AuditEventType,
     Base,
     CheckOutcome,
+    Connection,
     DeployKind,
     DeployRun,
     DeployStatus,
@@ -145,6 +150,8 @@ from lakana_core.runs.tasks import (
     read_own_tip,
     record_attempt,
 )
+from lakana_core.secrets.crypto import SecretBinding, encrypt_secret_values
+from lakana_core.secrets.forms import secret_forms
 from lakana_core.secrets.keys import EnvKeyProvider
 from lakana_core.secrets.service import SecretService
 from lakana_core.secrets.uses import SecretUse
@@ -3521,7 +3528,7 @@ def test_an_output_this_worker_does_not_know_fails_permanently_and_runs_nothing(
     assert _versions(py) == []
 
 
-@pytest.mark.parametrize("version", [8, 99, "3", 3.0, True, [3], 0, -1, 10**30])
+@pytest.mark.parametrize("version", [9, 99, "3", 3.0, True, [3], 0, -1, 10**30])
 def test_a_manifest_this_worker_cannot_read_fails_permanently(py: PyWorld, version: object) -> None:
     py.deploy()
 
@@ -7382,3 +7389,676 @@ def test_a_python_task_with_checks_of_a_protected_environment_is_refused_on_the_
     assert stamps == []
     with py.world.session() as session:
         assert results_of_task(session, claimed.task_run_id) == []
+
+
+def _harness_writes(world: World, *batches: list[int]) -> Script:
+    """Build a script that writes as the harness does for the task's write mode.
+
+    An append against a snapshot appends, a merge merges on the task's key, and anything else
+    (a replace, the first run of an append) replaces; each call writes the next batch of ids.
+
+    Parameters
+    ----------
+    world
+        The world.
+    *batches
+        The ids each call writes, in order.
+
+    Returns
+    -------
+    Script
+        The script.
+    """
+    calls = iter(batches)
+
+    def script(task: PythonTask, on_log: Callable[[bytes], None], stop: StopSignal) -> RunOutcome:
+        data = pa.table({"id": pa.array(next(calls), pa.int64())})
+        parsed = parse_token(task.token, "lakana_task")
+        assert parsed is not None
+        expected = cast("ExpectedSnapshot", task.expected_snapshot_id)
+        with world.session() as session:
+            principal = TaskTokenService(session, AllowAllAuthorization()).verify(*parsed).principal
+            catalog = CatalogService(session, StorageResolver(session), AllowAllAuthorization())
+            ref = TableRef.from_dotted("dev", task.table)
+            try:
+                if task.write == "merge":
+                    merged = catalog.merge(
+                        principal, ref, data, key=task.key, expected_snapshot_id=expected
+                    )
+                    rows = merged.rows_inserted + merged.rows_updated
+                    return RunOutcome(succeeded=True, snapshot_id=merged.snapshot_id, rows=rows)
+                if task.write == "append" and expected != "none":
+                    appended = catalog.append(principal, ref, data, expected_snapshot_id=expected)
+                    return RunOutcome(
+                        succeeded=True, snapshot_id=appended.snapshot_id, rows=appended.rows
+                    )
+                written = catalog.replace(principal, ref, data, expected_snapshot_id=expected)
+            except ConflictError:
+                return RunOutcome(
+                    succeeded=False,
+                    error_message="gold.scores changed during the write; retry.",
+                    conflict=True,
+                    failure_code=FailureCode.CONFLICT,
+                )
+        return RunOutcome(succeeded=True, snapshot_id=written.snapshot_id, rows=written.rows)
+
+    return script
+
+
+def _rerun(py: PyWorld, engine: RunEngine) -> ClaimedTask:
+    """Start a second run of the project and run its Python task.
+
+    Parameters
+    ----------
+    py
+        The world.
+    engine
+        The engine.
+
+    Returns
+    -------
+    ClaimedTask
+        The second run's claim of the Python task.
+    """
+    with py.world.session() as session:
+        scheduler_tick(session, datetime.now(UTC), lambda: 0.5)
+    claimed = py.claim_python(engine)
+    run_claimed(engine, claimed)
+    return claimed
+
+
+def _snapshot(world: World, dotted: str = "gold.scores") -> int | None:
+    """Read a table's current snapshot through the catalog.
+
+    Parameters
+    ----------
+    world
+        The world.
+    dotted
+        The table.
+
+    Returns
+    -------
+    int or None
+        Its current snapshot id.
+    """
+    with world.session() as session:
+        return (
+            CatalogService(session, StorageResolver(session), AllowAllAuthorization())
+            .load_table(world.admin, TableRef.from_dotted("dev", dotted))
+            .metadata.current_snapshot_id
+        )
+
+
+def test_an_appending_python_asset_gets_its_watermark_and_the_pin(py: PyWorld) -> None:
+    """The first run creates the table; a later one appends against the watermark's snapshot."""
+    py.deploy(write="append", watermark="id", write_mode="append")
+    engine = py.engine(_harness_writes(py.world, [1, 2], [3]))
+    first = py.claim_python(engine)
+    run_claimed(engine, first)
+    pinned = _snapshot(py.world)
+    second = _rerun(py, engine)
+
+    one, two = py.runner.tasks
+    assert (one.write, one.watermark_column, one.watermark) == ("append", "id", None)
+    assert one.expected_snapshot_id == "none"
+    assert (two.write, two.watermark_column, two.watermark) == ("append", "id", "long:2")
+    assert pinned is not None
+    assert two.expected_snapshot_id == pinned
+    assert _ids(py.world, "gold.scores") == [1, 2, 3]
+    assert _task(py.world, "gold.scores").status is TaskStatus.SUCCEEDED
+    log = _log(py.world, second.run_id, "gold.scores")
+    assert "write mode: append" in log
+    assert "watermark: long:2" in log
+    assert "write mode: replace" not in _log(py.world, first.run_id, "gold.scores")
+
+
+def test_a_table_without_a_snapshot_is_sent_as_an_existing_table(py: PyWorld) -> None:
+    """A first run of zero rows created the table without a snapshot; the next run is no first."""
+    py.deploy(write="append", watermark="id", write_mode="append")
+    engine = py.engine(_harness_writes(py.world, [], [1]))
+    run_claimed(engine, py.claim_python(engine))
+    assert _snapshot(py.world) is None
+    _rerun(py, engine)
+
+    first, second = py.runner.tasks
+    assert (first.table_exists, first.expected_snapshot_id) == (False, "none")
+    assert (second.table_exists, second.expected_snapshot_id) == (True, "none")
+
+
+def test_a_merging_python_asset_gets_its_key(py: PyWorld) -> None:
+    py.deploy(write="merge", key=["id"], write_mode="merge")
+    engine = py.engine(_harness_writes(py.world, [1, 2], [2, 3]))
+    run_claimed(engine, py.claim_python(engine))
+    claimed = _rerun(py, engine)
+
+    one, two = py.runner.tasks
+    assert (one.write, one.key, one.watermark_column) == ("merge", ("id",), None)
+    assert one.expected_snapshot_id == "none"
+    assert isinstance(two.expected_snapshot_id, int)
+    assert _ids(py.world, "gold.scores") == [1, 2, 3]
+    assert _task(py.world, "gold.scores").status is TaskStatus.SUCCEEDED
+    assert "write mode: merge" in _log(py.world, claimed.run_id, "gold.scores")
+
+
+def test_a_target_changed_after_the_watermark_was_read_is_retried_with_a_new_watermark(
+    py: PyWorld,
+) -> None:
+    """A writer between the worker's read and the upload: the free retry reads it again.
+
+    The other writer's rows are then below the new watermark, so they are not appended twice.
+    """
+    py.deploy(write="append", watermark="id", write_mode="append")
+    engine = py.engine(_harness_writes(py.world, [1, 2]))
+    run_claimed(engine, py.claim_python(engine))
+    writes = _harness_writes(py.world, [5], [6])
+
+    def interleaved(
+        task: PythonTask, on_log: Callable[[bytes], None], stop: StopSignal
+    ) -> RunOutcome:
+        if len(py.runner.tasks) == 1:
+            with py.world.session() as session:
+                CatalogService(session, StorageResolver(session), AllowAllAuthorization()).append(
+                    py.world.admin,
+                    TableRef.from_dotted("dev", "gold.scores"),
+                    pa.table({"id": pa.array([3, 4], pa.int64())}),
+                )
+        return writes(task, on_log, stop)
+
+    engine = py.engine(interleaved)
+    with py.world.session() as session:
+        scheduler_tick(session, datetime.now(UTC), lambda: 0.5)
+    run_claimed(engine, py.claim_python(engine))
+    task = _task(py.world, "gold.scores")
+    assert (task.status, task.attempt, task.conflict_retried) == (TaskStatus.PENDING, 0, True)
+    assert _ids(py.world, "gold.scores") == [1, 2, 3, 4]
+
+    run_claimed(engine, _next_attempt(py))
+
+    first, retried = py.runner.tasks
+    assert (first.watermark, retried.watermark) == ("long:2", "long:4")
+    assert _task(py.world, "gold.scores").status is TaskStatus.SUCCEEDED
+    assert _ids(py.world, "gold.scores") == [1, 2, 3, 4, 6]
+
+
+def test_a_write_between_the_state_read_and_the_watermark_read_is_a_conflict(
+    py: PyWorld, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The pin is the state the attempt is judged against, so a foreign write never passes.
+
+    Otherwise the other writer's snapshot would count as this attempt's write.
+    """
+    py.deploy(write="append", watermark="id", write_mode="append")
+    engine = py.engine(_harness_writes(py.world, [1, 2]))
+    run_claimed(engine, py.claim_python(engine))
+    real = CatalogService.read_watermark
+
+    def after_a_write(self: CatalogService, *args: object) -> object:
+        CatalogService(
+            self._session, StorageResolver(self._session), AllowAllAuthorization()
+        ).append(
+            py.world.admin,
+            TableRef.from_dotted("dev", "gold.scores"),
+            pa.table({"id": pa.array([3], pa.int64())}),
+        )
+        self._session.commit()
+        return real(self, *args)  # ty: ignore[invalid-argument-type]
+
+    monkeypatch.setattr(CatalogService, "read_watermark", after_a_write)
+    with py.world.session() as session:
+        scheduler_tick(session, datetime.now(UTC), lambda: 0.5)
+    claimed = py.claim_python(engine)
+    run_claimed(engine, claimed)
+
+    assert len(py.runner.tasks) == 1  # no process for the second run's first attempt
+    task = _task(py.world, "gold.scores")
+    assert (task.status, task.attempt, task.conflict_retried) == (TaskStatus.PENDING, 0, True)
+    assert _attempts(py.world, claimed.task_run_id)[0].failure_code == FailureCode.CONFLICT.value
+
+
+@pytest.mark.parametrize("write", ["append", "merge"])
+def test_an_empty_append_is_a_success(py: PyWorld, write: str) -> None:
+    """Review Focus 2: a run that found nothing new leaves the table as it was and succeeds."""
+    extra: dict[str, object] = (
+        {"watermark": "id", "write_mode": "append"}
+        if write == "append"
+        else {"key": ["id"], "write_mode": "merge"}
+    )
+    py.deploy(entry={"write": write, **extra})
+    engine = py.engine(_harness_writes(py.world, [1]))
+    run_claimed(engine, py.claim_python(engine))
+    before = _snapshot(py.world)
+    nothing = py.engine(lambda _t, _l, _s: RunOutcome(succeeded=True, snapshot_id=None, rows=0))
+
+    claimed = _rerun(py, nothing)
+
+    task = _task(py.world, "gold.scores")
+    assert task.status is TaskStatus.SUCCEEDED, task.error_message
+    attempt = _attempts(py.world, claimed.task_run_id)[0]
+    assert (attempt.outcome, attempt.rows_written) == (AttemptOutcome.SUCCEEDED, 0)
+    assert _snapshot(py.world) == before
+    log = _log(py.world, claimed.run_id, "gold.scores")
+    assert f"write mode: {write}" in log
+    assert "snapshot:" not in log
+    assert _ids(py.world, "gold.scores") == [1]
+
+
+def _nothing_new(task: PythonTask, on_log: Callable[[bytes], None], stop: StopSignal) -> RunOutcome:
+    """Report what an append or merge whose source had nothing new reports.
+
+    Parameters
+    ----------
+    task
+        The task.
+    on_log
+        The log sink.
+    stop
+        The stop signal.
+
+    Returns
+    -------
+    RunOutcome
+        Success with no rows and no snapshot.
+    """
+    return RunOutcome(succeeded=True, snapshot_id=None, rows=0)
+
+
+def test_an_empty_retry_after_an_attempt_that_wrote_is_set_back_when_its_check_fails(
+    py: PyWorld,
+) -> None:
+    """Attempt 1 appended and failed, attempt 2 found nothing new, and its check failed.
+
+    The table goes back to before attempt 1: the empty success still names what the run wrote.
+    """
+    py.deploy(write="append", watermark="id", write_mode="append")
+    _published_before(py)
+    _with_checks(py, _NO_ROWS)
+    engine = py.engine(_writes_then_fails(py.world, rows=2))
+    first = py.claim_python(engine)
+    run_claimed(engine, first)
+    assert _ids(py.world, "gold.scores") == [0, 1]
+    with py.world.session() as session:
+        baseline = read_baseline(session, first.task_run_id)
+    assert baseline is not None and baseline.publishes is False
+
+    second = _next_attempt(py)
+    run_claimed(py.engine(_nothing_new), second)
+
+    task = _task(py.world, "gold.scores")
+    assert (task.status, task.attempt) == (TaskStatus.FAILED, 2)
+    assert task.error_message is not None and _SET_BACK in task.error_message
+    assert _ids(py.world, "gold.scores") == [0]
+    (rolled,) = _rollbacks(py)
+    assert (rolled["outcome"], rolled["before"]) == ("rolled_back", baseline.snapshot_id)
+
+
+def test_an_empty_retry_after_an_attempt_that_created_the_table_ends_not_published(
+    py: PyWorld,
+) -> None:
+    """The table did not exist before the task run: nothing that failed its check is published."""
+    py.deploy(write="append", watermark="id", write_mode="append")
+    _with_checks(py, _NO_ROWS)
+    engine = py.engine(_writes_then_fails(py.world, rows=2))
+    first = py.claim_python(engine)
+    run_claimed(engine, first)
+    with py.world.session() as session:
+        assert read_baseline(session, first.task_run_id) == Baseline(None, True)
+
+    second = _next_attempt(py)
+    run_claimed(py.engine(_nothing_new), second)
+
+    task = _task(py.world, "gold.scores")
+    assert task.status is TaskStatus.FAILED
+    assert task.error_message is not None and _NOT_PUBLISHED in task.error_message
+    assert _marked_by(py) == second.run_id
+    (rolled,) = _rollbacks(py)
+    assert (rolled["outcome"], rolled["before"]) == ("unpublished", None)
+
+
+def test_an_empty_success_over_rows_that_fail_a_check_says_nothing_was_set_back(
+    py: PyWorld,
+) -> None:
+    """The check fails on rows of an earlier run; this run wrote nothing, so nothing goes back."""
+    py.deploy(write="append", watermark="id", write_mode="append")
+    _published_before(py)
+    _with_checks(py, _NO_ROWS)
+
+    claimed = _rerun(py, py.engine(_nothing_new))
+
+    task = _task(py.world, "gold.scores")
+    assert task.status is TaskStatus.FAILED
+    assert task.error_message is not None
+    assert task.error_message.startswith(
+        "Check `gold.scores/no_rows` failed: 1 row (checks/gold/scores/no_rows.sql). "
+        "The table was not changed by this run, and nothing downstream was built."
+    )
+    assert "rollback failed" not in task.error_message.lower()
+    with py.world.session() as session:
+        (result,) = results_of_task(session, claimed.task_run_id)
+    assert result.rollback_outcome is RollbackOutcome.NOTHING_WRITTEN
+    assert _ids(py.world, "gold.scores") == [0]
+    assert _rollbacks(py) == []
+
+
+def test_an_empty_success_of_a_run_that_wrote_nothing_has_nothing_to_set_back(
+    py: PyWorld,
+) -> None:
+    """Without an earlier write in the run the empty success names no write.
+
+    The checks run on the table as it is.
+    """
+    py.deploy(write="append", watermark="id", write_mode="append")
+    _published_before(py)
+    _with_checks(py, _NO_NULLS)
+    claimed = _rerun(py, py.engine(_nothing_new))
+    assert _task(py.world, "gold.scores").status is TaskStatus.SUCCEEDED
+    assert _attempts(py.world, claimed.task_run_id)[0].rows_written == 0
+    assert _ids(py.world, "gold.scores") == [0]
+    assert _rollbacks(py) == []
+
+
+@pytest.mark.parametrize(
+    "claim",
+    [
+        RunOutcome(succeeded=True, snapshot_id=None, rows=3),
+        RunOutcome(succeeded=True, snapshot_id=42, rows=0),
+    ],
+    ids=["claims-rows", "claims-a-snapshot"],
+)
+def test_an_append_that_claims_a_write_it_did_not_make_still_fails(
+    py: PyWorld, claim: RunOutcome
+) -> None:
+    py.deploy(write="append", watermark="id", write_mode="append")
+    engine = py.engine(_harness_writes(py.world, [1]))
+    run_claimed(engine, py.claim_python(engine))
+
+    claimed = _rerun(py, py.engine(lambda _t, _l, _s: claim))
+
+    task = _task(py.world, "gold.scores")
+    assert (task.status, task.failure_code) == (TaskStatus.FAILED, "build_failed")
+    message = _attempts(py.world, claimed.task_run_id)[0].error_message
+    assert message is not None and message.startswith(_NO_WRITE)
+
+
+def test_an_empty_replace_without_a_write_still_fails(py: PyWorld) -> None:
+    """Only an append or a merge may find nothing to write: a replace always writes."""
+    engine = py.engine(_writer(py.world))
+    run_claimed(engine, py.claim_python(engine))
+
+    claimed = _rerun(py, py.engine(lambda _t, _l, _s: RunOutcome(succeeded=True, rows=0)))
+
+    assert _task(py.world, "gold.scores").status is TaskStatus.FAILED
+    message = _attempts(py.world, claimed.task_run_id)[0].error_message
+    assert message is not None and message.startswith(_NO_WRITE)
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        (
+            {"write": "upsert"},
+            "the project version's write mode 'upsert' for gold.scores is not valid; deploy it "
+            "again with this release",
+        ),
+        (
+            {"write": "merge", "key": []},
+            "the project version merges gold.scores without a key; deploy it again with this "
+            "release",
+        ),
+        (
+            {"write": "append", "watermark": None},
+            "the project version appends to gold.scores without a watermark; deploy it again "
+            "with this release",
+        ),
+    ],
+    ids=["unknown", "merge-without-key", "append-without-watermark"],
+)
+def test_a_write_no_run_may_do_is_never_run_as_a_replace(
+    py: PyWorld, overrides: dict[str, object], message: str
+) -> None:
+    py.deploy(entry=overrides)
+    task, text = _fails(py, py.engine(_writer(py.world)))
+    assert (task.status, task.attempt, task.failure_code) == (TaskStatus.FAILED, 1, "code_changed")
+    assert text == message
+    assert py.runner.tasks == []
+
+
+def _connection(py: PyWorld, name: str = "crm-db") -> None:
+    """Add a PostgreSQL connection to `dev`.
+
+    Parameters
+    ----------
+    py
+        The world.
+    name
+        Its name.
+    """
+    with py.world.session() as session:
+        env = session.execute(select(Environment).where(Environment.name == "dev")).scalar_one()
+        session.add(
+            Connection(
+                id=uuid.uuid4(),
+                environment_id=env.id,
+                name=name,
+                kind=ConnectionKind.POSTGRESQL,
+                address={"host": "db.example.com", "port": 5432, "database": "crm"},
+                settings={},
+                created_by=py.world.admin.id,
+            )
+        )
+        session.commit()
+
+
+def test_the_task_carries_the_kind_of_every_declared_connection(py: PyWorld) -> None:
+    """Even for a replace: a helper of the task refuses a connection it is not told about."""
+    _connection(py)
+    py.deploy(connections=["crm-db"])
+    engine = py.engine(_writer(py.world))
+    run_claimed(engine, py.claim_python(engine))
+    (task,) = py.runner.tasks
+    assert task.write == "replace"
+    assert task.connections == {"crm-db": {"kind": "postgresql"}}
+    assert _task(py.world, "gold.scores").status is TaskStatus.SUCCEEDED
+
+
+def test_a_connection_deleted_after_the_attempt_was_prepared_hides_nothing(
+    py: PyWorld, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Its row is gone, so it has no secret to hide; the task's own fetch is refused later."""
+    _connection(py)
+    py.deploy(connections=["crm-db"])
+    real = python_tasks_module._connection_secrets
+
+    def after_a_delete(session: Session, *args: object) -> tuple[str, ...]:
+        session.execute(sqlalchemy_delete(Connection).where(Connection.name == "crm-db"))
+        session.commit()
+        return real(session, *args)  # ty: ignore[invalid-argument-type]
+
+    monkeypatch.setattr(python_tasks_module, "_connection_secrets", after_a_delete)
+    engine = py.engine(_writer(py.world))
+    run_claimed(engine, py.claim_python(engine))
+
+    (task,) = py.runner.tasks
+    assert task.connections == {"crm-db": {"kind": "postgresql"}}
+    assert task.hidden == ()
+    assert _task(py.world, "gold.scores").status is TaskStatus.SUCCEEDED
+
+
+def test_an_asset_without_connections_is_told_of_none(py: PyWorld) -> None:
+    _connection(py)
+    engine = py.engine(_writer(py.world))
+    run_claimed(engine, py.claim_python(engine))
+    assert py.runner.tasks[0].connections == {}
+
+
+def test_a_declared_connection_that_is_gone_fails_naming_it(py: PyWorld) -> None:
+    py.deploy(connections=["crm-db"])
+    task, message = _fails(py, py.engine(_writer(py.world)))
+    assert (task.status, task.attempt, task.failure_code) == (TaskStatus.FAILED, 1, "not_found")
+    assert message == (
+        "gold.scores declares the connection `crm-db`, which environment dev does not have; "
+        "create it (lakana connection create) or remove it from the asset's connections, then "
+        "deploy again"
+    )
+    assert py.runner.tasks == []
+
+
+_CONNECTION_PASSWORD = "crm-db-pa55word"
+
+
+def _connection_with_secret(
+    py: PyWorld, name: str = "crm-db", password: str = _CONNECTION_PASSWORD
+) -> None:
+    """Add a `tcp` connection to `dev` with its own secret, under the engine's test key.
+
+    Parameters
+    ----------
+    py
+        The world.
+    name
+        Its name.
+    password
+        Its secret's `password`.
+    """
+    with py.world.session() as session:
+        owner = session.get(Principal, py.world.admin.id)
+        assert owner is not None
+        ConnectionService(session, AllowAllAuthorization(), _INDEX_KEY).create(
+            PrincipalRef(id=owner.id, name=owner.name, type=owner.type),
+            "dev",
+            name=name,
+            kind=ConnectionKind.TCP,
+            address={"host": "db.example.com", "port": 5432},
+            settings={},
+            secret_values={"user": "abc", "password": password},
+        )
+
+
+def test_the_declared_connections_secrets_are_hidden_from_the_tasks_output(py: PyWorld) -> None:
+    """Decrypted with `require_use` and given to the runner only; values under 4 are not."""
+    _connection_with_secret(py)
+    py.deploy(connections=["crm-db"])
+    engine = _with_key(py.engine(_writer(py.world)))
+    run_claimed(engine, py.claim_python(engine))
+    (task,) = py.runner.tasks
+    assert task.hidden == (_CONNECTION_PASSWORD,)
+    assert _CONNECTION_PASSWORD not in repr(task)
+    assert _task(py.world, "gold.scores").status is TaskStatus.SUCCEEDED
+
+
+def test_a_secret_bound_elsewhere_is_not_decrypted_and_the_attempt_still_runs(
+    py: PyWorld, caplog: pytest.LogCaptureFixture
+) -> None:
+    _connection_with_secret(py)
+    with py.world.session() as session:
+        session.execute(
+            update(Secret)
+            .where(Secret.name == "crm-db-connection")
+            .values(use_target_id=uuid.uuid4())
+        )
+        session.commit()
+    py.deploy(connections=["crm-db"])
+    engine = _with_key(py.engine(_writer(py.world)))
+    with caplog.at_level(logging.WARNING):
+        run_claimed(engine, py.claim_python(engine))
+    assert py.runner.tasks[0].hidden == ()
+    assert _task(py.world, "gold.scores").status is TaskStatus.SUCCEEDED
+    assert "crm-db" in caplog.text
+    assert _CONNECTION_PASSWORD not in caplog.text
+
+
+def test_every_form_of_a_tricky_secret_is_hidden(py: PyWorld) -> None:
+    password = "Tr0ub\\4dor\"&'x\x01é"
+    _connection_with_secret(py, password=password)
+    py.deploy(connections=["crm-db"])
+    engine = _with_key(py.engine(_writer(py.world)))
+    run_claimed(engine, py.claim_python(engine))
+    assert set(py.runner.tasks[0].hidden) == secret_forms(password)
+
+
+def test_without_a_master_key_a_task_whose_connection_has_a_secret_never_starts(
+    py: PyWorld,
+) -> None:
+    """The server would hand the task a value this worker could not hide in its log."""
+    _connection_with_secret(py)
+    py.deploy(connections=["crm-db"])
+    engine = py.engine(_writer(py.world))
+    engine.key_provider = None
+    task, message = _fails(py, engine)
+    assert (task.status, task.attempt, task.failure_code) == (TaskStatus.FAILED, 1, "no_runtime")
+    assert message == _CANNOT_HIDE.format(name="crm-db")
+    assert py.runner.tasks == []
+    assert _tokens_minted(py) == 0
+
+
+def test_a_worker_whose_key_cannot_read_the_secret_never_starts_the_task(py: PyWorld) -> None:
+    _connection_with_secret(py)
+    py.deploy(connections=["crm-db"])
+    engine = py.engine(_writer(py.world))
+    engine.key_provider = EnvKeyProvider(base64.b64encode(b"9" * 32).decode())
+    task, message = _fails(py, engine)
+    assert (task.status, task.failure_code) == (TaskStatus.FAILED, "no_runtime")
+    assert message == _CANNOT_HIDE.format(name="crm-db")
+    assert py.runner.tasks == []
+
+
+def test_without_a_master_key_a_connection_without_a_secret_still_runs(py: PyWorld) -> None:
+    _connection(py)
+    py.deploy(connections=["crm-db"])
+    engine = py.engine(_writer(py.world))
+    engine.key_provider = None
+    run_claimed(engine, py.claim_python(engine))
+    assert py.runner.tasks[0].hidden == ()
+    assert _task(py.world, "gold.scores").status is TaskStatus.SUCCEEDED
+
+
+_CANNOT_HIDE = (
+    "this worker cannot decrypt the secret of connection `{name}`, so it could not hide the "
+    "value in the task's log, which the server would hand the task; set "
+    "LAKANA_SECRETS__MASTER_KEY on the worker to the server's value and restart it"
+)
+
+
+def _tokens_minted(py: PyWorld) -> int:
+    """Count the task tokens minted so far.
+
+    Parameters
+    ----------
+    py
+        The world.
+
+    Returns
+    -------
+    int
+        How many there are.
+    """
+    with py.world.session() as session:
+        return len(session.execute(select(TaskToken.id)).all())
+
+
+def test_a_stored_value_that_is_not_text_fails_the_task_for_good_naming_the_cause(
+    py: PyWorld,
+) -> None:
+    """An older row can hold one; the worker could not hide it, so the task never starts."""
+    _connection_with_secret(py)
+    with py.world.session() as session:
+        secret = session.execute(
+            select(Secret).where(Secret.name == "crm-db-connection")
+        ).scalar_one()
+        sealed = encrypt_secret_values(
+            {"password": "x\ud800yz"},
+            _INDEX_KEY,
+            SecretBinding(secret.id, secret.environment_id, secret.name),
+        )
+        secret.ciphertext, secret.nonce = sealed.ciphertext, sealed.nonce
+        secret.wrapped_data_key, secret.key_id = sealed.wrapped_data_key, sealed.key_id
+        session.commit()
+    py.deploy(connections=["crm-db"])
+    task, message = _fails(py, _with_key(py.engine(_writer(py.world))))
+    assert (task.status, task.attempt, task.failure_code) == (TaskStatus.FAILED, 1, "no_runtime")
+    assert message == (
+        "the secret of connection `crm-db` holds a value that is not valid text, so it could not "
+        "be hidden in the task's log; set it again: lakana connection update crm-db --env dev "
+        "--password-stdin (or --values-stdin)"
+    )
+    assert py.runner.tasks == []

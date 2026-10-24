@@ -356,3 +356,22 @@ def test_maintenance_of_an_artifact_is_refused_at_submission(
     assert str(caught.value) == (
         "gold.daily is an artifact; maintenance applies to tables. See `lakana artifact --help`."
     )
+
+
+_MERGE_REFUSAL = (
+    "merge is written by assets (`write: merge`) and by `client.tables.merge`; a query writes "
+    "with create, replace or append"
+)
+
+
+def test_a_query_cannot_merge_and_is_told_what_does(
+    session: Session, principal: PrincipalRef, seeded: CatalogService
+) -> None:
+    with pytest.raises(ValidationError) as caught:
+        QueryService(session, AllowAllAuthorization()).submit_write(
+            principal,
+            "dev",
+            "SELECT 1 AS id",
+            WriteTarget(table="gold.daily", mode=WriteMode.MERGE),
+        )
+    assert str(caught.value) == _MERGE_REFUSAL

@@ -513,6 +513,18 @@ def test_a_task_token_split_across_log_lines_is_redacted(tmp_path: Path) -> None
     assert joined.startswith(b"token=")
 
 
+def test_a_declared_connections_secret_split_across_log_lines_is_redacted(
+    tmp_path: Path,
+) -> None:
+    """`PythonTask.hidden` is masked in the container's log as the token is."""
+    chunks = (b"password=conn-s3c", b"r3t-value\n")
+    launcher = FakeLauncher(scripts={"run": _writes(None, _DONE, chunks)})
+
+    _, logs, _ = _run(tmp_path, launcher, None, hidden=("conn-s3cr3t-value",))
+
+    assert b"".join(logs) == b"password=***\n"
+
+
 def test_a_failing_log_sink_stops_the_container_and_is_permanent(tmp_path: Path) -> None:
     """The client reports the sink's failure; the runner stops the container."""
     launcher = FakeLauncher()

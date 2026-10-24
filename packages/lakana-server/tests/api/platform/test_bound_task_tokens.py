@@ -760,3 +760,110 @@ def test_a_source_named_like_a_connection_is_refused_as_a_table(bound: Bound) ->
         "/api/v1/environments/dev/namespaces/gold/tables/scores/lineage", headers=AUTH_HEADER
     )
     assert [node["kind"] for node in response.json()["nodes"]] == ["TABLE"]
+
+
+def _merge(bound: Bound, dotted: str) -> tuple[int, dict[str, object]]:
+    """Merge id 7 into a table on `id` with the bound token.
+
+    Parameters
+    ----------
+    bound
+        The attempt.
+    dotted
+        ``namespace.table``.
+
+    Returns
+    -------
+    tuple
+        The status code and the JSON answer.
+    """
+    namespace, name = dotted.rsplit(".", 1)
+    response = bound.client.post(
+        f"/api/v1/environments/dev/namespaces/{namespace}/tables/{name}/merge?key=id",
+        headers={**bound.headers, "Content-Type": _ARROW},
+        content=_ipc([7]),
+    )
+    return response.status_code, response.json()
+
+
+def test_it_merges_into_its_own_asset_which_it_may_not_read(bound: Bound) -> None:
+    """A merge compares with the own asset; the token may do it there and nowhere else."""
+    status, body = _merge(bound, "gold.scores")
+    assert status == 200, body
+    assert (body["rows_inserted"], body["rows_updated"]) == (1, 0)
+    assert bound.get("dev", "gold.scores") == 403
+    assert _merge(bound, "gold.other")[0] == 403
+    assert _merge(bound, "silver.weather")[0] == 403
+
+
+def test_a_task_of_a_filtered_principal_may_not_merge_into_its_own_asset(bound: Bound) -> None:
+    """The row filter of the principal the task acts for refuses the merge."""
+    created = bound.client.post(
+        "/api/v1/row-filters",
+        headers=AUTH_HEADER,
+        json={
+            "principal": "etl",
+            "environment": "dev",
+            "namespace": "gold",
+            "table": "scores",
+            "expression": "id < 3",
+        },
+    )
+    assert created.status_code < 300, created.text
+
+    status, body = _merge(bound, "gold.scores")
+
+    assert status == 422, body
+    assert "row filter or column mask applies to you" in str(body["detail"])
+
+
+def _only_actions(bound: Bound, actions: list[str]) -> None:
+    """Replace `etl`'s role on `dev` with grants of exactly `actions`.
+
+    Parameters
+    ----------
+    bound
+        The attempt.
+    actions
+        The actions `etl` keeps on `dev`.
+    """
+    grants = bound.client.get(
+        "/api/v1/grants",
+        headers=AUTH_HEADER,
+        params={"principal_name": "etl", "environment": "dev"},
+    ).json()
+    for grant in grants:
+        revoked = bound.client.delete(f"/api/v1/grants/{grant['id']}", headers=AUTH_HEADER)
+        assert revoked.status_code == 204, revoked.text
+    for action in actions:
+        granted = bound.client.post(
+            "/api/v1/grants",
+            headers=AUTH_HEADER,
+            json={
+                "principal": "etl",
+                "action": action,
+                "kind": "ENVIRONMENT",
+                "environment": "dev",
+            },
+        )
+        assert granted.status_code < 300, granted.text
+
+
+def test_a_task_of_a_write_only_principal_may_not_merge(bound: Bound) -> None:
+    """Only the token's narrowing is waived on the own asset; the principal still needs READ."""
+    _only_actions(bound, ["WRITE_TABLE"])
+
+    status, body = _merge(bound, "gold.scores")
+
+    assert status == 403, body
+    assert "READ_TABLE" in str(body["detail"])
+    assert bound.write("POST", "gold.scores") == 200
+
+
+def test_a_task_of_a_reading_and_writing_principal_merges(bound: Bound) -> None:
+    """READ_TABLE and WRITE_TABLE alone are enough for the task's merge."""
+    _only_actions(bound, ["WRITE_TABLE", "READ_TABLE"])
+
+    status, body = _merge(bound, "gold.scores")
+
+    assert status == 200, body

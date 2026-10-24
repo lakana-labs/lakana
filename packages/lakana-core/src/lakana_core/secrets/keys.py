@@ -54,7 +54,7 @@ class KeyProvider(ABC):
 
         The process's configuration (`LAKANA_SECRETS__ACCEPT_FORMAT_1`), carried
         by the provider because every place that decrypts already has one.
-        The four decrypt sites pass it to `decrypt_secret_row`; it is never read
+        The five decrypt sites pass it to `decrypt_secret_row`; it is never read
         from the database.
 
         Returns

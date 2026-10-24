@@ -23,7 +23,12 @@ from lakana_core.projects.asset_model import (
     DEFAULT_DECIMALS,
     MAX_CONNECTIONS,
     MAX_KEEP_VERSIONS,
+    WATERMARK_MESSAGE,
+    WRITE_CHOICES,
     ParsedAsset,
+    key_issues,
+    write_choice_message,
+    write_rule_issues,
 )
 from lakana_core.projects.discovery import DiscoveredAsset
 from lakana_core.projects.frontmatter import (
@@ -52,6 +57,9 @@ _KNOWN = (
     "keep_versions",
     "decimals",
     "connections",
+    "write",
+    "key",
+    "watermark",
 )
 _SHAPES: dict[str, tuple[type, str]] = {
     "inputs": (dict, "a dict of strings"),
@@ -63,7 +71,15 @@ _SHAPES: dict[str, tuple[type, str]] = {
     "output": (str, "a string"),
     "decimals": (str, "a string"),
     "connections": (list, "a list of strings"),
+    "write": (str, "a string"),
+    "key": (list, "a list of strings"),
+    "watermark": (str, "a string"),
 }
+_DEFAULTS: dict[str, tuple[object, ...]] = {"write": ("replace",), "key": ([],)}
+"""Values of the write model that an artifact asset may still give: they change nothing."""
+CONTEXT_PARAMETER = "ctx"
+"""The parameter that receives the asset's context: never an input."""
+_CONTEXT_IS_NOT_AN_INPUT = "`ctx` is the asset's context; give the input another parameter name"
 _ALIAS_HINT = (
     "the decorator must be lakana.asset: use `from lakana import asset` with `@asset(...)`, "
     "or `import lakana` with `@lakana.asset(...)`; aliases and re-exports are not resolved"
@@ -356,8 +372,14 @@ def _output(
         else:
             kept = keep
     if output == "artifact":
-        for name in ("materialize", "columns"):
-            if name in values:
+        # `write="replace"` and `key=[]` say what an artifact asset does anyway.
+        given = {
+            name
+            for name in ("materialize", "columns", "write", "key", "watermark")
+            if name in values and values[name] not in _DEFAULTS.get(name, ())
+        }
+        for name in ("materialize", "columns", "write", "key", "watermark"):
+            if name in given:
                 issues.append(
                     ProjectIssue(
                         path,
@@ -445,6 +467,49 @@ def _connections(
     return tuple(names)
 
 
+def _write_model(
+    values: dict[str, object], path: str, line: int, issues: list[ProjectIssue]
+) -> tuple[str | None, tuple[str, ...], str | None]:
+    """Read how a run writes the asset's table, with the rules a SQL block follows.
+
+    Parameters
+    ----------
+    values
+        `_arguments`' first result; an argument of the wrong shape never reaches it.
+    path
+        Repository-relative path, for issues.
+    line
+        The decorator's line.
+    issues
+        Collects issues.
+
+    Returns
+    -------
+    tuple
+        `write` (`None` when not given), `key` (empty when not given) and `watermark`; all
+        three unset after an issue, so nothing unsafe reaches the metadata.
+    """
+    given = values.get("write")
+    write = given if isinstance(given, str) else None
+    listed = values.get("key")
+    key = tuple(listed) if isinstance(listed, list) else ()
+    marked = values.get("watermark")
+    watermark = marked if isinstance(marked, str) else None
+    messages = key_issues(key)
+    if watermark is not None and unsafe_identifier(watermark):
+        messages.append(WATERMARK_MESSAGE)
+    if write is not None and write not in WRITE_CHOICES:
+        messages.insert(0, write_choice_message(shown(write)))
+    else:
+        messages.extend(
+            write_rule_issues(write, key, watermark, materialize="table", evolve_schema=None)
+        )
+    issues.extend(ProjectIssue(path, line, message) for message in messages)
+    if messages:
+        return None, (), None  # the issues stand; nothing unsafe reaches the metadata
+    return write, key, watermark
+
+
 def _parameters(function: _Function, path: str, issues: list[ProjectIssue]) -> list[str]:
     """List the function's parameters, refusing every shape the harness cannot call.
 
@@ -460,7 +525,8 @@ def _parameters(function: _Function, path: str, issues: list[ProjectIssue]) -> l
     Returns
     -------
     list of str
-        Parameter names in declaration order.
+        The input parameters' names in declaration order: every parameter but `ctx`, which
+        receives the asset's context.
     """
     spec = function.args
     line = function.lineno
@@ -481,7 +547,7 @@ def _parameters(function: _Function, path: str, issues: list[ProjectIssue]) -> l
     names = [arg.arg for arg in (*spec.posonlyargs, *spec.args, *spec.kwonlyargs)]
     for name in sorted({name for name in names if names.count(name) > 1}):
         issues.append(ProjectIssue(path, line, f"parameter {_quoted(name)} is declared twice"))
-    return names
+    return [name for name in names if name != CONTEXT_PARAMETER]
 
 
 def _metadata(
@@ -492,6 +558,7 @@ def _metadata(
     issues: list[ProjectIssue],
     *,
     artifact: bool,
+    write_model: tuple[str | None, tuple[str, ...], str | None] = (None, (), None),
 ) -> AssetMetadata | None:
     """Validate the decorator's metadata with the front-matter model.
 
@@ -510,14 +577,33 @@ def _metadata(
     artifact
         Whether the asset is an artifact asset: `_output` already refused its
         `materialize` and `columns`, so they are not checked again.
+    write_model
+        `_write_model`'s result: `write`, `key` and `watermark`.
 
     Returns
     -------
     AssetMetadata or None
         The metadata with ``materialize: table``, or `None` after an issue.
     """
-    left_out = ("inputs", "materialize", "output", "keep_versions", "decimals", "connections")
+    left_out = (
+        "inputs",
+        "materialize",
+        "output",
+        "keep_versions",
+        "decimals",
+        "connections",
+        "write",
+        "key",
+        "watermark",
+    )
     raw = {name: value for name, value in values.items() if name not in left_out}
+    write, key, watermark = write_model
+    if write is not None:
+        raw["write"] = write
+    if key:
+        raw["key"] = key
+    if watermark is not None:
+        raw["watermark"] = watermark
     if artifact:
         raw.pop("columns", None)
     materialize = values.get("materialize", "table")
@@ -525,7 +611,12 @@ def _metadata(
         pass
     elif materialize == "incremental":
         issues.append(
-            ProjectIssue(path, line, "incremental Python assets are not supported yet (#23)")
+            ProjectIssue(
+                path,
+                line,
+                'a Python asset appends with write="append" and watermark="<column>", '
+                "not materialize='incremental'",
+            )
         )
     elif materialize != "table":
         issues.append(
@@ -588,7 +679,7 @@ def _inputs(
     values
         `_arguments`' result.
     parameters
-        The function's parameter names.
+        The function's input parameter names (`_parameters`).
     function
         The asset function.
     path
@@ -613,6 +704,9 @@ def _inputs(
                 )
             )
     for name, table in inputs.items():
+        if name == CONTEXT_PARAMETER:
+            issues.append(ProjectIssue(path, line, _CONTEXT_IS_NOT_AN_INPUT))
+            continue
         if name not in parameters:
             issues.append(
                 ProjectIssue(path, line, f"inputs names {name!r}, which is not a parameter")
@@ -733,8 +827,16 @@ def parse_python_asset(
     output, keep = _output(values, dropped, path, line, issues)
     decimals = _decimals(values, path, line, issues)
     connections = _connections(values, path, line, issues)
+    artifact = output == "artifact"
+    write_model = (None, (), None) if artifact else _write_model(values, path, line, issues)
     own = _metadata(
-        values, ast.get_docstring(function), path, line, issues, artifact=output == "artifact"
+        values,
+        ast.get_docstring(function),
+        path,
+        line,
+        issues,
+        artifact=artifact,
+        write_model=write_model,
     )
     if output == "artifact" and asset.table in inputs.values():
         issues.append(

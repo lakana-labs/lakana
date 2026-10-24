@@ -64,8 +64,9 @@ from lakana_core.models import (
     TaskStatus,
     WriteMode,
 )
+from lakana_core.projects.asset_model import WRITE_CHOICES
 from lakana_core.projects.checks import read_manifest_checks, source_check_tables
-from lakana_core.projects.manifest import asset_kind
+from lakana_core.projects.manifest import asset_kind, entry_write
 from lakana_core.runs.checks import (
     ASSET,
     SOURCE_CHECK,
@@ -367,6 +368,46 @@ def _close_write(session: Session, query_run_id: uuid.UUID, message: str) -> Non
     session.commit()
 
 
+def checked_write(
+    entry: Mapping[str, object], asset: str
+) -> tuple[str, tuple[str, ...], str | None]:
+    """Read how a run writes an asset's table, refusing what no run may do.
+
+    Parameters
+    ----------
+    entry
+        The asset's manifest entry; untrusted.
+    asset
+        The asset, for the message.
+
+    Returns
+    -------
+    tuple
+        ``(write, key, watermark)`` as `entry_write` reads them.
+
+    Raises
+    ------
+    TaskFailure
+        Permanent for a write mode this release does not know (never run as a replace,
+        which would drop rows) and for a merge without a key.
+    """
+    written, merge_key, watermark = entry_write(entry)
+    if written not in WRITE_CHOICES:
+        raise TaskFailure(
+            FailureKind.PERMANENT,
+            f"the project version's write mode {written!r} for {asset} is not valid; "
+            "deploy it again with this release",
+            FailureCode.CODE_CHANGED,
+        )
+    if written == "merge" and not merge_key:
+        raise TaskFailure(
+            FailureKind.PERMANENT,
+            f"the project version merges {asset} without a key; deploy it again with this release",
+            FailureCode.CODE_CHANGED,
+        )
+    return written, merge_key, watermark
+
+
 def ensure_namespaces(
     session: Session,
     catalog: CatalogService,
@@ -573,7 +614,14 @@ def _prepare(session: Session, engine: RunEngine, claimed: ClaimedTask) -> _Prep
             f"the project version's write mode {mode_name!r} for {claimed.asset} is not valid",
             FailureCode.CODE_CHANGED,
         ) from None
-    key = entry.get("incremental_key")
+    written, merge_key, watermark = checked_write(entry, claimed.asset)
+    if written == "merge" and mode not in (WriteMode.MERGE, WriteMode.CREATE):
+        # `write` and `write_mode` disagree: never run a merge asset as a replace or append.
+        raise TaskFailure(
+            FailureKind.PERMANENT,
+            f"the project version's write mode {mode_name!r} for {claimed.asset} is not valid",
+            FailureCode.CODE_CHANGED,
+        )
     write = QueryRun(
         id=uuid.uuid4(),
         environment_id=env.id,
@@ -582,7 +630,8 @@ def _prepare(session: Session, engine: RunEngine, claimed: ClaimedTask) -> _Prep
         status=QueryRunStatus.RUNNING,
         write_mode=mode,
         target_name=claimed.asset,
-        incremental_key=key if isinstance(key, str) else None,
+        incremental_key=watermark,
+        merge_key=list(merge_key) if written == "merge" else None,
         evolve_schema=bool(entry.get("evolve_schema")),
         task_run_id=claimed.task_run_id,
         worker_id=engine.settings.worker_id,
@@ -824,6 +873,7 @@ def _execute(
         kept_table=prepared.kept_table if succeeded else None,
         built_snapshot_id=write.snapshot_id if succeeded and prepared.kept_table else None,
         failure_code=code,
+        wrote_nothing=succeeded and write.snapshot_id is None and not rows,
     )
 
 

@@ -31,6 +31,7 @@ from lakana._models import (
     Lineage,
     LineageEdge,
     LineageNode,
+    MergeResult,
     Namespace,
     QueryStatus,
     Table,
@@ -982,6 +983,117 @@ def test_replace_and_append_send_source_versions_sorted() -> None:
     assert seen[0].url.params.get_list("source_version") == ["7:models.a", "2:models.b"]
     assert seen[1].url.params.get_list("source_version") == ["1:models.a"]
     assert "source_version" not in seen[2].url.params
+
+
+# --- Tables: merge ---------------------------------------------------------
+
+
+def test_tables_merge_posts_the_stream_with_the_key_repeated() -> None:
+    """`tables.merge` POSTs to `…/merge` with one `key` per column and returns the counts."""
+    seen: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["method"] = request.method
+        seen["path"] = request.url.path
+        seen["params"] = request.url.params.multi_items()
+        seen["content_type"] = request.headers["content-type"]
+        with pyarrow.ipc.open_stream(pa.BufferReader(request.content)) as reader:
+            seen["table"] = reader.read_all()
+        return httpx.Response(200, json={"snapshot_id": 11, "rows_inserted": 3, "rows_updated": 2})
+
+    data = pa.table({"id": [1, 2], "region": ["eu", "us"]})
+    result = Tables(_transport(handler)).merge(
+        "dev",
+        "silver.customers",
+        data,
+        key=["id", "region"],
+        sources=["bronze.raw"],
+        source_versions={"models.a": 4},
+        break_glass_reason="incident 4: fix two customers",
+        expected_snapshot_id=10,
+    )
+
+    assert seen["method"] == "POST"
+    assert seen["path"] == "/api/v1/environments/dev/namespaces/silver/tables/customers/merge"
+    assert seen["content_type"] == "application/vnd.apache.arrow.stream"
+    assert seen["params"] == [
+        ("key", "id"),
+        ("key", "region"),
+        ("source", "bronze.raw"),
+        ("source_version", "4:models.a"),
+        ("break_glass_reason", "incident 4: fix two customers"),
+        ("expected_snapshot_id", "10"),
+    ]
+    assert seen["table"].equals(data)
+    assert result == MergeResult(snapshot_id=11, rows_inserted=3, rows_updated=2)
+
+
+def test_tables_merge_accepts_a_single_key_as_a_string() -> None:
+    """`key="id"` is one column, not the letters `i` and `d`."""
+    seen: list[list[str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.params.get_list("key"))
+        return httpx.Response(200, json={"snapshot_id": 1, "rows_inserted": 1, "rows_updated": 0})
+
+    Tables(_transport(handler)).merge("dev", "silver.customers", pa.table({"id": [1]}), key="id")
+
+    assert seen == [["id"]]
+
+
+def test_tables_merge_refuses_an_empty_key_before_sending() -> None:
+    """No request goes out without a key column."""
+    sent: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent.append(request)
+        return httpx.Response(200, json={})
+
+    with pytest.raises(ValueError, match="at least one key column"):
+        Tables(_transport(handler)).merge("dev", "silver.customers", pa.table({"id": [1]}), key=[])
+
+    assert sent == []
+
+
+def test_tables_merge_raises_conflict_without_a_retry_when_a_snapshot_is_expected() -> None:
+    """With `expected_snapshot_id` the conflict is the answer: one request, `Conflict`."""
+    attempts = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        attempts["n"] += 1
+        return httpx.Response(409, json={"detail": "silver.customers changed; retry."})
+
+    with pytest.raises(Conflict):
+        Tables(_transport(handler)).merge(
+            "dev", "silver.customers", pa.table({"id": [1]}), key=["id"], expected_snapshot_id=7
+        )
+
+    assert attempts["n"] == 1
+
+
+def test_tables_merge_retries_once_on_conflict_without_an_expected_snapshot() -> None:
+    """Without a precondition a conflict proves nothing committed: one retry, as `append`."""
+    attempts = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            return httpx.Response(409, json={"detail": "conflict"})
+        return httpx.Response(200, json={"snapshot_id": 5, "rows_inserted": 0, "rows_updated": 1})
+
+    result = Tables(_transport(handler)).merge(
+        "dev", "silver.customers", pa.table({"id": [1]}), key=["id"]
+    )
+
+    assert attempts["n"] == 2
+    assert result.rows_updated == 1
+
+
+def test_tables_merge_route_is_registered() -> None:
+    """The route table names the merge route."""
+    assert ROUTES["tables.merge"] == Route(
+        "POST", "/api/v1/environments/{env}/namespaces/{path}/tables/{name}/merge"
+    )
 
 
 # --- lakana._arrow: schema_to_columns ----------------------------------------

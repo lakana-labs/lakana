@@ -2018,7 +2018,21 @@ update follows the same rule**, decided by one helper, `CatalogService._may_see_
   absent keys from a `remove-properties` update first, so both succeed, as in the Iceberg reference
   implementation.
 
-A bound task token on its own asset is a non-reader like any other.
+A bound task token on its own asset is a non-reader like any other, with one exception: a
+**merge** into it. For a bound token whose asset is the target (`_bound_to_own_asset`),
+`check_can_merge` checks `READ_TABLE` against the run principal's own grants with the token's
+narrowing to its inputs removed (`replace(p, task_scope=None)`), after `WRITE_TABLE` has held the
+token to its environment and its own asset (compared by parts). Only that narrowing is waived:
+materialising the asset is the task's whole job and a merge cannot be done without comparing
+against it. The principal itself must still hold `READ_TABLE`, so a task of a write-only
+principal is refused exactly as that principal's personal token is
+(`test_a_task_of_a_write_only_principal_may_not_merge`, core and server); otherwise the merge's
+counts would tell such a task the asset's keys. The write guard's own-asset rule
+(`WriteOperation.MERGE`) still confines the token to that one table, and every other table stays
+refused. The row filter and column mask
+refusal still runs against the principal the task acts for, so a task of a filtered or masked
+principal cannot merge (`test_a_task_of_a_filtered_principal_may_not_merge_into_its_own_asset`,
+core and server).
 
 **An Iceberg REST commit never removes snapshots** (`_NO_SNAPSHOT_REMOVAL`, 403 for every caller).
 `commit_table` refuses `remove-snapshots`, and `remove-snapshot-ref` for a ref named
@@ -3454,7 +3468,7 @@ work.
   configuration, outside the database: `format_version` is a column of the row, so a check on it
   alone cannot tell an old secret from an old-format triple pasted onto a format-2 row by someone
   with database write access. The server and the worker build their `EnvKeyProvider` with the
-  setting (`accept_format_1=`); all four decrypt sites pass `key_provider.accepts_format_1` to
+  setting (`accept_format_1=`); all five decrypt sites pass `key_provider.accepts_format_1` to
   `decrypt_secret_row`, and `decrypt_secret_values` raises `LegacyFormatRefusedError` for format 1
   before anything is unwrapped or decrypted (the crypto module never reads the environment). The
   migration cannot re-encrypt (it has no master key); it labels old rows format 1 with the bare key
@@ -3485,7 +3499,8 @@ work.
   or principal; `SecretService` (`create`/`list_for_environment`/`rotate`/`revoke`, each
   behind `Action.MANAGE_SECRET`) calls only `encrypt_secret_values` — decryption is
   structurally unreachable from any principal-facing method, not merely unexposed by one.
-  `decrypt_secret_row` is called in exactly four places: `StorageResolver` (storage
+  `decrypt_secret_row` is called in exactly five places (inventory:
+  `lakana-worker/tests/test_secret_use_sites.py`): `StorageResolver` (storage
   credentials), `lakana_worker.deploy.resolve_credential` (a repository's git credential,
   M5b), which reads only the deploy's own environment's secret scope and hands the plaintext
   straight to `lakana_worker.git`, and `lakana_worker.index_credentials.resolve_index_access`
@@ -3493,7 +3508,9 @@ work.
   and holds a password, and when a project's environment is built; the plaintext lives in the
   returned `IndexAccess` objects, which hide it in `repr`, and, during a build, in the build's
   environment mapping, in the process environment of the launcher and of uv, and in the output
-  redactor's list of values), and `lakana_worker.notify` (the fourth: a job's webhook, below).
+  redactor's list of values), `lakana_worker.notify` (the fourth: a job's webhook, below), and
+  `lakana_core.connections.fetch.connection_secret` (the fifth: a connection's secret, for a running
+  task's fetch and the worker's redaction; see "Connections and the run-time credential fetch (M6)").
   The fourth reads the secret named by a delivery row in the row's own environment, **only for
   one attempt**: the URL and the signing key live in local variables of `_prepare` and the
   request object (whose `repr` hides them), and go out of scope when the attempt is recorded.
@@ -3585,9 +3602,10 @@ that uses it. User reference: `docs/site/reference/package-indexes.md`; how-to:
   that connection's `secret_id` (both connections locked by id before the secret, so two moves in
   opposite directions do not deadlock; a deadlock or serialization failure that still happens is a
   409 to retry, `db.refuse_concurrent_change`), and a `secret_id` whose secret is not bound to that
-  connection counts as no secret. A secret is refused for a connection that takes none. The four places that decrypt a secret
-  for an index, a repository, storage or a webhook check the use first and refuse another one,
-  with the command that moves it. `MANAGE_PACKAGE_INDEX` and `MANAGE_REPOSITORY` are not
+  connection counts as no secret. A secret is refused for a connection that takes none. The five places that decrypt a secret
+  for an index, a repository, storage, a webhook or a connection check the use first and refuse another one,
+  with the command that moves it (a connection's: `connections.fetch.connection_secret`, which
+  answers "no secret" instead, see "Connections and the run-time credential fetch (M6)"). `MANAGE_PACKAGE_INDEX` and `MANAGE_REPOSITORY` are not
   `MANAGE_SECRET`: their holder can name only a secret already bound to that same entry, and
   cannot change the URL of an entry with a bound secret, whatever credential it names at that
   moment (`require_secret_management_for_url_change`). Counting references to decide whether a
@@ -3688,6 +3706,96 @@ that uses it. User reference: `docs/site/reference/package-indexes.md`; how-to:
   marks its files as fresh), without asking the index; the index's files must be on its own host
   and port; an author who locks a public package by mistake still ships it; an administrator who
   registers an index trusts its packages with whatever a task may do.
+
+## Connections and the run-time credential fetch (M6)
+
+`GET /api/v1/tasks/self/connections/{name}` (`lakana_server.api.platform.task_connections`,
+decision in `lakana_core.connections.fetch.fetch_for_task`) is the only route that returns a
+secret's values, and the only way a secret reaches a Python asset (#23). User reference:
+`docs/site/reference/connections.md`, "How a task gets its credential".
+
+- **Check order, and why.** (1) the caller is a bound task token (`TaskScope.bound`), else 403
+  `only a running task can fetch a connection` (`not_bound`: a PAT, a REST-minted task token, a CI
+  token); (2) `name in bound.connections`, else 403 `` connection `NAME` is not declared by asset
+  `ASSET` `` (`not_declared`); (3) the token's environment has a connection of that name, else 403
+  `` connection `NAME` is not in environment `ENV` `` (`not_in_environment`). Declaration is
+  judged before existence, so an undeclared name answers the same whether or not a connection of
+  that name exists, in this environment or another: no existence oracle. A malformed name is just
+  an undeclared one (the path parameter caps it at 63 characters, a 422 before the service). There
+  is no 404 on this route.
+- **An ended or re-claimed attempt is a 401, not a 403** (ruling 2026-10-24). Authentication
+  resolves `bound` from the database on every request (`resolve_task_token_scope`), and a token
+  whose task run is not `RUNNING` with its claim, or whose run ended or is being cancelled, does
+  not authenticate at all. So it never reaches `fetch_for_task` and leaves no
+  `CONNECTION_CREDENTIAL_REFUSED` row (the failed authentication is audited as any other).
+  `BoundTask.connections == ()` (an asset that declares none, or a manifest value that cannot be
+  read, `connections_readable=False`) refuses every name as `not_declared`.
+- **Audit.** `CONNECTION_CREDENTIAL_FETCHED` (`connection`, `environment`, `repository`, `asset`,
+  `run_id`, `task_run_id`, `attempt` = the claim counter; `reason` when no secret was sent) is
+  added in the same transaction and committed before the route returns the body.
+  `CONNECTION_CREDENTIAL_REFUSED` (the fields known, plus `reason`) is committed through the
+  process's `DenialAuditLimiter` (action `FETCH_CONNECTION:<reason>`, so the first refusal of each
+  reason is recorded rather than folded into an earlier kind), so a task asking in a loop is
+  refused every time but recorded at the limiter's rate; a suppressed one is logged at INFO with
+  `reason`, `connection`, `asset` and `task_run_id`. No detail holds a value; `connection`,
+  `asset` and `attempt` are `SHOWN_FIELDS`.
+- **The secret only through `require_use`.** `connection_secret` loads `Connection.secret_id`,
+  treats a missing or revoked secret as none, calls `require_use(session, secret,
+  SecretUse.connection(row), environment_name=...)` and only then `decrypt_secret_row`.
+  `SecretUseRefused` (a `secret_id` whose secret is now bound elsewhere), and `require_use`'s
+  `ValueError` (a stray `secret_id` into another environment), become `secret: null`
+  with `reason: secret_not_bound` and a warning naming the connection, never a 422 that would name
+  the secret and a bind command to the task. A decryption failure becomes `secret: null` with
+  `reason: secret_unreadable` (`decrypt_secret_row` logs why, without a value). The S1 binding
+  rules above decide which secret that can be; their tests are in `test_connection_service.py`,
+  and `test_connection_fetch.py` pins that a moved or revoked secret is never sent.
+- **The answer.** `TaskConnectionOut` carries the settings with a `ca_certificate` in full (the
+  helper needs it) and `endpoints` from `connections.endpoints.endpoints`, the list the worker's
+  egress grants and the binding's audit `url` use too. `Cache-Control: no-store`,
+  `Pragma: no-cache`. The access log is uvicorn's request line and status; no body is logged
+  anywhere (`test_task_connections.py` checks `caplog` and `capfd` for the value).
+- **Redaction on both sides.** Both sides list the same forms of a value (the worker also hides
+  the 4+-character forms of a value shorter than 4 characters; the harness's `register_secret`
+  ignores such a value entirely):
+  `lakana_core.secrets.forms.secret_forms` (worker) and its SDK copy
+  `lakana.context.secret_forms` (harness; the SDK cannot import core), compared by
+  `lakana-worker/tests/test_secret_forms_parity.py`: raw, `repr`, JSON with and without
+  `ensure_ascii`, `quote` (default and `safe=""`), `quote_plus`, the `repr` of the UTF-8
+  bytes (each `repr` under both quote choices, since a dict's repr of a JSON body quotes with
+  `'` and escapes an apostrophe), and each JSON form again inside a `repr`, as bytes and
+  JSON-encoded twice, each at least 4 characters. The harness's `_mask` masks every occurrence
+  of every form as spans and joins overlapping or touching ones (`abab` in `ababab` → `***`).
+  A value that cannot be written as UTF-8 (a lone surrogate) has no forms:
+  `secrets.forms.require_text` refuses it at every create and rotate (and in
+  `check_secret_values`), 422 naming the key only, and the worker fails a task whose stored row
+  holds one, permanent, naming `lakana connection update`. Not covered: shorter values, other transformations
+  (base64, slices), and derived values (an OAuth2 access token) unless a helper registers them.
+  The harness (`lakana.ingest._connections.fetch`) registers every value with
+  `lakana.context.register_secret`; `lakana.runner._mask` replaces
+  them (longest first) with the token in the failure record's `message` and `error_type`, in the
+  trace on stderr and in `_clean`. `main` clears the state and the fetched connections only after
+  the record and the trace are written. The worker decrypts the declared connections' secrets
+  before minting the token (`python_tasks._connection_secrets`, the same `connection_secret`) and
+  adds them to `secrets_to_hide` of both runners (`PythonTask.hidden`, never sent to the task, not
+  in `repr`), so `OutputRedactor` masks them in the captured log, split across writes too, and in
+  the record's message. A worker that cannot decrypt an active secret of a declared connection
+  (no master key, or another key than the server's: `secret_unreadable`) fails the attempt
+  before minting the token, permanent, `NO_RUNTIME`, naming the connection and
+  `LAKANA_SECRETS__MASTER_KEY`: the server would otherwise hand the task a value the captured log
+  could not hide. A secret not bound to the connection is none on both sides and only logged.
+  **Window, accepted:** the worker decrypts when the attempt starts, before the task fetches; a
+  secret added, bound or rotated in between (or the secret of a declared connection created
+  after the check, or, on a worker without the key, a secret bound mid-attempt) is hidden by the
+  harness but may appear in the worker-captured log. The worker's decryption is not audited: no value leaves
+  the worker, and only the task's own fetch hands one out.
+- **Not retried.** `ConnectionNotDeclared`, `ConnectionRefused` and `CapExceeded`
+  (`lakana.ingest._errors`) carry `retryable = False`, which `_retryable` honours for
+  `IngestError`s of the `function` phase only (a user exception's own `retryable` attribute is
+  ignored); `ConnectionChanged` is `True`.
+- **Residual, accepted.** Deployed code sees the credentials of the connections its asset
+  declares and can send them to any host the task can reach (until task egress narrows that to
+  the declared endpoints). Reviewing an asset's `connections` is reviewing what it may read. The
+  fetched values live in the task process's memory, which the task's own code can read anyway.
 
 ## Audit log (M3e — shipped)
 
@@ -4184,6 +4292,17 @@ exit criterion is being re-run after the M3f fixes above — see
 - **An incremental append is refused while a row filter or column mask on its target applies to
   the caller**: the watermark comes from Iceberg manifest statistics over every row, including rows
   the caller can't see.
+- **A merge (`CatalogService.merge`, `POST …/tables/{name}/merge`) needs `READ_TABLE` as well as
+  `WRITE_TABLE` (except for a bound task token on its own asset, see "A bound task token on its
+  own asset is a non-reader"), and is refused while a row filter or column mask on its target applies to the
+  caller** (`check_can_merge`, run as the route's precheck and again by `merge`). A merge reads
+  the target's rows that the batch's keys match and compares them: `rows_updated` against
+  `rows_inserted`, the "key repeats in N rows of the table" refusal and a no-op that commits
+  nothing would each tell the caller about rows or values it may not see. A key of several
+  columns is capped at `COMPOSITE_KEY_MAX_ROWS` (5,000) rows per batch, checked before anything
+  is read: pyiceberg matches such a key with one filter term per row and its time grows with the
+  square of the batch, so an uncapped batch would hold a server thread and an append slot for
+  minutes.
 - **A zero-row batch never writes a file.** An empty result creates or replaces the table without
   an empty Parquet file, and an append of nothing leaves no orphan.
 - **Masked data is persisted masked.** A write's SELECT goes through the same rewriter as a query,

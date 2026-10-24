@@ -18,7 +18,7 @@ stays as described in [Projects and deploys](../how-to/projects.md), "Python ass
 
 | Option | Values | Default | Meaning |
 |---|---|---|---|
-| `output` | `"table"` or `"artifact"` | `"table"` | `"table"`: the function returns a `polars.DataFrame` that becomes the table. `"artifact"`: the function writes files into `lakana.output_dir()` and returns a path, and each run stores one new version of the artifact. |
+| `output` | `"table"` or `"artifact"` | `"table"` | `"table"`: the function returns a `polars.DataFrame` (or a `pyarrow.Table`) that becomes the table. `"artifact"`: the function writes files into `lakana.output_dir()` and returns a path, and each run stores one new version of the artifact. |
 | `keep_versions` | an integer from 1 to 2147483647 | not set: keep every version | Only with `output="artifact"`. After a run stores a new version, versions beyond the newest `keep_versions` are deleted. See [Limit how many versions are kept](../how-to/limit-artifact-versions.md). |
 | `decimals` | `"float"` or `"exact"` | `"float"` | For every Python asset, table or artifact. `"float"`: a SQL decimal column of an input table reaches the function as a `Float64` column. `"exact"`: it arrives as a `Decimal` column of `decimal.Decimal` values. See [Python assets](../how-to/projects.md#python-assets). |
 
@@ -28,8 +28,10 @@ Options that do not apply to an artifact asset:
   artifact asset; remove it` (or `columns does not apply ...`). A deploy says `argument
   'materialize' does not apply to an artifact asset; remove it` (or `'columns'`), naming the file
   and line.
-- `incremental_key` is not an `@asset` argument at all (it is a SQL front-matter key), so a deploy
-  refuses it as `unknown argument 'incremental_key'`.
+- `write`, `key` and `watermark` are refused the same way (`argument 'write' does not apply to an
+  artifact asset; remove it`), except `write="replace"` and `key=[]`, which change nothing: each
+  run stores a new version of the artifact. `incremental_key` is not an `@asset` argument at all,
+  so a deploy refuses it as `unknown argument 'incremental_key'`.
 - `keep_versions` on an asset without `output="artifact"` is refused. The decorator raises
   `keep_versions applies only to an asset with output="artifact"`. A deploy says `argument
   'keep_versions' applies only to an asset with output="artifact"; remove it or set

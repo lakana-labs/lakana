@@ -9,6 +9,7 @@ from lakana_core.projects.manifest import (
     entry_decimals,
     entry_keep_versions,
     entry_output,
+    entry_write,
     manifest_assets,
     manifest_jobs,
 )
@@ -20,10 +21,12 @@ _MATERIALIZATION_KEYS = ("materialize", "write_mode", "incremental_key", "evolve
 def _materialization(entry: dict[str, Any]) -> tuple[object, ...]:
     """Collect what decides how an asset is materialized.
 
-    `output`, `keep_versions` and `decimals` are read through the manifest readers, not
-    with `get`: an entry deployed before manifest version 3 lacks the keys
-    and reads as "table, keep all, float decimals", exactly like a version 3 table entry, so
-    upgrading the platform alone is not a change.
+    `output`, `keep_versions`, `decimals` and the write model (`write`, `key`, `watermark`) are
+    read through the manifest readers, not with `get`: an entry deployed before manifest
+    version 3 lacks the keys and reads as "table, keep all, float decimals", exactly like a
+    version 3 table entry, and one from before `write` reads its write model from
+    `materialize`, so upgrading the platform alone is not a change. A changed write mode or key
+    is a change of how the table is written.
 
     Parameters
     ----------
@@ -40,6 +43,7 @@ def _materialization(entry: dict[str, Any]) -> tuple[object, ...]:
         entry_output(entry),
         entry_keep_versions(entry),
         entry_decimals(entry),
+        entry_write(entry),
     )
 
 
@@ -93,7 +97,7 @@ class DeployDiff:
     adopted
         New in this manifest; the table exists but no project version produces it.
     materialization_changed
-        Materialization, write mode, incremental key or evolve flag changed.
+        Materialization, write mode, merge key, watermark or evolve flag changed.
     sql_changed
         Normalized SQL changed.
     metadata_changed
@@ -105,6 +109,10 @@ class DeployDiff:
     jobs_changed
         Jobs in both whose selection, cron, time zone or notification changed, each as
         ``name (what, ...)``.
+    hints
+        Advice about how the new manifest's assets are written (an older spelling), each as
+        ``table: text``; not a change, so not counted. The deploy adds them, not
+        `diff_manifests`.
     """
 
     added: tuple[str, ...] = ()
@@ -116,6 +124,7 @@ class DeployDiff:
     jobs_added: tuple[str, ...] = ()
     jobs_removed: tuple[str, ...] = ()
     jobs_changed: tuple[str, ...] = ()
+    hints: tuple[str, ...] = ()
 
     def to_json(self) -> dict[str, list[str]]:
         """Serialize for `deploy_runs.diff_json`.
@@ -133,9 +142,13 @@ class DeployDiff:
         Returns
         -------
         dict
-            Category → count.
+            Category → count; `hints` are advice, not a change, and are left out.
         """
-        return {field.name: len(getattr(self, field.name)) for field in fields(self)}
+        return {
+            field.name: len(getattr(self, field.name))
+            for field in fields(self)
+            if field.name != "hints"
+        }
 
     @classmethod
     def from_json(cls, data: dict[str, Any]) -> DeployDiff:

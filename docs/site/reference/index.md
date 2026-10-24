@@ -10,6 +10,7 @@ Pages:
 - [CI trust rules and CI tokens](ci-trust-rules.md): which CI jobs may deploy with their OIDC ID token, the exchange, what a CI token may do, refusals, commands, SDK, routes and audit events.
 - [Checks](checks.md): the files, the keys, every refusal at deploy, the outcomes, commands, routes, permissions and audit events of data quality checks.
 - [Descriptions](descriptions.md): the two sources of a table's and a column's description, commands, SDK, REST routes, rights and audit events.
+- [Merging rows into a table](merge.md): the key, the counts, the first merge, the command, the SDK, the REST route, who may merge, every refusal, the audit event and the limits.
 - [Table health](table-health.md): the numbers of a table's snapshot, its last maintenance, the newest result of each check and who reads it; the fields, the rules, the settings, commands, SDK and routes.
 - [Search](search.md): what is matched, the ranking, who sees what, the route, the command, the SDK and how the columns of existing tables are filled in.
 

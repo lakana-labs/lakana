@@ -8,6 +8,7 @@ import logging
 import pytest
 from test_projects_dag import make_asset
 
+from lakana_core.projects.asset_model import deploy_hints
 from lakana_core.projects.checks import ParsedCheck, read_manifest_checks
 from lakana_core.projects.dag import build_graph
 from lakana_core.projects.frontmatter import AssetMetadata
@@ -18,6 +19,7 @@ from lakana_core.projects.manifest import (
     MANIFEST_VERSION,
     NOTIFY_VERSION,
     VERSION_WITHOUT_CHECKS,
+    WRITES_VERSION,
     EntryConnections,
     JobNotify,
     asset_kind,
@@ -28,6 +30,7 @@ from lakana_core.projects.manifest import (
     entry_inputs,
     entry_keep_versions,
     entry_output,
+    entry_write,
     job_notify,
     manifest_artifacts,
     manifest_assets,
@@ -137,6 +140,9 @@ def test_manifest_pins_every_field() -> None:
                 "first_write_mode": "create",
                 "incremental_key": "ts",
                 "evolve_schema": True,
+                "write": "append",
+                "key": [],
+                "watermark": "ts",
                 "retries": 1,
                 "retry_delay_seconds": 10,
                 "timeout_seconds": 60,
@@ -523,7 +529,7 @@ def test_a_python_entry_records_decimals_and_the_manifest_version_is_unchanged(
     asset = dataclasses.replace(_python_asset(), decimals=decimals)
     manifest = build_manifest([asset], build_graph([asset]), ResolvedProjectConfig())
     assert manifest["version"] == VERSION_WITHOUT_CHECKS == 3
-    assert MANIFEST_VERSION == 7
+    assert MANIFEST_VERSION == 8
     assert manifest["assets"][0]["decimals"] == decimals
 
 
@@ -703,7 +709,7 @@ def test_a_project_without_connections_keeps_its_version_and_one_with_any_is_ver
     assert plain["version"] == version
     assert plain["assets"][0]["connections"] == []
     declared = _versioned(yaml, checks=checks, connections=("crm-db", "files"))
-    assert declared["version"] == CONNECTIONS_VERSION == MANIFEST_VERSION == 7
+    assert declared["version"] == CONNECTIONS_VERSION == 7
     assert declared["assets"][0]["connections"] == ["crm-db", "files"]
     assert isinstance(declared["checks"], list)
     assert len(declared["checks"]) == (1 if checks else 0)
@@ -773,3 +779,147 @@ def test_read_entry_connections_names_every_string_and_says_whether_it_is_readab
 ) -> None:
     assert read_entry_connections(entry) == EntryConnections(names, readable)
     assert entry_connections(entry) == (names if readable else ())
+
+
+_OLD_SPELLING = AssetMetadata(materialize="incremental", incremental_key="ts")
+
+
+def test_the_old_incremental_spelling_is_recorded_as_append_and_keeps_its_version() -> None:
+    asset = make_asset("silver.customers", ("bronze.raw",), metadata=_OLD_SPELLING)
+    manifest = build_manifest([asset], build_graph([asset]), ResolvedProjectConfig())
+    assert manifest["version"] == VERSION_WITHOUT_CHECKS
+    (entry,) = manifest["assets"]
+    assert {key: entry[key] for key in _WRITE_KEYS} == {
+        "write": "append",
+        "key": [],
+        "watermark": "ts",
+        "materialize": "incremental",
+        "write_mode": "append",
+        "first_write_mode": "create",
+        "incremental_key": "ts",
+    }
+    assert deploy_hints([asset]) == (
+        "silver.customers: `materialize: incremental` is now written `write: append` with "
+        "`watermark: ts`; both work",
+    )
+
+
+_WRITE_KEYS = (
+    "write",
+    "key",
+    "watermark",
+    "materialize",
+    "write_mode",
+    "first_write_mode",
+    "incremental_key",
+)
+
+
+@pytest.mark.parametrize(
+    ("metadata", "expected"),
+    [
+        (
+            AssetMetadata(materialize="table", write="merge", key=("id",)),
+            {
+                "write": "merge",
+                "key": ["id"],
+                "watermark": None,
+                "materialize": "table",
+                "write_mode": "merge",
+                "first_write_mode": "create",
+                "incremental_key": None,
+            },
+        ),
+        (
+            AssetMetadata(materialize="table", write="merge", key=("id", "region"), watermark="u"),
+            {
+                "write": "merge",
+                "key": ["id", "region"],
+                "watermark": "u",
+                "materialize": "table",
+                "write_mode": "merge",
+                "first_write_mode": "create",
+                "incremental_key": "u",
+            },
+        ),
+        (
+            AssetMetadata(materialize="table", write="append", watermark="ts"),
+            {
+                "write": "append",
+                "key": [],
+                "watermark": "ts",
+                "materialize": "incremental",
+                "write_mode": "append",
+                "first_write_mode": "create",
+                "incremental_key": "ts",
+            },
+        ),
+    ],
+    ids=["merge", "merge-with-watermark", "append"],
+)
+def test_the_new_write_spelling_is_version_8_with_the_keys_older_readers_know(
+    metadata: AssetMetadata, expected: dict[str, object]
+) -> None:
+    asset = make_asset("silver.customers", ("bronze.raw",), metadata=metadata)
+    manifest = build_manifest([asset], build_graph([asset]), ResolvedProjectConfig())
+    assert manifest["version"] == WRITES_VERSION == MANIFEST_VERSION == 8
+    assert manifest["checks"] == []
+    (entry,) = manifest["assets"]
+    assert {key: entry[key] for key in _WRITE_KEYS} == expected
+    assert deploy_hints([asset]) == ()
+
+
+def test_a_replace_asset_records_replace_and_keeps_its_version() -> None:
+    asset = make_asset("gold.daily", ("bronze.raw",))
+    manifest = build_manifest([asset], build_graph([asset]), ResolvedProjectConfig())
+    assert manifest["version"] == VERSION_WITHOUT_CHECKS
+    (entry,) = manifest["assets"]
+    assert (entry["write"], entry["key"], entry["watermark"]) == ("replace", [], None)
+    explicit = make_asset(
+        "gold.daily", ("bronze.raw",), metadata=AssetMetadata(materialize="table", write="replace")
+    )
+    assert build_manifest([explicit], build_graph([explicit]), ResolvedProjectConfig()) == manifest
+
+
+def test_a_project_with_connections_and_new_writes_is_version_8() -> None:
+    asset = dataclasses.replace(
+        _python_asset(),
+        connections=("crm-db",),
+        metadata=AssetMetadata(materialize="table", write="merge", key=("id",)),
+    )
+    manifest = build_manifest([asset], build_graph([asset]), ResolvedProjectConfig())
+    assert manifest["version"] == 8
+    assert manifest["assets"][0]["connections"] == ["crm-db"]
+
+
+@pytest.mark.parametrize(
+    ("entry", "expected"),
+    [
+        ({"write": "merge", "key": ["id"], "watermark": "u"}, ("merge", ("id",), "u")),
+        ({"write": "append", "key": [], "watermark": "ts"}, ("append", (), "ts")),
+        ({"materialize": "incremental", "incremental_key": "ts"}, ("append", (), "ts")),
+        ({"materialize": "table", "write_mode": "replace"}, ("replace", (), None)),
+        ({"materialize": "view"}, ("replace", (), None)),
+        ({"write": "merge", "key": "id"}, ("merge", (), None)),
+        ({"write": "merge", "key": [1, "id"], "watermark": 3}, ("merge", (), None)),
+        ({"write": "upsert"}, ("upsert", (), None)),
+        ("not an entry", ("replace", (), None)),
+    ],
+)
+def test_entry_write_reads_new_and_old_entries(
+    entry: object, expected: tuple[str, tuple[str, ...], str | None]
+) -> None:
+    """An unknown `write` is returned as stored, so a reader refuses it instead of replacing."""
+    assert entry_write(entry) == expected
+
+
+def test_a_version_8_manifest_without_checks_reads_as_damaged() -> None:
+    """Version 8 always carries the list, so a missing one reads as a damaged manifest."""
+    asset = make_asset(
+        "silver.customers", metadata=AssetMetadata(materialize="table", write="merge", key=("id",))
+    )
+    manifest = build_manifest([asset], build_graph([asset]), ResolvedProjectConfig())
+    read = read_manifest_checks(manifest)
+    assert (read.specs, read.unplaced) == ((), False)
+    damaged = {key: value for key, value in manifest.items() if key != "checks"}
+    assert read_manifest_checks(damaged).unplaced is True

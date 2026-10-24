@@ -756,6 +756,9 @@ def test_a_manifest_without_checks_is_unchanged() -> None:
                 "first_write_mode": "create",
                 "incremental_key": "ts",
                 "evolve_schema": True,
+                "write": "append",
+                "key": [],
+                "watermark": "ts",
                 "retries": 1,
                 "retry_delay_seconds": 10,
                 "timeout_seconds": 60,
@@ -1373,3 +1376,23 @@ def test_keep_is_refused_for_a_materialize_that_comes_from_lakana_yaml(
     (issue,) = check_issues([check], assets, build_graph(assets))
 
     assert "it is a view" in issue.message
+
+
+def test_keep_on_a_check_of_an_append_asset_is_refused_as_for_the_old_spelling() -> None:
+    metadata = AssetMetadata(materialize="table", write="append", watermark="ts")
+    assets = [make_asset(_TABLE, ("raw.events",), metadata=metadata)]
+    assert _issues([_parsed(on_failure="keep")], assets) == [
+        f"{_PATH}: on_failure: keep cannot be used on `silver.station_temperatures`: it is an "
+        "incremental asset, and building it again only adds rows, so the rows that failed "
+        "would stay. Use `on_failure: block`: it takes the failed increment out again."
+    ]
+
+
+def test_keep_on_a_check_of_a_merge_asset_is_refused() -> None:
+    metadata = AssetMetadata(materialize="table", write="merge", key=("id",))
+    assets = [make_asset(_TABLE, ("raw.events",), metadata=metadata)]
+    assert _issues([_parsed(on_failure="keep")], assets) == [
+        f"{_PATH}: on_failure: keep cannot be used on `silver.station_temperatures`: it is "
+        "written with `write: merge`, and building it again never deletes a row, so the rows "
+        "that failed would stay. Use `on_failure: block`: it takes the failed merge out again."
+    ]

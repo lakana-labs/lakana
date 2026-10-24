@@ -56,6 +56,7 @@ from lakana_server.api.platform.schemas import (
     LineageNodeOut,
     LineageOut,
     MaintenanceIn,
+    MergeOut,
     QuerySubmitOut,
     ReplaceOut,
     TableCreate,
@@ -683,6 +684,51 @@ def _expected_snapshot(request: Request, value: str | None) -> ExpectedSnapshot 
     return parse_expected_snapshot(value)
 
 
+def _arrow_write_target(
+    request: Request,
+    env: str,
+    path: str,
+    name: str,
+    source: list[str] | None,
+    source_version: list[str] | None,
+    expected_snapshot_id: str | None,
+) -> tuple[ExpectedSnapshot | None, dict[str, int], TableRef]:
+    """Check the query parameters every Arrow write takes, before the body is read.
+
+    Parameters
+    ----------
+    request
+        The current request.
+    env
+        Environment name.
+    path
+        Dot-joined namespace path.
+    name
+        Table name.
+    source
+        The `source` parameters.
+    source_version
+        The `source_version` parameters.
+    expected_snapshot_id
+        The `expected_snapshot_id` parameter.
+
+    Returns
+    -------
+    tuple
+        The precondition, the source versions by name, and the table.
+
+    Raises
+    ------
+    ValidationError
+        If a parameter is malformed or repeated where it may not be.
+    """
+    expected = _expected_snapshot(request, expected_snapshot_id)
+    check_sources(source or [])
+    versions = parse_source_versions(source_version or [])
+    ref = TableRef(environment=env, namespace=NamespacePath.from_parts(path.split(".")), name=name)
+    return expected, versions, ref
+
+
 _T = TypeVar("_T")
 
 
@@ -697,10 +743,10 @@ async def _governed_arrow_write(
 ) -> _T:
     """Read, bound and decode an Arrow IPC body, then hand it to a catalog write.
 
-    Shared by `append_table_data` and `replace_table_data` so every body
-    control applies to both.
+    Shared by `append_table_data`, `replace_table_data` and `merge_table_data` so every body
+    control applies to all three.
 
-    `precheck` (`check_can_append`, or `check_can_replace` for a replace) runs
+    `precheck` (`check_can_append`, `check_can_replace` or `check_can_merge`) runs
     first — before the body is read at all — so an unauthorized or
     nonexistent-table request is refused
     without spending any time or memory on a body that was never going to
@@ -1750,10 +1796,9 @@ async def append_table_data(
     -----
     The body controls are shared with `replace_table_data` through `_governed_arrow_write`.
     """
-    expected = _expected_snapshot(request, expected_snapshot_id)
-    check_sources(source or [])
-    versions = parse_source_versions(source_version or [])
-    ref = TableRef(environment=env, namespace=NamespacePath.from_parts(path.split(".")), name=name)
+    expected, versions, ref = _arrow_write_target(
+        request, env, path, name, source, source_version, expected_snapshot_id
+    )
     result = await _governed_arrow_write(
         request,
         principal,
@@ -1851,10 +1896,9 @@ async def replace_table_data(
     -----
     The body controls are shared with `append_table_data` through `_governed_arrow_write`.
     """
-    expected = _expected_snapshot(request, expected_snapshot_id)
-    check_sources(source or [])
-    versions = parse_source_versions(source_version or [])
-    ref = TableRef(environment=env, namespace=NamespacePath.from_parts(path.split(".")), name=name)
+    expected, versions, ref = _arrow_write_target(
+        request, env, path, name, source, source_version, expected_snapshot_id
+    )
     result = await _governed_arrow_write(
         request,
         principal,
@@ -1877,4 +1921,118 @@ async def replace_table_data(
         files=result.files,
         snapshot_id=result.snapshot_id,
         schema_diff=None if result.schema_diff.is_empty() else result.schema_diff.to_json(),
+    )
+
+
+@router.post(
+    "/{name}/merge", response_model=MergeOut, responses=errors(403, 404, 409, 408, 413, 503)
+)
+@streams_its_own_body
+async def merge_table_data(
+    env: str,
+    path: str,
+    name: str,
+    request: Request,
+    source: list[str] | None = Query(default=None),
+    source_version: list[str] | None = Query(default=None),
+    expected_snapshot_id: str | None = Query(default=None, max_length=64),
+    key: list[str] = Query(min_length=1),
+    principal: PrincipalRef = Depends(get_write_principal),
+    catalog: CatalogService = Depends(get_catalog),
+    session: Session = Depends(get_session),
+) -> MergeOut:
+    """Merge rows into a table on a key.
+
+    Sends the rows of an Arrow IPC stream as the request body. A row whose `key` (repeatable,
+    required: one or more columns) matches a row of the table replaces it; any other row is
+    inserted; nothing is deleted. One snapshot: readers see the table before or after, never a
+    half. Takes the same `source`, `source_version` and `expected_snapshot_id` as the append,
+    and the same body limits. Needs `WRITE_TABLE` and `READ_TABLE` on the table (a merge
+    compares the rows with the table's), and `CREATE_TABLE` as well to create a missing table
+    with `expected_snapshot_id=none`; it is refused (422) while a row filter or column mask on
+    the table applies to the caller. Answers 404 when the table or a
+    source does not exist, 409 when `expected_snapshot_id` no longer matches, 413 for a body
+    over the server's limit, 408 when the body arrives too slowly, 503 when the server is busy
+    with other uploads (try again after `Retry-After`) and 422 for a key column the table or
+    the rows do not have, a null key, a key that repeats in the rows or matches two rows of the
+    table (counts only, never values), a key of several columns with more than 5,000 rows, or
+    rows that do not fit the table.
+
+    Parameters
+    ----------
+    env
+        Environment name.
+    path
+        Dot-joined namespace path.
+    name
+        Table name.
+    request
+        The current request.
+    key
+        The columns that identify a row; repeat the parameter for a key of several columns.
+    source
+        Dotted names of the tables the rows came from.
+    source_version
+        ``<version>:<dotted name>`` for each source that is an artifact, when the
+        task read a specific version; the edge records it instead of the current one.
+        A malformed value is a 422 before the body is read.
+    expected_snapshot_id
+        The table's current snapshot as the caller read it, or `none`; the merge commits only
+        while that still holds (409 otherwise). `none` also creates a missing table from the
+        rows.
+    principal
+        The authenticated caller, with any `?break_glass_reason=` attached.
+    catalog
+        The catalog service for this request.
+    session
+        The request's session.
+
+    Returns
+    -------
+    MergeOut
+        The committed snapshot's id and how many rows were inserted and updated.
+
+    Raises
+    ------
+    lakana_core.errors.ValidationError
+        Mapped to 422: a key column the table or the rows do not have, a null key, a key that
+        repeats in the rows or matches two rows of the table, a key of several columns with
+        more than 5,000 rows, rows that do not fit the table, a row filter or column mask that
+        applies to the caller, or any body check.
+    lakana_core.errors.NotFoundError
+        Mapped to 404: the table or a declared source does not exist.
+    lakana_core.errors.PermissionDenied
+        Mapped to 403.
+    lakana_core.errors.ConflictError
+        Mapped to 409: `expected_snapshot_id` no longer matches, or another writer committed
+        first.
+
+    Notes
+    -----
+    The body controls are shared with `append_table_data` through `_governed_arrow_write`.
+    """
+    expected, versions, ref = _arrow_write_target(
+        request, env, path, name, source, source_version, expected_snapshot_id
+    )
+    result = await _governed_arrow_write(
+        request,
+        principal,
+        catalog,
+        session,
+        ref,
+        lambda data: catalog.merge(
+            principal,
+            ref,
+            data,
+            key=key,
+            sources=source or [],
+            source_versions=versions,
+            expected_snapshot_id=expected,
+        ),
+        precheck=lambda: catalog.check_can_merge(principal, ref, expected_snapshot_id=expected),
+    )
+    return MergeOut(
+        snapshot_id=result.snapshot_id,
+        rows_inserted=result.rows_inserted,
+        rows_updated=result.rows_updated,
     )

@@ -24,6 +24,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from pydantic import ValidationError as ModelError
 
 from lakana_core.errors import ValidationError
+from lakana_core.secrets.forms import require_text
 
 
 class ConnectionKind(enum.StrEnum):
@@ -1178,8 +1179,11 @@ def _check_value(key: str, value: object) -> None:
     Raises
     ------
     ValidationError
-        For a value that is not text, is empty, or is larger than 64 KiB.
+        For a value that is not text (also one that cannot be written as UTF-8), is empty, or
+        is larger than 64 KiB.
     """
+    if isinstance(value, str):
+        require_text({key: value})
     if (
         not isinstance(value, str)
         or not value

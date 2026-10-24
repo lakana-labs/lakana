@@ -321,6 +321,7 @@ _NO_RESULT_CLAUSES: dict[WriteMode | None, str] = {
     WriteMode.CREATE: "wrote to a table",
     WriteMode.REPLACE: "wrote to a table",
     WriteMode.APPEND: "wrote to a table",
+    WriteMode.MERGE: "wrote to a table",
     WriteMode.VIEW: "created a view",
     WriteMode.MAINTAIN: "was a maintenance run",
 }

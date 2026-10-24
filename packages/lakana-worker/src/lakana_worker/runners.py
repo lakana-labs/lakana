@@ -88,7 +88,11 @@ _DRAIN_SECONDS = 2.0
 _SHA256 = re.compile(r"\A[0-9a-f]{64}\Z")
 
 _DESCRIPTION_VERSION = 2
-"""The task description's version: `lakana.runner.parse_description` accepts only this one."""
+"""The task description's version for an asset that replaces and declares no connection: a
+harness of the release before the write modes reads it."""
+_WRITES_DESCRIPTION_VERSION = 3
+"""The version that adds ``write``, ``key``, ``watermark`` and ``connections``; sent only to an
+asset that uses one of them (`lakana.runner.parse_description` reads 2 and 3)."""
 _DESCRIPTION_REFUSED = 2
 """The exit status with which the harness refuses a task description it cannot use."""
 _DESCRIPTION_MESSAGE = (
@@ -198,6 +202,23 @@ class PythonTask:
     python
         The Python version the task runs on, ``3.11`` to ``3.14``; DockerRunner picks the image
         by it.
+    write
+        ``replace``, ``append`` or ``merge``: how the harness writes the table.
+    key
+        The merge key's columns; empty unless `write` is ``merge``.
+    watermark_column
+        The asset's `watermark` column, if it has one.
+    watermark
+        The encoded watermark the worker read (``<type>:<value>``), or `None` when the table
+        has none yet.
+    connections
+        Each connection the asset declares to what the harness needs about it (its ``kind``).
+    table_exists
+        Whether the asset's table existed when the worker read it (one created by a first run
+        of zero rows has no snapshot and still exists).
+    hidden
+        Secret values the log redactor masks in the task's output. Left out of `repr` and never
+        sent to the harness.
     """
 
     code_dir: Path
@@ -218,6 +239,13 @@ class PythonTask:
     task_run_id: uuid.UUID | None = None
     environment_key: str | None = None
     python: str | None = None
+    write: str = "replace"
+    key: tuple[str, ...] = ()
+    watermark_column: str | None = None
+    watermark: str | None = None
+    connections: Mapping[str, Mapping[str, object]] = field(default_factory=dict)
+    table_exists: bool = False
+    hidden: tuple[str, ...] = field(default=(), repr=False)
 
 
 @dataclass(frozen=True)
@@ -456,18 +484,19 @@ def _read_record(path: Path, expected_output: str) -> dict[str, object] | None:
 
 
 def _clean(text: str, secrets_to_hide: list[str], limit: int) -> str:
-    """Make record text safe to store: printable, redacted, bounded.
+    """Make record text safe to store: redacted, printable, bounded.
 
-    Control, format, surrogate and private-use characters become ``?``
-    first, so a secret cannot be hidden from the redaction by splitting it
-    with one; the text is then redacted and only then cut.
+    The text is redacted as it was written first, so a secret that holds a character that is
+    not printable (a no-break space, a zero-width space, an escape) is still found. Control,
+    format, surrogate and private-use characters then become ``?`` (never deleted, which could
+    join the halves of a secret), and the text is redacted again and only then cut.
 
     Parameters
     ----------
     text
         Text from the result record.
     secrets_to_hide
-        The task token and its secret part.
+        The task token, its secret part and the forms of the connections' secrets.
     limit
         Most characters kept.
 
@@ -476,12 +505,32 @@ def _clean(text: str, secrets_to_hide: list[str], limit: int) -> str:
     str
         The cleaned text.
     """
-    printable = "".join(c if c.isprintable() or c in "\n\t" else "?" for c in text)
+    raw = _redacted(text.encode("utf-8", "surrogatepass"), secrets_to_hide)
+    written = raw.decode("utf-8", "surrogatepass")
+    printable = "".join(c if c.isprintable() or c in "\n\t" else "?" for c in written)
+    return _redacted(printable.encode("utf-8"), secrets_to_hide).decode("utf-8")[:limit]
+
+
+def _redacted(data: bytes, secrets_to_hide: list[str]) -> bytes:
+    """Mask every secret in one piece of text, as the log stream masks it.
+
+    Parameters
+    ----------
+    data
+        The text as bytes.
+    secrets_to_hide
+        The values to mask.
+
+    Returns
+    -------
+    bytes
+        The text with each value replaced by ``***``.
+    """
     redacted: list[bytes] = []
-    redactor = OutputRedactor(secrets_to_hide, redacted.append, max_line=len(printable) * 4 + 1)
-    redactor.feed(printable.encode("utf-8"))
+    redactor = OutputRedactor(secrets_to_hide, redacted.append, max_line=len(data) + 1)
+    redactor.feed(data)
     redactor.close()
-    return b"".join(redacted).decode("utf-8")[:limit]
+    return b"".join(redacted)
 
 
 def _leader_exited(process: subprocess.Popen[bytes]) -> bool:
@@ -671,28 +720,42 @@ def task_description(
     Returns
     -------
     bytes
-        The JSON document, version `_DESCRIPTION_VERSION`.
+        The JSON document: version `_WRITES_DESCRIPTION_VERSION` for an asset that appends,
+        merges or declares a connection, else version `_DESCRIPTION_VERSION`, unchanged, so a
+        harness of the previous release still runs every other asset.
     """
-    return json.dumps(
-        {
-            "version": _DESCRIPTION_VERSION,
-            "server_url": task.server_url,
-            "token": task.token,
-            "environment": task.environment,
-            "asset_path": task.asset_path,
-            "table": task.table,
-            "inputs": dict(task.inputs),
-            "expected_snapshot_id": task.expected_snapshot_id,
-            "result_path": result_path,
-            "request_timeout_seconds": float(task.timeout_seconds),
-            "parent_pid": parent_pid,
-            "output": task.output,
-            "input_kinds": {p: task.input_kinds.get(p, "table") for p in task.inputs},
-            "input_versions": dict(task.input_versions),
-            "decimals": task.decimals,
-            "work_dir": work_dir,
+    document: dict[str, object] = {
+        "version": _DESCRIPTION_VERSION,
+        "server_url": task.server_url,
+        "token": task.token,
+        "environment": task.environment,
+        "asset_path": task.asset_path,
+        "table": task.table,
+        "inputs": dict(task.inputs),
+        "expected_snapshot_id": task.expected_snapshot_id,
+        "result_path": result_path,
+        "request_timeout_seconds": float(task.timeout_seconds),
+        "parent_pid": parent_pid,
+        "output": task.output,
+        "input_kinds": {p: task.input_kinds.get(p, "table") for p in task.inputs},
+        "input_versions": dict(task.input_versions),
+        "decimals": task.decimals,
+        "work_dir": work_dir,
+    }
+    if task.write != "replace" or task.connections:
+        document["version"] = _WRITES_DESCRIPTION_VERSION
+        document["write"] = task.write
+        document["key"] = list(task.key)
+        document["watermark"] = (
+            None
+            if task.watermark_column is None
+            else {"column": task.watermark_column, "value": task.watermark}
+        )
+        document["table_exists"] = task.table_exists
+        document["connections"] = {
+            name: dict(routing) for name, routing in task.connections.items()
         }
-    ).encode("utf-8")
+    return json.dumps(document).encode("utf-8")
 
 
 def _has_module(venv: Path, module: str) -> bool:
@@ -952,7 +1015,7 @@ class LocalProcessRunner:
                 retryable=False,
                 failure_code=FailureCode.BUILD_FAILED,
             )
-        secrets_to_hide = token_secrets(task.token)
+        secrets_to_hide = token_secrets(task.token) + list(task.hidden)
         document = task_description(
             task,
             result_path=str(result_path),
@@ -1360,7 +1423,7 @@ class DockerRunner:
                 error_message=f"could not prepare the task directory: {exc.strerror or exc}",
                 failure_code=FailureCode.INTERNAL,
             )
-        secrets_to_hide = token_secrets(task.token)
+        secrets_to_hide = token_secrets(task.token) + list(task.hidden)
         if stop.is_set():  # a cancel, lost lease or drain before the container exists
             return _outcome_from(
                 None,

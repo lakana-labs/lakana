@@ -254,6 +254,10 @@ class TaskOutcome:
     failure_code
         Why the attempt failed, for a failure; `None` for a success and a release. A failure
         without one is recorded as ``internal``.
+    wrote_nothing
+        A successful build that committed nothing (an append or merge whose source had nothing
+        new, a merge that changed no row): a failed check then has nothing of this run to set
+        back, which is not the same as a write whose record is missing.
     """
 
     kind: FailureKind | None
@@ -271,3 +275,4 @@ class TaskOutcome:
     built_snapshot_id: int | None = None
     in_transaction: Callable[[Session], None] | None = None
     failure_code: FailureCode | None = None
+    wrote_nothing: bool = False

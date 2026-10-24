@@ -30,7 +30,12 @@ from lakana import assets as sdk_assets
 from lakana import runner
 from lakana.assets import ASSET_ATTRIBUTE
 from lakana_core.connections.kinds import NAME
-from lakana_core.projects.asset_model import MAX_CONNECTIONS, MAX_KEEP_VERSIONS, ParsedAsset
+from lakana_core.projects.asset_model import (
+    MAX_CONNECTIONS,
+    MAX_KEEP_VERSIONS,
+    WRITE_CHOICES,
+    ParsedAsset,
+)
 from lakana_core.projects.deploys import ARTIFACT_PARAMETER, _artifact_parameter_issues
 from lakana_core.projects.discovery import DiscoveredAsset
 from lakana_core.projects.project_config import AssetDefaults, normalize_source
@@ -295,6 +300,30 @@ _ARGUMENT_CASES: dict[str, str] = {
     "connections-longest": 'connections=["' + "a" * 63 + '"]',
     "connections-trailing-newline": 'connections=["crm-db\\n"]',
     "connections-underscore": 'connections=["crm_db"]',
+    "write-replace": 'write="replace"',
+    "write-append": 'write="append", watermark="ts"',
+    "write-merge": 'write="merge", key=["id"]',
+    "write-merge-composite-with-watermark": 'write="merge", key=["id", "region"], watermark="u"',
+    "write-other-string": 'write="upsert"',
+    "write-number": "write=3",
+    "write-none": "write=None",
+    "write-append-without-watermark": 'write="append"',
+    "write-append-with-key": 'write="append", watermark="ts", key=["id"]',
+    "write-merge-without-key": 'write="merge"',
+    "write-merge-empty-key": 'write="merge", key=[]',
+    "write-replace-with-key": 'write="replace", key=["id"]',
+    "watermark-alone": 'watermark="ts"',
+    "key-alone": 'key=["id"]',
+    "key-repeated": 'write="merge", key=["id", "id"]',
+    "key-a-string": 'write="merge", key="id"',
+    "key-tuple": 'write="merge", key=("id",)',
+    "key-unsafe": 'write="merge", key=["i\\u200bd"]',
+    "watermark-unsafe": 'write="append", watermark="t\\u2028s"',
+    "watermark-a-list": "write=\"append\", watermark=['ts']",
+    "write-on-artifact": 'output="artifact", write="append", watermark="ts"',
+    "key-on-artifact": 'output="artifact", key=["id"]',
+    "replace-and-empty-key-on-artifact": 'output="artifact", write="replace", key=[]',
+    "materialize-incremental": 'materialize="incremental"',
 }
 
 
@@ -329,6 +358,33 @@ def test_the_connection_rules_are_the_same_in_core_and_the_sdk() -> None:
     assert declared.connections == ("crm-db",)
 
 
+def test_the_write_choices_and_defaults_are_the_same_in_core_and_the_sdk() -> None:
+    assert sdk_assets.WRITE_CHOICES == WRITE_CHOICES == ("replace", "append", "merge")
+    fields = sdk_assets.AssetSpec.__dataclass_fields__
+    assert (fields["write"].default, fields["key"].default, fields["watermark"].default) == (
+        "replace",
+        (),
+        None,
+    )
+    merged = _discovered(
+        _PLAIN.replace("@asset()", '@asset(write="merge", key=["id"], watermark="u")')
+    )
+    assert merged is not None
+    assert (merged.metadata.write, merged.metadata.key, merged.metadata.watermark) == (
+        "merge",
+        ("id",),
+        "u",
+    )
+
+
+def test_the_decorator_records_the_write_model_on_its_spec() -> None:
+    namespace: dict[str, object] = {"__name__": "parity"}
+    source = _PLAIN.replace("@asset()", '@asset(write="merge", key=["id", "region"])')
+    exec(compile(source, _PATH, "exec"), namespace)  # nosec B102 -- the test's own literal
+    spec = getattr(namespace["scores"], ASSET_ATTRIBUTE)
+    assert (spec.write, spec.key, spec.watermark) == ("merge", ("id", "region"), None)
+
+
 def test_the_retention_bound_is_the_same_in_core_and_the_sdk() -> None:
     assert MAX_KEEP_VERSIONS == sdk_assets.MAX_KEEP_VERSIONS == 2**31 - 1
 
@@ -346,7 +402,7 @@ def test_the_decimals_modes_and_default_are_the_same_in_core_and_the_sdk() -> No
 
 @pytest.mark.parametrize("name", sorted(_ARGUMENT_CASES))
 def test_deploy_and_the_decorator_accept_and_refuse_the_same_arguments(name: str) -> None:
-    """The rules for `output` and `keep_versions` exist twice (core, SDK); they must agree."""
+    """The rules for the decorator's arguments exist twice (core, SDK); they must agree."""
     source = _PLAIN.replace("@asset()", f"@asset({_ARGUMENT_CASES[name]})")
     deploy_accepts = _discovered(source) is not None
     refusal = _call(source)

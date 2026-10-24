@@ -149,6 +149,13 @@ def _bound_task_run_id(p: PrincipalRef) -> uuid.UUID | None:
     return scope.bound.task_run_id if scope is not None and scope.bound is not None else None
 
 
+MERGE_IS_NOT_A_QUERY_MODE = (
+    "merge is written by assets (`write: merge`) and by `client.tables.merge`; a query writes "
+    "with create, replace or append"
+)
+"""Why a write run refuses `merge`: the key and the checks belong to an asset or a merge call."""
+
+
 @dataclass(frozen=True)
 class WriteTarget:
     """Where a write run puts its result.
@@ -176,12 +183,14 @@ class WriteTarget:
         Raises
         ------
         ValidationError
-            If `mode` is `MAINTAIN`, `incremental_key` is set for a mode
-            other than `APPEND`, or `evolve_schema` for a mode other than
-            `REPLACE`/`APPEND`.
+            If `mode` is `MAINTAIN` or `MERGE` (assets and `tables.merge` merge, a query
+            does not), `incremental_key` is set for a mode other than `APPEND`, or
+            `evolve_schema` for a mode other than `REPLACE`/`APPEND`.
         """
         if self.mode is WriteMode.MAINTAIN:
             raise ValidationError("maintain is not a query target mode.")
+        if self.mode is WriteMode.MERGE:
+            raise ValidationError(MERGE_IS_NOT_A_QUERY_MODE)
         if self.incremental_key is not None and self.mode is not WriteMode.APPEND:
             raise ValidationError("incremental_key applies to mode append only.")
         if self.evolve_schema and self.mode not in (WriteMode.REPLACE, WriteMode.APPEND):

@@ -1268,3 +1268,36 @@ def test_no_wait_line_with_json_output(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.stderr
     assert "Waiting:" not in result.stderr
     assert json.loads(result.stdout)["status"] == "succeeded"
+
+
+_HINT = (
+    "customers: `materialize: incremental` is now written `write: append` with "
+    "`watermark: ts`; both work"
+)
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_a_deploy_prints_each_hint_after_the_diff_and_never_as_a_changed_table(
+    tmp_path: Path, dry_run: bool
+) -> None:
+    diff = {"added": ["silver.clean"], "hints": [_HINT]}
+    api = _api(kind="dry_run" if dry_run else "deploy", diff=diff)
+    flags = ["--dry-run"] if dry_run else []
+    result = invoke(
+        make_state(tmp_path, api), "deploy", "analytics", "--env", "dev", *flags, env=_CI
+    )
+    assert result.exit_code == 0, result.output
+    assert f"hint: {_HINT}" in _plain(result.stderr)
+    out = _plain(result.stdout)
+    assert "added silver.clean" in out
+    assert "hints" not in out
+    alone = invoke(
+        make_state(tmp_path, _api(diff={"added": [], "hints": [_HINT]})),
+        "deploy",
+        "analytics",
+        "--env",
+        "dev",
+        env=_CI,
+    )
+    assert "No changes." in _plain(alone.stdout)
+    assert f"hint: {_HINT}" in _plain(alone.stderr)

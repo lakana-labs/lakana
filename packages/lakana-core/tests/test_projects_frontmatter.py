@@ -134,7 +134,10 @@ def test_merge_takes_front_matter_over_defaults_and_defaults_materialize() -> No
     [
         (AssetMetadata(materialize="incremental"), "incremental_key is required"),
         (AssetMetadata(materialize="table", incremental_key="ts"), "only with materialize"),
-        (AssetMetadata(materialize="view", evolve_schema=True), "evolve_schema is allowed only"),
+        (
+            AssetMetadata(materialize="view", evolve_schema=True),
+            "`evolve_schema` works with `write: append` only",
+        ),
     ],
 )
 def test_inconsistent_metadata_is_reported(metadata: AssetMetadata, message: str) -> None:
@@ -309,3 +312,81 @@ def test_split_front_matter_returns_the_raw_mapping() -> None:
 def test_split_front_matter_without_a_block_returns_the_whole_text() -> None:
     split = split_front_matter("SELECT 1\n", path=_PATH)
     assert (split.raw, split.body, split.body_line, split.block_line) == ({}, "SELECT 1\n", 1, None)
+
+
+def _merged(block: str) -> AssetMetadata:
+    """Parse a block and apply empty defaults, as deploy does.
+
+    Parameters
+    ----------
+    block
+        The block's YAML lines.
+
+    Returns
+    -------
+    AssetMetadata
+        The merged metadata.
+    """
+    front = parse_front_matter(f"/* lakana\n{block}*/\nSELECT 1 AS id", path=_PATH)
+    return merge_metadata(AssetDefaults(), front.metadata)
+
+
+def test_a_merge_block_parses() -> None:
+    metadata = _merged("write: merge\nkey: [id, region]\nwatermark: updated_at\n")
+    assert (metadata.write, metadata.key, metadata.watermark) == (
+        "merge",
+        ("id", "region"),
+        "updated_at",
+    )
+    assert consistency_issues(metadata, path=_PATH, line=1) == []
+    appended = _merged("write: append\nwatermark: ts\nevolve_schema: true\n")
+    assert consistency_issues(appended, path=_PATH, line=1) == []
+
+
+@pytest.mark.parametrize(
+    ("block", "message"),
+    [
+        ("materialize: view\nwrite: replace\n", "`materialize: view` cannot take `write:`"),
+        (
+            "materialize: incremental\nincremental_key: ts\nwrite: append\nwatermark: ts\n",
+            "use one: `write: append` with `watermark:` replaces `materialize: incremental`",
+        ),
+        (
+            "write: merge\nkey: [id]\nevolve_schema: true\n",
+            "`evolve_schema` works with `write: append` only",
+        ),
+        (
+            "write: append\n",
+            "`write: append` needs `watermark:` — the column whose largest value the next run "
+            "starts after",
+        ),
+        ("write: merge\n", "`write: merge` needs `key:` — the columns that identify a row"),
+        ("key: [id]\n", "`write: replace` takes neither `key:` nor `watermark:`"),
+        ("write: merge\nkey: [id, id]\n", "key column `id` is listed twice"),
+    ],
+)
+def test_a_wrong_write_model_in_a_block_is_reported(block: str, message: str) -> None:
+    issues = consistency_issues(_merged(block), path=_PATH, line=1)
+    assert [(issue.path, issue.line, issue.message) for issue in issues] == [(_PATH, 1, message)]
+
+
+@pytest.mark.parametrize(
+    ("block", "message"),
+    [
+        ("write: upsert\n", "write: must be one of replace, append, merge; got 'upsert'"),
+        (
+            'write: merge\nkey: ["i\\u200bd"]\n',
+            "key: a key column must not contain a control, format or surrogate character or a "
+            "line separator",
+        ),
+        (
+            'write: append\nwatermark: "t\\u2028s"\n',
+            "watermark: watermark must not contain a control, format or surrogate character or "
+            "a line separator",
+        ),
+    ],
+)
+def test_a_wrong_write_value_in_a_block_is_refused(block: str, message: str) -> None:
+    with pytest.raises(ProjectValidationError) as caught:
+        _merged(block)
+    assert [issue.message for issue in caught.value.issues] == [message]

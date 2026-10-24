@@ -5,9 +5,9 @@ an object store or an HTTPS API. It has a name, a kind, an address (where the so
 (how to reach it) and at most one secret (the password, token or key). Each environment has its
 own connections, as it has its own secrets, so `crm-db` in `dev` and `crm-db` in `prod` can point
 at different servers. An asset names the connections it reads from in
-`@asset(connections=[...])`; a deploy is refused while the environment lacks one of them.
-Reading a connection from inside a task arrives in a later release: in this one, connections are
-created, declared by assets and checked at deploy.
+`@asset(connections=[...])`; a deploy is refused while the environment lacks one of them. Inside
+the asset's task, `lakana.ingest.connections.get` reads a declared connection with its secret
+([How a task gets its credential](#how-a-task-gets-its-credential)).
 
 Creating or changing a connection reaches no source: it only stores where the source is. The
 connection's name and kind never change; to change them, delete it and create it again. The
@@ -72,8 +72,9 @@ What each setting means, and its default:
 | List and show connections | `READ_ENVIRONMENT` on the environment | every role on it |
 
 A task cannot list or show connections, whatever its token's rights: a request with a task token
-is refused (403) without naming any connection. Reading a connection from inside a task arrives
-in a later release.
+is refused (403) without naming any connection. A running task reads only the connections its
+asset declares, one by one
+([How a task gets its credential](#how-a-task-gets-its-credential)).
 
 A connection's secret is given one of three ways, and who may give it depends on the way:
 
@@ -212,6 +213,7 @@ lakana audit list --kind connection --env dev
 | `PATCH /api/v1/environments/{env}/connections/{name}` | `MANAGE_CONNECTION`, and `MANAGE_SECRET` as above | the connection |
 | `DELETE /api/v1/environments/{env}/connections/{name}` | `MANAGE_CONNECTION` | 204; 409 while a deployed project version declares it |
 | `GET /api/v1/audit-events?kind=connection` | `READ_AUDIT_LOG` | every `CONNECTION_*` event; combines with the other filters |
+| `GET /api/v1/tasks/self/connections/{name}` | the token of a running task whose asset declares `name` | `{"name", "kind", "address", "settings", "endpoints": [{"host", "port", "role"}], "secret"}`, with `Cache-Control: no-store`; 403 otherwise (below), 401 for a token whose attempt has ended or was claimed again. For the helpers of `lakana.ingest`; the SDK's `client.task_connections.get(name)` returns the body as it is |
 
 The body of a create; `secret_values` and `secret` are both optional, and at most one is given:
 
@@ -235,7 +237,8 @@ removed), `secret`, `secret_values`, and `clear`, a list of `secret` and setting
 The record, in every answer: `name`, `kind`, `address` and `settings` (with defaults filled in,
 `ca_certificate` as its fingerprint), `secret` (the secret's name, or `null`), `declared_by` (a
 list of `{"repository": ..., "asset": ...}`), `created_by` (a principal's name), `created_at` and
-`updated_at`. No answer holds a secret's value.
+`updated_at`. No answer of these routes holds a secret's value; only the task route above does,
+for the running task itself.
 
 ## SDK
 
@@ -263,6 +266,69 @@ events = client.audit_events.list(kind="connection")
 
 `update` takes `address`, `settings`, `secret`, `secret_values` and `clear` (a list of names).
 
+## How a task gets its credential
+
+An asset reads a connection it declares with `lakana.ingest.connections.get`:
+
+```python
+import polars as pl
+from lakana import asset
+from lakana.ingest import connections
+
+
+@asset(connections=["crm-db"])
+def customers() -> pl.DataFrame:
+    crm = connections.get("crm-db")
+    host, user = crm.address["host"], crm.settings["user"]
+    password = crm.secret["password"]  # crm.secret is None for a connection without a secret
+    ...
+```
+
+- **Fetched at run time, with the task's own token.** The first `get` of an attempt asks the
+  server for the connection (`GET /api/v1/tasks/self/connections/{name}`); a second `get` of the
+  same name in the same attempt asks nothing. The server answers only the token of a task that is
+  running now, in its own environment, for a name its deployed asset declares in
+  `@asset(connections=[...])`. Any other token is refused, and so is a name the asset does not
+  declare, whether or not a connection of that name exists.
+- **In memory only.** The credential is kept in the task's memory for the attempt and never put
+  in an environment variable, a file, the task's log, an error message, lineage or the deploy
+  record. Each value of the secret is shown as `***` in what the task prints, in its failure
+  message and in its trace: as it is, and as it appears in a `repr`, in JSON, URL-encoded
+  (`quote`, `quote_plus`) and as the `repr` of its bytes, and a JSON form once more inside a
+  `repr`, as bytes or JSON-encoded again (a JSON body printed as it is sent). `repr(crm.secret)` shows
+  `{'password': '***'}`. What is not hidden: a value or form shorter than 4 characters, any
+  other transformation of a value (such as base64 or a part of it), and a value your code
+  derives from the secret (such as an OAuth2 access token), unless a `lakana.ingest` helper
+  registers it.
+- **A worker hides only what it can decrypt.** When an attempt starts, the worker reads the
+  secrets of the connections the asset declares. A worker without the instance's secrets master
+  key (`LAKANA_SECRETS__MASTER_KEY`, the server's value) cannot hide them in the task's log, so
+  it does not start an attempt whose declared connections have a secret then: the attempt fails
+  for good, naming the connection and the setting. A secret value must be text: one that
+  cannot be written as UTF-8 is refused when it is created or set again (422, naming its key).
+- **A rotated secret is used by the next attempt.** Nothing is kept from one attempt to the
+  next, so `lakana connection update crm-db --password-stdin` takes effect when the next attempt
+  starts, without a deploy. The worker reads the secrets to hide when the attempt starts. A
+  secret added, bound or rotated while an attempt runs, and the secret of a declared connection
+  created after the attempt started, is still hidden by the task in its failure message and
+  trace, but may appear unhidden in the log the worker captures if the task prints it; on a
+  worker without the master key, such a secret is not caught by the check at the start either.
+  Change secrets between runs.
+- **Only the secret bound to the connection.** A secret that is revoked, or bound to anything
+  but this connection, counts as none: `crm.secret` is `None`.
+- **Every fetch is in the audit log**, as `CONNECTION_CREDENTIAL_FETCHED`; refusals are
+  `CONNECTION_CREDENTIAL_REFUSED` (`lakana audit list --kind connection`). Refusals are
+  rate-limited per principal (`LAKANA_DENIAL_AUDIT__PER_PRINCIPAL_PER_MINUTE`): the first of each
+  reason is always recorded, the ones past the limit are counted in the next recorded event and
+  named in the server's log. No event holds a value.
+- **Deployed code sees its declared credentials.** Code you deploy can read the secret of every
+  connection its asset declares and send it to any host the task can reach. Review an asset's
+  `connections` as you review its code.
+
+`connections.get` returns `name`, `kind`, `address`, `settings` (a `ca_certificate` in full),
+`endpoints` (each `host`, `port` and `role`, `service` or `token`) and `secret`. `proxy_url`,
+`relay_address` and `root_path` are `None` in this release.
+
 ## Lineage
 
 A table or artifact written by an asset that declares connections shows each connection as a
@@ -285,6 +351,8 @@ it counted among the hidden nodes, without its name.
 | `CONNECTION_CREATED` | A connection was created. | `name`, `kind`, `address`, `secret` (its name) |
 | `CONNECTION_UPDATED` | A connection changed. | `name`, `changed` (such as `address.host`, `settings.tls`, `secret`), `address`, `secret` |
 | `CONNECTION_DELETED` | A connection was deleted. | `name`, `kind` |
+| `CONNECTION_CREDENTIAL_FETCHED` | A running task fetched a connection it declares. | `connection`, `environment`, `repository`, `asset`, `run_id`, `task_run_id`, `attempt`; `reason` (`secret_not_bound` or `secret_unreadable`) when it got no secret |
+| `CONNECTION_CREDENTIAL_REFUSED` | A fetch was refused. Recorded at most `LAKANA_DENIAL_AUDIT__PER_PRINCIPAL_PER_MINUTE` times a minute per principal, the first of each reason always; the others are counted in `suppressed` of the next one recorded. | the same fields as far as they are known, and `reason`: `not_bound`, `not_declared` or `not_in_environment` |
 | `SECRET_CREATED`, `SECRET_BOUND` | New values created the connection's secret, or a secret was bound to a connection or let go of it. | `use` is `connection`; `url` of `SECRET_BOUND` is every `host:port` the connection sends the secret to, such as `api.example.com:443, login.example.org:443` for an `oauth2` connection whose token URL is on another host |
 
 No event holds a secret's value or a CA certificate. `lakana audit list --kind connection` lists
@@ -304,3 +372,8 @@ every `CONNECTION_*` event.
 | ``Secret 'crm-pw' of environment 'prod' is not bound to connection 'crm-db'. Ask someone who may manage secrets in 'prod' to bind it to this connection: lakana secret bind crm-pw --env prod --connection crm-db (the bind also makes it the secret the connection uses)`` | An administrator runs the command; nothing else is needed. Or give the connection new values with `--password-stdin`. |
 | ``This change of connection 'crm-db' (its address, TLS, CA certificate or how it sends its secret) could send secret 'crm-db-connection' of environment 'prod' somewhere new. ...`` | Give new values in the same command (`--password-stdin` or `--values-stdin`), or ask an administrator to make the change. |
 | ``address.base_url ...`` (or another field) | The message names the field and its rule; fix that value. |
+| ``the value of `password` is not valid text (it cannot be written as UTF-8); give it again as plain text`` | The value holds a character that is not text (a lone surrogate, such as `\ud800` in JSON). Give the value again, as plain text. |
+| ``connection `crm-db` is not declared by asset `bronze.customers` `` (403) | The task asked for a connection its deployed asset does not declare. Add it to `@asset(connections=[...])` and deploy. |
+| ``connection `crm-db` is not in environment `dev` `` (403) | The asset declares it, but the task's environment has no connection of that name (it was deleted since the deploy). Create it: `lakana connection create crm-db --env dev ...`. |
+| ``only a running task can fetch a connection`` (403) | Only a task's own token, while the task runs, may fetch a credential. Read connections with `lakana connection show` instead; it never shows the secret. |
+| ``` `crm-db` is not declared by this asset: add it to @asset(connections=[...]) and deploy. ``` | `connections.get` was asked for a name the asset does not declare; nothing was sent. Add the name and deploy. This error is not retried. |

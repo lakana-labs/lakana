@@ -1,7 +1,9 @@
 # Manage secrets
 
 A secret holds credentials, such as the keys of a storage backend or a repository's token. Lakana
-stores it encrypted in its database, and no route, command or page returns its value again. This
+stores it encrypted in its database, and no route, command or page returns its value to a person
+again; only a running task gets the secret of a connection its asset declares
+([How a task gets its credential](../reference/connections.md#how-a-task-gets-its-credential)). This
 page is for the person who runs the instance. It shows which secrets are stored in an older format
 and how to bring them up to date.
 

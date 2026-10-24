@@ -428,7 +428,8 @@ class WriteTargetIn(BaseModel):
     table
         The target's dotted name.
     mode
-        `create`, `replace`, `append` or `view`.
+        `create`, `replace`, `append` or `view`. `merge` is accepted only to be refused with
+        what merges instead (an asset with `write: merge`, or `tables.merge`).
     incremental_key
         The key column, `append` only.
     evolve_schema
@@ -438,7 +439,7 @@ class WriteTargetIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     table: str = Field(min_length=1, max_length=1024)
-    mode: Literal["create", "replace", "append", "view"]
+    mode: Literal["create", "replace", "append", "view", "merge"]
     incremental_key: str | None = Field(default=None, max_length=255)
     evolve_schema: bool = False
 
@@ -743,6 +744,25 @@ class AppendOut(BaseModel):
     rows: int
     files: int
     snapshot_id: int | None
+
+
+class MergeOut(BaseModel):
+    """Response body for a governed Arrow merge.
+
+    Parameters
+    ----------
+    snapshot_id
+        The snapshot the merge committed, or `None` when it changed nothing (no rows, or every
+        row equal to the table's).
+    rows_inserted
+        Rows whose key the table did not have.
+    rows_updated
+        Rows whose key matched and whose values changed.
+    """
+
+    snapshot_id: int | None
+    rows_inserted: int
+    rows_updated: int
 
 
 class ReplaceOut(BaseModel):
@@ -2267,6 +2287,55 @@ class ConnectionPage(BaseModel):
 
     items: list[ConnectionOut]
     next_cursor: str | None
+
+
+class EndpointOut(BaseModel):
+    """One host and port a connection reaches.
+
+    Parameters
+    ----------
+    host
+        The host, lower case.
+    port
+        The port.
+    role
+        ``service`` (the data) or ``token`` (where an OAuth2 token is fetched).
+    """
+
+    host: str
+    port: int
+    role: str
+
+
+class TaskConnectionOut(BaseModel):
+    """Response body of a running task's fetch of one of its connections.
+
+    The only answer of the API that carries a secret's values. It is sent only to a bound task
+    token of a running attempt, for a connection its deployed asset declares, with
+    ``Cache-Control: no-store``; the helper keeps it in memory for the attempt.
+
+    Parameters
+    ----------
+    name
+        The connection's name.
+    kind
+        Its kind.
+    address
+        Its address, with defaults filled in.
+    settings
+        Its settings, with defaults filled in; a ``ca_certificate`` in full.
+    endpoints
+        Every host and port it reaches, in order.
+    secret
+        The values of its secret; `null` when it has none it may use.
+    """
+
+    name: str
+    kind: str
+    address: dict[str, Any]
+    settings: dict[str, Any]
+    endpoints: list[EndpointOut]
+    secret: dict[str, str] | None
 
 
 class DeployCreate(BaseModel):

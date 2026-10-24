@@ -34,6 +34,7 @@ from lakana._models import (
     Lineage,
     LineageEdge,
     LineageNode,
+    MergeResult,
     Reader,
     Table,
     TableHealth,
@@ -1133,6 +1134,103 @@ class Tables:
         )
         return _write_result_from_json(response.json())
 
+    def merge(
+        self,
+        environment: str,
+        qualified_name: str,
+        data: pa.Table | pa.RecordBatch | object,
+        *,
+        key: str | Sequence[str],
+        sources: Sequence[str] | None = None,
+        source_versions: Mapping[str, int] | None = None,
+        break_glass_reason: str | None = None,
+        expected_snapshot_id: int | str | None = None,
+    ) -> MergeResult:
+        """Merge rows into a managed table on a key.
+
+        A row whose `key` matches a row of the table replaces it; any other row is inserted;
+        nothing is deleted. One snapshot: readers see the table before or after, never a half.
+        The rows must not repeat a key and no key may be null; a key that matches two rows of
+        the table is refused too. Needs `WRITE_TABLE` and `READ_TABLE`, and is refused while a
+        row filter or column mask on the table applies to you. A key of several columns takes
+        at most 5,000 rows per call. Serialised, sent and retried exactly like `append`, and a
+        timeout is just as ambiguous here (a merge sent twice is harmless: the second changes
+        nothing).
+
+        Parameters
+        ----------
+        environment
+            The environment name.
+        qualified_name
+            Dot-joined `"namespace.table"` name.
+        data
+            The rows: a `pa.Table`, a `pa.RecordBatch`, or anything `pyarrow.table()`
+            accepts.
+        key
+            The column, or the columns, that identify a row.
+        sources
+            Dotted names of the tables `data` was derived from, recorded as lineage. Each must
+            exist and be readable by the caller.
+        source_versions
+            The version of each source that is an artifact, by dotted name, when the caller
+            read a specific one.
+        break_glass_reason
+            Write to a protected environment outside a run: 10-500 characters, needs
+            `MANAGE_ENVIRONMENT`, audited. The next run of the deployed code may overwrite
+            the fix.
+        expected_snapshot_id
+            The table's current snapshot as you read it (`Table.snapshot_id`), or ``"none"``
+            for "no snapshot yet". The merge commits only while that still holds; otherwise
+            `Conflict` is raised and nothing is retried. ``"none"`` also creates a missing
+            table from `data`.
+
+        Returns
+        -------
+        MergeResult
+            The committed snapshot's id and how many rows were inserted and updated.
+
+        Raises
+        ------
+        ValueError
+            If `key` names no column; nothing is sent.
+        lakana.errors.NotFound
+            If the table or a source does not exist.
+        lakana.errors.PermissionDenied
+            If the caller may not write the table or read a source.
+        lakana.errors.Conflict
+            If a second attempt, after one retry, still conflicts; or at once when
+            `expected_snapshot_id` no longer matches.
+        lakana.errors.ValidationError
+            If a key column is missing, a key is null or repeats (the message gives the count
+            of rows, never a value), a key of several columns comes with more than 5,000 rows,
+            `data` does not match the table, or a row filter or column mask applies to you.
+        """
+        columns = [key] if isinstance(key, str) else list(key)
+        if not columns:
+            raise ValueError('A merge needs at least one key column: pass key="id".')
+        params: dict[str, object] = {"key": columns}
+        if sources:
+            params["source"] = list(sources)
+        _add_source_versions(params, source_versions)
+        if break_glass_reason is not None:
+            params["break_glass_reason"] = break_glass_reason
+        if expected_snapshot_id is not None:
+            params["expected_snapshot_id"] = str(expected_snapshot_id)
+        response = self._send_arrow(
+            "tables.merge",
+            environment,
+            qualified_name,
+            data,
+            params,
+            retry_conflict=expected_snapshot_id is None,
+        )
+        body = response.json()
+        return MergeResult(
+            snapshot_id=body["snapshot_id"],
+            rows_inserted=body["rows_inserted"],
+            rows_updated=body["rows_updated"],
+        )
+
     def lineage(
         self,
         environment: str,
@@ -1257,7 +1355,7 @@ class Tables:
         Parameters
         ----------
         route
-            `"tables.append"` or `"tables.replace"`.
+            `"tables.append"`, `"tables.replace"` or `"tables.merge"`.
         environment
             The environment name.
         qualified_name

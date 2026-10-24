@@ -344,3 +344,66 @@ def test_job_categories_round_trip_through_json_and_old_diffs_load() -> None:
     assert diff.counts()["jobs_added"] == 1
     old = {"added": ["s.a"], "removed": []}
     assert DeployDiff.from_json(old).jobs_added == ()
+
+
+def _written(write: str, key: tuple[str, ...] = (), watermark: str | None = None) -> ParsedAsset:
+    """Build an asset with a write model.
+
+    Parameters
+    ----------
+    write
+        ``replace``, ``append`` or ``merge``.
+    key
+        The merge key.
+    watermark
+        The watermark column.
+
+    Returns
+    -------
+    ParsedAsset
+        The asset `s.customers`.
+    """
+    metadata = AssetMetadata(materialize="table", write=write, key=key, watermark=watermark)
+    return make_asset("s.customers", metadata=metadata)
+
+
+def test_a_changed_merge_key_is_a_materialization_change() -> None:
+    before = _manifest(_written("merge", ("id",)))
+    after = _manifest(_written("merge", ("id", "region")))
+    diff = diff_manifests(before, after, existing_unowned=set())
+    assert diff.materialization_changed == ("s.customers",)
+    assert diff.sql_changed == () and diff.metadata_changed == ()
+
+
+def test_a_changed_write_mode_is_a_materialization_change() -> None:
+    before = _manifest(_written("append", watermark="ts"))
+    after = _manifest(_written("merge", ("id",), watermark="ts"))
+    diff = diff_manifests(before, after, existing_unowned=set())
+    assert diff.materialization_changed == ("s.customers",)
+
+
+def test_moving_to_the_new_spelling_or_upgrading_alone_is_no_change() -> None:
+    """`materialize: incremental` and `write: append` with the same column mean the same."""
+    old_spelling = make_asset(
+        "s.customers", metadata=AssetMetadata(materialize="incremental", incremental_key="ts")
+    )
+    new_spelling = _written("append", watermark="ts")
+    assert (
+        diff_manifests(
+            _manifest(old_spelling), _manifest(new_spelling), existing_unowned=set()
+        ).materialization_changed
+        == ()
+    )
+    stored = _manifest(old_spelling)
+    for entry in stored["assets"]:
+        for key in ("write", "key", "watermark"):
+            del entry[key]  # what a release before write modes stored
+    diff = diff_manifests(stored, _manifest(new_spelling), existing_unowned=set())
+    assert diff.materialization_changed == ()
+
+
+def test_hints_round_trip_and_are_not_counted_as_changes() -> None:
+    diff = DeployDiff(hints=("s.customers: a hint",))
+    assert DeployDiff.from_json(diff.to_json()) == diff
+    assert diff.to_json()["hints"] == ["s.customers: a hint"]
+    assert "hints" not in diff.counts()

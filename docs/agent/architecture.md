@@ -468,6 +468,19 @@ version a process committed before it crashed is not a success (the retry commit
 artifact upload's `conflict` is an ordinary transient failure: it gets no free immediate retry. The
 worker never adds a version itself.
 
+**Python appends and merges (M6).** The description is version 3 for an asset that appends,
+merges or declares a connection (`write`, `key`, `watermark` `{column, value}`, `connections`
+`{name: {kind}}`), version 2 for every other asset, so an older harness keeps running those. For an
+append or merge with a watermark on an existing table, `_supervise` reads `read_watermark` as the
+run principal after `_target_state` and before minting; its pin must equal that state (else a
+`ConflictError`, the free retry), and the upload is pinned to the same snapshot. The platform does
+not filter the function's rows; `ctx.watermark()` hands it the value. The harness uploads an append
+with `tables.append` (a first run with `tables.replace` and `"none"`), a merge with `tables.merge`,
+and checks a merge's repeated keys and the composite cap itself, with Python wording. Success rule
+addition: an append or merge whose table is unchanged succeeds when the record claims 0 rows and no
+snapshot (nothing new). `lakana.context.current()` holds the attempt's client and connections until
+`main` has written the record and the trace.
+
 A worker that is killed (SIGKILL, OOM) takes its children with it on Linux: the harness and the
 `uv` of a venv build both ask the kernel for `PR_SET_PDEATHSIG` (the build through a small
 launcher that then `execv`s uv, `venvs._LAUNCHER`) and check that their parent is still the worker

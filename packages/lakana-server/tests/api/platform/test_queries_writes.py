@@ -102,7 +102,6 @@ def test_a_read_run_reports_no_write_fields(client: TestClient) -> None:
     [
         {"table": "gold.daily", "mode": "replace", "incremental_key": "id"},
         {"table": "gold.daily", "mode": "create", "evolve_schema": True},
-        {"table": "gold.daily", "mode": "merge"},
         {"table": "gold.daily", "mode": "create", "location": "s3://elsewhere"},
     ],
 )
@@ -215,3 +214,19 @@ def test_a_view_reader_who_cant_read_a_reference_gets_no_sql_or_references(
     assert "bronze.src" not in restricted.text
     assert full.json()["sql"] == "SELECT id FROM bronze.src"
     assert full.json()["hidden_references"] == 0
+
+
+def test_a_merge_target_is_a_422_that_names_what_merges(client: TestClient) -> None:
+    _setup(client)
+
+    response = client.post(
+        _QUERIES,
+        headers=AUTH_HEADER,
+        json={"sql": "SELECT 1 AS id", "target": {"table": "gold.daily", "mode": "merge"}},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == (
+        "merge is written by assets (`write: merge`) and by `client.tables.merge`; a query "
+        "writes with create, replace or append"
+    )

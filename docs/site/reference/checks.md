@@ -22,7 +22,7 @@ a set-back can end as, the commands, the routes, who may read the results and wh
 | Key | Values | Default |
 |---|---|---|
 | `description` | Text that says what the check is for. | None. |
-| `on_failure` | `block`: a failing check sets the table back and stops what is built from it. `keep`: a failing check fails the task and leaves the table with the data this run wrote; nothing that reads it is built, and the table is marked `kept` until its checks pass (see [Keeping a table](#keeping-a-table)); allowed on a check of a table the project builds with `materialize: table` (SQL or Python) or only reads, and refused at deploy on a check of an incremental or view asset. `warn`: a failing check is reported and nothing else happens. | The project's `checks.on_failure`, else `block` |
+| `on_failure` | `block`: a failing check sets the table back and stops what is built from it. `keep`: a failing check fails the task and leaves the table with the data this run wrote; nothing that reads it is built, and the table is marked `kept` until its checks pass (see [Keeping a table](#keeping-a-table)); allowed on a check of a table the project builds with `write: replace` (SQL or Python) or only reads, and refused at deploy on a check of an asset that appends or merges, or of a view. `warn`: a failing check is reported and nothing else happens. | The project's `checks.on_failure`, else `block` |
 
 Any other key is refused, and so is any other value of `on_failure`; the message lists the right
 ones. A file without the comment takes the project's default.
@@ -50,7 +50,8 @@ together.
 | `A and B are both the check 'TABLE/NAME'` | Two paths differ only in capitals, so they are the same check. | Rename one of them. |
 | `unknown key 'KEY'; a check's /* lakana */ block takes: description, on_failure` | The comment has a key a check does not use. | Remove the key. |
 | `on_failure must be block, keep or warn (got 'VALUE')` | The value of `on_failure` is none of the three. | Use `block`, `keep` or `warn`. |
-| ``on_failure: keep cannot be used on `TABLE`: it is an incremental asset, and building it again only adds rows, so the rows that failed would stay. Use `on_failure: block`: it takes the failed increment out again.`` | The check says `on_failure: keep` and its table is an asset of `materialize: incremental`. A kept table clears by being built again, and an incremental build would leave the failed rows in it. | Set `on_failure: block` in the check (or `warn`). |
+| ``on_failure: keep cannot be used on `TABLE`: it is an incremental asset, and building it again only adds rows, so the rows that failed would stay. Use `on_failure: block`: it takes the failed increment out again.`` | The check says `on_failure: keep` and its table is an asset of `write: append` (or `materialize: incremental`). A kept table clears by being built again, and an append would leave the failed rows in it. | Set `on_failure: block` in the check (or `warn`). |
+| ``on_failure: keep cannot be used on `TABLE`: it is written with `write: merge`, and building it again never deletes a row, so the rows that failed would stay. Use `on_failure: block`: it takes the failed merge out again.`` | The check says `on_failure: keep` and its table is an asset of `write: merge`. | Set `on_failure: block` in the check (or `warn`). |
 | ``on_failure: keep cannot be used on `TABLE`: it is a view and holds no data to keep. Use `on_failure: block`: for a view it stops what reads it in that run.`` | The check says `on_failure: keep` and its table is an asset of `materialize: view`. | Set `on_failure: block` in the check (or `warn`). A failing `block` check of a view fails the task and nothing downstream is built in that run; the rollback outcome is `not_a_table`. |
 | ``checks.on_failure: must be block or warn (got 'keep'). `keep` leaves failing data where readers find it, so it can only be set on a check: put `on_failure: keep` in that check's /* lakana */ block.`` | `lakana.yaml` sets `keep` as the default of the project's checks. In an environment's override the message starts with `environments.NAME.checks.on_failure:`. | Set `block` or `warn` as the default, and put `on_failure: keep` in the comment of each check that should keep its table. |
 | `checks.on_failure: Input should be 'block' or 'warn'` | `lakana.yaml` sets another value as the default, for example `stop`. | Use `block` or `warn`. |
@@ -112,9 +113,9 @@ SDK, the REST API) read the table as before. A table has one of three states: `p
   The mark then moves to the new run and names the check as one that could not run, and the
   table's state text says it holds data no check could run on. Readers stay refused.
 - **Where `keep` is allowed.** On a check of an asset of `materialize: table` (SQL or Python)
-  and of a table the project only reads. A deploy refuses it on a check of an incremental asset
-  (building it again only adds rows, so the failed rows would stay) and of a view (it holds no
-  data); see [What a deploy refuses](#what-a-deploy-refuses).
+  and of a table the project only reads. A deploy refuses it on a check of an asset that appends
+  or merges (building it again never deletes a row, so the failed rows would stay) and of a view
+  (it holds no data); see [What a deploy refuses](#what-a-deploy-refuses).
 - **Who clears it.** A run of the project that builds the table, in one of three ways: the
   table's own task passes all its `block` and `keep` checks after a rebuild; the check task of
   a later run passes (see below); or a project version that has no checks for the table rebuilds it.

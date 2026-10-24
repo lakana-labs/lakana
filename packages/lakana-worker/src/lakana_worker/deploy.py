@@ -9,6 +9,7 @@ goes to the worker log. Nothing a run does can take down the poller.
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import gzip
 import hashlib
 import logging
@@ -47,6 +48,7 @@ from lakana_core.models import (
     RepositoryKind,
     Secret,
 )
+from lakana_core.projects.asset_model import deploy_hints
 from lakana_core.projects.checks import check_issues, checks_listing, parse_checks
 from lakana_core.projects.dag import build_graph, validate_project
 from lakana_core.projects.deploys import DeclaredConnections, DeployService, connection_issues
@@ -786,12 +788,15 @@ def _deploy(
             ),
         )
         current = service.current_job_version(environment_id, repository_id)
-        diff = diff_manifests(
-            current.manifest_json if current is not None else None,
-            manifest,
-            existing_unowned=service.existing_unowned(
-                principal, environment_name, manifest_tables(manifest)
+        diff = dataclasses.replace(
+            diff_manifests(
+                current.manifest_json if current is not None else None,
+                manifest,
+                existing_unowned=service.existing_unowned(
+                    principal, environment_name, manifest_tables(manifest)
+                ),
             ),
+            hints=deploy_hints(assets),
         )
         if kind is DeployKind.DRY_RUN:
             service.record_dry_run(
