@@ -34,4 +34,8 @@ regexes = [
   # A made-up key block that commit 9d15db8 of #279 had in test_ca_bundle.py (now built from
   # parts); the pull request's commit scan still reads that commit.
   '''path\.write_bytes\(_PEM \+ b"-----BEGIN PRIVATE KEY-----\\nMIIE\\n-----END PRIVATE KEY-----\\n"\)''',
+  # A made-up key header that commits c8b101f and d38b32a of #292 had in test_trust.py (now
+  # built from parts); the pull request's commit scan still reads those commits.
+  '''_KEY = b"-----BEGIN PRIVATE KEY-----\\nAA==\\n"''',
+  '''\(_CERTIFICATE \+ b"-----BEGIN PRIVATE KEY-----\\nAA==\\n", "also holds a private key"\),''',
 ]

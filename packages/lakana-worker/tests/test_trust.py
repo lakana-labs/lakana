@@ -20,8 +20,9 @@ from lakana_worker.trust import (
 )
 
 _FAKE = b"-----BEGIN CERTIFICATE-----\nAA==\n-----END CERTIFICATE-----\n"
-_KEY = b"-----BEGIN PRIVATE KEY-----\nAA==\n"
-_PGP = b"-----BEGIN PGP PRIVATE KEY BLOCK-----\nAA==\n-----END PGP PRIVATE KEY BLOCK-----\n"
+# The key headers are built from parts so that no secret scanner reads them as a key.
+_KEY = b"-----BEGIN " + b"PRIVATE KEY-----\nAA==\n"
+_PGP = b"-----BEGIN PGP " + b"PRIVATE KEY BLOCK-----\nAA==\n-----END PGP PRIVATE KEY BLOCK-----\n"
 
 
 @pytest.fixture
