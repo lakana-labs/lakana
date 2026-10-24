@@ -27,12 +27,14 @@ import-linter enforces these boundaries; `uv run lint-imports` checks them.
    `scripts/check_licenses.py`'s `ALLOWLIST` — CI fails otherwise. Covers Python **and npm**:
    any `package-lock.json` is checked (SPDX `OR` passes if any alternative is permissive;
    a missing licence fails); pnpm/yarn lockfiles are refused until supported.
-5. **Run the gates before claiming done**: `ruff check`, `ruff format --check`,
-   `ty check packages`, `lint-imports`, `pytest --cov --cov-report=json`,
-   `scripts/coverage_ratchet.py`. The `--cov` flags are not optional — the ratchet refuses
-   a report older than the code, so a plain `pytest` makes it fail rather than lie. Local
-   gates run Python 3.14 with coverage plus these static checks; 3.11, 3.13 and macOS run in
-   CI only (`docs/agent/testing.md`, "Local gates").
+5. **Run the gates before claiming done.** Locally, before a push: `ruff check`,
+   `ruff format --check`, `ty check packages`, `lint-imports`, and the tests of the changed
+   packages and their dependents (`scripts/select_tests.py` prints them; `lakana-core`,
+   shared fixtures, `pyproject.toml`, `uv.lock` or `scripts/` select everything). In CI only:
+   `pytest --cov --cov-report=json` with `scripts/coverage_ratchet.py`, and Python 3.11, 3.13
+   and macOS. A local pytest is not a ratchet result and must never be presented as one — the
+   ratchet refuses a report older than the code rather than lie
+   (`docs/agent/testing.md`, "Local gates").
 6. **When you change a rule, a config, or a licence, grep the docs for what asserted the
    old behaviour and fix it in the same commit.**
 7. **Conventional everything** — CI's `conventional` check enforces all of it:

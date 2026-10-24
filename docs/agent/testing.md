@@ -95,8 +95,8 @@ budgets").
 
 `addopts` carries no `-n`, so a plain `uv run pytest` stays serial. The default Python of a
 checkout is 3.14 (`.python-version`; the image runs 3.14 too), so a plain `uv run` is the 3.14
-run. **Locally, run the 3.14 gate with coverage** (see "Local gates"), inside the capped scope,
-with `-n 2`:
+run. Locally, a pull request runs the tests its change selects (see "Local gates"); to run the
+whole suite the way the 3.14 shards do together, inside the capped scope, use `-n 2`:
 
 ```bash
 systemd-run --user --scope -q -p MemoryMax=6G -p MemorySwapMax=0 timeout 900 \
@@ -130,7 +130,7 @@ systemd-run --user --scope -q -p MemoryMax=6G -p MemorySwapMax=0 timeout 900 \
   `[tool.coverage.run] core = "ctrace"` in `pyproject.toml` selects the C tracer that 3.11 to
   3.13 use anyway. With it, measured 2026-10-11 under a 6 GB cap, coverage 100 % each time:
   serial 797 s / 1.9 GB; `-n 2` 397 s / 4.2 GB; `-n 3` 274 s / 5.0 GB; `-n 4` killed at 96 %.
-  The 3.14 processes are still heavier than those of 3.11 and 3.13, so CI and the local gate use two.
+  The 3.14 processes are still heavier than those of 3.11 and 3.13, so CI uses two, and so does a local run.
   If a parallel 3.14 run is killed again, check first that the setting is still there.
 - **The cap can end a run before the watchdog does.** The watchdog counts resident anonymous
   and shared pages; a cgroup cap also counts page cache and the files in `/tmp` (a RAM disk,
@@ -275,12 +275,12 @@ every missing output of it means "run everything".
   `packages/*/src` (not the tests) and `scripts/duplication_ratchet.py` fails when the duplicated
   lines or the clones rise (see "The duplication ratchet" below).
 - **`test (macos)`** (job `test-macos`) is the macOS check: Lakana's local mode supports macOS
-  (Python 3.13 and later), and the two shards it collects, `unit (macos, 1/2)` and `(macos, 2/2)`
+  (Python 3.13 and later), and the three shards it collects, `unit (macos, 1/3)` to `(macos, 3/3)`
   (job `unit-macos`), run what a macOS user runs, on GitHub's `macos-latest`
   (Apple Silicon, 3 cores, 7 GB) with Python 3.14. They run the `packages/` unit suite (not
   `scripts/`, which is Linux tooling whose tests need GNU tools) with
   `pytest packages -m "not integration" -n 2`, without coverage (the ratchet stays on the Linux 3.14 job), and
-  the second shard runs `scripts/run_docs_examples.sh getting-started`, which ends with `lakana server reset --local`.
+  the third shard runs `scripts/run_docs_examples.sh getting-started`, which ends with `lakana server reset --local`.
   Docker-based tests (`integration`, `five-minute`, `compose-smoke`) do not run: macOS runners
   have no Docker. `scripts/pytest_memory_limit.py` needs `/proc`, so on macOS it does nothing and
   the limit's 6 GB default (below the runner's 7 GB) is not enforced; two workers fit. The example
@@ -598,7 +598,7 @@ maintainer who wants to run CI on a runner of their own.
 - **What moves:** every job of `ci.yml`, `security.yml`, `conventional.yml`, `mutation.yml` and
   `security-deep.yml`, and the `release-please` job of `release.yml`, which only opens and merges
   the release pull request.
-- **What never moves:** the macOS shards `unit (macos, N/2)` (macOS runs only on GitHub's own runners) and every job
+- **What never moves:** the macOS shards `unit (macos, N/3)` (macOS runs only on GitHub's own runners) and every job
   that builds or publishes a release. What users install is
   built on GitHub's runners, not on someone's machine.
 - **A pull request from a fork always uses GitHub's runner.** The `runs-on` expression honours
@@ -929,7 +929,8 @@ combine` into one report and prints `coverage report --skip-covered --show-missi
 that fails the ratchet is named by file and line in that job's log. One shard alone is not the
 suite: the ratchet only ever reads the combined report.
 
-Run it locally the same way CI does:
+The ratchet is a CI gate (see "Local gates"); to reproduce a failure locally, run it the
+same way CI does, over the whole suite:
 
 ```bash
 uv run pytest --cov --cov-report=json --cov-report=term
@@ -1016,8 +1017,11 @@ the test, the budget, and the next step.
   `scripts/slow-tests-baseline.json`. The 3.14 shards write junit reports
   (`--junitxml=junit-N.xml -o junit_family=xunit1`: only that family names each test's file), in
   which `scripts/pytest_selection.py` adds the property `slow=true` to every marked test;
-  `test (3.14)` runs `time_budgets.py slow-tests junit/*.xml` over them. A new test over the
-  threshold fails with its name: make it faster (a smaller fixture, no real sleep, a shared app;
+  `test (3.14)` runs `time_budgets.py slow-tests --confirm junit/*.xml` over them. One
+  measurement in a busy shard is noisy (between two runs a test of 0.6 s once took 2.4 s), so an
+  unmarked test over the threshold is run again on its own, serially and under coverage, and
+  fails only if it is that slow again; the log names each one counted as noise. A new test over
+  the threshold fails with its name and both times: make it faster (a smaller fixture, no real sleep, a shared app;
   see "The CLI tests share one app" for what that once saved), or mark it slow and make another
   slow test fast. Each case of a parametrized test counts. When the number falls the check passes
   and says to lower the baseline in the same pull request:
@@ -1030,8 +1034,8 @@ the test, the budget, and the next step.
   `--update` never records a rise. The tests marked when the ratchet started were those at 1.5 s
   or more in CI, a margin below the threshold so that runner noise does not fail an unrelated pull
   request; a test that drifts over 2 s unmarked is still a failure to fix.
-- **Locally**, `uv run pytest -m "not slow"` skips the slow tests for a quick loop; the gates
-  still run everything (see "Local gates").
+- **Locally**, `uv run pytest -m "not slow"` skips the slow tests for a quick loop while you
+  work; before a push, run the selection of "Local gates" without it.
 
 ## Flaky tests: the same-day rule
 
@@ -1064,21 +1068,43 @@ failure on `main`.
 
 ## Local gates
 
-Local runs are lean: **Python 3.14 with coverage, plus the static checks**. That is the gate list
-of `CLAUDE.md` rule 5:
+Local runs before a push are lean and **selected by the package graph**: the static checks always,
+and the tests of the packages a change touches and of the packages that depend on them. Nothing
+local replaces a CI gate: **the coverage ratchet, Python 3.11 and 3.13, the oldest Polars and
+macOS run only in CI** (`test (3.14)`, `test (3.11)`, the 3.11 shard's Polars step,
+`test (macos)`). A local run of them is for reproducing a failure CI showed, and a coverage number
+from a local run of some packages is not a ratchet result: never report it as one.
+
+Always, whatever changed:
 
 ```bash
 uv run ruff check . && uv run ruff format --check .
 uv run ty check packages && uv run lint-imports
-systemd-run --user --scope -q -p MemoryMax=6G -p MemorySwapMax=0 timeout 1800 \
-  uv run pytest -n 2 --dist loadfile --cov --cov-report=json -q -p no:cacheprovider
-uv run python scripts/coverage_ratchet.py
 ```
 
-Python 3.11 and 3.13, the oldest Polars and macOS run in CI only (`test (3.11)`, the 3.11 shard's
-Polars step, `test (macos)`); a local run of them is for reproducing a failure CI showed. The
-integration tier runs locally only for the area a change touches (`uv run pytest -m integration
-PATH`), as described in its sections.
+Then the tests the change selects (from `git diff --name-only origin/main...HEAD`):
+
+| The change touches | Run |
+|---|---|
+| only the SDK and CLI (`packages/lakana/`) | `packages/lakana/tests` and `packages/lakana-server/tests/sdk` |
+| only the server (`packages/lakana-server/`) | `packages/lakana-server/tests` |
+| only the worker (`packages/lakana-worker/`) | `packages/lakana-worker/tests` |
+| several of these three | the union of their rows |
+| `packages/lakana-core/`, a shared `conftest.py` or fixture (`packages/conftest.py`, `scripts/`), `pyproject.toml`, `uv.lock`, or anything not named here | everything (`uv run pytest`) |
+| only documentation (as `scripts/docs_only.py` defines it) | the documentation checks: `scripts/docs_blocks.py`, `scripts/generate_reference.py --check`, the strict build, and `pytest scripts/tests` |
+
+`scripts/select_tests.py` prints this selection for the current branch, as the commands to run
+(the static checks first). It reads the changed files from `git diff --name-only BASE...HEAD`
+(`--base`, default `origin/main`), or from standard input with `-`:
+
+```bash
+uv run python -m scripts.select_tests
+git diff --name-only | uv run python -m scripts.select_tests -
+```
+
+Run the tests it prints inside the capped scope, in parallel (`-n 2 --dist loadfile`, see
+"Running the unit suite in parallel"). The integration tier runs locally only for the area a
+change touches (`uv run pytest -m integration PATH`), as described in its sections.
 
 ## Property-based testing for the policy rewriter (M3)
 
