@@ -274,7 +274,45 @@ def _test_files(root: Path) -> list[Path]:
     )
 
 
-def select(paths: Sequence[str], root: Path = ROOT) -> Selection:
+def read_test_imports(root: Path = ROOT) -> dict[str, set[str] | None]:
+    """Read which Lakana packages each test file imports.
+
+    Parameters
+    ----------
+    root
+        The repository root.
+
+    Returns
+    -------
+    dict
+        Root-relative test file to the import names it reaches (itself, its ``conftest.py`` chain
+        and the local modules they import), or None when a file on the way cannot be parsed.
+    """
+    known: dict[Path, set[str] | None] = {}
+    local_names = {entry.stem for entry in root.iterdir()} | {
+        entry.stem
+        for tree in TEST_TREES
+        for base in root.glob(tree)
+        for entry in [base, *base.rglob("*")]
+    }
+    answer: dict[str, set[str] | None] = {}
+    for test_file in _test_files(root):
+        imported: set[str] | None = set()
+        for source in [test_file, *_conftests(test_file, root)]:
+            more = _imported_packages(source, root, known, local_names)
+            if more is None:
+                imported = None
+                break
+            imported |= more
+        answer[test_file.relative_to(root).as_posix()] = imported
+    return answer
+
+
+def select(
+    paths: Sequence[str],
+    root: Path = ROOT,
+    imports: dict[str, set[str] | None] | None = None,
+) -> Selection:
     """Select the local checks for a set of changed files.
 
     Parameters
@@ -283,6 +321,8 @@ def select(paths: Sequence[str], root: Path = ROOT) -> Selection:
         The changed files, relative to the repository root.
     root
         The repository root.
+    imports
+        The answer of `read_test_imports` for `root`; None reads it now, when a package changed.
 
     Returns
     -------
@@ -301,24 +341,11 @@ def select(paths: Sequence[str], root: Path = ROOT) -> Selection:
         changed.add(package[0])
         chosen.add(package[1])
     if changed:
-        known: dict[Path, set[str] | None] = {}
-        test_files = _test_files(root)
-        local_names = {entry.stem for entry in root.iterdir()} | {
-            entry.stem
-            for tree in TEST_TREES
-            for base in root.glob(tree)
-            for entry in [base, *base.rglob("*")]
-        }
-        for test_file in test_files:
-            imported: set[str] | None = set()
-            for source in [test_file, *_conftests(test_file, root)]:
-                more = _imported_packages(source, root, known, local_names)
-                if more is None:
-                    imported = None
-                    break
-                imported |= more
+        for test_file, imported in (
+            imports if imports is not None else read_test_imports(root)
+        ).items():
             if imported is None or imported & changed:
-                chosen.add(test_file.relative_to(root).as_posix())
+                chosen.add(test_file)
     # A file inside a selected test directory adds nothing.
     kept = [t for t in chosen if not any(t.startswith(o + "/") for o in chosen)]
     return Selection(tests=sorted(kept), docs=docs)

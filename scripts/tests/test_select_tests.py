@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.select_tests import EVERYTHING, Selection, commands, main, select
+from scripts.select_tests import EVERYTHING, Selection, commands, main, read_test_imports, select
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -57,45 +57,57 @@ def _selected(selection: Selection, test_file: str) -> bool:
     return any(test_file == t or test_file.startswith(t + "/") for t in selection.tests)
 
 
-def test_an_sdk_change_selects_every_test_that_imports_the_sdk() -> None:
-    """The review's cases: the server's CLI and SDK tests and the worker tests of the runner."""
-    selection = select(["packages/lakana/src/lakana/cli/main.py"])
-    assert _selected(selection, "packages/lakana/tests/test_client.py")
-    imports = r"(?m)^\s*(from|import) lakana\.{}"
-    cli = _files_importing(imports.format("cli"), "packages/lakana-server/tests/cli")
-    runner = _files_importing(imports.format("runner"), "packages/lakana-worker/tests")
+@pytest.mark.slow
+def test_the_review_s_cases_on_the_real_test_files() -> None:
+    """Each change selects every test file that imports its package (PR #328's review).
+
+    The imports of this repository's test files are read once (about 1 s, 2.5 s under coverage
+    in CI, hence ``slow``) and the three changes are selected from them.
+    """
+    imports = read_test_imports()
+    # The SDK: the server's CLI tests, the worker's tests of the runner, the server's SDK tests.
+    sdk = select(["packages/lakana/src/lakana/cli/main.py"], imports=imports)
+    pattern = r"(?m)^\s*(from|import) lakana\.{}"
+    cli = _files_importing(pattern.format("cli"), "packages/lakana-server/tests/cli")
+    runner = _files_importing(pattern.format("runner"), "packages/lakana-worker/tests")
     assert cli
     assert runner
-    for test_file in [*cli, *runner, "packages/lakana-server/tests/sdk/test_sdk_admin.py"]:
-        assert _selected(selection, test_file), test_file
-    assert not _selected(selection, "packages/lakana-core/tests/test_migrations.py")
-
-
-def test_a_worker_change_selects_the_server_s_sdk_test_that_imports_the_worker() -> None:
-    """``test_sdk_admin.py`` imports ``lakana_worker.pipeline``."""
-    selection = select(["packages/lakana-worker/src/lakana_worker/pipeline.py"])
-    assert _selected(selection, "packages/lakana-worker/tests/test_tasks.py")
-    assert _selected(selection, "packages/lakana-server/tests/sdk/test_sdk_admin.py")
-    assert not _selected(selection, "packages/lakana/tests/test_client.py")
-
-
-def test_a_server_change_selects_the_scripts_tests_that_import_the_server() -> None:
-    """The reference generator and the user-text check import ``lakana_server``."""
-    selection = select(["packages/lakana-server/src/lakana_server/app.py"])
+    for test_file in [
+        "packages/lakana/tests/test_client.py",
+        *cli,
+        *runner,
+        "packages/lakana-server/tests/sdk/test_sdk_admin.py",
+    ]:
+        assert _selected(sdk, test_file), test_file
+    assert not _selected(sdk, "packages/lakana-core/tests/test_migrations.py")
+    # The worker: test_sdk_admin.py imports lakana_worker.pipeline.
+    worker = select(["packages/lakana-worker/src/lakana_worker/pipeline.py"], imports=imports)
+    assert _selected(worker, "packages/lakana-worker/tests/test_tasks.py")
+    assert _selected(worker, "packages/lakana-server/tests/sdk/test_sdk_admin.py")
+    assert not _selected(worker, "packages/lakana/tests/test_client.py")
+    # The server: the reference generator and the user-text check import lakana_server.
+    server = select(["packages/lakana-server/src/lakana_server/app.py"], imports=imports)
     for test_file in [
         "packages/lakana-server/tests/test_main_logging.py",
         "scripts/tests/test_generate_reference.py",
         "scripts/tests/test_no_job_version_in_user_text.py",
     ]:
-        assert _selected(selection, test_file), test_file
-    assert not _selected(selection, "packages/lakana-worker/tests/test_tasks.py")
+        assert _selected(server, test_file), test_file
+    assert not _selected(server, "packages/lakana-worker/tests/test_tasks.py")
 
 
-def test_each_file_is_parsed_at_most_once_per_selection(monkeypatch: pytest.MonkeyPatch) -> None:
-    """What keeps the selection at about a second: one parse per file, however often imported.
+def test_each_file_is_parsed_once_however_often_it_is_imported(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """What keeps the selection at about a second: one parse per file and call.
 
     A wall-clock bound would fail on a busy CI runner; the number of parses does not.
     """
+    files = {"packages/lakana-worker/tests/conftest.py": "from shared import s\n"}
+    files["packages/lakana-worker/tests/shared.py"] = "import lakana\n"
+    for i in range(20):
+        files[f"packages/lakana-worker/tests/test_{i}.py"] = "from shared import s\n"
+    root = _tree(tmp_path, files)
     parsed: list[str] = []
     parse = ast.parse
 
@@ -104,12 +116,9 @@ def test_each_file_is_parsed_at_most_once_per_selection(monkeypatch: pytest.Monk
         return parse(source)
 
     monkeypatch.setattr("scripts.select_tests.ast.parse", counting)
-    select(["packages/lakana/src/lakana/client.py"])
-    # Without the per-call memo every test file would parse its conftest chain and helpers
-    # again: several thousand parses instead of one per file.
-    files = [*ROOT.glob("packages/*/tests/**/*.py"), *(ROOT / "scripts").rglob("*.py")]
-    assert parsed
-    assert len(parsed) <= len(files)
+    selection = select(["packages/lakana/src/lakana/client.py"], root=root)
+    assert len(parsed) == len(files)
+    assert selection.tests == [*sorted(f for f in files if "/test_" in f), "packages/lakana/tests"]
 
 
 def _tree(root: Path, files: dict[str, str]) -> Path:
