@@ -1750,7 +1750,7 @@ def test_the_macos_job_runs_for_a_pull_request_only_when_packages_change() -> No
         assert step["if"].startswith("steps.scope.outputs.run == 'true'"), step
 
 
-def test_the_macos_check_collects_both_shards() -> None:
+def test_the_macos_check_collects_all_three_shards() -> None:
     """``test (macos)`` is the check the maintainer will make required (#148)."""
     job = _jobs("ci.yml")["test-macos"]
     assert job["name"] == "test (macos)"

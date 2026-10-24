@@ -28,9 +28,10 @@ import-linter enforces these boundaries; `uv run lint-imports` checks them.
    any `package-lock.json` is checked (SPDX `OR` passes if any alternative is permissive;
    a missing licence fails); pnpm/yarn lockfiles are refused until supported.
 5. **Run the gates before claiming done.** Locally, before a push: `ruff check`,
-   `ruff format --check`, `ty check packages`, `lint-imports`, and the tests of the changed
-   packages and their dependents (`scripts/select_tests.py` prints them; `lakana-core`,
-   shared fixtures, `pyproject.toml`, `uv.lock` or `scripts/` select everything). In CI only:
+   `ruff format --check`, `ty check packages`, `lint-imports`, and the changed packages' own tests
+   plus every test that imports a changed package (`scripts/select_tests.py` reads the imports
+   and prints them; `lakana-core`, shared fixtures, `pyproject.toml`, `uv.lock` or `scripts/`
+   select everything). In CI only:
    `pytest --cov --cov-report=json` with `scripts/coverage_ratchet.py`, and Python 3.11, 3.13
    and macOS. A local pytest is not a ratchet result and must never be presented as one — the
    ratchet refuses a report older than the code rather than lie

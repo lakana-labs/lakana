@@ -1070,7 +1070,7 @@ failure on `main`.
 ## Local gates
 
 Local runs before a push are lean and **selected by the package graph**: the static checks always,
-and the tests of the packages a change touches and of the packages that depend on them. Nothing
+and the tests that import a package the change touches, read from the test files themselves. Nothing
 local replaces a CI gate: **the coverage ratchet, Python 3.11 and 3.13, the oldest Polars and
 macOS run only in CI** (`test (3.14)`, `test (3.11)`, the 3.11 shard's Polars step,
 `test (macos)`). A local run of them is for reproducing a failure CI showed, and a coverage number
@@ -1087,12 +1087,15 @@ Then the tests the change selects (from `git diff --name-only origin/main...HEAD
 
 | The change touches | Run |
 |---|---|
-| only the SDK and CLI (`packages/lakana/`) | `packages/lakana/tests` and `packages/lakana-server/tests/sdk` |
-| only the server (`packages/lakana-server/`) | `packages/lakana-server/tests` |
-| only the worker (`packages/lakana-worker/`) | `packages/lakana-worker/tests` |
-| several of these three | the union of their rows |
+| `packages/lakana/`, `packages/lakana-server/` or `packages/lakana-worker/` (not their `pyproject.toml`) | the changed packages' own tests, and **every test file that imports a changed package** (`lakana`, `lakana_server`, `lakana_worker`): directly, through its `conftest.py` chain, or through a local helper module it imports (`tests.server_test_helpers`, `from .near import`, a sibling `task_run_helpers.py`) |
 | `packages/lakana-core/`, a shared `conftest.py` or fixture (`packages/conftest.py`, `scripts/`), `pyproject.toml`, `uv.lock`, or anything not named here | everything (`uv run pytest`) |
 | only documentation (as `scripts/docs_only.py` defines it) | the documentation checks: `scripts/docs_blocks.py`, `scripts/generate_reference.py --check`, the strict build, and `pytest scripts/tests` |
+
+So an SDK change also runs the server's CLI and SDK tests and the worker tests of `lakana.runner`;
+a worker change also runs `tests/sdk/test_sdk_admin.py` of the server; a server change also runs
+`scripts/tests/test_generate_reference.py`. The imports are read with `ast` on every call (about
+1 s), nothing is cached, so a new import counts at once; a test file that cannot be parsed is
+always selected.
 
 `scripts/select_tests.py` prints this selection for the current branch, as the commands to run
 (the static checks first). It reads the changed files from `git diff --name-only BASE...HEAD`
