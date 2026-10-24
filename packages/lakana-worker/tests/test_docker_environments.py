@@ -456,6 +456,16 @@ def test_a_refused_build_is_permanent_and_an_unreachable_launcher_transient(
     assert not isinstance(caught.value, VenvBuildRefused)
 
 
+def test_a_build_refused_for_its_fields_names_the_release_skew(tmp_path: Path) -> None:
+    """A launcher of another release refuses the build's field set: upgrade both, together."""
+    refused = FakeLauncher(
+        scripts={"status": _status(False), "build": refusing("build takes exactly the fields a, b")}
+    )
+
+    with pytest.raises(VenvBuildRefused, match=r"different releases.*upgrade"):
+        _acquire(_environments(refused), _project(tmp_path))
+
+
 def test_a_bad_lock_digest_or_a_missing_pyproject_fails_before_the_launcher(
     tmp_path: Path,
 ) -> None:

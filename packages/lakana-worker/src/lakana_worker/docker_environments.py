@@ -40,7 +40,13 @@ from lakana_worker.index_credentials import (
     wheels_only,
 )
 from lakana_worker.launcher.task_build import NO_INTERPRETER, NO_SDK, TOO_LARGE
-from lakana_worker.launcher_client import LauncherClient, LauncherRefused, LauncherUnavailable
+from lakana_worker.launcher_client import (
+    RELEASE_SKEW,
+    LauncherClient,
+    LauncherRefused,
+    LauncherUnavailable,
+    release_skew,
+)
 from lakana_worker.processes import OutputRedactor
 from lakana_worker.runners import NO_SDK_MESSAGE, stop_retry_gap
 from lakana_worker.trust import certificate_hint, install_trust
@@ -335,7 +341,10 @@ class DockerEnvironments:
             finally:
                 tee.close()
         except LauncherRefused as exc:
-            raise VenvBuildRefused(f"{_FAILED}: the launcher refused the build: {exc}") from None
+            skew = f". {RELEASE_SKEW}" if release_skew(str(exc)) else ""
+            raise VenvBuildRefused(
+                f"{_FAILED}: the launcher refused the build: {exc}{skew}"
+            ) from None
         except LauncherUnavailable as exc:
             raise VenvBuildError(str(exc)) from None
         if result.get("complete") is True:

@@ -500,6 +500,22 @@ def test_a_refused_run_is_permanent_and_names_the_settings(tmp_path: Path) -> No
     )
 
 
+def test_a_run_refused_for_its_fields_names_the_release_skew(tmp_path: Path) -> None:
+    """A worker and a launcher of different releases disagree on the fields, not the settings."""
+    launcher = FakeLauncher(
+        scripts={"run": refusing("run takes exactly the fields attempt, cpus, environment")}
+    )
+
+    outcome, _, _ = _run(tmp_path, launcher)
+
+    assert outcome.retryable is False
+    assert outcome.failure_code is FailureCode.NO_RUNTIME
+    assert outcome.error_message is not None
+    assert "different releases" in outcome.error_message
+    assert "upgrade" in outcome.error_message
+    assert "LAKANA_RUN__TASK_" not in outcome.error_message
+
+
 def test_a_task_token_split_across_log_lines_is_redacted(tmp_path: Path) -> None:
     """Review focus: Docker frames and base64 lines cut the token anywhere."""
     middle = len(TOKEN) // 2

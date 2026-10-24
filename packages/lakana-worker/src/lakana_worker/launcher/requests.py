@@ -877,7 +877,10 @@ def parse_request(raw: bytes, *, token: str, settings: LauncherSettings) -> Requ
     if not isinstance(op, str) or op not in FIELDS:
         raise Refused(f"op must be one of {', '.join(sorted(FIELDS))}")
     if set(data) != FIELDS[op]:
-        raise Refused(f"{op} takes exactly the fields {', '.join(sorted(FIELDS[op]))}")
+        raise Refused(
+            f"{op} takes exactly the fields {', '.join(sorted(FIELDS[op]))}; the worker and "
+            "the launcher must be the same release"
+        )
     if op == "run":
         return _run(data, settings)
     if op == "build":

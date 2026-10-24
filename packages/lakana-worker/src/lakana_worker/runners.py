@@ -48,11 +48,13 @@ from typing import Protocol
 from lakana_core.runs.failures import FailureCode
 from lakana_worker.git import HFS_IGNORABLE, fold_name
 from lakana_worker.launcher_client import (
+    RELEASE_SKEW,
     LauncherClient,
     LauncherRefused,
     LauncherTimedOut,
     LauncherUnavailable,
     LogSinkFailed,
+    release_skew,
 )
 from lakana_worker.processes import (
     OutputRedactor,
@@ -1540,11 +1542,15 @@ class DockerRunner:
                 succeeded=False, error_message=str(error), failure_code=FailureCode.NO_RUNTIME
             )
         if isinstance(error, LauncherRefused):
+            next_step = (
+                RELEASE_SKEW
+                if release_skew(str(error))
+                else "An operator checks LAKANA_LAUNCHER__IMAGES and the LAKANA_RUN__TASK_* "
+                "settings against the launcher's ceilings, or the project's python: in lakana.yaml"
+            )
             return RunOutcome(
                 succeeded=False,
-                error_message=f"the launcher refused the task: {error}. An operator checks "
-                "LAKANA_LAUNCHER__IMAGES and the LAKANA_RUN__TASK_* settings against the "
-                "launcher's ceilings, or the project's python: in lakana.yaml",
+                error_message=f"the launcher refused the task: {error}. {next_step}",
                 retryable=False,
                 failure_code=FailureCode.NO_RUNTIME,
             )

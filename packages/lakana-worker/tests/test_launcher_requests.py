@@ -1108,6 +1108,8 @@ def test_trust_is_required_and_a_boolean(base: dict[str, Any]) -> None:
     op = base["op"]
     with pytest.raises(Refused, match=f"{op} takes exactly the fields .*trust"):
         parse_request(_raw(_without(base, "trust")), token=TOKEN, settings=SETTINGS)
+    with pytest.raises(Refused, match="the worker and the launcher must be the same release"):
+        parse_request(_raw(_without(base, "trust")), token=TOKEN, settings=SETTINGS)
     for value in ("yes", 1, None, "true"):
         with pytest.raises(Refused, match="trust: true or false"):
             parse_request(_raw(_with(base, trust=value)), token=TOKEN, settings=SETTINGS)
