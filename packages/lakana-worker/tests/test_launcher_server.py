@@ -44,6 +44,7 @@ RUN = {
     "kill_grace_seconds": 1,
     "stdin": "{}",
     "roots": [],
+    "trust": False,
 }
 
 

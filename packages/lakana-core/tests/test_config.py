@@ -1164,7 +1164,6 @@ def test_a_task_memory_out_of_bounds_is_refused_with_the_setting_named(text: str
         ({"task_memory": "lots"}, "LAKANA_RUN__TASK_MEMORY must be a size with a unit"),
         ({"launcher_socket": "launcher.sock"}, "absolute"),
         ({"runner": "docker", "https_proxy": "http://proxy:3128"}, "LAKANA_EGRESS__UPSTREAM_PROXY"),
-        ({"runner": "docker", "ca_bundle": "/etc/ssl/corp.pem"}, "LAKANA_RUN__CA_BUNDLE"),
         ({"task_pids": 4}, "task_pids"),
         ({"task_cpus": 0}, "task_cpus"),
         ({"task_cpus": float("inf")}, "task_cpus"),
@@ -1186,16 +1185,11 @@ def test_a_runner_setting_that_cannot_work_is_refused_at_start(
         RunConfig(**values)  # ty: ignore[invalid-argument-type]
 
 
-def test_a_private_ca_with_the_docker_runner_is_refused_with_the_way_out() -> None:
-    """A build container cannot trust a private CA yet: the message says what still works."""
-    with pytest.raises(pydantic.ValidationError) as caught:
-        RunConfig(runner="docker", ca_bundle=Path("/etc/ssl/corp.pem"))
-    text = str(caught.value)
-    assert "LAKANA_RUN__CA_BUNDLE" in text
-    assert "publicly trusted" in text
-    assert "LAKANA_RUN__RUNNER=local" in text
-    assert "/etc/ssl/corp.pem" not in text
-    assert RunConfig(runner="local", ca_bundle=Path("/etc/ssl/corp.pem")).ca_bundle is not None
+def test_a_private_ca_is_accepted_with_either_runner() -> None:
+    """Build and task containers trust LAKANA_RUN__CA_BUNDLE; the old refusal is gone."""
+    bundle = Path("/etc/ssl/corp.pem")
+    assert RunConfig(runner="docker", ca_bundle=bundle).ca_bundle == bundle
+    assert RunConfig(runner="local", ca_bundle=bundle).ca_bundle == bundle
     assert RunConfig(runner="local", https_proxy=SecretStr("http://proxy:3128")).https_proxy
 
 

@@ -474,6 +474,7 @@ class Harness:
         self.stop = StopSignal()
         self.fields: dict[str, object] = {}
         self.memory_limit: int | None = None
+        self.trust: Path | None = None
         self.registry = TaskRegistry()
 
     def task(self, timeout: float = 30.0, **fields: object) -> PythonTask:
@@ -541,6 +542,7 @@ class Harness:
             module="fake_harness",
             poll_seconds=0.02,
             memory_limit=self.memory_limit,
+            trust=self.trust,
             registry=self.registry,
         )
         return self._bounded(runner)
@@ -2100,3 +2102,23 @@ def test_a_secret_with_a_character_that_is_not_printable_is_hidden_in_the_record
 
 def test_a_lone_surrogate_in_a_record_is_still_replaced() -> None:
     assert runners_module._clean("bad \ud800 text \x00", [], 2000) == "bad ? text ?"
+
+
+def test_the_local_task_process_trusts_the_workers_bundle(harness: Harness, tmp_path: Path) -> None:
+    """`SSL_CERT_FILE` and `LAKANA_CA_BUNDLE` name the worker's bundle; without one, neither."""
+    harness.trust = tmp_path / "trust.pem"
+    body = (
+        "keys = ('SSL_CERT_FILE', 'LAKANA_CA_BUNDLE')\n"
+        "print(json.dumps({k: os.environ.get(k) for k in keys}))\n"
+        "write({'status': 'succeeded', 'snapshot_id': None, 'rows': 0})\n"
+    )
+    assert harness.run(body).succeeded
+    assert json.loads(harness.output().splitlines()[0]) == {
+        "SSL_CERT_FILE": str(tmp_path / "trust.pem"),
+        "LAKANA_CA_BUNDLE": str(tmp_path / "trust.pem"),
+    }
+    assert (
+        child_environment(tmp_path, tmp_path)
+        .keys()
+        .isdisjoint({"SSL_CERT_FILE", "LAKANA_CA_BUNDLE"})
+    )

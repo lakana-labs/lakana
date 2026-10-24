@@ -468,9 +468,10 @@ class RunConfig(BaseModel):
     no_proxy
         Comma-separated hosts that bypass the proxy.
     ca_bundle
-        Absolute path of a PEM file of certificate authorities that the environment build trusts,
-        for an internal package index. The file must exist and be readable on the worker.
-        Local runner only: refused with `LAKANA_RUN__RUNNER=docker`.
+        Absolute path of a PEM file of certificate authorities to trust in addition to the public
+        ones: for a package index or proxy signed by a private certificate authority, and for the
+        sources of ingestion tasks behind one. Builds and tasks trust it under both runners.
+        Certificates only, at most 1 MiB; the worker checks the file at start.
     runner
         How Python tasks run: `local` (the default: as processes of the worker, not isolated
         from it) or `docker` (each task and each environment build in a container of its own,
@@ -661,9 +662,9 @@ class RunConfig(BaseModel):
     def _docker_builds_go_through_the_egress_proxy(self) -> Self:
         """Refuse the local runner's build network settings with the docker runner.
 
-        A build container reaches its package indexes only through the egress service, and it
-        trusts only the certificate authorities of its task image: neither setting would reach
-        it, so each is refused at start rather than ignored.
+        A build container reaches its package indexes only through the egress service, so the
+        local runner's proxy would never reach it and is refused at start rather than ignored.
+        (`ca_bundle` serves both runners: the worker mounts it into build and task containers.)
 
         Returns
         -------
@@ -673,7 +674,7 @@ class RunConfig(BaseModel):
         Raises
         ------
         ValueError
-            If `runner` is ``docker`` and `https_proxy` or `ca_bundle` is set, or `index_url` is
+            If `runner` is ``docker`` and `https_proxy` is set, or `index_url` is
             a plain ``http://`` URL (the egress proxy tunnels https only).
         """
         if self.runner == "docker" and self.https_proxy is not None:
@@ -689,15 +690,6 @@ class RunConfig(BaseModel):
                 "builds reach package indexes only over https, through the egress proxy. Serve "
                 "the index over https and write https:// in LAKANA_RUN__INDEX_URL, or keep "
                 "LAKANA_RUN__RUNNER=local for this index."
-            )
-        if self.runner == "docker" and self.ca_bundle is not None:
-            raise ValueError(
-                "LAKANA_RUN__CA_BUNDLE applies to builds of the local runner; a build container "
-                "trusts only the publicly trusted certificate authorities of its task image, so "
-                "with LAKANA_RUN__RUNNER=docker a package index or proxy signed by a private "
-                "certificate authority cannot be reached. Unset LAKANA_RUN__CA_BUNDLE and serve "
-                "the index with a publicly trusted certificate, or keep LAKANA_RUN__RUNNER=local "
-                "for such an index."
             )
         return self
 

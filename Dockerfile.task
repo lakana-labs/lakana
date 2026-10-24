@@ -27,7 +27,7 @@ RUN groupadd --system --gid 10003 lakana-task \
  && useradd --system --uid 10002 --gid lakana-build --no-create-home --home-dir /tmp --shell /usr/sbin/nologin lakana-build \
  && install -d -o 10002 -g 10002 -m 0755 /env \
  && install -d -o 10002 -g 10002 -m 0700 /uv-cache \
- && install -d -m 0755 /code /work /src /opt/lakana-task /ingest \
+ && install -d -m 0755 /code /work /src /opt/lakana-task /ingest /trust \
  && find / -xdev -perm /6000 -type f -exec chmod a-s {} +
 COPY --from=uv /uv /usr/local/bin/uv
 COPY packages/lakana-worker/src/lakana_worker/launcher/task_build.py /opt/lakana-task/build.py

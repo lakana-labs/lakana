@@ -120,6 +120,26 @@ def _scan(path: str) -> tuple[bool, bool]:
     return certificate, key
 
 
+def scan_pem(data: bytes) -> tuple[bool, bool]:
+    """Look for certificates and private keys in a PEM text held in memory.
+
+    The same two marks as the start-up scan of a file, for a caller that read the file once
+    and must judge exactly the bytes it will use.
+
+    Parameters
+    ----------
+    data
+        The text.
+
+    Returns
+    -------
+    tuple of (bool, bool)
+        Whether it holds ``-----BEGIN CERTIFICATE-----``, and whether it holds the header of a
+        private key anywhere.
+    """
+    return _PEM_MARK in data, _PRIVATE_KEY.search(data) is not None
+
+
 def find_ca_bundle(
     environ: Mapping[str, str] | None = None,
     system_bundles: Sequence[str] = SYSTEM_BUNDLES,

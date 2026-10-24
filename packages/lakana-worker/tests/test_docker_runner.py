@@ -271,7 +271,7 @@ def test_the_request_carries_container_paths_and_no_parent_pid(tmp_path: Path) -
     }
     assert set(request) - {"_attempt_dir"} == {
         "op", "task", "owner", "python", "environment", "attempt", "memory_mb", "cpus",
-        "pids", "timeout_seconds", "kill_grace_seconds", "stdin", "roots",
+        "pids", "timeout_seconds", "kill_grace_seconds", "stdin", "roots", "trust",
     }  # fmt: skip
     work = tmp_path / "attempt-abc_12" / "task"
     assert all((work / d).is_dir() for d in ("home", "tmp", "tmp/polars-spill"))
@@ -1092,3 +1092,42 @@ def test_the_stop_retry_gap_doubles_from_the_poll_and_stops_growing_at_five_seco
         gaps.append(stop_retry_gap(gaps[-1], 0.2))
 
     assert gaps == [0.0, 0.2, 0.4, 0.8, 1.6, 3.2, 5.0, 5.0]
+
+
+def test_with_a_trust_bundle_the_attempt_gets_a_copy_and_the_run_asks_for_the_mount(
+    tmp_path: Path,
+) -> None:
+    """`<attempt>/trust/trust.pem` (0644 in a 0755 directory, a copy) and `trust: true`."""
+    bundle = tmp_path / "worker-trust.pem"
+    bundle.write_bytes(b"-----BEGIN CERTIFICATE-----\nAA==\n-----END CERTIFICATE-----\n")
+    launcher = FakeLauncher(scripts={"run": _writes({"status": "succeeded", "rows": 1}, _DONE)})
+    outcome, _, _ = _run(tmp_path, launcher, {"trust": bundle})
+    assert outcome.succeeded, outcome.error_message
+    assert launcher.requests[0]["trust"] is True
+    copied = tmp_path / "attempt-abc_12" / "trust" / "trust.pem"
+    assert copied.read_bytes() == bundle.read_bytes() and not copied.is_symlink()
+    assert oct(copied.stat().st_mode & 0o777) == "0o644"
+    assert oct(copied.parent.stat().st_mode & 0o777) == "0o755"
+    assert oct((tmp_path / "attempt-abc_12").stat().st_mode & 0o777) == "0o700"
+
+
+def test_without_a_trust_bundle_there_is_no_trust_directory(tmp_path: Path) -> None:
+    """`trust: false`, and nothing written: today's run."""
+    launcher = FakeLauncher(scripts={"run": _writes({"status": "succeeded", "rows": 1}, _DONE)})
+    _run(tmp_path, launcher)
+    assert launcher.requests[0]["trust"] is False
+    assert not (tmp_path / "attempt-abc_12" / "trust").exists()
+
+
+def test_a_planted_trust_link_fails_the_attempt_before_the_launcher(tmp_path: Path) -> None:
+    """A link at `<attempt>/trust` is refused as an unprepared directory; nothing is sent."""
+    bundle = tmp_path / "worker-trust.pem"
+    bundle.write_bytes(b"-----BEGIN CERTIFICATE-----\nAA==\n-----END CERTIFICATE-----\n")
+    launcher = FakeLauncher(scripts={"run": _writes({"status": "succeeded", "rows": 1}, _DONE)})
+    attempt = tmp_path / "attempt-abc_12"
+    attempt.mkdir(mode=0o700)
+    (attempt / "trust").symlink_to(tmp_path)
+    outcome, _, _ = _run(tmp_path, launcher, {"trust": bundle})
+    assert not outcome.succeeded
+    assert "could not prepare the task directory" in (outcome.error_message or "")
+    assert launcher.requests == []

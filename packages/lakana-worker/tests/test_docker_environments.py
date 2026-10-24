@@ -773,3 +773,55 @@ def test_a_launcher_that_cannot_take_the_stop_is_asked_again(tmp_path: Path) -> 
         )
 
     assert len(calls) == 2
+
+
+def test_with_a_trust_bundle_the_build_gets_a_copy_and_asks_for_the_mount(tmp_path: Path) -> None:
+    """The bundle is copied into `<attempt>/trust` before the build, and `trust: true` sent."""
+    bundle = tmp_path / "worker-trust.pem"
+    bundle.write_bytes(b"-----BEGIN CERTIFICATE-----\nAA==\n-----END CERTIFICATE-----\n")
+    launcher = FakeLauncher(
+        scripts={"status": _status(False), "build": lambda r, on_log: {"complete": True}}
+    )
+    _acquire(_environments(launcher, trust=bundle), _project(tmp_path))
+    assert launcher.requests[1]["trust"] is True
+    copied = tmp_path / "attempt-abc_12" / "trust" / "trust.pem"
+    assert copied.read_bytes() == bundle.read_bytes()
+    assert oct(copied.stat().st_mode & 0o777) == "0o644"
+
+
+def test_without_a_trust_bundle_the_build_asks_for_no_mount(tmp_path: Path) -> None:
+    """`trust: false` and no `trust` directory."""
+    launcher = FakeLauncher(
+        scripts={"status": _status(False), "build": lambda r, on_log: {"complete": True}}
+    )
+    _acquire(_environments(launcher), _project(tmp_path))
+    assert launcher.requests[1]["trust"] is False
+    assert not (tmp_path / "attempt-abc_12" / "trust").exists()
+
+
+def test_a_build_failing_on_an_untrusted_certificate_names_the_setting(tmp_path: Path) -> None:
+    """Uv's certificate error gets the hint to set LAKANA_RUN__CA_BUNDLE; a retry may help."""
+
+    def build(request: dict[str, Any], on_log: Callable[[bytes], None]) -> dict[str, object]:
+        """Fail as uv does on an index signed by an unknown authority.
+
+        Parameters
+        ----------
+        request
+            The build request.
+        on_log
+            The log sink.
+
+        Returns
+        -------
+        dict
+            The incomplete result.
+        """
+        on_log(b"error: Request failed: invalid peer certificate: UnknownIssuer\n")
+        return {"complete": False, "exit": 2}
+
+    launcher = FakeLauncher(scripts={"status": _status(False), "build": build})
+    with pytest.raises(VenvBuildError, match="uv exited with status 2: ") as caught:
+        _acquire(_environments(launcher), _project(tmp_path))
+    assert "LAKANA_RUN__CA_BUNDLE" in str(caught.value)
+    assert not isinstance(caught.value, VenvBuildRefused)

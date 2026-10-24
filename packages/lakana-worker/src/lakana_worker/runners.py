@@ -60,6 +60,7 @@ from lakana_worker.processes import (
     remove_private_tree,
     signal_group,
 )
+from lakana_worker.trust import install_trust
 
 MAX_ERROR_MESSAGE_CHARS = 2000
 """Longest task error message stored; the value `lakana.runner` truncates to as well."""
@@ -338,7 +339,9 @@ POLARS_SPILL_DIRECTORY = "polars-spill"
 """The directory in a task's `TMPDIR` that Polars 2 may spill into; the runner makes it."""
 
 
-def child_environment(home: Path, tmp: Path, memory_limit: int | None = None) -> dict[str, str]:
+def child_environment(
+    home: Path, tmp: Path, memory_limit: int | None = None, trust: Path | None = None
+) -> dict[str, str]:
     """Build the complete environment of a task process.
 
     Polars 2 spills to disk from 80 % of the memory it believes the machine has. It
@@ -359,6 +362,8 @@ def child_environment(home: Path, tmp: Path, memory_limit: int | None = None) ->
     memory_limit
         The worker's memory limit in bytes, or `None` when it has none (the two Polars
         sizes are then not set; the spill directory is).
+    trust
+        The worker's trust bundle, or `None` without `LAKANA_RUN__CA_BUNDLE`.
 
     Returns
     -------
@@ -366,7 +371,8 @@ def child_environment(home: Path, tmp: Path, memory_limit: int | None = None) ->
         `PATH`, `HOME`, `TMPDIR`, `PYTHONUNBUFFERED`, `PYTHONDONTWRITEBYTECODE`,
         `POLARS_OOC_SPILL_DIR` and, with `memory_limit`, `POLARS_OVERRIDE_TOTAL_MEMORY_MB`
         and `POLARS_OOC_DISK_BUDGET_MB` (the limit in megabytes of 10**6 bytes, as Polars
-        counts them, at least 1); nothing else of the worker's own environment.
+        counts them, at least 1), with `trust` `SSL_CERT_FILE` and `LAKANA_CA_BUNDLE` (both
+        naming it); nothing else of the worker's own environment.
     """
     env = {
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
@@ -380,6 +386,8 @@ def child_environment(home: Path, tmp: Path, memory_limit: int | None = None) ->
         megabytes = str(max(memory_limit // 1_000_000, 1))
         env["POLARS_OVERRIDE_TOTAL_MEMORY_MB"] = megabytes
         env["POLARS_OOC_DISK_BUDGET_MB"] = megabytes
+    if trust is not None:
+        env["SSL_CERT_FILE"] = env["LAKANA_CA_BUNDLE"] = str(trust)
     return env
 
 
@@ -928,6 +936,8 @@ class LocalProcessRunner:
     memory_limit
         The worker's memory limit in bytes, which the task's Polars is told about
         (`child_environment`); `None` when the worker has none.
+    trust
+        The worker's trust bundle; `None` without `LAKANA_RUN__CA_BUNDLE`.
     registry
         Where the running process is listed for the memory watchdog; `TASKS` by default.
     """
@@ -938,6 +948,7 @@ class LocalProcessRunner:
         module: str = "lakana.runner",
         poll_seconds: float = 0.2,
         memory_limit: int | None = None,
+        trust: Path | None = None,
         registry: TaskRegistry | None = None,
     ) -> None:
         self._registry = registry if registry is not None else TASKS
@@ -945,6 +956,7 @@ class LocalProcessRunner:
         self._module = module
         self._poll_seconds = poll_seconds
         self._memory_limit = memory_limit
+        self._trust = trust
 
     @property
     def isolated(self) -> bool:
@@ -1026,7 +1038,7 @@ class LocalProcessRunner:
             process = subprocess.Popen(  # nosec B603 -- fixed argv, no shell, minimal env
                 [str(task.venv / "bin" / "python"), "-P", "-m", self._module],
                 cwd=task.code_dir,
-                env=child_environment(home, tmp, self._memory_limit),
+                env=child_environment(home, tmp, self._memory_limit, self._trust),
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
@@ -1262,7 +1274,8 @@ class DockerRunner:
     """Run a task in a container of its own, through the launcher.
 
     The container sees the attempt's code read-only at `/code`, its environment read-only at
-    `/env`, a private `/work` (the attempt's ``task`` directory) and `/tmp`, and a network on
+    `/env`, a private `/work` (the attempt's ``task`` directory), with a trust bundle the
+    attempt's ``trust`` directory read-only at `/trust`, and `/tmp`, and a network on
     which the server is the only other member. It runs as the worker's uid with no
     capabilities, a read-only root filesystem and the limits below, enforced by the runtime;
     when it ends, the launcher removes it with every process in it. The token travels on stdin
@@ -1287,6 +1300,8 @@ class DockerRunner:
         How often the stop signal is checked.
     roots
         Allowed ingestion roots to mount.
+    trust
+        The worker's trust bundle; `None` without `LAKANA_RUN__CA_BUNDLE`.
     deadline_margin
         Seconds past the timeout and the kill grace after which the worker gives up on the
         launcher's answer and closes the connection, so the launcher removes the container.
@@ -1303,6 +1318,7 @@ class DockerRunner:
         kill_grace: float = 10.0,
         poll_seconds: float = 0.2,
         roots: tuple[str, ...] = (),
+        trust: Path | None = None,
         deadline_margin: float = DEADLINE_MARGIN_SECONDS,
     ) -> None:
         self._client = client
@@ -1313,6 +1329,7 @@ class DockerRunner:
         self._kill_grace = kill_grace
         self._poll_seconds = poll_seconds
         self._roots = roots
+        self._trust = trust
         self._deadline_margin = deadline_margin
 
     def _stop(self, ident: str) -> bool:
@@ -1417,6 +1434,8 @@ class DockerRunner:
                 directory.mkdir(mode=0o700, exist_ok=True)
             with contextlib.suppress(FileNotFoundError):
                 (work / RESULT_FILE).unlink()
+            if self._trust is not None:
+                install_trust(self._trust, task.attempt_dir)
         except OSError as exc:
             return RunOutcome(
                 succeeded=False,
@@ -1453,6 +1472,7 @@ class DockerRunner:
                 task, result_path=f"/work/{RESULT_FILE}", work_dir="/work", parent_pid=None
             ).decode("utf-8"),
             "roots": list(self._roots),
+            "trust": self._trust is not None,
         }
         sink = OutputRedactor(secrets_to_hide, on_log)
         box: dict[str, object] = {}
