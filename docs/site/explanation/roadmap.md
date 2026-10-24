@@ -102,17 +102,20 @@ build reaches only its package indexes, through an egress proxy. Two changes are
 Compose bundle uses the docker runner by default, and a protected environment runs Python tasks
 only in containers. See [Run Python tasks in containers](../how-to/run-python-tasks-in-containers.md)
 and the [notes for 0.20.0](upgrades.md#notes-for-0200). The next elements are the open
-dependency updates and a batch of small issues, then M6 ingestion, then M7c (the public beta,
-#33), M7, M8, M8b, M8c, M8d, M9, M10 and v1.0.0.
+dependency updates and a batch of small issues, then M6 ingestion, M8d data modelling, M7 web
+interface and sign-in, a small private test round on a hosted instance, M7c (the public beta,
+#33), M8, M8b, M8c, M9, M10 and v1.0.0.
 
 ## To v1.0.0
 
-The public beta comes before the web interface. The beta's purpose is that
-real users try Lakana and its documentation early, and what they report should shape the
-interface, which is the project's first front-end code and the least certain piece of work. The
-first testers are people at home in a terminal. Ingestion (M6) comes
-before the beta (task isolation, M7b, is built): a new team's first job is getting its data in, so the beta ships with the
-ingestion helpers and named connections.
+The order up to the public beta is: M6 ingestion, M8d data modelling, M7 web interface and
+sign-in, a small private test round on a hosted instance, and then M7c, the public beta. Dates
+follow the plan. The reasons: the first audience, teams without a senior data engineer, needs
+the web interface and real sign-in from the start; the strict data-model rules (a declared kind,
+grain, key and references, with generated checks, #250) should exist before anyone builds projects
+on Lakana; and the interface then shows model metadata from its first version. Ingestion (M6)
+comes first (task isolation, M7b, is built): a new team's first job is getting its data in, so
+the beta ships with the ingestion helpers and named connections.
 
 1. **M5d, triggers, data quality checks and notifications (built).** Runs start by hand, on a schedule
    or through an API call. A check, a SQL file that must return no rows, can block, keep or
@@ -144,36 +147,8 @@ ingestion helpers and named connections.
    asset's helper does the reading. Done when a new team loads data from each kind of source
    with a short asset, merges a changing source into a table, or loads a local file with
    `lakana load`.
-5. **M7c, public beta.** The repository is open and the packages are on PyPI as a pre-beta from
-   0.12.0; the beta is the 0.x release that says it is ready to try.
-   The beta is the CLI, the SDK and the REST API; it has no web interface yet, and the README and
-   these pages say so. Sign-in is by token: an administrator issues a token for each further
-   user with the CLI. The API may still change. Done when a stranger can install it from PyPI and
-   follow the documentation to a working instance, and a second person can be given access with
-   the documented token steps, and a new team can load data from a file, a SQL database and a
-   JSON API with the M6 helpers.
-6. **M7, web interface and sign-in.** Designed with what beta users report; the design (#66)
-   happens before or right after the beta, so that M7 starts with feedback in hand. A web
-   interface with OIDC sign-in, or an invite link and a passkey for teams without an identity
-   provider. It shows the catalog, lineage, runs with logs and check results and deploys, and has
-   a one-query SQL editor, administration of users, groups, grants, tokens and connections,
-   loading a file, and a first-run tour. No file browser, dashboards or notebooks. The Compose
-   bundle can set up a TLS proxy, because passkeys need HTTPS. Done when a new user can sign in and answer a question
-   without the CLI. A second security review is due when the interface and sign-in arrive.
-7. **M8, ML.** Experiment tracking, the model registry, and the offline feature store, all
-    queryable and tied to commits. The registry is the artifact store of M5c2b. It adds named
-    pointers such as `production`, pinned versions that a consumer can name, and metrics on a
-    version. Done when a model can be traced to the
-    exact code, data and parameters that produced it.
-8. **M8b, agents.** An MCP server so AI agents can operate Lakana under the same authorization
-    and audit as a person. Done when an agent can run a deploy and a query and both appear in
-    the audit log under its own identity.
-9. **M8c, BI tools.** A read-only governed SQL endpoint over the PostgreSQL wire protocol, with
-    a token as the password. A service account is refused on a table that has a row filter or
-    column mask; a dashboard on restricted data reads a table built for its audience. Done when
-    each tool on the tested list connects and sees only what its identity may.
-10. **M8d, data modelling (epic #249).** Decided on 2026-10-20 and built before v1.0.0, after M8c
-    and before M9. Opinionated support for medallion layers (bronze, silver, gold) and
+5. **M8d, data modelling (epic #249).** Decided on 2026-10-20; on 2026-10-24 it moved before
+    the public beta, after M6 and before M7. Opinionated support for medallion layers (bronze, silver, gold) and
     Kimball-lite star schemas, with optional wide tables. The parts: model metadata in the asset
     header (#250); translated labels and descriptions with a main language (#251); layer rules,
     first opt-in and then enforced (#252); the write mode `history` (SCD type 2) (#253); `merge`
@@ -181,6 +156,37 @@ ingestion helpers and named connections.
     metadata only, with no metrics layer (#255). Done when a new team can start from the
     template, build a star schema with a history dimension, and see its layers and labels in the
     catalog.
+6. **M7, web interface and sign-in.** Comes after M8d, so the interface shows model metadata
+   (kind, grain, key, references, layers and labels) from its first version. A web
+   interface with OIDC sign-in, or an invite link and a passkey for teams without an identity
+   provider. It shows the catalog, lineage, runs with logs and check results and deploys, and has
+   a one-query SQL editor, administration of users, groups, grants, tokens and connections,
+   loading a file, and a first-run tour. No file browser, dashboards or notebooks. The Compose
+   bundle can set up a TLS proxy, because passkeys need HTTPS. Done when a new user can sign in and answer a question
+   without the CLI. A second security review is due when the interface and sign-in arrive. M7 is designed first (#66): a spec and its slices come before any screen, built around what the
+   first audience needs, and the private test round checks it before the public beta. After
+   M7, a small private test round on a hosted instance comes before the beta.
+7. **M7c, public beta.** The repository is open and the packages are on PyPI as a pre-beta from
+   0.12.0; the beta is the 0.x release that says it is ready to try, planned for about February 2027.
+   The beta includes the web interface (M7) with sign-in by OIDC, or by an invite link and a
+   passkey for teams without an identity provider, and the data-modelling features of M8d, after a
+   small private test round on a hosted instance. The CLI, the SDK and the REST API stay. Tokens
+   remain for the CLI, the SDK and automation. The API may still change. Done when a stranger can
+   install it from PyPI and follow the documentation to a working instance, a second person can
+   sign in through the interface, a new team can load data from a file, a SQL database and a
+   JSON API with the M6 helpers, and model it with the M8d template.
+8. **M8, ML.** Experiment tracking, the model registry, and the offline feature store, all
+    queryable and tied to commits. The registry is the artifact store of M5c2b. It adds named
+    pointers such as `production`, pinned versions that a consumer can name, and metrics on a
+    version. Done when a model can be traced to the
+    exact code, data and parameters that produced it.
+9. **M8b, agents.** An MCP server so AI agents can operate Lakana under the same authorization
+    and audit as a person. Done when an agent can run a deploy and a query and both appear in
+    the audit log under its own identity.
+10. **M8c, BI tools.** A read-only governed SQL endpoint over the PostgreSQL wire protocol, with
+    a token as the password. A service account is refused on a table that has a row filter or
+    column mask; a dashboard on restricted data reads a table built for its audience. Done when
+    each tool on the tested list connects and sees only what its identity may.
 11. **M9, performance and multi-host workers.** Measured query performance, and workers that
     run on more than one host. Done when adding a host increases throughput as documented.
 12. **M10, hardening and v1.0.0.** Security review, upgrade paths, documentation pass and the

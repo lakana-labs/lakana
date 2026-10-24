@@ -45,13 +45,13 @@ you would change, or why Apache Iceberg, see
 
 > **Pre-beta.** The packages are on PyPI as 0.x releases so that people can try Lakana and tell
 > us what is missing. The API and the data layout may change between 0.x releases, and Lakana is
-> not ready for production data yet. The public beta follows later.
+> not ready for production data yet. The public beta follows the web interface and data modelling.
 
 `lakana-core`, `lakana-server`, and `lakana-worker` are
 substantially built — catalog, storage, authorization, policy, secrets, audit, the query
 executor, and the platform REST API are all real. `lakana` is the SDK and CLI on top of them,
 covering every platform route. There is no web interface yet: you work with Lakana through the
-CLI, the SDK or the REST API, and the interface is planned after the public beta. See
+CLI, the SDK or the REST API, and the interface is planned before the public beta. See
 [Scope and philosophy](docs/site/explanation/scope.md) and
 the [Roadmap](docs/site/explanation/roadmap.md) for where this is going.
 

@@ -9,7 +9,7 @@ by adding workers, not by distributing queries.
 New here? Begin with [Getting started](tutorials/getting-started.md).
 
 There is no web interface yet. You work with Lakana through the command line (CLI), the Python
-SDK or the REST API, and the interface is planned after the public beta
+SDK or the REST API, and the interface is planned before the public beta
 (see the [roadmap](explanation/roadmap.md)). To build on the REST API, read [The REST API as a
 contract](reference/rest-api.md): what Lakana promises about it and where to get its OpenAPI
 document.

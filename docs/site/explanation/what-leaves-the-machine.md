@@ -62,7 +62,7 @@ A few more things you may see:
 - **Not built yet.** There is no OIDC login for people in the code today. When it arrives it
   will make connections to the provider you configure, and this page will list them. (The CI
   OIDC exchange above is for CI jobs only.)
-- **There is no web interface** in the repository today.
+- **There is no web interface** in the repository today; it comes before the public beta.
 - **This documentation site** loads no font, script, image or style sheet from another host, so
   it also works on an internal network.
 

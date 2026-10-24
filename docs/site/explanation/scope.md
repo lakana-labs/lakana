@@ -44,7 +44,7 @@ PostgreSQL, so that a small team gets them in one install instead of assembling 
 | Area | What Lakana covers |
 |---|---|
 | Analytics | SQL assets, incremental tables, lineage, governed queries |
-| Data modelling | Medallion layers and Kimball-lite star schemas, the history write mode (`merge` comes with ingestion in M6), translated metadata, measures as metadata (milestone M8d, before v1.0.0, #249) |
+| Data modelling | Medallion layers and Kimball-lite star schemas, the history write mode (`merge` comes with ingestion in M6), translated metadata, measures as metadata (milestone M8d, built after ingestion and before the web interface and the public beta, #249) |
 | Data science | Python assets, reproducible environments, exploration through the SDK (including from your own notebook) |
 | ML | Training and batch scoring as assets, versioned model artifacts, experiment tracking, a feature store |
 | Operations | Runs, schedules, retries, audit, secrets, access policies, table and environment retention (0.17.0, #87), deploys from CI without a stored secret (0.18.0, #15), health checks and stable log codes (0.18.0, #205, #207), queries on DuckDB 2.0 with a hardened sandbox (0.19.0, #96), each Python task in a container of its own (0.20.0, #38) |
@@ -68,7 +68,7 @@ How the larger pieces are meant to work:
   translated with a main language (#251), and layer rules are opt-in first and enforced later
   (#252). The write mode `history` (SCD type 2) builds tables whose rows
   change (#253); `merge` (upsert) comes earlier, with ingestion in M6, and a template and a guide start a new team (#254). A measure is metadata on a
-  column, not a computed metric (#255). All of it comes before v1.0.0 (epic #249).
+  column, not a computed metric (#255). All of it comes before the web interface and the public beta (epic #249), so that nobody builds projects on Lakana before the rules exist and the interface shows model metadata from its first version.
 - **Data quality.** A check is a SQL file that must return no rows. It either blocks (the table is
   set back to what it was before the run, and what reads it is not built) or only warns, and its
   results are kept as a history. Nothing more elaborate than that. See
@@ -87,15 +87,17 @@ How the larger pieces are meant to work:
 - **Feature store.** Feature definitions are assets in git, stored as tables, with point-in-time
   correct joins for training. This is the offline half; a low-latency online store is not planned
   until a user needs one.
-- **Sign-in.** Tokens for the CLI, the SDK and automation; during the public beta they are the
-  only way in, and an administrator issues one for each further user with the CLI. The web
-  interface follows the beta, and with it, before v1.0.0, OpenID Connect (OIDC) for people and an
-  invite link and a passkey for small teams that have no identity provider. No passwords.
-- **Web interface.** There is none yet. The public beta is the CLI, the SDK and the REST API, and
-  the first testers are people at home in a terminal. The interface (M7) is planned after the
-  beta, designed with what beta users report, because it is the project's first front-end code
-  and the least certain piece of work. A second security review is due when it and sign-in
-  arrive.
+- **Sign-in.** Tokens for the CLI, the SDK and automation, and an administrator issues one for
+  each further user with the CLI. For people, the public beta brings the web interface with
+  OpenID Connect (OIDC), or an invite link and a passkey for small teams that have no identity
+  provider. No passwords.
+- **Web interface.** There is none yet. It is built after ingestion (M6) and data modelling
+  (M8d) and before the public beta, because the first audience, teams without a senior data
+  engineer, needs it and real sign-in from the start, and because it then shows model metadata
+  from its first version. It is designed first (#66), before any screen, around what that audience
+  needs, and the private test round on a hosted instance checks it before the
+  beta. The interface (M7) is the project's first front-end code. A second security review is
+  due when it and sign-in arrive.
 - **BI tools.** Before v1.0.0, a read-only SQL endpoint that speaks the PostgreSQL wire protocol,
   with a token as the password, and a tested list of tools. A BI tool that runs on a server
   connects with one stored identity, so a row filter could not apply to each viewer. The endpoint

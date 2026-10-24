@@ -7,7 +7,7 @@ needs the `ADMIN` role on the instance. In local mode and in the Compose bundle 
 is one (see [Getting started](../tutorials/getting-started.md) and
 [Deploying with Compose](deploy-with-compose.md)). The person you give access to needs the `lakana`
 command on their machine and a network route to the instance. The web interface is not part of
-this release, so a **token** is the way in: a secret string that stands for one person.
+this release, so a **token** is the way in for now: a secret string that stands for one person.
 
 The steps below give a person called `alice` access to the environment `dev`. Use your own names.
 
