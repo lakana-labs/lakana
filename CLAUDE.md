@@ -30,7 +30,9 @@ import-linter enforces these boundaries; `uv run lint-imports` checks them.
 5. **Run the gates before claiming done**: `ruff check`, `ruff format --check`,
    `ty check packages`, `lint-imports`, `pytest --cov --cov-report=json`,
    `scripts/coverage_ratchet.py`. The `--cov` flags are not optional — the ratchet refuses
-   a report older than the code, so a plain `pytest` makes it fail rather than lie.
+   a report older than the code, so a plain `pytest` makes it fail rather than lie. Local
+   gates run Python 3.14 with coverage plus these static checks; 3.11, 3.13 and macOS run in
+   CI only (`docs/agent/testing.md`, "Local gates").
 6. **When you change a rule, a config, or a licence, grep the docs for what asserted the
    old behaviour and fix it in the same commit.**
 7. **Conventional everything** — CI's `conventional` check enforces all of it:
