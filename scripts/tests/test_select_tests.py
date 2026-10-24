@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import ast
 import io
 import re
 import subprocess
-import time
 from pathlib import Path
 
 import pytest
@@ -52,18 +52,14 @@ def _selected(selection: Selection, test_file: str) -> bool:
     bool
         True when the file or a directory above it is selected, or everything is.
     """
-    if selection.tests is EVERYTHING:
+    if selection.tests is None:  # EVERYTHING
         return True
     return any(test_file == t or test_file.startswith(t + "/") for t in selection.tests)
 
 
 def test_an_sdk_change_selects_every_test_that_imports_the_sdk() -> None:
     """The review's cases: the server's CLI and SDK tests and the worker tests of the runner."""
-    start = time.monotonic()
     selection = select(["packages/lakana/src/lakana/cli/main.py"])
-    # It parses every test file's imports on each call: about 1.1 s, 1.5 s under coverage. The
-    # bound leaves room for a busy CI runner and still catches a selection that got slow.
-    assert time.monotonic() - start < 4
     assert _selected(selection, "packages/lakana/tests/test_client.py")
     imports = r"(?m)^\s*(from|import) lakana\.{}"
     cli = _files_importing(imports.format("cli"), "packages/lakana-server/tests/cli")
@@ -93,6 +89,27 @@ def test_a_server_change_selects_the_scripts_tests_that_import_the_server() -> N
     ]:
         assert _selected(selection, test_file), test_file
     assert not _selected(selection, "packages/lakana-worker/tests/test_tasks.py")
+
+
+def test_each_file_is_parsed_at_most_once_per_selection(monkeypatch: pytest.MonkeyPatch) -> None:
+    """What keeps the selection at about a second: one parse per file, however often imported.
+
+    A wall-clock bound would fail on a busy CI runner; the number of parses does not.
+    """
+    parsed: list[str] = []
+    parse = ast.parse
+
+    def counting(source: str) -> ast.Module:
+        parsed.append(source)
+        return parse(source)
+
+    monkeypatch.setattr("scripts.select_tests.ast.parse", counting)
+    select(["packages/lakana/src/lakana/client.py"])
+    # Without the per-call memo every test file would parse its conftest chain and helpers
+    # again: several thousand parses instead of one per file.
+    files = [*ROOT.glob("packages/*/tests/**/*.py"), *(ROOT / "scripts").rglob("*.py")]
+    assert parsed
+    assert len(parsed) <= len(files)
 
 
 def _tree(root: Path, files: dict[str, str]) -> Path:
