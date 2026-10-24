@@ -128,6 +128,13 @@ from lakana_core.catalog.maintenance import (
     select_expired_snapshots,
     select_orphans,
 )
+from lakana_core.catalog.merge import (
+    SDK_ADVICE,
+    MergeAdvice,
+    MergeResult,
+    check_merge_batch,
+    stage_upsert,
+)
 from lakana_core.catalog.metadata import (
     apply_updates,
     build_table_metadata,
@@ -973,6 +980,30 @@ def _layout_switch(update: TableUpdate) -> tuple[str, int] | None:
     if isinstance(update, SetDefaultSortOrderUpdate):
         return ("order", update.sort_order_id)
     return None
+
+
+def _bound_to_own_asset(p: PrincipalRef, ref: TableRef) -> bool:
+    """Tell whether `p` is a task attempt's bound token and `ref` is that task's own asset.
+
+    The names are compared as dotted strings, which a legacy name with a dot inside one of its
+    parts could make equal for two tables; `WRITE_TABLE`, authorized first, compares the parts
+    and refuses the other table.
+
+    Parameters
+    ----------
+    p
+        The acting principal.
+    ref
+        The table.
+
+    Returns
+    -------
+    bool
+        `True` only for a bound token on its own asset.
+    """
+    scope = p.task_scope
+    bound = None if scope is None else scope.bound
+    return bound is not None and bound.asset == ref.dotted()
 
 
 @dataclass(frozen=True)
@@ -4070,9 +4101,9 @@ class CatalogService:
             swap's transaction, after the metadata file was uploaded and in the lock order of a
             write (`tables`, then `task_runs`). No request, route or token reaches it.
         own_data_files
-            Only `CatalogService.append` and `write_batches` pass `True`: this service wrote
-            the commit's data files through pyiceberg, which always writes field ids, so their
-            footers are not read again. No request, route or token reaches this parameter.
+            Only `CatalogService.append`, `merge` and `write_batches` pass `True`: this service
+            wrote the commit's data files through pyiceberg, which always writes field ids, so
+            their footers are not read again. No request, route or token reaches this parameter.
         release_session
             Only the Iceberg REST commit route passes `True`: the database transaction is
             ended before the field-id check reads manifests and footers, so that no pooled
@@ -4953,8 +4984,128 @@ class CatalogService:
         ValidationError
             If the table is not a managed table.
         """
+        self._check_can_write_or_create(
+            p,
+            ref,
+            expected_snapshot_id,
+            artifact_operation="replacing rows",
+            unmanaged="Replaces are only supported on managed (Iceberg) tables.",
+        )
+
+    def check_can_merge(
+        self,
+        p: PrincipalRef,
+        ref: TableRef,
+        *,
+        expected_snapshot_id: ExpectedSnapshot | None = None,
+    ) -> None:
+        """Cheaply verify a merge would be authorized, before any data is read.
+
+        The rules of `check_can_replace` (`WRITE_TABLE` first, `CREATE_TABLE` as well when the
+        merge would create a missing table with `expected_snapshot_id="none"`), and `READ_TABLE`
+        right after `WRITE_TABLE`: a merge compares the batch with the table's rows, and its
+        counts and refusals tell what it found. For the same reason a merge is refused while a
+        row filter or column mask on the table applies to `p`, as `read_watermark` is.
+
+        One exception in how the `READ_TABLE` step is checked: a task attempt's bound token
+        merging into its own asset. Such a token may read only the task's declared inputs,
+        never its own asset, but writing that asset is the task's job. So for it, `READ_TABLE`
+        is checked against the principal's own grants without the token's narrowing (the
+        principal must still hold it, as its personal token would need to), after
+        `WRITE_TABLE` has held the token to its environment and its own asset; the write
+        guard's own-asset rule (`WriteOperation.MERGE`) holds it there too. The row filter and
+        column mask refusal runs against the same principal, so a task of a filtered or masked
+        principal cannot merge either.
+
+        Parameters
+        ----------
+        p
+            The acting principal.
+        ref
+            The table.
+        expected_snapshot_id
+            The caller's precondition, if any.
+
+        Raises
+        ------
+        PermissionDenied
+            Without `WRITE_TABLE` or `READ_TABLE`, or without `CREATE_TABLE` when the merge
+            would create the table.
+        NotFoundError
+            If the table does not exist and no precondition was given.
+        ConflictError
+            If the table does not exist and a snapshot id was expected.
+        ValidationError
+            If the table is not a managed table, or a row filter or column mask on it applies
+            to `p`.
+        """
+        row = self._check_can_write_or_create(
+            p,
+            ref,
+            expected_snapshot_id,
+            artifact_operation="merging rows",
+            unmanaged="Merges are only supported on managed (Iceberg) tables.",
+            read_as=replace(p, task_scope=None) if _bound_to_own_asset(p, ref) else p,
+        )
+        if row is None:
+            return
+        policy = PolicyResolver(self._session).resolve(p, ref, table_id=row.id)
+        if policy.row_filters or policy.column_masks:
+            raise ValidationError(
+                f"Merges into {ref.dotted()} are refused while a row filter or column mask "
+                "applies to you on it: a merge compares your rows with rows you can't see. Ask "
+                "someone the table is not filtered or masked for to run it, or ask an owner to "
+                "lift the filter or mask for you."
+            )
+
+    def _check_can_write_or_create(
+        self,
+        p: PrincipalRef,
+        ref: TableRef,
+        expected_snapshot_id: ExpectedSnapshot | None,
+        *,
+        artifact_operation: str,
+        unmanaged: str,
+        read_as: PrincipalRef | None = None,
+    ) -> Table | None:
+        """Run the pre-check of a write that may create its target.
+
+        Parameters
+        ----------
+        p
+            The acting principal.
+        ref
+            The table.
+        expected_snapshot_id
+            The caller's precondition, if any.
+        artifact_operation
+            What was attempted, for `artifact_refusal`.
+        unmanaged
+            The refusal for a table that is neither managed nor an artifact.
+        read_as
+            Authorize `READ_TABLE` too, right after `WRITE_TABLE`, for this principal (`p`, or
+            `p` without its task token's narrowing).
+
+        Returns
+        -------
+        Table or None
+            The table's row, or `None` when the write would create the table.
+
+        Raises
+        ------
+        PermissionDenied
+            As `check_can_replace`.
+        NotFoundError
+            As `check_can_replace`.
+        ConflictError
+            As `check_can_replace`.
+        ValidationError
+            As `check_can_replace`.
+        """
         securable = Securable.table_scope(ref.environment, ref.namespace, ref.name)
         self._authz.authorize(p, Action.WRITE_TABLE, securable)
+        if read_as is not None:
+            self._authz.authorize(read_as, Action.READ_TABLE, securable)
         row = self._existing_table(ref)
         if row is None:
             if expected_snapshot_id is None:
@@ -4962,11 +5113,12 @@ class CatalogService:
             if expected_snapshot_id != "none":
                 raise ConflictError(target_changed_message(ref.dotted()))
             self._authz.authorize(p, Action.CREATE_TABLE, securable)
-            return
+            return None
         if row.table_type is TableType.ARTIFACT:
-            raise ValidationError(artifact_refusal(ref.dotted(), "replacing rows"))
+            raise ValidationError(artifact_refusal(ref.dotted(), artifact_operation))
         if row.table_type is not TableType.ICEBERG:
-            raise ValidationError("Replaces are only supported on managed (Iceberg) tables.")
+            raise ValidationError(unmanaged)
+        return row
 
     def append(
         self,
@@ -5257,6 +5409,227 @@ class CatalogService:
             evolve_schema=evolve_schema,
             sources=lineage,
             pin=pin,
+        )
+
+    def merge(
+        self,
+        p: PrincipalRef,
+        ref: TableRef,
+        data: pa.Table,
+        *,
+        key: Sequence[str],
+        sources: Sequence[str] = (),
+        source_versions: Mapping[str, int] | None = None,
+        expected_snapshot_id: ExpectedSnapshot | None = None,
+        pin: SnapshotPin | None = None,
+        query_run_id: uuid.UUID | None = None,
+        watermark: str | None = None,
+        advice: MergeAdvice = SDK_ADVICE,
+    ) -> MergeResult:
+        """Update the rows whose key matches, insert the rest, in one commit (`tables.merge`).
+
+        The batch is checked first (`check_merge_batch`: the key columns exist, no key is null
+        or repeats; counts, never values), then against the table's schema as an append is.
+        `stage_upsert` reads the rows of the table that the batch's keys match, refuses a key
+        that matches more than one of them, and stages one snapshot; it is committed through
+        `commit_table` with the `TABLE_WRITE` event (`mode: merge`, both counts, the key) and
+        one lineage edge per source in the same transaction. A reader sees the table before or
+        after, never a half. Nothing is deleted. A failure deletes every file the merge wrote,
+        as for `append`.
+
+        A missing table with `expected_snapshot_id="none"` is created from the batch (the same
+        batch checks first) by the create path of `replace`, whose audit event is the create's.
+
+        Parameters
+        ----------
+        p
+            The acting principal.
+        ref
+            The table.
+        data
+            The rows.
+        key
+            The columns that identify a row.
+        sources
+            Dotted names of the tables `data` came from; each must exist and be READ-able,
+            checked before anything is written.
+        source_versions
+            The version of each source that is an artifact, by dotted name, when the caller
+            read a specific one; see :meth:`resolve_lineage_sources`.
+        expected_snapshot_id
+            The table's current snapshot as the caller read it, or ``none``; the merge commits
+            only while that still holds, and ``none`` on a missing table creates it.
+        pin
+            The table and snapshot a worker's merge run computed its rows from (a SQL asset's
+            watermark, or a SELECT of its own target), as for `write_batches`: the merge
+            commits only while the table is still that table at that snapshot. `None` for a
+            merge whose rows do not depend on the table; ignored where the merge creates it.
+        query_run_id
+            The run merging, for the audit event and the lineage edges.
+        watermark
+            The encoded watermark the run filtered on, for the audit event.
+        advice
+            How a refusal of the rows tells the caller to fix them: `SDK_ADVICE` for a caller
+            that sends batches, `SQL_ADVICE` for a SQL asset's run.
+
+        Returns
+        -------
+        MergeResult
+            The new snapshot and the counts. `snapshot_id` is `None`, and nothing is committed
+            or audited, when `data` has no rows or changes nothing.
+
+        Raises
+        ------
+        PermissionDenied
+            If `p` may not write or read the table or read a source, or lacks `CREATE_TABLE`
+            where the merge would create the table.
+        NotFoundError
+            If the table or a source does not exist.
+        ValidationError
+            For a key the batch or the table cannot merge on, a null or repeated key in the
+            batch, a key of several columns with more than `COMPOSITE_KEY_MAX_ROWS` rows, a key
+            of the batch matching two rows of the table, data that does not fit the table, a
+            table that is not managed, or a row filter or column mask on it that applies to
+            `p` (see `check_can_merge`).
+        ConflictError
+            If another writer committed first, or `expected_snapshot_id` or `pin` no longer
+            matches.
+        """
+        self._commit_sent = False
+        self.check_can_merge(p, ref, expected_snapshot_id=expected_snapshot_id)
+        self._guard.check(p, ref.environment, WriteOperation.MERGE, table_target(ref))
+        lineage = self.resolve_lineage_sources(
+            p, ref.environment, sources, versions=source_versions
+        )
+        data = strip_field_metadata(data)
+        key = list(key)
+        if self._existing_table(ref) is None and expected_snapshot_id == "none":
+            check_merge_batch(
+                data,
+                key,
+                table_columns=data.column_names,
+                table_name=ref.dotted(),
+                advice=advice,
+            )
+            try:
+                created = self.write_batches(
+                    p,
+                    ref,
+                    mode=WriteMode.CREATE,
+                    schema=data.schema,
+                    batches=data.to_batches(),
+                    sources=lineage,
+                    query_run_id=query_run_id,
+                )
+            except AlreadyExistsError as exc:
+                raise ConflictError(target_changed_message(ref.dotted())) from exc
+            return MergeResult(
+                snapshot_id=created.snapshot_id,
+                rows_inserted=created.rows,
+                rows_updated=0,
+                created=True,
+                table_id=created.table_id,
+            )
+
+        securable = Securable.table_scope(ref.environment, ref.namespace, ref.name)
+        ns, row = self._find_table(ref)
+        environment_id, table_id = ns.environment_id, row.id
+        unpublished = row.unpublished_run_id is not None
+        loaded = self._to_loaded_table(ref, row)
+        current = loaded.metadata
+        pins: list[TableRequirement] = [
+            AssertTableUUID(uuid=table_id),
+            AssertCurrentSchemaId(current_schema_id=current.current_schema_id),
+        ]
+        if expected_snapshot_id is not None:
+            wanted = expected_snapshot_value(expected_snapshot_id)
+            if current.current_snapshot_id != wanted:
+                raise ConflictError(target_changed_message(ref.dotted()))
+            pins.append(AssertRefSnapshotId(ref="main", snapshot_id=wanted))
+        if pin is not None:
+            if pin != SnapshotPin(table_id, current.current_snapshot_id):
+                raise ConflictError(target_changed_message(ref.dotted()))
+            pins.append(AssertRefSnapshotId(ref="main", snapshot_id=pin.snapshot_id))
+        schema = current.schema()
+        check_merge_batch(
+            data,
+            key,
+            table_columns=[column.name for column in schema.fields],
+            table_name=ref.dotted(),
+            advice=advice,
+        )
+        validate_arrow_schema(schema, data)
+        if data.num_rows == 0:
+            return MergeResult(snapshot_id=None, rows_inserted=0, rows_updated=0, table_id=table_id)
+
+        resolved = self._storage.for_environment(ref.environment)
+        staged = stage_upsert(
+            current, loaded.metadata_location, resolved.file_io, data, key, table_name=ref.dotted()
+        )
+        added = [u.snapshot for u in staged.updates if isinstance(u, AddSnapshotUpdate)]
+        if not added:
+            return MergeResult(snapshot_id=None, rows_inserted=0, rows_updated=0, table_id=table_id)
+        snapshot = added[0]
+        # Listed before the try, as in `append`: a failure reading them back aborts directly.
+        written_paths = new_data_file_paths(snapshot, resolved.file_io)
+        cleanup_paths = [
+            *written_paths,
+            *new_manifest_paths(snapshot, resolved.file_io),
+            *staged.discarded,
+        ]
+        counts = staged.counts
+        try:
+            self._record_write(
+                p,
+                securable,
+                ref,
+                WriteMode.MERGE,
+                WriteResult(
+                    table_id=table_id,
+                    rows=counts.rows_inserted + counts.rows_updated,
+                    files=len(written_paths),
+                    snapshot_id=snapshot.snapshot_id,
+                    schema_diff=SchemaDiff(),
+                ),
+                query_run_id,
+                watermark,
+                lineage,
+                environment_id,
+                snapshot_before=current.current_snapshot_id,
+                publishes=unpublished,
+                detail={
+                    "rows_inserted": counts.rows_inserted,
+                    "rows_updated": counts.rows_updated,
+                    "key": key,
+                },
+            )
+            self.commit_table(
+                p,
+                ref,
+                requirements=[*pins, *staged.requirements],
+                updates=staged.updates,
+                own_data_files=True,
+            )
+        except Exception as exc:
+            landed = self._settle_failed_write(
+                exc,
+                ref,
+                table_id=table_id,
+                snapshot_id=snapshot.snapshot_id,
+                new_table=False,
+                commit_sent=self._commit_sent,
+                clean_up=lambda: cleanup_written_paths(resolved, cleanup_paths),
+            )
+            if not landed:
+                if isinstance(exc, ConflictError):
+                    raise ConflictError(target_changed_message(ref.dotted())) from exc
+                raise
+        cleanup_written_paths(resolved, staged.discarded)
+        return MergeResult(
+            snapshot_id=snapshot.snapshot_id,
+            rows_inserted=counts.rows_inserted,
+            rows_updated=counts.rows_updated,
+            table_id=table_id,
         )
 
     def resolve_lineage_sources(
@@ -6396,6 +6769,7 @@ class CatalogService:
         *,
         snapshot_before: int | None = None,
         publishes: bool = False,
+        detail: Mapping[str, object] | None = None,
     ) -> None:
         """Add a write's `TABLE_WRITE` event and lineage edges to the session, uncommitted.
 
@@ -6429,6 +6803,8 @@ class CatalogService:
             a table without a snapshot and a view.
         publishes
             Whether the write creates the table or finds it not published.
+        detail
+            More fields for the event, after the common ones (a merge's counts and key).
         """
         AuditService(self._session).record(
             p.id,
@@ -6446,6 +6822,7 @@ class CatalogService:
                 else result.schema_diff.to_json(),
                 "run_id": None if query_run_id is None else str(query_run_id),
                 "principal": p.name,
+                **(detail or {}),
             },
         )
         if result.snapshot_id is not None:

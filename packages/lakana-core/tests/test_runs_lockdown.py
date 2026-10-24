@@ -1126,6 +1126,7 @@ def test_a_commit_that_is_not_the_rollback_is_refused_for_a_set_back_claim(
     ("operation", "target"),
     [
         (WriteOperation.APPEND, ("bronze", "events")),
+        (WriteOperation.MERGE, ("bronze", "events")),
         (WriteOperation.WRITE, ("bronze", "events")),
         (WriteOperation.DROP_TABLE, ("bronze", "events")),
         (WriteOperation.RENAME_TABLE, ("bronze", "events")),
@@ -1465,6 +1466,7 @@ _ALLOWED = {
     WriteOperation.SQL_WRITE,
     WriteOperation.WRITE,
     WriteOperation.APPEND,
+    WriteOperation.MERGE,
     WriteOperation.COMMIT,
     WriteOperation.CREATE_VIEW,
     WriteOperation.ARTIFACT_VERSION,
@@ -1529,7 +1531,7 @@ def _own_asset_text(operation: str, subject: str) -> str:
     """
     return (
         f"Task 'models.churn' may not do '{operation}' to {subject}; "
-        "a task may only materialize its own asset: for a table, sql write, write, append, "
+        "a task may only materialize its own asset: for a table, sql write, write, append, merge, "
         "commit, create view; for an artifact, artifact version. Do this outside the task."
     )
 
@@ -1590,6 +1592,7 @@ _TABLE_OPERATIONS = (
     WriteOperation.SQL_WRITE,
     WriteOperation.WRITE,
     WriteOperation.APPEND,
+    WriteOperation.MERGE,
     WriteOperation.COMMIT,
     WriteOperation.CREATE_VIEW,
 )

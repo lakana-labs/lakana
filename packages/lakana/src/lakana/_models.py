@@ -633,6 +633,26 @@ class AppendResult:
 
 
 @dataclass(frozen=True)
+class MergeResult:
+    """The outcome of a governed Arrow merge.
+
+    Parameters
+    ----------
+    snapshot_id
+        The id of the snapshot the merge committed, or `None` when it changed nothing (no
+        rows, or every row equal to the table's).
+    rows_inserted
+        Rows whose key the table did not have.
+    rows_updated
+        Rows whose key matched and whose values changed.
+    """
+
+    snapshot_id: int | None
+    rows_inserted: int
+    rows_updated: int
+
+
+@dataclass(frozen=True)
 class WriteResult:
     """The outcome of a governed Arrow replace.
 

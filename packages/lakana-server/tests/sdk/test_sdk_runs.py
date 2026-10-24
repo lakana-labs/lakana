@@ -161,6 +161,7 @@ def test_the_worker_list_returns_typed_entries(
     assert (worker.query_run_id, worker.deploy_run_id, worker.task_run_id) == (None, None, None)
 
 
+@pytest.mark.slow
 def test_checks_are_typed(lakana_client: lakana.Client, client: TestClient) -> None:
     """Both methods, `iter`, and the task fields come back typed; an older server's body works."""
     from datetime import datetime

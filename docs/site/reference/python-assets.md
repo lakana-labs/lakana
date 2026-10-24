@@ -12,7 +12,10 @@ limits lie is in [Python assets: what they are for and how far they are trusted]
   code at the repository root or under `src/`; both are importable at run time. A helper module
   that has the same name as an installed package or a standard library module cannot be
   imported under that name, because the repository is searched last.
-- **Inputs.** `inputs` maps each parameter of the function to a table or an artifact. A parameter
+- **Inputs.** `inputs` maps each parameter of the function to a table or an artifact, except a
+  parameter named `ctx`: `ctx` is not an input, it is reserved for the asset's context (see
+  [The asset's context](#the-assets-context)), so `def customers(ctx):` needs no
+  `inputs`, and `inputs` may not name it. A parameter
   that names a table receives the whole table as a `polars.DataFrame` (a table in memory). A
   parameter that names an artifact receives a `pathlib.Path` to a read-only copy of its files (see
   the [reference](artifacts.md)). It is read as the run principal,
@@ -37,18 +40,36 @@ limits lie is in [Python assets: what they are for and how far they are trusted]
   handed a Python asset `decimal.Decimal` values; an asset written for them that relies on
   that needs `decimals="exact"` after an upgrade.
 - **Connections.** `connections` names the connections of the environment this asset reads from,
-  for example `@asset(connections=["crm-db"])`; reading them from inside the task arrives in a
-  later release. At most 16, each made of lower-case letters, digits and `-`, starting with a
+  for example `@asset(connections=["crm-db"])`; inside the task, `lakana.ingest.connections.get`
+  reads one with its secret
+  ([How a task gets its credential](connections.md#how-a-task-gets-its-credential)). At most 16, each made of lower-case letters, digits and `-`, starting with a
   letter, and none listed twice. Each must exist in the environment you deploy to, or the deploy fails naming the
   `lakana connection create` command that creates it. A rollback to a version whose connection
   was deleted since fails the same way. While a deployed version declares a connection, the
   connection cannot be deleted. An asset without `connections` deploys as before. A project
-  version in which an asset declares connections has manifest version 7, so a worker of an
-  earlier release refuses its runs instead of running the asset without them: upgrade the
-  workers first. The kinds of connection and the commands that manage them are in
+  version in which an asset declares connections has manifest version 7 (8 when an asset also
+  appends or merges), so a worker of an earlier release refuses its runs instead of running the
+  asset without them: upgrade the workers first. The kinds of connection and the commands that manage them are in
   [Connections](connections.md).
-- **Output.** The function returns a `polars.DataFrame`. It replaces the asset's table in one
-  snapshot. Zero rows are fine. With `output="artifact"` it returns a `pathlib.Path` inside
+- **Write modes.** `write`, `key` and `watermark` say what a run does to the table, with the
+  rules of SQL front-matter (see [Write modes](asset-front-matter.md#write-modes)):
+  `write="replace"` (the default) replaces every row with what the function returns;
+  `write="append", watermark="updated_at"` creates the table on the first run and adds the rows
+  of each later run; `write="merge", key=["id"]` updates the rows whose key the table has and
+  adds the others, deleting none (`watermark` is optional). A key of several columns takes at
+  most 5,000 rows per run. The platform does not filter what a Python asset returns: an append
+  must return only the rows past `ctx.watermark()` (see [The asset's context](#the-assets-context)),
+  or it adds every row again. A merge holds its whole result in memory while it compares it with
+  the table, so what it returns counts against the worker's memory limit
+  (`LAKANA_WORKER__MEMORY_LIMIT`; `LAKANA_RUN__TASK_MEMORY` for a task in a container).
+  `materialize="incremental"` is refused with
+  ``a Python asset appends with write="append" and watermark="<column>", not materialize='incremental'``.
+  A project version in which an asset appends or merges has manifest version 8: a worker of an
+  earlier release refuses it instead of replacing the table.
+- **Output.** The function returns a `polars.DataFrame` or a `pyarrow.Table`; both get the same
+  checks of their columns. It is written into the asset's table in one snapshot, as `write` says.
+  Zero rows are fine: a replace empties the table, and an append or a merge whose source had
+  nothing new writes nothing and succeeds. With `output="artifact"` it returns a `pathlib.Path` inside
   `lakana.output_dir()` instead, and each run stores a new version of the artifact (see the
   [reference](artifacts.md)).
 - **Metadata.** `description` (default: the first paragraph of the docstring), `owner`, `tags`,
@@ -70,6 +91,52 @@ limits lie is in [Python assets: what they are for and how far they are trusted]
   shown under that name. A table created later under the same name is a new table:
   a grant on it does not show the old one. It is counted in `hidden_nodes` instead. To let a
   colleague see the history, grant them read on the namespace.
+
+## The asset's context
+
+A function that has a parameter named `ctx` receives the context of its run there. Its one method
+today is `ctx.watermark(default=None)`: the largest value of the asset's `watermark` column that
+its table holds, as an `int`, a `decimal.Decimal`, a `datetime.date` or a `datetime.datetime`
+(naive for a `timestamp` column, in UTC for a `timestamptz` one). On a first run the table has
+no rows yet and `ctx.watermark()` returns `default`, so give the earliest value you want to load,
+of the column's kind: a naive `datetime` for a `timestamp` column, one with `tzinfo=UTC` for a
+`timestamptz` column (polars `Datetime` with a time zone), as here:
+
+```python
+from datetime import UTC, datetime
+
+import polars as pl
+from lakana import asset
+
+
+@asset(write="append", watermark="updated_at")
+def orders(ctx) -> pl.DataFrame:
+    since = ctx.watermark(default=datetime(2020, 1, 1, tzinfo=UTC))
+    rows = pl.read_parquet("exports/orders.parquet")
+    return rows.filter(pl.col("updated_at") > since)
+```
+
+- **Filter the rows yourself.** The platform does not filter the rows a Python asset returns:
+  filter them with `ctx.watermark()`. An append adds every row the function returns, so an asset
+  that returns all rows on every run adds them all again.
+- **Nothing new is fine.** A run that finds nothing new returns an empty table and succeeds
+  without writing; the table, and so the next run's watermark, stay as they are. An empty
+  `polars.DataFrame()` without columns is fine too, except on the first run, before the table
+  exists (one a run created without rows exists): a table needs its columns, so that run fails
+  with
+  ``the asset returned no columns, so there is nothing to create bronze.orders from; its source had no data yet (check the pattern or the query); the first run must find data``.
+- **At least once.** `append` is at-least-once: a run whose answer is lost (the worker stopped
+  after the upload, before it could record it) runs again, and rows it returns again that are not
+  past the next watermark are added twice. `merge` is idempotent: running it again changes nothing.
+- **A concurrent write.** The worker reads the watermark before the task starts, and the upload
+  commits only on the table it was read from. If another write lands in between, the attempt is a
+  conflict and is tried again once at once, with the new watermark.
+- **The watermark column.** It must be a column of what the function returns, of one of the
+  types int, long, decimal, date, timestamp or timestamptz; otherwise the run fails before it
+  writes, for example
+  ``watermark column `name` is a string; it must be one of int, long, decimal, date, timestamp, timestamptz``.
+- **Without a watermark.** `ctx.watermark()` returns `default` for an asset without `watermark`,
+  such as a replace or a merge without one.
 
 ## Polars 1 and Polars 2
 
@@ -109,7 +176,8 @@ Spilling to disk, the one thing Polars 2 does that can use the worker's disk, is
 
 ## What Python assets do not do (yet)
 
-- `materialize: table` only. `incremental` is not supported (#23), and `view` is refused too.
+- A Python asset is a table (or an artifact), never a view. It appends with
+  `write="append", watermark=...`, not with `materialize="incremental"`.
 - Table inputs and a table output are whole DataFrames in memory. There is no streaming (#22), so
   the worker needs memory for your inputs, your output and your own work. An artifact is a file on
   disk and is not held in memory by Lakana.
@@ -155,7 +223,10 @@ there is one, the line, as `path:line: message`. Fix the cause and deploy again.
 | ``Asset `x.y`: the connections this project version declares cannot be read, so they cannot be checked against environment `e`. Deploy the repository again to record a new version.`` | The stored record of a project version was damaged or edited by hand. A rollback to such a version says the same. | Deploy the repository again; roll back only to a version recorded intact. |
 | `argument 'connections' must be a list of strings`, ``connection `c` is listed twice``, `an asset declares at most 16 connections`, `connection names are lower-case letters, digits and '-', …` | A wrong value for `connections`. | Write a list of distinct connection names, such as `connections=["crm-db"]`. |
 | `the file does not parse: …` | A syntax error. | Fix the line it names. |
-| `incremental Python assets are not supported yet (#23)`, `a Python asset supports only materialize 'table', got …` | `materialize` is not `table`. | Remove the argument, or write a SQL asset. |
+| ``a Python asset appends with write="append" and watermark="<column>", not materialize='incremental'`` | `materialize="incremental"`. | Write `write="append", watermark="<column>"`. |
+| `a Python asset supports only materialize 'table', got …` | `materialize` is neither `table` nor `incremental`. | Remove the argument, or write a SQL asset. |
+| ``write must be one of replace, append, merge; got '…'``, ``` `write: append` needs `watermark:` … ```, ``` `write: merge` needs `key:` … ```, ``` `write: replace` takes neither `key:` nor `watermark:` ```, ``key column `id` is listed twice`` | A wrong write model. | See [Write modes](asset-front-matter.md#write-modes); the rules are the same as in SQL front-matter. |
+| `` `ctx` is the asset's context; give the input another parameter name `` | `inputs` names a parameter `ctx`. | Rename the parameter and its entry in `inputs`. |
 | `assets/a.sql and assets/a.py both produce table 'a'` | A SQL file and a Python file for one table. | Keep one. |
 | `every .py file under assets/ is an asset; put helper code outside assets/ …` | `__init__.py` or a helper module under `assets/`. | Move helper code to the repository root or `src/`. |
 | `symlinks are not allowed in a repository with Python assets` | A symlink anywhere in the repository. | Replace it with a copy of the file. |
@@ -223,8 +294,12 @@ attempt (see [Run](../how-to/projects.md#run)).
 | The worker stops for using too much memory (cause `out_of_memory` on the query run) | The message names the limit and the setting to raise. On Linux a running Python task is always ended first and retried (the row above), so this row reaches only a SQL task and a Python task still building its environment. Such a task is **not retried** when the worker was running only this task (and its own query runs): it would need the same memory again. A SQL task whose write had already been committed is `succeeded` instead (the row above; a task whose table has [checks](../how-to/check-your-data.md) is taken again and only checks). On macOS every task is handled this way. When an unrelated query was running on the worker too, the blame is uncertain and the task is retried while it has attempts left. |
 | A Python asset raises `MemoryError` | Fails with `MemoryError. The task ran out of memory: use less data …, or run it on a machine or in a container with more memory.` Not retried. The machine or container itself had no memory left: narrow the inputs with an upstream SQL asset, work in smaller pieces, or give the worker's machine or container more memory. |
 | A Python asset's function raises `TypeError` | Fails with `TypeError: <the exception's text>` and a second line: `This error is almost always a mistake in the asset's code, so it is not retried. Fix the function, deploy, and run again.` Not retried: a wrong type is almost always a mistake in the code, and every attempt repeats it. If the cause can be transient (a library raising `TypeError` on a value an HTTP call did not return this time, for example), catch it in the function and raise another exception type, such as `RuntimeError`, which is retried. This holds for a `TypeError` (or a subclass) raised out of the function itself, not for one raised while the file is imported. Any other exception of the function (`ValueError`, `KeyError`, `NameError`, a failed network call, ...) is retried until `retries` runs out, because it can depend on the data or on the moment. |
-| A return value that cannot become a table | Fails and is not retried: `the asset returned a polars LazyFrame; call .collect() …`, `… a pandas DataFrame; return pl.from_pandas(df)`, `… a DataFrame without columns`, or `column 'x' has type …, which cannot be stored in a table`. A column of type `Int128` or `UInt128` is refused by name, with the way out: `cast it to Int64 (pl.col('x').cast(pl.Int64)), or to a decimal such as pl.Decimal(38, 0) if the values do not fit into 64 bits` (Polars 2 gives `Int128` when you add a signed and an unsigned integer column). An `Extension` column (an Arrow extension type Polars does not know) is refused with `take its stored values with pl.col('x').ext.storage() and cast them to a type a table stores`. A table stores no list, struct or map either: such a column is refused as `Column 'x' has an unsupported Arrow type: …`. |
+| A return value that cannot become a table | Fails and is not retried: `the asset returned a polars LazyFrame; call .collect() …`, `… a pandas DataFrame; return pl.from_pandas(df)`, ``… a pyarrow RecordBatchReader; read it with `.read_all()` and return the table``, `… a DataFrame without columns` (`… a table without columns` for a `pyarrow.Table`), or `column 'x' has type …, which cannot be stored in a table`. A column of type `Int128` or `UInt128` is refused by name, with the way out: `cast it to Int64 (pl.col('x').cast(pl.Int64)), or to a decimal such as pl.Decimal(38, 0) if the values do not fit into 64 bits` (Polars 2 gives `Int128` when you add a signed and an unsigned integer column). An `Extension` column (an Arrow extension type Polars does not know) is refused with `take its stored values with pl.col('x').ext.storage() and cast them to a type a table stores`. A table stores no list, struct or map either: such a column is refused as `Column 'x' has an unsupported Arrow type: …`. |
 | The output schema changed | Fails and is not retried: `the asset's output no longer matches the schema of <table> …`, with the remedy. |
+| An append or merge's first run returns no columns | ``the asset returned no columns, so there is nothing to create <table> from; …``. Not retried. Run it again once its source has data. |
+| The watermark column is missing or has another type | ``watermark column `ts` is not a column of what the asset returned; return it, or change the asset's watermark=`` or ``watermark column `name` is a string; it must be one of int, long, decimal, date, timestamp, timestamptz``. Not retried. |
+| A merge's rows repeat a key, or a key of several columns has more than 5,000 rows | ``key `id` repeats in 4 rows of what the asset returned; return one row per key, for example with `df.unique(subset=['id'], keep='last')` `` or ``a merge on a key of several columns takes at most 5,000 rows per run, and the asset returned 12,000. …``, which says to merge on one key column or to return only the rows past `ctx.watermark()`. Not retried; nothing is written. |
+| A connection the asset declares no longer exists | ``<table> declares the connection `crm-db`, which environment dev does not have; create it (lakana connection create) or remove it from the asset's connections, then deploy again``. Not retried. |
 | The process exits or is killed without a result | `the task process exited with status N without a result` or `the task process was killed by signal N`. Retried. A kill by signal 9 is usually the operating system running out of memory, and signal 6 is an abort, as after a failed allocation in native code: the fix is less data in memory (narrow the inputs) or a worker with more memory, not another retry. |
 | An artifact input has no version, or cannot be read | `models.x has no version yet; run the asset that produces it` (not retried), or `models.x cannot be read by the run's principal 'svc-run', or does not exist; grant read on it or check the name` (not retried). Download problems say `reading input 'model' (models.x, version 3) failed: …`; a version that was deleted since the task started is retried and resolved again, and a refusal such as a grant revoked after the task was prepared is not retried. A version whose stored manifest the client rejects (it does not match its own digest, or it is over a limit such as a path the client refuses) is not retried either: every attempt would meet the same record. Its message says so (`The stored manifest of version 3 does not match its digest, so this version is damaged on the server and downloading it again will not help. Tell the operator, and store the artifact again …`). A downloaded file that does not match its manifest, a broken connection and a 5xx are retried. |
 | An artifact upload is refused as too large (413) | The task fails with the server's text, for example `The manifest request is larger than 16777216 bytes. It lists every file with its path and hash: store fewer files or give them shorter paths (the limit is fixed).` Not retried: the operator's limit is reached, and the same upload is refused again. Store fewer or smaller files. |
@@ -235,7 +310,7 @@ attempt (see [Run](../how-to/projects.md#run)).
 | The task's process is killed or times out after its version was stored | The task shows as failed or timed out and is retried; its version **stays live**, and a retry stores a newer one. With `keep_versions=1` the previous version is already deleted, so use at least 2 if you want the last good model to survive a bad run. |
 | The worker is older than the platform that deployed the project | `the project version's manifest has version 5, but this worker understands versions 1 to 4; update the worker to the platform version that deployed it, or redeploy with this worker's version` (the numbers differ). Not retried. Update the worker. |
 | An artifact asset returns the wrong thing | `an artifact asset must return a pathlib.Path inside lakana.output_dir() …`, `the asset returned …, which is not inside lakana.output_dir() …`, `… which does not exist …`, `… which passes through a symbolic link …`. Not retried. See the [reference](artifacts.md). |
-| The task reports success but its table did not change | `the task reported success without writing its table`; not retried. An attempt counts as succeeded only when the platform finds the table changed. For an artifact asset the platform looks for a version stored by this attempt and says `the task reported success without storing a version of its artifact …`. |
+| The task reports success but its table did not change | `the task reported success without writing its table`; not retried. An attempt counts as succeeded only when the platform finds the table changed, or, for an append or a merge, unchanged after a run that reported no rows (nothing new). For an artifact asset the platform looks for a version stored by this attempt and says `the task reported success without storing a version of its artifact …`. |
 | The environment build fails | `environment build failed: …`, with uv's output in the log. Retried. A build that runs out of time or space says so. |
 | A package index refuses the credential of a registered index | ``environment build failed: The package index 'team' refused the credential in secret 'team-index' of environment 'dev'. …`` Not retried: the same credential is refused again. Set the secret again with the command in the message (`lakana secret rotate team-index --env dev --values-stdin`); the next run builds the environment with it, without a new deploy. See [Use a private package index](../how-to/private-package-index.md). |
 | The secret of a registered index is missing, has no usable `password`, or cannot be decrypted | ``environment build failed: the package index 'team' needs the secret 'team-index' in environment 'dev', which does not exist. …`` or ``environment build failed: the secret 'team-index' of environment 'dev', which the package index 'team' uses, has no usable "password". …``. Not retried. Create or set the secret with the command in the message. A deploy stops with the same text, and a run whose environment is already built does not read the secret. |

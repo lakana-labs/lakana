@@ -898,9 +898,11 @@ _NOTHING_OF_A_KEPT_TABLE = {
     "rename_table": _OWN_ASSET,
     "append": _OWN_ASSET,
     "replace": _OWN_ASSET,
+    "merge": _OWN_ASSET,
     "write_batches": _OWN_ASSET,
     "check_can_append": "the precheck of `append`; returns nothing",
     "check_can_replace": "the precheck of `replace`; returns nothing",
+    "check_can_merge": "the precheck of `merge`; returns nothing",
     "roll_back": "sets the task's own asset back (`_require_own_task`); returns an outcome",
     "read_watermark": (
         "one value of the target of an incremental append, for which it authorizes WRITE_TABLE: "
@@ -1073,6 +1075,7 @@ def test_every_public_catalog_method_is_placed() -> None:
     assert all(reason.strip() for reason in _NOTHING_OF_A_KEPT_TABLE.values())
 
 
+@pytest.mark.slow
 def test_no_other_caller_reads_a_table_for_a_task() -> None:
     """A new way to a table's rows or files must go through `load_table`, or be listed here.
 

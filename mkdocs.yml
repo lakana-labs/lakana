@@ -68,6 +68,7 @@ nav:
       - reference/ci-trust-rules.md
       - reference/checks.md
       - reference/descriptions.md
+      - reference/merge.md
       - reference/table-health.md
       - reference/search.md
       - reference/lists.md

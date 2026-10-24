@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pytest
 import typer
 from conftest import FakeApi, invoke, make_state
 
@@ -38,6 +39,7 @@ def _paths(command: object, prefix: tuple[str, ...] = ()) -> list[tuple[str, ...
     return found
 
 
+@pytest.mark.slow
 def test_no_help_text_shows_a_numpydoc_section(tmp_path: Path) -> None:
     """Walk the whole command tree: no `--help` carries a docstring section."""
     paths = _paths(typer.main.get_command(build_app()))

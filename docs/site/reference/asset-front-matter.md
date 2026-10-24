@@ -11,9 +11,9 @@ An optional `/* lakana … */` block, first in the file:
 description: Cleaned hourly weather observations, nulls dropped.
 owner: data-eng
 tags: [weather, hourly]
-materialize: incremental      # table | view | incremental
-incremental_key: ts           # required exactly when incremental
-evolve_schema: false          # incremental only
+write: append                 # replace | append | merge, see "Write modes" below
+watermark: ts                 # append needs it; merge may have it
+evolve_schema: false          # append only
 retries: 3                    # run policy, see lakana.yaml: "Retries and timeouts"
 retry_delay: 1m
 timeout: 5m
@@ -51,13 +51,138 @@ quoted strings or numbers. `evolve_schema` that changes a column's type (other t
 makes the column a new one: the rows written before read as NULL in it, and the row filters and
 column masks that use it must be created again, as reads under them are refused until then. Each block is at most 64 KiB, and it ends at the first `*/`, even
 inside a string or scalar (when the leftover text then fails to parse, the error says so).
-`table` is written with `replace` (`create` the first time), `view` as a view, `incremental` with
-`append` on `incremental_key`. An incremental asset needs no table made beforehand: its first run
-creates the table with every row the `SELECT` returns, and each later run appends the rows whose
-`incremental_key` is above the highest value already in the table. A first run that returns no
-rows creates the table empty, and the next run takes every row. The key must be a column of the
-result, of an integer, decimal, date or timestamp type; a first run with another key fails before
-it creates anything. Because the first run creates the table, the run's principal needs the right
-to create tables in the asset's namespace (`CREATE_TABLE`), not only to write them. Without it the
-first run fails with a message that names the right and the table, and the next run works once
-you grant it, or create the table yourself.
+`materialize: table` (the default) makes the asset a table, written as its `write:` says (below);
+`materialize: view` makes it a view, which takes no `write:`.
+
+## Write modes
+
+`write:` says what each run does to the asset's table. The same three modes, with the same rules,
+are the `write=`, `key=` and `watermark=` arguments of a Python asset's `@asset(...)`, with one
+difference: the platform filters a SQL asset's rows on the watermark, but not the rows a Python
+function returns. A Python asset that appends must return only the rows past `ctx.watermark()`
+(and `ctx.watermark(default=...)` gives the first run its start), see
+[The asset's context](python-assets.md#the-assets-context).
+
+| `write:` | What a run does | Needs |
+|---|---|---|
+| `replace` (the default) | Replaces every row of the table with what the `SELECT` returns. | neither `key:` nor `watermark:` (it takes neither) |
+| `append` | The first run creates the table with every row; each later run adds only the rows whose `watermark` column is above the highest value already in the table. | `watermark:` |
+| `merge` | Matches the rows on `key:`: a row whose key the table has replaces that row, any other row is added. Nothing is deleted. With `watermark:`, a run reads only the rows above the highest value in the table. | `key:` (one or more columns); `watermark:` is optional |
+
+Every first run creates the table, so the run's principal needs the right to create tables in the
+asset's namespace (`CREATE_TABLE`), not only to write them. Without it the first run fails with a
+message that names the right and the table; the next run works once you grant it, or create the
+table yourself. A first run that returns no rows creates the table empty.
+
+### `append`
+
+<!-- source: docs/examples/write-modes/project/assets/silver/customer_changes.sql -->
+```sql
+/* lakana
+description: Every change of a customer, oldest first; each run adds the new ones.
+write: append
+watermark: updated_at
+*/
+SELECT id, name, updated_at FROM bronze.customer_updates
+```
+
+The watermark must be a column of the result, of an integer, decimal, date or timestamp type; a
+first run with another column fails before it creates anything. A row that arrives late, with a
+value at or below the watermark, is not added. After Grace's name changed and Edsger arrived,
+the second run added both rows and kept the first ones:
+
+<!-- output: write-modes#appended -->
+```text
+┏━━━━┳━━━━━━━━━━━━━━┓
+┃ id ┃ name         ┃
+┡━━━━╇━━━━━━━━━━━━━━┩
+│ 1  │ Ada          │
+│ 2  │ Grace        │
+│ 2  │ Grace Hopper │
+│ 3  │ Edsger       │
+└────┴──────────────┘
+4 rows
+```
+
+`evolve_schema: true` lets an append change the table's schema when the result's columns change;
+it works with `write: append` only.
+
+### `merge`
+
+<!-- source: docs/examples/write-modes/project/assets/silver/customers.sql -->
+```sql
+/* lakana
+description: One row per customer, kept up to date.
+write: merge
+key: [id]
+*/
+SELECT id, name, updated_at FROM bronze.customer_updates
+```
+
+The same two runs leave one row per customer:
+
+<!-- output: write-modes#merged -->
+```text
+┏━━━━┳━━━━━━━━━━━━━━┓
+┃ id ┃ name         ┃
+┡━━━━╇━━━━━━━━━━━━━━┩
+│ 1  │ Ada          │
+│ 2  │ Grace Hopper │
+│ 3  │ Edsger       │
+└────┴──────────────┘
+3 rows
+```
+
+Each run commits one new snapshot, so a reader sees the table before or after the merge, never
+half of it, and running the same merge again changes nothing. Every run checks the rows first,
+the first one too: a run whose result has a null key, or a key in more than one row, fails and
+writes nothing (``key `id` repeats in 2 rows of the asset's result; keep one row per key in its
+SELECT, …``); make the `SELECT` return one row per key, for example with
+`QUALIFY row_number() OVER (PARTITION BY id ORDER BY updated_at DESC) = 1`.
+A key of several columns (`key: [id, region]`) takes at most 5,000 rows per run; on one column
+there is no such cap. A merge holds its whole result in the worker's memory while it compares it
+with the table (at most `LAKANA_QUERY_LIMITS__MAX_WRITE_ROWS` rows), so a large one counts against
+the worker's memory limit (`LAKANA_WORKER__MEMORY_LIMIT`). A merge compares the rows with the table's, so the run's principal needs
+`READ_TABLE` on the table as well as the right to write it, and a merge is refused while a row
+filter or column mask on the table applies to that principal. The details, the counts and the
+audit event are in [Merging rows into a table](merge.md).
+
+### `replace`
+
+`replace` needs nothing more: leave `write:` out, or write `write: replace`.
+
+### Rules
+
+Each of these fails the deploy with an issue at the block's line:
+
+| Issue | Cause |
+|---|---|
+| ``write: must be one of replace, append, merge; got 'upsert'`` | Another value. |
+| ``` `write: append` needs `watermark:` — the column whose largest value the next run starts after ``` | `append` without `watermark:`. |
+| ``` `write: merge` needs `key:` — the columns that identify a row ``` | `merge` without `key:`. |
+| ``` `write: replace` takes neither `key:` nor `watermark:` ``` | `key:` or `watermark:` without `write: append` or `merge`. |
+| ``` `write: append` takes no `key:`; to merge rows on a key use `write: merge` ``` | `append` with `key:`. |
+| ``key column `id` is listed twice`` | A repeated key column. |
+| ``` `materialize: view` cannot take `write:` ``` | A view with `write:`. |
+| ``` `evolve_schema` works with `write: append` only ``` | `evolve_schema` on any other asset. |
+| ``use one: `write: append` with `watermark:` replaces `materialize: incremental` `` | Both spellings in one block. |
+
+### The older spelling
+
+`materialize: incremental` with `incremental_key:` is the older spelling of `write: append` with
+`watermark:`; both work, and a deploy prints a hint:
+
+<!-- output: write-modes#hint -->
+```text
+Queued dry run 3dc2c4aa-8f40-4985-9106-1d92966b24eb
+Dry run of analytics in dev at abcc6826166c7e41e9bbed945192487e8ef38035
+┏━━━━━━━━┳━━━━━━━━━━━━━━━━━━━┓
+┃ change ┃ table             ┃
+┡━━━━━━━━╇━━━━━━━━━━━━━━━━━━━┩
+│ added  │ silver.orders_log │
+└────────┴───────────────────┘
+hint: silver.orders_log: `materialize: incremental` is now written `write: append` with `watermark: order_id`; both work
+```
+
+A project version that uses `write: append` or `merge` needs workers of this release or later: a
+worker of an earlier one refuses its manifest instead of running the asset as a replace.

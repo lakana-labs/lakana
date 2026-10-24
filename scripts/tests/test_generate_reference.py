@@ -272,6 +272,7 @@ def test_check_fails_on_a_stale_page_and_names_the_command(
     assert main(["--check"], site=tmp_path, generate=lambda: pages) == 1
 
 
+@pytest.mark.slow
 def test_the_committed_pages_are_current() -> None:
     """The real pages equal what the code produces (the CI check, in the test run)."""
     assert main(["--check"]) == 0
@@ -328,6 +329,7 @@ def test_the_openapi_document_describes_the_routers_it_is_given() -> None:
     assert render_openapi([_fixture_router()]) == text
 
 
+@pytest.mark.slow
 def test_the_committed_openapi_document_is_the_platform_api_only() -> None:
     """Every route is under /api/; the Iceberg REST catalog has its own specification."""
     doc = json.loads(real_pages()[OPENAPI_PAGE])
@@ -335,6 +337,7 @@ def test_the_committed_openapi_document_is_the_platform_api_only() -> None:
     assert [path for path in doc["paths"] if not path.startswith("/api/")] == []
 
 
+@pytest.mark.slow
 def test_an_instance_serves_the_committed_platform_routes(tmp_path: Path) -> None:
     """``/openapi.json`` of a running instance has the same platform routes as the snapshot."""
     from lakana_core.config import DatabaseConfig
@@ -355,6 +358,7 @@ _INTERNAL = re.compile(
 )
 
 
+@pytest.mark.slow
 def test_no_setting_description_names_internal_code() -> None:
     """The settings page is user documentation: a description names no internal code."""
     page = real_pages()[SETTINGS_PAGE]
@@ -389,6 +393,7 @@ def _operations() -> list[tuple[str, str, dict]]:
     ]
 
 
+@pytest.mark.slow
 def test_every_route_has_a_summary_and_a_description_for_a_user() -> None:
     """Each operation has a summary and a description that says more than the summary."""
     lacking = []
@@ -400,6 +405,7 @@ def test_every_route_has_a_summary_and_a_description_for_a_user() -> None:
     assert lacking == []
 
 
+@pytest.mark.slow
 def test_no_route_description_shows_maintainer_text() -> None:
     """Internal parameter names and ``Raises`` lines stay in the code, out of the contract."""
     leaks = []
@@ -411,6 +417,7 @@ def test_no_route_description_shows_maintainer_text() -> None:
     assert leaks == []
 
 
+@pytest.mark.slow
 def test_every_route_that_needs_a_caller_documents_the_refusal_of_a_missing_one() -> None:
     """Every route answers 401 for a missing or wrong credential, and says so."""
     missing = [
@@ -421,6 +428,7 @@ def test_every_route_that_needs_a_caller_documents_the_refusal_of_a_missing_one(
     assert missing == []
 
 
+@pytest.mark.slow
 def test_every_parameter_of_every_route_has_a_description() -> None:
     """Path, query and header parameters say what they are for."""
     lacking = [

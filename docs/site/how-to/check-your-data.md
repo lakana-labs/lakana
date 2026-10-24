@@ -884,13 +884,14 @@ The value in force for a check is its own `on_failure`, else the default in `lak
 `block`. The comment of a check takes two keys, `description` and `on_failure`. Any other key, and
 any other value of `on_failure`, is refused at deploy and the message lists the right ones.
 
-`keep` can be used on a table your project builds with `materialize: table` (the default, and
-every Python asset) and on a table it only reads, where it stops what reads the table in that run
+`keep` can be used on a table your project builds with `write: replace` (the default, SQL or
+Python) and on a table it only reads, where it stops what reads the table in that run
 and marks nothing (see [A table your project only reads](#a-table-your-project-only-reads)). A
-deploy refuses it on an incremental asset and on a view. A kept table clears when it is built
-again and passes its checks; building an incremental asset again only adds rows, so the rows that
-failed would stay, and a view holds no data to keep. Use `block` there: it takes a failed
-increment out again, and for a view it stops what reads it. The messages are in
+deploy refuses it on an asset that appends (`write: append`, or `materialize: incremental`), on
+one that merges (`write: merge`) and on a view. A kept table clears when it is built again and
+passes its checks; building an appending or merging asset again only adds or updates rows, so the
+rows that failed would stay, and a view holds no data to keep. Use `block` there: it takes a
+failed increment or merge out again, and for a view it stops what reads it. The messages are in
 [Checks](../reference/checks.md#what-a-deploy-refuses).
 
 ### Block

@@ -112,10 +112,16 @@ def _public_sdk_methods() -> set[str]:
         client.close()
 
 
+_TASK_ONLY = frozenset({"task_connections.get"})
+"""SDK methods only a running task's own token is answered for: a command would only ever print
+the refusal. `lakana.ingest` calls them inside the task; a person reads connections with
+`lakana connection show`."""
+
+
 def test_every_public_sdk_method_has_a_command() -> None:
     """Completeness: no SDK capability is missing from the CLI (plan ruling 2)."""
     covered = {key for keys in COMMANDS.values() for key in keys}
-    missing = _public_sdk_methods() - covered
+    missing = _public_sdk_methods() - covered - _TASK_ONLY
     assert not missing, f"SDK methods with no CLI command: {sorted(missing)}"
 
 

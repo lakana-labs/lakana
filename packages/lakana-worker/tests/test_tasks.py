@@ -1564,7 +1564,7 @@ def test_a_sql_asset_whose_name_is_an_artifact_is_refused_with_the_next_step(wor
     )
 
 
-@pytest.mark.parametrize("declared", [8, "3", 3.0, 0, -1, True])
+@pytest.mark.parametrize("declared", [9, "3", 3.0, 0, -1, True])
 def test_a_sql_task_of_a_manifest_this_worker_cannot_read_fails_permanently(
     world: World, declared: object
 ) -> None:
@@ -1624,12 +1624,12 @@ def test_a_sql_task_of_a_manifest_of_a_version_up_to_the_current_one_still_runs(
 
 @pytest.mark.parametrize(
     ("declared", "status"),
-    [(6, TaskStatus.SUCCEEDED), (7, TaskStatus.SUCCEEDED), (8, TaskStatus.FAILED)],
+    [(7, TaskStatus.SUCCEEDED), (8, TaskStatus.SUCCEEDED), (9, TaskStatus.FAILED)],
 )
-def test_a_manifest_of_version_7_is_accepted_and_8_is_refused(
+def test_a_manifest_of_version_8_is_accepted_and_9_is_refused(
     world: World, declared: int, status: TaskStatus
 ) -> None:
-    """Version 7 is the one a project with connections gets; 8 is a future worker's."""
+    """Version 8 is the one a project with `write: append` or `merge` gets; 9 is a future one's."""
     _start(world)
     with world.session() as session:
         version = session.get(JobVersion, world.version_id)
@@ -2146,3 +2146,174 @@ def test_only_a_cancel_has_a_code_among_the_stops() -> None:
     """A release is no failure."""
     assert stop_code(FailureKind.CANCELLED) is not None
     assert stop_code(FailureKind.RELEASED) is None
+
+
+def _merging(world: World, **extra: object) -> None:
+    """Deploy `silver.orders` as a `write: merge` asset on `id`, as a deploy writes it.
+
+    Parameters
+    ----------
+    world
+        The world.
+    **extra
+        Overrides of the manifest entry.
+    """
+    entry = {
+        "references": ["bronze.events"],
+        "materialize": "table",
+        "write_mode": "merge",
+        "first_write_mode": "create",
+        "incremental_key": None,
+        "write": "merge",
+        "key": ["id"],
+        "watermark": None,
+        "retry_delay_seconds": 0,
+        **extra,
+    }
+    world.set_manifest(_entry("silver.orders", "SELECT id FROM bronze.events", **entry))
+
+
+def test_a_merge_asset_creates_its_table_and_later_runs_merge_on_its_key(world: World) -> None:
+    """Run 2 reads every source row again; the rows of run 1 are matched, not added twice."""
+    _outside_table(world, "bronze.events", [1, 2, 3])
+    _merging(world)
+
+    _start(world)
+    _drain(world)
+
+    first = _task(world, "silver.orders")
+    assert first.status is TaskStatus.SUCCEEDED, first.error_message
+    (write,) = _writes(world, first.id)
+    assert (write.write_mode, write.merge_key, write.rows_written) == (
+        WriteMode.CREATE,
+        ["id"],
+        3,
+    )
+    _append_ids(world, "bronze.events", [4, 5])
+
+    _start(world)
+    _drain(world)
+
+    second = _task(world, "silver.orders")
+    assert second.status is TaskStatus.SUCCEEDED, second.error_message
+    (write,) = _writes(world, second.id)
+    assert (write.write_mode, write.merge_key, write.rows_written) == (
+        WriteMode.MERGE,
+        ["id"],
+        2,
+    )
+    assert write.snapshot_id is not None
+    assert _ids(world, "silver.orders") == [1, 2, 3, 4, 5]
+
+
+def test_a_merge_that_changes_nothing_says_the_run_left_the_table_as_it_was(
+    world: World,
+) -> None:
+    """A failing blocking check after a merge that committed nothing: nothing to set back."""
+    _outside_table(world, "bronze.events", [1, 2, 3])
+    entry = {
+        "references": ["bronze.events"],
+        "materialize": "table",
+        "write_mode": "merge",
+        "first_write_mode": "create",
+        "incremental_key": None,
+        "write": "merge",
+        "key": ["id"],
+        "watermark": None,
+        "retry_delay_seconds": 0,
+        "retries": 0,
+    }
+    world.set_manifest(_entry("silver.orders", "SELECT id FROM bronze.events", **entry))
+    _start(world)
+    _drain(world)
+    assert _task(world, "silver.orders").status is TaskStatus.SUCCEEDED
+    world.set_manifest(
+        _entry("silver.orders", "SELECT id FROM bronze.events", **entry),
+        checks=[_check("no_threes", "SELECT id FROM silver.orders WHERE id = 3")],
+    )
+
+    run_id = _start(world)
+    _drain(world)
+
+    task = _task(world, "silver.orders")
+    assert task.status is TaskStatus.FAILED
+    assert task.error_message is not None
+    assert task.error_message.startswith(
+        "Check `silver.orders/no_threes` failed: 1 row (checks/silver/orders/no_threes.sql). "
+        "The table was not changed by this run, and nothing downstream was built."
+    )
+    assert "rollback failed" not in task.error_message.lower()
+    (result,) = _results(world, task.id)
+    assert result.rollback_outcome is RollbackOutcome.NOTHING_WRITTEN
+    assert "rollback: nothing_written" in _log(world, run_id, "silver.orders")
+    assert _ids(world, "silver.orders") == [1, 2, 3]
+
+
+def test_the_first_run_of_a_merge_asset_refuses_a_repeated_key_and_creates_nothing(
+    world: World,
+) -> None:
+    """The create is checked as every later merge is: a repeated key would collapse later."""
+    _outside_table(world, "bronze.events", [1, 1, 2])
+    _merging(world, retries=0)
+
+    _start(world)
+    _drain(world)
+
+    task = _task(world, "silver.orders")
+    assert task.status is TaskStatus.FAILED
+    assert task.error_message is not None
+    assert "key `id` repeats in 2 rows of the asset's result; keep one row per key in its " in (
+        task.error_message
+    )
+    assert "QUALIFY ROW_NUMBER() OVER (PARTITION BY id ORDER BY" in task.error_message
+    assert "unique(subset" not in task.error_message
+    assert not _exists(world, "silver.orders")
+
+
+def test_a_later_run_of_a_merge_asset_refuses_a_repeated_key_with_advice_for_its_select(
+    world: World,
+) -> None:
+    _outside_table(world, "bronze.events", [1, 2])
+    _merging(world, retries=0)
+    _start(world)
+    _drain(world)
+    assert _task(world, "silver.orders").status is TaskStatus.SUCCEEDED
+    _append_ids(world, "bronze.events", [2])
+
+    _start(world)
+    _drain(world)
+
+    task = _task(world, "silver.orders")
+    assert task.status is TaskStatus.FAILED
+    assert task.error_message is not None
+    assert "key `id` repeats in 2 rows of the asset's result" in task.error_message
+    assert "QUALIFY ROW_NUMBER()" in task.error_message
+    assert _ids(world, "silver.orders") == [1, 2]
+
+
+@pytest.mark.parametrize(
+    ("extra", "message"),
+    [
+        ({"write": "upsert"}, "the project version's write mode 'upsert' for silver.orders"),
+        ({"key": []}, "the project version merges silver.orders without a key"),
+        ({"key": "id"}, "the project version merges silver.orders without a key"),
+        (
+            {"first_write_mode": "replace"},
+            "the project version's write mode 'replace' for silver.orders is not valid",
+        ),
+    ],
+    ids=["unknown-write", "no-key", "key-not-a-list", "merge-written-as-replace"],
+)
+def test_a_merge_entry_that_cannot_be_read_fails_without_writing(
+    world: World, extra: dict[str, object], message: str
+) -> None:
+    _outside_table(world, "bronze.events", [1, 2])
+    _merging(world, retries=0, **extra)
+
+    _start(world)
+    _drain(world)
+
+    task = _task(world, "silver.orders")
+    assert task.status is TaskStatus.FAILED
+    assert task.error_message is not None and task.error_message.startswith(message)
+    assert not _exists(world, "silver.orders")

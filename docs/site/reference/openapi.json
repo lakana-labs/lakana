@@ -4214,6 +4214,249 @@
         }
       }
     },
+    "/api/v1/environments/{env}/namespaces/{path}/tables/{name}/merge": {
+      "post": {
+        "tags": [
+          "tables"
+        ],
+        "summary": "Merge rows into a table on a key",
+        "description": "Sends the rows of an Arrow IPC stream as the request body. A row whose `key` (repeatable, required: one or more columns) matches a row of the table replaces it; any other row is inserted; nothing is deleted. One snapshot: readers see the table before or after, never a half. Takes the same `source`, `source_version` and `expected_snapshot_id` as the append, and the same body limits. Needs `WRITE_TABLE` and `READ_TABLE` on the table (a merge compares the rows with the table's), and `CREATE_TABLE` as well to create a missing table with `expected_snapshot_id=none`; it is refused (422) while a row filter or column mask on the table applies to the caller. Answers 404 when the table or a source does not exist, 409 when `expected_snapshot_id` no longer matches, 413 for a body over the server's limit, 408 when the body arrives too slowly, 503 when the server is busy with other uploads (try again after `Retry-After`) and 422 for a key column the table or the rows do not have, a null key, a key that repeats in the rows or matches two rows of the table (counts only, never values), a key of several columns with more than 5,000 rows, or rows that do not fit the table.",
+        "operationId": "merge_table_data_api_v1_environments__env__namespaces__path__tables__name__merge_post",
+        "parameters": [
+          {
+            "name": "env",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Env"
+            },
+            "description": "Environment name."
+          },
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            },
+            "description": "Dot-joined namespace path."
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            },
+            "description": "Table name."
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source"
+            },
+            "description": "Dotted names of the tables the rows came from."
+          },
+          {
+            "name": "source_version",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source Version"
+            },
+            "description": "``<version>:<dotted name>`` for each source that is an artifact, when the task read a specific version; the edge records it instead of the current one. A malformed value is a 422 before the body is read."
+          },
+          {
+            "name": "expected_snapshot_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Expected Snapshot Id"
+            },
+            "description": "The table's current snapshot as the caller read it, or `none`; the merge commits only while that still holds (409 otherwise). `none` also creates a missing table from the rows."
+          },
+          {
+            "name": "key",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "title": "Key"
+            },
+            "description": "The columns that identify a row; repeat the parameter for a key of several columns."
+          },
+          {
+            "name": "break_glass_reason",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 500
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Why the protection of a protected environment is broken, up to 500 characters; recorded in the audit log. Only a protected environment needs it.",
+              "title": "Break Glass Reason"
+            },
+            "description": "Why the protection of a protected environment is broken, up to 500 characters; recorded in the audit log. Only a protected environment needs it."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MergeOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token is missing, wrong, expired or revoked.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "No part of the request body arrived within the read timeout.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The request body is larger than the server accepts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The server cannot do this right now; ask again after the time in `Retry-After`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/environments/{env}/namespaces/{path}/dropped-tables": {
       "get": {
         "tags": [
@@ -10028,6 +10271,90 @@
           },
           "409": {
             "description": "The request conflicts with the current state; the message says what to change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/self/connections/{name}": {
+      "get": {
+        "tags": [
+          "connections"
+        ],
+        "summary": "Fetch a connection the running task's asset declares, with its secret",
+        "description": "For the helpers of `lakana.ingest` inside a Lakana task; nothing else needs it. Answers only the task's own token while its attempt runs, for a connection its deployed asset declares in `@asset(connections=[...])`, in the task's environment. Every call is in the audit log: `CONNECTION_CREDENTIAL_FETCHED` (committed before the answer is sent) or `CONNECTION_CREDENTIAL_REFUSED`. Answers 403 with \"only a running task can fetch a connection\" for any other token, \"connection `NAME` is not declared by asset `ASSET`\" for a name the asset does not declare (whether or not a connection of that name exists), and \"connection `NAME` is not in environment `ENV`\" for a declared name the environment lacks; 401 for a token whose attempt has ended or was claimed again. The answer is never cached (`Cache-Control: no-store`, `Pragma: no-cache`).",
+        "operationId": "get_task_connection_api_v1_tasks_self_connections__name__get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 63,
+              "description": "The connection's name.",
+              "title": "Name"
+            },
+            "description": "The connection's name."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskConnectionOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token is missing, wrong, expired or revoked.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
             "content": {
               "application/json": {
                 "schema": {
@@ -17734,6 +18061,30 @@
         "title": "DroppedTableOut",
         "description": "One dropped table whose files are not deleted yet.\n\nParameters\n----------\nname\n    The table's name when it was dropped.\nnamespace\n    Dot-joined namespace path it was dropped from.\nuuid\n    The table's id, which a restore keeps.\nkind\n    ``TABLE``: only managed tables can be restored.\ndropped_at\n    When it was dropped.\npurge_after\n    From when on the worker's sweep deletes its files; it can be restored until then.\nrestorable\n    Whether `POST .../tables/{name}/undrop` would still restore it: `false` once\n    `purge_after` has passed or the sweep has started deleting its files."
       },
+      "EndpointOut": {
+        "properties": {
+          "host": {
+            "type": "string",
+            "title": "Host"
+          },
+          "port": {
+            "type": "integer",
+            "title": "Port"
+          },
+          "role": {
+            "type": "string",
+            "title": "Role"
+          }
+        },
+        "type": "object",
+        "required": [
+          "host",
+          "port",
+          "role"
+        ],
+        "title": "EndpointOut",
+        "description": "One host and port a connection reaches.\n\nParameters\n----------\nhost\n    The host, lower case.\nport\n    The port.\nrole\n    ``service`` (the data) or ``token`` (where an OAuth2 token is fetched)."
+      },
       "EnvironmentCreate": {
         "properties": {
           "name": {
@@ -18830,6 +19181,37 @@
         "type": "object",
         "title": "MaintenanceIn",
         "description": "Request body for table maintenance.\n\nParameters\n----------\nkeep_days\n    Snapshots younger than this many days are kept.\nkeep_last\n    The most recent this many snapshots are always kept.\ndry_run\n    Report what would happen without changing anything.\nolder_than_hours\n    Unreferenced files younger than this many hours are never deleted;\n    1 to 87600 (ten years)."
+      },
+      "MergeOut": {
+        "properties": {
+          "snapshot_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snapshot Id"
+          },
+          "rows_inserted": {
+            "type": "integer",
+            "title": "Rows Inserted"
+          },
+          "rows_updated": {
+            "type": "integer",
+            "title": "Rows Updated"
+          }
+        },
+        "type": "object",
+        "required": [
+          "snapshot_id",
+          "rows_inserted",
+          "rows_updated"
+        ],
+        "title": "MergeOut",
+        "description": "Response body for a governed Arrow merge.\n\nParameters\n----------\nsnapshot_id\n    The snapshot the merge committed, or `None` when it changed nothing (no rows, or every\n    row equal to the table's).\nrows_inserted\n    Rows whose key the table did not have.\nrows_updated\n    Rows whose key matched and whose values changed."
       },
       "NamespaceCreate": {
         "properties": {
@@ -21596,6 +21978,60 @@
         "title": "TaskAttemptOut",
         "description": "One attempt of a task run.\n\nParameters\n----------\nattempt\n    Attempt number.\nworker\n    Worker id.\nstarted_at\n    Start.\nfinished_at\n    End.\noutcome\n    How it ended.\nrows_written\n    Rows written.\nerror_message\n    Why it failed, as free text.\nfailure\n    The code, cause and next step of an attempt that did not succeed (`FailureOut`);\n    `null` for an attempt that succeeded or is running."
       },
+      "TaskConnectionOut": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "address": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Address"
+          },
+          "settings": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Settings"
+          },
+          "endpoints": {
+            "items": {
+              "$ref": "#/components/schemas/EndpointOut"
+            },
+            "type": "array",
+            "title": "Endpoints"
+          },
+          "secret": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Secret"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "kind",
+          "address",
+          "settings",
+          "endpoints",
+          "secret"
+        ],
+        "title": "TaskConnectionOut",
+        "description": "Response body of a running task's fetch of one of its connections.\n\nThe only answer of the API that carries a secret's values. It is sent only to a bound task\ntoken of a running attempt, for a connection its deployed asset declares, with\n``Cache-Control: no-store``; the helper keeps it in memory for the attempt.\n\nParameters\n----------\nname\n    The connection's name.\nkind\n    Its kind.\naddress\n    Its address, with defaults filled in.\nsettings\n    Its settings, with defaults filled in; a ``ca_certificate`` in full.\nendpoints\n    Every host and port it reaches, in order.\nsecret\n    The values of its secret; `null` when it has none it may use."
+      },
       "TaskLogOut": {
         "properties": {
           "run_id": {
@@ -22359,7 +22795,8 @@
               "create",
               "replace",
               "append",
-              "view"
+              "view",
+              "merge"
             ],
             "title": "Mode"
           },
@@ -22388,7 +22825,7 @@
           "mode"
         ],
         "title": "WriteTargetIn",
-        "description": "Where a write run puts its result.\n\nParameters\n----------\ntable\n    The target's dotted name.\nmode\n    `create`, `replace`, `append` or `view`.\nincremental_key\n    The key column, `append` only.\nevolve_schema\n    Let the target adopt the result's schema, `replace`/`append` only."
+        "description": "Where a write run puts its result.\n\nParameters\n----------\ntable\n    The target's dotted name.\nmode\n    `create`, `replace`, `append` or `view`. `merge` is accepted only to be refused with\n    what merges instead (an asset with `write: merge`, or `tables.merge`).\nincremental_key\n    The key column, `append` only.\nevolve_schema\n    Let the target adopt the result's schema, `replace`/`append` only."
       }
     }
   }

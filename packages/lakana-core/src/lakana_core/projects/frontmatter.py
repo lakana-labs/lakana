@@ -4,10 +4,20 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from typing import Literal
 
 import pydantic
 from pydantic import Field, StrictBool, field_validator
 
+from lakana_core.artifacts.manifest import shown
+from lakana_core.projects.asset_model import (
+    KEY_COLUMN_MESSAGE,
+    WATERMARK_MESSAGE,
+    WRITE_CHOICES,
+    key_issues,
+    write_choice_message,
+    write_rule_issues,
+)
 from lakana_core.projects.issues import ProjectIssue, ProjectValidationError
 from lakana_core.projects.limits import DeployLimits
 from lakana_core.projects.project_config import (
@@ -63,6 +73,14 @@ class AssetMetadata(SafeTextModel):
         The watermark column; required exactly when ``incremental``.
     evolve_schema
         Let an incremental append evolve the table's schema.
+    write
+        ``replace``, ``append`` or ``merge``; `None` when the asset does not say (it then
+        replaces, or appends for ``materialize: incremental``).
+    key
+        The columns that identify a row, for ``write: merge``.
+    watermark
+        The column whose largest value the next run starts after, for ``write: append`` (and
+        optionally ``merge``).
     columns
         Column name → description.
     retries
@@ -79,6 +97,9 @@ class AssetMetadata(SafeTextModel):
     materialize: Materialize | None = None
     incremental_key: str | None = None
     evolve_schema: StrictBool | None = None
+    write: Literal["replace", "append", "merge"] | None = None
+    key: tuple[str, ...] = ()
+    watermark: str | None = None
     columns: dict[str, str] = Field(default_factory=dict)
     retries: int | None = Field(default=None, ge=0, le=MAX_RETRIES, strict=True)
     retry_delay: Duration | None = None
@@ -106,6 +127,81 @@ class AssetMetadata(SafeTextModel):
         """
         if value is not None and unsafe_identifier(value):
             raise ValueError(f"incremental_key {IDENTIFIER_MESSAGE}")
+        return value
+
+    @field_validator("write", mode="before")
+    @classmethod
+    def _write_is_a_choice(cls, value: object) -> object:
+        """Refuse a `write` that is not one of `WRITE_CHOICES`, naming them.
+
+        Parameters
+        ----------
+        value
+            The field's raw value.
+
+        Returns
+        -------
+        object
+            `value`, for the type check that follows.
+
+        Raises
+        ------
+        ValueError
+            If it is a string that is not a choice; any other type is left to the type check.
+        """
+        if isinstance(value, str) and value not in WRITE_CHOICES:
+            raise ValueError(write_choice_message(shown(value)).removeprefix("write "))
+        return value
+
+    @field_validator("key")
+    @classmethod
+    def _key_is_safe(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        """Refuse a key column with an unsafe character.
+
+        A column listed twice is a consistency issue (`consistency_issues`), reported with the
+        other rules.
+
+        Parameters
+        ----------
+        value
+            The field's value.
+
+        Returns
+        -------
+        tuple of str
+            `value`.
+
+        Raises
+        ------
+        ValueError
+            If a column has an unsafe character.
+        """
+        if any(unsafe_identifier(column) for column in value):
+            raise ValueError(KEY_COLUMN_MESSAGE)
+        return value
+
+    @field_validator("watermark")
+    @classmethod
+    def _watermark_is_safe(cls, value: str | None) -> str | None:
+        """Refuse a watermark column with an unsafe character.
+
+        Parameters
+        ----------
+        value
+            The field's value.
+
+        Returns
+        -------
+        str or None
+            `value`.
+
+        Raises
+        ------
+        ValueError
+            If it has an unsafe character.
+        """
+        if value is not None and unsafe_identifier(value):
+            raise ValueError(WATERMARK_MESSAGE)
         return value
 
     @field_validator("columns")
@@ -406,8 +502,15 @@ def consistency_issues(
                 path, line, "incremental_key is allowed only with materialize: incremental"
             )
         )
-    if not incremental and metadata.evolve_schema is not None:
-        issues.append(
-            ProjectIssue(path, line, "evolve_schema is allowed only with materialize: incremental")
-        )
+    rules = [
+        *write_rule_issues(
+            metadata.write,
+            metadata.key,
+            metadata.watermark,
+            materialize=metadata.materialize,
+            evolve_schema=metadata.evolve_schema,
+        ),
+        *key_issues(metadata.key),
+    ]
+    issues.extend(ProjectIssue(path, line, message) for message in rules)
     return issues

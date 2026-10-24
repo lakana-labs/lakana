@@ -10,7 +10,11 @@ from typing import TYPE_CHECKING, Any, cast
 
 from lakana_core.connections.kinds import NAME
 from lakana_core.identifiers import NOTIFY_FORMATS
-from lakana_core.projects.asset_model import DEFAULT_DECIMALS, MAX_KEEP_VERSIONS
+from lakana_core.projects.asset_model import (
+    DEFAULT_DECIMALS,
+    MAX_KEEP_VERSIONS,
+    normalized_write,
+)
 from lakana_core.projects.dag import ProjectGraph
 from lakana_core.projects.parse import ParsedAsset
 from lakana_core.projects.project_config import (
@@ -23,7 +27,7 @@ from lakana_core.projects.run_policy import RunCaps, resolve_run_policy
 if TYPE_CHECKING:
     from lakana_core.projects.checks import ParsedCheck
 
-MANIFEST_VERSION = 7
+MANIFEST_VERSION = 8
 """Bumped when the manifest's shape changes. Version 2 adds `kind` per asset and
 `lock_sha256`; a version-1 manifest is read as all-SQL. Version 3 adds `output`,
 `keep_versions` and `input_kinds` per Python asset; versions 1 and 2 are read as all-table.
@@ -39,6 +43,11 @@ never send; any other project keeps its version.
 Version 7 is written only when an asset declares connections (`CONNECTIONS_VERSION`), so that a
 worker of an earlier release refuses it; every Python entry carries `connections`, empty if need
 be, and a version 7 manifest always carries a `checks` list, as versions 5 and 6 do.
+Version 8 is written only when an asset uses `write: append` or `merge` in the new spelling
+(`WRITES_VERSION`), so that a worker of an earlier release refuses it instead of running a
+merge or an append as a replace; it also carries a `checks` list. Every entry carries `write`,
+`key` and `watermark` (read with `entry_write`), beside the older `materialize`, `write_mode`,
+`first_write_mode` and `incremental_key`; an entry without them reads from those.
 The `decimals` key is optional and read with a default (`entry_decimals`), so it needed
 no bump: an entry without it means ``float``. The `package_indexes` key is optional in
 the same way: a manifest without it uses no registered package index. The `python` key is
@@ -58,9 +67,18 @@ NOTIFY_VERSION = 6
 """The version of a manifest in which a job notifies."""
 
 CONNECTIONS_VERSION = 7
-"""The version of a manifest in which an asset declares connections (and, from the next pull
-request, uses `write: append` or `merge` in the new spelling); a worker of an earlier release
-refuses it instead of running the asset without its connections."""
+"""The version of a manifest in which an asset declares connections and none uses the new write
+spelling; a worker of an earlier release refuses it instead of running the asset without its
+connections."""
+
+WRITES_VERSION = 8
+"""The version of a manifest in which an asset uses `write: append` or `merge` in the new
+spelling (with or without connections); a worker of an earlier release refuses it instead of
+running the asset as a replace."""
+
+LISTS_CHECKS = (4, 5, 6, 7, 8)
+"""The versions whose manifest always carries a `checks` list (version 4 a non-empty one). A
+tuple, not a set: a stored version may be any JSON value, a list too, and must not raise."""
 
 _SHA256 = re.compile(r"\A[0-9a-f]{64}\Z")
 
@@ -68,11 +86,13 @@ WRITE_MODES: dict[str, tuple[str, str]] = {
     "table": ("replace", "create"),
     "view": ("view", "view"),
     "incremental": ("append", "create"),
+    "merge": ("merge", "create"),
 }
-"""Materialization → (M5a write mode, write mode when the table does not exist yet).
+"""Materialization (or ``merge``) → (write mode, write mode when the table does not exist yet).
 
 An incremental asset's first run creates its table with every row its SELECT returns;
-the runs after it append the rows past the watermark.
+the runs after it append the rows past the watermark. A merge asset's first run creates its
+table too, with the same key checks as every later merge.
 """
 
 
@@ -116,8 +136,11 @@ def _entry(asset: ParsedAsset, caps: RunCaps, artifacts: frozenset[str]) -> dict
     dict
         The manifest entry.
     """
+    write, key, watermark, _ = normalized_write(asset.metadata)
     materialize = asset.metadata.materialize or "table"
-    write_mode, first_write_mode = WRITE_MODES[materialize]
+    if write == "append":
+        materialize = "incremental"
+    write_mode, first_write_mode = WRITE_MODES["merge" if write == "merge" else materialize]
     entry: dict[str, Any] = {
         "table": asset.table,
         "path": asset.path,
@@ -125,8 +148,11 @@ def _entry(asset: ParsedAsset, caps: RunCaps, artifacts: frozenset[str]) -> dict
         "materialize": materialize,
         "write_mode": write_mode,
         "first_write_mode": first_write_mode,
-        "incremental_key": asset.metadata.incremental_key,
+        "incremental_key": watermark,
         "evolve_schema": bool(asset.metadata.evolve_schema),
+        "write": write,
+        "key": list(key),
+        "watermark": watermark,
         **_policy(asset, caps),
         "metadata": {
             "description": asset.metadata.description,
@@ -172,7 +198,13 @@ def _unset_notify(job: JobConfig) -> set[str]:
     return set() if job.notify is not None else {"notify"}
 
 
-def _version(config: ResolvedProjectConfig, *, has_checks: bool, uses_connections: bool) -> int:
+def _version(
+    config: ResolvedProjectConfig,
+    *,
+    has_checks: bool,
+    uses_connections: bool,
+    uses_new_writes: bool = False,
+) -> int:
     """Pick the lowest manifest version that carries everything the project declares.
 
     Parameters
@@ -183,14 +215,19 @@ def _version(config: ResolvedProjectConfig, *, has_checks: bool, uses_connection
         Whether the project has checks.
     uses_connections
         Whether an asset declares a connection.
+    uses_new_writes
+        Whether an asset spells `write: append` or `merge`.
 
     Returns
     -------
     int
-        `CONNECTIONS_VERSION` when an asset declares a connection, else `NOTIFY_VERSION` when a
-        job notifies, `JOBS_VERSION` with jobs, `CHECKS_VERSION` with checks,
-        `VERSION_WITHOUT_CHECKS` otherwise.
+        `WRITES_VERSION` when an asset uses the new write spelling, else `CONNECTIONS_VERSION`
+        when an asset declares a connection, `NOTIFY_VERSION` when a job notifies,
+        `JOBS_VERSION` with jobs, `CHECKS_VERSION` with checks, `VERSION_WITHOUT_CHECKS`
+        otherwise.
     """
+    if uses_new_writes:
+        return WRITES_VERSION
     if uses_connections:
         return CONNECTIONS_VERSION
     if any(job.notify is not None for job in config.jobs.values()):
@@ -235,7 +272,7 @@ def build_manifest(
     checks
         The validated checks; the manifest has a `checks` list, sorted by name, and version
         `CHECKS_VERSION` (`JOBS_VERSION` with jobs), only when there are any. A manifest with
-        jobs or connections carries the list even when it is empty.
+        jobs, connections or the new write spelling carries the list even when it is empty.
     python
         `lakana.yaml`'s `python:`; recorded as `python` only when set, so a project without it
         keeps its manifest.
@@ -251,6 +288,7 @@ def build_manifest(
         config,
         has_checks=bool(checks),
         uses_connections=any(asset.connections for asset in assets),
+        uses_new_writes=any(asset.metadata.write in ("append", "merge") for asset in assets),
     )
     manifest: dict[str, Any] = {
         "version": version,
@@ -271,7 +309,7 @@ def build_manifest(
         manifest["python"] = python
     if package_indexes:
         manifest["package_indexes"] = sorted(package_indexes)
-    if checks or config.jobs or version == CONNECTIONS_VERSION:
+    if checks or config.jobs or version in (CONNECTIONS_VERSION, WRITES_VERSION):
         manifest["checks"] = [
             {
                 "name": check.name,
@@ -574,6 +612,42 @@ def entry_decimals(entry: object) -> str:
     """
     value = entry.get("decimals") if isinstance(entry, Mapping) else None
     return "exact" if asset_kind(entry) == "python" and value == "exact" else DEFAULT_DECIMALS
+
+
+def entry_write(entry: object) -> tuple[str, tuple[str, ...], str | None]:
+    """Read how a run writes an asset's table from a stored manifest entry.
+
+    Parameters
+    ----------
+    entry
+        One element of `manifest_json["assets"]`; untrusted.
+
+    Returns
+    -------
+    tuple
+        ``(write, key, watermark)``. An entry with a string `write` returns it as stored, also
+        one that is not ``replace``, ``append`` or ``merge``, so that a reader refuses what it
+        does not know rather than replace the table; `key` is the strings of a list of strings
+        (empty otherwise) and `watermark` a string or `None`. An entry from before `write`
+        reads ``("append", (), incremental_key)`` for ``materialize: incremental`` and
+        ``("replace", (), None)`` otherwise.
+    """
+    if not isinstance(entry, Mapping):
+        return "replace", (), None
+    write = entry.get("write")
+    if not isinstance(write, str):
+        if entry.get("materialize") != "incremental":
+            return "replace", (), None
+        column = entry.get("incremental_key")
+        return "append", (), column if isinstance(column, str) else None
+    raw_key = entry.get("key")
+    key = (
+        tuple(raw_key)
+        if isinstance(raw_key, list) and all(isinstance(column, str) for column in raw_key)
+        else ()
+    )
+    watermark = entry.get("watermark")
+    return write, key, watermark if isinstance(watermark, str) else None
 
 
 @dataclass(frozen=True)

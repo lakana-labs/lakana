@@ -259,6 +259,7 @@ def test_a_row_filter_on_a_top_level_column_reads_a_table_with_a_struct_column(
     assert sorted(field.column("c").to_pylist()) == ["DE", "FR"]
 
 
+@pytest.mark.slow
 def test_a_column_mask_can_cover_a_whole_struct_column(
     session: Session, principal: PrincipalRef, catalog: CatalogService, tmp_path: Path
 ) -> None:
@@ -411,6 +412,7 @@ def _ids(session: Session, principal: PrincipalRef, tmp_path: Path, sql: str) ->
     return sorted(_result(tmp_path, _query(session, principal, sql)).column("id").to_pylist())
 
 
+@pytest.mark.slow
 def test_a_float_equality_on_a_column_promoted_to_double(
     session: Session, principal: PrincipalRef, catalog: CatalogService, tmp_path: Path
 ) -> None:

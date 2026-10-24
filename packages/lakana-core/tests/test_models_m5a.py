@@ -110,7 +110,14 @@ def test_a_read_run_leaves_every_write_field_null(session: Session) -> None:
 
 def test_write_mode_values_are_the_api_spelling() -> None:
     """The REST API speaks lowercase modes; the enum's values are exactly those."""
-    assert [mode.value for mode in WriteMode] == ["create", "replace", "append", "view", "maintain"]
+    assert [mode.value for mode in WriteMode] == [
+        "create",
+        "replace",
+        "append",
+        "merge",
+        "view",
+        "maintain",
+    ]
 
 
 def test_a_view_row_round_trips_its_definition_and_reports_its_kind(session: Session) -> None:

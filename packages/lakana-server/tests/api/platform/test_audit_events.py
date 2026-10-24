@@ -52,6 +52,7 @@ def test_list_audit_events_requires_read_audit_log(client: TestClient, storage_r
     assert "READ_AUDIT_LOG" in response.json()["detail"]
 
 
+@pytest.mark.slow
 def test_list_audit_events_returns_recorded_events(client: TestClient) -> None:
     """The bootstrap admin (Role.ADMIN, which bundles every Action) can read events back."""
     client.post(

@@ -21,7 +21,7 @@ from sqlglot import exp
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable
 from lakana_core.errors import ValidationError
 from lakana_core.identifiers import TableRef, shown, validate_path_component
-from lakana_core.projects.asset_model import ParsedAsset
+from lakana_core.projects.asset_model import ParsedAsset, normalized_write
 from lakana_core.projects.dag import ProjectGraph
 from lakana_core.projects.discovery import (
     CHECKS_DIR,
@@ -34,13 +34,7 @@ from lakana_core.projects.discovery import (
 from lakana_core.projects.frontmatter import split_front_matter
 from lakana_core.projects.issues import ProjectIssue, ProjectValidationError
 from lakana_core.projects.limits import DeployLimits
-from lakana_core.projects.manifest import (
-    CHECKS_VERSION,
-    CONNECTIONS_VERSION,
-    JOBS_VERSION,
-    NOTIFY_VERSION,
-    manifest_assets,
-)
+from lakana_core.projects.manifest import CHECKS_VERSION, LISTS_CHECKS, manifest_assets
 from lakana_core.projects.parse import _sql_issue
 from lakana_core.projects.project_config import SafeTextModel, pydantic_issues
 from lakana_core.query_rewrite import check_blacklist, extract_table_refs
@@ -71,20 +65,49 @@ _KEEP_REFUSED: dict[str, str] = {
         "it again only adds rows, so the rows that failed would stay. Use `on_failure: block`: "
         "it takes the failed increment out again."
     ),
+    "merge": (
+        "on_failure: keep cannot be used on `{table}`: it is written with `write: merge`, and "
+        "building it again never deletes a row, so the rows that failed would stay. Use "
+        "`on_failure: block`: it takes the failed merge out again."
+    ),
     "view": (
         "on_failure: keep cannot be used on `{table}`: it is a view and holds no data to keep. "
         "Use `on_failure: block`: for a view it stops what reads it in that run."
     ),
 }
-"""Why a check of an asset cannot say ``on_failure: keep``, by the asset's ``materialize``.
+"""Why a check of an asset cannot say ``on_failure: keep``, by how the asset is built
+(`_built_as`).
 
-A kept table is cleared by building it again and passing its checks. An incremental build only
-adds rows, so the rows that failed would still be there; a view holds no data. An asset of
+A kept table is cleared by building it again and passing its checks. An incremental build
+(``write: append``) only adds rows and a merge never deletes one, so the rows that failed would
+still be there; a view holds no data. An asset of
 ``materialize: table`` (SQL or Python) is replaced by a build, and a table the project only
 reads gets no note at all, so neither is listed.
 """
 RESERVED_NAMES: tuple[str, ...] = ("(none)", "(unreadable)")
 """Names no check can have: a task's result is called so when a check cannot be given."""
+
+
+def _built_as(asset: ParsedAsset) -> str | None:
+    """Name how a build writes an asset, as `_KEEP_REFUSED` is keyed.
+
+    Parameters
+    ----------
+    asset
+        The parsed asset.
+
+    Returns
+    -------
+    str or None
+        ``view``, ``incremental`` (``write: append`` in either spelling), ``merge``, or the
+        asset's ``materialize`` otherwise.
+    """
+    if asset.metadata.materialize == "view":
+        return "view"
+    write = normalized_write(asset.metadata)[0]
+    if write == "append":
+        return "incremental"
+    return "merge" if write == "merge" else asset.metadata.materialize
 
 
 @dataclass(frozen=True)
@@ -609,7 +632,7 @@ def check_issues(
     limits = limits or DeployLimits()
     built = {asset.table for asset in assets}
     artifacts = {asset.table for asset in assets if asset.output == "artifact"}
-    materialize = {asset.table: asset.metadata.materialize for asset in assets}
+    materialize = {asset.table: _built_as(asset) for asset in assets}
     reads = set(graph.external_inputs)
     issues: list[ProjectIssue] = []
     per_table: dict[str, list[ParsedCheck]] = {}
@@ -785,9 +808,10 @@ def read_manifest_checks(manifest: object) -> ManifestChecks:
         return ManifestChecks((), frozenset(), unplaced=False)
     raw = manifest.get("checks")
     version = manifest.get("version")
-    # A version 4 manifest exists because it has checks; a version 5, 6 or 7 one may have only
-    # jobs or connections, so it must carry the list but may leave it empty.
-    means_checks = version in (CHECKS_VERSION, JOBS_VERSION, NOTIFY_VERSION, CONNECTIONS_VERSION)
+    # A version 4 manifest exists because it has checks; a version 5 to 8 one may have only
+    # jobs, connections or the new write spelling, so it must carry the list but may leave it
+    # empty.
+    means_checks = version in LISTS_CHECKS
     if "checks" not in manifest and not means_checks:
         return ManifestChecks((), frozenset(), unplaced=False)
     if not isinstance(raw, list) or (version == CHECKS_VERSION and not raw):

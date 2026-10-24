@@ -31,6 +31,7 @@ JSON_ROUTE = "/api/v1/principals"
 STREAMING_ROUTES = {
     ("POST", "/api/v1/environments/{env}/namespaces/{path}/tables/{name}/data"),
     ("PUT", "/api/v1/environments/{env}/namespaces/{path}/tables/{name}/data"),
+    ("POST", "/api/v1/environments/{env}/namespaces/{path}/tables/{name}/merge"),
     ("POST", "/api/v1/environments/{env}/namespaces/{path}/artifacts/{name}/uploads"),
     (
         "PUT",
@@ -177,6 +178,7 @@ def test_authenticating_first_records_one_success_not_two(client: TestClient) ->
     [
         ("POST", "/api/v1/environments/dev/namespaces/bronze/tables/t/data"),
         ("PUT", "/api/v1/environments/dev/namespaces/bronze/tables/t/data"),
+        ("POST", "/api/v1/environments/dev/namespaces/bronze/tables/t/merge?key=id"),
         ("POST", "/api/v1/environments/dev/namespaces/models/artifacts/a/uploads"),
         (
             "PUT",

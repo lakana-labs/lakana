@@ -34,6 +34,7 @@ from lakana_core.models import (
     SecretUseKind,
 )
 from lakana_core.secrets.crypto import SecretBinding, encrypt_secret_values
+from lakana_core.secrets.forms import require_text
 from lakana_core.secrets.keys import KeyProvider
 from lakana_core.secrets.uses import (
     SecretUse,
@@ -93,6 +94,7 @@ def insert_secret(
     ValidationError
         If `use` is an index, repository or connection and the environment itself uses a
         secret of this name, for storage or webhooks.
+        If a value is not valid text (`lakana_core.secrets.forms.require_text`).
     LakanaError
         If no usable secrets master key is configured.
     """
@@ -107,6 +109,7 @@ def insert_secret(
             f"{use.wanted()}. Create it with --own-env, or give the {_noun(use)} a secret under "
             "another name."
         )
+    require_text(values)
     secret_id = uuid.uuid4()
     encrypted = encrypt_secret_values(
         values, key_provider, SecretBinding(secret_id, environment.id, name)
@@ -162,9 +165,12 @@ def rotate_values(
 
     Raises
     ------
+    ValidationError
+        If a value is not valid text (`lakana_core.secrets.forms.require_text`).
     LakanaError
         If no usable secrets master key is configured.
     """
+    require_text(values)
     env = session.get(Environment, secret.environment_id)
     assert env is not None  # nosec B101 -- environment_id is a non-nullable FK with ON DELETE CASCADE
     encrypted = encrypt_secret_values(

@@ -33,12 +33,29 @@ table. Without a grant the answer is no, and the refusal is recorded.
 
 ## Where secrets live
 
-A secret (a storage key, a repository token, a package index password, a webhook address) is stored
-encrypted in the instance's database, under a master key that you set with
-`LAKANA_SECRETS__MASTER_KEY`. No route, command or page returns its value again; to change it you set it
-again. A secret is **bound** to one use, for example one package index or one repository, and Lakana
-refuses it for anything else, so the person who registers an index cannot send a secret to a host
-of their choice. A secret is decrypted only where it is used, and only while it is used.
+A secret (a storage key, a repository token, a package index password, a webhook address, a
+connection's password) is stored encrypted in the instance's database, under a master key that you
+set with `LAKANA_SECRETS__MASTER_KEY`. No command or page returns its value again, and no route
+returns it to a person; to change it you set it again. A secret is **bound** to one use, for
+example one package index, one repository or one connection, and Lakana refuses it for anything
+else, so the person who registers an index cannot send a secret to a host of their choice. A secret
+is decrypted only where it is used, and only while it is used.
+
+The one answer that carries a secret's values goes to a running task, for the connection secret of
+a connection its asset declares ([How a task gets its credential](../reference/connections.md#how-a-task-gets-its-credential)).
+The server answers only the token of a task that is running now, in its own environment, for a name
+its deployed asset declares; it answers an undeclared name the same way whether or not a
+connection of that name exists. The task keeps the credential in memory for the attempt, never in
+an environment variable or a file, and each value is shown as `***` in the task's log, its
+failure message and its trace, also in its common encodings (a `repr`, JSON, a URL); a value
+shorter than 4 characters, another transformation of it, or a value derived from it (such as an
+OAuth2 access token) is not hidden unless a Lakana helper registers it. A worker that cannot
+decrypt a declared connection's secret when the attempt starts does not start it; a secret
+added, bound or rotated while an attempt runs may appear in the log the worker captures, so
+change secrets between runs. Every fetch is in the audit log; refusals are recorded
+at a limited rate per principal and the rest counted. The code you
+deploy can read the credentials of the connections its asset declares and send them anywhere the
+task can reach, so review an asset's `connections` with its code.
 
 Keep the master key and the `.env` file of a Compose bundle with the people who run the instance: whoever
 holds them holds every secret, and a lost master key makes every stored secret unrecoverable. The steps

@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import json
 import shlex
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 import typer
 
@@ -16,6 +17,9 @@ from lakana.cli import _files, _output, _retention
 from lakana.cli._break_glass import BREAK_GLASS, REASON, break_glass_reason
 from lakana.cli._state import CliError, CliState, confirm, resolve_environment, state_of
 from lakana.cli.artifacts import human_size
+
+if TYPE_CHECKING:
+    import pyarrow as pa
 
 table_app = typer.Typer(help="Manage tables and load data.", no_args_is_help=True)
 
@@ -778,6 +782,81 @@ def _table_columns(client: lakana.Client, environment: str, name: str) -> list[C
     return table.columns
 
 
+@dataclass(frozen=True)
+class _Upload:
+    """What a command that sends a file to a table has read before it sends.
+
+    Parameters
+    ----------
+    state
+        The CLI state.
+    environment
+        The environment.
+    glass
+        The break-glass reason, if any.
+    client
+        The SDK client.
+    data
+        The file's rows, fitted to the table's columns unless the command said not to.
+    """
+
+    state: CliState
+    environment: str
+    glass: str | None
+    client: lakana.Client
+    data: pa.Table
+
+
+def _read_upload(
+    ctx: typer.Context,
+    name: str,
+    file: Path,
+    *,
+    env: str | None,
+    file_format: str | None,
+    break_glass: bool,
+    reason: str | None,
+    conform: bool = True,
+) -> _Upload:
+    """Resolve the environment and read FILE for `table append`, `replace` or `merge`.
+
+    Parameters
+    ----------
+    ctx
+        The Typer context.
+    name
+        The qualified table name.
+    file
+        The data file.
+    env
+        `--env`.
+    file_format
+        `--format`.
+    break_glass
+        `--break-glass`.
+    reason
+        `--reason`.
+    conform
+        Fetch the table's columns and fit the file to them; off sends the file as it is.
+
+    Returns
+    -------
+    _Upload
+        What to send, and where.
+    """
+    state = state_of(ctx)
+    environment = resolve_environment(state, env)
+    glass = break_glass_reason(break_glass, reason, environment)
+    fmt = _files.infer_format(file, file_format)
+    client = state.client()
+    if conform:
+        columns = _table_columns(client, environment, name)
+        data = _files.conform(_files.read_table(file, fmt, columns), columns)
+    else:
+        data = _files.read_table(file, fmt)
+    return _Upload(state=state, environment=environment, glass=glass, client=client, data=data)
+
+
 @table_app.command("append")
 def append(
     ctx: typer.Context,
@@ -815,22 +894,21 @@ def append(
     reason
         `--reason`.
     """
-    state = state_of(ctx)
-    environment = resolve_environment(state, env)
-    glass = break_glass_reason(break_glass, reason, environment)
-    fmt = _files.infer_format(file, file_format)
-    client = state.client()
-    columns = _table_columns(client, environment, name)
-    data = _files.read_table(file, fmt, columns)
-    result = client.tables.append(
-        environment,
+    upload = _read_upload(
+        ctx,
         name,
-        _files.conform(data, columns),
-        sources=source or None,
-        break_glass_reason=glass,
+        file,
+        env=env,
+        file_format=file_format,
+        break_glass=break_glass,
+        reason=reason,
+    )
+    environment = upload.environment
+    result = upload.client.tables.append(
+        environment, name, upload.data, sources=source or None, break_glass_reason=upload.glass
     )
     _output.done(
-        state,
+        upload.state,
         f"Appended {result.rows} rows to {_output.inline(environment)}/{_output.inline(name)}",
         result,
     )
@@ -877,27 +955,99 @@ def replace(
     reason
         `--reason`.
     """
-    state = state_of(ctx)
-    environment = resolve_environment(state, env)
-    glass = break_glass_reason(break_glass, reason, environment)
-    fmt = _files.infer_format(file, file_format)
-    client = state.client()
-    if evolve_schema:
-        data = _files.read_table(file, fmt)
-    else:
-        columns = _table_columns(client, environment, name)
-        data = _files.conform(_files.read_table(file, fmt, columns), columns)
-    result = client.tables.replace(
+    upload = _read_upload(
+        ctx,
+        name,
+        file,
+        env=env,
+        file_format=file_format,
+        break_glass=break_glass,
+        reason=reason,
+        conform=not evolve_schema,
+    )
+    environment = upload.environment
+    result = upload.client.tables.replace(
         environment,
         name,
-        data,
+        upload.data,
         evolve_schema=evolve_schema,
         sources=source or None,
-        break_glass_reason=glass,
+        break_glass_reason=upload.glass,
     )
     _output.done(
-        state,
+        upload.state,
         f"Replaced {_output.inline(environment)}/{_output.inline(name)} with {result.rows} rows",
+        result,
+    )
+
+
+@table_app.command("merge")
+def merge(
+    ctx: typer.Context,
+    name: str,
+    file: Path,
+    key: Annotated[
+        list[str],
+        typer.Option(
+            "--key",
+            help="A column that identifies a row (repeat it for a key of several columns).",
+        ),
+    ],
+    env: _ENV = None,
+    file_format: _FORMAT = None,
+    source: _SOURCE = None,
+    break_glass: BREAK_GLASS = False,
+    reason: REASON = None,
+) -> None:
+    """Merge FILE (Parquet, CSV or Arrow) into table NAME on --key.
+
+    A row whose key the table has replaces that row; any other row is added; nothing is
+    deleted, all in one snapshot. The file is conformed to the table's columns first, exactly
+    as `table append` does. The file must not repeat a key and no key may be empty.
+
+    Parameters
+    ----------
+    ctx
+        The Typer context.
+    name
+        The qualified table name.
+    file
+        The data file.
+    key
+        `--key`: the columns that identify a row.
+    env
+        The environment.
+    file_format
+        The file's format, if the extension doesn't say.
+    source
+        Tables the data came from, recorded as lineage.
+    break_glass
+        `--break-glass`.
+    reason
+        `--reason`.
+    """
+    upload = _read_upload(
+        ctx,
+        name,
+        file,
+        env=env,
+        file_format=file_format,
+        break_glass=break_glass,
+        reason=reason,
+    )
+    environment = upload.environment
+    result = upload.client.tables.merge(
+        environment,
+        name,
+        upload.data,
+        key=key,
+        sources=source or None,
+        break_glass_reason=upload.glass,
+    )
+    _output.done(
+        upload.state,
+        f"Merged into {_output.inline(environment)}/{_output.inline(name)}: "
+        f"{result.rows_inserted} rows inserted, {result.rows_updated} updated",
         result,
     )
 

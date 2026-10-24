@@ -91,6 +91,22 @@ class SnapshotPin:
     snapshot_id: int | None
 
 
+def max_rows_message(max_rows: int) -> str:
+    """Say that a write has more rows than `QueryLimitsConfig.max_write_rows`.
+
+    Parameters
+    ----------
+    max_rows
+        The limit.
+
+    Returns
+    -------
+    str
+        The message, naming the setting and that nothing was committed.
+    """
+    return f"The write exceeds max_write_rows ({max_rows}); nothing was committed."
+
+
 ExpectedSnapshot = int | Literal["none"]
 """What a writer says the target's current snapshot is: an id, or ``none`` for "no snapshot"."""
 
@@ -409,9 +425,7 @@ class DataFileWriter:
             if batch.num_rows == 0:
                 continue
             if self._max_rows is not None and self.rows > self._max_rows:
-                raise ValidationError(
-                    f"The write exceeds max_write_rows ({self._max_rows}); nothing was committed."
-                )
+                raise ValidationError(max_rows_message(self._max_rows))
             for name in required:
                 if batch.column(name).null_count:
                     raise ValidationError(

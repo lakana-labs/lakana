@@ -11,13 +11,28 @@ file or directory inside `lakana.output_dir()` that it returned, through
 `client.artifacts.upload`. It never touches the database or the object store,
 and it never prints the token.
 
-The description is version 2: version 1's keys plus ``output``
+The description is version 2 or 3. Version 2 is version 1's keys plus ``output``
 (``"table"`` or ``"artifact"``), ``input_kinds`` (every input to ``"table"`` or
 ``"artifact"``), ``input_versions`` (exactly the artifact inputs, each to the
 version the worker resolved) and ``work_dir`` (the attempt's private directory:
 absolute, owned by this user, not accessible to group or others). The harness
 creates ``<work_dir>/inputs`` (0700) when an input is an artifact and
-``<work_dir>/output`` (0700) for an artifact asset.
+``<work_dir>/output`` (0700) for an artifact asset. Version 3 adds ``write``
+(``"replace"``, ``"append"`` or ``"merge"``), ``key`` (the merge key's columns, empty
+unless ``write`` is ``"merge"``), ``watermark`` (``null`` or ``{"column": str, "value":
+str | null}``, the value in the worker's ``<type>:<value>`` form) and ``connections``
+(each declared connection's name to an object with at least its ``kind``); the worker
+sends it only to an asset that uses one of them, and a version 2 document replaces.
+
+An append uploads with `client.tables.append` against ``expected_snapshot_id`` (the
+snapshot the worker read the watermark from), except on a first run (``"none"``), which
+creates the table with `client.tables.replace`; a merge always uses `client.tables.merge`,
+which creates a missing table after the same key checks. An append or merge whose
+function returned no rows (or no columns) on a table that exists uploads nothing and
+succeeds with ``rows`` 0. The function gets an `lakana.context.AssetContext` as its
+parameter ``ctx`` when it declares one (unless the project version is from before
+``ctx`` was reserved and names an input so), and `lakana.context.current` holds the
+attempt's client and connections until the result record is written.
 
 The result record is one JSON object. ``{"status": "succeeded",
 "snapshot_id": int | null, "rows": int}`` after a table upload, ``{"status":
@@ -43,6 +58,7 @@ import contextlib
 import ctypes
 import errno
 import importlib.util
+import inspect
 import json
 import math
 import os
@@ -61,7 +77,7 @@ from typing import TYPE_CHECKING, Any, NoReturn, TextIO, cast
 
 import pyarrow as pa
 
-from lakana import assets
+from lakana import assets, context
 from lakana._arrow import (
     cast_timestamp_ns_columns_to_us,
     normalize_view_columns,
@@ -76,8 +92,9 @@ from lakana._artifact_manifest import (
     shown,
 )
 from lakana._models import ArtifactVersion
-from lakana.assets import ASSET_ATTRIBUTE, DECIMALS_MODES, AssetSpec
+from lakana.assets import ASSET_ATTRIBUTE, DECIMALS_MODES, WRITE_CHOICES, AssetSpec, _unsafe
 from lakana.client import Client
+from lakana.context import WATERMARK_TAGS, AssetContext, WatermarkValue, decode_watermark
 from lakana.errors import (
     AuthenticationError,
     Conflict,
@@ -88,13 +105,19 @@ from lakana.errors import (
     QueryFailed,
     ValidationError,
 )
+from lakana.ingest import _connections
+from lakana.ingest._errors import IngestError
 
 if TYPE_CHECKING:
     import polars as pl  # lazy: the SDK works without the assets extra
 
     _DataType = pl.DataType | pl.datatypes.DataTypeClass
 
-DESCRIPTION_VERSION = 2
+DESCRIPTION_VERSIONS = (2, 3)
+"""The task description versions this harness reads; the worker sends 3 only when needed."""
+COMPOSITE_KEY_MAX_ROWS = 5_000
+"""Most rows a merge on a key of several columns takes; the server refuses more, and this
+harness says so first, in words a Python asset can act on."""
 MAX_INPUT_VERSION = 2**31 - 1
 """The largest artifact version a description may name (the catalog stores a 32-bit integer)."""
 _SAVE_FLAGS = _DIR_FLAGS | getattr(os, "O_PATH", 0)
@@ -103,6 +126,15 @@ permission on the directory, so code that took that away cannot make the upload 
 _PARAMETER = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,127}")
 """A parameter name that may become a directory name: an ASCII identifier."""
 _KINDS = ("table", "artifact")
+_NOTHING_TO_CREATE = (
+    "the asset returned no columns, so there is nothing to create {table} from; its source had "
+    "no data yet (check the pattern or the query); the first run must find data"
+)
+"""Why a first append or merge without columns fails: a table needs its columns."""
+_READER = (
+    "the asset returned a pyarrow RecordBatchReader; read it with `.read_all()` and return the "
+    "table"
+)
 MAX_ERROR_MESSAGE_CHARS = 2000
 """Longest `message` in a result record; the worker stores it as the task's error."""
 
@@ -197,13 +229,17 @@ def _retryable(phase: str, cause: BaseException) -> bool:
         whose stored manifest the client rejects (`_STORED_MANIFEST_REFUSALS`), a 413 (the
         operator's size limit).
         A `TypeError` (or a subclass) raised out of the asset's function is a mistake in
-        its code that every attempt repeats; no other exception type of the function is
+        its code that every attempt repeats; an error of `lakana.ingest` says itself whether
+        another attempt could help (`IngestError.retryable`: a connection the asset does not
+        declare, or the server refused, repeats); no other exception type of the function is
         judged by its class. A 404 on the download of an artifact input is the exception
         among refused requests: the version may have been pruned since the worker resolved it, so
         another attempt, which resolves again, can end differently (the retries are
         bounded, and the worker fails an input with no live version for good).
     """
     origin = cause.__cause__ if isinstance(cause, InputError) else cause
+    if phase == "function" and isinstance(cause, IngestError) and cause.retryable is not None:
+        return cause.retryable
     if isinstance(origin, MemoryError) or (phase == "function" and isinstance(cause, TypeError)):
         return False
     permanent = (InvalidResult, AssetLoadError, UploadRefused, WorkspaceError)
@@ -325,6 +361,21 @@ class TaskDescription:
     decimals
         ``float`` or ``exact`` from the deployed manifest, or `None` when the
         worker sent none (an older worker): the decorator's own value then applies.
+    write
+        ``replace``, ``append`` or ``merge``; ``replace`` for a version 2 document.
+    key
+        The merge key's columns; empty unless `write` is ``merge``.
+    watermark_column
+        The asset's `watermark` column, if the worker sent one.
+    watermark
+        The largest value of that column the table held when the worker read it, decoded;
+        `None` when there is none yet. What `ctx.watermark()` returns.
+    connections
+        Each declared connection's name to what the worker sent about it (its ``kind``).
+    table_exists
+        Whether the table existed when the worker read it: one created by a first run of zero
+        rows has no snapshot (`expected_snapshot_id` ``"none"``) and still exists. Version 2
+        documents leave it out; then ``"none"`` means a first run.
     """
 
     server_url: str
@@ -342,6 +393,12 @@ class TaskDescription:
     input_versions: dict[str, int] = field(default_factory=dict)
     work_dir: str = ""
     decimals: str | None = None
+    write: str = "replace"
+    key: tuple[str, ...] = ()
+    watermark_column: str | None = None
+    watermark: WatermarkValue | None = None
+    connections: dict[str, dict[str, object]] = field(default_factory=dict)
+    table_exists: bool = False
 
 
 def _text(document: dict[str, object], key: str) -> str:
@@ -502,6 +559,111 @@ def _work_dir(document: dict[str, object]) -> str:
     return value
 
 
+@dataclass(frozen=True)
+class _Writes:
+    """How the asset writes its table, from a version 3 document.
+
+    Parameters
+    ----------
+    write
+        ``replace``, ``append`` or ``merge``.
+    key
+        The merge key's columns.
+    watermark_column
+        The watermark column, if any.
+    watermark
+        Its decoded value, if any.
+    connections
+        Each declared connection's routing.
+    table_exists
+        Whether the asset's table existed when the worker read it.
+    """
+
+    write: str = "replace"
+    key: tuple[str, ...] = ()
+    watermark_column: str | None = None
+    watermark: WatermarkValue | None = None
+    connections: dict[str, dict[str, object]] = field(default_factory=dict)
+    table_exists: bool = False
+
+
+def _write_fields(document: dict[str, object]) -> _Writes:
+    """Check the fields version 3 adds.
+
+    Parameters
+    ----------
+    document
+        The decoded description.
+
+    Returns
+    -------
+    _Writes
+        The write mode, key, watermark and connections.
+
+    Raises
+    ------
+    ValueError
+        If a field is missing or has the wrong type, the key is not given exactly for a
+        merge, or the watermark's value is not one the worker encodes. The message names the
+        field and never contains a value.
+    """
+    write = document.get("write")
+    if not isinstance(write, str) or write not in WRITE_CHOICES:
+        raise ValueError("task description: write must be 'replace', 'append' or 'merge'")
+    key = document.get("key")
+    if (
+        not isinstance(key, list)
+        or not all(isinstance(column, str) and column and not _unsafe(column) for column in key)
+        or bool(key) != (write == "merge")
+    ):
+        raise ValueError(
+            "task description: key must name the columns of a merge, and only of a merge"
+        )
+    watermark = document.get("watermark")
+    column: str | None = None
+    value: WatermarkValue | None = None
+    if watermark is not None:
+        named = watermark.get("column") if isinstance(watermark, dict) else None
+        raw = watermark.get("value") if isinstance(watermark, dict) else None
+        try:
+            if (
+                not isinstance(named, str)
+                or not named
+                or _unsafe(named)
+                or not isinstance(raw, (str, type(None)))
+            ):
+                raise ValueError
+            column, value = named, None if raw is None else decode_watermark(raw)
+        except ValueError:
+            raise ValueError(
+                "task description: watermark must be null or an object with a column name and "
+                "an encoded value (or null)"
+            ) from None
+    connections = document.get("connections")
+    if not isinstance(connections, dict) or not all(
+        isinstance(name, str)
+        and isinstance(routing, dict)
+        and isinstance(routing.get("kind"), str)
+        and routing["kind"]
+        for name, routing in connections.items()
+    ):
+        raise ValueError(
+            "task description: connections must map each declared connection to an object "
+            "with its kind"
+        )
+    table_exists = document.get("table_exists")
+    if not isinstance(table_exists, bool):
+        raise ValueError("task description: table_exists must be true or false")
+    return _Writes(
+        table_exists=table_exists,
+        write=write,
+        key=tuple(key),
+        watermark_column=column,
+        watermark=value,
+        connections={name: dict(routing) for name, routing in connections.items()},
+    )
+
+
 def parse_description(text: str) -> TaskDescription:
     """Parse and check the task description.
 
@@ -519,7 +681,7 @@ def parse_description(text: str) -> TaskDescription:
     ------
     ValueError
         If the document is not JSON (an integer of thousands of digits and a
-        document nested too deeply are not), not version 2, or a field has the
+        document nested too deeply are not), not version 2 or 3, or a field has the
         wrong type, value or relation to another. The message names the field
         and never contains a value.
     """
@@ -530,9 +692,9 @@ def parse_description(text: str) -> TaskDescription:
     if (
         not isinstance(document, dict)
         or type(document.get("version")) is not int
-        or document["version"] != DESCRIPTION_VERSION
+        or document["version"] not in DESCRIPTION_VERSIONS
     ):
-        raise ValueError(f"task description: expected a version {DESCRIPTION_VERSION} document")
+        raise ValueError("task description: expected a version 2 or 3 document")
     inputs = document.get("inputs")
     if not isinstance(inputs, dict) or not all(
         isinstance(key, str) and isinstance(value, str) for key, value in inputs.items()
@@ -561,6 +723,7 @@ def parse_description(text: str) -> TaskDescription:
     decimals = document.get("decimals")
     if decimals is not None and decimals not in DECIMALS_MODES:
         raise ValueError("task description: decimals must be 'float' or 'exact'")
+    writes = _write_fields(document) if document["version"] == 3 else _Writes()
     return TaskDescription(
         server_url=_text(document, "server_url"),
         token=_text(document, "token"),
@@ -577,6 +740,12 @@ def parse_description(text: str) -> TaskDescription:
         input_versions=versions,
         work_dir=_work_dir(document),
         decimals=decimals,
+        write=writes.write,
+        key=writes.key,
+        watermark_column=writes.watermark_column,
+        watermark=writes.watermark,
+        connections=writes.connections,
+        table_exists=writes.table_exists,
     )
 
 
@@ -1106,13 +1275,16 @@ def _sources(description: TaskDescription) -> dict[str, int | None]:
     }
 
 
-def _to_arrow(result: object) -> pa.Table:
+def _to_arrow(result: object, *, columns_optional: bool = False) -> pa.Table:
     """Validate what the function returned and convert it for the upload.
 
     Parameters
     ----------
     result
         The function's return value.
+    columns_optional
+        Accept a result without columns (an append or a merge: its source may have had
+        nothing new); the caller decides what such a result means.
 
     Returns
     -------
@@ -1122,8 +1294,37 @@ def _to_arrow(result: object) -> pa.Table:
     Raises
     ------
     InvalidResult
-        Unless `result` is a `polars.DataFrame` with at least one column and
-        only column types a table can store.
+        Unless `result` is a `polars.DataFrame` or a `pyarrow.Table` with at least one column
+        (unless `columns_optional`) and only column types a table can store.
+    """
+    if isinstance(result, pa.RecordBatchReader):
+        raise InvalidResult(_READER)
+    if isinstance(result, pa.Table):
+        if result.num_columns == 0 and not columns_optional:
+            raise InvalidResult("the asset returned a table without columns")
+        return _storable(result)
+    return _storable(_polars_to_arrow(result, columns_optional=columns_optional))
+
+
+def _polars_to_arrow(result: object, *, columns_optional: bool) -> pa.Table:
+    """Check a returned polars DataFrame's column types and convert it to Arrow.
+
+    Parameters
+    ----------
+    result
+        The function's return value, which is not a `pyarrow.Table`.
+    columns_optional
+        Accept a DataFrame without columns.
+
+    Returns
+    -------
+    pa.Table
+        The rows as Arrow, not yet converted to types the platform accepts.
+
+    Raises
+    ------
+    InvalidResult
+        Unless `result` is a `polars.DataFrame` whose column types a table can store.
     """
     import polars as pl  # lazy: the SDK works without the assets extra
 
@@ -1137,9 +1338,10 @@ def _to_arrow(result: object) -> pa.Table:
         if module_name.split(".")[0] == "pandas" and kind.__name__ == "DataFrame":
             raise InvalidResult("the asset returned a pandas DataFrame; return pl.from_pandas(df)")
         raise InvalidResult(
-            f"the asset must return a polars DataFrame, got {module_name}.{kind.__qualname__}"
+            "the asset must return a polars DataFrame or a pyarrow Table, got "
+            f"{module_name}.{kind.__qualname__}"
         )
-    if result.width == 0:
+    if result.width == 0 and not columns_optional:
         raise InvalidResult("the asset returned a DataFrame without columns")
     extension = getattr(pl, "Extension", None)  # Polars 2 only
     for name, dtype in result.schema.items():
@@ -1161,12 +1363,109 @@ def _to_arrow(result: object) -> pa.Table:
                 f"its stored values with pl.col('{label}').ext.storage() and cast them to a "
                 "type a table stores"
             )
+    return pa.table(result)
+
+
+def _storable(table: pa.Table) -> pa.Table:
+    """Convert view and nanosecond columns, then check every column type.
+
+    Parameters
+    ----------
+    table
+        The rows.
+
+    Returns
+    -------
+    pa.Table
+        The rows, with types the platform accepts.
+
+    Raises
+    ------
+    InvalidResult
+        If a column has a type a table cannot store, or nanoseconds a microsecond timestamp
+        would lose.
+    """
     try:
-        table = normalize_view_columns(cast_timestamp_ns_columns_to_us(pa.table(result)))
-        schema_to_columns(table.schema)
+        converted = normalize_view_columns(cast_timestamp_ns_columns_to_us(table))
+        schema_to_columns(converted.schema)
     except ValidationError as exc:
         raise InvalidResult(str(exc)) from exc
-    return table
+    return converted
+
+
+def _check_watermark_column(table: pa.Table, column: str) -> None:
+    """Require the watermark column in the result, with a type a watermark can have.
+
+    Parameters
+    ----------
+    table
+        The converted result.
+    column
+        The asset's `watermark` column.
+
+    Raises
+    ------
+    InvalidResult
+        If the column is missing or its type is not one of `WATERMARK_TAGS`.
+    """
+    if column not in table.column_names:
+        raise InvalidResult(
+            f"watermark column `{shown(column)}` is not a column of what the asset returned; "
+            "return it, or change the asset's watermark="
+        )
+    (described,) = schema_to_columns(table.select([column]).schema)
+    kind = str(described["type"])
+    if kind.split("(")[0] not in WATERMARK_TAGS:
+        raise InvalidResult(
+            f"watermark column `{shown(column)}` is a {kind}; it must be one of "
+            f"{', '.join(WATERMARK_TAGS)}"
+        )
+
+
+def _check_merge_rows(table: pa.Table, key: tuple[str, ...]) -> None:
+    """Refuse a merge the server would refuse, with advice a Python asset can follow.
+
+    The server checks the same and stays the authority; it words its refusals for a caller
+    that sends batches. Key columns the result does not have, null keys (the server counts them
+    before it looks for repeats) and nested key types are left to the server.
+
+    Parameters
+    ----------
+    table
+        The converted result.
+    key
+        The merge key's columns.
+
+    Raises
+    ------
+    InvalidResult
+        For a key of several columns with more than `COMPOSITE_KEY_MAX_ROWS` rows, or a key
+        that repeats.
+    """
+    if len(key) > 1 and table.num_rows > COMPOSITE_KEY_MAX_ROWS:
+        raise InvalidResult(
+            f"a merge on a key of several columns takes at most {COMPOSITE_KEY_MAX_ROWS:,} rows "
+            f"per run, and the asset returned {table.num_rows:,}. Merge on one key column (a "
+            "column that holds the whole key), or return fewer rows per run: give the asset a "
+            "watermark= and return only the rows past ctx.watermark(), and load the history in "
+            f"parts of at most {COMPOSITE_KEY_MAX_ROWS:,} rows"
+        )
+    if not set(key) <= set(table.column_names) or table.num_rows < 2:
+        return
+    if any(table.column(column).null_count for column in key):
+        return  # the server names null keys first, with their count
+    try:
+        groups = table.select(list(key)).group_by(list(key)).aggregate([([], "count_all")])
+    except (pa.ArrowNotImplementedError, pa.ArrowInvalid, pa.ArrowTypeError):
+        return  # a key type the server refuses with its own words
+    repeated = sum(count for count in groups.column("count_all").to_pylist() if count > 1)
+    if repeated:
+        columns = ", ".join(f"`{shown(column)}`" for column in key)
+        subset = ", ".join(repr(column) for column in key)
+        raise InvalidResult(
+            f"key {columns} repeats in {repeated} rows of what the asset returned; return one "
+            f"row per key, for example with `df.unique(subset=[{subset}], keep='last')`"
+        )
 
 
 def _returned_text(result: object) -> str:
@@ -1537,9 +1836,9 @@ def run_asset(description: TaskDescription, client: Client, root: Path) -> dict[
         user's function; `phase` says where and `cause` holds the original
         (`AssetLoadError`, `InputError`, `InvalidResult`, `UploadRefused`, an
         SDK `Conflict` when the target changed, or the user's own exception).
-    UploadRefused
-        Raised for an invalid upload and wrapped in a `Failure` of phase
-        ``upload``.
+    InvalidResult
+        Raised for a result that cannot be written (a first append or merge without columns)
+        and wrapped in a `Failure` of phase ``validate``.
     """
     with contextlib.ExitStack() as stack:
         with _Phase("load"):
@@ -1560,29 +1859,187 @@ def run_asset(description: TaskDescription, client: Client, root: Path) -> dict[
                 else:
                     values[parameter] = _read_input(client, description, parameter, name, decimals)
         with _Phase("function"):
+            if _takes_context(function, description):
+                values["ctx"] = AssetContext(description.watermark)
             result = function(**values)
         if workspace.output is not None:
             return _store_artifact(client, description, workspace.output, result)
     with _Phase("validate"):
-        arrow = _to_arrow(result)
+        replaces = description.write == "replace"
+        arrow = _to_arrow(result, columns_optional=not replaces)
+        if not replaces and arrow.num_rows == 0 and _table_exists(description):
+            # Nothing new since the last run: the table stays as it is. The watermark column is
+            # not checked here (an empty result may have no columns at all), so an empty result
+            # with a wrongly typed watermark column passes; the next run that has rows fails.
+            return {"status": "succeeded", "snapshot_id": None, "rows": 0}
+        if arrow.num_columns == 0:
+            raise InvalidResult(_NOTHING_TO_CREATE.format(table=description.table))
+        if description.watermark_column is not None:
+            _check_watermark_column(arrow, description.watermark_column)
+        if description.write == "merge":
+            _check_merge_rows(arrow, description.key)
     with _Phase("upload"):
-        sources = _sources(description)
-        try:
-            written = client.tables.replace(
+        return _upload(client, description, arrow)
+
+
+def _table_exists(description: TaskDescription) -> bool:
+    """Say whether the asset's table existed when the worker read it.
+
+    Parameters
+    ----------
+    description
+        The task description.
+
+    Returns
+    -------
+    bool
+        True when the worker read a snapshot, or said the table exists without one.
+    """
+    return description.table_exists or description.expected_snapshot_id != "none"
+
+
+def _takes_context(function: Callable[..., object], description: TaskDescription) -> bool:
+    """Say whether the function gets an `AssetContext` as its parameter ``ctx``.
+
+    Parameters
+    ----------
+    function
+        The asset function.
+    description
+        The task description.
+
+    Returns
+    -------
+    bool
+        Whether it has a parameter ``ctx`` that can be passed by keyword, and the project
+        version names no input so: one deployed before ``ctx`` was reserved keeps reading
+        that input.
+    """
+    if "ctx" in description.inputs:
+        return False
+    try:
+        parameter = inspect.signature(function).parameters.get("ctx")
+    except (TypeError, ValueError):
+        return False
+    return parameter is not None and parameter.kind in (
+        inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        inspect.Parameter.KEYWORD_ONLY,
+    )
+
+
+def _upload(client: Client, description: TaskDescription, arrow: pa.Table) -> dict[str, object]:
+    """Write the result to the asset's table as its write mode says.
+
+    Parameters
+    ----------
+    client
+        The SDK client holding the task's token.
+    description
+        The task description.
+    arrow
+        The checked result.
+
+    Returns
+    -------
+    dict
+        The ``succeeded`` record of a table asset; a merge's rows are those it inserted and
+        updated.
+
+    Raises
+    ------
+    UploadRefused
+        If the server refuses the rows (`ValidationError`).
+    """
+    sources = _sources(description)
+    lineage: dict[str, Any] = {
+        "sources": sorted(sources),
+        "source_versions": {n: v for n, v in sources.items() if v is not None},
+    }
+    expected = description.expected_snapshot_id
+    try:
+        if description.write == "merge":
+            merged = client.tables.merge(
                 description.environment,
                 description.table,
                 arrow,
-                evolve_schema=False,
-                sources=sorted(sources),
-                source_versions={n: v for n, v in sources.items() if v is not None},
-                expected_snapshot_id=description.expected_snapshot_id,
+                key=list(description.key),
+                expected_snapshot_id=expected,
+                **lineage,
             )
-        except ValidationError as exc:
-            raise UploadRefused(_upload_message(exc, description.table)) from exc
+            rows = merged.rows_inserted + merged.rows_updated
+            return {"status": "succeeded", "snapshot_id": merged.snapshot_id, "rows": rows}
+        if description.write == "append" and _table_exists(description):
+            appended = client.tables.append(
+                description.environment,
+                description.table,
+                arrow,
+                expected_snapshot_id=expected,
+                **lineage,
+            )
+            return {
+                "status": "succeeded",
+                "snapshot_id": appended.snapshot_id,
+                "rows": appended.rows,
+            }
+        # A replace, and the first run of an append, which creates the table.
+        written = client.tables.replace(
+            description.environment,
+            description.table,
+            arrow,
+            evolve_schema=False,
+            expected_snapshot_id=expected,
+            **lineage,
+        )
+    except ValidationError as exc:
+        raise UploadRefused(_upload_message(exc, description.table)) from exc
     return {"status": "succeeded", "snapshot_id": written.snapshot_id, "rows": written.rows}
 
 
 _CONTROL_ESCAPES = {0x2028, 0x2029}
+
+
+def _mask(text: str, token: str) -> str:
+    """Replace every occurrence of the task token and of every value registered to hide.
+
+    Every occurrence of every value is a span, overlapping ones included; spans that overlap or
+    touch are joined and each joined span becomes one ``***`` (as the worker's redactor does),
+    so no part of a value is left beside a mask.
+
+    Parameters
+    ----------
+    text
+        Any text the harness is about to write.
+    token
+        The task token; empty when the caller removed it already.
+
+    Returns
+    -------
+    str
+        The masked text.
+    """
+    state = context._state
+    hidden = {token, *(state.secrets if state is not None else ())} - {""}
+    spans: list[tuple[int, int]] = []
+    for value in hidden:
+        at = text.find(value)
+        while at >= 0:
+            spans.append((at, at + len(value)))
+            at = text.find(value, at + 1)
+    if not spans:
+        return text
+    spans.sort()
+    joined = [spans[0]]
+    for start, end in spans[1:]:
+        if start <= joined[-1][1]:
+            joined[-1] = (joined[-1][0], max(joined[-1][1], end))
+        else:
+            joined.append((start, end))
+    out, kept = [], 0
+    for start, end in joined:
+        out += [text[kept:start], "***"]
+        kept = end
+    out.append(text[kept:])
+    return "".join(out)
 
 
 def _clean(text: str) -> str:
@@ -1596,13 +2053,13 @@ def _clean(text: str) -> str:
     Returns
     -------
     str
-        The text with control characters (except newline and tab), surrogates,
-        format characters (bidi overrides, zero-width; not the joiners) and the
-        Unicode line and paragraph separators written as ``\xNN`` or
-        ``\uNNNN``.
+        The text with every value registered to hide masked (`_mask`), then control
+        characters (except newline and tab), surrogates, format characters (bidi overrides,
+        zero-width; not the joiners) and the Unicode line and paragraph separators written as
+        ``\xNN`` or ``\uNNNN``.
     """
     out = []
-    for char in text:
+    for char in _mask(text, ""):
         code = ord(char)
         category = unicodedata.category(char)
         if (
@@ -1696,7 +2153,8 @@ def _failure_record(exc: BaseException, token: str) -> dict[str, object]:
     exc
         A `Failure`, or anything raised outside the phases.
     token
-        The task token, removed from every text.
+        The task token, removed from every text with every value registered to hide
+        (`_mask`).
 
     Returns
     -------
@@ -1712,7 +2170,7 @@ def _failure_record(exc: BaseException, token: str) -> dict[str, object]:
         text = f"{name}: {text}"
     if isinstance(cause, MemoryError):
         text = f"{text or name}.{_TASK_MEMORY_HINT}"
-    message = _clean((text or name).replace(token, "***"))
+    message = _clean(_mask(text or name, token))
     if phase == "function" and isinstance(cause, TypeError):
         # The advice must survive the bound on the message: cut the exception's text instead.
         room = MAX_ERROR_MESSAGE_CHARS - len(_TYPE_ERROR_HINT)
@@ -1721,7 +2179,7 @@ def _failure_record(exc: BaseException, token: str) -> dict[str, object]:
         message += _TYPE_ERROR_HINT
     return {
         "status": "failed",
-        "error_type": _clean(name.replace(token, "***")),
+        "error_type": _clean(_mask(name, token)),
         "message": message[:MAX_ERROR_MESSAGE_CHARS],
         "retryable": _retryable(phase, cause),
         "phase": phase,
@@ -1754,10 +2212,44 @@ def main(stdin: TextIO | None = None, client_factory: Callable[..., Client] | No
     if description.parent_pid is not None and os.getppid() != description.parent_pid:
         _stderr("the worker that started this task is gone\n")
         return 1
+    try:
+        return _run_described(description, client_factory)
+    finally:
+        # Only now: the record and the trace are written, so what they hide was known then.
+        context._set(None)
+        _connections.clear()
+
+
+def _run_described(
+    description: TaskDescription, client_factory: Callable[..., Client] | None
+) -> int:
+    """Run the described asset and write its result record.
+
+    Parameters
+    ----------
+    description
+        The parsed task description.
+    client_factory
+        Builds the SDK client; `Client` when `None`.
+
+    Returns
+    -------
+    int
+        0 after a ``succeeded`` record, 1 after a failure.
+    """
     token = description.token
     try:
         client = (client_factory or Client)(
             description.server_url, token, timeout=description.request_timeout_seconds
+        )
+        context._set(
+            context._TaskState(
+                client=client,
+                environment=description.environment,
+                asset=description.table,
+                declared=frozenset(description.connections),
+                connections=description.connections,
+            )
         )
         try:
             record = run_asset(description, client, Path.cwd())
@@ -1771,7 +2263,7 @@ def main(stdin: TextIO | None = None, client_factory: Callable[..., Client] | No
             trace = "".join(traceback.format_exception(shown))
         except Exception:
             trace = _clean(_safe(lambda: type(shown).__name__, "Exception")) + "\n"
-        _stderr(trace.replace(token, "***"))
+        _stderr(_mask(trace, token))
         return 1
     return 0 if _write_record(description.result_path, record) else 1
 

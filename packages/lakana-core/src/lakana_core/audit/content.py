@@ -78,7 +78,10 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "address",
         "artifact",
         "artifact_id",
+        # the asset (table) of a task attempt, and the attempt's claim counter
+        "asset",
         "asset_scope",
+        "attempt",
         "check",
         "check_result_id",
         "checks",
@@ -87,6 +90,8 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         # (a repository id, a ref, an environment name); configuration, never data.
         "conditions",
         "column",
+        # a connection's name, as a task asked for it
+        "connection",
         "credential_secret",
         "delivery_id",
         "deploy_id",
@@ -101,6 +106,8 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "issuer",
         "job",
         "jti_sha256",
+        # a merge's key: column names, as `column` and a schema diff hold
+        "key",
         "key_id",
         "kind",
         "kinds",
@@ -207,7 +214,9 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "revoked_policies",
         "row_count",
         "rows",
+        "rows_inserted",
         "rows_shown",
+        "rows_updated",
         "scheduled_for",
         "size_bytes",
         "snapshot_id",

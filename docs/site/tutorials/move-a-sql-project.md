@@ -32,7 +32,7 @@ nothing like it: a file names the other table in plain SQL. Here is where each p
 | the seed `regions.csv` | the same file, kept in git, loaded with a command |
 | the source | the table `bronze.orders`, loaded with a command |
 | the cleaning view | the asset `silver.orders_clean`, `materialize: view` |
-| the incremental table | the asset `silver.orders_enriched`, `materialize: incremental` |
+| the incremental table | the asset `silver.orders_enriched`, `write: append` |
 | the report table | the asset `gold.revenue_by_region` |
 | the five tests | five files under `checks/silver/orders_enriched/` |
 | the two targets | the environments `dev` and `prod`; this tutorial uses `dev` |
@@ -114,9 +114,9 @@ SELECT
 FROM bronze.orders
 ```
 
-The incremental asset joins the region name to every order. `incremental_key: order_id` makes a
-run add only the orders whose number is above the highest one already in the table, and the first
-run creates the table with every order. It reads the view and the seed table by their names. The
+The incremental asset joins the region name to every order. `write: append` with
+`watermark: order_id` makes a run add only the orders whose number is above the highest one
+already in the table, and the first run creates the table with every order. It reads the view and the seed table by their names. The
 `LEFT JOIN` keeps an order whose region is unknown, so that a check can find it instead of the
 join hiding it:
 
@@ -124,8 +124,8 @@ join hiding it:
 ```sql
 /* lakana
 description: Every order with the name of its region. Each run adds the orders that are new.
-materialize: incremental
-incremental_key: order_id
+write: append
+watermark: order_id
 columns:
   order_id: The order's number.
   region_name: The name of the region, empty when the region code is unknown.

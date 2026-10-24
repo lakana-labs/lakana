@@ -3,7 +3,8 @@
 One file under `assets/` holds one decorated function. Deploy reads the
 decorator with `ast` and never imports the file; at run time the harness
 (`lakana.runner`) imports it, finds the function carrying `AssetSpec` and
-calls it with one `polars.DataFrame` per declared input. An asset returns a
+calls it with one `polars.DataFrame` per declared input. A parameter named
+``ctx`` is not an input: it is reserved for the asset's context. An asset returns a
 `polars.DataFrame`; with ``output="artifact"`` it writes files into
 `output_dir` and returns a `pathlib.Path` inside that directory instead.
 """
@@ -11,6 +12,7 @@ calls it with one `polars.DataFrame` per declared input. An asset returns a
 from __future__ import annotations
 
 import re
+import unicodedata
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -32,6 +34,14 @@ CONNECTION_NAME = re.compile(r"\A[a-z][a-z0-9-]{0,62}\Z")
 
 MAX_CONNECTIONS = 16
 """The most connections one asset declares; deploy refuses more (a parity test pins both)."""
+
+WRITE_CHOICES = ("replace", "append", "merge")
+"""The values of `write`; deploy accepts the same three (a parity test pins both)."""
+
+_UNSAFE_CATEGORIES = ("Cc", "Cf", "Cs", "Zl", "Zp")
+_IDENTIFIER_MESSAGE = (
+    "must not contain a control, format or surrogate character or a line separator"
+)
 
 _PARENTHESES = "write @asset(...) with parentheses"
 _NO_OUTPUT_DIR = (
@@ -113,6 +123,13 @@ class AssetSpec:
         rounded). ``exact``: it arrives as ``Decimal``, as stored.
     connections
         Names of connections of the environment the asset reads from; checked at deploy.
+    write
+        ``replace``, ``append`` or ``merge``: what a run does to the table.
+    key
+        The columns that identify a row, for ``merge``.
+    watermark
+        The column whose largest value the next run starts after, for ``append`` (and
+        optionally ``merge``).
     """
 
     inputs: dict[str, str]
@@ -128,6 +145,89 @@ class AssetSpec:
     keep_versions: int | None = None
     decimals: str = "float"
     connections: tuple[str, ...] = ()
+    write: str = "replace"
+    key: tuple[str, ...] = ()
+    watermark: str | None = None
+
+
+def _unsafe(text: str) -> bool:
+    """Say whether a column name has a character deploy refuses.
+
+    Parameters
+    ----------
+    text
+        The name.
+
+    Returns
+    -------
+    bool
+        True for a control, format or surrogate character or a line or paragraph separator.
+    """
+    return any(unicodedata.category(char) in _UNSAFE_CATEGORIES for char in text)
+
+
+def _check_write(
+    write: object, key: object, watermark: object
+) -> tuple[str, tuple[str, ...], str | None]:
+    """Read the decorator's write model with the rules deploy applies.
+
+    Parameters
+    ----------
+    write
+        ``replace``, ``append`` or ``merge``; `None` means ``replace``.
+    key
+        The merge key: a list or tuple of strings; `None` means none.
+    watermark
+        The watermark column, or `None`.
+
+    Returns
+    -------
+    tuple
+        `write`, `key` and `watermark`.
+
+    Raises
+    ------
+    ValueError
+        For a value of the wrong type or with a character deploy refuses, a `write` outside
+        `WRITE_CHOICES`, a key column listed twice, ``append`` without a watermark or with a
+        key, ``merge`` without a key, and ``replace`` with a key or a watermark.
+    """
+    mode = "replace" if write is None else write
+    if not isinstance(mode, str):
+        raise ValueError("write must be a string")
+    if mode not in WRITE_CHOICES:
+        shown = ascii(mode)[1:-1][:200]
+        raise ValueError(f"write must be one of {', '.join(WRITE_CHOICES)}; got '{shown}'")
+    columns = () if key is None else key
+    if not isinstance(columns, (list, tuple)) or not all(
+        isinstance(column, str) for column in columns
+    ):
+        raise ValueError("key must be a list of strings")
+    if watermark is not None and not isinstance(watermark, str):
+        raise ValueError("watermark must be a string")
+    if any(_unsafe(column) for column in columns):
+        raise ValueError(f"a key column {_IDENTIFIER_MESSAGE}")
+    if watermark is not None and _unsafe(watermark):
+        raise ValueError(f"watermark {_IDENTIFIER_MESSAGE}")
+    seen: set[str] = set()
+    for column in columns:
+        if column in seen:
+            raise ValueError(f"key column `{column}` is listed twice")
+        seen.add(column)
+    if mode == "append" and watermark is None:
+        raise ValueError(
+            "`write: append` needs `watermark:` — the column whose largest value the next run "
+            "starts after"
+        )
+    if mode == "append" and columns:
+        raise ValueError(
+            "`write: append` takes no `key:`; to merge rows on a key use `write: merge`"
+        )
+    if mode == "merge" and not columns:
+        raise ValueError("`write: merge` needs `key:` — the columns that identify a row")
+    if mode == "replace" and (columns or watermark is not None):
+        raise ValueError("`write: replace` takes neither `key:` nor `watermark:`")
+    return mode, tuple(columns), watermark
 
 
 def _check_connections(connections: object) -> tuple[str, ...]:
@@ -219,6 +319,9 @@ def asset(
     keep_versions: int | None = None,
     decimals: str = "float",
     connections: Iterable[str] = (),
+    write: str = "replace",
+    key: Iterable[str] = (),
+    watermark: str | None = None,
 ) -> Callable[[F], F]:
     """Declare a Python asset; returns the function unchanged with its metadata attached.
 
@@ -238,7 +341,8 @@ def asset(
     tags
         Free-form tags.
     materialize
-        ``table`` (the only supported value); not allowed with ``output="artifact"``.
+        ``table`` (the only supported value); not allowed with ``output="artifact"``. An asset
+        that appends says ``write="append"`` instead.
     columns
         Column name → description.
     retries
@@ -266,8 +370,20 @@ def asset(
         decimal identifier or a wide sum. What the function returns is stored as it is.
     connections
         Names of connections of the environment the asset reads from; each must exist when
-        you deploy. Reading them from inside the task arrives in a later release. At most
-        16, each lower-case letters, digits and ``-``, starting with a letter.
+        you deploy. Inside the task, `lakana.ingest.connections.get` reads one, with its
+        secret. At most 16, each lower-case letters, digits and ``-``, starting with a letter.
+    write
+        ``replace`` (the default): every run replaces the table's rows with what the
+        function returns.
+        ``append``: the first run creates the table; each later run adds the rows it returns,
+        and needs `watermark`.
+        ``merge``: rows whose `key` matches a row of the table update it, the others are
+        added; nothing is deleted. Needs `key`.
+    key
+        The columns that identify a row, for ``write="merge"``.
+    watermark
+        The column whose largest value in the table the next run starts after: needed by
+        ``write="append"``, optional for ``merge``.
 
     Returns
     -------
@@ -283,8 +399,9 @@ def asset(
         other than ``table``, `materialize` or `columns` on an artifact asset,
         and a `keep_versions` that is not an integer from 1 to 2147483647 or
         that is given without ``output="artifact"``, a `decimals` other than
-        ``float`` or ``exact``, and a `connections` that is not a list of valid,
-        distinct names or holds more than 16.
+        ``float`` or ``exact``, a `connections` that is not a list of valid,
+        distinct names or holds more than 16, and a `write`, `key` or `watermark` deploy
+        would refuse (also any of them on an artifact asset).
     """
     if function is not None:
         raise TypeError(_PARENTHESES)
@@ -306,17 +423,27 @@ def asset(
             f"(decimal.Decimal values), got {shown}"
         )
     if output == "artifact":
-        for name, given in (("materialize", materialize), ("columns", columns)):
+        for name, given in (
+            ("materialize", materialize),
+            ("columns", columns),
+            ("write", None if write in (None, "replace") else write),
+            ("key", key or None),
+            ("watermark", watermark),
+        ):
             if given is not None:
                 raise ValueError(f"{name} does not apply to an artifact asset; remove it")
         _check_keep_versions(keep_versions)
     elif keep_versions is not None:
         raise ValueError('keep_versions applies only to an asset with output="artifact"')
     elif materialize == "incremental":
-        raise ValueError("incremental Python assets are not supported yet (#23)")
+        raise ValueError(
+            'a Python asset appends with write="append" and watermark="<column>", '
+            "not materialize='incremental'"
+        )
     elif materialize not in (None, "table"):
         raise ValueError(f"a Python asset supports only 'table', got {materialize!r}")
     declared = _check_connections(connections)
+    mode, key_columns, watermark_column = _check_write(write, key, watermark)
     spec = AssetSpec(
         inputs=dict(inputs) if inputs is not None else {},
         description=description,
@@ -331,6 +458,9 @@ def asset(
         keep_versions=keep_versions,
         decimals=decimals,
         connections=declared,
+        write=mode,
+        key=key_columns,
+        watermark=watermark_column,
     )
 
     def decorate(target: F) -> F:

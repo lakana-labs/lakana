@@ -84,7 +84,11 @@ def test_a_bare_decorator_says_to_add_parentheses() -> None:
 
 @pytest.mark.parametrize(
     ("materialize", "fragment"),
-    [("view", "only 'table'"), ("incremental", "#23"), ("snapshot", "only 'table'")],
+    [
+        ("view", "only 'table'"),
+        ("incremental", 'appends with write="append" and watermark="<column>"'),
+        ("snapshot", "only 'table'"),
+    ],
 )
 def test_only_table_materialization(materialize: str, fragment: str) -> None:
     with pytest.raises(ValueError, match=fragment):
@@ -286,3 +290,40 @@ def test_a_wrong_connections_is_refused(connections: object, message: str) -> No
     with pytest.raises(ValueError) as info:
         lakana.asset(connections=cast(Any, connections))
     assert str(info.value) == message
+
+
+def test_the_write_model_defaults_to_replace_and_is_stored() -> None:
+    @lakana.asset()
+    def plain() -> None:
+        return None
+
+    spec = getattr(plain, ASSET_ATTRIBUTE)
+    assert (spec.write, spec.key, spec.watermark) == ("replace", (), None)
+
+    @lakana.asset(write="merge", key=["id", "region"], watermark="updated_at")
+    def merged() -> None:
+        return None
+
+    spec = getattr(merged, ASSET_ATTRIBUTE)
+    assert (spec.write, spec.key, spec.watermark) == ("merge", ("id", "region"), "updated_at")
+
+
+@pytest.mark.parametrize(
+    ("arguments", "message"),
+    [
+        ({"write": "upsert"}, "write must be one of replace, append, merge; got 'upsert'"),
+        (
+            {"write": "append"},
+            "`write: append` needs `watermark:` — the column whose largest value the next run "
+            "starts after",
+        ),
+        ({"write": "merge"}, "`write: merge` needs `key:` — the columns that identify a row"),
+        ({"key": ["id"]}, "`write: replace` takes neither `key:` nor `watermark:`"),
+        ({"write": "merge", "key": ["id", "id"]}, "key column `id` is listed twice"),
+        ({"write": "merge", "key": "id"}, "key must be a list of strings"),
+    ],
+)
+def test_a_wrong_write_model_is_refused(arguments: dict[str, Any], message: str) -> None:
+    with pytest.raises(ValueError) as caught:
+        lakana.asset(**arguments)
+    assert str(caught.value) == message

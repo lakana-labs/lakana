@@ -113,6 +113,7 @@ class WriteOperation(enum.StrEnum):
     SQL_WRITE = "sql_write"
     WRITE = "write"
     APPEND = "append"
+    MERGE = "merge"
     COMMIT = "commit"
     CREATE_TABLE = "create_table"
     CREATE_EXTERNAL_TABLE = "create_external_table"
@@ -139,6 +140,7 @@ _MATERIALIZING = frozenset(
         WriteOperation.SQL_WRITE,
         WriteOperation.WRITE,
         WriteOperation.APPEND,
+        WriteOperation.MERGE,
         WriteOperation.COMMIT,
         WriteOperation.CREATE_VIEW,
         WriteOperation.ARTIFACT_VERSION,

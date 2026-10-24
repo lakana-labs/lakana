@@ -11,6 +11,15 @@ pipeline: ingestion (no inputs, returns rows from an API or a file format SQL ca
 end use (scoring with a model, calling a library, training). If you can write it as a `SELECT`,
 write it as a SQL asset.
 
+**An incremental Python asset filters its own rows.** For a SQL asset that appends, the platform
+wraps the `SELECT` and keeps only the rows past the watermark, because it can read the query. It
+cannot read what a Python function does, so it hands the function the watermark instead
+(`ctx.watermark()`) and writes every row the function returns. The function knows its source:
+an API's `since=` parameter, a file's modification time or a column of an export. Filtering there
+also means a run reads only what is new. The cost is that a mistake in the filter adds rows twice,
+which a `merge` on a key would absorb: it updates a row it already has rather than adding it.
+Details in [The asset's context](../reference/python-assets.md#the-assets-context).
+
 
 ## Isolation: one instance is one trust domain
 

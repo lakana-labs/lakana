@@ -55,6 +55,7 @@ class WriteMode(enum.StrEnum):
     CREATE = "create"
     REPLACE = "replace"
     APPEND = "append"
+    MERGE = "merge"
     VIEW = "view"
     MAINTAIN = "maintain"
 
@@ -116,6 +117,10 @@ class QueryRun(Base, TimestampMixin):
     target_table_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True, index=True)
     """The target's id once known. No foreign key, so a run's history survives a drop."""
     incremental_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    merge_key: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    """The columns a merge matches rows on: set by the worker for a SQL asset with
+    `write: merge` (its `MERGE` runs and the `CREATE` of its first run, which is checked the same
+    way); `None` for every other run."""
     evolve_schema: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     watermark: Mapped[str | None] = mapped_column(String(255), nullable=True)
     """The type-tagged watermark an incremental append filtered on, e.g. ``long:42``."""

@@ -2403,3 +2403,135 @@ def test_a_second_attempts_failed_check_sets_the_table_back_to_before_the_first_
     assert (below.status, below.attempt) == ("upstream_failed", 0)
     with pytest.raises(NotFound):
         admin.tables.get(env, "gold.after_wide")
+
+
+_APPEND_LOG = '''\
+import polars as pl
+from lakana import asset
+
+
+@asset(inputs={"events": "bronze.events"}, write="append", watermark="id")
+def orders_log(events: pl.DataFrame, ctx) -> pl.DataFrame:
+    """Every event once: only the rows past the table's watermark."""
+    return events.filter(pl.col("id") > ctx.watermark(default=0))
+'''
+
+_MERGE_LATEST = '''\
+import polars as pl
+from lakana import asset
+
+
+@asset(inputs={"events": "bronze.events"}, write="merge", key=["id"])
+def latest(events: pl.DataFrame) -> pl.DataFrame:
+    """One row per event, with the number of events the run saw."""
+    return events.with_columns(seen=pl.lit(events.height, dtype=pl.Int64))
+'''
+
+
+def test_python_assets_append_past_the_watermark_and_merge_on_their_key(
+    stack: _Stack, wheelhouse: Path
+) -> None:
+    """Three runs with the real harness: create, append the new row, find nothing and write nothing.
+
+    The merge asset runs beside it: its second run updates the rows it wrote and adds the new one.
+    """
+    project = _deploy(
+        stack,
+        wheelhouse,
+        {"assets/bronze/orders_log.py": _APPEND_LOG, "assets/silver/latest.py": _MERGE_LATEST},
+    )
+    admin, env = stack.admin, project.environment
+    log_rows = "SELECT id FROM bronze.orders_log ORDER BY id"
+    latest_rows = "SELECT id, seen FROM silver.latest ORDER BY id"
+
+    stack.succeed(env, admin.runs.start(env, project.repository).id)
+    assert stack.sql(log_rows, env) == [{"id": 1}, {"id": 2}]
+    assert stack.sql(latest_rows, env) == [{"id": 1, "seen": 2}, {"id": 2, "seen": 2}]
+
+    admin.tables.append(env, "bronze.events", pa.table({"id": pa.array([3], pa.int64())}))
+    second = admin.runs.start(env, project.repository)
+    stack.succeed(env, second.id)
+    assert stack.sql(log_rows, env) == [{"id": 1}, {"id": 2}, {"id": 3}]
+    assert stack.sql(latest_rows, env) == [
+        {"id": 1, "seen": 3},
+        {"id": 2, "seen": 3},
+        {"id": 3, "seen": 3},
+    ]
+    appended = admin.runs.log(env, second.id, "bronze.orders_log").text
+    assert "write mode: append" in appended
+    assert "watermark: long:2" in appended
+    assert "rows: 1" in appended
+    merged = admin.runs.log(env, second.id, "silver.latest").text
+    assert "write mode: merge" in merged
+    assert "rows: 3" in merged  # two updated, one inserted
+
+    snapshot = admin.tables.get(env, "bronze.orders_log").snapshot_id
+    third = admin.runs.start(env, project.repository)
+    stack.succeed(env, third.id)
+    assert admin.tables.get(env, "bronze.orders_log").snapshot_id == snapshot
+    assert stack.sql(log_rows, env) == [{"id": 1}, {"id": 2}, {"id": 3}]
+    nothing = admin.runs.log(env, third.id, "bronze.orders_log").text
+    assert "watermark: long:3" in nothing
+    assert "rows: 0" in nothing
+    assert "snapshot:" not in nothing
+
+
+_CRM_PASSWORD = "crm-e2e-s3cr3t"
+
+_CRM_ROWS = '''\
+import polars as pl
+from lakana import asset
+from lakana.ingest import connections
+
+
+@asset(connections=["crm-db"])
+def crm_rows() -> pl.DataFrame:
+    """Fetch the declared connection, print its password, and record what it said."""
+    crm = connections.get("crm-db")
+    print("password:", crm.secret["password"])
+    print("secret:", crm.secret)
+    return pl.DataFrame({"host": [crm.address["host"]], "kind": [crm.kind]})
+'''
+
+
+def test_a_python_asset_declaring_a_connection_records_it_in_lineage(
+    stack: _Stack, wheelhouse: Path
+) -> None:
+    """Deploy, run with the real harness: the task fetches its secret, the log hides it.
+
+    The write records the declared connection as a source; the admin sees it in lineage.
+    """
+    admin, env = stack.admin, unique_name()
+    stack.services.environment(admin, env)
+    admin.connections.create(
+        env,
+        "crm-db",
+        kind="postgresql",
+        address={"host": "db.example.com", "database": "crm"},
+        settings={"user": "reader"},
+        secret_values={"password": _CRM_PASSWORD},
+    )
+    project = _deploy(stack, wheelhouse, {"assets/bronze/crm_rows.py": _CRM_ROWS}, environment=env)
+
+    run = admin.runs.start(env, project.repository)
+    stack.succeed(env, run.id)
+
+    assert stack.sql("SELECT host, kind FROM bronze.crm_rows", env) == [
+        {"host": "db.example.com", "kind": "postgresql"}
+    ]
+    log = admin.runs.log(env, run.id, "bronze.crm_rows").text
+    assert "password: ***" in log
+    assert "secret: {'password': '***'}" in log
+    assert _CRM_PASSWORD not in log
+    lineage = admin.tables.lineage(env, "bronze.crm_rows")
+    (node,) = [n for n in lineage.nodes if n.kind == "CONNECTION"]
+    assert (node.name, node.connection_kind, node.dropped) == ("crm-db", "postgresql", False)
+    with Session(stack.db) as session:
+        fetched = session.execute(
+            select(AuditEvent).where(
+                AuditEvent.event_type == AuditEventType.CONNECTION_CREDENTIAL_FETCHED,
+                AuditEvent.securable_environment == env,
+            )
+        ).scalar_one()
+    assert fetched.detail["asset"] == "bronze.crm_rows"
+    assert _CRM_PASSWORD not in json.dumps(fetched.detail)

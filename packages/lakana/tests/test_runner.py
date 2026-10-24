@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import datetime
 import errno
 import io
 import json
@@ -15,7 +16,7 @@ import sys
 import textwrap
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
@@ -33,7 +34,13 @@ from lakana._artifact_manifest import (
     StoredManifestInvalid,
     scan,
 )
-from lakana._models import ArtifactDownload, ArtifactVersion, WriteResult
+from lakana._models import (
+    AppendResult,
+    ArtifactDownload,
+    ArtifactVersion,
+    MergeResult,
+    WriteResult,
+)
 from lakana.errors import (
     ArtifactCorrupt,
     AuthenticationError,
@@ -47,7 +54,7 @@ from lakana.errors import (
     ValidationError,
 )
 from lakana.runner import (
-    DESCRIPTION_VERSION,
+    DESCRIPTION_VERSIONS,
     MAX_ERROR_MESSAGE_CHARS,
     AssetLoadError,
     TaskDescription,
@@ -154,7 +161,105 @@ class _Tables:
 
     def __init__(self, outcome: WriteResult | Exception) -> None:
         self.outcome = outcome
+        self.appended: AppendResult | Exception = AppendResult(rows=2, files=1, snapshot_id=43)
+        self.merged: MergeResult | Exception = MergeResult(
+            snapshot_id=44, rows_inserted=1, rows_updated=1
+        )
         self.calls: list[dict[str, object]] = []
+
+    def _record(
+        self,
+        method: str,
+        environment: str,
+        qualified_name: str,
+        data: object,
+        options: dict[str, object],
+        outcome: object,
+    ) -> object:
+        """Record one upload and hand back its scripted outcome.
+
+        Parameters
+        ----------
+        method
+            ``replace``, ``append`` or ``merge``.
+        environment
+            The environment.
+        qualified_name
+            The table.
+        data
+            The rows.
+        options
+            Keyword options.
+        outcome
+            The scripted result, or an exception to raise.
+
+        Returns
+        -------
+        object
+            The scripted result.
+        """
+        self.calls.append(
+            {
+                "method": method,
+                "environment": environment,
+                "table": qualified_name,
+                "data": data,
+                **options,
+            }
+        )
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    def append(
+        self, environment: str, qualified_name: str, data: object, **options: object
+    ) -> AppendResult:
+        """Record an append.
+
+        Parameters
+        ----------
+        environment
+            The environment.
+        qualified_name
+            The table.
+        data
+            The rows.
+        **options
+            Keyword options.
+
+        Returns
+        -------
+        AppendResult
+            The scripted result.
+        """
+        result = self._record("append", environment, qualified_name, data, options, self.appended)
+        assert isinstance(result, AppendResult)
+        return result
+
+    def merge(
+        self, environment: str, qualified_name: str, data: object, **options: object
+    ) -> MergeResult:
+        """Record a merge.
+
+        Parameters
+        ----------
+        environment
+            The environment.
+        qualified_name
+            The table.
+        data
+            The rows.
+        **options
+            Keyword options.
+
+        Returns
+        -------
+        MergeResult
+            The scripted result.
+        """
+        result = self._record("merge", environment, qualified_name, data, options, self.merged)
+        assert isinstance(result, MergeResult)
+        return result
 
     def replace(
         self, environment: str, qualified_name: str, data: object, **options: object
@@ -177,12 +282,9 @@ class _Tables:
         WriteResult
             The scripted result.
         """
-        self.calls.append(
-            {"environment": environment, "table": qualified_name, "data": data, **options}
-        )
-        if isinstance(self.outcome, Exception):
-            raise self.outcome
-        return self.outcome
+        result = self._record("replace", environment, qualified_name, data, options, self.outcome)
+        assert isinstance(result, WriteResult)
+        return result
 
 
 class _Client:
@@ -240,7 +342,7 @@ class _World:
             JSON.
         """
         document: dict[str, object] = {
-            "version": DESCRIPTION_VERSION,
+            "version": 2,
             "server_url": "http://server:8000",
             "token": _TOKEN,
             "environment": "dev",
@@ -450,8 +552,11 @@ def test_sys_exit_in_the_function_is_a_failure(world: _World) -> None:
     ("body", "fragment"),
     [
         ("return obs.lazy()", "returned a polars LazyFrame; call .collect()"),
-        ("return [1, 2]", "must return a polars DataFrame, got builtins.list"),
-        ("return None", "must return a polars DataFrame, got builtins.NoneType"),
+        ("return [1, 2]", "must return a polars DataFrame or a pyarrow Table, got builtins.list"),
+        (
+            "return None",
+            "must return a polars DataFrame or a pyarrow Table, got builtins.NoneType",
+        ),
         ("return pl.DataFrame()", "returned a DataFrame without columns"),
         (
             "return pl.DataFrame({'blob': [object()]})",
@@ -2925,11 +3030,11 @@ _ARTIFACT_INPUT = {
 @pytest.mark.parametrize(
     ("overrides", "fragment"),
     [
-        ({"version": 1}, "expected a version 2 document"),
-        ({"version": 3}, "expected a version 2 document"),
-        ({"version": 2.0}, "expected a version 2 document"),
-        ({"version": True}, "expected a version 2 document"),
-        ({"version": "2"}, "expected a version 2 document"),
+        ({"version": 1}, "expected a version 2 or 3 document"),
+        ({"version": 4}, "expected a version 2 or 3 document"),
+        ({"version": 2.0}, "expected a version 2 or 3 document"),
+        ({"version": True}, "expected a version 2 or 3 document"),
+        ({"version": "2"}, "expected a version 2 or 3 document"),
         ({"output": "model"}, "output must be 'table' or 'artifact'"),
         ({"output": None}, "output must be 'table' or 'artifact'"),
         ({"output": ["table"]}, "output must be 'table' or 'artifact'"),
@@ -3245,9 +3350,13 @@ def test_a_description_may_leave_decimals_out(world: _World) -> None:
     assert parse_description(world.description(decimals=None)).decimals is None
 
 
-def test_the_task_description_version_is_unchanged_by_the_decimals_key() -> None:
-    """An optional key that both sides read with a default needs no version bump."""
-    assert DESCRIPTION_VERSION == 2
+def test_the_harness_reads_versions_2_and_3() -> None:
+    """`decimals`, read with a default on both sides, needed no new version; the write mode did.
+
+    A worker sends version 3 only to an asset that uses its fields, so a harness of the previous
+    release keeps running every other asset.
+    """
+    assert DESCRIPTION_VERSIONS == (2, 3)
 
 
 def _nested() -> pa.Table:
@@ -3559,3 +3668,713 @@ def test_a_map_input_arrives_as_a_list_of_structs_in_polars_1(world: _World) -> 
     )
     assert world.run() == 0
     assert _uploaded(world).to_pydict() == {"id": [1, 2], "first": [1.5, None]}
+
+
+def _write_asset(world: _World, body: str, *, signature: str = "obs", inputs: str = "") -> None:
+    """Write an asset whose function body is `body`.
+
+    Parameters
+    ----------
+    world
+        The world.
+    body
+        The function's body, one statement per line.
+    signature
+        The function's parameters.
+    inputs
+        The decorator's arguments.
+    """
+    world.result_path.parent.mkdir(exist_ok=True)
+    arguments = inputs or "inputs={'obs': 'silver.weather'}"
+    source = (
+        "import datetime\nimport polars as pl\nimport pyarrow as pa\nfrom lakana import asset\n\n\n"
+        f"@asset({arguments})\ndef f({signature}):\n"
+    )
+    (world.root / "assets" / "gold" / "scores.py").write_text(
+        source + textwrap.indent(body, "    ") + "\n"
+    )
+
+
+def _v3(
+    write: str = "append",
+    *,
+    key: list[str] | None = None,
+    watermark: Mapping[str, object] | None = None,
+    connections: Mapping[str, object] | None = None,
+    expected: int | str = 17,
+) -> dict[str, object]:
+    """Build the version 3 keys of a description.
+
+    Parameters
+    ----------
+    write
+        The write mode.
+    key
+        The merge key.
+    watermark
+        The watermark object; `None` sends JSON null.
+    connections
+        The connections object.
+    expected
+        The expected snapshot id.
+
+    Returns
+    -------
+    dict
+        Overrides for `_World.run` and `_World.description`.
+    """
+    return {
+        "version": 3,
+        "write": write,
+        "key": key or [],
+        "watermark": None if watermark is None else dict(watermark),
+        "connections": dict(connections or {}),
+        "expected_snapshot_id": expected,
+        "table_exists": expected != "none",
+    }
+
+
+_WATERMARK_ID = {"column": "id", "value": "long:41"}
+
+
+def test_append_first_run_replaces_with_expected_none(world: _World) -> None:
+    """write=append, expected "none": the first run creates the table with every row."""
+    _write_asset(world, "return obs")
+    overrides = _v3(watermark={"column": "id", "value": None}, expected="none")
+    assert world.run(**overrides) == 0
+    (call,) = world.client.tables.calls
+    assert call["method"] == "replace"
+    assert call["expected_snapshot_id"] == "none"
+    assert call["evolve_schema"] is False
+    assert world.record() == {"status": "succeeded", "snapshot_id": 42, "rows": 2}
+
+
+def test_append_later_runs_append_against_the_pin(world: _World) -> None:
+    """write=append, expected 17: `client.tables.append(..., expected_snapshot_id=17)`."""
+    _write_asset(world, "return obs")
+    assert world.run(**_v3(watermark=_WATERMARK_ID)) == 0
+    (call,) = world.client.tables.calls
+    assert call["method"] == "append"
+    assert call["expected_snapshot_id"] == 17
+    assert call["sources"] == ["silver.weather"]
+    assert call["source_versions"] == {}
+    assert "evolve_schema" not in call
+    assert _uploaded(world).to_pydict() == {"id": [1, 2]}
+    assert world.record() == {"status": "succeeded", "snapshot_id": 43, "rows": 2}
+
+
+@pytest.mark.parametrize("expected", [17, "none"])
+def test_merge_calls_merge_with_the_key(world: _World, expected: int | str) -> None:
+    """write=merge: `client.tables.merge(..., key=["id"], expected_snapshot_id=17)`.
+
+    A first run merges too: the server creates the table after the same key checks.
+    """
+    _write_asset(world, "return obs")
+    assert world.run(**_v3("merge", key=["id"], expected=expected)) == 0
+    (call,) = world.client.tables.calls
+    assert call["method"] == "merge"
+    assert call["key"] == ["id"]
+    assert call["expected_snapshot_id"] == expected
+    assert call["sources"] == ["silver.weather"]
+    assert world.record() == {"status": "succeeded", "snapshot_id": 44, "rows": 2}
+
+
+def test_a_merge_that_changes_nothing_succeeds_without_a_snapshot(world: _World) -> None:
+    _write_asset(world, "return obs")
+    world.client.tables.merged = MergeResult(snapshot_id=None, rows_inserted=0, rows_updated=0)
+    assert world.run(**_v3("merge", key=["id"])) == 0
+    assert world.record() == {"status": "succeeded", "snapshot_id": None, "rows": 0}
+
+
+def test_ctx_receives_the_decoded_watermark(world: _World) -> None:
+    """`def asset(ctx): return pl.DataFrame({"n": [ctx.watermark()]})` gets 41 for "long:41"."""
+    _write_asset(
+        world,
+        "return pl.DataFrame({'id': [ctx.watermark()]})",
+        signature="ctx",
+        inputs="write='append', watermark='id'",
+    )
+    assert world.run(inputs={}, input_kinds={}, **_v3(watermark=_WATERMARK_ID)) == 0
+    assert _uploaded(world).to_pydict() == {"id": [41]}
+
+
+def test_ctx_gives_the_default_on_a_first_run(world: _World) -> None:
+    _write_asset(
+        world,
+        "return pl.DataFrame({'d': [ctx.watermark(default=datetime.date(2020, 1, 1))]})",
+        signature="obs, ctx",
+    )
+    overrides = _v3(watermark={"column": "d", "value": None}, expected="none")
+    assert world.run(**overrides) == 0
+    assert _uploaded(world).to_pydict() == {"d": [datetime.date(2020, 1, 1)]}
+
+
+def test_a_replace_asset_gets_a_ctx_without_a_watermark(world: _World) -> None:
+    """A version 2 description still passes `ctx`; its watermark is the default."""
+    _write_asset(
+        world, "return obs.with_columns(w=pl.lit(ctx.watermark(default=-1)))", signature="ctx, obs"
+    )
+    assert world.run() == 0
+    assert _uploaded(world).to_pydict() == {"id": [1, 2], "w": [-1, -1]}
+
+
+def test_an_input_named_ctx_of_an_older_project_version_is_still_the_input(world: _World) -> None:
+    """A version deployed before `ctx` was reserved may name an input `ctx`: it keeps it."""
+    _write_asset(world, "return ctx", signature="ctx", inputs="inputs={'ctx': 'silver.weather'}")
+    assert world.run(inputs={"ctx": "silver.weather"}, input_kinds={"ctx": "table"}) == 0
+    assert _uploaded(world).to_pydict() == {"id": [1, 2]}
+
+
+def test_a_pyarrow_table_is_accepted(world: _World) -> None:
+    """The asset may return a `pyarrow.Table`; view and nanosecond types are converted."""
+    _write_asset(
+        world,
+        "return pa.table({'name': pa.array(['a'], pa.string_view()),\n"
+        "                 'at': pa.array([datetime.datetime(2026, 1, 1)], pa.timestamp('ns'))})",
+    )
+    assert world.run() == 0
+    uploaded = _uploaded(world)
+    assert uploaded.schema.field("name").type == pa.string()
+    assert uploaded.schema.field("at").type == pa.timestamp("us")
+
+
+def test_a_pyarrow_table_gets_the_same_schema_checks(world: _World) -> None:
+    record = _failing(
+        world, "import pyarrow as pa\nreturn pa.table({'d': pa.array([1], pa.duration('s'))})"
+    )
+    assert record["error_type"] == "InvalidResult"
+    assert record["retryable"] is False
+    assert str(record["message"]).startswith("Column 'd' has an unsupported Arrow type")
+
+
+def test_a_pyarrow_table_without_columns_is_refused_for_a_replace(world: _World) -> None:
+    record = _failing(world, "import pyarrow as pa\nreturn pa.table({})")
+    assert record["message"] == "the asset returned a table without columns"
+
+
+def test_a_record_batch_reader_is_refused(world: _World) -> None:
+    """A stream is not read for the asset: the message says how to read it into a table."""
+    record = _failing(
+        world,
+        "import pyarrow as pa\nt = obs.to_arrow()\n"
+        "return pa.RecordBatchReader.from_batches(t.schema, t.to_batches())",
+    )
+    assert record["error_type"] == "InvalidResult"
+    assert record["retryable"] is False
+    assert record["message"] == (
+        "the asset returned a pyarrow RecordBatchReader; read it with `.read_all()` and return "
+        "the table"
+    )
+    assert world.client.tables.calls == []
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "return obs.clear()",
+        "return pl.DataFrame()",
+        "return pa.table({})",
+        "return obs.to_arrow().slice(0, 0)",
+    ],
+    ids=["zero-rows", "polars-without-columns", "arrow-without-columns", "arrow-zero-rows"],
+)
+@pytest.mark.parametrize("write", ["append", "merge"])
+def test_an_empty_append_succeeds_without_a_write(world: _World, body: str, write: str) -> None:
+    """Review Focus 2: an append or merge whose source had nothing new succeeds, writing nothing.
+
+    The table exists (expected 17) and the asset returns a zero-row table or a zero-column one:
+    the record says succeeded with rows 0 and no snapshot; no upload is sent, and the watermark
+    column is not looked for in a result without columns.
+    """
+    _write_asset(world, body)
+    key = ["id"] if write == "merge" else None
+    assert world.run(**_v3(write, key=key, watermark=_WATERMARK_ID)) == 0
+    assert world.record() == {"status": "succeeded", "snapshot_id": None, "rows": 0}
+    assert world.client.tables.calls == []
+
+
+@pytest.mark.parametrize("write", ["append", "merge"])
+def test_an_empty_first_run_without_columns_fails_naming_the_cause(
+    world: _World, write: str
+) -> None:
+    """write=append or merge, expected "none", zero columns: nothing to create the table from."""
+    key = ["id"] if write == "merge" else None
+    record = _failing(
+        world, "return pl.DataFrame()", **_v3(write, key=key, watermark=None, expected="none")
+    )
+    assert record["error_type"] == "InvalidResult"
+    assert record["retryable"] is False
+    assert record["phase"] == "validate"
+    assert record["message"] == (
+        "the asset returned no columns, so there is nothing to create gold.scores from; its "
+        "source had no data yet (check the pattern or the query); the first run must find data"
+    )
+    assert world.client.tables.calls == []
+
+
+def test_an_empty_first_run_with_columns_creates_the_table(world: _World) -> None:
+    """A zero-row result that has columns creates the table empty; the next run appends."""
+    _write_asset(world, "return obs.clear()")
+    world.client.tables.outcome = WriteResult(rows=0, files=0, snapshot_id=None)
+    assert world.run(**_v3(watermark={"column": "id", "value": None}, expected="none")) == 0
+    assert world.client.tables.calls[0]["method"] == "replace"
+    assert world.record() == {"status": "succeeded", "snapshot_id": None, "rows": 0}
+
+
+def test_an_empty_replace_still_replaces(world: _World) -> None:
+    """Only append and merge skip the upload: an empty replace empties the table."""
+    _write_asset(world, "return obs.clear()")
+    world.client.tables.outcome = WriteResult(rows=0, files=0, snapshot_id=50)
+    assert world.run() == 0
+    assert world.client.tables.calls[0]["method"] == "replace"
+    assert world.record() == {"status": "succeeded", "snapshot_id": 50, "rows": 0}
+
+
+def test_the_watermark_column_must_have_an_incremental_type(world: _World) -> None:
+    """Watermark "name" of type string: the run fails naming the column and the allowed types."""
+    record = _failing(
+        world,
+        "return obs.with_columns(name=pl.lit('x'))",
+        **_v3(watermark={"column": "name", "value": None}),
+    )
+    assert record["error_type"] == "InvalidResult"
+    assert record["retryable"] is False
+    assert record["message"] == (
+        "watermark column `name` is a string; it must be one of int, long, decimal, date, "
+        "timestamp, timestamptz"
+    )
+    assert world.client.tables.calls == []
+
+
+def test_the_watermark_column_must_be_in_the_result(world: _World) -> None:
+    record = _failing(world, "return obs", **_v3(watermark={"column": "ts", "value": None}))
+    assert record["message"] == (
+        "watermark column `ts` is not a column of what the asset returned; return it, or change "
+        "the asset's watermark="
+    )
+
+
+@pytest.mark.parametrize(
+    ("expression", "name"),
+    [
+        ("pl.lit(1, dtype=pl.Int32)", "int"),
+        ("pl.lit(1, dtype=pl.Int64)", "long"),
+        ("pl.lit(1.5).cast(pl.Decimal(10, 2))", "decimal"),
+        ("pl.lit(datetime.date(2026, 1, 1))", "date"),
+        ("pl.lit(datetime.datetime(2026, 1, 1))", "timestamp"),
+        ("pl.lit(datetime.datetime(2026, 1, 1)).dt.replace_time_zone('UTC')", "timestamptz"),
+    ],
+)
+def test_every_incremental_type_is_a_watermark_column(
+    world: _World, expression: str, name: str
+) -> None:
+    _write_asset(world, f"return obs.with_columns(w={expression})")
+    assert world.run(**_v3(watermark={"column": "w", "value": None})) == 0, name
+    assert world.client.tables.calls[0]["method"] == "append"
+
+
+def test_version_2_descriptions_still_run(world: _World) -> None:
+    """A version 2 document has no write fields: it replaces, whatever else it carries."""
+    _write_asset(world, "return obs")
+    assert world.run(write="append", key=["id"]) == 0
+    assert world.client.tables.calls[0]["method"] == "replace"
+    description = parse_description(world.description(write="append"))
+    assert (description.write, description.key, description.watermark) == ("replace", (), None)
+
+
+def test_a_version_3_description_is_parsed(world: _World) -> None:
+    description = parse_description(
+        world.description(
+            **_v3(
+                "merge",
+                key=["id", "day"],
+                watermark={"column": "at", "value": "timestamptz:2026-10-22T08:00:00+00:00"},
+                connections={"crm-db": {"kind": "postgresql"}},
+            )
+        )
+    )
+    assert description.write == "merge"
+    assert description.key == ("id", "day")
+    assert description.watermark_column == "at"
+    assert description.watermark == datetime.datetime(2026, 10, 22, 8, tzinfo=datetime.UTC)
+    assert description.connections == {"crm-db": {"kind": "postgresql"}}
+
+
+@pytest.mark.parametrize(
+    ("overrides", "fragment"),
+    [
+        ({"write": "upsert"}, "write must be 'replace', 'append' or 'merge'"),
+        ({"write": None}, "write must be 'replace', 'append' or 'merge'"),
+        ({"write": "merge", "key": []}, "key must name the columns of a merge"),
+        ({"write": "append", "key": ["id"]}, "key must name the columns of a merge"),
+        ({"write": "merge", "key": ["id", 1]}, "key must name the columns of a merge"),
+        ({"write": "merge", "key": "id"}, "key must name the columns of a merge"),
+        ({"watermark": "id"}, "watermark must be null or"),
+        ({"watermark": {"column": ""}}, "watermark must be null or"),
+        ({"watermark": {"column": "id", "value": 41}}, "watermark must be null or"),
+        ({"watermark": {"column": "id", "value": "long:x"}}, "watermark must be null or"),
+        ({"watermark": {"column": "id", "value": "float:1"}}, "watermark must be null or"),
+        ({"connections": []}, "connections must map each declared connection"),
+        ({"connections": {"crm": "postgresql"}}, "connections must map each declared connection"),
+        ({"connections": {"crm": {}}}, "connections must map each declared connection"),
+        ({"connections": {"crm": {"kind": 3}}}, "connections must map each declared connection"),
+        ({"version": 4}, "expected a version 2 or 3 document"),
+    ],
+)
+def test_a_version_3_description_checks_its_fields(
+    world: _World, overrides: dict[str, object], fragment: str
+) -> None:
+    fields = {**_v3("merge", key=["id"], watermark=_WATERMARK_ID), **overrides}
+    with pytest.raises(ValueError, match=fragment) as caught:
+        parse_description(world.description(**fields))
+    assert "long:x" not in str(caught.value)
+
+
+def test_a_merge_with_a_repeated_key_is_refused_before_the_upload(world: _World) -> None:
+    """The refusal names the count and what a Python asset can do about it."""
+    record = _failing(world, "return pl.concat([obs, obs])", **_v3("merge", key=["id"]))
+    assert record["error_type"] == "InvalidResult"
+    assert record["retryable"] is False
+    assert record["message"] == (
+        "key `id` repeats in 4 rows of what the asset returned; return one row per key, for "
+        "example with `df.unique(subset=['id'], keep='last')`"
+    )
+    assert world.client.tables.calls == []
+
+
+def test_a_merge_on_several_columns_over_the_cap_is_refused_before_the_upload(
+    world: _World,
+) -> None:
+    rows = runner.COMPOSITE_KEY_MAX_ROWS + 1
+    record = _failing(
+        world,
+        f"return pl.DataFrame({{'id': range({rows}), 'day': [1] * {rows}}})",
+        **_v3("merge", key=["id", "day"]),
+    )
+    assert record["error_type"] == "InvalidResult"
+    assert record["message"] == (
+        "a merge on a key of several columns takes at most 5,000 rows per run, and the asset "
+        "returned 5,001. Merge on one key column (a column that holds the whole key), or return "
+        "fewer rows per run: give the asset a watermark= and return only the rows past "
+        "ctx.watermark(), and load the history in parts of at most 5,000 rows"
+    )
+    assert world.client.tables.calls == []
+
+
+def test_a_merge_on_several_columns_at_the_cap_is_sent(world: _World) -> None:
+    rows = runner.COMPOSITE_KEY_MAX_ROWS
+    _write_asset(world, f"return pl.DataFrame({{'id': range({rows}), 'day': [1] * {rows}}})")
+    assert world.run(**_v3("merge", key=["id", "day"])) == 0
+    assert world.client.tables.calls[0]["key"] == ["id", "day"]
+
+
+@pytest.mark.parametrize("write", ["append", "merge"])
+def test_a_refused_append_or_merge_is_worded_like_a_refused_replace(
+    world: _World, write: str
+) -> None:
+    refusal = ValidationError("key column `id` is null in 1 rows", status=422)
+    if write == "append":
+        world.client.tables.appended = refusal
+    else:
+        world.client.tables.merged = refusal
+    key = ["id"] if write == "merge" else None
+    record = _failing(world, "return obs", **_v3(write, key=key, watermark=_WATERMARK_ID))
+    assert record["error_type"] == "UploadRefused"
+    assert record["retryable"] is False
+    assert record["message"] == "key column `id` is null in 1 rows"
+
+
+def test_a_conflict_on_an_append_is_a_conflict(world: _World) -> None:
+    world.client.tables.appended = Conflict("gold.scores changed during the write; retry.")
+    record = _failing(world, "return obs", **_v3(watermark=_WATERMARK_ID))
+    assert (record["conflict"], record["retryable"], record["phase"]) == (True, True, "upload")
+
+
+def test_the_task_state_is_set_while_the_asset_runs(world: _World) -> None:
+    """`lakana.context.current()` names the client, the asset and its declared connections."""
+    _write_asset(
+        world,
+        "from lakana import context\n"
+        "state = context.current()\n"
+        "return obs.with_columns(env=pl.lit(state.environment), asset=pl.lit(state.asset),\n"
+        "    declared=pl.lit(','.join(sorted(state.declared))),\n"
+        "    kind=pl.lit(state.connections['crm-db']['kind']),\n"
+        "    client=pl.lit(state.client is not None))",
+    )
+    connections = {"crm-db": {"kind": "postgresql"}, "files": {"kind": "s3"}}
+    assert world.run(**_v3("replace", connections=connections, expected=41)) == 0
+    assert _uploaded(world).to_pylist()[0] == {
+        "id": 1,
+        "env": "dev",
+        "asset": "gold.scores",
+        "declared": "crm-db,files",
+        "kind": "postgresql",
+        "client": True,
+    }
+    with pytest.raises(RuntimeError):
+        runner.context.current()
+
+
+def test_the_task_state_outlives_a_failure_until_the_record_is_written(
+    world: _World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The values to hide must still be known when the failure record and the trace are written."""
+    seen: list[object] = []
+    build = runner._failure_record
+
+    def spy(exc: BaseException, token: str) -> dict[str, object]:
+        seen.append(runner.context._state)
+        return build(exc, token)
+
+    monkeypatch.setattr(runner, "_failure_record", spy)
+    record = _failing(
+        world,
+        "from lakana import context\n"
+        "context.register_secret('hunter2-secret')\n"
+        "raise ValueError('x')",
+    )
+    assert record["error_type"] == "ValueError"
+    (state,) = seen
+    assert isinstance(state, runner.context._TaskState)
+    assert state.secrets == {"hunter2-secret"}
+    assert runner.context._state is None
+
+
+def test_a_merge_with_null_keys_is_left_to_the_server_which_names_the_nulls(world: _World) -> None:
+    """Nulls are not "repeats": the server's null message comes first, not the unique() advice."""
+    world.client.tables.merged = ValidationError("key column `id` is null in 2 rows", status=422)
+    record = _failing(
+        world,
+        "return pl.DataFrame({'id': [None, None, 1]}, schema={'id': pl.Int64})",
+        **_v3("merge", key=["id"]),
+    )
+    assert record["error_type"] == "UploadRefused"
+    assert record["message"] == "key column `id` is null in 2 rows"
+    (call,) = world.client.tables.calls
+    assert call["method"] == "merge"
+
+
+@pytest.mark.parametrize(
+    ("overrides", "fragment"),
+    [
+        ({"key": ["id\n"]}, "key must name the columns of a merge"),
+        ({"key": ["i\u202ed"]}, "key must name the columns of a merge"),
+        ({"watermark": {"column": "at\x00", "value": None}}, "watermark must be null or"),
+        ({"watermark": {"column": "a\u2028t", "value": None}}, "watermark must be null or"),
+    ],
+)
+def test_key_and_watermark_columns_must_be_identifiers(
+    world: _World, overrides: dict[str, object], fragment: str
+) -> None:
+    """The rule of a deploy: no control, format or surrogate character, no line separator."""
+    fields = {**_v3("merge", key=["id"], watermark=_WATERMARK_ID), **overrides}
+    with pytest.raises(ValueError, match=fragment):
+        parse_description(world.description(**fields))
+
+
+def test_a_spaced_key_and_watermark_parse(world: _World) -> None:
+    description = parse_description(
+        world.description(
+            **_v3("merge", key=["order id"], watermark={"column": "län", "value": None})
+        )
+    )
+    assert (description.key, description.watermark_column) == (("order id",), "län")
+
+
+_FETCHED_PASSWORD = "fetched-pa55word"
+
+
+class _FetchedConnections:
+    """A fake `client.task_connections` that answers `crm-db` with a password.
+
+    Parameters
+    ----------
+    password
+        The secret's password.
+    """
+
+    def __init__(self, password: str = _FETCHED_PASSWORD) -> None:
+        self.password = password
+        self.asked: list[str] = []
+
+    def get(self, name: str) -> dict[str, object]:
+        """Answer one fetch.
+
+        Parameters
+        ----------
+        name
+            The connection's name.
+
+        Returns
+        -------
+        dict
+            A `TaskConnectionOut` body.
+        """
+        self.asked.append(name)
+        return {
+            "name": name,
+            "kind": "postgresql",
+            "address": {"host": "db.example.com", "port": 5432, "database": "crm"},
+            "settings": {"user": "reader"},
+            "endpoints": [{"host": "db.example.com", "port": 5432, "role": "service"}],
+            "secret": {"password": self.password},
+        }
+
+
+_CRM = {"crm-db": {"kind": "postgresql"}}
+
+
+def test_a_fetched_password_in_an_exception_is_masked_in_the_record_and_the_trace(
+    world: _World, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The harness masks what it writes; what the asset prints itself is the worker's to mask."""
+    world.client.task_connections = _FetchedConnections()  # ty: ignore[unresolved-attribute]
+    record = _failing(
+        world,
+        "from lakana.ingest import connections\n"
+        "password = connections.get('crm-db').secret['password']\n"
+        "print('password is', password)\n"
+        "raise ValueError(f'could not log in with {password!r} or {password}')",
+        **_v3("replace", connections=_CRM, expected=41),
+    )
+    assert record["message"] == "ValueError: could not log in with '***' or ***"
+    assert record["retryable"] is True
+    err = capsys.readouterr().err
+    assert "ValueError: could not log in with '***' or ***" in err
+    assert _FETCHED_PASSWORD not in err
+    assert runner.context._state is None
+
+
+def test_a_fetched_password_in_the_name_of_an_exception_type_is_masked(world: _World) -> None:
+    world.client.task_connections = _FetchedConnections()  # ty: ignore[unresolved-attribute]
+    record = _failing(
+        world,
+        "from lakana.ingest import connections\n"
+        "password = connections.get('crm-db').secret['password']\n"
+        "raise type(password, (Exception,), {})('x')",
+        **_v3("replace", connections=_CRM, expected=41),
+    )
+    assert record["error_type"] == "***"
+    assert record["message"] == "***: x"
+    assert _FETCHED_PASSWORD not in json.dumps(record)
+
+
+def test_the_fetched_connections_are_forgotten_when_the_attempt_ends(world: _World) -> None:
+    from lakana.ingest import _connections
+
+    fake = _FetchedConnections()
+    world.client.task_connections = fake  # ty: ignore[unresolved-attribute]
+    _write_asset(
+        world,
+        "from lakana.ingest import connections\n"
+        "connections.get('crm-db')\nconnections.get('crm-db')\nreturn obs",
+    )
+    assert world.run(**_v3("replace", connections=_CRM, expected=41)) == 0
+    assert fake.asked == ["crm-db"]
+    assert _connections._CACHE == {}
+
+
+@pytest.mark.parametrize(
+    ("raised", "retryable"),
+    [
+        ("from lakana.ingest import ConnectionNotDeclared as E", False),
+        ("from lakana.ingest import ConnectionRefused as E", False),
+        ("from lakana.ingest import CapExceeded as E", False),
+        ("from lakana.ingest import ConnectionChanged as E", True),
+        ("from lakana.ingest import SourceError as E", True),
+        ("class E(Exception):\n    retryable = False", True),
+    ],
+    ids=["not-declared", "refused", "cap", "changed", "source", "user-attribute"],
+)
+def test_an_ingest_error_says_whether_another_attempt_could_help(
+    world: _World, raised: str, retryable: bool
+) -> None:
+    """Only `lakana.ingest`'s own errors are read: a user's attribute decides nothing."""
+    record = _failing(world, f"{raised}\nraise E('no')")
+    assert (record["phase"], record["retryable"]) == ("function", retryable)
+
+
+def test_overlapping_occurrences_of_a_value_are_masked_whole(world: _World) -> None:
+    """`abab` in `ababab`: both occurrences overlap, so the whole run is one span."""
+    record = _failing(
+        world,
+        "from lakana import context\n"
+        "context.register_secret('abab')\n"
+        "context.register_secret('cdcd-long')\n"
+        "raise ValueError('ababab and cdcd-longcdcd-long and xabab')",
+    )
+    assert record["message"] == "ValueError: *** and *** and x***"
+
+
+@pytest.mark.parametrize(
+    "body", ["return pl.DataFrame()", "return obs.clear()"], ids=["no-columns", "no-rows"]
+)
+def test_an_empty_result_for_an_existing_table_without_a_snapshot_succeeds(
+    world: _World, body: str
+) -> None:
+    """A first run of zero rows created the table without a snapshot; it exists all the same."""
+    _write_asset(world, body)
+    overrides = {**_v3(watermark={"column": "id", "value": None}, expected="none")}
+    overrides["table_exists"] = True
+    assert world.run(**overrides) == 0
+    assert world.record() == {"status": "succeeded", "snapshot_id": None, "rows": 0}
+    assert world.client.tables.calls == []
+
+
+def test_an_existing_table_without_a_snapshot_gets_its_rows_appended(world: _World) -> None:
+    _write_asset(world, "return obs")
+    overrides = {**_v3(watermark={"column": "id", "value": None}, expected="none")}
+    overrides["table_exists"] = True
+    assert world.run(**overrides) == 0
+    (call,) = world.client.tables.calls
+    assert (call["method"], call["expected_snapshot_id"]) == ("append", "none")
+
+
+@pytest.mark.parametrize("value", [None, "yes", 1])
+def test_a_version_3_description_says_whether_the_table_exists(
+    world: _World, value: object
+) -> None:
+    fields = {**_v3(watermark=_WATERMARK_ID), "table_exists": value}
+    with pytest.raises(ValueError, match="table_exists must be true or false"):
+        parse_description(world.description(**fields))
+
+
+@pytest.mark.parametrize(
+    ("body", "key"),
+    [
+        ("return obs.head(1)", ["id"]),
+        ("return obs.rename({'id': 'other'})", ["id"]),
+        (
+            "import uuid\nreturn pa.table({'id': pa.array([uuid.uuid4().bytes] * 2, pa.uuid())})",
+            ["id"],
+        ),
+    ],
+    ids=["one-row", "key-column-missing", "key-type-arrow-cannot-group"],
+)
+def test_a_merge_the_harness_cannot_judge_is_left_to_the_server(
+    world: _World, body: str, key: list[str]
+) -> None:
+    """A merge of one row, without its key column or keyed on a uuid goes to the server as is.
+
+    One row cannot repeat; a missing key column, or one pyarrow cannot group, is the server's to
+    judge.
+    """
+    _write_asset(world, body)
+    assert world.run(**_v3("merge", key=key)) == 0
+    (call,) = world.client.tables.calls
+    assert (call["method"], call["key"]) == ("merge", key)
+
+
+def test_a_function_whose_signature_cannot_be_read_is_called_without_ctx(world: _World) -> None:
+    """A `__signature__` that `inspect` refuses: the function is called with its inputs only."""
+    world.result_path.parent.mkdir(exist_ok=True)
+    (world.root / "assets" / "gold" / "scores.py").write_text(
+        "from lakana import asset\n\n\n"
+        "@asset(inputs={'obs': 'silver.weather'})\n"
+        "def f(obs, **rest):\n"
+        "    assert 'ctx' not in rest\n"
+        "    return obs\n\n\n"
+        "f.__signature__ = 'not a signature'\n"
+    )
+    assert world.run() == 0
+    assert _uploaded(world).to_pydict() == {"id": [1, 2]}

@@ -762,6 +762,7 @@ def test_a_read_by_field_id_gives_the_same_rows_in_either_file_order(
     assert rows == expected
 
 
+@pytest.mark.slow
 def test_a_read_of_two_thousand_files_and_a_thousand_columns_by_field_id(tmp_path: Path) -> None:
     """The file list and the map grow with the table and still go through the query process."""
     fields = [_fid(f"c{i}", pa.int64(), i) for i in range(1, 1001)]

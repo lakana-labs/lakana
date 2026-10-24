@@ -478,6 +478,7 @@ def test_a_syntax_error_shows_the_parsers_position_without_escape_codes(
     assert "Unexpected error" not in stored.error_message
 
 
+@pytest.mark.slow
 def test_an_out_of_memory_run_has_its_own_cause(session: Session, principal: PrincipalRef) -> None:
     """End to end: DuckDB's out-of-memory error is stored as `out_of_memory`."""
     values = ",".join(f"({i},'value-{i:06d}')" for i in range(3000))

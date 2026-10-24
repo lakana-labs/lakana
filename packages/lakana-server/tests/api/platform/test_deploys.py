@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -186,6 +187,7 @@ def _insert_job_version(
         return version.id
 
 
+@pytest.mark.slow
 def test_job_version_is_readable_and_scoped_to_its_environment(client: TestClient) -> None:
     """A project version shows in its own environment and is a 404 through any other."""
     _setup(client)

@@ -1344,13 +1344,19 @@ def record_result(
 
 
 def mark_rollback_failed(
-    session: Session, *, task_run_id: uuid.UUID, worker: str, claim: int
+    session: Session,
+    *,
+    task_run_id: uuid.UUID,
+    worker: str,
+    claim: int,
+    outcome: RollbackOutcome = RollbackOutcome.FAILED,
 ) -> bool:
     """Note on a task's failed blocking results that their rollback failed, for the claim.
 
-    For a rollback the catalog refused before it recorded anything. The task run is read
-    ``FOR SHARE`` as `record_result` reads it. An outcome that is already there is the
-    catalog's own record and is left alone.
+    For a rollback the catalog refused before it recorded anything, and, with `outcome`
+    `NOTHING_WRITTEN`, for a run that wrote nothing, so there was nothing to set back. The
+    task run is read ``FOR SHARE`` as `record_result` reads it. An outcome that is already
+    there is the catalog's own record and is left alone.
 
     Parameters
     ----------
@@ -1362,6 +1368,8 @@ def mark_rollback_failed(
         The worker that claims to hold the task.
     claim
         The claim it claims to hold.
+    outcome
+        What to note: `FAILED`, or `NOTHING_WRITTEN` for a run that wrote nothing.
 
     Returns
     -------
@@ -1389,7 +1397,7 @@ def mark_rollback_failed(
             CheckResult.outcome.in_([CheckOutcome.FAILED, CheckOutcome.ERRORED]),
             CheckResult.rollback_outcome.is_(None),
         )
-        .values(rollback_outcome=RollbackOutcome.FAILED)
+        .values(rollback_outcome=outcome)
         .execution_options(synchronize_session=False)
     )
     session.commit()

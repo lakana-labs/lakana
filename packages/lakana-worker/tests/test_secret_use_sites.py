@@ -9,6 +9,7 @@ import pytest
 
 _PACKAGES = Path(__file__).resolve().parents[2]
 _SITES = {
+    "lakana-core/src/lakana_core/connections/fetch.py": "connection_secret",
     "lakana-core/src/lakana_core/storage/resolver.py": "_resolve_secret_values",
     "lakana-worker/src/lakana_worker/deploy.py": "resolve_credential",
     "lakana-worker/src/lakana_worker/index_credentials.py": "resolve_index_access",
@@ -115,8 +116,9 @@ def _under_broad_handler(tree: ast.AST, call: ast.Call) -> bool:
     return False
 
 
-def test_only_the_four_known_sites_decrypt_a_secret() -> None:
-    """A fifth caller of any decrypting function would read a secret for any use."""
+@pytest.mark.slow
+def test_only_the_known_sites_decrypt_a_secret() -> None:
+    """Another caller of any decrypting function would read a secret for any use."""
     callers = sorted(
         str(path.relative_to(_PACKAGES))
         for path in _PACKAGES.glob("*/src/**/*.py")
@@ -137,7 +139,7 @@ def test_only_the_four_known_sites_decrypt_a_secret() -> None:
     ],
 )
 def test_the_scan_finds_each_way_to_open_a_secret(source: str) -> None:
-    """The inventory test would otherwise miss a fifth site written this way."""
+    """The inventory test would otherwise miss another site written this way."""
     assert _names_a_decrypter(source)
 
 

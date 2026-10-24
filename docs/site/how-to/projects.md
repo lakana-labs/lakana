@@ -377,10 +377,15 @@ alive but could not record the outcome after the commit, also during a drain or 
 is a task whose table has [checks](check-your-data.md): the platform does not end it `succeeded`
 before its checks have run. It is taken again, builds nothing, and only runs its checks. A task whose write did not commit
 is tried again under its policy, and an attempt that has already been superseded never commits.
-`replace` rebuilds the same table and `incremental` re-reads its watermark from the table, so a
-rerun after a failure of another kind is safe too. A Python task is still run at least once, not
-exactly once: if its worker is lost after the function wrote a table, the task is run again, so
-write with `replace` or an incremental key. (A Python task with checks that is lost after its
+`replace` rebuilds the same table, `append` re-reads its watermark from the table and `merge`
+matches the rows it wrote before on their key, so a rerun after a failure of another kind is safe
+too. A Python task is still run at least once, not exactly once: if its worker is lost after the
+function wrote a table, the task is run again, so write with `replace`, `merge` or an `append`
+with a watermark (see [Write modes](../reference/asset-front-matter.md#write-modes)). The
+platform does not filter what a Python function returns, so a Python `append` must return only
+the rows past `ctx.watermark()` (with `ctx.watermark(default=...)` for the first run); rows it
+returns again that are not past the watermark are added again (see
+[The asset's context](../reference/python-assets.md#the-assets-context)). (A Python task with checks that is lost after its
 last attempt's write has its table set back first; one without checks keeps what it wrote.)
 Starting, cancelling and resuming need `RUN`; reading needs `READ_ENVIRONMENT` (a `RUN` holder
 can read the runs it starts). `GET .../runs` takes `limit` (1 to 200).

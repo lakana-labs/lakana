@@ -190,6 +190,7 @@ def _written_and_lost(world: World, monkeypatch: pytest.MonkeyPatch) -> uuid.UUI
     return run_id
 
 
+@pytest.mark.slow
 def test_a_replaced_table_is_set_back(world: World) -> None:
     """Spec section 6, first row: the table reads what it read before the run."""
     _built_once_then_redeployed(world, _check("unique_id", _DUPLICATE_IDS))
@@ -598,6 +599,7 @@ def test_a_rollback_refused_because_the_run_was_cancelled_cancels_the_task(
     _set_back_by_the_next_worker_and_cancelled(world)
 
 
+@pytest.mark.slow
 def test_the_rollback_runs_under_the_claims_run_context(
     world: World, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -631,6 +633,7 @@ def test_the_rollback_runs_under_the_claims_run_context(
     assert _events(world, AuditEventType.PROTECTED_WRITE_DENIED) == []
 
 
+@pytest.mark.slow
 def test_without_the_run_context_a_protected_environment_would_refuse_the_rollback(
     world: World, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -661,6 +664,7 @@ def test_without_the_run_context_a_protected_environment_would_refuse_the_rollba
     assert _ids(world, "silver.orders") == [11, 11, 12]
 
 
+@pytest.mark.slow
 def test_a_worker_lost_after_the_rollback_ends_the_task_failed_without_building_again(
     world: World, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -717,6 +721,7 @@ def test_a_worker_lost_after_the_rollback_ends_the_task_failed_without_building_
     assert _task(world, "gold.report").status is TaskStatus.UPSTREAM_FAILED
 
 
+@pytest.mark.slow
 def test_a_set_back_claim_after_a_landed_rollback_ends_the_task_with_the_failed_check(
     world: World, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -763,6 +768,7 @@ def test_a_set_back_claim_after_a_landed_rollback_ends_the_task_with_the_failed_
     assert "  check unique_id: failed, 1 row\n  rollback: rolled_back\n" in log
 
 
+@pytest.mark.slow
 def test_the_results_of_an_earlier_run_do_not_end_the_task_of_a_new_run(world: World) -> None:
     """Results belong to a task run; a new run builds and checks for itself."""
     _checked(world, _check("unique_id", _DUPLICATE_IDS))
@@ -1092,6 +1098,7 @@ def test_a_worker_that_starts_stopping_after_the_verdict_records_no_attempt(
     assert [r.outcome for r in _results(world, task.id)] == [CheckOutcome.PASSED]
 
 
+@pytest.mark.slow
 def test_a_result_that_cannot_be_recorded_because_the_claim_is_gone_ends_the_phase(
     world: World, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1230,6 +1237,7 @@ def test_a_count_that_timed_out_is_an_errored_check_not_a_retry(
     assert (task.status, task.attempt) == (TaskStatus.SUCCEEDED, 1)
 
 
+@pytest.mark.slow
 def test_a_rollback_that_raises_is_retried_by_the_next_claim_which_checks_again(
     world: World, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1351,6 +1359,7 @@ def test_a_database_error_while_counting_on_the_last_attempt_is_an_errored_check
     assert _marker(world, "silver.orders") == run_id
 
 
+@pytest.mark.slow
 def test_a_rollback_refused_after_the_catalog_found_nothing_to_set_back_does_not_blame_the_table(
     world: World, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1740,6 +1749,7 @@ def _nothing_but_a_set_back(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(tasks_module, "before_build", lambda *a: pytest.fail("before_build ran"))
 
 
+@pytest.mark.slow
 def test_a_stamped_task_lost_in_a_cancelled_run_is_set_back_from_its_stamp(
     world: World, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -1502,6 +1502,8 @@ def test_no_new_catalog_method_builds_a_loaded_table_without_a_decision() -> Non
         # A reader that names one snapshot a check result recorded, never the current state.
         "load_table_at_check",
         "maintain",
+        # A writer's: it reads the rows its keys match to compare them and returns counts only.
+        "merge",
         "read_watermark",
         "rename_table",
         # The table it restored, after the same two rights as a rename.

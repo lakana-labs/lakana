@@ -50,6 +50,7 @@ from lakana.resources.row_filters import RowFilters
 from lakana.resources.runs import Runs, Scheduler, Workers
 from lakana.resources.secrets import Secrets
 from lakana.resources.tables import Tables
+from lakana.resources.task_connections import TaskConnections
 from lakana.resources.task_tokens import TaskTokens
 from lakana.resources.tokens import Tokens
 
@@ -107,6 +108,8 @@ class Client:
         self.column_masks = ColumnMasks(self._transport)
         self.secrets = Secrets(self._transport)
         self.connections = Connections(self._transport)
+        self.task_connections = TaskConnections(self._transport)
+        """For the helpers of `lakana.ingest` inside a task: the fetch of a declared connection."""
         self.repositories = Repositories(self._transport)
         self.package_indexes = PackageIndexes(self._transport)
         self.ci_trust_rules = CiTrustRules(self._transport)

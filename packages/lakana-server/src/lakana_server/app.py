@@ -52,6 +52,7 @@ from lakana_server.api.platform.secrets import router as secrets_router
 from lakana_server.api.platform.tables import dropped_router as dropped_tables_router
 from lakana_server.api.platform.tables import expiring_router as expiring_tables_router
 from lakana_server.api.platform.tables import router as tables_router
+from lakana_server.api.platform.task_connections import router as task_connections_router
 from lakana_server.api.platform.task_tokens import router as task_tokens_router
 from lakana_server.api.platform.tokens import router as tokens_router
 from lakana_server.api.platform.whoami import router as whoami_router
@@ -87,6 +88,7 @@ ROUTERS = (
     column_masks_router,
     secrets_router,
     connections_router,
+    task_connections_router,
     repositories_router,
     package_indexes_router,
     deploys_router,

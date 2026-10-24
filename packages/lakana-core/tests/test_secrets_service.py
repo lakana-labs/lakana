@@ -638,3 +638,24 @@ def test_a_format_1_triple_pasted_onto_a_format_2_row_is_refused_end_to_end(
             decrypt_secret_row(row, provider, environment_name="dev", accept_format_1=True)
             == LEGACY_VALUES
         )
+
+
+def test_a_value_that_is_not_text_is_refused_at_create_and_rotate_naming_only_its_key(
+    session: Session,
+) -> None:
+    """A lone surrogate cannot be written as UTF-8: no task could ever be shown it masked."""
+    admin = _add_principal(session, "admin")
+    _add_environment(session, "dev")
+    service = SecretService(session, AllowAllAuthorization(), _key_provider())
+    with pytest.raises(ValidationError) as refused:
+        service.create(admin, environment="dev", name="bad", values={"password": "x\ud800yz"})
+    assert str(refused.value) == (
+        "the value of `password` is not valid text (it cannot be written as UTF-8); "
+        "give it again as plain text"
+    )
+    assert session.execute(select(Secret).where(Secret.name == "bad")).first() is None
+    created = service.create(admin, environment="dev", name="good", values={"password": "ok12"})
+    with pytest.raises(ValidationError) as rotated:
+        service.rotate(admin, created.id, values={"token": "\udfff"})
+    assert "`token`" in str(rotated.value)
+    assert "\udfff" not in str(rotated.value)

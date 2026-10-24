@@ -18,8 +18,10 @@ from sqlalchemy.orm import Session
 
 import lakana_worker.index_credentials as index_credentials
 from lakana_core.auth import AllowAllAuthorization, PrincipalRef
+from lakana_core.errors import ValidationError
 from lakana_core.models import Environment, Principal, PrincipalType, Secret, SecretUseKind
 from lakana_core.projects.package_sources import RegisteredIndex
+from lakana_core.secrets.crypto import SecretBinding, encrypt_secret_values
 from lakana_core.secrets.keys import EnvKeyProvider
 from lakana_core.secrets.service import SecretService
 from lakana_core.secrets.uses import SecretUse
@@ -755,9 +757,42 @@ def test_names_that_a_shell_would_split_are_quoted_in_the_command(session: Sessi
         {"username": "lone\udcffuser", "password": "fine"},
     ],
 )
-def test_a_lone_surrogate_gets_its_own_message(session: Session, values: dict[str, str]) -> None:
+def test_a_lone_surrogate_is_refused_when_the_secret_is_stored(
+    session: Session, values: dict[str, str]
+) -> None:
+    """The secret service refuses such a value first, naming only its key."""
+    _environment(session, "dev")
+    with pytest.raises(ValidationError) as caught:
+        _secret(session, "dev", values)
+    (key,) = [key for key, value in values.items() if value not in ("ci-user-91", "fine")]
+    assert str(caught.value) == (
+        f"the value of `{key}` is not valid text (it cannot be written as UTF-8); give it again "
+        "as plain text"
+    )
+    for value in values.values():
+        assert value not in str(caught.value)
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        {"username": "ci-user-91", "password": "lone\ud800surrogate"},
+        {"username": "lone\udcffuser", "password": "fine"},
+    ],
+)
+def test_a_lone_surrogate_stored_by_an_earlier_release_gets_its_own_message(
+    session: Session, values: dict[str, str]
+) -> None:
+    """A secret stored before the service refused such values still meets the index's text."""
     dev = _environment(session, "dev")
-    _secret(session, "dev", values)
+    secret_id = _secret(session, "dev", {"username": "ci", "password": "placeholder"})
+    row = session.get(Secret, secret_id)
+    assert row is not None
+    encrypted = encrypt_secret_values(values, _KEY, SecretBinding(row.id, dev.id, row.name))
+    row.ciphertext, row.nonce = encrypted.ciphertext, encrypted.nonce
+    row.wrapped_data_key, row.key_id = encrypted.wrapped_data_key, encrypted.key_id
+    row.format_version = encrypted.format_version
+    session.commit()
     with pytest.raises(IndexCredentialError) as caught:
         resolve_index_access(session, _KEY, dev.id, dev.name, [_TEAM])
     assert str(caught.value) == (

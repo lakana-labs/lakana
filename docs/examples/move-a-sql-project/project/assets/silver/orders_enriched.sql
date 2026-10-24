@@ -1,7 +1,7 @@
 /* lakana
 description: Every order with the name of its region. Each run adds the orders that are new.
-materialize: incremental
-incremental_key: order_id
+write: append
+watermark: order_id
 columns:
   order_id: The order's number.
   region_name: The name of the region, empty when the region code is unknown.

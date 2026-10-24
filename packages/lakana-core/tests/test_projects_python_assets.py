@@ -269,7 +269,12 @@ _HEAD = "from lakana import asset\n"
         (_HEAD + "@asset(timeout='soon')\ndef f():\n    pass\n", 2, "timeout"),
         (_HEAD + "@asset(timeout=1.5)\ndef f():\n    pass\n", 2, "timeout"),
         (_HEAD + "@asset(materialize='view')\ndef f():\n    pass\n", 2, "only materialize 'table'"),
-        (_HEAD + "@asset(materialize='incremental')\ndef f():\n    pass\n", 2, "#23"),
+        (
+            _HEAD + "@asset(materialize='incremental')\ndef f():\n    pass\n",
+            2,
+            'a Python asset appends with write="append" and watermark="<column>", '
+            "not materialize='incremental'",
+        ),
         (_HEAD + "@asset()\ndef f(x):\n    pass\n", 3, "parameter 'x' has no entry in inputs"),
         (
             _HEAD + "@asset(inputs={'y': 'a.b'})\ndef f():\n    pass\n",
@@ -899,4 +904,89 @@ def test_a_bad_and_a_repeated_connection_are_both_reported() -> None:
         "connection names are lower-case letters, digits and '-', starting with a letter, "
         "at most 63; got 'Bad'",
         "connection `ok` is listed twice",
+    ]
+
+
+_APPEND_NEEDS_WATERMARK = (
+    "`write: append` needs `watermark:` — the column whose largest value the next run starts after"
+)
+
+
+def test_the_write_model_is_read_from_the_decorator() -> None:
+    source = _GOOD.replace(
+        "@asset(", '@asset(write="merge", key=["id", "region"], watermark="updated_at", ', 1
+    )
+    metadata = _parsed(source).metadata
+    assert (metadata.write, metadata.key, metadata.watermark) == (
+        "merge",
+        ("id", "region"),
+        "updated_at",
+    )
+    plain = _parsed(_GOOD).metadata
+    assert (plain.write, plain.key, plain.watermark) == (None, (), None)
+    appended = _parsed(_GOOD.replace("@asset(", '@asset(write="append", watermark="ts", ', 1))
+    assert (appended.metadata.write, appended.metadata.watermark) == ("append", "ts")
+
+
+@pytest.mark.parametrize(
+    ("argument", "message"),
+    [
+        ('write="upsert"', "write must be one of replace, append, merge; got 'upsert'"),
+        ('write="append"', _APPEND_NEEDS_WATERMARK),
+        ('write="merge"', "`write: merge` needs `key:` — the columns that identify a row"),
+        ('write="merge", key=[]', "`write: merge` needs `key:` — the columns that identify a row"),
+        ('write="replace", key=["id"]', "`write: replace` takes neither `key:` nor `watermark:`"),
+        ('watermark="ts"', "`write: replace` takes neither `key:` nor `watermark:`"),
+        ('write="merge", key=["id", "id"]', "key column `id` is listed twice"),
+        (
+            'write="append", watermark="ts", key=["id"]',
+            "`write: append` takes no `key:`; to merge rows on a key use `write: merge`",
+        ),
+        (
+            'write="merge", key=["i\\u200bd"]',
+            "a key column must not contain a control, format or surrogate character or a line "
+            "separator",
+        ),
+        (
+            'write="append", watermark="t\\u2028s"',
+            "watermark must not contain a control, format or surrogate character or a line "
+            "separator",
+        ),
+        ("write=3", "argument 'write' must be a string"),
+        ('key="id"', "argument 'key' must be a list of strings"),
+        ("watermark=['ts']", "argument 'watermark' must be a string"),
+    ],
+)
+def test_a_wrong_write_model_is_a_deploy_issue_at_the_decorator(
+    argument: str, message: str
+) -> None:
+    source = _GOOD.replace("@asset(", f"@asset({argument}, ", 1)
+    issues = _issues(source)
+    assert [issue.message for issue in issues] == [message]
+    assert issues[0].line == 5  # the decorator's line in `_GOOD`
+
+
+@pytest.mark.parametrize("argument", ['write="append", watermark="ts"', 'key=["id"]'])
+def test_an_artifact_asset_takes_no_write_model(argument: str) -> None:
+    name = argument.split("=", 1)[0]
+    messages = [issue.message for issue in _issues(_MODEL.replace("keep_versions=2", argument))]
+    assert f"argument {name!r} does not apply to an artifact asset; remove it" in messages
+
+
+def test_ctx_is_the_context_and_not_an_input() -> None:
+    source = _GOOD.replace(
+        "def station_scores(obs: pl.DataFrame, stations: pl.DataFrame)",
+        "def station_scores(ctx, obs: pl.DataFrame, stations: pl.DataFrame)",
+    )
+    parsed = _parsed(source)
+    assert parsed.inputs == (("obs", "silver.weather"), ("stations", "bronze.stations"))
+    alone = _parsed(_HEAD + "@asset()\ndef customers(ctx):\n    pass\n")
+    assert alone.inputs == ()
+    assert alone.references == ()
+
+
+def test_an_input_named_ctx_is_refused_with_one_issue() -> None:
+    issues = _issues(_HEAD + "@asset(inputs={'ctx': 'silver.a'})\ndef f(ctx):\n    pass\n")
+    assert [(issue.line, issue.message) for issue in issues] == [
+        (2, "`ctx` is the asset's context; give the input another parameter name")
     ]

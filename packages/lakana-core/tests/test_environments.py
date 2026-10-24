@@ -541,7 +541,8 @@ def test_every_public_catalog_method_calls_authorize() -> None:
     before `append` itself has anything to read) rather than calling
     `self._authz.authorize` directly; `check_can_append` is itself a public
     method this same loop checks independently, and does call it. `replace`
-    delegates to `check_can_replace` for the same reason. `commit_answer` asks
+    and `merge` delegate to `check_can_replace` and `check_can_merge` for the same reason, and
+    those two to `_check_can_write_or_create`, which authorizes. `commit_answer` asks
     `_may_see_state`, which calls `permits` for READ_TABLE. `set_table_description` and
     `set_column_description` ask `_find_table_to_describe`, which authorizes (the owner, or
     `DROP_TABLE`) before it says anything.
@@ -555,9 +556,12 @@ def test_every_public_catalog_method_calls_authorize() -> None:
             or "self._authz.permits" in source
             or "self.check_can_append(" in source
             or "self.check_can_replace(" in source
+            or "self.check_can_merge(" in source
+            or "self._check_can_write_or_create(" in source
             or "self._may_see_state(" in source
             or "self._find_table_to_describe(" in source
         ), name
+    assert "self._authz.authorize" in inspect.getsource(CatalogService._check_can_write_or_create)
 
 
 def test_update_environment_storage_replaces_options(

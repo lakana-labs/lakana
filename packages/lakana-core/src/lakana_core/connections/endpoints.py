@@ -1,8 +1,8 @@
 """The exact host:port pairs a connection lets a task reach.
 
-One place for the worker (the targets it grants a task) and for what a binding shows and records
-(`endpoint_hosts`); the run-time fetch of a connection, added in a later change, is to read the
-same list, so they cannot disagree.
+One place for the worker (the targets it grants a task), for what a binding shows and records
+(`endpoint_hosts`) and for what a task's run-time fetch of a connection is told
+(`lakana_core.connections.fetch`), so they cannot disagree.
 """
 
 from __future__ import annotations

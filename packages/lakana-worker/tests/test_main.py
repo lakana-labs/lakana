@@ -1172,6 +1172,7 @@ def test_the_entry_point_adds_no_handler_where_one_exists() -> None:
     assert root.level == level
 
 
+@pytest.mark.slow
 def test_the_sweeps_off_notice_is_printed_by_the_real_entry_point(tmp_path: Path) -> None:
     """`main` in a fresh process prints the start-up notice for `LAKANA_RUN__SWEEP_INTERVAL=0`."""
     done = _child(
@@ -1193,6 +1194,7 @@ def test_the_sweeps_off_notice_is_printed_by_the_real_entry_point(tmp_path: Path
     )
 
 
+@pytest.mark.slow
 def test_the_start_up_lines_are_printed_when_the_module_runs_as_main(tmp_path: Path) -> None:
     """Under `python -m lakana_worker` the module's own INFO lines reach stderr at the default.
 
@@ -1215,6 +1217,7 @@ def test_the_start_up_lines_are_printed_when_the_module_runs_as_main(tmp_path: P
     assert re.search(r" INFO lakana_worker\.__main__: Python assets: ", done.stderr), done.stderr
 
 
+@pytest.mark.slow
 def test_a_bad_log_level_stops_both_entry_points_before_any_side_effect(tmp_path: Path) -> None:
     """`python -m lakana_server` and `python -m lakana_worker` refuse `LAKANA_LOG__LEVEL=loud`.
 

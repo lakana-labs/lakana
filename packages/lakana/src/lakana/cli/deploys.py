@@ -36,6 +36,9 @@ project_version_app = typer.Typer(help="Immutable project versions.", no_args_is
 _JOB_CHANGES = {"jobs_added": "added", "jobs_removed": "removed", "jobs_changed": "changed"}
 """The diff categories about jobs, which are not tables, and the word each is printed with."""
 
+_NOT_TABLES = frozenset({*_JOB_CHANGES, "hints"})
+"""The diff keys that do not list changed tables: the job categories and the deploy's hints."""
+
 
 @dataclass(frozen=True)
 class DiffRow:
@@ -124,7 +127,7 @@ def _warn_if_dirty(state: CliState, repository: str) -> None:
 
 
 def _report(state: CliState, deploy: Deploy, verb: str) -> None:
-    """Print a finished run: SHA and diff, or the run as JSON.
+    """Print a finished run: SHA and diff, then its hints and warnings; or the run as JSON.
 
     Parameters
     ----------
@@ -143,7 +146,7 @@ def _report(state: CliState, deploy: Deploy, verb: str) -> None:
     rows = [
         DiffRow(change=change, table=table)
         for change, tables in diff.items()
-        if change not in _JOB_CHANGES
+        if change not in _NOT_TABLES
         for table in tables
     ]
     jobs = [
@@ -182,6 +185,8 @@ def _report(state: CliState, deploy: Deploy, verb: str) -> None:
             value = _output.inline(defaulted[0]["on_failure"])
             takes = "check takes" if len(defaulted) == 1 else "checks take"
             typer.echo(f"{len(defaulted)} {takes} `on_failure: {value}` from lakana.yaml.")
+    for hint in diff.get("hints", ()):
+        typer.echo(f"hint: {_output.inline(hint, 500)}", err=True)
     for warning in deploy.warnings:
         typer.echo(f"warning: {_output.inline(warning, 500)}", err=True)
 

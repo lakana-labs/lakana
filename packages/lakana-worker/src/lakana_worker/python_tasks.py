@@ -56,16 +56,21 @@ from lakana_core.auth import PrincipalRef, RunContext
 from lakana_core.catalog.identity import resolve_table_id
 from lakana_core.catalog.metadata import read_metadata
 from lakana_core.catalog.service import CatalogService
+from lakana_core.catalog.writes import SnapshotPin, target_changed_message
+from lakana_core.connections.fetch import connection_secret
+from lakana_core.connections.kinds import ConnectionKind
 from lakana_core.errors import ConflictError, LakanaError, NotFoundError, ValidationError
 from lakana_core.identifiers import TableRef
 from lakana_core.identity.task_tokens import TaskTokenService
 from lakana_core.kept_mark import KeptSeen
 from lakana_core.models import (
     LIVE_ENVIRONMENT,
+    Connection,
     Environment,
     JobVersion,
     Principal,
     Run,
+    Secret,
     Table,
     TableType,
     WriteMode,
@@ -85,6 +90,7 @@ from lakana_core.projects.lockfile import (
 )
 from lakana_core.projects.manifest import (
     asset_kind,
+    entry_connections,
     entry_decimals,
     entry_input_kinds,
     entry_output,
@@ -102,6 +108,7 @@ from lakana_core.runs.tasks import (
     Written,
     record_baseline,
 )
+from lakana_core.secrets.forms import secret_forms
 from lakana_core.secrets.keys import KeyProvider
 from lakana_core.storage.resolver import StorageResolver
 from lakana_worker.attempt_sweep import AttemptSweeper
@@ -149,6 +156,7 @@ from lakana_worker.task_outcome import (
 from lakana_worker.tasks import (
     RunEngine,
     check_integrity,
+    checked_write,
     ensure_namespaces,
     manifest_entry,
     may_read_name,
@@ -566,6 +574,16 @@ class _Prepared:
         The manifest's `python`, if the project names one.
     project_id
         `environment_owner` of the project version: whose environments the task may use.
+    principal
+        The run principal, bound to this attempt; reads the watermark.
+    write
+        ``replace``, ``append`` or ``merge`` (always ``replace`` for an artifact asset).
+    key
+        The merge key's columns.
+    watermark_column
+        The asset's `watermark` column, if it has one.
+    connections
+        Each connection the asset declares to its ``kind``, in the order declared.
     """
 
     environment: str
@@ -583,6 +601,133 @@ class _Prepared:
     python: str
     named_python: str | None
     project_id: uuid.UUID
+    principal: PrincipalRef
+    write: str = "replace"
+    key: tuple[str, ...] = ()
+    watermark_column: str | None = None
+    connections: dict[str, dict[str, object]] = field(default_factory=dict)
+
+
+_CANNOT_HIDE = (
+    "this worker cannot decrypt the secret of connection `{name}`, so it could not hide the "
+    "value in the task's log, which the server would hand the task; set "
+    "LAKANA_SECRETS__MASTER_KEY on the worker to the server's value and restart it"
+)
+
+
+_NOT_TEXT = (
+    "the secret of connection `{name}` holds a value that is not valid text, so it could not "
+    "be hidden in the task's log; set it again: lakana connection update {name} --env "
+    "{environment} --password-stdin (or --values-stdin)"
+)
+
+
+def _connection_secrets(
+    session: Session, key_provider: KeyProvider | None, prepared: _Prepared
+) -> tuple[str, ...]:
+    """Decrypt the secrets of the connections the asset declares, to hide them in its output.
+
+    The task fetches these values itself at run time (`lakana_core.connections.fetch`); the
+    worker only needs them to mask them, in every form text can carry them in
+    (`lakana_core.secrets.forms.secret_forms`), in the log it captures and in the failure
+    message. Each secret is decrypted through `lakana_core.connections.fetch.connection_secret`,
+    so only a secret bound to that very connection is, and one that is not counts as none on
+    both sides. A worker that cannot decrypt an active secret (no master key, or another one
+    than the server's) refuses to start the task: the server would hand the task a value this
+    worker could not hide. This decryption is not audited: no value leaves the worker.
+
+    Parameters
+    ----------
+    session
+        The supervisor's session; rolled back afterwards.
+    key_provider
+        The worker's key provider; `None` without a master key.
+    prepared
+        The attempt's plan, with the declared connections.
+
+    Returns
+    -------
+    tuple of str
+        Every form of every value, in declared order.
+
+    Raises
+    ------
+    TaskFailure
+        Permanent (`NO_RUNTIME`), naming the connection and the setting, when an active secret
+        bound to a declared connection cannot be decrypted here; and naming the command that
+        sets it again when one of its values is not valid text (a row from before such values
+        were refused).
+    """
+    if not prepared.connections:
+        return ()
+    rows = {
+        row.name: row
+        for row in session.execute(
+            select(Connection)
+            .join(Environment, Environment.id == Connection.environment_id)
+            .where(
+                Environment.name == prepared.environment,
+                LIVE_ENVIRONMENT,
+                Connection.name.in_(list(prepared.connections)),
+            )
+        ).scalars()
+    }
+    hidden: list[str] = []
+    for name in prepared.connections:
+        row = rows.get(name)
+        if row is None:
+            continue
+        if key_provider is None:
+            secret = None if row.secret_id is None else session.get(Secret, row.secret_id)
+            if secret is not None and secret.revoked_at is None:
+                raise TaskFailure(
+                    FailureKind.PERMANENT, _CANNOT_HIDE.format(name=name), FailureCode.NO_RUNTIME
+                )
+            continue
+        values, why = connection_secret(session, key_provider, row, prepared.environment)
+        if why == "secret_unreadable":
+            raise TaskFailure(
+                FailureKind.PERMANENT, _CANNOT_HIDE.format(name=name), FailureCode.NO_RUNTIME
+            )
+        if why is not None:
+            logger.warning(
+                "the secret of connection %s is not bound to it, so the task gets none (%s)",
+                name,
+                why,
+            )
+        try:
+            for value in (values or {}).values():
+                hidden += sorted(secret_forms(value))
+        except UnicodeEncodeError:
+            raise TaskFailure(
+                FailureKind.PERMANENT,
+                _NOT_TEXT.format(name=name, environment=prepared.environment),
+                FailureCode.NO_RUNTIME,
+            ) from None
+    session.rollback()
+    return tuple(dict.fromkeys(hidden))
+
+
+@dataclass
+class _Shown:
+    """What the attempt's log block says about the write, filled in as the attempt learns it.
+
+    Parameters
+    ----------
+    output
+        ``table`` until the manifest entry is read, then what the asset produces.
+    write
+        The asset's write mode.
+    watermark
+        The encoded watermark sent to the task, if any.
+    """
+
+    output: str = "table"
+    write: str = "replace"
+    watermark: str | None = None
+
+
+_LOGGED_MODES = {"replace": WriteMode.REPLACE, "append": WriteMode.APPEND, "merge": WriteMode.MERGE}
 
 
 @dataclass
@@ -873,7 +1018,7 @@ class PythonRuntime:
         """
         buffer = bytearray()
         sink = CappedSink(buffer.extend, MAX_TASK_OUTPUT_BYTES)
-        produces = ["table"]
+        shown = _Shown()
 
         def ended(
             kind: FailureKind | None,
@@ -885,6 +1030,7 @@ class PythonRuntime:
             kept_table: KeptTable | None = None,
             in_transaction: Callable[[Session], None] | None = None,
             failure_code: FailureCode | None = None,
+            wrote_nothing: bool = False,
         ) -> TaskOutcome:
             """Build the outcome, with the output captured so far.
 
@@ -910,6 +1056,8 @@ class PythonRuntime:
                 Work to land with the attempt's record (a failed integrity check's run failure).
             failure_code
                 Why the attempt failed; `None` for a success and a release.
+            wrote_nothing
+                A success whose task run committed nothing to the table.
 
             Returns
             -------
@@ -920,7 +1068,8 @@ class PythonRuntime:
                 kind,
                 _safe_message(message),
                 environment,
-                None if produces[0] == "artifact" else WriteMode.REPLACE,
+                None if shown.output == "artifact" else _LOGGED_MODES.get(shown.write),
+                watermark=shown.watermark,
                 rows=rows,
                 output=_safe_output(buffer),
                 snapshot_id=snapshot_id,
@@ -929,12 +1078,13 @@ class PythonRuntime:
                 kept_table=kept_table,
                 in_transaction=in_transaction,
                 failure_code=failure_code,
+                wrote_nothing=wrote_nothing,
             )
 
         try:
             with engine.session_factory() as session:
                 try:
-                    return self._supervise(session, engine, claimed, keeper, sink, ended, produces)
+                    return self._supervise(session, engine, claimed, keeper, sink, ended, shown)
                 except LeaseLost:
                     return None
                 except TaskFailure as failure:
@@ -967,7 +1117,7 @@ class PythonRuntime:
         keeper: LeaseKeeper,
         sink: Callable[[bytes], None],
         ended: Callable[..., TaskOutcome],
-        produces: list[str],
+        shown: _Shown,
     ) -> TaskOutcome | None:
         """Prepare, run the process, clean up on every path, then classify.
 
@@ -990,10 +1140,9 @@ class PythonRuntime:
             Receives the venv build's and the process's output; one cap covers both.
         ended
             Builds the outcome to record.
-        produces
-            One element, ``table`` until the manifest entry is read, then what the
-            asset produces: `ended` leaves the write mode out of the log of an
-            artifact asset, which has none.
+        shown
+            What `ended` logs about the write: what the asset produces (an artifact asset has
+            no write mode), its write mode and the watermark sent to the task.
 
         Returns
         -------
@@ -1008,10 +1157,11 @@ class PythonRuntime:
         LeaseLost
             If the attempt was superseded before its token could be minted.
         LakanaError
-            From namespace creation or unreadable table metadata.
+            From namespace creation or unreadable table metadata; `ConflictError` when the
+            table changed between the worker's read of it and of its watermark.
         """
         prepared, tarball = self._prepare(session, engine, claimed)
-        produces[0] = prepared.output
+        shown.output, shown.write = prepared.output, prepared.write
         server_url = self.support.server_url
         assert server_url is not None  # nosec B101 -- `support.reason()` was None in `_prepare`
         session.rollback()
@@ -1074,7 +1224,9 @@ class PythonRuntime:
                     "deploy the self-reading version",
                     FailureCode.BUILD_FAILED,
                 )
+            shown.watermark = self._watermark(session, engine, prepared, before)
             _refuse_if_stopped(session, keeper, claimed.run_id)
+            hidden = _connection_secrets(session, engine.key_provider, prepared)
             token, key_id = self._mint(session, tokens, keeper, claimed, prepared)
             cleanup.callback(self._revoke, session, tokens, key_id)
             outcome = self.runner.run(
@@ -1099,6 +1251,13 @@ class PythonRuntime:
                     task_run_id=claimed.task_run_id,
                     environment_key=lease.key,
                     python=prepared.python,
+                    write=prepared.write,
+                    key=prepared.key,
+                    watermark_column=prepared.watermark_column,
+                    watermark=shown.watermark,
+                    connections=prepared.connections,
+                    table_exists=before.table_id is not None,
+                    hidden=hidden,
                 ),
                 sink,
                 stop,
@@ -1123,7 +1282,10 @@ class PythonRuntime:
 
         1. A lost lease records nothing.
         2. A ``succeeded`` record is a claim: the attempt succeeded only if
-           the worker itself finds the table there and changed, and then
+           the worker itself finds the table there and changed (or, for an append or a
+           merge, unchanged with a record of no rows and no snapshot: its source had nothing
+           new; its `written` still names what an earlier attempt of the task run wrote, so a
+           failed check sets that back), and then
            whatever stopped the process afterwards does not matter. The outcome
            carries what the worker read before and after as `written`:
            for an asset with checks the task runner stamps the task run with it
@@ -1200,10 +1362,10 @@ class PythonRuntime:
             except TaskFailure:
                 _refuse_if_stopped(session, keeper, claimed.run_id)
                 raise
+            start = baseline or Baseline(
+                before.snapshot_id, before.table_id is None or before.unpublished
+            )
             if after != before and after.table_id is not None:
-                start = baseline or Baseline(
-                    before.snapshot_id, before.table_id is None or before.unpublished
-                )
                 return ended(
                     None,
                     None,
@@ -1220,6 +1382,36 @@ class PythonRuntime:
                         if before.kept and not claimed.has_checks
                         else None
                     ),
+                )
+            if (
+                after == before
+                and after.table_id is not None
+                and prepared.write in ("append", "merge")
+                and outcome.rows == 0
+                and outcome.snapshot_id is None
+            ):
+                # Nothing new since the last run: an append or merge that writes nothing has
+                # done its work. A record can claim this without running the asset, which then
+                # left the table as it was, the outcome a run that found nothing has.
+                earlier = baseline is not None and (
+                    start.publishes or start.snapshot_id != after.snapshot_id
+                )
+                # An earlier attempt of this task run wrote (and created the table, when the
+                # baseline publishes): the check phase must still know that write, to set it
+                # back or leave the table unpublished when a check fails.
+                return ended(
+                    None,
+                    None,
+                    rows=0,
+                    written=Written(
+                        after.table_id,
+                        start.snapshot_id,
+                        after.snapshot_id,
+                        publishes=start.publishes,
+                    )
+                    if earlier
+                    else None,
+                    wrote_nothing=not earlier,
                 )
         stop = cancel_kind(session, keeper, claimed.run_id)
         if stop is not None:
@@ -1301,6 +1493,18 @@ class PythonRuntime:
                 FailureKind.PERMANENT, self._bad_inputs(claimed.asset), FailureCode.CODE_CHANGED
             )
         output = self._output_of(entry, claimed.asset)
+        write, key, watermark_column = (
+            checked_write(entry, claimed.asset) if output == "table" else ("replace", (), None)
+        )
+        if write == "append" and watermark_column is None:
+            # Never append every row the asset returns again and again.
+            raise TaskFailure(
+                FailureKind.PERMANENT,
+                f"the project version appends to {claimed.asset} without a watermark; deploy it "
+                "again with this release",
+                FailureCode.CODE_CHANGED,
+            )
+        connections = self._connections(session, env, entry, claimed.asset)
         reason = self.support.reason()
         if reason is not None:
             raise TaskFailure(
@@ -1404,8 +1608,63 @@ class PythonRuntime:
             python=named or own,
             named_python=named,
             project_id=environment_owner(version.repository_id, version.environment_id),
+            principal=principal,
+            write=write,
+            key=key,
+            watermark_column=watermark_column,
+            connections=connections,
         )
         return prepared, tarball
+
+    @staticmethod
+    def _connections(
+        session: Session, env: Environment, entry: Mapping[str, object], asset: str
+    ) -> dict[str, dict[str, object]]:
+        """Read the kind of every connection the asset declares.
+
+        Parameters
+        ----------
+        session
+            The supervisor's session.
+        env
+            The run's environment.
+        entry
+            The asset's manifest entry; untrusted.
+        asset
+            The asset, for the message.
+
+        Returns
+        -------
+        dict
+            Each declared name to ``{"kind": ...}``, in the order declared; empty for an asset
+            that declares none.
+
+        Raises
+        ------
+        TaskFailure
+            Permanent when the environment no longer has one of them (a deploy checks this,
+            so only a change since can cause it).
+        """
+        names = entry_connections(entry)
+        if not names:
+            return {}
+        kinds = dict(
+            session.execute(
+                select(Connection.name, Connection.kind).where(
+                    Connection.environment_id == env.id, Connection.name.in_(names)
+                )
+            ).all()
+        )
+        for name in names:
+            if name not in kinds:
+                raise TaskFailure(
+                    FailureKind.PERMANENT,
+                    f"{asset} declares the connection `{name}`, which environment {env.name} "
+                    "does not have; create it (lakana connection create) or remove it from the "
+                    "asset's connections, then deploy again",
+                    FailureCode.NOT_FOUND,
+                )
+        return {name: {"kind": ConnectionKind(kinds[name]).value} for name in names}
 
     @staticmethod
     def _output_of(entry: Mapping[str, object], asset: str) -> str:
@@ -2007,6 +2266,58 @@ class PythonRuntime:
             )
         finally:
             session.rollback()
+
+    @staticmethod
+    def _watermark(
+        session: Session, engine: RunEngine, prepared: _Prepared, before: _TargetState
+    ) -> str | None:
+        """Read the watermark an append or a merge filters on, as the run principal.
+
+        The watermark comes with the snapshot it was read from (`read_watermark`). That must be
+        the state the attempt is judged against (`before`), whose snapshot the task's upload is
+        pinned to: a write in between would otherwise count as this attempt's.
+
+        Parameters
+        ----------
+        session
+            The supervisor's session; rolled back before and after.
+        engine
+            The run engine.
+        prepared
+            The prepared attempt.
+        before
+            The target's state as the worker read it.
+
+        Returns
+        -------
+        str or None
+            The encoded watermark; `None` for an asset without one, a table that does not exist
+            yet or has no rows.
+
+        Raises
+        ------
+        ConflictError
+            If the table changed after `before` was read: a conflict, retried once for free.
+        """
+        if prepared.write == "replace" or prepared.watermark_column is None:
+            return None
+        if before.table_id is None:
+            return None
+        session.rollback()
+        try:
+            catalog = CatalogService(
+                session,
+                StorageResolver(session, engine.key_provider),
+                engine.authz_factory(session),
+            )
+            watermark, pin = catalog.read_watermark(
+                prepared.principal, prepared.ref, prepared.watermark_column
+            )
+        finally:
+            session.rollback()
+        if pin != SnapshotPin(before.table_id, before.snapshot_id):
+            raise ConflictError(target_changed_message(prepared.ref.dotted()))
+        return None if watermark is None else watermark.encode()
 
     def _mint(
         self,
