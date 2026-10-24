@@ -5055,7 +5055,10 @@ misreads (e.g. `token=token, …` in `lakana login`) — never a pattern broad e
 credential. Prefer fixture tokens that don't trip the rules at all; allowlist one only when the
 test needs its shape (e.g. the SDK's masking tests, which need a secret with underscores and
 dashes). gitleaks scans every commit in a PR, so a false positive in any earlier commit needs an
-allowlist entry even after the line has changed. The `secrets` job runs the gitleaks command line
+allowlist entry even after the line has changed. Scope such an entry to the commits that carry the
+line (an `[[allowlists]]` table with `condition = "AND"`, `commits` and `regexes`): a global line
+entry for a fake key header also hides a real key written right after it, because the
+private-key rule's match runs on to the next key's header. The `secrets` job runs the gitleaks command line
 (MIT) from one pinned release whose SHA-256 is checked, not the gitleaks GitHub Action, which needs
 a paid licence key for a repository owned by an organisation; raise the version and the checksum
 together from the release's checksums file. Any
