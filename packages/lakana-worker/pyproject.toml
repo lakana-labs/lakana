@@ -60,6 +60,9 @@ dependencies = [
     # query process looks for a CA bundle (`ca_bundle.py`), and the public roots of the trust
     # bundle of builds and tasks (`trust.py`); shipped through httpx already.
     "certifi>=2024.2.2",
+    # Apache-2.0 OR BSD-3-Clause. Parses each certificate of LAKANA_RUN__CA_BUNDLE as X.509
+    # and writes it again in canonical form (`trust.py`); lakana-core already depends on it.
+    "cryptography>=50.0.2",
 ]
 
 [tool.hatch.build.targets.wheel]

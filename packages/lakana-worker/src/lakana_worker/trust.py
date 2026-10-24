@@ -42,6 +42,9 @@ _CERTIFICATE_BLOCK = re.compile(
 )
 """One PEM certificate block: header, base64 body, footer."""
 
+_TRUSTED_CERTIFICATE = b"-----BEGIN TRUSTED CERTIFICATE-----"
+"""OpenSSL's ``-trustout`` form, which carries trust settings that uv and Python ignore."""
+
 _PGP_KEY = b"PRIVATE KEY BLOCK-----"
 """The end of a PGP private key's header, which the PEM scan does not know."""
 
@@ -124,9 +127,11 @@ def build_trust_bundle(operator: Path | None) -> bytes | None:
     ------
     TrustBundleError
         For a file that is not a readable regular file, is larger than 1 MiB, holds no
-        certificate or holds a private key, or when Mozilla's roots cannot be read. The file is
-        read once. Only its ``CERTIFICATE`` blocks, each parsed as an X.509 certificate and
-        written again in canonical form, reach the bundle: anything else in the file is dropped.
+        certificate, holds a private key or holds a ``TRUSTED CERTIFICATE`` block (named with
+        the ``openssl x509`` command that converts it), or when Mozilla's roots cannot be read.
+        The file is read once. Only its ``CERTIFICATE`` blocks, each parsed as an X.509
+        certificate and written again in canonical form, reach the bundle: anything else in the
+        file is dropped.
     """
     if operator is None:
         return None
@@ -145,6 +150,13 @@ def build_trust_bundle(operator: Path | None) -> bytes | None:
     if scan_pem(data)[1] or _PGP_KEY in data:
         raise TrustBundleError(
             _refusal(operator, "also holds a private key, and every task could read it")
+        )
+    if _TRUSTED_CERTIFICATE in data:
+        raise TrustBundleError(
+            f"LAKANA_RUN__CA_BUNDLE names {operator}, which holds a TRUSTED CERTIFICATE block "
+            "(OpenSSL's -trustout form, as in RHEL's ca-bundle.trust.crt) that builds and tasks "
+            f"cannot read. Convert each certificate with `openssl x509 -in {operator} -out "
+            "plain.pem` and point LAKANA_RUN__CA_BUNDLE at the plain PEM file."
         )
     blocks = _CERTIFICATE_BLOCK.findall(data)
     if not blocks:

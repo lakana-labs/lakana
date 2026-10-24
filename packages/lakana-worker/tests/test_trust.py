@@ -106,6 +106,24 @@ def test_a_key_next_to_a_certificate_is_still_refused(
         build_trust_bundle(operator)
 
 
+def test_a_trusted_certificate_block_is_refused_naming_the_conversion(
+    tmp_path: Path, private_ca_pem: str
+) -> None:
+    """OpenSSL's ``-trustout`` form (RHEL's ca-bundle.trust.crt) is named, not dropped silently."""
+    body = private_ca_pem.replace("BEGIN CERTIFICATE", "BEGIN TRUSTED CERTIFICATE").replace(
+        "END CERTIFICATE", "END TRUSTED CERTIFICATE"
+    )
+    operator = tmp_path / "ca-bundle.trust.crt"
+    operator.write_text(private_ca_pem + body)
+    with pytest.raises(TrustBundleError) as caught:
+        build_trust_bundle(operator)
+    message = str(caught.value)
+    assert "TRUSTED CERTIFICATE" in message
+    assert "openssl x509 -in" in message and "-out" in message
+    assert str(operator) in message
+    assert "holds no PEM certificate" not in message
+
+
 @pytest.mark.parametrize("kind", ["missing", "directory"])
 def test_an_operator_path_that_is_not_a_readable_file_stops_the_worker(
     tmp_path: Path, kind: str

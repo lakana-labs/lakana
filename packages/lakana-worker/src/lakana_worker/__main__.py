@@ -246,15 +246,17 @@ def _python_runtime(
         token kept in the cache directory, unique among live workers); the attempt directories
         must then be the launcher's work volume, which it mounts by attempt name. With
         `LAKANA_RUN__CA_BUNDLE`, the trust bundle (Mozilla's roots plus the certificates of that
-        file) is built once in memory and written to ``<cache>/trust-<digest>.pem``, a name no
-        other worker's bundle shares; builds and tasks of both runners trust it.
+        file) is built once in memory; builds and tasks of both runners trust it. The Docker
+        runner writes those bytes into each attempt; only the local runner writes them to
+        ``<cache>/trust-<digest>.pem``, a name no other worker's bundle shares.
 
     Raises
     ------
     SystemExit
         If `LAKANA_RUN__CA_BUNDLE` names a file the containers cannot trust (unreadable, over
-        1 MiB, no certificate, a private key), or the bundle cannot be written to the cache; the
-        message names the setting or the path, and the cause.
+        1 MiB, no certificate, a private key, a ``TRUSTED CERTIFICATE`` block), or the local
+        runner cannot write the bundle to the cache; the message names the setting or the path,
+        and the cause.
     """
     cache = worker_cache_dir()
     if python.reason() is None:
@@ -268,7 +270,8 @@ def _python_runtime(
     run = settings.run
     try:
         trust = build_trust_bundle(run.ca_bundle)
-        trust_file = write_trust_file(trust, cache) if trust is not None else None
+        local = run.runner != "docker"
+        trust_file = write_trust_file(trust, cache) if trust is not None and local else None
     except TrustBundleError as exc:
         raise SystemExit(str(exc)) from None
     cap, timeout = settings.task_tokens.max_ttl_seconds, settings.query_limits.timeout_seconds

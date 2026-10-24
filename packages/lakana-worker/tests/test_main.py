@@ -2194,3 +2194,37 @@ def test_an_unwritable_cache_for_the_trust_bundle_stops_the_worker_with_the_caus
     )
     with pytest.raises(SystemExit, match=r"cannot write the trust bundle to .*lakana-worker"):
         _python_runtime(settings, PythonSupport(server_url="http://s", uv="/bin/uv"))
+
+
+def test_a_docker_runner_worker_with_an_unwritable_cache_still_starts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Containers get the bundle's bytes; only the local runner writes a file to the cache."""
+    cache_home = tmp_path / "xdg"
+    cache_home.mkdir()
+    (cache_home / "lakana-worker").write_bytes(b"in the way")
+    monkeypatch.setenv("XDG_CACHE_HOME", str(cache_home))
+    operator = tmp_path / "ca.pem"
+    operator.write_bytes(make_authority(tmp_path).ca_file.read_bytes())
+    settings = Settings(
+        database={"url": f"sqlite:///{tmp_path}/lakana.db"},  # type: ignore[arg-type]
+        run={"runner": "docker", "ca_bundle": str(operator)},  # type: ignore[arg-type]
+    )
+    runtime = _python_runtime(settings, PythonSupport(server_url="http://s", uv="/bin/uv"))
+    assert runtime.environments is not None and isinstance(runtime.environments.trust, bytes)
+    assert runtime.venvs.ca_bundle is None
+
+
+def test_a_docker_runner_worker_writes_no_trust_file_to_the_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No ``trust-<digest>.pem`` accumulates in a cache the Docker runner never reads it from."""
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg"))
+    operator = tmp_path / "ca.pem"
+    operator.write_bytes(make_authority(tmp_path).ca_file.read_bytes())
+    settings = Settings(
+        database={"url": f"sqlite:///{tmp_path}/lakana.db"},  # type: ignore[arg-type]
+        run={"runner": "docker", "ca_bundle": str(operator)},  # type: ignore[arg-type]
+    )
+    _python_runtime(settings, PythonSupport(server_url="http://s", uv="/bin/uv"))
+    assert not list((tmp_path / "xdg").glob("**/trust*.pem"))
