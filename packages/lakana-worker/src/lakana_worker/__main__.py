@@ -68,6 +68,7 @@ from lakana_worker.runners import DockerRunner, LocalProcessRunner, Runner
 from lakana_worker.scheduler import SchedulerLoop
 from lakana_worker.spill import sweep_spill_directories
 from lakana_worker.tasks import RunEngine, TaskSettings
+from lakana_worker.trust import TrustBundleError, build_trust_bundle, write_trust_file
 from lakana_worker.venvs import VenvSettings
 
 if TYPE_CHECKING:
@@ -243,7 +244,19 @@ def _python_runtime(
         `DockerRunner` and `DockerEnvironments` on the launcher at
         `LAKANA_RUN__LAUNCHER_SOCKET`, owned by this worker (`claim_owner`: the host name and a
         token kept in the cache directory, unique among live workers); the attempt directories
-        must then be the launcher's work volume, which it mounts by attempt name.
+        must then be the launcher's work volume, which it mounts by attempt name. With
+        `LAKANA_RUN__CA_BUNDLE`, the trust bundle (Mozilla's roots plus the certificates of that
+        file) is built once in memory; builds and tasks of both runners trust it. The Docker
+        runner writes those bytes into each attempt; only the local runner writes them to
+        ``<cache>/trust-<digest>.pem``, a name no other worker's bundle shares.
+
+    Raises
+    ------
+    SystemExit
+        If `LAKANA_RUN__CA_BUNDLE` names a file the containers cannot trust (unreadable, over
+        1 MiB, no certificate, a private key, a ``TRUSTED CERTIFICATE`` block), or the local
+        runner cannot write the bundle to the cache; the message names the setting or the path,
+        and the cause.
     """
     cache = worker_cache_dir()
     if python.reason() is None:
@@ -255,6 +268,12 @@ def _python_runtime(
                 exc if isinstance(exc, UnsafeDirectory) else f"{cache / 'attempts'}: {exc}",
             )
     run = settings.run
+    try:
+        trust = build_trust_bundle(run.ca_bundle)
+        local = run.runner != "docker"
+        trust_file = write_trust_file(trust, cache) if trust is not None and local else None
+    except TrustBundleError as exc:
+        raise SystemExit(str(exc)) from None
     cap, timeout = settings.task_tokens.max_ttl_seconds, settings.query_limits.timeout_seconds
     needed = token_ttl(timeout, run.kill_grace)
     if cap < needed:
@@ -296,6 +315,7 @@ def _python_runtime(
             cpus=run.task_cpus,
             pids=run.task_pids,
             kill_grace=run.kill_grace,
+            trust=trust,
         )
         environments = DockerEnvironments(
             client=client,
@@ -306,11 +326,13 @@ def _python_runtime(
             build_timeout=run.venv_build_timeout,
             max_bytes=run.venv_max_bytes,
             operator_index=_secret(run.index_url),
+            trust=trust,
         )
     else:
         runner = LocalProcessRunner(
             kill_grace=run.kill_grace,
             memory_limit=resolve_limit(settings.worker.memory_limit).bytes,
+            trust=trust_file,
         )
     return PythonRuntime(
         support=python,
@@ -325,7 +347,7 @@ def _python_runtime(
             index_url=_secret(run.index_url),
             https_proxy=_secret(run.https_proxy),
             no_proxy=run.no_proxy,
-            ca_bundle=run.ca_bundle,
+            ca_bundle=trust_file,
         ),
         runner=runner,
         kill_grace=run.kill_grace,

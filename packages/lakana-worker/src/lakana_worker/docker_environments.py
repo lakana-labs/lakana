@@ -40,9 +40,16 @@ from lakana_worker.index_credentials import (
     wheels_only,
 )
 from lakana_worker.launcher.task_build import NO_INTERPRETER, NO_SDK, TOO_LARGE
-from lakana_worker.launcher_client import LauncherClient, LauncherRefused, LauncherUnavailable
+from lakana_worker.launcher_client import (
+    RELEASE_SKEW,
+    LauncherClient,
+    LauncherRefused,
+    LauncherUnavailable,
+    release_skew,
+)
 from lakana_worker.processes import OutputRedactor
 from lakana_worker.runners import NO_SDK_MESSAGE, stop_retry_gap
+from lakana_worker.trust import certificate_hint, install_trust
 from lakana_worker.venvs import (
     BuildStop,
     IndexResolver,
@@ -204,6 +211,9 @@ class DockerEnvironments:
         Seconds a stopped build's result is waited for once the launcher confirmed the stop;
         then the task ends without it (an image pull the launcher cannot interrupt), and the
         launcher removes the build when the pull ends.
+    trust
+        The worker's trust bundle as bytes (`lakana_worker.trust`), written into the attempt and
+        mounted at ``/trust``; `None` without `LAKANA_RUN__CA_BUNDLE`.
     """
 
     client: LauncherClient
@@ -216,6 +226,7 @@ class DockerEnvironments:
     operator_index: str | None = field(default=None, repr=False)
     poll_seconds: float = 0.2
     stop_wait: float = 30.0
+    trust: bytes | None = field(default=None, repr=False)
 
     def acquire(
         self,
@@ -289,6 +300,14 @@ class DockerEnvironments:
                 return lease
             if stop is not None and stop():
                 raise VenvBuildStopped(_STOPPED)
+            if self.trust is not None:
+                try:
+                    install_trust(self.trust, project.parent)
+                except OSError as exc:
+                    raise VenvBuildError(
+                        f"{_FAILED}: could not copy the trust bundle into the attempt: "
+                        f"{exc.strerror or exc}"
+                    ) from None
             accesses = list(indexes()) if indexes is not None else []
             tee = Tee(
                 OutputRedactor(
@@ -315,13 +334,17 @@ class DockerEnvironments:
                 "pids": self.pids,
                 "timeout_seconds": max(1, math.ceil(self.build_timeout)),
                 "max_bytes": self.max_bytes,
+                "trust": self.trust is not None,
             }
             try:
                 result = self._call(request, tee.feed, stop)
             finally:
                 tee.close()
         except LauncherRefused as exc:
-            raise VenvBuildRefused(f"{_FAILED}: the launcher refused the build: {exc}") from None
+            skew = f". {RELEASE_SKEW}" if release_skew(str(exc)) else ""
+            raise VenvBuildRefused(
+                f"{_FAILED}: the launcher refused the build: {exc}{skew}"
+            ) from None
         except LauncherUnavailable as exc:
             raise VenvBuildError(str(exc)) from None
         if result.get("complete") is True:
@@ -466,4 +489,7 @@ class DockerEnvironments:
         package = missing_wheel(output) if wheels_only(accesses) else None
         if package is not None:
             return VenvBuildRefused(f"{_FAILED}: {no_wheel_message(package)}")
-        return VenvBuildError(f"{_FAILED}: uv exited with status {code}")
+        hint = certificate_hint(output)
+        return VenvBuildError(
+            f"{_FAILED}: uv exited with status {code}" + (f": {hint}" if hint else "")
+        )

@@ -63,6 +63,7 @@ RUN: dict[str, Any] = {
     "kill_grace_seconds": 10,
     "stdin": '{"version": 2}',
     "roots": [],
+    "trust": False,
 }
 BUILD: dict[str, Any] = {
     "token": TOKEN,
@@ -83,6 +84,7 @@ BUILD: dict[str, Any] = {
     "pids": 256,
     "timeout_seconds": 600,
     "max_bytes": 5 * 1024**3,
+    "trust": False,
 }
 
 
@@ -1092,3 +1094,71 @@ def test_a_target_may_name_any_port_of_a_host_once() -> None:
     assert isinstance(parse_request(_raw(two), token=TOKEN, settings=SETTINGS), BuildRequest)
     with pytest.raises(Refused, match="targets:"):
         parse_request(_raw(twice), token=TOKEN, settings=SETTINGS)
+
+
+@pytest.mark.parametrize("base", [RUN, BUILD], ids=["run", "build"])
+def test_trust_is_required_and_a_boolean(base: dict[str, Any]) -> None:
+    """Without `trust` the request has a field too few; anything but a boolean is refused.
+
+    Parameters
+    ----------
+    base
+        The valid request.
+    """
+    op = base["op"]
+    with pytest.raises(Refused, match=f"{op} takes exactly the fields .*trust"):
+        parse_request(_raw(_without(base, "trust")), token=TOKEN, settings=SETTINGS)
+    with pytest.raises(Refused, match="the worker and the launcher must be the same release"):
+        parse_request(_raw(_without(base, "trust")), token=TOKEN, settings=SETTINGS)
+    for value in ("yes", 1, None, "true"):
+        with pytest.raises(Refused, match="trust: true or false"):
+            parse_request(_raw(_with(base, trust=value)), token=TOKEN, settings=SETTINGS)
+
+
+def _trust_specs(trust: bool) -> list[dict[str, Any]]:
+    """Build the task spec and the build spec of requests with `trust` set.
+
+    Parameters
+    ----------
+    trust
+        The field's value.
+
+    Returns
+    -------
+    list of dict
+        The run's container spec, then the build's.
+    """
+    run = parse_request(_raw(_with(RUN, trust=trust)), token=TOKEN, settings=SETTINGS)
+    build = parse_request(_raw(_with(BUILD, trust=trust)), token=TOKEN, settings=SETTINGS)
+    assert isinstance(run, RunRequest) and isinstance(build, BuildRequest)
+    assert run.trust is trust and build.trust is trust
+    return [
+        run_container_spec(run, SETTINGS, no_new_privileges=True),
+        build_container_spec(
+            build, SETTINGS, no_new_privileges=True, proxy_url=None, cache_key=CACHE_KEY
+        ),
+    ]
+
+
+def test_with_trust_both_containers_mount_the_attempts_bundle_read_only() -> None:
+    """Subpath `<attempt>/trust` of the work volume at /trust, read-only, and both variables."""
+    for spec in _trust_specs(True):
+        mounts = [m for m in spec["HostConfig"]["Mounts"] if m["Target"] == "/trust"]
+        assert mounts == [
+            {
+                "Type": "volume",
+                "Source": "lakana-task-work",
+                "Target": "/trust",
+                "ReadOnly": True,
+                "VolumeOptions": {"NoCopy": True, "Subpath": "attempt-abc_12/trust"},
+            }
+        ]
+        assert "SSL_CERT_FILE=/trust/trust.pem" in spec["Env"]
+        assert "LAKANA_CA_BUNDLE=/trust/trust.pem" in spec["Env"]
+
+
+def test_without_trust_nothing_changes() -> None:
+    """No mount at /trust and neither variable: today's containers."""
+    for spec in _trust_specs(False):
+        assert all(m["Target"] != "/trust" for m in spec["HostConfig"]["Mounts"])
+        assert not any(v.startswith(("SSL_CERT_FILE=", "LAKANA_CA_BUNDLE=")) for v in spec["Env"])

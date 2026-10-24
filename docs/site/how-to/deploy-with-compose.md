@@ -217,13 +217,47 @@ logs a warning, and fails Python tasks, if `attempts` is a link or not private. 
 
 The environment build downloads packages. With the docker runner a build reaches the hosts the
 project's `uv.lock` names (PyPI by default) through `egress` only, and `LAKANA_RUN__HTTPS_PROXY`
-and `LAKANA_RUN__CA_BUNDLE` are refused (set `LAKANA_EGRESS_UPSTREAM_PROXY` in `.env` for a proxy;
-an index signed by a private certificate authority needs `LAKANA_RUNNER=local`). With the local
-runner the worker needs outbound HTTPS to those hosts, or `LAKANA_RUN__INDEX_URL`, `LAKANA_RUN__HTTPS_PROXY`,
-`LAKANA_RUN__NO_PROXY` and `LAKANA_RUN__CA_BUNDLE` set on the `worker` service by hand (same rules
+is refused (set `LAKANA_EGRESS_UPSTREAM_PROXY` in `.env` for a proxy). With the local
+runner the worker needs outbound HTTPS to those hosts, or `LAKANA_RUN__INDEX_URL`, `LAKANA_RUN__HTTPS_PROXY`
+and `LAKANA_RUN__NO_PROXY` set on the `worker` service by hand (same rules
 as the `LAKANA_GIT__*` settings below; put a credential in the URL's `user:token@` part: a query string is refused). Without network access a Python task fails at its
 environment build, and the task's log has uv's error. Whether a worker can run Python assets is
 logged when it starts (`Python assets: enabled` or `disabled: <reason>. To enable it: <fix>`).
+
+If your package index, or a source your tasks read, uses a certificate of a private certificate
+authority, mount that authority's PEM file into the `worker` service read-only and point
+`LAKANA_RUN__CA_BUNDLE` at it, with either runner. In `compose.yaml`, **add** one line to the
+`worker` service's `environment:` and one to its `volumes:`, and keep every entry that is there:
+the worker needs its cache, the launcher's socket and the task volume, and the docker runner
+fails without them. `worker-interactive` and `worker-pipeline` take both lists from `worker`
+(`<<: *worker`, `<<: *worker-env`), so they get the file too:
+
+```yaml
+x-lakana-env: &lakana-env    # unchanged: the bundle's shared settings
+  LAKANA_DATABASE__URL: postgresql+pg8000://lakana:${POSTGRES_PASSWORD}@postgres:5432/lakana
+  LAKANA_SECRETS__MASTER_KEY: ${LAKANA_SECRETS__MASTER_KEY}
+
+services:
+  worker: &worker
+    # ... (image, command and the rest unchanged)
+    environment: &worker-env
+      <<: *lakana-env
+      LAKANA_REPO_ROOTS: '["/repos"]'
+      LAKANA_RUN__SERVER_URL: http://server:8000
+      LAKANA_RUN__RUNNER: ${LAKANA_RUNNER:-docker}
+      LAKANA_RUN__CA_BUNDLE: /certs/corp-ca.pem              # added
+    volumes:
+      - ./repos:/repos:ro
+      - worker-cache:/home/lakana/.cache/lakana-worker
+      - launcher-socket:/run/lakana-launcher
+      - task-work:/home/lakana/.cache/lakana-worker/attempts
+      - ./certs/corp-ca.pem:/certs/corp-ca.pem:ro            # added
+```
+
+Builds and tasks then trust Mozilla's roots plus that file; the worker mounts it into each build
+and task container itself. A file with a private key, without a certificate or over 1 MiB stops
+the worker with a message that names the cause:
+[The trust bundle of builds and tasks](../reference/network-settings.md#the-trust-bundle-of-builds-and-tasks).
 
 `LAKANA_TASK_TOKENS__MAX_TTL_SECONDS` caps the lifetime of every task token, and the server and the
 worker both read it. If you change it, set it to the same value on the `server` and the `worker`
@@ -1510,15 +1544,34 @@ docker volume ls -q --filter "label=lakana.launcher.stack=lakana" | xargs -r doc
 
 Workers fetch `https` repositories with git, which never sees the container's `HTTPS_PROXY`
 or CA variables. Set `LAKANA_GIT__HTTPS_PROXY`, `LAKANA_GIT__NO_PROXY` and `LAKANA_GIT__CA_BUNDLE`
-instead, by hand in `compose.yaml` on the `worker` service only (next to `<<: *lakana-env`; the
-server and `migrate` need neither), and mount the CA file read-only next to the `repos` mount:
+instead, by hand in `compose.yaml` on the `worker` service only (the server and `migrate` need
+neither), and mount the CA file read-only. **Add** the lines to the `worker` service's
+`environment:` and `volumes:` and keep every entry that is there (the worker's cache, the
+launcher's socket and the task volume are needed by Python assets); `worker-interactive` and
+`worker-pipeline` take both lists from `worker`:
 
 ```yaml
-    environment:
-      LAKANA_GIT__HTTPS_PROXY: http://proxy.corp:3128
-      LAKANA_GIT__NO_PROXY: gitlab.corp,.internal
-      LAKANA_GIT__CA_BUNDLE: /certs/corp-ca.pem
-    volumes: ["./repos:/repos:ro", "./certs/corp-ca.pem:/certs/corp-ca.pem:ro"]
+x-lakana-env: &lakana-env    # unchanged: the bundle's shared settings
+  LAKANA_DATABASE__URL: postgresql+pg8000://lakana:${POSTGRES_PASSWORD}@postgres:5432/lakana
+  LAKANA_SECRETS__MASTER_KEY: ${LAKANA_SECRETS__MASTER_KEY}
+
+services:
+  worker: &worker
+    # ... (image, command and the rest unchanged)
+    environment: &worker-env
+      <<: *lakana-env
+      LAKANA_REPO_ROOTS: '["/repos"]'
+      LAKANA_RUN__SERVER_URL: http://server:8000
+      LAKANA_RUN__RUNNER: ${LAKANA_RUNNER:-docker}
+      LAKANA_GIT__HTTPS_PROXY: http://proxy.corp:3128        # added
+      LAKANA_GIT__NO_PROXY: gitlab.corp,.internal            # added
+      LAKANA_GIT__CA_BUNDLE: /certs/corp-ca.pem              # added
+    volumes:
+      - ./repos:/repos:ro
+      - worker-cache:/home/lakana/.cache/lakana-worker
+      - launcher-socket:/run/lakana-launcher
+      - task-work:/home/lakana/.cache/lakana-worker/attempts
+      - ./certs/corp-ca.pem:/certs/corp-ca.pem:ro            # added
 ```
 
 The worker refuses to start if the CA file is not a readable file; the proxy must be an

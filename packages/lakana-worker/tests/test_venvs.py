@@ -315,7 +315,7 @@ def test_network_settings_reach_uv_and_secrets_are_redacted_and_hidden(fake: Fak
     assert env["UV_INDEX"] == "https://svc:hunter2@pypi.corp/simple"
     assert env["HTTPS_PROXY"] == env["https_proxy"] == "http://px:s3cr3t@proxy:3128"
     assert env["NO_PROXY"] == env["no_proxy"] == "pypi.corp"
-    assert env["SSL_CERT_FILE"] == str(bundle)
+    assert env["SSL_CERT_FILE"] == env["LAKANA_CA_BUNDLE"] == str(bundle)
     assert b"hunter2" not in fake.output() and b"s3cr3t" not in fake.output()
     settings = VenvSettings(
         uv="uv",
@@ -326,7 +326,9 @@ def test_network_settings_reach_uv_and_secrets_are_redacted_and_hidden(fake: Fak
     )
     assert "hunter2" not in repr(settings) and "s3cr3t" not in repr(settings)
     plain = build_environment(fake.settings, Path("/h"), Path("/b"))
-    assert not {"UV_INDEX", "HTTPS_PROXY", "NO_PROXY", "SSL_CERT_FILE"} & set(plain)
+    assert not {"UV_INDEX", "HTTPS_PROXY", "NO_PROXY", "SSL_CERT_FILE", "LAKANA_CA_BUNDLE"} & set(
+        plain
+    )
 
 
 def test_a_second_acquire_reuses_the_venv_and_records_the_use(fake: Fake) -> None:
@@ -720,7 +722,7 @@ def test_the_argv_carries_no_credential_and_the_env_only_the_network_settings(fa
     assert set(call["env"]) - {"LC_CTYPE", "__CF_USER_TEXT_ENCODING"} == {
         "PATH", "HOME", "TMPDIR", "UV_PROJECT_ENVIRONMENT", "UV_PYTHON_DOWNLOADS",
         "UV_CACHE_DIR", "UV_NO_PROGRESS", "UV_INDEX", "HTTPS_PROXY", "https_proxy",
-        "NO_PROXY", "no_proxy", "SSL_CERT_FILE",
+        "NO_PROXY", "no_proxy", "SSL_CERT_FILE", "LAKANA_CA_BUNDLE",
     }  # fmt: skip
 
 
@@ -1369,3 +1371,12 @@ def test_the_workers_own_environment_is_not_touched_by_a_build(
         fake.acquire(_SHA_C, lambda: [_TEAM])
     assert dict(os.environ) == before
     assert "UV_INDEX" not in os.environ
+
+
+def test_a_local_build_failing_on_an_untrusted_certificate_names_the_setting(fake: Fake) -> None:
+    """The local runner's build says the same as a container build: set LAKANA_RUN__CA_BUNDLE."""
+    fake.behave(mode="fail", code=2, output="error: invalid peer certificate: UnknownIssuer")
+    with pytest.raises(VenvBuildError) as caught:
+        fake.acquire()
+    assert str(caught.value).startswith("environment build failed: uv exited with status 2: ")
+    assert "LAKANA_RUN__CA_BUNDLE" in str(caught.value)

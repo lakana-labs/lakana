@@ -117,7 +117,7 @@ Each cell is a summary. The page named in the last column has the detail. The ch
 
 | Release | What it asks | Where |
 |---|---|---|
-| 0.20.0 | No migration. **Breaking:** the Compose bundle runs Python tasks in containers: replace `compose.yaml`, add four `.env` lines, Docker Engine 28 or later; budget `LAKANA_RUN__TASK_MEMORY` (2 GB) per worker; with the docker runner `LAKANA_RUN__HTTPS_PROXY`, `LAKANA_RUN__CA_BUNDLE` and an `http://` `LAKANA_RUN__INDEX_URL` are refused, and a registered index on another port than 443 needs a credential. A protected environment runs Python assets only on workers with `LAKANA_RUN__RUNNER=docker`, so no longer in local mode. | [Notes for 0.20.0](#notes-for-0200), [Run Python tasks in containers](../how-to/run-python-tasks-in-containers.md) |
+| 0.20.0 | No migration. **Breaking:** the Compose bundle runs Python tasks in containers: replace `compose.yaml`, add four `.env` lines, Docker Engine 28 or later; budget `LAKANA_RUN__TASK_MEMORY` (2 GB) per worker; with the docker runner `LAKANA_RUN__HTTPS_PROXY`, `LAKANA_RUN__CA_BUNDLE` (accepted again from the next release) and an `http://` `LAKANA_RUN__INDEX_URL` are refused, and a registered index on another port than 443 needs a credential. A protected environment runs Python assets only on workers with `LAKANA_RUN__RUNNER=docker`, so no longer in local mode. | [Notes for 0.20.0](#notes-for-0200), [Run Python tasks in containers](../how-to/run-python-tasks-in-containers.md) |
 | 0.19.0 | No migration. **Security fix**: upgrade the server and every worker. **Breaking:** queries run on DuckDB 2.0: `//` and `%` by zero fail (use `TRY` or `NULLIF`), an untyped `NULL AS x` in a write is refused (add a `CAST`), a table function's alias is its value, `price = 1.1` after a float-to-double widening matches only newer rows, some Parquet files from other writers may not read; the worker needs macOS 10.15 or glibc 2.27. A `PIVOT` lists its values; `CONNECT BY`, DuckDB-internal and sequence functions are refused; a query opens only the tables it reads. The worker stops at start-up on an unusable CA bundle; an unverifiable store certificate fails at once. | [Notes for 0.19.0](#notes-for-0190) |
 | 0.18.0 | Migrations `0047` (CI trust rules and CI tokens) and `0048` (measured sizes), both adding only empty tables and columns. A new environment's storage root must be in the environment's scheme, name a bucket or container, and may not be `file:///`, contain `::`, or lie in another environment's files (422 with a root to use; existing environments are not changed). An allowed webhook host may no longer reach loopback or cloud metadata addresses, except the entry `localhost`. Log lines worth an alert end with `event=<code>`. Copy the new healthchecks from a fresh `compose.yaml`. The workers trim uv's package cache above 10 GiB (`0` keeps it untrimmed). `lakana init` writes CI files that deploy without a stored secret; `--ci-auth pat` for the old ones. | [Notes for 0.18.0](#notes-for-0180) |
 | 0.17.0 | Migrations `0042` to `0046`. **Breaking:** a dropped table's files, and those of the tables of a deleted environment, are deleted after `LAKANA_TABLES__UNDO_DAYS` (7 days; restore with `lakana table undrop` or `lakana env restore`), and `DELETE /api/v1/environments/{name}` answers 200 with the environment; the first administrator's token is written to `LAKANA_BOOTSTRAP_TOKEN_FILE`, never to the log; ADMINs no longer see other people's SQL text or column values in the audit log until granted `READ_QUERY_TEXT`. Set `LAKANA_TABLES__UNDO_DAYS` the same on the server and the workers. A new storage root must be written canonically. Nothing expires unless retention is set. Sign-in events are written once per token every 15 minutes. | [Notes for 0.17.0](#notes-for-0170) |
@@ -172,6 +172,36 @@ worker of 0.20.0 and a launcher of this release (or the other way round) refuse 
 build requests (`build takes exactly the fields ...`), and the task fails until both are
 upgraded. The shared build caches get new names, so the first build of each environment after
 the upgrade downloads its packages again.
+
+### The docker runner trusts a private certificate authority
+
+`LAKANA_RUN__CA_BUNDLE` now works with the docker runner too: builds and tasks of both runners
+trust Mozilla's roots plus the certificates of that file, which the worker mounts read-only at
+`/trust/trust.pem` in each build and task container and names in `SSL_CERT_FILE` and
+`LAKANA_CA_BUNDLE`. In a Compose bundle, mount the file into the `worker` service read-only and
+set the variable there; see
+[The trust bundle of builds and tasks](../reference/network-settings.md#the-trust-bundle-of-builds-and-tasks).
+
+**Breaking** for a worker that already sets it with the local runner:
+
+- The worker checks the file at start. A file over 1 MiB, without a certificate, with a private
+  key, with a damaged or cut-off certificate block or in OpenSSL's `TRUSTED CERTIFICATE` form
+  now **stops the worker**, with a message that names the setting, the file and the cause;
+  before, the local runner passed any file on. Give a PEM file of certificates only. The local
+  runner also refuses to write its copy of the bundle into a cache directory other users can
+  write to.
+- Only the file's certificate blocks are used. Local builds trust **Mozilla's roots plus the
+  file**, where before they trusted the file alone: public indexes such as PyPI are now trusted
+  next to it.
+- Local **tasks** used to get no `SSL_CERT_FILE`, so Python's `ssl` (and `urllib`) trusted the
+  host's system store. Now `SSL_CERT_FILE` names Mozilla's roots plus the file, and that
+  **replaces the host's system store** for them. A corporate authority installed only in the
+  system store (`update-ca-certificates`, `update-ca-trust`) is no longer trusted by a local task:
+  put every private authority your tasks need into the `LAKANA_RUN__CA_BUNDLE` file.
+
+Upgrade the launcher and the workers together, as the bundle does: a worker of 0.20.0 and a
+launcher of this release (or the other way round) refuse each other's requests
+(`run takes exactly the fields ...`), and tasks fail until both are upgraded.
 
 ### A cancel stops an environment build
 
@@ -240,7 +270,9 @@ page); Docker Engine 28 or later is required. Task containers sit outside the wo
 limit: budget `LAKANA_RUN__TASK_MEMORY` (2 GB) per worker on top of the workers' own. Builds reach
 package indexes only through `egress`: a corporate proxy goes in `LAKANA_EGRESS_UPSTREAM_PROXY`,
 and `LAKANA_RUN__HTTPS_PROXY` and `LAKANA_RUN__CA_BUNDLE` are refused with the docker runner, and
-so is an `http://` `LAKANA_RUN__INDEX_URL`. A registered package index on another port than 443
+so is an `http://` `LAKANA_RUN__INDEX_URL` (the next release accepts `LAKANA_RUN__CA_BUNDLE` with
+the docker runner: see
+[The docker runner trusts a private certificate authority](#the-docker-runner-trusts-a-private-certificate-authority)). A registered package index on another port than 443
 that has no credential, which builds of the local runner reached, is refused (403 from `egress`)
 under the docker runner until [#301](https://github.com/lakana-labs/lakana/issues/301): give it a
 credential or serve it on port 443.

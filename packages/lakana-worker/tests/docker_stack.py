@@ -10,12 +10,14 @@ from __future__ import annotations
 
 import base64
 import contextlib
+import hashlib
 import io
 import os
 import sys
 import tarfile
 import threading
 import uuid
+import zipfile
 from collections.abc import Generator
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,11 +25,13 @@ from typing import Any
 
 import pytest
 
+import lakana_worker.launcher
 from lakana_worker.launcher.engine import DockerEngine
 from lakana_worker.launcher.requests import (
     LABEL_KIND,
     LABEL_SHARED,
     LABEL_STACK,
+    TRUST_FILE,
     BuildRequest,
     Limits,
     RunRequest,
@@ -47,6 +51,9 @@ STUB_HARNESS = (
     'runpy.run_path("/code/" + description["asset_path"], run_name="__main__")\n'
 )
 """Stands in for `lakana.runner`: runs the attempt's script, so a test's probe is the task."""
+
+APP = "/opt/lakana-task"
+"""Where a helper's source and files go in its container: a directory the task image has."""
 
 Entry = tuple[str, str, bytes | str, int, int]
 """``(path, kind, content, mode, uid)``; kind ``dir`` or ``file`` (links: `Stack.link`)."""
@@ -258,6 +265,7 @@ class Stack:
         code_link: str | None = None,
         task_link: str | None = None,
         files: dict[str, bytes] | None = None,
+        trust: bytes | None = None,
     ) -> str:
         """Lay out an attempt directory whose code is one probe script.
 
@@ -271,6 +279,9 @@ class Stack:
             Make ``task`` a symbolic link to this target instead.
         files
             More files for ``code``, path to content (directories are made, read-only).
+        trust
+            A trust bundle: written as ``trust/trust.pem`` (0644, in a 0755 directory, both the
+            task user's) the way `lakana_worker.trust.install_trust` lays it out.
 
         Returns
         -------
@@ -290,6 +301,11 @@ class Stack:
             entries += [
                 (f"{name}/code/{path}", "file", data, 0o444, 10001)
                 for path, data in (files or {}).items()
+            ]
+        if trust is not None:
+            entries += [
+                (f"{name}/trust", "dir", b"", 0o755, 10001),
+                (f"{name}/trust/{TRUST_FILE}", "file", trust, 0o644, 10001),
             ]
         if task_link is None:
             entries += [
@@ -335,6 +351,7 @@ class Stack:
         timeout: int = 60,
         task: str | None = None,
         environment: str = KEY,
+        trust: bool = False,
     ) -> tuple[dict[str, object], bytes]:
         """Run an attempt's probe as a task through the launcher.
 
@@ -354,6 +371,8 @@ class Stack:
             Its id; a random one by default.
         environment
             The key of the built environment it runs in.
+        trust
+            Mount the attempt's trust bundle at ``/trust`` (`Stack.attempt`'s ``trust``).
 
         Returns
         -------
@@ -372,15 +391,22 @@ class Stack:
                 limits=Limits(memory_mb, cpus, pids, timeout),
                 kill_grace_seconds=2,
                 stdin=b'{"asset_path": "probe.py"}',
+                trust=trust,
             ),
             lambda line: output.append(base64.b64decode(str(line["log"]))),
         )
         return result, b"".join(output)
 
     def build(
-        self, attempt: str, *, environment: str, no_build: bool
+        self,
+        attempt: str,
+        *,
+        environment: str,
+        no_build: bool,
+        targets: tuple[tuple[str, int], ...] = (),
+        trust: bool = False,
     ) -> tuple[dict[str, object], bytes]:
-        """Build an environment from an attempt's ``code`` through the launcher, offline.
+        """Build an environment from an attempt's ``code`` through the launcher.
 
         Parameters
         ----------
@@ -390,6 +416,11 @@ class Stack:
             The environment key.
         no_build
             Wheels only, which shares the cache of the index set.
+        targets
+            The host:port pairs the build may reach through the egress service
+            (`start_egress`); none keeps it offline.
+        trust
+            Mount the attempt's trust bundle at ``/trust`` (`Stack.attempt`'s ``trust``).
 
         Returns
         -------
@@ -407,10 +438,11 @@ class Stack:
                 attempt=attempt,
                 indexes=(),
                 operator_index=None,
-                targets=(),
+                targets=targets,
                 no_build=no_build,
                 limits=Limits(1024, 1.0, 256, 300),
                 max_bytes=1 << 30,
+                trust=trust,
             ),
             lambda line: output.append(base64.b64decode(str(line["log"]))),
         )
@@ -509,8 +541,8 @@ def stack(client: Any, image: str, root: Path) -> Generator[Stack]:
     Yields
     ------
     Stack
-        The stack; everything of it is removed afterwards, also what a failing test left, and
-        nothing of another stack.
+        The stack; everything of it is removed afterwards (also a network a test made with its
+        labels), also what a failing test left, and nothing of another stack.
     """
     name = f"lt{uuid.uuid4().hex[:10]}"
     current = Stack(client=client, image=image, name=name, root=root)
@@ -574,6 +606,9 @@ def stack(client: Any, image: str, root: Path) -> Generator[Stack]:
             for volume in client.volumes.list(filters=wanted):
                 with contextlib.suppress(Exception):
                     volume.remove(force=True)
+        for network in client.networks.list(filters=mine):
+            with contextlib.suppress(Exception):
+                network.remove()
 
 
 def serve(launcher: Launcher) -> tuple[LauncherServer, threading.Thread]:
@@ -594,3 +629,133 @@ def serve(launcher: Launcher) -> tuple[LauncherServer, threading.Thread]:
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     return server, thread
+
+
+def make_wheel(name: str, version: str, files: dict[str, str]) -> tuple[str, bytes]:
+    """Make a pure-Python wheel.
+
+    Parameters
+    ----------
+    name
+        The distribution name.
+    version
+        Its version.
+    files
+        Path in the wheel to text.
+
+    Returns
+    -------
+    tuple
+        The wheel's file name and its bytes.
+    """
+    dist = f"{name.replace('-', '_')}-{version}"
+    entries = {
+        **files,
+        f"{dist}.dist-info/METADATA": f"Metadata-Version: 2.1\nName: {name}\nVersion: {version}\n",
+        f"{dist}.dist-info/WHEEL": (
+            "Wheel-Version: 1.0\nGenerator: lakana-test\nRoot-Is-Purelib: true\nTag: py3-none-any\n"
+        ),
+    }
+    record = []
+    for path, text in entries.items():
+        digest = hashlib.sha256(text.encode()).digest()
+        encoded = base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
+        record.append(f"{path},sha256={encoded},{len(text.encode())}")
+    record.append(f"{dist}.dist-info/RECORD,,")
+    entries[f"{dist}.dist-info/RECORD"] = "\n".join(record) + "\n"
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        for path, text in entries.items():
+            archive.writestr(path, text)
+    return f"{dist}-py3-none-any.whl", buffer.getvalue()
+
+
+def _package() -> bytes:
+    """Pack the launcher package for a container that runs the proxy from source.
+
+    Returns
+    -------
+    bytes
+        A tar of `lakana_worker/__init__.py` and `lakana_worker/launcher/`.
+    """
+    buffer = io.BytesIO()
+    root = Path(lakana_worker.launcher.__file__).parent
+    with tarfile.open(fileobj=buffer, mode="w") as archive:
+        archive.add(root.parent / "__init__.py", arcname="lakana_worker/__init__.py")
+        for path in root.glob("*.py"):
+            archive.add(path, arcname=f"lakana_worker/launcher/{path.name}")
+    return buffer.getvalue()
+
+
+def _key_archive(key: bytes) -> bytes:
+    """Pack the launcher's key file, readable by the proxy's user only.
+
+    Parameters
+    ----------
+    key
+        The key file's content.
+
+    Returns
+    -------
+    bytes
+        A tar of `egress.key`.
+    """
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w") as archive:
+        info = tarfile.TarInfo("egress.key")
+        info.size, info.mode, info.uid, info.gid = len(key), 0o400, 10001, 10001
+        archive.addfile(info, io.BytesIO(key))
+    return buffer.getvalue()
+
+
+def start_egress(stack: Stack, *, network: str | None = None, reachable: str | None = None) -> Any:
+    """Start the stack's egress service, run from this checkout's proxy.
+
+    Labelled as the stack's ``egress`` Compose service, so the launcher attaches it to every
+    build network; it reads the launcher's key from a copy in its container.
+
+    Parameters
+    ----------
+    stack
+        A started stack.
+    network
+        A network to create the container on instead of Docker's default bridge.
+    reachable
+        A network (CIDR) the proxy may connect to although it is attached to it, which it
+        otherwise refuses: `EgressSettings.reachable`, which is not a setting, so the entry sets
+        it in code.
+
+    Returns
+    -------
+    docker.models.containers.Container
+        The started container; the stack removes it.
+    """
+    assert stack.launcher is not None
+    key = stack.launcher.settings.egress_key.read_bytes()
+    prefix = f"import sys; sys.path.insert(0, {APP!r}); "
+    if reachable is None:
+        entry = prefix + "from lakana_worker.launcher.egress import main; main()"
+    else:
+        entry = prefix + (
+            "import dataclasses, ipaddress, os; "
+            "from lakana_worker.launcher.egress import EgressServer, load_settings; "
+            "settings = dataclasses.replace(load_settings(os.environ), "
+            f"reachable=frozenset({{ipaddress.ip_network({reachable!r})}})); "
+            "EgressServer(settings).serve_forever()"
+        )
+    egress = stack.client.containers.create(
+        stack.image,
+        ["python", "-I", "-S", "-c", entry],
+        user="10001:10001",
+        environment={"LAKANA_EGRESS__KEY": f"{APP}/egress.key"},
+        network=network,
+        labels={
+            **stack.labels,
+            "com.docker.compose.project": stack.name,
+            "com.docker.compose.service": "egress",
+        },
+    )
+    egress.put_archive(APP, _package())
+    egress.put_archive(APP, _key_archive(key))
+    egress.start()
+    return egress

@@ -62,6 +62,7 @@ from lakana_worker.index_credentials import (
 )
 from lakana_worker.launcher.task_build import UV_SYNC_FLAGS
 from lakana_worker.processes import OutputRedactor, is_private_directory, signal_group, tree_size
+from lakana_worker.trust import certificate_hint
 
 MARKER = ".lakana-complete"
 """Written last into a venv; its mtime is when the venv was last used."""
@@ -287,7 +288,8 @@ class VenvSettings:
     no_proxy
         Hosts that bypass the proxy.
     ca_bundle
-        CA file the build trusts.
+        The worker's trust bundle (`lakana_worker.trust`): Mozilla's roots plus
+        `LAKANA_RUN__CA_BUNDLE`.
     """
 
     uv: str
@@ -395,7 +397,7 @@ def build_environment(
     if settings.no_proxy is not None:
         env["NO_PROXY"] = env["no_proxy"] = settings.no_proxy
     if settings.ca_bundle is not None:
-        env["SSL_CERT_FILE"] = str(settings.ca_bundle)
+        env["SSL_CERT_FILE"] = env["LAKANA_CA_BUNDLE"] = str(settings.ca_bundle)
     indexes = uv_index_value(settings.index_url, accesses)
     if indexes is not None:
         env["UV_INDEX"] = indexes
@@ -723,6 +725,9 @@ def _build(
                 package = missing_wheel(output) if wheels_only(accesses) else None
                 if package is not None:
                     raise VenvBuildRefused(f"{_FAILED}: {no_wheel_message(package)}") from exc
+                hint = certificate_hint(output)
+                if hint is not None:
+                    raise VenvBuildError(f"{exc}: {hint}") from exc
                 raise
             if not (build / "bin" / "python").exists():
                 raise VenvBuildError(f"{_FAILED}: uv did not create an interpreter")

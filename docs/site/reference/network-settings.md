@@ -1,8 +1,8 @@
 # Network settings of the worker
 
 How the worker reaches git remotes and webhook addresses through a proxy or with an internal CA,
-which certificate authorities its queries trust when they read an object store over HTTPS, and
-what it refuses to reach. Where the settings go in a Compose bundle:
+which certificate authorities its queries trust when they read an object store over HTTPS, which
+ones builds and tasks of Python assets trust, and what it refuses to reach. Where the settings go in a Compose bundle:
 [Deploy with Compose](../how-to/deploy-with-compose.md). Every other setting:
 [Settings](settings.md).
 
@@ -77,6 +77,51 @@ The message names the store by host and port only, never a presigned URL. To fix
 
 The failure does not go away by itself, so it is not retried: a task fails on its first attempt,
 whatever its retries.
+
+## The trust bundle of builds and tasks
+
+Environment builds and Python tasks trust Mozilla's list of public certificate authorities. If a
+package index, a proxy or a source an ingestion task reads uses a certificate from a private
+certificate authority (a company CA), set `LAKANA_RUN__CA_BUNDLE` on the **worker** to an
+absolute path of a PEM file of that authority's certificate. The setting works with both runners.
+
+At start the worker builds the trust bundle once: Mozilla's roots followed by the certificates of
+your file. It **adds** to Mozilla's roots and never replaces them, so public indexes such as PyPI
+keep working; this is unlike `LAKANA_GIT__CA_BUNDLE`, `AWS_CA_BUNDLE` and
+`LAKANA_WEBHOOK__CA_BUNDLE`, which replace the store they are for. Only the certificate blocks of
+your file are used: anything else in it is dropped, and every certificate is checked and written
+again in its standard form. Every task can read the bundle, so the file must not hold a private
+key.
+
+Where builds and tasks see it:
+
+| Runner | Where the bundle is | Variables set in the build and the task |
+|---|---|---|
+| `docker` | `/trust/trust.pem`, mounted read-only into each build container and task container from the attempt's own directory, which the worker writes | `SSL_CERT_FILE` and `LAKANA_CA_BUNDLE`, both `/trust/trust.pem` |
+| `local` | `trust-<digest>.pem` in the worker's cache directory, named by its content | `SSL_CERT_FILE` and `LAKANA_CA_BUNDLE`, both that file |
+
+uv and Python's `ssl` read `SSL_CERT_FILE`. A task that uses a library with a CA setting of its
+own (requests' `REQUESTS_CA_BUNDLE`, an object store client) can pass `LAKANA_CA_BUNDLE` to it.
+Without `LAKANA_RUN__CA_BUNDLE` nothing is mounted and neither variable is set.
+
+The worker checks the file at start and stops with a message that names the setting, the file
+and the cause, never the file's content:
+
+| The worker stops with | Fix |
+|---|---|
+| `LAKANA_RUN__CA_BUNDLE names /x, which is not a regular file.` or `… which cannot be read (No such file or directory).` | Mount the file into the worker (read-only is enough), make it readable by the worker's user (uid 10001 in the image; a host file of mode `0600` owned by root gives `Permission denied`), and point the setting at its path inside the worker. |
+| `… which is larger than 1 MiB.` | A company CA bundle is a few kilobytes: give the authority's certificates only. |
+| `… which holds no PEM certificate.` | Give a PEM file (`-----BEGIN CERTIFICATE-----`). Convert a DER file with `openssl x509 -inform der -in ca.der -out ca.pem`. |
+| `… which holds a certificate block that is not a valid certificate: it is damaged or cut off, or not in the plain BEGIN CERTIFICATE form; export the certificate again as PEM.` | A block lost its `END` line, has a character that is not base64 in it, or has another header (`BEGIN X509 CERTIFICATE`). The worker stops rather than start without that authority. Export the certificate again as PEM, `-----BEGIN CERTIFICATE-----` to `-----END CERTIFICATE-----`. |
+| `… which also holds a private key, and every task could read it.` | Give a file of certificates only; never the CA's key. |
+| `… which holds a TRUSTED CERTIFICATE block (OpenSSL's -trustout form, as in RHEL's ca-bundle.trust.crt) …` | Point the setting at a plain PEM file. On RHEL, `/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem` is the system's bundle in plain PEM. For your own authority's file, `openssl x509 -in cert.pem -out plain.pem` converts it, but only the first certificate of a file: split a file of several blocks and convert each block on its own. |
+| `cannot write the trust bundle to /…/trust-<digest>.pem (…); check that the worker's cache directory is writable.` or `… the worker's cache directory /… is not private …` | Local runner only: make the worker's cache directory (`$XDG_CACHE_HOME/lakana-worker`, else `~/.cache/lakana-worker`) writable by the worker's user, and private to it: owned by that user, not a link, and not writable by any other user (`chmod 0700`). Another user who could write there could replace the bundle. |
+| `the worker cannot read Mozilla's certificate roots at /… (…); reinstall the worker's certifi package.` | The worker's installation is damaged: reinstall it (or pull the image again). |
+
+A build that fails because a package index's certificate is not trusted adds a hint to its
+failure: `a package index's certificate is not trusted; if your package index uses a private
+certificate authority, set LAKANA_RUN__CA_BUNDLE on the worker to a PEM file of it`. Where to set
+it in a Compose bundle: [Run Python tasks in containers](../how-to/run-python-tasks-in-containers.md#package-indexes-and-proxies).
 
 ## Webhook network settings
 

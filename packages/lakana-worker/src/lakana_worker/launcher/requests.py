@@ -3,10 +3,11 @@
 A request is one JSON object with exactly the fields of its operation (`FIELDS`), and every
 value is checked against a pattern or a bound before anything else happens. Every Docker field
 that matters is fixed here: the image comes from the operator's allow-list, the mounts from the
-work volume, the environment volume and the allowed ingestion roots; user, capabilities,
-network and command are constants. Nothing the caller sends reaches Docker as-is: identifiers
-become names only through the patterns, the stdin text becomes the container's input stream,
-and an index credential becomes one entry of `UV_INDEX`.
+work volume's code, task and trust subpaths, the environment volume and the allowed
+ingestion roots; user, capabilities, network and command are constants. Nothing the caller
+sends reaches Docker as-is: identifiers become names only through the patterns, the stdin text
+becomes the container's input stream, and an index credential becomes one entry of
+`UV_INDEX`.
 """
 
 from __future__ import annotations
@@ -38,6 +39,12 @@ MAX_URL_CHARS = 2048
 MAX_KILL_GRACE = 300
 MAX_ENVIRONMENT_BYTES = 1 << 40
 MIN_MEMORY_MB = 64
+TRUST_FILE = "trust.pem"
+"""The trust bundle's file name, in an attempt's ``trust`` directory and in the container."""
+TRUST_MOUNT = "/trust"
+"""Where a container sees its attempt's ``trust`` directory, read-only."""
+TRUST_PATH = f"{TRUST_MOUNT}/{TRUST_FILE}"
+"""What `SSL_CERT_FILE` and `LAKANA_CA_BUNDLE` name in a container that trusts the bundle."""
 INDEX_NAME_PREFIX = "lakana-registered-"
 """Prefix of the index names in `UV_INDEX`; the credential is bound to the URL, not the name."""
 
@@ -84,6 +91,7 @@ FIELDS: dict[str, frozenset[str]] = {
             "kill_grace_seconds",
             "stdin",
             "roots",
+            "trust",
         }
     )
     | _LIMITS,
@@ -101,6 +109,7 @@ FIELDS: dict[str, frozenset[str]] = {
             "targets",
             "no_build",
             "max_bytes",
+            "trust",
         }
     )
     | _LIMITS,
@@ -184,6 +193,8 @@ class RunRequest:
         The task description, written to the container's stdin. Left out of `repr`.
     roots
         Allowed ingestion roots to mount read-only.
+    trust
+        Whether the container mounts its attempt's trust bundle at ``/trust``.
     """
 
     task: str
@@ -195,6 +206,7 @@ class RunRequest:
     kill_grace_seconds: int
     stdin: bytes = field(repr=False)
     roots: tuple[str, ...] = ()
+    trust: bool = False
 
 
 @dataclass(frozen=True)
@@ -225,6 +237,8 @@ class BuildRequest:
         Memory, CPUs, processes, timeout.
     max_bytes
         Largest size of the built environment.
+    trust
+        Whether the container mounts its attempt's trust bundle at ``/trust``.
     """
 
     build: str
@@ -238,6 +252,7 @@ class BuildRequest:
     no_build: bool
     limits: Limits
     max_bytes: int
+    trust: bool = False
 
 
 @dataclass(frozen=True)
@@ -660,6 +675,47 @@ def _credential(item: object) -> IndexCredential:
     return IndexCredential(url=url, host=host, username=username, password=password)
 
 
+def _trust(data: dict[str, Any]) -> bool:
+    """Read the ``trust`` field of a run or a build.
+
+    Parameters
+    ----------
+    data
+        The request.
+
+    Returns
+    -------
+    bool
+        Whether the container mounts its attempt's trust bundle.
+
+    Raises
+    ------
+    Refused
+        For anything but a JSON boolean.
+    """
+    if type(data["trust"]) is not bool:
+        raise Refused("trust: true or false")
+    return data["trust"]
+
+
+def _trust_mount(settings: LauncherSettings, attempt: str) -> dict[str, Any]:
+    """Describe the read-only mount of an attempt's trust bundle.
+
+    Parameters
+    ----------
+    settings
+        For the work volume.
+    attempt
+        The attempt directory's name.
+
+    Returns
+    -------
+    dict
+        One entry of ``HostConfig.Mounts``.
+    """
+    return _volume(settings.work_volume, TRUST_MOUNT, read_only=True, subpath=f"{attempt}/trust")
+
+
 def _run(data: dict[str, Any], settings: LauncherSettings) -> RunRequest:
     """Read a ``run`` request.
 
@@ -707,6 +763,7 @@ def _run(data: dict[str, Any], settings: LauncherSettings) -> RunRequest:
         kill_grace_seconds=_integer(data, "kill_grace_seconds", 0, MAX_KILL_GRACE),
         stdin=stdin.encode("utf-8"),
         roots=tuple(roots),
+        trust=_trust(data),
     )
 
 
@@ -769,6 +826,7 @@ def _build(data: dict[str, Any], settings: LauncherSettings) -> BuildRequest:
         no_build=data["no_build"],
         limits=_limits(data, settings),
         max_bytes=_integer(data, "max_bytes", 1, MAX_ENVIRONMENT_BYTES),
+        trust=_trust(data),
     )
 
 
@@ -819,7 +877,10 @@ def parse_request(raw: bytes, *, token: str, settings: LauncherSettings) -> Requ
     if not isinstance(op, str) or op not in FIELDS:
         raise Refused(f"op must be one of {', '.join(sorted(FIELDS))}")
     if set(data) != FIELDS[op]:
-        raise Refused(f"{op} takes exactly the fields {', '.join(sorted(FIELDS[op]))}")
+        raise Refused(
+            f"{op} takes exactly the fields {', '.join(sorted(FIELDS[op]))}; the worker and "
+            "the launcher must be the same release"
+        )
     if op == "run":
         return _run(data, settings)
     if op == "build":
@@ -1222,6 +1283,9 @@ def run_container_spec(
 ) -> dict[str, Any]:
     """Describe the container of one task attempt.
 
+    With ``trust`` it also mounts the attempt's trust bundle read-only at ``/trust`` and points
+    `SSL_CERT_FILE` and `LAKANA_CA_BUNDLE` at it.
+
     Parameters
     ----------
     request
@@ -1250,22 +1314,26 @@ def run_container_spec(
         _volume(settings.work_volume, "/work", read_only=False, subpath=f"{request.attempt}/task"),
         *(_ingestion_mount(settings, name) for name in request.roots),
     ]
+    env = [
+        "PATH=/usr/local/bin:/usr/bin:/bin",
+        "HOME=/work/home",
+        "TMPDIR=/work/tmp",
+        "PYTHONUNBUFFERED=1",
+        "PYTHONDONTWRITEBYTECODE=1",
+        "POLARS_OOC_SPILL_DIR=/work/tmp/polars-spill",
+        f"POLARS_OVERRIDE_TOTAL_MEMORY_MB={polars}",
+        f"POLARS_OOC_DISK_BUDGET_MB={polars}",
+    ]
+    if request.trust:
+        mounts.append(_trust_mount(settings, request.attempt))
+        env += [f"SSL_CERT_FILE={TRUST_PATH}", f"LAKANA_CA_BUNDLE={TRUST_PATH}"]
     return {
         "Image": settings.images[request.python],
         "Entrypoint": ["/env/bin/python", "-P", "-m", "lakana.runner"],
         "Cmd": [],
         "User": settings.task_user,
         "WorkingDir": "/code",
-        "Env": [
-            "PATH=/usr/local/bin:/usr/bin:/bin",
-            "HOME=/work/home",
-            "TMPDIR=/work/tmp",
-            "PYTHONUNBUFFERED=1",
-            "PYTHONDONTWRITEBYTECODE=1",
-            "POLARS_OOC_SPILL_DIR=/work/tmp/polars-spill",
-            f"POLARS_OVERRIDE_TOTAL_MEMORY_MB={polars}",
-            f"POLARS_OOC_DISK_BUDGET_MB={polars}",
-        ],
+        "Env": env,
         "AttachStdin": True,
         "AttachStdout": True,
         "AttachStderr": True,
@@ -1341,7 +1409,9 @@ def build_container_spec(
     """Describe the container that builds one environment.
 
     It mounts the attempt's code read-only (the lock may name wheels in the repository), its
-    own environment volume and the cache of its index set, and runs the image's build entry.
+    own environment volume and the cache of its index set, and runs the image's build entry. With
+    ``trust`` it also mounts the attempt's trust bundle read-only at ``/trust`` and points
+    `SSL_CERT_FILE` and `LAKANA_CA_BUNDLE` at it.
 
     Parameters
     ----------
@@ -1396,6 +1466,9 @@ def build_container_spec(
         ),
         _volume(cache_volume(settings, request, key=cache_key), "/uv-cache", read_only=False),
     ]
+    if request.trust:
+        mounts.append(_trust_mount(settings, request.attempt))
+        env += [f"SSL_CERT_FILE={TRUST_PATH}", f"LAKANA_CA_BUNDLE={TRUST_PATH}"]
     return {
         "Image": settings.images[request.python],
         "Entrypoint": ["/usr/local/bin/python", "-I", "/opt/lakana-task/build.py"],

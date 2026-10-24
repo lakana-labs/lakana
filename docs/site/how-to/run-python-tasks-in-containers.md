@@ -111,11 +111,16 @@ registered package indexes its lock names. A package's files must come from one 
   `LAKANA_EGRESS_UPSTREAM_PROXY` in `.env` (`http://[user:password@]host:port`). `egress` then
   tunnels through that proxy and leaves the address checks above to it; it still lets a build
   reach only its own indexes' hosts.
-- **A private certificate authority.** A build container trusts only the publicly trusted
-  certificate authorities of its task image. `LAKANA_RUN__HTTPS_PROXY` and `LAKANA_RUN__CA_BUNDLE`
-  apply only to the local runner and stop a worker with the docker runner at start. An index or a
-  proxy whose certificate a private authority signed needs `LAKANA_RUNNER=local` for now
-  ([#292](https://github.com/lakana-labs/lakana/issues/292)).
+- **A private certificate authority.** If an index (or a source your tasks read) uses a
+  certificate a private authority signed, mount that authority's PEM file into the `worker`
+  service read-only and set `LAKANA_RUN__CA_BUNDLE` on the worker to its path (see
+  [Deploy with Compose](deploy-with-compose.md#python-assets)). Builds and tasks then trust
+  Mozilla's roots plus that file: the worker mounts it read-only at `/trust/trust.pem` in each
+  build and task container and sets `SSL_CERT_FILE` and `LAKANA_CA_BUNDLE` to it. Only the file's
+  certificates are used; one with a private key stops the worker. Details and every start-up
+  message: [The trust bundle of builds and tasks](../reference/network-settings.md#the-trust-bundle-of-builds-and-tasks).
+- **The local runner's proxy.** `LAKANA_RUN__HTTPS_PROXY` applies only to the local runner and
+  stops a worker with the docker runner at start; use `LAKANA_EGRESS_UPSTREAM_PROXY` instead.
 
 A secret is sent only to the index it is bound to: see [Use a private package index](private-package-index.md).
 
@@ -241,7 +246,10 @@ If a project may have deployed a malicious dependency or package, or a worker ma
 | `this client's network already holds 32 connections to the egress proxy ...` (in uv's error) | The build has `LAKANA_EGRESS__MAX_CONNECTIONS_PER_NETWORK` connections open already: its own code, a build backend for example, opens many. | The task is retried. If it keeps happening, raise the setting under `egress` in `compose.yaml`; see [The egress proxy](#the-egress-proxy). |
 | `python: must be one of "3.11", "3.12", "3.13", "3.14" ...` | The version has no task image, or lacks quotes. | Write one of the four, in quotes. |
 | `this project names Python X in lakana.yaml, and this worker runs Python tasks on its own Python Y without containers ...` | A local-runner worker took the task. | Run it on a worker with `LAKANA_RUN__RUNNER=docker`, or remove `python:`. |
+| `the launcher refused the task: run takes exactly the fields ...` or `the launcher refused the build: build takes exactly the fields ...`, with `The worker and the launcher are different releases` | The worker and the launcher run different releases (one was upgraded without the other), so they disagree on what a request holds. | Upgrade both to the same release: `docker compose pull`, then `docker compose up -d`. Every task fails until they match. |
 | `the launcher refused the task: ...` | Worker and launcher settings disagree. | Compare `LAKANA_LAUNCHER__IMAGES` and the `LAKANA_LAUNCHER__MAX_*` ceilings with the `LAKANA_RUN__TASK_*` settings. |
 | `environment 'prod' is protected, and this worker runs Python tasks without isolation ...` | A local-runner worker took a protected environment's task. | Give the worker `LAKANA_RUN__RUNNER=docker`. |
-| `LAKANA_RUN__HTTPS_PROXY applies to builds of the local runner ...`, `LAKANA_RUN__CA_BUNDLE applies to builds of the local runner ...` (worker log) | A local-runner setting on a docker-runner worker. | Unset it; see [Package indexes and proxies](#package-indexes-and-proxies). |
+| `LAKANA_RUN__HTTPS_PROXY applies to builds of the local runner ...` (worker log) | A local-runner setting on a docker-runner worker. | Unset it, and set `LAKANA_EGRESS_UPSTREAM_PROXY` in `.env` for a proxy; see [Package indexes and proxies](#package-indexes-and-proxies). |
+| `LAKANA_RUN__CA_BUNDLE names /x, which ...` (the worker stops at start) | The file is missing or unreadable in the worker, over 1 MiB, holds no certificate, a damaged certificate, a private key, or a `TRUSTED CERTIFICATE` block. | Do what the message's cause says; each cause and its fix: [The trust bundle of builds and tasks](../reference/network-settings.md#the-trust-bundle-of-builds-and-tasks). |
+| `a package index's certificate is not trusted; if your package index uses a private certificate authority, set LAKANA_RUN__CA_BUNDLE ...` (in a build's failure) | uv could not verify the index's certificate (`invalid peer certificate: UnknownIssuer`). | Set `LAKANA_RUN__CA_BUNDLE` to the PEM file of the authority that signed it; see [Package indexes and proxies](#package-indexes-and-proxies). |
 | `timed out: the launcher reported no end of the task's container ...` | The launcher did not report the container's end within the task's timeout, its kill grace and 15 minutes. | Read `docker compose logs launcher`; the worker closed its connection, which removes the container. |

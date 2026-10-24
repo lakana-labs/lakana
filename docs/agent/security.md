@@ -1035,11 +1035,24 @@ access-controlled on the server; `read_only=True` seals it (0400/0500) for a tas
   mount of the launcher's work volume: the launcher mounts `<attempt>/code` and `<attempt>/task`
   by name (`requests._ATTEMPT` accepts mkdtemp's names; a test pins the agreement). The local
   runner refuses a project whose `python:` names another Python than the worker's own
-  (`no_runtime`). `LAKANA_RUN__HTTPS_PROXY` and `LAKANA_RUN__CA_BUNDLE` are refused at start
-  with the docker runner: no build request field carries a CA bundle, so a private-CA index or
-  TLS-inspecting proxy is unsupported under DockerRunner rather than half-working (passing a
-  bundle would need a request field, a file the launcher, which holds the Docker socket, writes
-  into a build mount, and `SSL_CERT_FILE` in the build; #292).
+  (`no_runtime`). `LAKANA_RUN__HTTPS_PROXY` is refused at start with the docker runner (the
+  egress proxy is the way out; a company proxy is `LAKANA_EGRESS__UPSTREAM_PROXY`).
+- **The trust mount** (#292). With `LAKANA_RUN__CA_BUNDLE` the worker builds the trust bundle
+  once at start, in memory (`lakana_worker.trust.build_trust_bundle`): Mozilla's roots (certifi)
+  plus only the `CERTIFICATE` blocks of the operator's file, each parsed as X.509 and written
+  again canonically, so anything else pasted into the file never reaches a container. The file
+  is read once (`O_NONBLOCK`, regular file, at most 1 MiB): judging and copying the same bytes
+  leaves no check-to-copy swap. A file with a private key (PEM or PGP), without a certificate,
+  with a damaged one or with a `TRUSTED CERTIFICATE` block stops the worker, because every task
+  can read the bundle. The worker, not the launcher, writes the bytes into each attempt's
+  `trust/trust.pem` (`install_trust`: a file, never a link; a planted link at `trust` is
+  refused, one at `trust.pem` replaced without being followed), and the run or build request
+  carries only `trust: true`; the launcher mounts `<attempt>/trust` read-only at `/trust` and
+  sets `SSL_CERT_FILE` and `LAKANA_CA_BUNDLE`. Read-only because a task owns its attempt's
+  files: only the mount stops it from rewriting what a later build of the same attempt trusts
+  (`test_docker_trust_integration.py` proves `EROFS`). Under the docker runner nothing is
+  written to the worker's cache, so replicas sharing it never read each other's bundle; the
+  local runner writes `trust-<sha256[:16]>.pem` there, named by its content, never deleted.
 - **A build gets only what its lock needs**: the credentials of the registered indexes it uses
   (an index without a credential is a host to reach, not an entry of `UV_INDEX`), the operator's
   index, and the `host:port` of each of those indexes for the egress proxy. Credentials are decrypted only when
@@ -5042,7 +5055,10 @@ misreads (e.g. `token=token, …` in `lakana login`) — never a pattern broad e
 credential. Prefer fixture tokens that don't trip the rules at all; allowlist one only when the
 test needs its shape (e.g. the SDK's masking tests, which need a secret with underscores and
 dashes). gitleaks scans every commit in a PR, so a false positive in any earlier commit needs an
-allowlist entry even after the line has changed. The `secrets` job runs the gitleaks command line
+allowlist entry even after the line has changed. Scope such an entry to the commits that carry the
+line (an `[[allowlists]]` table with `condition = "AND"`, `commits` and `regexes`): a global line
+entry for a fake key header also hides a real key written right after it, because the
+private-key rule's match runs on to the next key's header. The `secrets` job runs the gitleaks command line
 (MIT) from one pinned release whose SHA-256 is checked, not the gitleaks GitHub Action, which needs
 a paid licence key for a repository owned by an organisation; raise the version and the checksum
 together from the release's checksums file. Any

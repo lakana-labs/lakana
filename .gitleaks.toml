@@ -1,11 +1,13 @@
 # gitleaks configuration: the default rules, plus an allowlist of exact literals that
 # only look like secrets — test-fixture token values and specific code lines the
 # generic-api-key rule misreads. Every entry must be an exact literal, never a
-# pattern broad enough to hide a real credential.
+# pattern broad enough to hide a real credential. A fake key line that only old commits of a
+# pull request still carry is allowed in those commits alone (commits AND regexes), so the
+# literal can never hide a real key written next to it elsewhere.
 [extend]
 useDefault = true
 
-[allowlist]
+[[allowlists]]
 description = "Fake fixture tokens in SDK/CLI tests, and code lines misread as keys"
 regexTarget = "line"
 regexes = [
@@ -31,7 +33,30 @@ regexes = [
   # reads those commits.
   '''eyJhbGciOiJSUzI1NiIsImtpZCI6Ii4uLiJ9.eyJpc3MiOiIuLi4ifQ.c2lnbmF0dXJl''',
   '''lakana_ci_3f2a9c1b7d4e8f60_8m1Zr0qWn5x7sK2bVt9yLcD4gH6jA0pE3uF5iO7wQ1s''',
-  # A made-up key block that commit 9d15db8 of #279 had in test_ca_bundle.py (now built from
-  # parts); the pull request's commit scan still reads that commit.
+]
+
+[[allowlists]]
+# A made-up key block that commit 9d15db8 of #279 had in test_ca_bundle.py (now built from
+# parts); the pull request's commit scan still reads that commit.
+description = "A fake key line of #279, in the commit that had it"
+condition = "AND"
+commits = ["9d15db89705f464caa1bf412f34bd69ea4ba2a20"]
+regexTarget = "line"
+regexes = [
   '''path\.write_bytes\(_PEM \+ b"-----BEGIN PRIVATE KEY-----\\nMIIE\\n-----END PRIVATE KEY-----\\n"\)''',
+]
+
+[[allowlists]]
+# A made-up key header that commits c8b101f and d38b32a of #292 had in test_trust.py (now
+# built from parts); the pull request's commit scan still reads those commits.
+description = "Fake key lines of #292, in the commits that had them"
+condition = "AND"
+commits = [
+  "c8b101f5d4afc51852457fd6ac9fd3ebacc683c7",
+  "d38b32a9366e78820b5d94cc0de9bc2e70589b7e",
+]
+regexTarget = "line"
+regexes = [
+  '''_KEY = b"-----BEGIN PRIVATE KEY-----\\nAA==\\n"''',
+  '''\(_CERTIFICATE \+ b"-----BEGIN PRIVATE KEY-----\\nAA==\\n", "also holds a private key"\),''',
 ]

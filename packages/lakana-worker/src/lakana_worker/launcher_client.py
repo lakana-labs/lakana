@@ -53,6 +53,29 @@ class LauncherRefused(Exception):
     """The launcher refused the request; the text is its reason."""
 
 
+RELEASE_SKEW = (
+    "The worker and the launcher are different releases, so they disagree on the request's "
+    "fields: an operator upgrades both to the same release (docker compose pull, then up -d)"
+)
+"""What a refusal of a request's field set means, whichever of the two is the older."""
+
+
+def release_skew(reason: str) -> bool:
+    """Say whether a refusal is about the request's field set, not its values.
+
+    Parameters
+    ----------
+    reason
+        The launcher's refusal; a launcher of an earlier release words it the same way.
+
+    Returns
+    -------
+    bool
+        Whether it reads ``<op> takes exactly the fields …``.
+    """
+    return "takes exactly the fields" in reason
+
+
 class LauncherTimedOut(Exception):
     """No result arrived before the caller's deadline; the connection was closed.
 

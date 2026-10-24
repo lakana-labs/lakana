@@ -380,18 +380,18 @@ registered package indexes; see [What a deploy checks](#what-a-deploy-checks) an
 | `LAKANA_RUN__INDEX_URL` | unset | An extra package index for the build (passed to uv as `UV_INDEX`). A credential goes in the URL's userinfo (`https://user:token@host/simple`, redacted from logs); a URL with a query string (`?token=...`) is refused at startup. Only userinfo is redacted from logs, **a token in the path is not**. The server and the worker do not refuse such a URL: when a path segment looks like a token (16 or more letters, digits and `-_.~%+`, with a digit or a capital letter among them; the form `https://host/<token>/simple/`), they start and log one warning at startup that names this setting and not the URL. If it is a token, move it into the userinfo; if it is a project or repository name, nothing needs doing. A token shorter than 16 characters in the path is not recognised, so there is no warning and it is not redacted: do not put one there. |
 | `LAKANA_RUN__HTTPS_PROXY` | unset | Local runner only: refused with `docker`. Proxy for the build. A credential goes in the userinfo (`http://user:password@host:3128`); a URL with a query string is refused at startup; a path segment that looks like a token is warned about at startup, as for `LAKANA_RUN__INDEX_URL`. |
 | `LAKANA_RUN__NO_PROXY` | unset | Local runner only. Hosts that bypass the proxy. |
-| `LAKANA_RUN__CA_BUNDLE` | unset | Local runner only: refused with `docker`. An absolute path of a PEM file the build trusts. |
+| `LAKANA_RUN__CA_BUNDLE` | unset | Both runners. An absolute path of a PEM file of private certificate authorities that builds and tasks trust in addition to Mozilla's roots; only its certificate blocks are used, and a file with a private key, without a certificate or over 1 MiB stops the worker at start. See [The trust bundle of builds and tasks](network-settings.md#the-trust-bundle-of-builds-and-tasks). |
 | `LAKANA_RUN__RUNNER` | `local` | How Python tasks run: `local`, as processes of the worker (not isolated from it), or `docker`, each task and each environment build in a container of its own that the launcher service starts. Another value stops the worker at start. |
 | `LAKANA_RUN__LAUNCHER_SOCKET` | `/run/lakana-launcher/launcher.sock` | With `docker`: the launcher's socket, in a volume the worker and the launcher share. An absolute path. |
 | `LAKANA_RUN__TASK_MEMORY` | `2GB` | With `docker`: the memory limit of each task container and build container, outside the worker's own limit. Binary units (`1GB` is `1024MB`), at least `64MB`. |
 | `LAKANA_RUN__TASK_CPUS` | `1` | With `docker`: the CPUs of each task container and build container (above 0). |
 | `LAKANA_RUN__TASK_PIDS` | `256` | With `docker`: the most processes in each task container and build container (16 or more). |
 
-With `LAKANA_RUN__RUNNER=docker`, `LAKANA_RUN__HTTPS_PROXY` and `LAKANA_RUN__CA_BUNDLE` are refused
-at start: builds reach the package indexes through the egress service, and a build container
-trusts only the publicly trusted certificate authorities of its task image. A package index or a
-proxy whose certificate a private certificate authority signed therefore needs
-`LAKANA_RUN__RUNNER=local` for now ([#292](https://github.com/lakana-labs/lakana/issues/292); see
+With `LAKANA_RUN__RUNNER=docker`, `LAKANA_RUN__HTTPS_PROXY` is refused at start: builds reach
+the package indexes through the egress service. A package index whose certificate a private
+certificate authority signed works with both runners once `LAKANA_RUN__CA_BUNDLE` names that
+authority's certificate: the worker mounts the trust bundle read-only into each build and task
+container (see
 [Run Python tasks in containers](../how-to/run-python-tasks-in-containers.md#package-indexes-and-proxies)). The egress service lets a build reach the host and port of each
 package index its project uses (port 443 unless the index's URL names another, with a credential
 or without); it tunnels https only, so an `http://` index cannot be
@@ -406,9 +406,12 @@ kill grace and 15 minutes fails as `timed out: the launcher reported no end of t
 worker then closes its connection, which makes the launcher remove the container, and
 `docker compose logs launcher` has the reason.
 
-`LAKANA_RUN__INDEX_URL`, `LAKANA_RUN__HTTPS_PROXY`, `LAKANA_RUN__NO_PROXY` and
-`LAKANA_RUN__CA_BUNDLE` follow the rules of the `LAKANA_GIT__*` settings (see [Git network settings](network-settings.md#git-network-settings)); the
+`LAKANA_RUN__INDEX_URL`, `LAKANA_RUN__HTTPS_PROXY` and `LAKANA_RUN__NO_PROXY` follow the rules
+of the `LAKANA_GIT__*` settings (see [Git network settings](network-settings.md#git-network-settings)); the
 index and the proxy may carry a password, and it is redacted from errors, logs and uv's output.
+`LAKANA_RUN__CA_BUNDLE` does not: it adds to Mozilla's roots, where `LAKANA_GIT__CA_BUNDLE`
+replaces the system store (see
+[The trust bundle of builds and tasks](network-settings.md#the-trust-bundle-of-builds-and-tasks)).
 Set `LAKANA_RUN__*` where the worker reads them. Related settings are
 `LAKANA_RUN__DRAIN_GRACE_SECONDS` and `LAKANA_TASK_TOKENS__MAX_TTL_SECONDS`. The latter caps the
 lifetime of every task token and is read by the server and by the worker: set it to the same value

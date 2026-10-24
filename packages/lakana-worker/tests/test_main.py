@@ -18,6 +18,7 @@ from typing import cast
 from unittest import mock
 
 import pytest
+from tls_fixture import make_authority
 
 from lakana_core.audit.content import install_query_text, stored_query_text
 from lakana_core.config import Settings
@@ -145,7 +146,7 @@ def test_main_wires_settings_and_engine_into_poll_forever(
     monkeypatch.setenv("LAKANA_RUN__LEASE_SECONDS", "30")
     monkeypatch.setenv("LAKANA_QUERY_LIMITS__TIMEOUT_SECONDS", "120")
     bundle = tmp_path / "ca.pem"
-    bundle.write_text("x")
+    bundle.write_text(make_authority(tmp_path).ca_file.read_text())
     monkeypatch.setenv("LAKANA_GIT__CA_BUNDLE", str(bundle))
     monkeypatch.setenv("LAKANA_GIT__HTTPS_PROXY", "http://proxy.corp:3128")
     monkeypatch.setenv("LAKANA_GIT__NO_PROXY", "gitlab.corp")
@@ -226,7 +227,10 @@ def test_main_wires_settings_and_engine_into_poll_forever(
     assert python.venvs.index_url == "https://svc:hunter2@pypi.corp/simple"
     assert python.venvs.https_proxy == "http://svc:hunter2@proxy.corp:3128"
     assert python.venvs.no_proxy == "pypi.corp"
-    assert python.venvs.ca_bundle == bundle
+    trust = python.venvs.ca_bundle
+    assert trust is not None and trust.parent == tmp_path / "xdg" / "lakana-worker"
+    assert trust.read_text().rstrip().endswith(bundle.read_text().rstrip())
+    assert python.runner._trust == trust
     assert "hunter" not in repr(python)
     assert isinstance(python.runner, LocalProcessRunner)
     assert math.isclose(python.runner._kill_grace, 3.0)
@@ -2135,3 +2139,95 @@ def test_a_docker_worker_that_finds_nothing_left_says_nothing_about_it(
 
     assert "Python tasks run in containers through the launcher" in caplog.text
     assert "Removed" not in caplog.text
+
+
+@pytest.mark.parametrize("runner", ["local", "docker"])
+def test_a_run_ca_bundle_with_a_private_key_stops_the_worker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, runner: str
+) -> None:
+    """Every task could read the bundle: a key in it stops the worker, naming the setting."""
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg"))
+    combined = tmp_path / "combined.pem"
+    combined.write_bytes(
+        make_authority(tmp_path).ca_file.read_bytes()
+        + b"-----BEGIN PRIVATE KEY-----\nKEYBYTES\n-----END PRIVATE KEY-----\n"
+    )
+    settings = Settings(
+        database={"url": f"sqlite:///{tmp_path}/lakana.db"},  # type: ignore[arg-type]
+        run={"runner": runner, "ca_bundle": str(combined)},  # type: ignore[arg-type]
+    )
+    with pytest.raises(SystemExit) as caught:
+        _python_runtime(settings, PythonSupport(server_url="http://s", uv="/bin/uv"))
+    assert "LAKANA_RUN__CA_BUNDLE" in str(caught.value)
+    assert "private key" in str(caught.value)
+    assert "KEYBYTES" not in str(caught.value)
+    assert not list((tmp_path / "xdg").glob("**/trust*.pem"))
+
+
+def test_the_docker_runner_and_its_builds_get_the_workers_bundle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Both DockerRunner and DockerEnvironments hold the same validated bytes in memory."""
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg"))
+    operator = tmp_path / "ca.pem"
+    operator.write_bytes(make_authority(tmp_path).ca_file.read_bytes())
+    settings = Settings(
+        database={"url": f"sqlite:///{tmp_path}/lakana.db"},  # type: ignore[arg-type]
+        run={"runner": "docker", "ca_bundle": str(operator)},  # type: ignore[arg-type]
+    )
+    runtime = _python_runtime(settings, PythonSupport(server_url="http://s", uv="/bin/uv"))
+    assert runtime.environments is not None and isinstance(runtime.environments.trust, bytes)
+    assert runtime.runner._trust == runtime.environments.trust  # ty: ignore[unresolved-attribute]
+    assert runtime.environments.trust.endswith(operator.read_bytes())
+
+
+def test_an_unwritable_cache_for_the_trust_bundle_stops_the_worker_with_the_cause(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A file where the cache directory should be: a message naming the path, no traceback."""
+    cache_home = tmp_path / "xdg"
+    cache_home.mkdir()
+    (cache_home / "lakana-worker").write_bytes(b"in the way")
+    monkeypatch.setenv("XDG_CACHE_HOME", str(cache_home))
+    operator = tmp_path / "ca.pem"
+    operator.write_bytes(make_authority(tmp_path).ca_file.read_bytes())
+    settings = Settings(
+        database={"url": f"sqlite:///{tmp_path}/lakana.db"},  # type: ignore[arg-type]
+        run={"ca_bundle": str(operator)},  # type: ignore[arg-type]
+    )
+    with pytest.raises(SystemExit, match=r"cannot write the trust bundle to .*lakana-worker"):
+        _python_runtime(settings, PythonSupport(server_url="http://s", uv="/bin/uv"))
+
+
+def test_a_docker_runner_worker_with_an_unwritable_cache_still_starts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Containers get the bundle's bytes; only the local runner writes a file to the cache."""
+    cache_home = tmp_path / "xdg"
+    cache_home.mkdir()
+    (cache_home / "lakana-worker").write_bytes(b"in the way")
+    monkeypatch.setenv("XDG_CACHE_HOME", str(cache_home))
+    operator = tmp_path / "ca.pem"
+    operator.write_bytes(make_authority(tmp_path).ca_file.read_bytes())
+    settings = Settings(
+        database={"url": f"sqlite:///{tmp_path}/lakana.db"},  # type: ignore[arg-type]
+        run={"runner": "docker", "ca_bundle": str(operator)},  # type: ignore[arg-type]
+    )
+    runtime = _python_runtime(settings, PythonSupport(server_url="http://s", uv="/bin/uv"))
+    assert runtime.environments is not None and isinstance(runtime.environments.trust, bytes)
+    assert runtime.venvs.ca_bundle is None
+
+
+def test_a_docker_runner_worker_writes_no_trust_file_to_the_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No ``trust-<digest>.pem`` accumulates in a cache the Docker runner never reads it from."""
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg"))
+    operator = tmp_path / "ca.pem"
+    operator.write_bytes(make_authority(tmp_path).ca_file.read_bytes())
+    settings = Settings(
+        database={"url": f"sqlite:///{tmp_path}/lakana.db"},  # type: ignore[arg-type]
+        run={"runner": "docker", "ca_bundle": str(operator)},  # type: ignore[arg-type]
+    )
+    _python_runtime(settings, PythonSupport(server_url="http://s", uv="/bin/uv"))
+    assert not list((tmp_path / "xdg").glob("**/trust*.pem"))

@@ -2,24 +2,16 @@
 
 from __future__ import annotations
 
-import io
 import json
 import os
 import socket
-import tarfile
 import uuid
 from collections.abc import Iterator
-from pathlib import Path
 
 import pytest
-from docker_stack import Stack, build_task_image, docker_client, stack
-
-import lakana_worker.launcher
+from docker_stack import Stack, build_task_image, docker_client, stack, start_egress
 
 pytestmark = [pytest.mark.integration, pytest.mark.docker]
-
-_APP = "/opt/lakana-task"
-"""Where the proxy's source and key go in its container: a directory the task image has."""
 
 _PROBE = r"""
 import base64, http.client, json, os, socket
@@ -50,44 +42,6 @@ print(json.dumps({
 """
 
 
-def _package() -> bytes:
-    """Pack the launcher package for a container that runs the proxy from source.
-
-    Returns
-    -------
-    bytes
-        A tar of `lakana_worker/__init__.py` and `lakana_worker/launcher/`.
-    """
-    buffer = io.BytesIO()
-    root = Path(lakana_worker.launcher.__file__).parent
-    with tarfile.open(fileobj=buffer, mode="w") as archive:
-        archive.add(root.parent / "__init__.py", arcname="lakana_worker/__init__.py")
-        for path in root.glob("*.py"):
-            archive.add(path, arcname=f"lakana_worker/launcher/{path.name}")
-    return buffer.getvalue()
-
-
-def _key_archive(key: bytes) -> bytes:
-    """Pack the launcher's key file, readable by the proxy's user only.
-
-    Parameters
-    ----------
-    key
-        The key file's content.
-
-    Returns
-    -------
-    bytes
-        A tar of `egress.key`.
-    """
-    buffer = io.BytesIO()
-    with tarfile.open(fileobj=buffer, mode="w") as archive:
-        info = tarfile.TarInfo("egress.key")
-        info.size, info.mode, info.uid, info.gid = len(key), 0o400, 10001, 10001
-        archive.addfile(info, io.BytesIO(key))
-    return buffer.getvalue()
-
-
 @pytest.fixture(scope="module")
 def running(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Stack]:
     """Start a stack with an egress service run from this checkout's proxy.
@@ -112,28 +66,7 @@ def running(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Stack]:
     image = build_task_image(client)
     with stack(client, image, tmp_path_factory.mktemp("egress")) as current:
         assert current.launcher is not None
-        key = current.launcher.settings.egress_key.read_bytes()
-        egress = client.containers.create(
-            image,
-            [
-                "python",
-                "-I",
-                "-S",
-                "-c",
-                "import sys; sys.path.insert(0, '" + _APP + "'); "
-                "from lakana_worker.launcher.egress import main; main()",
-            ],
-            user="10001:10001",
-            environment={"LAKANA_EGRESS__KEY": f"{_APP}/egress.key"},
-            labels={
-                **current.labels,
-                "com.docker.compose.project": current.name,
-                "com.docker.compose.service": "egress",
-            },
-        )
-        egress.put_archive(_APP, _package())
-        egress.put_archive(_APP, _key_archive(key))
-        egress.start()
+        start_egress(current)
         yield current
 
 
