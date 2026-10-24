@@ -170,6 +170,35 @@ The time falls to a fifth on both versions. The memory of this package alone was
 since `core = "ctrace"` (see "Memory, Python 3.14" above) and falls by about 5 %; the 3.14
 processes stay heavier than those of 3.13 by about 20 to 30 MB here.
 
+### The server tests copy one catalog and skip fsync (#327)
+
+Every server test still gets its own SQLite file and its own app; two costs are shared instead.
+
+- **The schema is created once per process.** `catalog_template` (session scope, in
+  `packages/lakana-server/tests/conftest.py`) runs `Base.metadata.create_all` into a read-only
+  file; `settings` copies it into the test's `tmp_path` (under a millisecond, against about
+  0.7 s for the schema). A test that builds its own `Settings` with a fresh file still pays the
+  0.7 s; copy `catalog_template` instead when there are many of them.
+- **SQLite commits do not wait for the disk.** `_sqlite_commits_without_fsync` registers a
+  `connect` listener on every engine of the server test process that sets
+  `PRAGMA synchronous=OFF`. No unit test can observe durability across a power cut; WAL,
+  foreign keys and the busy timeout still come from `lakana_core.db`. Postgres connections
+  are left alone.
+- `tests/test_test_hygiene.py` pins both: each test's copy has the full schema and sees no
+  other test's write (in either order), the template is read-only, and the production pragmas
+  are still in force.
+
+Measured 2026-10-24, `packages/lakana-server` alone, Python 3.14, `-n 2 --dist loadfile`, no
+coverage, 6 GB scope, `--basetemp` on disk: 1,099 s before, 116 s after; the 902 tests under
+`tests/api/` from 1.99 s to 0.17 s each on average (setup and teardown included). Random order
+(`uv run --with pytest-randomly`, two seeds) passes too.
+
+Almost all of that was waiting for the disk: the schema takes about 1 s with `fsync` on that disk
+and 14 ms without. Where `fsync` is cheap (a `tmpfs` such as `/tmp` on this machine, or CI's
+runners) the gain is small: CI's unit steps took as long after the change as before (3.14 with
+coverage 19.3 against 18.4 min, 3.11 15.2 against 13.9 min, within run-to-run noise). The
+change pays off for a `--basetemp` on a real disk, as the agents' capped runs use.
+
 ## Pull requests that change documentation only
 
 A pull request that changes nothing but documentation skips the heavy jobs: `lint`, the `unit`
@@ -1020,7 +1049,10 @@ the test, the budget, and the next step.
   `test (3.14)` runs `time_budgets.py slow-tests --confirm junit/*.xml` over them. One
   measurement in a busy shard is noisy (between two runs a test of 0.6 s once took 2.4 s), so an
   unmarked test over the threshold is run again on its own, serially and under coverage, and
-  fails only if it is that slow again; the log names each one counted as noise. A new test over
+  fails only if it takes `confirm_seconds` (2.5 s, in `scripts/time-budgets.toml` beside the
+  threshold) or more there: a margin, because a test that sits at the 2 s threshold passed and
+  failed on the same code. The in-shard threshold stays 2 s for flagging; the log names each one
+  counted as noise. A new test over
   the threshold fails with its name and both times: make it faster (a smaller fixture, no real sleep, a shared app;
   see "The CLI tests share one app" for what that once saved), or mark it slow and make another
   slow test fast. Each case of a parametrized test counts. When the number falls the check passes
