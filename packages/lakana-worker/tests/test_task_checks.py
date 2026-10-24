@@ -135,6 +135,7 @@ def test_a_failed_blocking_check_is_permanent_and_the_build_runs_once(world: Wor
     assert (rolled["outcome"], rolled["checks"]) == ("unpublished", ["silver.orders/unique_id"])
 
 
+@pytest.mark.slow
 def test_passing_checks_leave_the_task_succeeded(world: World) -> None:
     _checked(
         world,
@@ -160,6 +161,7 @@ def test_passing_checks_leave_the_task_succeeded(world: World) -> None:
     assert (attempt.outcome, attempt.rows_written) == (AttemptOutcome.SUCCEEDED, 3)
 
 
+@pytest.mark.slow
 def test_a_warning_check_does_not_block(world: World) -> None:
     _checked(world, _check("unique_id", _DUPLICATE_IDS, on_failure="warn"))
     _start(world)
@@ -182,6 +184,7 @@ def test_a_warning_check_does_not_block(world: World) -> None:
     assert _events(world, AuditEventType.TABLE_ROLLED_BACK) == []
 
 
+@pytest.mark.slow
 def test_every_check_runs_also_after_one_failed(world: World) -> None:
     """Spec section 5: one run reports every failure."""
     _checked(
@@ -451,6 +454,7 @@ def test_a_task_without_checks_runs_exactly_as_before(
     assert "check" not in _log(world, run_id, "gold.daily")
 
 
+@pytest.mark.slow
 def test_the_task_log_lists_the_checks_and_the_rollback(world: World) -> None:
     _checked(
         world,
@@ -601,6 +605,7 @@ def test_a_build_that_failed_for_good_without_a_write_stays_failed_and_unchecked
     assert not _exists(world, "silver.orders")
 
 
+@pytest.mark.slow
 def test_a_deactivated_principal_after_the_write_makes_every_check_errored(
     world: World, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -686,6 +691,7 @@ def test_the_error_of_a_check_holds_no_value_of_the_table(world: World) -> None:
         assert "Alice" not in text and "Smith" not in text
 
 
+@pytest.mark.slow
 def test_no_rows_into_a_table_that_is_not_published_ends_failed_and_still_not_published(
     world: World, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -731,6 +737,7 @@ def test_no_rows_into_a_table_that_is_not_published_ends_failed_and_still_not_pu
         assert run is not None and run.status is RunStatus.FAILED  # nothing loops
 
 
+@pytest.mark.slow
 def test_no_new_rows_in_a_published_table_leave_it_alone_when_a_check_fails(
     world: World,
 ) -> None:
@@ -998,6 +1005,7 @@ def test_the_counts_run_under_the_installations_query_limits_as_the_run_principa
     assert call["spec"].name == "silver.orders/unique_id"
 
 
+@pytest.mark.slow
 def test_the_checks_run_as_the_run_principal_not_as_the_trigger_or_the_deployer(
     world: World, monkeypatch: pytest.MonkeyPatch
 ) -> None:

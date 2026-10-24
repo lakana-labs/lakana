@@ -6,6 +6,7 @@ from datetime import timedelta
 from pathlib import Path
 
 import pyarrow as pa
+import pytest
 from fastapi.testclient import TestClient
 from pyiceberg.table.update import RemoveSnapshotRefUpdate, SetSnapshotRefUpdate
 from sqlalchemy import select, update
@@ -1136,6 +1137,7 @@ def _head_of_sales(settings: Settings) -> int:
         engine.dispose()
 
 
+@pytest.mark.slow
 def test_an_unbound_task_token_is_refused_a_kept_table_over_the_iceberg_load(
     client: TestClient, storage_root: str, settings: Settings
 ) -> None:

@@ -14,15 +14,24 @@ WORKFLOWS = ROOT / ".github" / "workflows"
 SKIPPED_JOBS = {
     "ci.yml": (
         "lint",
+        "unit",
         "integration",
+        "integration-services",
+        "integration-docker",
+        "integration-assets",
         "five-minute",
         "compose-smoke",
         "docs-examples",
+        "unit-macos",
         "test-macos",
+        "quarantine",
     ),
     "security.yml": ("static",),
 }
-ALWAYS_RUN = {"ci.yml": ("changes", "test", "docs"), "security.yml": ("changes", "secrets")}
+ALWAYS_RUN = {
+    "ci.yml": ("changes", "test", "docs", "budgets"),
+    "security.yml": ("changes", "secrets"),
+}
 HEAVY_ONLY = "!cancelled() && needs.changes.outputs.docs_only != 'true'"
 
 
@@ -154,7 +163,9 @@ def test_the_changes_job_cannot_skip_the_pipeline_by_failing(workflow: str) -> N
 def test_heavy_jobs_are_skipped_only_for_a_docs_only_change(workflow: str, name: str) -> None:
     """A heavy job runs unless the detection said "docs only", also when detection failed."""
     job = _jobs(workflow)[name]
-    assert job["needs"] == "changes"
+    # A job that collects others (`integration`, `test (macos)`) waits for `changes` first.
+    needs = job["needs"] if isinstance(job["needs"], list) else [job["needs"]]
+    assert needs[0] == "changes"
     if workflow == "ci.yml":
         # ci.yml's jobs add conditions of their own (a draft, a commit tested already); each is
         # a further `&&` term, and none replaces the docs-only one. The terms are pinned in
@@ -170,7 +181,7 @@ def test_heavy_jobs_are_skipped_only_for_a_docs_only_change(workflow: str, name:
 def test_the_test_job_always_reports_and_runs_the_docs_tests() -> None:
     """``test (3.11)`` and ``test (3.14)`` are required: the job never skips for a pull request."""
     job = _jobs("ci.yml")["test"]
-    assert job["needs"] == "changes"
+    assert job["needs"] == ["changes", "unit"]
     # The only condition is the one that skips a push to main already tested (change in
     # test_workflows.py); never one that depends on the pull request's content.
     assert "docs_only" not in job.get("if", "")
@@ -178,8 +189,7 @@ def test_the_test_job_always_reports_and_runs_the_docs_tests() -> None:
     docs_only = "needs.changes.outputs.docs_only == 'true'"
     assert steps["Documentation tests"]["if"] == docs_only
     assert steps["Documentation tests"]["run"] == "uv run pytest scripts/tests"
-    for name in ("Unit tests", "Unit tests (with coverage)"):
-        assert steps[name]["if"].endswith("&& needs.changes.outputs.docs_only != 'true'")
+    assert steps["Unit test shards"]["if"] == "needs.changes.outputs.docs_only != 'true'"
     assert steps["Coverage ratchet"]["if"] == (
         "matrix.python-version == '3.14' && needs.changes.outputs.docs_only != 'true'"
     )
@@ -192,7 +202,10 @@ def test_the_test_job_always_reports_and_runs_the_docs_tests() -> None:
 def test_jobs_that_guard_every_change_have_no_condition(workflow: str, name: str) -> None:
     """The detection, the tests and the secret scan run on every pull request."""
     assert "docs_only" not in _jobs(workflow)[name].get("if", "")
-    if name != "test":
+    if name == "budgets":
+        # It waits for the other jobs and must still run after one of them failed.
+        assert _jobs(workflow)[name]["if"] == "${{ !cancelled() }}"
+    elif name != "test":
         assert "if" not in _jobs(workflow)[name]
 
 

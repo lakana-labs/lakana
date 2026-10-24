@@ -97,6 +97,8 @@ markers = [
     "unit: fast tests requiring no external services",
     "integration: tests requiring Postgres or object storage",
     "docker: tests that start containers through the Docker Engine (also marked integration)",
+    "slow: a unit test that takes 2 s or more; their number may fall, never rise (scripts/slow-tests-baseline.json)",
+    "quarantine(issue): a flaky test, skipped in the required jobs until its issue is fixed",
 ]
 # packages/conftest.py and scripts/conftest.py load `scripts.pytest_memory_limit`, which stops
 # a test run that uses too much resident memory (docs/agent/testing.md, "Memory limit").

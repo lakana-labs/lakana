@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -532,6 +533,7 @@ def test_list_is_filtered_by_grants(client: TestClient, settings: Settings, tmp_
     assert denials_after == denials_before
 
 
+@pytest.mark.slow
 def test_task_token_lists_only_its_own_environment(client: TestClient, tmp_path: Path) -> None:
     """A task token for the admin, scoped to dev, lists dev only, not everything the admin could."""
     _create(client, tmp_path, "dev")

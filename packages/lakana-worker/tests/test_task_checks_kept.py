@@ -365,6 +365,7 @@ def test_a_source_check_never_moves_the_note_of_an_asset_task(world: World) -> N
     assert _events(world, AuditEventType.TABLE_KEPT_CLEARED) == []
 
 
+@pytest.mark.slow
 def test_a_passing_check_phase_clears_the_note(world: World) -> None:
     _checked(world, _check("unique_id", _DUPLICATE_IDS, on_failure="keep"))
     first = _start(world)
@@ -390,6 +391,7 @@ def test_a_passing_check_phase_clears_the_note(world: World) -> None:
     }
 
 
+@pytest.mark.slow
 def test_a_check_phase_that_fails_again_moves_the_note_to_the_new_run(world: World) -> None:
     _checked(world, _check("unique_id", _DUPLICATE_IDS, on_failure="keep"))
     _start(world)
@@ -426,6 +428,7 @@ def _earlier_notes_of(world: World, dotted: str) -> list[dict[str, object]]:
         return list(session.scalars(select(Table.kept_earlier).where(Table.id == table_id)).one())
 
 
+@pytest.mark.slow
 def test_the_notes_of_later_runs_stack_and_a_passing_phase_stacks_the_mark_it_clears(
     world: World,
 ) -> None:
@@ -449,6 +452,7 @@ def test_the_notes_of_later_runs_stack_and_a_passing_phase_stacks_the_mark_it_cl
     assert [entry.get("run_id") for entry in stack] == [None, str(first), str(second)]
 
 
+@pytest.mark.slow
 def test_a_set_back_of_a_later_kept_run_puts_the_earlier_mark_back(
     world: World, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -487,6 +491,7 @@ def test_a_set_back_of_a_later_kept_run_puts_the_earlier_mark_back(
     assert described.state == "kept" and str(first) in (described.state_message or "")
 
 
+@pytest.mark.slow
 def test_a_set_back_after_another_runs_clear_puts_the_earlier_mark_back(
     world: World, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -537,6 +542,7 @@ def test_a_set_back_after_another_runs_clear_puts_the_earlier_mark_back(
     assert event["kept_restored"]["run_id"] == str(first)
 
 
+@pytest.mark.slow
 def test_a_clear_lands_with_the_success_or_not_at_all(
     world: World, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -575,6 +581,7 @@ def _snapshot_verdict_of(world: World, dotted: str) -> int | None:
         return session.scalars(select(Table.kept_snapshot_id).where(Table.id == table_id)).one()
 
 
+@pytest.mark.slow
 def test_a_clear_does_not_remove_a_mark_noted_while_its_checks_ran(
     world: World, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -603,6 +610,7 @@ def test_a_clear_does_not_remove_a_mark_noted_while_its_checks_ran(
     assert _events(world, AuditEventType.TABLE_KEPT_CLEARED) == []
 
 
+@pytest.mark.slow
 def test_a_passing_write_records_its_verdict_when_another_run_cleared_the_mark_first(
     world: World, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -636,6 +644,7 @@ def test_a_passing_write_records_its_verdict_when_another_run_cleared_the_mark_f
     assert _snapshot_verdict_of(world, "silver.orders") not in (None, KEPT_SNAPSHOT_UNKNOWN)
 
 
+@pytest.mark.slow
 def test_a_failing_clear_does_not_record_the_success(
     world: World, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -656,6 +665,7 @@ def test_a_failing_clear_does_not_record_the_success(
     assert _note_of(world, "silver.orders") == (first, first_task, "silver.orders/unique_id")
 
 
+@pytest.mark.slow
 def test_clean_writes_keep_the_verdict_snapshot_of_an_unmarked_table_current(
     world: World,
 ) -> None:
@@ -675,6 +685,7 @@ def test_clean_writes_keep_the_verdict_snapshot_of_an_unmarked_table_current(
     assert refreshed == task.written_snapshot_after != cleared_at
 
 
+@pytest.mark.slow
 def test_a_later_block_failure_rolls_back_to_the_kept_data_and_the_note_stays(
     world: World,
 ) -> None:
@@ -707,6 +718,7 @@ def test_a_later_block_failure_rolls_back_to_the_kept_data_and_the_note_stays(
     assert described.state == "kept"
 
 
+@pytest.mark.slow
 def test_a_block_failure_leaves_no_note(world: World) -> None:
     _checked(
         world,
@@ -722,6 +734,7 @@ def test_a_block_failure_leaves_no_note(world: World) -> None:
     assert _events(world, AuditEventType.TABLE_KEPT) == []
 
 
+@pytest.mark.slow
 def test_a_rebuild_without_checks_clears_the_note(world: World) -> None:
     _checked(world, _check("unique_id", _DUPLICATE_IDS, on_failure="keep"))
     _start(world)
@@ -745,6 +758,7 @@ def test_a_rebuild_without_checks_clears_the_note(world: World) -> None:
     }
 
 
+@pytest.mark.slow
 def test_a_rebuild_without_checks_does_not_clear_a_mark_another_run_noted_since(
     world: World, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -793,6 +807,7 @@ def test_a_task_without_a_note_writes_nothing_more(world: World, checked: bool) 
     assert _statements_of(world, claimed) == _STATEMENTS[checked]
 
 
+@pytest.mark.slow
 def test_the_next_claim_of_a_written_task_sets_the_note(
     world: World, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -939,6 +954,7 @@ def test_a_keep_check_of_a_table_that_does_not_exist_fails_the_task_and_notes_no
     assert _events(world, AuditEventType.TABLE_KEPT) == []
 
 
+@pytest.mark.slow
 def test_the_next_rebuild_clears_a_note_that_survived_one(
     world: World, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -970,6 +986,7 @@ def test_the_next_rebuild_clears_a_note_that_survived_one(
     assert event["why"] == "rebuilt_without_checks"
 
 
+@pytest.mark.slow
 def test_a_note_that_cannot_be_cleared_after_a_rebuild_does_not_fail_the_build(
     world: World, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1173,6 +1190,7 @@ def _kept_message(first: uuid.UUID) -> str:
     )
 
 
+@pytest.mark.slow
 def test_the_check_task_of_a_later_run_clears_the_note_when_it_passes(world: World) -> None:
     _kept_first_run(world)
     _deploy(world, _check("unique_id", _PASSING, on_failure="keep"))
@@ -1217,6 +1235,7 @@ def test_the_check_task_of_a_later_run_fails_and_keeps_the_note(
     assert not _exists(world, "gold.report")
 
 
+@pytest.mark.slow
 def test_a_kept_table_without_checks_stops_its_readers_until_it_is_rebuilt(world: World) -> None:
     first, first_task = _kept_first_run(world)
     _deploy(world)
@@ -1311,6 +1330,7 @@ def test_the_check_task_of_a_kept_python_assets_table_never_starts_a_process(
     assert _note_of(world, "silver.orders") == (first, first_task, "silver.orders/unique_id")
 
 
+@pytest.mark.slow
 def test_the_older_server_refusal_is_unchanged_by_a_check_task_of_a_kept_table(
     world: World,
 ) -> None:
@@ -1369,6 +1389,7 @@ def test_a_check_task_whose_note_is_gone_before_it_starts_fails_without_the_kept
     assert _note_of(world, "silver.orders") == (None, None, None)
 
 
+@pytest.mark.slow
 def test_a_check_task_whose_note_is_gone_before_it_starts_clears_and_audits_nothing(
     world: World,
 ) -> None:
@@ -1443,6 +1464,7 @@ def test_a_kept_table_behind_a_view_is_refused_too(world: World) -> None:
     assert not _exists(world, "silver.orders")
 
 
+@pytest.mark.slow
 def test_a_check_that_reads_a_kept_table_of_another_run_is_recorded_errored(world: World) -> None:
     """The count of a check runs as its task, and that task has no standing either."""
     _outside_table(world, "bronze.events", [1, 2])
@@ -1528,6 +1550,7 @@ def test_a_keep_check_refused_a_kept_table_sets_no_note(world: World) -> None:
     assert _ids(world, "silver.orders") == [1, 1, 2]
 
 
+@pytest.mark.slow
 def test_a_kept_table_rebuilt_while_its_keep_check_cannot_run_moves_the_mark(
     world: World,
 ) -> None:
@@ -1744,6 +1767,7 @@ def _each_reads_the_other(world: World, *, checked: bool) -> None:
     )
 
 
+@pytest.mark.slow
 def test_two_kept_tables_whose_checks_read_each_other_are_cleared_by_one_run(world: World) -> None:
     """The count of a check reads a kept table of its own project.
 
@@ -1776,6 +1800,7 @@ def test_two_kept_tables_whose_checks_read_each_other_are_cleared_by_one_run(wor
     ]
 
 
+@pytest.mark.slow
 def test_a_reader_of_a_kept_table_is_built_after_its_check_passed(world: World) -> None:
     """The whole path: `RunService` orders the reader after the check task, and it reads."""
     _kept_first_run(world)
@@ -1823,6 +1848,7 @@ def test_a_reader_of_a_kept_table_is_not_built_when_its_check_fails_again(world:
     assert _note_of(world, "silver.orders")[0] == first
 
 
+@pytest.mark.slow
 def test_a_reader_below_the_check_task_reads_a_table_that_still_carries_the_note(
     world: World, monkeypatch: pytest.MonkeyPatch
 ) -> None:

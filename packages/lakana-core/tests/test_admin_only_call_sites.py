@@ -662,6 +662,7 @@ def test_every_public_service_method_checks_the_administrator_or_is_listed(relat
     )
 
 
+@pytest.mark.slow
 def test_no_other_product_module_asks_for_one_of_the_three_actions() -> None:
     """A new call site elsewhere must go into `_GUARDED`, and through the helper."""
     packages = Path(__file__).resolve().parents[2]

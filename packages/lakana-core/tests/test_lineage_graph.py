@@ -380,6 +380,7 @@ def test_a_dropped_node_with_no_recorded_name_is_unreadable(session: Session) ->
     assert securable is None
 
 
+@pytest.mark.slow
 def test_a_wide_graph_is_capped_and_flagged_truncated(
     session: Session, principal: PrincipalRef
 ) -> None:

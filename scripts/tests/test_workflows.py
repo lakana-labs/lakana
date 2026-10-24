@@ -14,6 +14,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from scripts.time_budgets import BUDGETS, JobTime, check_jobs, read_budgets
+
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS = ROOT / ".github" / "workflows"
 
@@ -186,7 +188,7 @@ RUNNER = (
     " || github.event.pull_request.head.repo.full_name == github.repository)"
     " && vars.CI_RUNNER) || 'ubuntu-latest' }}"
 )
-MACOS_JOB = "test-macos"
+MACOS_JOB = "unit-macos"
 SWITCHABLE = ("ci.yml", "security.yml", "conventional.yml", "mutation.yml", "security-deep.yml")
 
 
@@ -458,33 +460,35 @@ def test_lint_keeps_the_read_only_token_while_it_runs_jscpd() -> None:
     assert "permissions" not in workflow["jobs"]["lint"]
 
 
-def _test_steps() -> dict[str, dict]:
-    """Index the steps of the ``test`` job in ``ci.yml`` by name.
+def _test_steps(job: str = "test") -> dict[str, dict]:
+    """Index the steps of a job in ``ci.yml`` by name.
+
+    Parameters
+    ----------
+    job
+        The job: ``test`` (the required checks that collect the shards) or ``unit``.
 
     Returns
     -------
     dict
         Step name to step, for the steps that have a name.
     """
-    return {s["name"]: s for s in _jobs("ci.yml")["test"]["steps"] if "name" in s}
+    return {s["name"]: s for s in _jobs("ci.yml")[job]["steps"] if "name" in s}
+
+
+MEASURED = "matrix.python-version == '3.14' && needs.changes.outputs.docs_only != 'true'"
 
 
 def test_only_the_python_3_14_run_measures_coverage() -> None:
     """The ratchet reads the 3.14 report; measuring on 3.11 costs a third of its run time."""
-    steps = _test_steps()
+    steps = _test_steps("unit")
     measured = steps["Unit tests (with coverage)"]
     plain = steps["Unit tests"]
-    assert (
-        measured["if"]
-        == "matrix.python-version == '3.14' && needs.changes.outputs.docs_only != 'true'"
-    )
+    assert measured["if"] == "matrix.python-version == '3.14'"
     assert "--cov" in measured["run"]
-    assert (
-        plain["if"]
-        == "matrix.python-version != '3.14' && needs.changes.outputs.docs_only != 'true'"
-    )
+    assert plain["if"] == "matrix.python-version != '3.14'"
     assert "--cov" not in plain["run"]
-    assert steps["Coverage ratchet"]["if"] == measured["if"]
+    assert _test_steps()["Coverage ratchet"]["if"] == MEASURED
 
 
 def test_the_3_14_run_uploads_its_coverage_report_also_when_the_ratchet_fails() -> None:
@@ -492,11 +496,82 @@ def test_the_3_14_run_uploads_its_coverage_report_also_when_the_ratchet_fails() 
     steps = _test_steps()
     names = list(steps)
     upload = steps["Upload the coverage report"]
-    assert upload["if"] == "always() && " + steps["Unit tests (with coverage)"]["if"]
+    assert upload["if"] == "always() && " + MEASURED
     assert upload["uses"].startswith("actions/upload-artifact@")
     assert upload["with"]["name"] == "coverage-report"
     assert upload["with"]["path"] == "coverage.json"
     assert names.index("Upload the coverage report") > names.index("Coverage ratchet")
+
+
+def test_the_unit_suite_runs_in_three_shards_per_version() -> None:
+    """Each shard runs a third of the test files, chosen by ``scripts/pytest_selection.py``."""
+    job = _jobs("ci.yml")["unit"]
+    assert job["strategy"]["matrix"]["shard"] == [1, 2, 3]
+    assert job["strategy"]["matrix"]["python-version"] == (
+        '${{ fromJSON(needs.changes.outputs.python_versions || \'["3.11","3.14"]\') }}'
+    )
+    assert job["strategy"]["fail-fast"] is False
+    assert job["name"] == "unit (${{ matrix.python-version }}, ${{ matrix.shard }}/3)"
+    assert job["needs"] == "changes"
+    steps = _test_steps("unit")
+    for name in ("Unit tests (with coverage)", "Unit tests"):
+        assert steps[name]["env"] == {"LAKANA_TEST_SHARD": "${{ matrix.shard }}/3"}
+    # The oldest-Polars step lists its files itself and must not be sharded.
+    assert "env" not in steps["Unit tests on the oldest supported Polars"]
+    assert "LAKANA_TEST_SHARD" not in str(job.get("env", {}))
+
+
+def test_the_3_14_shards_hand_their_coverage_data_and_junit_reports_on() -> None:
+    """``test (3.14)`` combines the data of every shard; one shard alone is not the suite."""
+    unit = _test_steps("unit")
+    assert unit["Keep the coverage data of this shard"]["run"] == (
+        'mv .coverage ".coverage.shard-${{ matrix.shard }}"'
+    )
+    data = unit["Upload the coverage data of this shard"]
+    assert data["with"]["name"] == "coverage-data-${{ matrix.shard }}"
+    assert data["with"]["path"] == ".coverage.shard-${{ matrix.shard }}"
+    assert data["with"]["include-hidden-files"] is True  # `.coverage.*` is a hidden file
+    assert data["with"]["if-no-files-found"] == "error"
+    junit = unit["Upload the junit report of this shard"]
+    assert junit["with"]["name"] == "junit-unit-${{ matrix.shard }}"
+    assert "--junitxml=junit-${{ matrix.shard }}.xml" in unit["Unit tests (with coverage)"]["run"]
+    assert "-o junit_family=xunit1" in unit["Unit tests (with coverage)"]["run"]
+
+    test = _test_steps()
+    names = list(test)
+    download = test["Download the shards' coverage data"]
+    assert download["with"] == {
+        "pattern": "coverage-data-*",
+        "path": "coverage-data",
+        "merge-multiple": True,
+    }
+    assert test["Combine the coverage of the shards"]["run"].splitlines() == [
+        "uv run coverage combine coverage-data",
+        "uv run coverage json",
+        "uv run coverage report --skip-covered --show-missing",
+    ]
+    assert (
+        names.index("Download the shards' coverage data")
+        < names.index("Combine the coverage of the shards")
+        < names.index("Coverage ratchet")
+    )
+    assert test["Slow-test ratchet"]["run"] == (
+        "uv run python scripts/time_budgets.py slow-tests --confirm junit/*.xml"
+    )
+    assert test["Slow-test ratchet"]["if"] == MEASURED
+    assert test["Download the shards' junit reports"]["with"]["pattern"] == "junit-unit-*"
+
+
+def test_the_required_test_checks_pass_only_when_every_shard_did() -> None:
+    """``test (3.11)`` and ``test (3.14)`` fail on any shard that did not succeed."""
+    job = _jobs("ci.yml")["test"]
+    assert job["needs"] == ["changes", "unit"]
+    first = job["steps"][0]
+    assert first["name"] == "Unit test shards"
+    assert first["if"] == "needs.changes.outputs.docs_only != 'true'"
+    assert first["env"] == {"RESULT": "${{ needs.unit.result }}"}
+    assert '[ "$RESULT" != "success" ]' in first["run"]
+    assert "exit 1" in first["run"]
 
 
 def test_both_unit_runs_are_parallel_and_3_14_measures_with_the_c_tracer() -> None:
@@ -507,11 +582,11 @@ def test_both_unit_runs_are_parallel_and_3_14_measures_with_the_c_tracer() -> No
     in ``pyproject.toml`` is what lets the 3.14 run be parallel at all, so the two are pinned
     together. ``addopts`` must not carry ``-n``.
     """
-    steps = _test_steps()
+    steps = _test_steps("unit")
     assert steps["Unit tests"]["run"] == "uv run pytest -n auto --maxprocesses 3 --dist loadfile"
     assert steps["Unit tests (with coverage)"]["run"] == (
-        "uv run pytest -n auto --maxprocesses 2 --dist loadfile"
-        " --cov --cov-report=json --cov-report=term-missing:skip-covered"
+        "uv run pytest -n auto --maxprocesses 2 --dist loadfile --cov --cov-report="
+        " --junitxml=junit-${{ matrix.shard }}.xml -o junit_family=xunit1"
     )
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text())
     assert pyproject["tool"]["coverage"]["run"]["core"] == "ctrace"
@@ -520,9 +595,9 @@ def test_both_unit_runs_are_parallel_and_3_14_measures_with_the_c_tracer() -> No
 
 def test_the_report_names_the_lines_a_miss_is_in() -> None:
     """A flaky branch must be named by the failing run itself."""
-    run = _test_steps()["Unit tests (with coverage)"]["run"]
-    assert "--cov-report=json" in run
-    assert "--cov-report=term-missing:skip-covered" in run
+    run = _test_steps()["Combine the coverage of the shards"]["run"]
+    assert "coverage json" in run
+    assert "coverage report --skip-covered --show-missing" in run
 
 
 def _workflow() -> dict:
@@ -679,23 +754,31 @@ def test_the_python_versions_come_from_the_changes_job() -> None:
     assert "name" not in job
 
 
-HEAVY_ON_READY = ("integration", "five-minute", "compose-smoke")
+HEAVY_ON_READY = (
+    "integration",
+    "integration-services",
+    "integration-docker",
+    "integration-assets",
+    "five-minute",
+    "compose-smoke",
+)
+DRAFT_RUNS = ("lint", "unit", "docs-examples", "test", "docs", "quarantine", "budgets")
 
 
 @pytest.mark.parametrize("name", HEAVY_ON_READY)
 def test_the_jobs_that_wait_for_ready_for_review_carry_the_draft_condition(name: str) -> None:
-    """These three skip while a pull request is a draft, and only then."""
+    """These skip while a pull request is a draft, and only then."""
     assert "needs.changes.outputs.draft != 'true'" in _terms(_jobs("ci.yml")[name]["if"])
 
 
-@pytest.mark.parametrize("name", ["changes", "lint", "test", "docs", "docs-examples"])
+@pytest.mark.parametrize("name", ["changes", *DRAFT_RUNS])
 def test_the_other_jobs_ignore_the_draft_state(name: str) -> None:
     """``lint``, ``docs``, ``docs-examples`` and ``test (3.14)`` run on a draft as before."""
     assert "draft" not in str(_jobs("ci.yml")[name].get("if", ""))
 
 
 @pytest.mark.parametrize("draft", ["false", "", "anything"])
-@pytest.mark.parametrize("name", [*HEAVY_ON_READY, "lint", "docs-examples", "test", "docs"])
+@pytest.mark.parametrize("name", [*HEAVY_ON_READY, *DRAFT_RUNS])
 def test_nothing_is_skipped_for_a_pull_request_that_is_not_a_draft(name: str, draft: str) -> None:
     """Outside a draft, and not docs-only, every job of ``ci.yml`` runs."""
     outputs = {"docs_only": "false", "draft": draft}
@@ -703,11 +786,11 @@ def test_nothing_is_skipped_for_a_pull_request_that_is_not_a_draft(name: str, dr
 
 
 @pytest.mark.parametrize("name", HEAVY_ON_READY)
-def test_a_draft_skips_exactly_the_three_heavy_jobs(name: str) -> None:
-    """On a draft the three jobs are skipped; the guards below keep running."""
+def test_a_draft_skips_exactly_the_heavy_jobs(name: str) -> None:
+    """On a draft the heavy jobs are skipped; the guards below keep running."""
     outputs = {"docs_only": "false", "draft": "true"}
     assert not runs(_jobs("ci.yml")[name], outputs)
-    for kept in ("lint", "docs-examples", "test", "docs"):
+    for kept in DRAFT_RUNS:
         assert runs(_jobs("ci.yml")[kept], outputs)
 
 
@@ -722,21 +805,36 @@ ALREADY_TESTED_OUTPUT = (
     "${{ github.event_name == 'push' && steps.tested.outputs.already_tested == 'true'"
     " && 'true' || 'false' }}"
 )
-SKIPPED_WHEN_TESTED = ("test", "integration", "five-minute", "compose-smoke", "docs-examples")
+SKIPPED_WHEN_TESTED = (
+    "unit",
+    "test",
+    "integration",
+    "integration-services",
+    "integration-docker",
+    "integration-assets",
+    "five-minute",
+    "compose-smoke",
+    "docs-examples",
+    "quarantine",
+)
 TESTED_TERM = "needs.changes.outputs.already_tested != 'true'"
 
 
 def test_the_changes_job_may_read_the_runs_of_the_pull_request() -> None:
-    """The already-tested script reads runs and pull requests: two read permissions, no more."""
+    """The already-tested script reads runs and pull requests: two read permissions, no more.
+
+    The budget job reads the jobs of its own run, and nothing else.
+    """
     changes = _jobs("ci.yml")["changes"]
     assert changes["permissions"] == {
         "contents": "read",
         "pull-requests": "read",
         "actions": "read",
     }
+    assert _jobs("ci.yml")["budgets"]["permissions"] == {"contents": "read", "actions": "read"}
     assert _workflow()["permissions"] == {"contents": "read"}
     for name, job in _jobs("ci.yml").items():
-        assert name == "changes" or "permissions" not in job, name
+        assert name in ("changes", "budgets") or "permissions" not in job, name
 
 
 def test_a_pull_request_event_never_gets_an_answer_from_the_script() -> None:
@@ -761,7 +859,7 @@ def test_the_jobs_a_tested_commit_skips_carry_the_condition(name: str) -> None:
     assert _terms(job["if"])[0] == "!cancelled()"
 
 
-@pytest.mark.parametrize("name", ["changes", "lint", "docs"])
+@pytest.mark.parametrize("name", ["changes", "lint", "docs", "budgets"])
 def test_lint_and_docs_run_on_every_push_to_main(name: str) -> None:
     """``lint`` and ``docs`` are not part of the proof, so they run as before."""
     assert "already_tested" not in str(_jobs("ci.yml")[name].get("if", ""))
@@ -849,31 +947,30 @@ EVENTS = {
     "main, tested": {"docs_only": "false", "draft": "false", "already_tested": "true"},
     "main, not proven": {"docs_only": "false", "draft": "false", "already_tested": "false"},
 }
+_FULL_RUN = {
+    "lint",
+    "unit",
+    "test",
+    "unit-macos",
+    "test-macos",
+    "docs",
+    "docs-examples",
+    "integration",
+    "integration-services",
+    "integration-docker",
+    "integration-assets",
+    "five-minute",
+    "compose-smoke",
+    "quarantine",
+    "budgets",
+}
 WHAT_RUNS = {
-    "push to a draft": {"lint", "test", "docs", "docs-examples"},
-    "ready or later push": {
-        "lint",
-        "test",
-        "test-macos",
-        "docs",
-        "docs-examples",
-        "integration",
-        "five-minute",
-        "compose-smoke",
-    },
-    "documentation only, draft": {"test", "docs"},
-    "documentation only, ready": {"test", "docs"},
-    "main, tested": {"lint", "docs", "test-macos"},
-    "main, not proven": {
-        "lint",
-        "test",
-        "test-macos",
-        "docs",
-        "docs-examples",
-        "integration",
-        "five-minute",
-        "compose-smoke",
-    },
+    "push to a draft": {"lint", "unit", "test", "docs", "docs-examples", "quarantine", "budgets"},
+    "ready or later push": _FULL_RUN,
+    "documentation only, draft": {"test", "docs", "budgets"},
+    "documentation only, ready": {"test", "docs", "budgets"},
+    "main, tested": {"lint", "docs", "unit-macos", "test-macos", "budgets"},
+    "main, not proven": _FULL_RUN,
 }
 
 
@@ -893,7 +990,8 @@ def test_the_test_job_never_skips_on_a_pull_request() -> None:
 
 def test_the_test_job_has_a_timeout() -> None:
     """A hung test must not hold a runner for the six hours Actions allows by default."""
-    assert _jobs("ci.yml")["test"]["timeout-minutes"] == 30
+    assert _jobs("ci.yml")["test"]["timeout-minutes"] == 15
+    assert _jobs("ci.yml")["unit"]["timeout-minutes"] == 25
 
 
 def _compose_filter() -> re.Pattern[str]:
@@ -1139,10 +1237,10 @@ def _polars_step() -> dict:
     Returns
     -------
     dict
-        The step of the ``test`` job of ``ci.yml`` named `POLARS_STEP`.
+        The step of the ``unit`` job of ``ci.yml`` named `POLARS_STEP`.
     """
     return next(
-        step for step in _jobs("ci.yml")["test"]["steps"] if step.get("name") == POLARS_STEP
+        step for step in _jobs("ci.yml")["unit"]["steps"] if step.get("name") == POLARS_STEP
     )
 
 
@@ -1602,13 +1700,14 @@ def test_the_macos_job_runs_the_unit_suite_and_the_getting_started_example() -> 
     macOS (#153) a failure fails the run like any other job's.
     """
     job = _jobs("ci.yml")[MACOS_JOB]
-    assert job["name"] == "test (macos)"
+    assert job["name"] == "unit (macos, ${{ matrix.shard }}/3)"
+    assert job["strategy"]["matrix"]["shard"] == [1, 2, 3]
     assert "continue-on-error" not in job
     assert job["runs-on"] == "macos-latest"
     assert "CI_RUNNER" not in str(job)
     assert job["timeout-minutes"] <= 45
     commands = [c for step in job["steps"] for c in _commands(step)]
-    pytest_command = next(c for c in commands if "pytest" in c)
+    pytest_command = next(c for c in commands if c.startswith("uv run pytest"))
     assert pytest_command.startswith("uv run pytest packages ")  # scripts/ is Linux tooling
     assert '-m "not integration"' in pytest_command
     assert "-n 2" in pytest_command
@@ -1616,6 +1715,8 @@ def test_the_macos_job_runs_the_unit_suite_and_the_getting_started_example() -> 
     setup = next(s for s in job["steps"] if "setup-uv" in str(s.get("uses")))
     assert setup["with"]["python-version"] == "3.14"
     assert any("run_docs_examples.sh getting-started" in c for c in commands)
+    example = next(s for s in job["steps"] if "getting-started" in s.get("run", ""))
+    assert example["if"].endswith("&& matrix.shard == 3")
     assert (
         (ROOT / "docs/examples/getting-started/run.sh")
         .read_text()
@@ -1646,7 +1747,18 @@ def test_the_macos_job_runs_for_a_pull_request_only_when_packages_change() -> No
     ]
     assert guarded
     for step in guarded:
-        assert step["if"] == "steps.scope.outputs.run == 'true'", step
+        assert step["if"].startswith("steps.scope.outputs.run == 'true'"), step
+
+
+def test_the_macos_check_collects_all_three_shards() -> None:
+    """``test (macos)`` is the check the maintainer will make required (#148)."""
+    job = _jobs("ci.yml")["test-macos"]
+    assert job["name"] == "test (macos)"
+    assert job["needs"] == ["changes", "unit-macos"]
+    assert job["if"] == _jobs("ci.yml")[MACOS_JOB]["if"]
+    (step,) = job["steps"]
+    assert step["env"] == {"RESULT": "${{ needs.unit-macos.result }}"}
+    assert '[ "$RESULT" != "success" ]' in step["run"]
 
 
 def test_the_five_minute_script_installs_uv_by_hash_and_dependabot_keeps_it_current() -> None:
@@ -1865,18 +1977,21 @@ def test_the_docker_isolation_tests_have_a_step_of_their_own_that_needs_docker()
     Its own step, so a Docker failure is named as such; `LAKANA_TEST_DOCKER=1` makes a missing
     Docker a failure instead of a skip, and the first step leaves these tests out.
     """
-    steps = _jobs("ci.yml")["integration"]["steps"]
-    first = next(step for step in steps if step.get("name") == "Integration tests")
-    docker = next(step for step in steps if step.get("name") == "Docker isolation tests")
+    jobs = _jobs("ci.yml")
+    first = next(
+        s for s in jobs["integration-services"]["steps"] if s.get("name") == "Integration tests"
+    )
+    docker = next(
+        s for s in jobs["integration-docker"]["steps"] if s.get("name") == "Docker isolation tests"
+    )
 
     assert '-m "integration and not docker"' in first["run"]
+    assert jobs["integration-docker"]["name"] == "integration (docker)"
     assert docker["env"] == {"LAKANA_TEST_DOCKER": "1"}
-    assert docker["if"] == "${{ !cancelled() }}"
     assert docker["run"] == (
         'uv run pytest -m docker --basetemp "$RUNNER_TEMP/pytest-docker" '
         "packages/lakana-worker/tests"
     )
-    assert steps.index(docker) == steps.index(first) + 1
 
 
 def test_every_integration_pytest_keeps_its_temp_files_off_the_runners_tmp() -> None:
@@ -1887,7 +2002,7 @@ def test_every_integration_pytest_keeps_its_temp_files_off_the_runners_tmp() -> 
     venv build of the module failed with "Disk quota exceeded" there. `$RUNNER_TEMP` is on the
     work disk, where the wheel directory and uv's cache already live.
     """
-    steps = _jobs("ci.yml")["integration"]["steps"]
+    steps = [step for name in INTEGRATION_JOBS for step in _jobs("ci.yml")[name]["steps"]]
     pytests = [step for step in steps if "pytest" in step.get("run", "")]
 
     assert len(pytests) == 3
@@ -1896,13 +2011,46 @@ def test_every_integration_pytest_keeps_its_temp_files_off_the_runners_tmp() -> 
     assert len({step["run"].split("--basetemp ")[1].split()[0] for step in pytests}) == 3
 
 
-def test_the_integration_job_has_room_for_the_docker_isolation_tests() -> None:
-    """The integration job's timeout leaves room for the Docker isolation step.
+INTEGRATION_JOBS = ("integration-services", "integration-docker", "integration-assets")
 
-    The job took 22 to 24 minutes before the Docker step; that step adds an image build (four
-    Python bases and uv: the legacy builder builds every stage) and two minutes of tests.
-    """
-    assert _jobs("ci.yml")["integration"]["timeout-minutes"] == 45
+
+@pytest.mark.parametrize("name", INTEGRATION_JOBS)
+def test_each_integration_job_has_a_timeout(name: str) -> None:
+    """No test waits without a bound, and no integration job may hold a runner for hours."""
+    assert _jobs("ci.yml")[name]["timeout-minutes"] == 30
+
+
+def test_the_required_integration_check_passes_only_when_every_integration_job_did() -> None:
+    """``integration`` is a required check: it waits for the three jobs and checks each result."""
+    job = _jobs("ci.yml")["integration"]
+    assert job["needs"] == ["changes", *INTEGRATION_JOBS]
+    assert job["if"] == _jobs("ci.yml")["integration-services"]["if"]
+    for name in INTEGRATION_JOBS:
+        assert job["if"] == _jobs("ci.yml")[name]["if"], name
+    (step,) = job["steps"]
+    assert set(step["env"].values()) == {f"${{{{ needs.{n}.result }}}}" for n in INTEGRATION_JOBS}
+    assert 'exit "$failed"' in step["run"]
+    assert "uses" not in step
+
+
+def test_the_services_tests_run_in_two_shards_and_the_python_assets_build_their_index() -> None:
+    """The longest integration step is split; the wheel index is built only where it is used."""
+    jobs = _jobs("ci.yml")
+    services = jobs["integration-services"]
+    assert services["strategy"]["matrix"]["shard"] == [1, 2]
+    assert services["name"] == "integration (services, ${{ matrix.shard }}/2)"
+    step = next(s for s in services["steps"] if s.get("name") == "Integration tests")
+    assert step["env"] == {"LAKANA_TEST_SHARD": "${{ matrix.shard }}/2"}
+    assert "--ignore=packages/lakana-server/tests/test_python_assets_integration.py" in step["run"]
+    assets = jobs["integration-assets"]
+    assert assets["name"] == "integration (python assets)"
+    names = [s.get("name") for s in assets["steps"]]
+    assert names.index("Build the wheel index for the Python-asset tests") < names.index(
+        "Python-asset integration tests"
+    )
+    for name, job in jobs.items():
+        if name != "integration-assets":
+            assert "build_wheelhouse.sh" not in str(job), name
 
 
 def test_the_two_dockerfiles_pin_the_same_python_314_base_image() -> None:
@@ -1912,3 +2060,74 @@ def test_the_two_dockerfiles_pin_the_same_python_314_base_image() -> None:
     task = set(pin.findall((ROOT / "Dockerfile.task").read_text()))
     assert len(main) == 1
     assert main == task
+
+
+def _check_names() -> list[str]:
+    """Name every check ``ci.yml`` reports, its matrix expanded.
+
+    Returns
+    -------
+    list of str
+        The names as the API lists them: a job's ``name`` with the matrix values put in, or,
+        without a name, its key followed by the matrix values in parentheses, as Actions does.
+    """
+    names = []
+    for key, job in _jobs("ci.yml").items():
+        matrix = job.get("strategy", {}).get("matrix", {})
+        versions = ["3.11", "3.14"] if "python-version" in matrix else [None]
+        for version in versions:
+            for shard in matrix.get("shard", [None]):
+                values = ", ".join(str(v) for v in (version, shard) if v is not None)
+                name = job.get("name", f"{key} ({values})" if values else key)
+                name = name.replace("${{ matrix.python-version }}", str(version))
+                names.append(name.replace("${{ matrix.shard }}", str(shard)))
+    return names
+
+
+def test_every_ci_job_has_a_time_budget() -> None:
+    """``scripts/time_budgets.py jobs`` fails a job without one; this finds it before CI does."""
+    budgets = read_budgets(ROOT / BUDGETS)
+    names = [name for name in _check_names() if name != "time budgets"]
+    assert "unit (3.14, 3/3)" in names
+    assert "test (3.11)" in names
+    assert "integration (services, 2/2)" in names
+    errors, _ = check_jobs([JobTime(name, 0.0) for name in names], budgets)
+    assert errors == []
+
+
+def test_the_budget_job_waits_for_every_job_and_reads_its_own_run() -> None:
+    """It runs last, also after a failure, and reads the jobs of this attempt of this run."""
+    jobs = _jobs("ci.yml")
+    job = jobs["budgets"]
+    assert job["name"] == "time budgets"
+    assert job["if"] == "${{ !cancelled() }}"
+    waited = set(job["needs"])
+    for name in jobs:
+        if name in ("budgets", "changes"):
+            continue
+        # A job is waited for directly or through a job that waits for it.
+        assert name in waited or any(
+            name in jobs[w].get("needs", [])
+            for w in waited
+            if isinstance(jobs[w].get("needs"), list)
+        ), name
+    step = next(s for s in job["steps"] if s.get("name") == "Job budgets")
+    assert "attempts/${GITHUB_RUN_ATTEMPT}/jobs" in step["run"]
+    assert "--paginate" in step["run"]
+    assert "python3 scripts/time_budgets.py jobs" in step["run"]
+    assert "pipefail" in step["shell"]
+    assert step["env"] == {"GH_TOKEN": "${{ github.token }}"}
+
+
+def test_the_quarantine_job_runs_only_quarantined_tests_and_never_fails_the_run() -> None:
+    """Quarantined tests are reported, not enforced; every required job skips them."""
+    job = _jobs("ci.yml")["quarantine"]
+    assert job["name"] == "quarantined tests"
+    step = next(s for s in job["steps"] if s.get("name", "").startswith("Quarantined tests"))
+    assert step["env"] == {"LAKANA_TEST_QUARANTINED": "1"}
+    assert 'uv run pytest -m ""' in step["run"]
+    assert "|| status=$?" in step["run"]
+    assert "GITHUB_STEP_SUMMARY" in step["run"]
+    for name, other in _jobs("ci.yml").items():
+        if name != "quarantine":
+            assert "LAKANA_TEST_QUARANTINED" not in str(other), name

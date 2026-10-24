@@ -385,6 +385,7 @@ def test_a_malformed_source_list_is_refused_before_the_service(
     assert refused.status_code == 422, refused.text
 
 
+@pytest.mark.slow
 def test_sixty_four_sources_are_accepted_by_the_schema_and_the_service(ready: TestClient) -> None:
     for n in range(64):
         create_table(ready, "dev", "gold", f"t{n}")

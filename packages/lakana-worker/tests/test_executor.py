@@ -1216,6 +1216,7 @@ def test_a_kill_after_the_grace_is_named_in_the_workers_log(
     ]
 
 
+@pytest.mark.slow
 def test_a_statement_that_ignores_the_ask_is_killed_and_the_next_query_runs(
     scripted: Callable[[str], None], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1388,6 +1389,7 @@ def test_a_set_cancellation_interrupts_a_running_query() -> None:
     timer.join()
 
 
+@pytest.mark.slow
 def test_a_drain_during_a_tasks_query_is_left_to_its_lease_keeper(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1620,6 +1622,7 @@ def test_a_type_error_that_is_not_about_a_parameter_is_not_turned_into_a_query_e
         execute_query("SELECT 1")
 
 
+@pytest.mark.slow
 def test_the_worker_process_imports_no_duckdb() -> None:
     """Spec 4.1: the worker's own process no longer opens a DuckDB connection."""
     code = (

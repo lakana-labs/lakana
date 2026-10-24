@@ -601,6 +601,7 @@ def _deep_paths(count: int) -> list[str]:
     return sorted(paths, key=lambda p: p.encode("utf-8"))
 
 
+@pytest.mark.slow
 def test_validating_a_manifest_at_the_file_count_limit_is_fast() -> None:
     paths = _deep_paths(10_000)
     assert max(len(p.encode()) for p in paths) <= 1024

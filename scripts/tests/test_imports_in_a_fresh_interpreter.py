@@ -155,6 +155,7 @@ def test_the_entry_points_are_found() -> None:
 
 
 @pytest.mark.parametrize("module", _entry_point_modules())
+@pytest.mark.slow
 def test_an_entry_point_imports_alone_in_a_fresh_interpreter(module: str) -> None:
     """Import `module` as the first and only import of a new process.
 
@@ -167,6 +168,7 @@ def test_an_entry_point_imports_alone_in_a_fresh_interpreter(module: str) -> Non
     assert result.returncode == 0, result.stderr[-2000:]
 
 
+@pytest.mark.slow
 def test_every_module_imports_alone() -> None:
     """Import each module of the four packages as the first import of its process.
 
@@ -182,6 +184,7 @@ def test_every_module_imports_alone() -> None:
     assert not failures, "\n\n".join(f"{name}:\n{trace}" for name, trace in failures.items())
 
 
+@pytest.mark.slow
 def test_a_hung_child_is_killed_with_its_whole_process_group_and_named() -> None:
     """The helper cannot hang: on a timeout it kills the group, and the message has the progress."""
     code = (

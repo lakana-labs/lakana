@@ -37,6 +37,7 @@ def _run_worker_once(client: TestClient, query_id: str) -> None:
         run_one(session, uuid.UUID(query_id), GrantAuthorization(session))
 
 
+@pytest.mark.slow
 def test_sdk_admin_lifecycle(
     lakana_client: lakana.Client, client: TestClient, tmp_path: Path
 ) -> None:
