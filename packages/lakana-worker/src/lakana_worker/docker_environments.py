@@ -206,8 +206,8 @@ class DockerEnvironments:
         then the task ends without it (an image pull the launcher cannot interrupt), and the
         launcher removes the build when the pull ends.
     trust
-        The worker's trust bundle (`lakana_worker.trust`), copied into the attempt and mounted at
-        ``/trust``; `None` without `LAKANA_RUN__CA_BUNDLE`.
+        The worker's trust bundle as bytes (`lakana_worker.trust`), written into the attempt and
+        mounted at ``/trust``; `None` without `LAKANA_RUN__CA_BUNDLE`.
     """
 
     client: LauncherClient
@@ -220,7 +220,7 @@ class DockerEnvironments:
     operator_index: str | None = field(default=None, repr=False)
     poll_seconds: float = 0.2
     stop_wait: float = 30.0
-    trust: Path | None = None
+    trust: bytes | None = field(default=None, repr=False)
 
     def acquire(
         self,

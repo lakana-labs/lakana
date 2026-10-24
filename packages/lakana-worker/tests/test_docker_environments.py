@@ -777,15 +777,14 @@ def test_a_launcher_that_cannot_take_the_stop_is_asked_again(tmp_path: Path) -> 
 
 def test_with_a_trust_bundle_the_build_gets_a_copy_and_asks_for_the_mount(tmp_path: Path) -> None:
     """The bundle is copied into `<attempt>/trust` before the build, and `trust: true` sent."""
-    bundle = tmp_path / "worker-trust.pem"
-    bundle.write_bytes(b"-----BEGIN CERTIFICATE-----\nAA==\n-----END CERTIFICATE-----\n")
+    bundle = b"-----BEGIN CERTIFICATE-----\nAA==\n-----END CERTIFICATE-----\n"
     launcher = FakeLauncher(
         scripts={"status": _status(False), "build": lambda r, on_log: {"complete": True}}
     )
     _acquire(_environments(launcher, trust=bundle), _project(tmp_path))
     assert launcher.requests[1]["trust"] is True
     copied = tmp_path / "attempt-abc_12" / "trust" / "trust.pem"
-    assert copied.read_bytes() == bundle.read_bytes()
+    assert copied.read_bytes() == bundle
     assert oct(copied.stat().st_mode & 0o777) == "0o644"
 
 

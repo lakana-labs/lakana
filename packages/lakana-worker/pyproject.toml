@@ -57,7 +57,8 @@ dependencies = [
     # BSD-3-Clause. Sends webhooks (`egress.py`); the lakana SDK already depends on it.
     "httpx>=0.28,<1",
     # MPL-2.0, used unmodified (allowlisted in scripts/check_licenses.py). The last place the
-    # query process looks for a CA bundle (`ca_bundle.py`); shipped through httpx already.
+    # query process looks for a CA bundle (`ca_bundle.py`), and the public roots of the trust
+    # bundle of builds and tasks (`trust.py`); shipped through httpx already.
     "certifi>=2024.2.2",
 ]
 

@@ -1098,14 +1098,13 @@ def test_with_a_trust_bundle_the_attempt_gets_a_copy_and_the_run_asks_for_the_mo
     tmp_path: Path,
 ) -> None:
     """`<attempt>/trust/trust.pem` (0644 in a 0755 directory, a copy) and `trust: true`."""
-    bundle = tmp_path / "worker-trust.pem"
-    bundle.write_bytes(b"-----BEGIN CERTIFICATE-----\nAA==\n-----END CERTIFICATE-----\n")
+    bundle = b"-----BEGIN CERTIFICATE-----\nAA==\n-----END CERTIFICATE-----\n"
     launcher = FakeLauncher(scripts={"run": _writes({"status": "succeeded", "rows": 1}, _DONE)})
     outcome, _, _ = _run(tmp_path, launcher, {"trust": bundle})
     assert outcome.succeeded, outcome.error_message
     assert launcher.requests[0]["trust"] is True
     copied = tmp_path / "attempt-abc_12" / "trust" / "trust.pem"
-    assert copied.read_bytes() == bundle.read_bytes() and not copied.is_symlink()
+    assert copied.read_bytes() == bundle and not copied.is_symlink()
     assert oct(copied.stat().st_mode & 0o777) == "0o644"
     assert oct(copied.parent.stat().st_mode & 0o777) == "0o755"
     assert oct((tmp_path / "attempt-abc_12").stat().st_mode & 0o777) == "0o700"
@@ -1121,8 +1120,7 @@ def test_without_a_trust_bundle_there_is_no_trust_directory(tmp_path: Path) -> N
 
 def test_a_planted_trust_link_fails_the_attempt_before_the_launcher(tmp_path: Path) -> None:
     """A link at `<attempt>/trust` is refused as an unprepared directory; nothing is sent."""
-    bundle = tmp_path / "worker-trust.pem"
-    bundle.write_bytes(b"-----BEGIN CERTIFICATE-----\nAA==\n-----END CERTIFICATE-----\n")
+    bundle = b"-----BEGIN CERTIFICATE-----\nAA==\n-----END CERTIFICATE-----\n"
     launcher = FakeLauncher(scripts={"run": _writes({"status": "succeeded", "rows": 1}, _DONE)})
     attempt = tmp_path / "attempt-abc_12"
     attempt.mkdir(mode=0o700)

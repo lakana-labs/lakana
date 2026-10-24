@@ -68,7 +68,7 @@ from lakana_worker.runners import DockerRunner, LocalProcessRunner, Runner
 from lakana_worker.scheduler import SchedulerLoop
 from lakana_worker.spill import sweep_spill_directories
 from lakana_worker.tasks import RunEngine, TaskSettings
-from lakana_worker.trust import TRUST_FILE, TrustBundleError, build_trust_bundle
+from lakana_worker.trust import TrustBundleError, build_trust_bundle, write_trust_file
 from lakana_worker.venvs import VenvSettings
 
 if TYPE_CHECKING:
@@ -245,14 +245,16 @@ def _python_runtime(
         `LAKANA_RUN__LAUNCHER_SOCKET`, owned by this worker (`claim_owner`: the host name and a
         token kept in the cache directory, unique among live workers); the attempt directories
         must then be the launcher's work volume, which it mounts by attempt name. With
-        `LAKANA_RUN__CA_BUNDLE`, the trust bundle (Mozilla's roots plus that file) is written once
-        to ``<cache>/trust.pem``; builds and tasks of both runners trust it.
+        `LAKANA_RUN__CA_BUNDLE`, the trust bundle (Mozilla's roots plus the certificates of that
+        file) is built once in memory and written to ``<cache>/trust-<digest>.pem``, a name no
+        other worker's bundle shares; builds and tasks of both runners trust it.
 
     Raises
     ------
     SystemExit
         If `LAKANA_RUN__CA_BUNDLE` names a file the containers cannot trust (unreadable, over
-        1 MiB, no certificate, a private key); the message names the setting and the cause.
+        1 MiB, no certificate, a private key), or the bundle cannot be written to the cache; the
+        message names the setting or the path, and the cause.
     """
     cache = worker_cache_dir()
     if python.reason() is None:
@@ -265,7 +267,8 @@ def _python_runtime(
             )
     run = settings.run
     try:
-        trust = build_trust_bundle(run.ca_bundle, cache / TRUST_FILE)
+        trust = build_trust_bundle(run.ca_bundle)
+        trust_file = write_trust_file(trust, cache) if trust is not None else None
     except TrustBundleError as exc:
         raise SystemExit(str(exc)) from None
     cap, timeout = settings.task_tokens.max_ttl_seconds, settings.query_limits.timeout_seconds
@@ -326,7 +329,7 @@ def _python_runtime(
         runner = LocalProcessRunner(
             kill_grace=run.kill_grace,
             memory_limit=resolve_limit(settings.worker.memory_limit).bytes,
-            trust=trust,
+            trust=trust_file,
         )
     return PythonRuntime(
         support=python,
@@ -341,7 +344,7 @@ def _python_runtime(
             index_url=_secret(run.index_url),
             https_proxy=_secret(run.https_proxy),
             no_proxy=run.no_proxy,
-            ca_bundle=trust,
+            ca_bundle=trust_file,
         ),
         runner=runner,
         kill_grace=run.kill_grace,

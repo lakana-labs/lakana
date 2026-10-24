@@ -1301,7 +1301,8 @@ class DockerRunner:
     roots
         Allowed ingestion roots to mount.
     trust
-        The worker's trust bundle; `None` without `LAKANA_RUN__CA_BUNDLE`.
+        The worker's trust bundle as bytes (`lakana_worker.trust`); `None` without
+        `LAKANA_RUN__CA_BUNDLE`.
     deadline_margin
         Seconds past the timeout and the kill grace after which the worker gives up on the
         launcher's answer and closes the connection, so the launcher removes the container.
@@ -1318,7 +1319,7 @@ class DockerRunner:
         kill_grace: float = 10.0,
         poll_seconds: float = 0.2,
         roots: tuple[str, ...] = (),
-        trust: Path | None = None,
+        trust: bytes | None = None,
         deadline_margin: float = DEADLINE_MARGIN_SECONDS,
     ) -> None:
         self._client = client

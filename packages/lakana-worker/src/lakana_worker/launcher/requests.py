@@ -4,10 +4,10 @@ A request is one JSON object with exactly the fields of its operation (`FIELDS`)
 value is checked against a pattern or a bound before anything else happens. Every Docker field
 that matters is fixed here: the image comes from the operator's allow-list, the mounts from the
 work volume's code, task and trust subpaths, the environment volume and the allowed
-ingestion roots; user, capabilities,
-network and command are constants. Nothing the caller sends reaches Docker as-is: identifiers
-become names only through the patterns, the stdin text becomes the container's input stream,
-and an index credential becomes one entry of `UV_INDEX`.
+ingestion roots; user, capabilities, network and command are constants. Nothing the caller
+sends reaches Docker as-is: identifiers become names only through the patterns, the stdin text
+becomes the container's input stream, and an index credential becomes one entry of
+`UV_INDEX`.
 """
 
 from __future__ import annotations
