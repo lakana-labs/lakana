@@ -233,10 +233,15 @@ fails without them. `worker-interactive` and `worker-pipeline` take both lists f
 (`<<: *worker`, `<<: *worker-env`), so they get the file too:
 
 ```yaml
+x-lakana-env: &lakana-env    # unchanged: the bundle's shared settings
+  LAKANA_DATABASE__URL: postgresql+pg8000://lakana:${POSTGRES_PASSWORD}@postgres:5432/lakana
+  LAKANA_SECRETS__MASTER_KEY: ${LAKANA_SECRETS__MASTER_KEY}
+
+services:
   worker: &worker
-    # ...
+    # ... (image, command and the rest unchanged)
     environment: &worker-env
-      # <<: *lakana-env stays the first entry, as in the bundle
+      <<: *lakana-env
       LAKANA_REPO_ROOTS: '["/repos"]'
       LAKANA_RUN__SERVER_URL: http://server:8000
       LAKANA_RUN__RUNNER: ${LAKANA_RUNNER:-docker}
@@ -1546,10 +1551,15 @@ launcher's socket and the task volume are needed by Python assets); `worker-inte
 `worker-pipeline` take both lists from `worker`:
 
 ```yaml
+x-lakana-env: &lakana-env    # unchanged: the bundle's shared settings
+  LAKANA_DATABASE__URL: postgresql+pg8000://lakana:${POSTGRES_PASSWORD}@postgres:5432/lakana
+  LAKANA_SECRETS__MASTER_KEY: ${LAKANA_SECRETS__MASTER_KEY}
+
+services:
   worker: &worker
-    # ...
+    # ... (image, command and the rest unchanged)
     environment: &worker-env
-      # <<: *lakana-env stays the first entry, as in the bundle
+      <<: *lakana-env
       LAKANA_REPO_ROOTS: '["/repos"]'
       LAKANA_RUN__SERVER_URL: http://server:8000
       LAKANA_RUN__RUNNER: ${LAKANA_RUNNER:-docker}

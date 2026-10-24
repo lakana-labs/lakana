@@ -109,13 +109,13 @@ and the cause, never the file's content:
 
 | The worker stops with | Fix |
 |---|---|
-| `LAKANA_RUN__CA_BUNDLE names /x, which is not a regular file.` or `… which cannot be read (No such file or directory).` | Mount the file into the worker (read-only is enough) and point the setting at its path inside the worker. |
+| `LAKANA_RUN__CA_BUNDLE names /x, which is not a regular file.` or `… which cannot be read (No such file or directory).` | Mount the file into the worker (read-only is enough), make it readable by the worker's user (uid 10001 in the image; a host file of mode `0600` owned by root gives `Permission denied`), and point the setting at its path inside the worker. |
 | `… which is larger than 1 MiB.` | A company CA bundle is a few kilobytes: give the authority's certificates only. |
 | `… which holds no PEM certificate.` | Give a PEM file (`-----BEGIN CERTIFICATE-----`). Convert a DER file with `openssl x509 -inform der -in ca.der -out ca.pem`. |
-| `… which holds a certificate block that is not a valid certificate.` | A block is damaged or cut off; export the certificate again. |
+| `… which holds a certificate block that is not a valid certificate: it is damaged or cut off, or not in the plain BEGIN CERTIFICATE form; export the certificate again as PEM.` | A block lost its `END` line, has a character that is not base64 in it, or has another header (`BEGIN X509 CERTIFICATE`). The worker stops rather than start without that authority. Export the certificate again as PEM, `-----BEGIN CERTIFICATE-----` to `-----END CERTIFICATE-----`. |
 | `… which also holds a private key, and every task could read it.` | Give a file of certificates only; never the CA's key. |
 | `… which holds a TRUSTED CERTIFICATE block (OpenSSL's -trustout form, as in RHEL's ca-bundle.trust.crt) …` | Point the setting at a plain PEM file. On RHEL, `/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem` is the system's bundle in plain PEM. For your own authority's file, `openssl x509 -in cert.pem -out plain.pem` converts it, but only the first certificate of a file: split a file of several blocks and convert each block on its own. |
-| `cannot write the trust bundle to /…/trust-<digest>.pem (…); check that the worker's cache directory is writable.` | Local runner only: make the worker's cache directory (`$XDG_CACHE_HOME/lakana-worker`, else `~/.cache/lakana-worker`) writable by the worker's user. |
+| `cannot write the trust bundle to /…/trust-<digest>.pem (…); check that the worker's cache directory is writable.` or `… the worker's cache directory /… is not private …` | Local runner only: make the worker's cache directory (`$XDG_CACHE_HOME/lakana-worker`, else `~/.cache/lakana-worker`) writable by the worker's user, and private to it: owned by that user, not a link, and not writable by any other user (`chmod 0700`). Another user who could write there could replace the bundle. |
 | `the worker cannot read Mozilla's certificate roots at /… (…); reinstall the worker's certifi package.` | The worker's installation is damaged: reinstall it (or pull the image again). |
 
 A build that fails because a package index's certificate is not trusted adds a hint to its

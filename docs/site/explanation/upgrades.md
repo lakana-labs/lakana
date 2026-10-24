@@ -182,15 +182,22 @@ trust Mozilla's roots plus the certificates of that file, which the worker mount
 set the variable there; see
 [The trust bundle of builds and tasks](../reference/network-settings.md#the-trust-bundle-of-builds-and-tasks).
 
-Two changes reach a worker that already sets it, with either runner:
+**Breaking** for a worker that already sets it with the local runner:
 
 - The worker checks the file at start. A file over 1 MiB, without a certificate, with a private
-  key, with a damaged certificate or in OpenSSL's `TRUSTED CERTIFICATE` form now **stops the
-  worker**, with a message that names the setting, the file and the cause; before, the local
-  runner passed any file on. Give a PEM file of certificates only.
-- Only the file's certificate blocks are used, and local builds and tasks trust **Mozilla's roots
-  plus the file**, where before they trusted the file alone. A file that listed only your own
-  authority keeps working, and public indexes such as PyPI are now trusted next to it.
+  key, with a damaged or cut-off certificate block or in OpenSSL's `TRUSTED CERTIFICATE` form
+  now **stops the worker**, with a message that names the setting, the file and the cause;
+  before, the local runner passed any file on. Give a PEM file of certificates only. The local
+  runner also refuses to write its copy of the bundle into a cache directory other users can
+  write to.
+- Only the file's certificate blocks are used. Local builds trust **Mozilla's roots plus the
+  file**, where before they trusted the file alone: public indexes such as PyPI are now trusted
+  next to it.
+- Local **tasks** used to get no `SSL_CERT_FILE`, so Python's `ssl` (and `urllib`) trusted the
+  host's system store. Now `SSL_CERT_FILE` names Mozilla's roots plus the file, and that
+  **replaces the host's system store** for them. A corporate authority installed only in the
+  system store (`update-ca-certificates`, `update-ca-trust`) is no longer trusted by a local task:
+  put every private authority your tasks need into the `LAKANA_RUN__CA_BUNDLE` file.
 
 Upgrade the launcher and the workers together, as the bundle does: a worker of 0.20.0 and a
 launcher of this release (or the other way round) refuse each other's requests
