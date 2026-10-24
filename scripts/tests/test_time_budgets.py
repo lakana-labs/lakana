@@ -549,6 +549,44 @@ def test_a_test_that_is_slow_again_fails_with_both_times() -> None:
     assert "a.py::lost took 3.0 s," in errors[1]
 
 
+def test_the_confirm_rerun_fails_only_from_the_confirm_margin() -> None:
+    """Hysteresis: flagged at 2 s in the shard, failed only at 2.5 s on its own."""
+    tests = [TestTime("a.py", "edge", 4.9, slow=False, skipped=False)]
+    errors, notes = check_slow_tests(
+        tests,
+        threshold=2.0,
+        confirm_threshold=2.5,
+        baseline=0,
+        remeasure=_remeasured({"a.py::edge": 2.4}),
+    )
+    assert errors == []
+    assert any("a.py::edge took 4.9 s in its shard but 2.4 s on its own" in n for n in notes)
+    errors, _ = check_slow_tests(
+        tests,
+        threshold=2.0,
+        confirm_threshold=2.5,
+        baseline=0,
+        remeasure=_remeasured({"a.py::edge": 2.5}),
+    )
+    assert len(errors) == 1
+    assert "a.py::edge took 4.9 s (and 2.5 s on its own)" in errors[0]
+    assert "2 s or more must be marked slow" in errors[0]
+
+
+def test_the_confirm_margin_is_read_and_defaults_to_the_threshold(tmp_path: Path) -> None:
+    """``confirm_seconds`` sits next to the threshold; without it the threshold decides."""
+    path = tmp_path / "b.toml"
+    path.write_text(BUDGETS_TOML)
+    assert read_budgets(path).confirm_seconds is None
+    path.write_text(BUDGETS_TOML + "confirm_seconds = 2.5\n")
+    assert read_budgets(path).confirm_seconds == pytest.approx(2.5)
+    path.write_text(BUDGETS_TOML + 'confirm_seconds = "slow"\n')
+    with pytest.raises(ValueError, match="confirm_seconds"):
+        read_budgets(path)
+    checked_in = read_budgets(ROOT / "scripts" / "time-budgets.toml")
+    assert checked_in.confirm_seconds == pytest.approx(2.5)
+
+
 def test_nothing_is_run_again_when_nothing_is_over() -> None:
     """No re-run without a candidate."""
     again = _remeasured({})

@@ -52,10 +52,14 @@ class Budgets:
         Check-name pattern to minutes, in the file's order.
     threshold_seconds
         From this many seconds a unit test must be marked ``slow``.
+    confirm_seconds
+        From this many seconds the solo re-run of a flagged test fails it; None means
+        ``threshold_seconds``.
     """
 
     jobs: dict[str, float]
     threshold_seconds: float
+    confirm_seconds: float | None = None
 
 
 @dataclass(frozen=True)
@@ -175,8 +179,13 @@ def read_budgets(path: Path) -> Budgets:
     threshold = data.get("slow_tests", {}).get("threshold_seconds")
     if not _is_number(threshold):
         raise ValueError(f"{path} has no [slow_tests] threshold_seconds.")
+    confirm = data["slow_tests"].get("confirm_seconds")
+    if confirm is not None and not _is_number(confirm):
+        raise ValueError(f"{path}: [slow_tests] confirm_seconds is not a number of seconds.")
     return Budgets(
-        jobs={str(k): float(v) for k, v in jobs.items()}, threshold_seconds=float(threshold)
+        jobs={str(k): float(v) for k, v in jobs.items()},
+        threshold_seconds=float(threshold),
+        confirm_seconds=None if confirm is None else float(confirm),
     )
 
 
@@ -386,13 +395,15 @@ def check_slow_tests(
     *,
     threshold: float,
     baseline: int,
+    confirm_threshold: float | None = None,
     remeasure: Callable[[list[TestTime]], dict[str, float]] | None = None,
 ) -> tuple[list[str], list[str]]:
     """Check the slow-test rule and the ratchet.
 
     One measurement in a busy shard is noisy (a test of 0.6 s once took 2.4 s), so with
     `remeasure` an unmarked test over the threshold fails only when it takes that long again,
-    run on its own.
+    run on its own, and only from `confirm_threshold` (a margin above the threshold: a test that
+    sits at the threshold would otherwise pass and fail on the same code).
 
     Parameters
     ----------
@@ -402,6 +413,8 @@ def check_slow_tests(
         From this many seconds an unmarked test fails.
     baseline
         The most tests that may be marked slow.
+    confirm_threshold
+        From this many seconds the solo re-run fails a test; None means `threshold`.
     remeasure
         Runs the given tests again and returns their seconds by node id; None trusts the first
         measurement. A test missing from its answer keeps its first measurement.
@@ -411,13 +424,14 @@ def check_slow_tests(
     tuple of two lists of str
         The errors, and notes for the log (the count, and a request to lower the baseline).
     """
+    confirm = threshold if confirm_threshold is None else confirm_threshold
     over = [t for t in tests if not t.slow and not t.skipped and t.seconds >= threshold]
     again = remeasure(over) if (remeasure is not None and over) else {}
     errors: list[str] = []
     notes: list[str] = []
     for test in over:
         second = again.get(test.nodeid)
-        if second is not None and second < threshold:
+        if second is not None and second < confirm:
             notes.append(
                 f"{test.nodeid} took {test.seconds:.1f} s in its shard but {second:.1f} s on its "
                 "own: counted as noise."
@@ -628,6 +642,7 @@ def _run_slow_tests(args: argparse.Namespace) -> int:
             tests,
             threshold=budgets.threshold_seconds,
             baseline=baseline,
+            confirm_threshold=budgets.confirm_seconds,
             remeasure=(lambda over: remeasure(over, Path(workdir))) if args.confirm else None,
         )
     for note in notes:

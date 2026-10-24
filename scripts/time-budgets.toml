@@ -23,3 +23,6 @@
 # may fall, never rise.
 [slow_tests]
 threshold_seconds = 2.0
+# The solo re-run of a flagged test (--confirm) fails it only from this many seconds: a test that
+# sits at the threshold would otherwise pass and fail on the same code.
+confirm_seconds = 2.5
