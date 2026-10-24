@@ -1020,7 +1020,10 @@ the test, the budget, and the next step.
   `test (3.14)` runs `time_budgets.py slow-tests --confirm junit/*.xml` over them. One
   measurement in a busy shard is noisy (between two runs a test of 0.6 s once took 2.4 s), so an
   unmarked test over the threshold is run again on its own, serially and under coverage, and
-  fails only if it is that slow again; the log names each one counted as noise. A new test over
+  fails only if it takes `confirm_seconds` (2.5 s, in `scripts/time-budgets.toml` beside the
+  threshold) or more there: a margin, because a test that sits at the 2 s threshold passed and
+  failed on the same code. The in-shard threshold stays 2 s for flagging; the log names each one
+  counted as noise. A new test over
   the threshold fails with its name and both times: make it faster (a smaller fixture, no real sleep, a shared app;
   see "The CLI tests share one app" for what that once saved), or mark it slow and make another
   slow test fast. Each case of a parametrized test counts. When the number falls the check passes
