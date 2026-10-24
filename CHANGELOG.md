@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.21.0](https://github.com/lakana-labs/lakana/compare/v0.20.0...v0.21.0) (2026-10-24)
+
+
+### ⚠ BREAKING CHANGES
+
+* **sdk:** a Python asset's function parameter named `ctx` now receives the asset's context and is never an input; an asset that reads a table through a parameter called `ctx` fails to deploy. Rename the parameter and its key in `inputs={...}`, then deploy again.
+
+### Features
+
+* **catalog:** connections per environment, declared by assets and checked at deploy ([#320](https://github.com/lakana-labs/lakana/issues/320)) ([560877b](https://github.com/lakana-labs/lakana/commit/560877b5bd33896345139d033949d3eb3a8f17d9)), closes [#85](https://github.com/lakana-labs/lakana/issues/85) [#321](https://github.com/lakana-labs/lakana/issues/321)
+* **sdk:** fetch connection credentials at run time; write: append and merge ([7abf9b0](https://github.com/lakana-labs/lakana/commit/7abf9b0e524eab3252efcef434b43fb2d741df26))
+
+
+### Bug Fixes
+
+* **query:** keep standard PIVOT, refuse operators by name, safe date filters, stable lineage ([#316](https://github.com/lakana-labs/lakana/issues/316)) ([03e51a9](https://github.com/lakana-labs/lakana/commit/03e51a9b4d4b114f93ca5c1f33b5f0d0e14f4628)), closes [#280](https://github.com/lakana-labs/lakana/issues/280) [#293](https://github.com/lakana-labs/lakana/issues/293) [#178](https://github.com/lakana-labs/lakana/issues/178) [#53](https://github.com/lakana-labs/lakana/issues/53)
+* **security:** batch 11 — launcher owner checks, egress caps and ports, stoppable builds ([#315](https://github.com/lakana-labs/lakana/issues/315)) ([4ce8a60](https://github.com/lakana-labs/lakana/commit/4ce8a60c48c5ea95a99f393960e74a295d7a76f2)), closes [#305](https://github.com/lakana-labs/lakana/issues/305) [#302](https://github.com/lakana-labs/lakana/issues/302) [#301](https://github.com/lakana-labs/lakana/issues/301) [#291](https://github.com/lakana-labs/lakana/issues/291)
+* **worker:** report a task killed by SIGKILL without Docker's OOMKilled flag as out of memory ([#312](https://github.com/lakana-labs/lakana/issues/312)) ([dddfb95](https://github.com/lakana-labs/lakana/commit/dddfb95dffe858098c426494081a10f3d5dabe71))
+
+
+### Documentation
+
+* move data modelling and the web interface before the public beta ([#324](https://github.com/lakana-labs/lakana/issues/324)) ([2802cc9](https://github.com/lakana-labs/lakana/commit/2802cc94919d9df6457f102ea8cf2c946ec6224e))
+* record what 0.20.0 shipped and the M6 design in the scope and roadmap pages ([#309](https://github.com/lakana-labs/lakana/issues/309)) ([373a669](https://github.com/lakana-labs/lakana/commit/373a669556cbbba122329e884aad0299bf62eef4))
+
+
+### Dependencies
+
+* bump astral-sh/uv from 0.13.1 to 0.13.5 in the images group across 1 directory ([#296](https://github.com/lakana-labs/lakana/issues/296)) ([227f063](https://github.com/lakana-labs/lakana/commit/227f0631a56d74c5c38b6b69467931e3eb1c3680))
+* bump ruff from 0.17.0 to 0.17.1 ([#299](https://github.com/lakana-labs/lakana/issues/299)) ([7bacac0](https://github.com/lakana-labs/lakana/commit/7bacac0045c425f08f14c982a105bd324cdd15ea))
+* bump the python group with 3 updates ([#297](https://github.com/lakana-labs/lakana/issues/297)) ([893093b](https://github.com/lakana-labs/lakana/commit/893093bcb522e64cf8f501b6c297d1bc2673241e))
+* bump ty from 0.0.88 to 0.0.89 ([#298](https://github.com/lakana-labs/lakana/issues/298)) ([51cb440](https://github.com/lakana-labs/lakana/commit/51cb440b7962013a974c2b15efa9564f5727403c))
+
 ## [0.20.0](https://github.com/lakana-labs/lakana/compare/v0.19.0...v0.20.0) (2026-10-23)
 
 
