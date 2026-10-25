@@ -7,6 +7,7 @@ import base64
 import errno
 import io
 import ipaddress
+import json
 import os
 import socket
 import stat
@@ -27,16 +28,20 @@ from lakana_worker.launcher.egress_token import read_key, verify
 from lakana_worker.launcher.engine import EngineError
 from lakana_worker.launcher.requests import (
     INGEST_PROBE_SCRIPT,
+    RELAY_COMMAND,
+    RELAY_PIDS,
     BuildRequest,
     CleanupRequest,
     Limits,
     Refused,
+    RelayRoute,
     RunRequest,
     StatusRequest,
     StopRequest,
     cache_volume,
     container_name,
     environment_volume,
+    relay_address,
 )
 from lakana_worker.launcher.service import Launcher, StartError, read_frames
 
@@ -2261,8 +2266,8 @@ def test_concurrent_networks_get_different_subnets(tmp_path: Path) -> None:
     """Allocation happens under the lock."""
     launcher = _started(FakeEngine(), tmp_path)
 
-    first = launcher._open_network("task", "t1", "w1", None, 0)
-    second = launcher._open_network("build", "b1", "w1", None, 0)
+    first = launcher._open_network("task", "t1", "w1", [], 0)
+    second = launcher._open_network("build", "b1", "w1", [], 0)
 
     assert launcher._subnets[first] == "10.207.0.0/29"
     assert launcher._subnets[second] == "10.207.0.8/29"
@@ -2284,7 +2289,7 @@ def test_subnets_of_networks_that_survive_the_start_are_recovered(tmp_path: Path
     launcher = _started(engine, tmp_path)
 
     assert launcher._subnets == {"lakana-task-stuck": "10.207.0.0/29"}
-    assert launcher._open_network("task", "t1", "w1", None, 0) and (
+    assert launcher._open_network("task", "t1", "w1", [], 0) and (
         launcher._subnets["lakana-task-t1"] == "10.207.0.8/29"
     )
 
@@ -2294,7 +2299,7 @@ def test_a_subnet_docker_says_overlaps_is_skipped(tmp_path: Path) -> None:
     engine = FakeEngine(overlaps={"10.207.0.0/29"})
     launcher = _started(engine, tmp_path)
 
-    name = launcher._open_network("task", "t1", "w1", None, 0)
+    name = launcher._open_network("task", "t1", "w1", [], 0)
 
     assert launcher._subnets[name] == "10.207.0.8/29"
     assert "10.207.0.0/29" in launcher._used_subnets
@@ -2306,7 +2311,7 @@ def test_a_range_full_of_overlaps_gives_up_with_the_setting_named(tmp_path: Path
     launcher = _started(engine, tmp_path)
 
     with pytest.raises(EngineError, match="LAKANA_LAUNCHER__NETWORK_RANGE"):
-        launcher._open_network("task", "t1", "w1", None, 0)
+        launcher._open_network("task", "t1", "w1", [], 0)
 
     assert launcher._subnets == {}
 
@@ -2315,10 +2320,10 @@ def test_runs_beyond_the_concurrency_bound_are_refused_naming_the_setting(tmp_pa
     """A /24 holds 32 networks; the bound is below that, so a burst cannot use them all."""
     launcher = _started(FakeEngine(), tmp_path, network_range="10.207.0.0/24")
     for number in range(24):
-        launcher._open_network("task", f"t{number}", "w1", None, 0)
+        launcher._open_network("task", f"t{number}", "w1", [], 0)
 
     with pytest.raises(EngineError, match="LAKANA_LAUNCHER__NETWORK_RANGE") as caught:
-        launcher._open_network("task", "t99", "w1", None, 0)
+        launcher._open_network("task", "t99", "w1", [], 0)
 
     assert "24 of 24" in str(caught.value)
 
@@ -2329,14 +2334,14 @@ def test_an_exhausted_pool_is_an_error_naming_the_setting(tmp_path: Path) -> Non
     launcher._used_subnets.update(f"10.207.0.{8 * n}/29" for n in range(32))
 
     with pytest.raises(EngineError, match="no free address range"):
-        launcher._open_network("task", "t1", "w1", None, 0)
+        launcher._open_network("task", "t1", "w1", [], 0)
 
 
 def test_a_network_that_cannot_be_deleted_keeps_its_subnet(tmp_path: Path) -> None:
     """Only a removed network gives its addresses back."""
     engine = FakeEngine()
     launcher = _started(engine, tmp_path)
-    name = launcher._open_network("task", "t1", "w1", None, 0)
+    name = launcher._open_network("task", "t1", "w1", [], 0)
     _intercept(engine, lambda m, p, b: m == "DELETE", (500, {"message": "busy"}))
 
     launcher.close_network(name)
@@ -2605,7 +2610,7 @@ def test_a_build_subnet_rests_until_its_token_has_expired(
     second, _ = launcher.open_build_network("b2", "w1", [("pypi.org", 443)], 60)
     assert launcher._subnets[second] != str(grant.network)
     launcher.close_network(second)
-    task = launcher._open_network("task", "t1", "w1", None, 0)
+    task = launcher._open_network("task", "t1", "w1", [], 0)
     assert launcher._subnets[task] != str(grant.network)
     launcher.close_network(task)
 
@@ -2641,3 +2646,827 @@ def test_resting_subnets_count_against_the_network_cap(tmp_path: Path) -> None:
 
     with pytest.raises(EngineError, match="6 resting"):
         launcher.open_build_network("b9", "w1", [("pypi.org", 443)], 60)
+
+
+_DB = RelayRoute(15001, "db.example.com", 5432)
+
+
+def _egress_run(**fields: Any) -> RunRequest:
+    """Build a run request with egress pairs or relay routes.
+
+    Parameters
+    ----------
+    **fields
+        `egress`, `relay` and other fields to replace.
+
+    Returns
+    -------
+    RunRequest
+        The request.
+    """
+    return replace(_run(), **fields)
+
+
+def _subnet_of(launcher: Launcher, engine: FakeEngine) -> list[str]:
+    """Record the subnet each network of a launcher gets.
+
+    Parameters
+    ----------
+    launcher
+        The launcher.
+    engine
+        Its fake engine.
+
+    Returns
+    -------
+    list of str
+        Filled as networks are created.
+    """
+    subnets: list[str] = []
+    allocate = launcher._allocate_subnet
+
+    def remember(name: str) -> str:
+        """Record the subnet.
+
+        Parameters
+        ----------
+        name
+            The network.
+
+        Returns
+        -------
+        str
+            The subnet.
+        """
+        subnets.append(allocate(name))
+        return subnets[-1]
+
+    launcher._allocate_subnet = remember  # ty: ignore[invalid-assignment]
+    return subnets
+
+
+def _task_running(engine: FakeEngine) -> bool:
+    """Say whether a task container is running (a relay may have started before it).
+
+    Parameters
+    ----------
+    engine
+        The fake engine.
+
+    Returns
+    -------
+    bool
+        Whether a container of kind ``task`` was started and not yet removed.
+    """
+    return any(
+        c["running"] and c["Labels"]["lakana.launcher.kind"] == "task"
+        for c in list(engine.containers.values())
+    )
+
+
+def _paths(engine: FakeEngine, method: str) -> list[str]:
+    """List the paths of every call of one method, in order.
+
+    Parameters
+    ----------
+    engine
+        The fake engine.
+    method
+        ``POST``, ``DELETE`` and so on.
+
+    Returns
+    -------
+    list of str
+        The paths.
+    """
+    return [path for m, path, _ in engine.calls if m == method]
+
+
+def test_a_run_with_egress_gets_the_proxy_and_a_task_token_for_exactly_its_pairs(
+    tmp_path: Path,
+) -> None:
+    """Server and proxy join the task network; the token is purpose `task`, bound to its /29."""
+    engine = FakeEngine()
+    launcher = _started(engine, tmp_path)
+    subnets = _subnet_of(launcher, engine)
+    pairs = (("api.example.com", 443), ("login.example.com", 443))
+
+    launcher.run(_egress_run(egress=pairs), lambda line: None)
+
+    connects = [b for m, p, b in engine.calls if p == "/networks/lakana-task-t1/connect"]
+    assert connects == [
+        {"Container": "c-server", "EndpointConfig": {"Aliases": ["server"]}},
+        {"Container": "c-egress", "EndpointConfig": {"Aliases": ["egress"]}},
+    ]
+    (spec,) = engine.created("task")
+    env = dict(item.split("=", 1) for item in spec["Env"])
+    assert not {"HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY"} & set(env)
+    token = env["LAKANA_EGRESS_PROXY"].removeprefix("http://lakana:").removesuffix("@egress:3128")
+    key = read_key(tmp_path / "egress.key")
+    assert key is not None
+    grant = verify(key, token, time.time())
+    assert grant is not None
+    assert (grant.purpose, grant.targets) == ("task", frozenset(pairs))
+    assert grant.network == ipaddress.ip_network(subnets[0])
+    assert time.time() + 30 + 3 < grant.expires <= time.time() + 30 + 3 + 61
+    assert "lakana-task-t1" not in engine.networks
+    assert subnets[0] in launcher._resting  # no other network gets it while the token lives
+
+
+def test_a_task_token_is_measured_from_after_the_image_pull(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A pull takes minutes; a token minted before it would expire before the task's timeout."""
+    engine = FakeEngine()
+    launcher = _started(engine, tmp_path)
+    engine.images.clear()
+    skew = [0.0]
+    real = time.time
+    monkeypatch.setattr(time, "time", lambda: real() + skew[0])
+
+    def slow_pull() -> None:
+        """Let a ten-minute pull pass on the clock."""
+        skew[0] += 600.0
+
+    engine.hooks["pull"] = slow_pull
+
+    launcher.run(_egress_run(egress=(("api.example.com", 443),)), lambda line: None)
+
+    (spec,) = engine.created("task")
+    env = dict(item.split("=", 1) for item in spec["Env"])
+    token = env["LAKANA_EGRESS_PROXY"].removeprefix("http://lakana:").removesuffix("@egress:3128")
+    key = read_key(tmp_path / "egress.key")
+    assert key is not None
+    grant = verify(key, token, time.time())
+    assert grant is not None
+    assert time.time() + 30 < grant.expires <= time.time() + 30 + 3 + 61
+
+
+@pytest.mark.parametrize(
+    "fields", [{"egress": (("api.example.com", 443),)}, {"relay": (_DB,)}], ids=["egress", "relay"]
+)
+def test_a_run_with_connections_without_the_egress_service_is_refused_first(
+    tmp_path: Path, fields: dict[str, Any]
+) -> None:
+    """The fixed refusal, before any network or container exists.
+
+    Parameters
+    ----------
+    tmp_path
+        The state directory.
+    fields
+        Egress pairs or relay routes.
+    """
+    engine = FakeEngine(services={"server": "c-server"})
+    launcher = _started(engine, tmp_path)
+    before = len(engine.calls)
+
+    with pytest.raises(Refused) as caught:
+        launcher.run(_egress_run(**fields), lambda line: None)
+
+    assert str(caught.value) == (
+        "tasks with connections need the `egress` service; start it (Compose bundle) or remove "
+        "the connection from the asset."
+    )
+    assert not [p for m, p, _ in engine.calls[before:] if m in ("POST", "DELETE")]
+
+
+def test_a_run_without_connections_keeps_the_server_only_posture(tmp_path: Path) -> None:
+    """One attachment, no token, no proxy variable, no relay, no resting subnet."""
+    engine = FakeEngine()
+    launcher = _started(engine, tmp_path)
+    subnets = _subnet_of(launcher, engine)
+
+    launcher.run(_run(), lambda line: None)
+
+    assert [b["Container"] for m, p, b in engine.calls if p.endswith("/connect")] == ["c-server"]
+    (spec,) = engine.created("task")
+    assert not any(item.startswith("LAKANA_EGRESS_PROXY=") for item in spec["Env"])
+    assert engine.created("relay") == []
+    assert subnets[0] not in launcher._resting
+
+
+def test_a_run_with_relay_routes_starts_its_relay_before_the_task(tmp_path: Path) -> None:
+    """The relay comes from the egress image, fixed fields, its address, then the task."""
+    engine = FakeEngine()
+    launcher = _started(engine, tmp_path)
+    subnets = _subnet_of(launcher, engine)
+
+    launcher.run(_egress_run(relay=(_DB,)), lambda line: None)
+
+    (relay,) = engine.created("relay")
+    address = relay_address(subnets[0])
+    assert address == str(ipaddress.ip_network(subnets[0]).network_address + 6)
+    assert relay["Image"] == "sha256:" + "e" * 64
+    assert relay["Entrypoint"] == list(RELAY_COMMAND)
+    assert relay["User"] == "65534:65534"
+    assert relay["Env"] == ["PATH=/usr/local/bin:/usr/bin:/bin", "PYTHONDONTWRITEBYTECODE=1"]
+    host = relay["HostConfig"]
+    assert host["Memory"] == host["MemorySwap"] == 64 * 1024 * 1024
+    assert (host["NanoCpus"], host["PidsLimit"]) == (250_000_000, RELAY_PIDS)
+    assert RELAY_PIDS >= 16 * (16 + 1) + 2  # a handler per connection, an acceptor per route
+    assert (host["CapDrop"], host["ReadonlyRootfs"], host["Mounts"]) == (["ALL"], True, [])
+    assert host["NetworkMode"] == "lakana-task-t1"
+    assert relay["NetworkingConfig"] == {
+        "EndpointsConfig": {
+            "lakana-task-t1": {"Aliases": ["lakana-relay"], "IPAMConfig": {"IPv4Address": address}}
+        }
+    }
+    assert relay["Labels"]["lakana.launcher.kind"] == "relay"
+    assert relay["Labels"]["lakana.launcher.deadline"]
+    plan = json.loads(engine.relay_stdin[0])
+    assert plan == {
+        "address": address,
+        "subnet": subnets[0],
+        "refused": _refused(tmp_path),
+        "routes": [{"listen": 15001, "host": "db.example.com", "port": 5432}],
+    }
+    kinds = [
+        b["Labels"]["lakana.launcher.kind"] for m, p, b in engine.calls if p == "/containers/create"
+    ]
+    assert kinds[-2:] == ["relay", "task"]
+    relay_id = f"c{kinds.index('relay') + 1}"  # the fake numbers containers as they are made
+    posts = _paths(engine, "POST")
+    assert posts.index("/networks/lakana_default/connect") < posts.index(
+        f"/containers/{relay_id}/start"
+    )
+    deletes = _paths(engine, "DELETE")
+    assert deletes.index(f"/containers/{relay_id}") < deletes.index("/networks/lakana-task-t1")
+    assert engine.containers == {} and "lakana-task-t1" not in engine.networks
+
+
+def test_the_relay_gets_the_upstream_proxy_of_the_egress_service(tmp_path: Path) -> None:
+    """`LAKANA_EGRESS__UPSTREAM_PROXY` applies to the relay as to the proxy."""
+    engine = FakeEngine()
+    engine.service_info["c-egress"]["Config"]["Env"] = [
+        "LAKANA_EGRESS__UPSTREAM_PROXY=http://corp:3128"
+    ]
+    launcher = _started(engine, tmp_path)
+
+    launcher.run(_egress_run(relay=(_DB,)), lambda line: None)
+
+    (relay,) = engine.created("relay")
+    assert "LAKANA_EGRESS__UPSTREAM_PROXY=http://corp:3128" in relay["Env"]
+
+
+def test_the_relays_lines_reach_the_tasks_log(tmp_path: Path) -> None:
+    """Review Focus 3: the relay's refusal is in the run's log, prefixed as the relay wrote it."""
+    line = b"lakana-relay: refused postgres:5432: it resolves to an internal address\n"
+    engine = FakeEngine(hold=True, relay_output=[b"lakana-relay: ready\n", line])
+    launcher = _started(engine, tmp_path)
+    emitted: list[dict[str, object]] = []
+    worker = threading.Thread(
+        target=lambda: launcher.run(_egress_run(relay=(_DB,)), emitted.append)
+    )
+    worker.start()
+    _until(lambda: line in _logs(emitted))
+    _until(lambda: _task_running(engine))
+    engine.release(
+        next(
+            c for c, v in engine.containers.items() if v["Labels"]["lakana.launcher.kind"] == "task"
+        )
+    )
+    worker.join(10)
+
+    assert line in _logs(emitted)
+    assert b"lakana-relay: ready" not in _logs(emitted)
+
+
+def test_a_relay_that_does_not_start_fails_the_run_and_leaves_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The run fails with the relay's last line; relay and network are gone, no task started.
+
+    Parameters
+    ----------
+    tmp_path
+        The state directory.
+    monkeypatch
+        Shortens the wait for `ready`.
+    """
+    from lakana_worker.launcher import service
+
+    monkeypatch.setattr(service, "_RELAY_READY_SECONDS", 0.3)
+    engine = FakeEngine(relay_output=[b"lakana-relay: cannot start: Address in use\n"])
+    launcher = _started(engine, tmp_path)
+
+    with pytest.raises(EngineError) as caught:
+        launcher.run(_egress_run(relay=(_DB,)), lambda line: None)
+
+    assert str(caught.value) == "the task's relay did not start: cannot start: Address in use"
+    assert engine.created("task") == []
+    assert engine.containers == {} and "lakana-task-t1" not in engine.networks
+
+
+def test_a_relay_needs_exactly_one_outward_network(tmp_path: Path) -> None:
+    """An egress service on two Compose networks is ambiguous: the run fails naming them."""
+    engine = FakeEngine()
+    engine.compose_networks["lakana_other"] = {"Labels": {}, "Containers": {}}
+    engine.service_info["c-egress"]["NetworkSettings"]["Networks"]["lakana_other"] = {}
+    launcher = _started(engine, tmp_path)
+
+    with pytest.raises(EngineError, match="lakana_default, lakana_other"):
+        launcher.run(_egress_run(relay=(_DB,)), lambda line: None)
+
+    assert engine.containers == {} and "lakana-task-t1" not in engine.networks
+
+
+def test_cleanup_spares_the_relay_of_a_live_run_and_removes_an_orphan(tmp_path: Path) -> None:
+    """A relay belongs to its task: `cleanup(owner)` keeps it while the run lives."""
+    engine = FakeEngine(hold=True)
+    launcher = _started(engine, tmp_path)
+    worker = threading.Thread(
+        target=lambda: launcher.run(_egress_run(relay=(_DB,)), lambda line: None)
+    )
+    worker.start()
+    _until(lambda: _task_running(engine))
+
+    assert launcher.cleanup(CleanupRequest("w1")) == {"removed": 0}
+    assert engine.created("relay") and any(
+        v["Labels"]["lakana.launcher.kind"] == "relay" for v in engine.containers.values()
+    )
+    launcher.stop(StopRequest("t1", "w1"))
+    worker.join(10)
+    engine.containers["c-orphan"] = {
+        "Name": "lakana-relay-t9",
+        "Labels": {
+            "lakana.launcher.stack": "lakana",
+            "lakana.launcher.kind": "relay",
+            "lakana.launcher.id": "t9",
+            "lakana.launcher.owner": "w1",
+        },
+        "spec": {"HostConfig": {"Mounts": []}},
+        "exit": None,
+        "running": True,
+    }
+    engine._released["c-orphan"] = threading.Event()
+
+    assert launcher.cleanup(CleanupRequest("w1")) == {"removed": 1}
+    assert engine.containers == {}
+
+
+_GATEWAYS = ["172.17.0.1/32", "172.18.0.1/32"]
+"""The fake's default bridge and Compose network gateways (IPv4)."""
+
+
+def _refused(tmp_path: Path) -> list[str]:
+    """Read the refused ranges the launcher wrote for the proxy.
+
+    Parameters
+    ----------
+    tmp_path
+        The state directory, which also holds the egress key.
+
+    Returns
+    -------
+    list of str
+        The ranges.
+    """
+    return json.loads((tmp_path / "refused.json").read_text(encoding="utf-8"))["refused"]
+
+
+def _networks_listing_answers(engine: FakeEngine, reply: Any) -> None:
+    """Answer the unfiltered ``GET /networks`` (the gateway listing) with `reply`.
+
+    Parameters
+    ----------
+    engine
+        The fake engine.
+    reply
+        The status and body.
+    """
+    real = engine.request
+
+    def request(
+        method: str, path: str, body: Any = None, *, query: Any = None, timeout: Any = 60.0
+    ) -> tuple[int, Any]:
+        if method == "GET" and path == "/networks" and not query:
+            return reply
+        return real(method, path, body, query=query, timeout=timeout)
+
+    engine.request = request  # ty: ignore[invalid-assignment]
+
+
+def test_start_writes_every_docker_gateway_and_the_operator_ranges_for_the_proxy(
+    tmp_path: Path,
+) -> None:
+    """Default bridge, Compose networks (IPv4 and IPv6), the setting and the launcher's range."""
+    engine = FakeEngine()
+
+    _started(engine, tmp_path, egress_refused=("192.0.2.0/24", "fd00:1::/32"))
+
+    assert _refused(tmp_path) == [
+        "10.207.0.0/16",
+        *_GATEWAYS,
+        "192.0.2.0/24",
+        "fd00:1::/32",
+        "fd12:3456::1/128",
+    ]
+    info = (tmp_path / "refused.json").stat()
+    assert stat.S_IMODE(info.st_mode) == 0o640
+    assert info.st_gid == (tmp_path / "egress.key").stat().st_gid
+    assert not [p for p in tmp_path.iterdir() if p.name.endswith(".tmp")]
+
+
+def test_a_network_made_after_start_is_refused_before_the_next_run_attaches_anything(
+    tmp_path: Path,
+) -> None:
+    """Refreshed at every network open, after the network exists, before a service joins it."""
+    engine = FakeEngine()
+    launcher = _started(engine, tmp_path)
+    engine.host_networks["other-project_default"] = {
+        "Labels": {"com.docker.compose.project": "other-project"},
+        "IPAM": {"Config": [{"Subnet": "192.168.77.0/24", "Gateway": "192.168.77.1"}]},
+    }
+    seen: list[list[str]] = []
+    real = engine.request
+
+    def request(
+        method: str, path: str, body: Any = None, *, query: Any = None, timeout: Any = 60.0
+    ) -> tuple[int, Any]:
+        if path.endswith("/connect") and not seen:
+            seen.append(_refused(tmp_path))
+        return real(method, path, body, query=query, timeout=timeout)
+
+    engine.request = request  # ty: ignore[invalid-assignment]
+
+    launcher.run(_run(), lambda line: None)
+
+    assert seen == [["10.207.0.0/16", *_GATEWAYS, "192.168.77.1/32", "fd12:3456::1/128"]]
+
+
+def test_the_refused_ranges_are_written_only_when_they_change(tmp_path: Path) -> None:
+    """A run that finds the same networks leaves the file alone: the proxy reads nothing new."""
+    engine = FakeEngine()
+    launcher = _started(engine, tmp_path)
+    before = (tmp_path / "refused.json").stat()
+
+    launcher.run(_run(), lambda line: None)
+
+    after = (tmp_path / "refused.json").stat()
+    assert (after.st_ino, after.st_mtime_ns) == (before.st_ino, before.st_mtime_ns)
+
+
+def test_start_stops_when_docker_cannot_list_its_networks(tmp_path: Path) -> None:
+    """Without the gateways the proxy would let a task reach the Docker host: no start."""
+    engine = FakeEngine()
+    _networks_listing_answers(engine, (500, {"message": "daemon busy"}))
+
+    with pytest.raises(StartError) as caught:
+        _started(engine, tmp_path)
+
+    assert str(caught.value).startswith("cannot list Docker's networks to find their gateways")
+    assert "daemon busy" in str(caught.value)
+    assert not (tmp_path / "refused.json").exists()
+
+
+def test_a_failed_listing_at_a_network_open_keeps_the_last_ranges_and_logs(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A busy daemon does not fail the run; the ranges written at start stay in force."""
+    engine = FakeEngine()
+    launcher = _started(engine, tmp_path)
+    written = _refused(tmp_path)
+    _networks_listing_answers(engine, (500, {"message": "daemon busy"}))
+
+    result = launcher.run(_run(), lambda line: None)
+
+    assert result["exit"] == 0
+    assert _refused(tmp_path) == written
+    assert "cannot list Docker's networks to find their gateways" in caplog.text
+
+
+def test_the_relays_plan_refuses_what_the_proxy_refuses(tmp_path: Path) -> None:
+    """The relay gets the same list as `refused.json`, current at its start."""
+    engine = FakeEngine()
+    launcher = _started(engine, tmp_path, egress_refused=("192.0.2.0/24",))
+    engine.host_networks["late"] = {
+        "Labels": {},
+        "IPAM": {"Config": [{"Subnet": "192.168.88.0/24", "Gateway": "192.168.88.1"}]},
+    }
+
+    launcher.run(_egress_run(relay=(_DB,)), lambda line: None)
+
+    plan = json.loads(engine.relay_stdin[0])
+    assert plan["refused"] == _refused(tmp_path)
+    assert "192.168.88.1/32" in plan["refused"] and "192.0.2.0/24" in plan["refused"]
+
+
+def test_a_relay_is_refused_when_docker_has_more_gateways_than_its_plan_holds(
+    tmp_path: Path,
+) -> None:
+    """The plan holds at most 256 ranges; past them the run fails naming the next step."""
+    engine = FakeEngine()
+    for n in range(300):
+        engine.host_networks[f"n{n}"] = {
+            "Labels": {},
+            "IPAM": {"Config": [{"Subnet": "x", "Gateway": f"10.{n // 200}.{n % 200}.1"}]},
+        }
+    launcher = _started(engine, tmp_path)
+
+    with pytest.raises(EngineError, match="at most 256") as caught:
+        launcher.run(_egress_run(relay=(_DB,)), lambda line: None)
+
+    assert "docker network prune" in str(caught.value)
+    assert engine.created("relay") == [] and engine.created("task") == []
+    assert "lakana-task-t1" not in engine.networks
+
+
+def test_a_gateway_that_is_not_an_address_is_skipped(tmp_path: Path) -> None:
+    """Docker leaves `Gateway` out or empty for some drivers; nothing else is read from it."""
+    engine = FakeEngine()
+    engine.host_networks["odd"] = {
+        "Labels": {},
+        "IPAM": {"Config": [{"Subnet": "10.1.0.0/24", "Gateway": ""}, {"Gateway": "nope"}, "x"]},
+    }
+    engine.host_networks["none"] = {"Labels": {}, "IPAM": None}
+
+    _started(engine, tmp_path)
+
+    assert _refused(tmp_path) == ["10.207.0.0/16", *_GATEWAYS, "fd12:3456::1/128"]
+
+
+def test_an_older_gateway_listing_never_replaces_a_newer_one(tmp_path: Path) -> None:
+    """Two network opens at once: a listing taken before a network existed must not win.
+
+    Open A lists before network G exists and is held there; G appears; open B lists and writes.
+    When A goes on, G stays refused, in the file and in what the relays get.
+    """
+    engine = FakeEngine()
+    launcher = _started(engine, tmp_path)
+    held = threading.Event()
+    listed = threading.Event()
+    real = engine.request
+
+    def request(
+        method: str, path: str, body: Any = None, *, query: Any = None, timeout: Any = 60.0
+    ) -> tuple[int, Any]:
+        answer = real(method, path, body, query=query, timeout=timeout)
+        if (
+            method == "GET"
+            and path == "/networks"
+            and not query
+            and threading.current_thread().name == "open-a"
+        ):
+            listed.set()
+            held.wait(5)
+        return answer
+
+    engine.request = request  # ty: ignore[invalid-assignment]
+    first = threading.Thread(target=launcher._write_refused, name="open-a")
+    first.start()
+    assert listed.wait(5)
+    engine.host_networks["late"] = {
+        "Labels": {},
+        "IPAM": {"Config": [{"Subnet": "192.168.77.0/24", "Gateway": "192.168.77.1"}]},
+    }
+    second = threading.Thread(target=launcher._write_refused, name="open-b")
+    second.start()
+    second.join(0.3)  # B either finished (no lock) or waits for A (lock)
+    held.set()
+    first.join(5)
+    second.join(5)
+
+    assert "192.168.77.1/32" in _refused(tmp_path)
+    assert "192.168.77.1/32" in launcher._refused
+
+
+def test_a_gateway_docker_spells_in_another_form_is_logged_naming_its_network(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A format change in Docker's answer must show, not leave a gateway silently unrefused."""
+    engine = FakeEngine()
+    engine.host_networks["odd"] = {
+        "Labels": {},
+        "IPAM": {"Config": [{"Gateway": "172.30.0.1/16"}, {"Gateway": ""}, {}]},
+    }
+
+    _started(engine, tmp_path)
+
+    warnings = [r.getMessage() for r in caplog.records if "odd" in r.getMessage()]
+    assert len(warnings) == 1
+    assert "172.30.0.1/16" in warnings[0] and "not an address" in warnings[0]
+
+
+def _unwritable(launcher: Launcher) -> None:
+    """Make every write of the refused ranges fail as on a read-only volume.
+
+    Parameters
+    ----------
+    launcher
+        The launcher.
+    """
+
+    def fail(path: Path, text: str) -> None:
+        raise OSError(errno.EROFS, "Read-only file system")
+
+    launcher._replace_refused = fail  # ty: ignore[invalid-assignment]
+
+
+def test_start_stops_when_the_refused_ranges_cannot_be_written(tmp_path: Path) -> None:
+    """Without the file the proxy refuses everything: the operator hears why, at start."""
+    engine = FakeEngine()
+    launcher = Launcher(settings(tmp_path), engine)
+    _unwritable(launcher)
+
+    with pytest.raises(StartError) as caught:
+        launcher.start()
+
+    assert str(caught.value) == (
+        f"cannot write the refused ranges {tmp_path / 'refused.json'} (Read-only file system); "
+        "mount the egress-key volume into the launcher, writable (see compose.yaml)."
+    )
+
+
+def test_a_failed_write_after_start_keeps_the_last_file_and_logs(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A run goes on; the file the proxy reads stays the last one written, and is tried again."""
+    engine = FakeEngine()
+    launcher = _started(engine, tmp_path)
+    written = _refused(tmp_path)
+    engine.host_networks["late"] = {
+        "Labels": {},
+        "IPAM": {"Config": [{"Subnet": "192.168.77.0/24", "Gateway": "192.168.77.1"}]},
+    }
+    _unwritable(launcher)
+
+    result = launcher.run(_run(), lambda line: None)
+
+    assert result["exit"] == 0
+    assert _refused(tmp_path) == written
+    assert "Cannot write the refused ranges" in caplog.text
+    assert "Read-only file system" in caplog.text
+    del launcher._replace_refused  # the class's own writer again
+    launcher._write_refused()
+    assert "192.168.77.1/32" in _refused(tmp_path)
+
+
+def test_the_refused_ranges_file_gets_the_keys_group(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When the directory does not hand down the key's group, the launcher sets it itself."""
+    engine = FakeEngine()
+    launcher = _started(engine, tmp_path)
+    key = tmp_path / "egress.key"
+    other = os.stat(key).st_gid + 1
+    real_stat = os.stat
+    chowned: list[int] = []
+
+    def stat_with_other_group(path: Any, *args: Any, **kwargs: Any) -> Any:
+        info = real_stat(path, *args, **kwargs)
+        if Path(path) == key:
+            fields = list(info)
+            fields[stat.ST_GID] = other
+            return os.stat_result(fields)
+        return info
+
+    monkeypatch.setattr(os, "stat", stat_with_other_group)
+    monkeypatch.setattr(os, "fchown", lambda fd, uid, gid: chowned.append(gid))
+    engine.host_networks["late"] = {
+        "Labels": {},
+        "IPAM": {"Config": [{"Subnet": "192.168.77.0/24", "Gateway": "192.168.77.1"}]},
+    }
+
+    launcher._write_refused()
+
+    assert chowned == [other]
+    assert "192.168.77.1/32" in _refused(tmp_path)
+
+
+def test_a_run_with_egress_needs_a_started_launcher(tmp_path: Path) -> None:
+    """Without `start()` there is no egress key to sign a token with."""
+    engine = FakeEngine()
+    launcher = Launcher(settings(tmp_path), engine)
+
+    with pytest.raises(RuntimeError, match="only available after start"):
+        launcher.run(_egress_run(egress=(("api.example.com", 443),)), lambda line: None)
+
+    assert not [p for m, p, _ in engine.calls if m in ("POST", "DELETE")]
+
+
+def test_egress_pairs_that_do_not_fit_in_a_token_are_refused_and_leave_nothing(
+    tmp_path: Path,
+) -> None:
+    """The token has a size limit; the run is refused naming egress, and its network goes."""
+    engine = FakeEngine()
+    launcher = _started(engine, tmp_path)
+    pairs = tuple((f"{'h' * 60}{n}.example.com", 443) for n in range(400))
+
+    with pytest.raises(Refused, match=r"^egress: "):
+        launcher.run(_egress_run(egress=pairs), lambda line: None)
+
+    assert engine.created("task") == []
+    assert "lakana-task-t1" not in engine.networks
+
+
+def test_a_relay_fails_the_run_when_docker_cannot_describe_an_egress_network(
+    tmp_path: Path,
+) -> None:
+    """The relay's way out must be known; an unanswered network description fails the run."""
+    engine = FakeEngine()
+    launcher = _started(engine, tmp_path)
+    _intercept(
+        engine,
+        lambda m, p, b: m == "GET" and p == "/networks/lakana_default",
+        (500, {"message": "daemon busy"}),
+    )
+
+    with pytest.raises(EngineError, match="could not describe network lakana_default: daemon busy"):
+        launcher.run(_egress_run(relay=(_DB,)), lambda line: None)
+
+    assert engine.created("relay") == [] and "lakana-task-t1" not in engine.networks
+
+
+def test_the_relays_way_out_skips_the_networks_the_launcher_made(tmp_path: Path) -> None:
+    """The egress service also sits on build networks; only the Compose network is its way out."""
+    engine = FakeEngine()
+    launcher = _started(engine, tmp_path)  # a start removes the launcher's own networks
+    engine.service_info["c-egress"]["NetworkSettings"]["Networks"]["lakana-build-b9"] = {}
+    engine.networks["lakana-build-b9"] = {
+        "Labels": {"lakana.launcher.stack": "lakana"},
+        "Containers": {},
+    }
+
+    launcher.run(_egress_run(relay=(_DB,)), lambda line: None)
+
+    assert "/networks/lakana_default/connect" in _paths(engine, "POST")
+    assert "/networks/lakana-build-b9/connect" not in _paths(engine, "POST")
+
+
+def test_a_relay_fails_the_run_when_docker_cannot_describe_the_egress_service(
+    tmp_path: Path,
+) -> None:
+    """The relay runs the egress service's image: without it there is no relay and no task."""
+    engine = FakeEngine()
+    launcher = _started(engine, tmp_path)
+    engine.service_info["c-egress"] = {"message": "no such container"}
+
+    with pytest.raises(EngineError, match="could not describe the egress service"):
+        launcher.run(_egress_run(relay=(_DB,)), lambda line: None)
+
+    assert engine.created("relay") == [] and engine.created("task") == []
+
+
+@pytest.mark.parametrize("step", ["attach", "start"])
+def test_a_relay_docker_refuses_to_attach_or_start_is_removed(tmp_path: Path, step: str) -> None:
+    """Either refusal fails the run with Docker's reason; the relay container goes with it.
+
+    Parameters
+    ----------
+    tmp_path
+        The state directory.
+    step
+        Which call Docker refuses.
+    """
+    engine = FakeEngine()
+    launcher = _started(engine, tmp_path)
+    if step == "attach":
+        _intercept(
+            engine,
+            lambda m, p, b: m == "POST" and p == "/networks/lakana_default/connect",
+            (500, {"message": "no"}),
+        )
+    else:
+        _intercept(
+            engine, lambda m, p, b: m == "POST" and p.endswith("/start"), (500, {"message": "no"})
+        )
+
+    with pytest.raises(EngineError, match=f"Docker could not {step} the relay: no"):
+        launcher.run(_egress_run(relay=(_DB,)), lambda line: None)
+
+    assert engine.containers == {} and "lakana-task-t1" not in engine.networks
+
+
+def test_the_relay_reader_ends_quietly_when_its_stream_breaks() -> None:
+    """A removed relay's stream fails; the reader ends without a line and without `ready`."""
+
+    class Broken:
+        def recv(self, size: int, /) -> bytes:
+            raise ConnectionResetError(104, "Connection reset by peer")
+
+    ready = threading.Event()
+    last: list[str] = []
+    emitted: list[dict[str, object]] = []
+
+    Launcher._read_relay(Broken(), ready, last, emitted.append)  # ty: ignore[invalid-argument-type]
+
+    assert not ready.is_set() and last == [] and emitted == []
+
+
+def test_a_run_stopped_while_its_relay_starts_never_creates_the_task(tmp_path: Path) -> None:
+    """The stop arrives between the relay and the task: the task container is never made."""
+    engine = FakeEngine()
+    launcher = _started(engine, tmp_path)
+
+    def stop() -> None:
+        """Stop the run while its relay is being attached."""
+        launcher.stop(StopRequest("t1", "w1"))
+
+    engine.hooks["attach"] = stop
+
+    result = launcher.run(_egress_run(relay=(_DB,)), lambda line: None)
+
+    assert result == {"exit": None, "oom_killed": False, "timed_out": False, "stopped": True}
+    assert engine.created("task") == []
+    assert engine.containers == {} and "lakana-task-t1" not in engine.networks

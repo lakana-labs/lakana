@@ -41,22 +41,27 @@ from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 from urllib.parse import quote
 
 from lakana_worker.launcher.egress import PORT as EGRESS_PORT
+from lakana_worker.launcher.egress import REFUSED_FILE
 from lakana_worker.launcher.egress_token import mint, rotate_key
 from lakana_worker.launcher.engine import API_VERSION, Engine, EngineError
 from lakana_worker.launcher.requests import (
     DEADLINE_MARGIN,
+    EGRESS_MISSING,
     LABEL_DEADLINE,
+    LABEL_ID,
     LABEL_KIND,
     LABEL_OWNER,
     LABEL_SHARED,
     LABEL_STACK,
+    MAX_RELAY_REFUSED,
     BuildRequest,
     CleanupRequest,
     Refused,
+    RelayRoute,
     Request,
     RunRequest,
     StatusRequest,
@@ -69,6 +74,9 @@ from lakana_worker.launcher.requests import (
     ingestion_probe_spec,
     network_spec,
     probe_container_spec,
+    relay_address,
+    relay_container_spec,
+    relay_plan,
     run_container_spec,
     volume_spec,
 )
@@ -187,6 +195,29 @@ class _Live:
     container_id: str | None = None
     stopped: threading.Event = field(default_factory=threading.Event)
     timed_out: threading.Event = field(default_factory=threading.Event)
+
+
+_RELAY_READY_SECONDS = 10.0
+_RELAY_LINE = "lakana-relay: "
+
+
+@dataclass
+class _Relay:
+    """A task's running relay.
+
+    Parameters
+    ----------
+    cid
+        Its container.
+    stream
+        Its attached stream, read by `reader`.
+    reader
+        The thread that copies its lines into the task's log.
+    """
+
+    cid: str
+    stream: socket.socket
+    reader: threading.Thread
 
 
 def _expired(labels: object, moment: float) -> bool:
@@ -396,6 +427,10 @@ class Launcher:
         self._reserved_mb = 0
         self._key: bytes | None = None
         self._egress_key: bytes | None = None
+        self._gateways: frozenset[str] = frozenset()
+        self._refused: tuple[str, ...] = ()
+        self._refused_text: str | None = None
+        self._refused_lock = threading.Lock()
         self._reaper_stop = threading.Event()
 
     # --- start-up -----------------------------------------------------------------------
@@ -407,7 +442,8 @@ class Launcher:
         ------
         StartError
             If the engine is older than `MIN_ENGINE_MAJOR` or cannot make an isolated network,
-            the option is ``on`` and does not work here, or an ingestion root fails its probe.
+            the option is ``on`` and does not work here, an ingestion root fails its probe, or
+            Docker's networks cannot be listed or the refused ranges cannot be written.
         EngineError
             If Docker cannot be reached.
         """
@@ -475,6 +511,175 @@ class Launcher:
                 "launcher, writable (see compose.yaml)."
             ) from None
         self._check_ingestion_roots()
+        self._write_refused(starting=True)
+
+    # --- refused ranges -----------------------------------------------------------------
+
+    def _docker_gateways(self) -> frozenset[str]:
+        """List the gateway address of every Docker network, whoever made it.
+
+        The Docker host answers on each of them (172.17.0.1 on the default bridge, one per
+        Compose network), so a service on the host that listens on every address would be
+        reachable from the proxy and the relays through them.
+
+        Returns
+        -------
+        frozenset of str
+            Each gateway as a ``/32`` or ``/128`` network; a `Gateway` that is not an address
+            is skipped.
+
+        Raises
+        ------
+        EngineError
+            If Docker does not list its networks.
+        """
+        found: set[str] = set()
+        for network in self._list("/networks", {}, "networks"):
+            ipam = network.get("IPAM") if isinstance(network, dict) else None
+            configs = ipam.get("Config") if isinstance(ipam, dict) else None
+            for config in configs if isinstance(configs, list) else []:
+                gateway = config.get("Gateway") if isinstance(config, dict) else None
+                try:
+                    address = ipaddress.ip_address(str(gateway))
+                except ValueError:
+                    if isinstance(gateway, str) and gateway:
+                        logger.warning(
+                            "Docker network %s has a gateway %r that is not an address; it is "
+                            "not refused. Report this with `docker network inspect %s`.",
+                            network.get("Name"),
+                            gateway,
+                            network.get("Name"),
+                        )
+                    continue
+                found.add(str(ipaddress.ip_network(address)))
+        return frozenset(found)
+
+    def _refused_ranges(self) -> tuple[str, ...]:
+        """Join the last known gateways, the operator's ranges and the launcher's own range.
+
+        Returns
+        -------
+        tuple of str
+            The ranges in CIDR form, IPv4 then IPv6, sorted, and merged where one holds or
+            adjoins another (a task network's gateway sits inside the launcher's range).
+        """
+        texts = (*self._gateways, *self.settings.egress_refused, self.settings.network_range)
+        networks = [ipaddress.ip_network(text) for text in texts]
+        v4 = [n for n in networks if isinstance(n, ipaddress.IPv4Network)]
+        v6 = [n for n in networks if isinstance(n, ipaddress.IPv6Network)]
+        merged = [*ipaddress.collapse_addresses(v4), *ipaddress.collapse_addresses(v6)]
+        return tuple(str(network) for network in merged)
+
+    def _write_refused(self, *, starting: bool = False) -> None:
+        """List Docker's gateways and write the refused ranges for the proxy, if they changed.
+
+        The file is ``refused.json`` next to the egress key, written to a temporary file and
+        renamed into place, mode 0640 in the key's group. The proxy reads it again when it
+        changes; each relay gets the ranges current at its start in its plan.
+
+        Parameters
+        ----------
+        starting
+            Whether the launcher is starting: a failure then stops it. Later, a failure keeps
+            the ranges known before and is logged.
+
+        Raises
+        ------
+        StartError
+            When starting, if Docker's networks cannot be listed or the file cannot be written.
+        """
+        path = self.settings.egress_key.parent / REFUSED_FILE
+        # The listing happens under the lock: a listing taken before another network open's
+        # must never be written after it, or a network made in between would drop out again.
+        with self._refused_lock:
+            self._list_and_write_refused(path, starting=starting)
+
+    def _list_and_write_refused(self, path: Path, *, starting: bool) -> None:
+        """List Docker's gateways and write the refused ranges; the caller holds the lock.
+
+        Parameters
+        ----------
+        path
+            ``refused.json``.
+        starting
+            Whether the launcher is starting (see `_write_refused`).
+
+        Raises
+        ------
+        StartError
+            When starting, if Docker's networks cannot be listed or the file cannot be written.
+        """
+        try:
+            gateways = self._docker_gateways()
+        except EngineError as exc:
+            if starting:
+                raise StartError(
+                    f"cannot list Docker's networks to find their gateways ({exc}); the egress "
+                    "proxy and the relays refuse every gateway (the Docker host answers there), "
+                    "so the launcher does not start without them. Check `docker compose logs "
+                    "launcher` and the Docker daemon."
+                ) from None
+            logger.warning(
+                "Kept the refused ranges known before: cannot list Docker's networks to find "
+                "their gateways (%s); a network made since is refused from the next listing on.",
+                exc,
+            )
+            return
+        self._gateways = gateways
+        self._refused = self._refused_ranges()
+        text = json.dumps({"refused": list(self._refused)})
+        if text == self._refused_text:
+            return
+        try:
+            self._replace_refused(path, text)
+        except OSError as exc:
+            reason = exc.strerror or type(exc).__name__
+            if starting:
+                raise StartError(
+                    f"cannot write the refused ranges {path} ({reason}); mount the "
+                    "egress-key volume into the launcher, writable (see compose.yaml)."
+                ) from None
+            logger.error(
+                "Cannot write the refused ranges to %s (%s); the egress proxy keeps the ones "
+                "written before.",
+                path,
+                reason,
+            )
+            return
+        self._refused_text = text
+
+    def _replace_refused(self, path: Path, text: str) -> None:
+        """Write the refused ranges to a temporary file, flushed, then rename it into place.
+
+        Parameters
+        ----------
+        path
+            ``refused.json``.
+        text
+            Its content.
+
+        Raises
+        ------
+        OSError
+            If the file cannot be written or renamed.
+        """
+        temporary = path.with_name(f".{path.name}.{secrets.token_hex(8)}.tmp")
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC
+        descriptor = os.open(temporary, flags, 0o640)
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                handle.write(text)
+                handle.flush()
+                os.fchmod(handle.fileno(), 0o640)
+                with contextlib.suppress(OSError):  # the key's directory sets the group already
+                    group = os.stat(self.settings.egress_key).st_gid
+                    if os.fstat(handle.fileno()).st_gid != group:
+                        os.fchown(handle.fileno(), -1, group)
+                os.fsync(handle.fileno())
+            os.replace(temporary, path)
+        finally:
+            with contextlib.suppress(OSError):
+                temporary.unlink()
 
     def _check_isolated_network(self, version: str) -> None:
         """Make an isolated network and see that Docker kept the mode, then remove it.
@@ -857,12 +1062,16 @@ class Launcher:
     def run(self, request: RunRequest, emit: Emit) -> dict[str, object]:
         """Run one task attempt to its end.
 
+        A run with ``egress`` gets the egress proxy on its network and a token for exactly those
+        pairs in `LAKANA_EGRESS_PROXY`; a run with ``relay`` gets its relay container first. A
+        run with neither reaches the server alone.
+
         Parameters
         ----------
         request
             The run.
         emit
-            Sends ``{"log": <base64>}`` lines.
+            Sends ``{"log": <base64>}`` lines; called from one thread at a time.
 
         Returns
         -------
@@ -872,21 +1081,41 @@ class Launcher:
         Raises
         ------
         Refused
-            If the run names an ingestion root that failed its start-up probe.
+            If the run names an ingestion root that failed its start-up probe, has egress or
+            relay routes while the egress service is not running (`EGRESS_MISSING`), or its
+            pairs do not fit in a token; nothing is left behind.
         EngineError
-            If Docker refuses a step or the environment is not built; the container and network
-            are removed first.
+            If Docker refuses a step, the relay does not start or the environment is not built;
+            the containers and the network are removed first.
+        RuntimeError
+            If a run with egress reaches a launcher that has not started.
         Exception
             Whatever `emit` raises when the caller is gone; likewise.
         """
         for root in request.roots:
             if root in self.unusable_roots:
                 raise Refused(self.unusable_roots[root])
+        if (request.egress or request.relay) and not self._running(self.settings.egress_service):
+            raise Refused(EGRESS_MISSING)
+        if request.egress and self._egress_key is None:
+            raise RuntimeError("the egress key is only available after start()")
+        lock = threading.Lock()
+
+        def emit_locked(line: dict[str, object]) -> None:
+            """Send one line; the relay's reader and the task's stream share the caller.
+
+            Parameters
+            ----------
+            line
+                The line.
+            """
+            with lock:
+                emit(line)
+
         name = container_name(self.settings, "task", request.task)
         live = self._register(
             name, request.owner, request.kill_grace_seconds, request.limits.memory_mb
         )
-        deadline = _deadline(request.limits.timeout_seconds + request.kill_grace_seconds)
         try:
             volume = environment_volume(self.settings, request.python, request.environment)
             if not self._built(volume):
@@ -894,32 +1123,295 @@ class Launcher:
             self._touch(volume)
             if live.stopped.is_set():
                 return dict(_STOPPED_BEFORE_START)
-            network = self._open_network(
-                "task",
-                request.task,
-                request.owner,
-                (self.settings.server_service, self.settings.server_alias),
-                deadline,
-            )
+            # Pull first: the token's and the deadline's time start after it, and a pull takes
+            # minutes in which a prune or an eviction must not let Docker create the volume
+            # empty at the mount.
+            self._ensure_image(self.settings.images[request.python])
+            if not self._built(volume):
+                raise self._not_built(request.python, request.environment)
+            if live.stopped.is_set():
+                return dict(_STOPPED_BEFORE_START)
+            deadline = _deadline(request.limits.timeout_seconds + request.kill_grace_seconds)
+            services = [(self.settings.server_service, self.settings.server_alias)]
+            if request.egress:
+                services.append((self.settings.egress_service, "egress"))
+            network = self._open_network("task", request.task, request.owner, services, deadline)
+            relay: _Relay | None = None
             try:
+                proxy_url = (
+                    self._proxy_url(
+                        network,
+                        request.egress,
+                        request.limits.timeout_seconds + request.kill_grace_seconds,
+                        "task",
+                    )
+                    if request.egress
+                    else None
+                )
+                if request.relay:
+                    relay = self._start_relay(
+                        "task",
+                        request.task,
+                        request.owner,
+                        request.relay,
+                        network,
+                        emit_locked,
+                        deadline,
+                    )
                 spec = run_container_spec(
                     request,
                     self.settings,
                     no_new_privileges=self.no_new_privileges,
                     deadline=deadline,
+                    proxy_url=proxy_url,
                 )
-                self._ensure_image(spec["Image"])
-                # A pull takes minutes; a prune or an eviction in that time must not let Docker
-                # create the volume empty at the mount.
-                if not self._built(volume):
-                    raise self._not_built(request.python, request.environment)
                 return self._supervise(
-                    name, spec, live, request.limits.timeout_seconds, emit, stdin=request.stdin
+                    name,
+                    spec,
+                    live,
+                    request.limits.timeout_seconds,
+                    emit_locked,
+                    stdin=request.stdin,
                 )
             finally:
+                if relay is not None:
+                    self._stop_relay(relay)
                 self.close_network(network)
         finally:
             self.forget(name, request.owner, live)
+
+    def _proxy_url(
+        self, network: str, pairs: tuple[tuple[str, int], ...], seconds: int, purpose: str
+    ) -> str:
+        """Mint an egress token bound to a network and its lifetime plus a minute.
+
+        Parameters
+        ----------
+        network
+            The run's network, open already; its subnet rests until the token expires.
+        pairs
+            The host and port pairs.
+        seconds
+            The run's timeout and kill grace.
+        purpose
+            ``task`` or ``connection-test``: picks the proxy's next step in a refusal.
+
+        Returns
+        -------
+        str
+            ``http://lakana:<token>@egress:3128``.
+
+        Raises
+        ------
+        Refused
+            If the pairs do not fit in a token.
+        """
+        expires = int(time.time()) + seconds + 60
+        with self._lock:
+            subnet = self._subnets[network]
+            self._token_expiry[network] = expires
+        try:
+            token = mint(
+                cast("bytes", self._egress_key),
+                pairs,
+                expires,
+                purpose=purpose,
+                network=ipaddress.ip_network(subnet),
+            )
+        except ValueError as exc:
+            raise Refused(f"egress: {exc}") from None
+        return f"http://lakana:{token}@egress:{EGRESS_PORT}"
+
+    def _outward_network(self, info: dict[str, Any]) -> str:
+        """Find the network the egress service reaches out through.
+
+        Parameters
+        ----------
+        info
+            ``GET /containers/{egress}/json``.
+
+        Returns
+        -------
+        str
+            The one network of the egress container that the launcher did not create.
+
+        Raises
+        ------
+        EngineError
+            Unless there is exactly one such network.
+        """
+        names = list((info.get("NetworkSettings") or {}).get("Networks") or {})
+        outward = []
+        for network in names:
+            status, body = self.engine.request("GET", f"/networks/{quote(network, safe='')}")
+            if status != 200 or not isinstance(body, dict):
+                raise EngineError(f"Docker could not describe network {network}: {_message(body)}")
+            if LABEL_STACK not in (body.get("Labels") or {}):
+                outward.append(network)
+        if len(outward) != 1:
+            raise EngineError(
+                "a task's relay goes out through the egress service's own network, and the "
+                f"egress service is on {len(outward)} networks the launcher did not create "
+                f"({', '.join(sorted(outward)) or 'none'}); attach it to exactly one "
+                "(the Compose bundle's `default`)"
+            )
+        return outward[0]
+
+    def _start_relay(
+        self,
+        kind: str,
+        ident: str,
+        owner: str,
+        routes: tuple[RelayRoute, ...],
+        network: str,
+        emit: Emit,
+        deadline: int,
+    ) -> _Relay:
+        """Start the relay of a run or a check and wait until it listens.
+
+        Parameters
+        ----------
+        kind
+            ``task`` or ``check``.
+        ident
+            The run's or check's id.
+        owner
+            The worker that asked.
+        routes
+            The routes.
+        network
+            The run's network, open already.
+        emit
+            Receives every line the relay writes after ``ready``, for the run's log.
+        deadline
+            The run's deadline label.
+
+        Returns
+        -------
+        _Relay
+            The running relay; `_stop_relay` removes it.
+
+        Raises
+        ------
+        EngineError
+            If Docker refuses a step, the refused ranges do not fit in the plan, or the relay
+            does not report ready within 10 seconds (the message has its last line); the relay
+            is removed first.
+        """
+        with self._lock:
+            subnet = self._subnets[network]
+        with self._refused_lock:
+            refused = self._refused
+        try:
+            plan = relay_plan(routes, self.settings, subnet, refused)
+        except ValueError as exc:
+            raise EngineError(
+                f"a task's relay refuses at most {MAX_RELAY_REFUSED} address ranges, and the "
+                "gateways of Docker's networks, LAKANA_LAUNCHER__EGRESS_REFUSED and the "
+                f"launcher's range make {exc}; remove the Docker networks nobody uses "
+                "(docker network prune) or list wider ranges in LAKANA_LAUNCHER__EGRESS_REFUSED"
+            ) from None
+        cid = self._service_container(self.settings.egress_service)
+        status, info = self.engine.request("GET", f"/containers/{quote(cid, safe='')}/json")
+        if status != 200 or not isinstance(info, dict) or not info.get("Image"):
+            raise EngineError(f"Docker could not describe the egress service: {_message(info)}")
+        outward = self._outward_network(info)
+        upstream = next(
+            (
+                item.split("=", 1)[1].strip()
+                for item in (info.get("Config") or {}).get("Env") or []
+                if item.startswith("LAKANA_EGRESS__UPSTREAM_PROXY=")
+            ),
+            "",
+        )
+        spec = relay_container_spec(
+            self.settings,
+            kind=kind,
+            ident=ident,
+            owner=owner,
+            image=str(info["Image"]),
+            upstream=upstream or None,
+            address=relay_address(subnet),
+            no_new_privileges=self.no_new_privileges,
+            deadline=deadline,
+        )
+        relay_cid = self._create(container_name(self.settings, "relay", ident), spec)
+        stream: socket.socket | None = None
+        try:
+            status, body = self.engine.request(
+                "POST",
+                f"/networks/{quote(outward, safe='')}/connect",
+                {"Container": relay_cid, "EndpointConfig": {}},
+            )
+            if status != 200:
+                raise EngineError(f"Docker could not attach the relay: {_message(body)}")
+            stream = self.engine.attach(relay_cid, stdin=True)
+            status, body = self.engine.request("POST", f"/containers/{relay_cid}/start")
+            if status != 204:
+                raise EngineError(f"Docker could not start the relay: {_message(body)}")
+            _send_input(stream, plan)
+            ready = threading.Event()
+            last: list[str] = []
+            reader = threading.Thread(
+                target=self._read_relay, args=(stream, ready, last, emit), daemon=True
+            )
+            reader.start()
+            if not ready.wait(_RELAY_READY_SECONDS):
+                said = last[-1] if last else "it wrote nothing"
+                raise EngineError(f"the task's relay did not start: {said}")
+        except BaseException:
+            if stream is not None:
+                stream.close()
+            self._remove_container(relay_cid)
+            raise
+        return _Relay(relay_cid, stream, reader)
+
+    @staticmethod
+    def _read_relay(
+        stream: socket.socket, ready: threading.Event, last: list[str], emit: Emit
+    ) -> None:
+        """Copy a relay's lines: ``ready`` releases the run, every later line goes to its log.
+
+        Parameters
+        ----------
+        stream
+            The relay's attached stream.
+        ready
+            Set at the ``ready`` line.
+        last
+            Receives the lines before ``ready``, for the reason a relay did not start.
+        emit
+            Sends a line to the caller; a caller that has gone is left to the run to notice.
+        """
+        pending = b""
+        try:
+            for payload in read_frames(stream):
+                pending += payload
+                while b"\n" in pending:
+                    raw, pending = pending.split(b"\n", 1)
+                    line = raw.decode("utf-8", "replace")
+                    if not ready.is_set():
+                        if line == f"{_RELAY_LINE}ready":
+                            ready.set()
+                        else:
+                            last.append(line.removeprefix(_RELAY_LINE)[:500])
+                        continue
+                    with contextlib.suppress(Exception):
+                        emit({"log": base64.b64encode(raw + b"\n").decode("ascii")})
+        except OSError:
+            return  # the relay was removed
+
+    def _stop_relay(self, relay: _Relay) -> None:
+        """Remove a task's relay; its stream ends and its reader with it.
+
+        Parameters
+        ----------
+        relay
+            The relay.
+        """
+        self._remove_container(relay.cid)
+        relay.stream.close()
+        relay.reader.join(timeout=5)
 
     @staticmethod
     def _not_built(python: str, environment: str) -> EngineError:
@@ -1514,6 +2006,10 @@ class Launcher:
         removed = 0
         for container in containers:
             names = {str(n).lstrip("/") for n in container.get("Names", [])}
+            found = container.get("Labels") or {}
+            if found.get(LABEL_KIND) == "relay":
+                # A relay belongs to its task: it stays while the task's run is live.
+                names.add(container_name(self.settings, "task", str(found.get(LABEL_ID, ""))))
             if names & live:
                 continue
             self._remove_container(str(container["Id"]))
@@ -1685,10 +2181,10 @@ class Launcher:
         kind: str,
         ident: str,
         owner: str,
-        service: tuple[str, str] | None,
+        services: Sequence[tuple[str, str]],
         deadline: int,
     ) -> str:
-        """Create a task's or build's network and attach a service to it.
+        """Create a task's or build's network and attach services to it, in order.
 
         Parameters
         ----------
@@ -1698,8 +2194,8 @@ class Launcher:
             Its id.
         owner
             The worker.
-        service
-            Compose service and alias to attach, or `None`.
+        services
+            Compose service and alias pairs to attach (the server first for a task).
         deadline
             Epoch seconds after which the reaper removes the network.
 
@@ -1711,24 +2207,27 @@ class Launcher:
         Raises
         ------
         EngineError
-            If Docker refuses it, no subnet is free, too many networks are in use, or the
+            If Docker refuses it, no subnet is free, too many networks are in use, or a
             service is not running; nothing is left behind.
         """
         name = container_name(self.settings, kind, ident)
         self._create_network(name, kind, ident, owner, deadline)
-        if service is not None:
-            try:
-                cid = self._service_container(service[0])
+        try:
+            # Before anything joins it: a network made since the last listing, by anyone, is
+            # refused from this run on.
+            self._write_refused()
+            for service, alias in services:
+                cid = self._service_container(service)
                 status, body = self.engine.request(
                     "POST",
                     f"/networks/{quote(name, safe='')}/connect",
-                    {"Container": cid, "EndpointConfig": {"Aliases": [service[1]]}},
+                    {"Container": cid, "EndpointConfig": {"Aliases": [alias]}},
                 )
                 if status != 200:
-                    raise EngineError(f"Docker could not attach {service[0]}: {_message(body)}")
-            except EngineError:
-                self.close_network(name)
-                raise
+                    raise EngineError(f"Docker could not attach {service}: {_message(body)}")
+        except EngineError:
+            self.close_network(name)
+            raise
         return name
 
     def _running(self, service: str) -> bool:
@@ -1787,8 +2286,8 @@ class Launcher:
         if self._egress_key is None:
             raise RuntimeError("the egress key is only available after start()")
         egress = self._running(self.settings.egress_service)
-        service = (self.settings.egress_service, "egress") if egress else None
-        network = self._open_network("build", build, owner, service, _deadline(seconds))
+        services = [(self.settings.egress_service, "egress")] if egress else []
+        network = self._open_network("build", build, owner, services, _deadline(seconds))
         if not egress:
             return network, None
         expires = int(time.time()) + seconds + 60

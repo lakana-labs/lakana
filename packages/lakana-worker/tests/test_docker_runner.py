@@ -272,6 +272,7 @@ def test_the_request_carries_container_paths_and_no_parent_pid(tmp_path: Path) -
     assert set(request) - {"_attempt_dir"} == {
         "op", "task", "owner", "python", "environment", "attempt", "memory_mb", "cpus",
         "pids", "timeout_seconds", "kill_grace_seconds", "stdin", "roots", "trust",
+        "egress", "relay",
     }  # fmt: skip
     work = tmp_path / "attempt-abc_12" / "task"
     assert all((work / d).is_dir() for d in ("home", "tmp", "tmp/polars-spill"))

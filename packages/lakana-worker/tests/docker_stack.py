@@ -687,24 +687,27 @@ def _package() -> bytes:
     return buffer.getvalue()
 
 
-def _key_archive(key: bytes) -> bytes:
-    """Pack the launcher's key file, readable by the proxy's user only.
+def _key_archive(key: bytes, refused: bytes) -> bytes:
+    """Pack the launcher's key file and refused ranges, readable by the proxy's user only.
 
     Parameters
     ----------
     key
         The key file's content.
+    refused
+        ``refused.json`` as the launcher wrote it at its start.
 
     Returns
     -------
     bytes
-        A tar of `egress.key`.
+        A tar of `egress.key` and `refused.json`.
     """
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode="w") as archive:
-        info = tarfile.TarInfo("egress.key")
-        info.size, info.mode, info.uid, info.gid = len(key), 0o400, 10001, 10001
-        archive.addfile(info, io.BytesIO(key))
+        for name, content in (("egress.key", key), ("refused.json", refused)):
+            info = tarfile.TarInfo(name)
+            info.size, info.mode, info.uid, info.gid = len(content), 0o400, 10001, 10001
+            archive.addfile(info, io.BytesIO(content))
     return buffer.getvalue()
 
 
@@ -712,7 +715,8 @@ def start_egress(stack: Stack, *, network: str | None = None, reachable: str | N
     """Start the stack's egress service, run from this checkout's proxy.
 
     Labelled as the stack's ``egress`` Compose service, so the launcher attaches it to every
-    build network; it reads the launcher's key from a copy in its container.
+    build network; it reads the launcher's key and refused ranges (as written at the launcher's
+    start) from a copy in its container.
 
     Parameters
     ----------
@@ -732,6 +736,7 @@ def start_egress(stack: Stack, *, network: str | None = None, reachable: str | N
     """
     assert stack.launcher is not None
     key = stack.launcher.settings.egress_key.read_bytes()
+    refused = (stack.launcher.settings.egress_key.parent / "refused.json").read_bytes()
     prefix = f"import sys; sys.path.insert(0, {APP!r}); "
     if reachable is None:
         entry = prefix + "from lakana_worker.launcher.egress import main; main()"
@@ -756,6 +761,6 @@ def start_egress(stack: Stack, *, network: str | None = None, reachable: str | N
         },
     )
     egress.put_archive(APP, _package())
-    egress.put_archive(APP, _key_archive(key))
+    egress.put_archive(APP, _key_archive(key, refused))
     egress.start()
     return egress

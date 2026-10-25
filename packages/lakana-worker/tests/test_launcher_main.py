@@ -103,3 +103,22 @@ def test_main_exits_2_when_the_socket_cannot_be_served(
 
     assert caught.value.code == 2
     assert str(error) in caplog.text
+
+
+def test_main_exits_2_naming_a_malformed_refused_range(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A range with host bits set stops the launcher before it touches Docker."""
+    for name, value in _ENV.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setenv("LAKANA_LAUNCHER__EGRESS_REFUSED", "192.168.1.5/24")
+    monkeypatch.setattr(Launcher, "start", lambda self: pytest.fail("the launcher started"))
+
+    with pytest.raises(SystemExit) as caught:
+        entry.main()
+
+    assert caught.value.code == 2
+    assert (
+        "LAKANA_LAUNCHER__EGRESS_REFUSED: `192.168.1.5/24` is not a network (host bits set; did "
+        "you mean 192.168.1.0/24?)"
+    ) in caplog.text

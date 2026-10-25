@@ -18,10 +18,13 @@ import ipaddress
 import json
 import math
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any, NoReturn
 from urllib.parse import quote, unquote, urlsplit, urlunsplit
 
+from lakana_worker.launcher.egress_token import MAX_TARGETS as MAX_TOKEN_TARGETS
+from lakana_worker.launcher.egress_token import valid_host
 from lakana_worker.launcher.settings import LauncherSettings
 
 MAX_REQUEST_BYTES = 512 * 1024
@@ -34,6 +37,43 @@ BUILD_DOWNLOADS = 16
 proxy's default cap of 32 connections per build network, which leaves room for the connections
 uv keeps open to an index's other host and for a build backend's own."""
 MAX_ROOTS = 16
+MAX_EGRESS = MAX_TOKEN_TARGETS
+"""The most host:port pairs one task may reach through the egress proxy: what a token holds."""
+MAX_RELAY_ROUTES = 16
+"""The most database connections one task's relay forwards."""
+RELAY_PORTS = range(15001, 15065)
+"""The ports a relay listens on, one per route."""
+RELAY_MAX_PER_PORT = 16
+"""The most connections one route of a relay carries at once."""
+RELAY_PIDS = MAX_RELAY_ROUTES * (RELAY_MAX_PER_PORT + 1) + 2 + 16
+"""The relay container's process limit: a thread per connection and an accepting thread per
+route at their maximum, the main thread and Docker's init, and 16 to spare."""
+MAX_RELAY_REFUSED = 256
+"""The most ranges a relay's plan refuses."""
+EGRESS_MISSING = (
+    "tasks with connections need the `egress` service; start it (Compose bundle) or remove the "
+    "connection from the asset."
+)
+"""The refusal of a run with egress while the egress service is not running."""
+RELAY_ALIAS = "lakana-relay"
+"""The name a task resolves to its relay's address."""
+RELAY_USER = "65534:65534"
+"""The relay runs as nobody: it owns no file and mounts nothing."""
+RELAY_COMMAND = (
+    "/usr/local/bin/python",
+    "-I",
+    "-S",
+    "-c",
+    "import sys; sys.path.insert(0, '/opt/lakana-launcher'); "
+    "from lakana_worker.launcher.relay import main; main()",
+)
+"""The relay's entry point in the egress service's image: the base interpreter on the
+launcher's own copy of its package, as the egress proxy runs (no site-packages, no `.pth`)."""
+_EGRESS_RULE = f"egress: a list of at most {MAX_EGRESS} distinct [host, port] pairs"
+_RELAY_RULE = (
+    f"relay: at most {MAX_RELAY_ROUTES} routes, each a listen port from {RELAY_PORTS.start} to "
+    f"{RELAY_PORTS.stop - 1} (distinct) and a host and port"
+)
 MAX_CREDENTIAL_CHARS = 4096
 MAX_URL_CHARS = 2048
 MAX_KILL_GRACE = 300
@@ -92,6 +132,8 @@ FIELDS: dict[str, frozenset[str]] = {
             "stdin",
             "roots",
             "trust",
+            "egress",
+            "relay",
         }
     )
     | _LIMITS,
@@ -122,6 +164,25 @@ FIELDS: dict[str, frozenset[str]] = {
 
 class Refused(Exception):
     """A request the launcher does not run; the text names the field and the rule."""
+
+
+@dataclass(frozen=True)
+class RelayRoute:
+    """One port of a task's relay and the target it forwards to.
+
+    Parameters
+    ----------
+    listen
+        The port the relay listens on, in `RELAY_PORTS`.
+    host
+        The target's host, as `valid_host` spells it.
+    port
+        The target's port.
+    """
+
+    listen: int
+    host: str
+    port: int
 
 
 @dataclass(frozen=True)
@@ -195,6 +256,11 @@ class RunRequest:
         Allowed ingestion roots to mount read-only.
     trust
         Whether the container mounts its attempt's trust bundle at ``/trust``.
+    egress
+        The host and port pairs the task may reach through the egress proxy; empty for a task
+        without such connections, whose network then holds the server alone.
+    relay
+        The routes of the task's relay; empty for a task without a database connection.
     """
 
     task: str
@@ -207,6 +273,8 @@ class RunRequest:
     stdin: bytes = field(repr=False)
     roots: tuple[str, ...] = ()
     trust: bool = False
+    egress: tuple[tuple[str, int], ...] = ()
+    relay: tuple[RelayRoute, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -675,6 +743,95 @@ def _credential(item: object) -> IndexCredential:
     return IndexCredential(url=url, host=host, username=username, password=password)
 
 
+def _pair(item: object) -> tuple[str, int] | None:
+    """Read one ``[host, port]`` of a run's egress or relay.
+
+    Parameters
+    ----------
+    item
+        The JSON value.
+
+    Returns
+    -------
+    tuple or None
+        The pair; `None` unless the host is lower case as `valid_host` spells it and the port is
+        a JSON integer from 1 to 65535. Private addresses pass: a source is often on one. The
+        proxy and the relay refuse loopback, link-local, metadata and the stack's own networks
+        when they resolve the host, whatever this says.
+    """
+    if not isinstance(item, list) or len(item) != 2:
+        return None
+    host, port = item
+    if not isinstance(host, str) or not valid_host(host):
+        return None
+    if type(port) is not int or not 0 < port < 65536:
+        return None
+    return host, port
+
+
+def _egress(data: dict[str, Any]) -> tuple[tuple[str, int], ...]:
+    """Read ``egress``.
+
+    Parameters
+    ----------
+    data
+        The request.
+
+    Returns
+    -------
+    tuple
+        The pairs, in request order.
+
+    Raises
+    ------
+    Refused
+        With `_EGRESS_RULE`.
+    """
+    raw = data["egress"]
+    if not isinstance(raw, list) or len(raw) > MAX_EGRESS:
+        raise Refused(_EGRESS_RULE)
+    pairs = [_pair(item) for item in raw]
+    found = [pair for pair in pairs if pair is not None]
+    if len(found) != len(pairs) or len(set(found)) != len(found):
+        raise Refused(_EGRESS_RULE)
+    return tuple(found)
+
+
+def _relay_routes(data: dict[str, Any]) -> tuple[RelayRoute, ...]:
+    """Read ``relay``.
+
+    Parameters
+    ----------
+    data
+        The request.
+
+    Returns
+    -------
+    tuple of RelayRoute
+        The routes, in request order.
+
+    Raises
+    ------
+    Refused
+        With `_RELAY_RULE`.
+    """
+    raw = data["relay"]
+    if not isinstance(raw, list) or len(raw) > MAX_RELAY_ROUTES:
+        raise Refused(_RELAY_RULE)
+    routes: list[RelayRoute] = []
+    for item in raw:
+        if not isinstance(item, dict) or set(item) != {"listen", "host", "port"}:
+            raise Refused(_RELAY_RULE)
+        listen = item["listen"]
+        pair = _pair([item["host"], item["port"]])
+        if type(listen) is not int or listen not in RELAY_PORTS or pair is None:
+            raise Refused(_RELAY_RULE)
+        routes.append(RelayRoute(listen, *pair))
+    if len({route.listen for route in routes}) != len(routes):
+        raise Refused(_RELAY_RULE)
+    return tuple(routes)
+
+
 def _trust(data: dict[str, Any]) -> bool:
     """Read the ``trust`` field of a run or a build.
 
@@ -764,6 +921,8 @@ def _run(data: dict[str, Any], settings: LauncherSettings) -> RunRequest:
         stdin=stdin.encode("utf-8"),
         roots=tuple(roots),
         trust=_trust(data),
+        egress=_egress(data),
+        relay=_relay_routes(data),
     )
 
 
@@ -1280,11 +1439,14 @@ def run_container_spec(
     *,
     no_new_privileges: bool,
     deadline: int | None = None,
+    proxy_url: str | None = None,
 ) -> dict[str, Any]:
     """Describe the container of one task attempt.
 
     With ``trust`` it also mounts the attempt's trust bundle read-only at ``/trust`` and points
-    `SSL_CERT_FILE` and `LAKANA_CA_BUNDLE` at it.
+    `SSL_CERT_FILE` and `LAKANA_CA_BUNDLE` at it. With a proxy URL it sets
+    `LAKANA_EGRESS_PROXY`, never `HTTPS_PROXY` or `HTTP_PROXY`: libraries read those unasked,
+    and the ingestion helpers choose per connection whether a request goes through the proxy.
 
     Parameters
     ----------
@@ -1296,6 +1458,8 @@ def run_container_spec(
         Whether to set the option.
     deadline
         Epoch seconds after which the reaper removes the container.
+    proxy_url
+        ``http://lakana:<token>@egress:3128`` for a run with egress, else `None`.
 
     Returns
     -------
@@ -1327,6 +1491,8 @@ def run_container_spec(
     if request.trust:
         mounts.append(_trust_mount(settings, request.attempt))
         env += [f"SSL_CERT_FILE={TRUST_PATH}", f"LAKANA_CA_BUNDLE={TRUST_PATH}"]
+    if proxy_url is not None:
+        env.append(f"LAKANA_EGRESS_PROXY={proxy_url}")
     return {
         "Image": settings.images[request.python],
         "Entrypoint": ["/env/bin/python", "-P", "-m", "lakana.runner"],
@@ -1350,6 +1516,147 @@ def run_container_spec(
             no_new_privileges=no_new_privileges,
         ),
     }
+
+
+def relay_address(subnet: str) -> str:
+    """Name the address a task's relay takes in the task's /29.
+
+    Parameters
+    ----------
+    subnet
+        The task network's subnet.
+
+    Returns
+    -------
+    str
+        Its last host address, which Docker hands to no other container: the gateway, the
+        server, the egress proxy and the task take the lowest free ones.
+    """
+    return str(list(ipaddress.IPv4Network(subnet).hosts())[-1])
+
+
+def relay_container_spec(
+    settings: LauncherSettings,
+    *,
+    kind: str,
+    ident: str,
+    owner: str,
+    image: str,
+    upstream: str | None,
+    address: str,
+    no_new_privileges: bool,
+    deadline: int,
+) -> dict[str, Any]:
+    """Describe the relay container of one task attempt or connection check.
+
+    Parameters
+    ----------
+    settings
+        For the stack's names.
+    kind
+        ``task`` or ``check``: whose network the relay joins.
+    ident
+        The run's or check's id; the relay's labels carry it.
+    owner
+        The worker that asked.
+    image
+        The egress service's image id, which holds the launcher's package.
+    upstream
+        The egress service's `LAKANA_EGRESS__UPSTREAM_PROXY`, or `None`. Left in the
+        container's environment only, never in a log.
+    address
+        `relay_address` of the network's subnet.
+    no_new_privileges
+        Whether to set the option.
+    deadline
+        The run's deadline label: the reaper removes the relay with it.
+
+    Returns
+    -------
+    dict
+        The body of ``POST /containers/create``; the outward network is connected after.
+    """
+    network = container_name(settings, kind, ident)
+    env = ["PATH=/usr/local/bin:/usr/bin:/bin", "PYTHONDONTWRITEBYTECODE=1"]
+    if upstream:
+        env.append(f"LAKANA_EGRESS__UPSTREAM_PROXY={upstream}")
+    # No timer of its own: the relay is removed with its run, or by the reaper at the deadline.
+    limits = Limits(memory_mb=64, cpus=0.25, pids=RELAY_PIDS, timeout_seconds=0)
+    return {
+        "Image": image,
+        "Entrypoint": list(RELAY_COMMAND),
+        "Cmd": [],
+        "User": RELAY_USER,
+        "WorkingDir": "/",
+        "Env": env,
+        "AttachStdin": True,
+        "AttachStdout": True,
+        "AttachStderr": True,
+        "OpenStdin": True,
+        "StdinOnce": True,
+        "Tty": False,
+        "NetworkDisabled": False,
+        "Labels": labels(settings, "relay", ident, owner, deadline),
+        "HostConfig": _host_config(
+            limits,
+            network,
+            [],
+            "rw,noexec,nosuid,nodev,size=1m",
+            no_new_privileges=no_new_privileges,
+        ),
+        "NetworkingConfig": {
+            "EndpointsConfig": {
+                network: {"Aliases": [RELAY_ALIAS], "IPAMConfig": {"IPv4Address": address}}
+            }
+        },
+    }
+
+
+def relay_plan(
+    routes: tuple[RelayRoute, ...],
+    settings: LauncherSettings,
+    subnet: str,
+    refused: Sequence[str],
+) -> bytes:
+    """Write the plan a relay reads on stdin.
+
+    Parameters
+    ----------
+    routes
+        The run's routes.
+    settings
+        For the launcher's range of task networks, which the plan refuses whatever `refused`
+        holds.
+    subnet
+        The network's subnet.
+    refused
+        The ranges the relay refuses as a target besides the built-in ones: every Docker
+        network's gateway, `LauncherSettings.egress_refused` and the launcher's range, as the
+        launcher wrote them for the proxy.
+
+    Returns
+    -------
+    bytes
+        One JSON object.
+
+    Raises
+    ------
+    ValueError
+        If there are more than `MAX_RELAY_REFUSED` ranges.
+    """
+    ranges = list(refused)
+    if settings.network_range not in ranges:
+        ranges.append(settings.network_range)
+    if len(ranges) > MAX_RELAY_REFUSED:
+        raise ValueError(f"{len(ranges)} refused ranges, more than {MAX_RELAY_REFUSED}")
+    return json.dumps(
+        {
+            "address": relay_address(subnet),
+            "subnet": subnet,
+            "refused": ranges,
+            "routes": [{"listen": r.listen, "host": r.host, "port": r.port} for r in routes],
+        }
+    ).encode("utf-8")
 
 
 def uv_index_value(request: BuildRequest) -> str | None:

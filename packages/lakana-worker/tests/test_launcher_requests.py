@@ -18,10 +18,12 @@ from lakana_worker.launcher.requests import (
     BUILD_DOWNLOADS,
     LABEL_OWNER,
     LABEL_STACK,
+    MAX_EGRESS,
     MAX_REQUEST_BYTES,
     BuildRequest,
     CleanupRequest,
     Refused,
+    RelayRoute,
     RunRequest,
     StatusRequest,
     StopRequest,
@@ -32,6 +34,7 @@ from lakana_worker.launcher.requests import (
     network_spec,
     parse_request,
     probe_container_spec,
+    relay_plan,
     run_container_spec,
     uv_index_value,
     volume_spec,
@@ -64,6 +67,8 @@ RUN: dict[str, Any] = {
     "stdin": '{"version": 2}',
     "roots": [],
     "trust": False,
+    "egress": [],
+    "relay": [],
 }
 BUILD: dict[str, Any] = {
     "token": TOKEN,
@@ -1162,3 +1167,139 @@ def test_without_trust_nothing_changes() -> None:
     for spec in _trust_specs(False):
         assert all(m["Target"] != "/trust" for m in spec["HostConfig"]["Mounts"])
         assert not any(v.startswith(("SSL_CERT_FILE=", "LAKANA_CA_BUNDLE=")) for v in spec["Env"])
+
+
+_EGRESS_RULE = "egress: a list of at most 64 distinct [host, port] pairs"
+_RELAY_RULE = (
+    "relay: at most 16 routes, each a listen port from 15001 to 15064 (distinct) and a host "
+    "and port"
+)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "rule"),
+    [
+        ("egress", "db:5432", _EGRESS_RULE),
+        ("egress", [["DB.example.com", 443]], _EGRESS_RULE),
+        ("egress", [["api.example.com", 0]], _EGRESS_RULE),
+        ("egress", [["api.example.com", "443"]], _EGRESS_RULE),
+        ("egress", [["api.example.com", True]], _EGRESS_RULE),
+        ("egress", [["api.example.com", 443, 1]], _EGRESS_RULE),
+        ("egress", [["api.example.com", 443]] * 2, _EGRESS_RULE),
+        ("egress", [[f"h{i}.example.com", 443] for i in range(65)], _EGRESS_RULE),
+        ("relay", {"listen": 15001}, _RELAY_RULE),
+        ("relay", [{"listen": 15000, "host": "db", "port": 5432}], _RELAY_RULE),
+        ("relay", [{"listen": 15065, "host": "db", "port": 5432}], _RELAY_RULE),
+        ("relay", [{"listen": 15001, "host": "db", "port": 5432}] * 2, _RELAY_RULE),
+        ("relay", [{"listen": 15001, "host": "db", "port": 5432, "x": 1}], _RELAY_RULE),
+        ("relay", [{"listen": 15001, "host": "db:1", "port": 5432}], _RELAY_RULE),
+        ("relay", [{"listen": "15001", "host": "db", "port": 5432}], _RELAY_RULE),
+        (
+            "relay",
+            [{"listen": 15001 + i, "host": "db", "port": 5432} for i in range(17)],
+            _RELAY_RULE,
+        ),
+    ],
+)
+def test_run_refuses_a_malformed_egress_or_relay(field: str, value: object, rule: str) -> None:
+    """Each field's rule is the refusal's text.
+
+    Parameters
+    ----------
+    field
+        `egress` or `relay`.
+    value
+        A value that breaks the rule.
+    rule
+        The refusal.
+    """
+    with pytest.raises(Refused) as caught:
+        parse_request(_raw(_with(RUN, **{field: value})), token=TOKEN, settings=SETTINGS)
+
+    assert str(caught.value) == rule
+
+
+@pytest.mark.parametrize("field", ["egress", "relay"])
+def test_egress_and_relay_are_required_in_a_run(field: str) -> None:
+    """Required even empty: an older worker's request is refused as a release skew, not misread.
+
+    Parameters
+    ----------
+    field
+        The field left out.
+    """
+    with pytest.raises(Refused, match="the worker and the launcher must be the same release"):
+        parse_request(_raw(_without(RUN, field)), token=TOKEN, settings=SETTINGS)
+
+
+def test_a_run_reads_its_egress_and_relay_in_order() -> None:
+    """Private addresses and the most pairs a token holds are accepted; the order is kept."""
+    egress = [["db.example.com", 443], ["10.1.2.3", 9000]] + [
+        [f"h{i}.example.com", 443] for i in range(MAX_EGRESS - 2)
+    ]
+    relay = [
+        {"listen": 15002, "host": "db.example.com", "port": 5432},
+        {"listen": 15001, "host": "erp.example.com", "port": 1433},
+    ]
+
+    request = parse_request(
+        _raw(_with(RUN, egress=egress, relay=relay)), token=TOKEN, settings=SETTINGS
+    )
+
+    assert isinstance(request, RunRequest)
+    assert request.egress[:2] == (("db.example.com", 443), ("10.1.2.3", 9000))
+    assert len(request.egress) == MAX_EGRESS
+    assert request.relay == (
+        RelayRoute(15002, "db.example.com", 5432),
+        RelayRoute(15001, "erp.example.com", 1433),
+    )
+
+
+def test_a_task_with_egress_gets_the_proxy_variable_and_no_standard_one() -> None:
+    """`LAKANA_EGRESS_PROXY` is set; no variable a library reads unasked is."""
+    request = parse_request(
+        _raw(_with(RUN, egress=[["api.example.com", 443]])), token=TOKEN, settings=SETTINGS
+    )
+    assert isinstance(request, RunRequest)
+
+    spec = run_container_spec(
+        request,
+        SETTINGS,
+        no_new_privileges=True,
+        proxy_url="http://lakana:v1.x.y@egress:3128",
+    )
+    env = dict(item.split("=", 1) for item in spec["Env"])
+
+    assert env["LAKANA_EGRESS_PROXY"] == "http://lakana:v1.x.y@egress:3128"
+    assert not {"HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY", "https_proxy", "http_proxy"} & set(env)
+
+
+def test_a_task_without_a_proxy_url_has_no_proxy_variable() -> None:
+    """The M7b posture: no egress, no variable."""
+    request = parse_request(_raw(RUN), token=TOKEN, settings=SETTINGS)
+    assert isinstance(request, RunRequest)
+
+    spec = run_container_spec(request, SETTINGS, no_new_privileges=True)
+
+    assert not any(item.startswith("LAKANA_EGRESS_PROXY=") for item in spec["Env"])
+
+
+def test_a_relay_plan_always_refuses_the_launchers_range_and_holds_at_most_256() -> None:
+    """The given ranges in their order, the task range added when missing; too many is an error."""
+    route = (RelayRoute(15001, "db.example.com", 5432),)
+
+    plan = json.loads(relay_plan(route, SETTINGS, "10.207.0.8/29", ["172.17.0.1/32"]))
+    kept = json.loads(
+        relay_plan(route, SETTINGS, "10.207.0.8/29", ["10.207.0.0/16", "172.17.0.1/32"])
+    )
+
+    assert plan == {
+        "address": "10.207.0.14",
+        "subnet": "10.207.0.8/29",
+        "refused": ["172.17.0.1/32", "10.207.0.0/16"],
+        "routes": [{"listen": 15001, "host": "db.example.com", "port": 5432}],
+    }
+    assert kept["refused"] == ["10.207.0.0/16", "172.17.0.1/32"]
+    many = [f"10.0.{n}.1/32" for n in range(256)]
+    with pytest.raises(ValueError, match="257 refused ranges, more than 256"):
+        relay_plan(route, SETTINGS, "10.207.0.8/29", many)

@@ -1476,6 +1476,8 @@ class DockerRunner:
             ).decode("utf-8"),
             "roots": list(self._roots),
             "trust": self._trust is not None,
+            "egress": [],
+            "relay": [],
         }
         sink = OutputRedactor(secrets_to_hide, on_log)
         box: dict[str, object] = {}

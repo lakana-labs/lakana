@@ -32,6 +32,10 @@ _ENV_COMMENTS = {
         "http://[user:password@]host:port of the proxy your network sends https through; empty "
         "for none."
     ),
+    "LAKANA_EGRESS_REFUSED": (
+        "Address ranges no task, build or connection may reach, comma-separated CIDRs or "
+        "addresses: add this host's own LAN address or subnet, such as 192.168.1.0/24."
+    ),
     "LAKANA_WORKER_MEMORY": (
         "Memory limit of each worker container; the worker stops itself at 90% of it "
         "(it is a limit per replica: LAKANA_WORKERS + LAKANA_WORKERS_INTERACTIVE + "
@@ -147,6 +151,7 @@ def generate_env(
         "LAKANA_RUNNER": "docker",
         "LAKANA_DOCKER_SOCKET": "/var/run/docker.sock",
         "LAKANA_EGRESS_UPSTREAM_PROXY": "",
+        "LAKANA_EGRESS_REFUSED": "",
         "LAKANA_BIND": bind,
         "LAKANA_PORT": str(port),
         "LAKANA_WORKERS": str(workers),

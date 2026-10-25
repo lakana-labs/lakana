@@ -373,10 +373,19 @@ not protect against. Each is accepted.
 10. **The address range.** Task and build networks take /29s from `10.207.0.0/16` unless
     `LAKANA_LAUNCHER__NETWORK_RANGE` says otherwise; a range that overlaps a route of the host's
     network shadows that route for the host. The how-to tells the operator to choose a free one.
-11. **Egress.** A direct connection may reach private addresses outside the networks the proxy
-    is attached to, because a company's index often has one (operator allow and deny ranges:
-    #303). With `LAKANA_EGRESS__UPSTREAM_PROXY` the proxy makes no address check of its own: the
-    upstream proxy resolves and decides, and the token still limits the host:port pairs. A
+11. **Egress.** The proxy and the relays refuse loopback, link-local and metadata addresses, the
+    networks they are attached to, the launcher's task range, the gateway of every Docker
+    network (the Docker host's addresses there, such as `172.17.0.1`, listed again at every
+    network open), the Docker host's well-known names (`host.docker.internal` and the like,
+    whatever they resolve to) and the ranges of `LAKANA_LAUNCHER__EGRESS_REFUSED` (an
+    IPv4-mapped entry is read as its IPv4 form); without the launcher's list of those the proxy
+    connects to nothing. A direct connection may still reach other private addresses, because a
+    company's index often has one, and the Docker host's other addresses (LAN, VPN, `virbr0`,
+    Docker Desktop's `192.168.65.0/24`) are refused only when the operator lists them there (the
+    how-to says to, and to bind host services to loopback). With `LAKANA_EGRESS__UPSTREAM_PROXY`
+    the local check covers numeric hosts, and for tasks and connection tests the addresses a
+    name resolves to here; the company proxy resolves the name again and decides, so a
+    split-horizon or rebinding name can pass, and the token still limits the host:port pairs. A
     tunnel whose writes block can outlive its token's expiry by up to the 300-second idle
     timeout. One build holds at most `LAKANA_EGRESS__MAX_CONNECTIONS_PER_NETWORK` (32) of the
     proxy's `LAKANA_EGRESS__MAX_CONNECTIONS` (256), so it takes at most its share; enough builds

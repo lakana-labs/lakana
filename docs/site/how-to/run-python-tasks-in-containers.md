@@ -103,14 +103,22 @@ registered package indexes its lock names. A package's files must come from one 
 - **https only.** `egress` tunnels https, so an `http://` index cannot be reached from a build,
   and an `http://` `LAKANA_RUN__INDEX_URL` stops a worker with the docker runner at start.
 - **Addresses.** `egress` never connects to loopback, link-local (cloud metadata), multicast or
-  reserved addresses, nor into the networks it is attached to (the bundle's own network with the
-  server, the database and the object store, and the build networks). Other private addresses
-  stay reachable, because a company's package index often has one; a list of ranges an operator
-  allows or refuses is [#303](https://github.com/lakana-labs/lakana/issues/303).
+  reserved addresses, into the networks it is attached to (the bundle's own network with the
+  server, the database and the object store, and the build networks), to the gateway of any
+  Docker network (such as `172.17.0.1`, where the Docker host answers), to the Docker host's
+  names (`host.docker.internal` and the like), nor to the ranges of `LAKANA_EGRESS_REFUSED` in
+  `.env`. Other private addresses stay reachable, because a company's package index often has
+  one. List every address of the Docker host in `LAKANA_EGRESS_REFUSED` (`ip -br addr`): its LAN
+  address or subnet, a VPN or Tailscale address (`100.64.0.0/10`), `virbr0`, and on Docker
+  Desktop `192.168.65.0/24`, plus any other internal network a task must never reach; bind
+  services on the Docker host to loopback (`127.0.0.1`), not `0.0.0.0`. Docker's gateways and
+  the host names are refused without it.
+  Details: [Addresses builds and tasks never reach](../reference/network-settings.md#addresses-builds-and-tasks-never-reach).
 - **A company proxy.** If your network sends https through a proxy, set
   `LAKANA_EGRESS_UPSTREAM_PROXY` in `.env` (`http://[user:password@]host:port`). `egress` then
-  tunnels through that proxy and leaves the address checks above to it; it still lets a build
-  reach only its own indexes' hosts.
+  tunnels through that proxy. It still refuses a numeric host in the ranges above before it asks
+  that proxy, which resolves names itself, so keep internal ranges refused in its rules too; it
+  still lets a build reach only its own indexes' hosts.
 - **A private certificate authority.** If an index (or a source your tasks read) uses a
   certificate a private authority signed, mount that authority's PEM file into the `worker`
   service read-only and set `LAKANA_RUN__CA_BUNDLE` on the worker to its path (see
@@ -183,6 +191,7 @@ first two. Keep your additions when you replace `compose.yaml` on an upgrade.
 | `LAKANA_LAUNCHER__MAX_CPUS` | `8` | The most CPUs one task or build may ask for. |
 | `LAKANA_LAUNCHER__MAX_PIDS` | `4096` | The most processes one task or build may ask for. |
 | `LAKANA_LAUNCHER__NETWORK_RANGE` | `10.207.0.0/16` | The private IPv4 range (a `/24` or larger) that each task and build network gets 8 addresses from. |
+| `LAKANA_LAUNCHER__EGRESS_REFUSED` | none (from `LAKANA_EGRESS_REFUSED` in `.env`) | Address ranges builds, tasks and connection tests never reach, besides Docker's gateways and the ranges always refused: comma-separated CIDR ranges or addresses, at most 64, such as `192.168.1.0/24,10.0.0.7`. List the Docker host's LAN address or subnet. A malformed entry stops the launcher, naming it. |
 | `LAKANA_LAUNCHER__INGESTION_ROOTS` | none | Host directories, by name, that a task may read at `/ingest/<name>`. No task asks for one in this release; data loading will. |
 | `LAKANA_LAUNCHER__PROBE_MAX_ENTRIES` | `100000` | The most entries the start-up check looks at in one ingestion root. |
 
@@ -210,7 +219,7 @@ Set these under `environment:` of the `egress` service in `compose.yaml`.
 |---|---|---|
 | `LAKANA_EGRESS__UPSTREAM_PROXY` | none (from `LAKANA_EGRESS_UPSTREAM_PROXY` in `.env`) | The proxy builds go through, `http://[user:password@]host:port`. |
 | `LAKANA_EGRESS__MAX_CONNECTIONS` | `256` | Connections at once, 1 to 4096. |
-| `LAKANA_EGRESS__MAX_CONNECTIONS_PER_NETWORK` | `32` | Connections one build may hold at once, 1 to `LAKANA_EGRESS__MAX_CONNECTIONS`, so that one build cannot take the connections the others need. A build downloads at most 16 packages at once; keep this at 24 or more. A build past it gets `503` with the reason in uv's error. |
+| `LAKANA_EGRESS__MAX_CONNECTIONS_PER_NETWORK` | `32` | Connections one build or task may hold at once, 1 to `LAKANA_EGRESS__MAX_CONNECTIONS`, so that one build cannot take the connections the others need. A build downloads at most 16 packages at once; keep this at 24 or more. A build past it gets `503` with the reason in uv's error. |
 | `LAKANA_EGRESS__LISTEN` | `0.0.0.0:3128` | Where the proxy listens. Leave it. |
 | `LAKANA_EGRESS__KEY` | `/run/lakana-egress/egress.key` | The key the launcher signs build tokens with; a new one at every launcher start. Leave it. |
 
@@ -243,6 +252,11 @@ If a project may have deployed a malicious dependency or package, or a worker ma
 | `The Docker socket ... is writable by everyone` (launcher log) | The socket's mode lets any local user control Docker. | Restrict it to the docker group on the host: `chmod 660`, owned by root:docker. |
 | `this task was ended because it used more than its container's memory limit` | The task used more than `LAKANA_RUN__TASK_MEMORY`. A task process killed by signal 9 that Lakana neither stopped nor timed out reads the same way, because the memory limit is by far the most likely sender; a task that kills itself, an operator's `docker kill` or `docker rm -f`, or the host's own OOM killer also end a task with that signal and read as this message. | Read less in the task, or raise the setting. |
 | `... is not a destination this build may reach` (in uv's error), `Refused a build connection ... not in its token.` (egress log) | The build tried a host or port that is not one of its indexes. | Register the index (`lakana index add`), or set `LAKANA_RUN__INDEX_URL`, with the port in its URL; see [Package indexes and proxies](#package-indexes-and-proxies). |
+| ``LAKANA_LAUNCHER__EGRESS_REFUSED: `...` is not a network (host bits set; did you mean ...?)`` or ``... is not an IP address or CIDR range`` (launcher log; it stops) | An entry of `LAKANA_EGRESS_REFUSED` in `.env` is not a CIDR range or address, or a range has host bits set. | Write the range the message suggests, or a plain address, separated by commas; see [Addresses builds and tasks never reach](../reference/network-settings.md#addresses-builds-and-tasks-never-reach). |
+| `cannot list Docker's networks to find their gateways ...` (launcher log; it stops) | Docker did not answer the network listing, so the launcher cannot tell which addresses are the Docker host's. | Check the Docker daemon (`docker network ls`) and `docker compose logs launcher`, then start the launcher again. |
+| `... is not reachable through this proxy: it resolves to a loopback, link-local, metadata or internal address ...` (in uv's error or the task's log), or `lakana-relay: refused ...` (the task's log) | The host is loopback, metadata, part of the stack, a Docker network's gateway, a name of the Docker host such as `host.docker.internal`, or in `LAKANA_EGRESS_REFUSED`. | Give the index or the connection an address outside those ranges, or take its range out of `LAKANA_EGRESS_REFUSED`; see [Addresses builds and tasks never reach](../reference/network-settings.md#addresses-builds-and-tasks-never-reach). |
+| `the egress proxy cannot read the refused ranges the launcher writes ...` (`503`, in uv's error or the task's log) | The launcher has not written `refused.json` to the `egress-key` volume yet, or it is damaged. | Look at `docker compose logs launcher`; the file is written at every launcher start, so `docker compose restart launcher` writes it again. |
+| `a task's relay refuses at most 256 address ranges ...` | The host has so many Docker networks that their gateways and your ranges do not fit in a relay's list. | Remove the Docker networks nobody uses (`docker network prune`), or list wider ranges in `LAKANA_EGRESS_REFUSED`. |
 | `this client's network already holds 32 connections to the egress proxy ...` (in uv's error) | The build has `LAKANA_EGRESS__MAX_CONNECTIONS_PER_NETWORK` connections open already: its own code, a build backend for example, opens many. | The task is retried. If it keeps happening, raise the setting under `egress` in `compose.yaml`; see [The egress proxy](#the-egress-proxy). |
 | `python: must be one of "3.11", "3.12", "3.13", "3.14" ...` | The version has no task image, or lacks quotes. | Write one of the four, in quotes. |
 | `this project names Python X in lakana.yaml, and this worker runs Python tasks on its own Python Y without containers ...` | A local-runner worker took the task. | Run it on a worker with `LAKANA_RUN__RUNNER=docker`, or remove `python:`. |
