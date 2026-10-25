@@ -795,6 +795,7 @@ def test_removing_a_stale_socket_refuses_a_planted_file_and_a_wrong_directory(
 
 def test_a_check_is_served_with_its_output_and_result(served: Served) -> None:
     """A `check` line gets the check's output as log lines, then the result."""
+    served.engine.hold = False  # the check's container exits at once, as a real check does
     request: dict[str, object] = {
         "token": served.token,
         "op": "check",
