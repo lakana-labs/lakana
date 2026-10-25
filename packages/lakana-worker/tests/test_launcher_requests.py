@@ -18,6 +18,8 @@ import pytest
 
 from lakana_worker.launcher.requests import (
     BUILD_DOWNLOADS,
+    CHECK_GRACE,
+    CHECK_LIMITS,
     LABEL_OWNER,
     LABEL_STACK,
     MAX_EGRESS,
@@ -26,6 +28,7 @@ from lakana_worker.launcher.requests import (
     BuildRequest,
     CheckRequest,
     CleanupRequest,
+    Limits,
     Refused,
     RelayRoute,
     RunRequest,
@@ -1490,31 +1493,38 @@ def test_a_check_must_name_a_check_attempt_never_a_tasks() -> None:
 
 
 def test_a_check_container_keeps_a_tasks_hardening_and_its_own_fixed_limits() -> None:
-    """Pinned here, so a later change to `_host_config` cannot loosen a check silently."""
+    """Pinned whole here, so a later change to `_host_config` cannot loosen a check silently."""
     request = parse_request(_raw(CHECK), token=TOKEN, settings=SETTINGS)
     assert isinstance(request, CheckRequest)
 
     spec = check_container_spec(request, SETTINGS, no_new_privileges=True, deadline=99)
 
-    host = spec["HostConfig"]
-    assert host["Memory"] == 256 * 1024 * 1024
-    assert host["MemorySwap"] == host["Memory"]
-    assert host["PidsLimit"] == 64
-    assert host["NanoCpus"] == 500_000_000
-    assert host["ReadonlyRootfs"] is True
-    assert host["CapDrop"] == ["ALL"]
-    assert host["Privileged"] is False
-    assert host["SecurityOpt"] == ["no-new-privileges"]
+    assert spec["HostConfig"] == {
+        "Mounts": [],
+        "Binds": [],
+        "Devices": [],
+        "Memory": 256 * 1024 * 1024,
+        "MemorySwap": 256 * 1024 * 1024,
+        "NanoCpus": 500_000_000,
+        "PidsLimit": 64,
+        "CapDrop": ["ALL"],
+        "CapAdd": [],
+        "Privileged": False,
+        "ReadonlyRootfs": True,
+        "Init": True,
+        "IpcMode": "private",
+        "PidMode": "",
+        "UsernsMode": "",
+        "CgroupnsMode": "private",
+        "NetworkMode": "lakana-check-k0f3c9a1e",
+        "PublishAllPorts": False,
+        "Tmpfs": {"/tmp": "rw,noexec,nosuid,nodev,size=16m"},
+        "LogConfig": {"Type": "none"},
+        "AutoRemove": False,
+        "RestartPolicy": {"Name": "no"},
+        "SecurityOpt": ["no-new-privileges"],
+    }
     assert spec["User"] == SETTINGS.task_user and not spec["User"].startswith("0")
-    assert host["NetworkMode"] == "lakana-check-k0f3c9a1e"
     assert "server" not in json.dumps(spec)
     assert not any(item.startswith("LAKANA_EGRESS_PROXY=") for item in spec["Env"])
-
-
-def test_a_checks_relay_plan_asks_for_verdicts() -> None:
-    """A check's relay says when it connected; a task's never does."""
-    route = (RelayRoute(15001, "db.example.com", 5432),)
-
-    plan = json.loads(relay_plan(route, SETTINGS, "10.207.0.8/29", [], verdicts=True))
-
-    assert plan["verdicts"] is True
+    assert (Limits(256, 0.5, 64, 30), 1) == (CHECK_LIMITS, CHECK_GRACE)

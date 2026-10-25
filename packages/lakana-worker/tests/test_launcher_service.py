@@ -3765,3 +3765,25 @@ def test_a_relay_line_that_is_no_verdict_does_not_end_the_wait(
 
     assert other in _logs(emitted)
     assert time.monotonic() - started >= 0.5
+
+
+def test_a_check_is_supervised_for_its_fixed_30_seconds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The timeout comes from `CHECK_LIMITS`, never from the request or the settings."""
+    engine = FakeEngine()
+    launcher = _started(engine, tmp_path, built=False)
+    seen: list[int] = []
+    real = launcher._supervise
+
+    def recording(
+        name: str, spec: dict[str, Any], live: Any, timeout: int, *args: Any, **kw: Any
+    ) -> dict[str, object]:
+        seen.append(timeout)
+        return real(name, spec, live, timeout, *args, **kw)
+
+    monkeypatch.setattr(launcher, "_supervise", recording)
+
+    launcher.check(_check(), lambda line: None)
+
+    assert seen == [30]
