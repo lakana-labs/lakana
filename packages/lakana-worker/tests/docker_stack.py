@@ -140,6 +140,7 @@ def build_task_image(client: Any) -> str:
         for relative in (
             "Dockerfile.task",
             "packages/lakana-worker/src/lakana_worker/launcher/task_build.py",
+            "packages/lakana/src/lakana/ingest/_check.py",
         ):
             archive.add(REPO / relative, arcname=relative)
     context.seek(0)

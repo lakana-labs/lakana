@@ -31,6 +31,7 @@ from lakana_worker.launcher.engine import EngineError
 from lakana_worker.launcher.requests import (
     MAX_REQUEST_BYTES,
     BuildRequest,
+    CheckRequest,
     Refused,
     Request,
     RunRequest,
@@ -229,13 +230,14 @@ class _Handler(socketserver.StreamRequestHandler):
         name: str | None = None
         owner = ""
         done = threading.Event()
-        if isinstance(request, (RunRequest, BuildRequest)):
+        if isinstance(request, (RunRequest, BuildRequest, CheckRequest)):
             owner = request.owner
-            kind, ident = (
-                ("task", request.task)
-                if isinstance(request, RunRequest)
-                else ("build", request.build)
-            )
+            if isinstance(request, RunRequest):
+                kind, ident = "task", request.task
+            elif isinstance(request, CheckRequest):
+                kind, ident = "check", request.check
+            else:
+                kind, ident = "build", request.build
             name = container_name(launcher.settings, kind, ident)
             threading.Thread(
                 target=_watch,

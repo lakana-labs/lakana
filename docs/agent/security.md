@@ -862,8 +862,9 @@ code in this area has to know.
   `LAKANA_RUN__RUNNER=local` keep this, and the trust domain includes holders of
   `MANAGE_CONNECTION` there: a connection test dials from the worker's host (any address the
   connection names; paths under the ingestion roots), a probe a data engineer without `DEPLOY`
-  did not have before. In this version a `DockerRunner` worker runs no connection tests; from
-  the next release a test runs there in a container under a task's own network rules.
+  did not have before. A `DockerRunner` worker runs a test through the launcher's `check` op
+  instead (see "Task egress: connections, the proxy and the relay (M6)"): the task image, the
+  task's network rules for that one connection, so it reaches only what such a task could.
 - **`DockerRunner` isolates projects, not hostile code.** Each task runs in a container that the
   launcher (`lakana_worker.launcher`) starts with fixed fields (`requests.run_container_spec`,
   `_host_config`): uid 10001 in group 10003 (`TASK_USER`; builds run as 10002:10002, so a task
@@ -1283,6 +1284,38 @@ connections; a connection opens exactly its endpoints and nothing else.
   before any network or container exists (`EGRESS_MISSING`, a permanent failure with its own
   text). Every refusal of an address is the same `INTERNAL` reason, with the task's next step
   (`give the connection an address outside the Lakana stack (lakana connection update)`).
+- **The connection check (`check` op).** Under the docker runner `ConnectionTestLoop`
+  (`connection_tests.py`) asks `LauncherClient.check` with exactly the routes a task with that one
+  connection would get, built by `python_tasks.connection_plan`, which `_connection_plan` uses
+  too (a test compares both per kind): the `egress` pairs of a proxy kind, one relay route per
+  endpoint of a database or `tcp` kind (ports from 15001, `relay_port` in the routing), the root of a mounted kind (`root_dir` `/ingest/<root>`). The worker's trust bundle is
+  written into a private `attempt-check_*` directory (0700, under the work directory, removed when
+  the check ends; `AttemptSweeper` sweeps a dead worker's); the launcher refuses a check naming any
+  other attempt, so a check never mounts a task's. The worker claims a test for
+  `LEASE_SECONDS` (`CHECK_WAIT_SECONDS` + 30, 120 s), so no other worker retakes a running check. The launcher (`Launcher.check`,
+  `check_container_spec`) runs the check the task image carries, `CHECK_ENTRY` =
+  `/usr/local/bin/python -I -B /opt/lakana-check/check.py`; the request has no image, command,
+  environment, code or limit field, only `python` from `LAUNCHER__IMAGES`. The container runs as the
+  task user with the fixed `CHECK_LIMITS` (256 MiB, 0.5 CPU, 64 pids, 30 s, kill grace 1 s), a
+  16 MiB `/tmp`, no `/code`, `/env` or `/work`, only the attempt's `trust` subpath and the allowed
+  roots, read-only. Its network holds no server (the connection and its secret travel on stdin): the
+  egress service joins with a token of purpose `connection-test` when it has pairs, minted after the
+  image pull, and its relay starts when it has routes; `stop`, the abandon watcher and `cleanup`
+  treat a `check` name and its relay like a run's. A check's relay plan has `verdicts: true`: the
+  relay reports a successful dial (`connected HOST:PORT`) as well as a refusal, and the launcher
+  waits up to `RELAY_VERDICT_SECONDS` (20) for that verdict before it removes the relay, joining
+  its reader before it closes the stream. The worker keeps at most 64 KiB of output; a
+  `lakana-relay: refused` line decides the outcome first (source refusals map to `dns`, `refused`,
+  `timeout`, `not_allowed`; the upstream proxy, the routing table and unknown texts to `failed`),
+  then the last answer line, and through the relay an `ok` without the relay's `connected` line is
+  `timeout` (the relay accepts before it dials, so the check's own `ok` proves only the relay); it
+  masks the message again before storing it; no output reaches a log line.
+  `test_connection_test_outcomes` proves the outcomes per route class on a real engine. A
+  refusal, an unreachable launcher or no answer within `CHECK_WAIT_SECONDS` (90) records `failed`
+  naming the launcher's log. `/opt/lakana-check/check.py` is a root-owned copy of
+  `lakana/ingest/_check.py`, which imports only the standard library (an AST test in
+  `test_ingest_check.py` keeps it so); the image installs no package for it, and `-I` keeps the
+  script's directory and the environment out of its path, and `-B` writes no bytecode.
 - **What a task cannot reach, connections or not**: another task's network (each run its own
   /29; the relay and the proxy refuse the launcher's whole range), the Compose stack (attached
   networks; the relay sits on the outward network, the stack's `default`, so SeaweedFS's 18333 and

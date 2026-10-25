@@ -23,7 +23,7 @@ import secrets
 import socket
 import stat
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
 from lakana_worker.launcher.server import TOKEN_FILE
@@ -41,6 +41,11 @@ _HOST_PART = 110
 """Longest host part of an owner: with ``.`` and the token it stays within the launcher's 128."""
 _CLAIMS: list[int] = []
 """Descriptors of the owner files this process holds locked, open until it ends."""
+CHECK_WAIT_SECONDS = 90.0
+"""How long a worker waits for a connection check: its 30 seconds and 1 s grace, a relay's 10 s
+start, the 20 s wait for the relay's verdict (`RELAY_VERDICT_SECONDS`) and a margin for the
+image pull and the network."""
+_MAX_CHECK_OUTPUT = 64 * 1024
 _TRANSIENT_REFUSALS = ("the launcher is busy:", "no request line arrived in time")
 """Refusals that say the launcher could not take the request now, not that it was wrong."""
 
@@ -392,6 +397,48 @@ class LauncherClient:
             under.
         """
         return self.call({"op": "stop", "id": ident, "owner": owner}).get("stopped") is True
+
+    def check(
+        self, fields: Mapping[str, object], *, timeout: float = CHECK_WAIT_SECONDS
+    ) -> tuple[dict[str, object], bytes]:
+        """Run one connection check and collect what it printed.
+
+        Parameters
+        ----------
+        fields
+            The ``check`` request's fields without ``op`` and the token.
+        timeout
+            Seconds to the result: the check's own 30 seconds, a relay's start and a margin.
+
+        Returns
+        -------
+        tuple
+            The launcher's result (``exit``, ``timed_out`` and so on) and the check's output,
+            at most its first 64 KiB.
+
+        Raises
+        ------
+        LauncherUnavailable
+            As `call`.
+        LauncherRefused
+            As `call`.
+        LauncherTimedOut
+            As `call`.
+        """
+        output = bytearray()
+
+        def collect(chunk: bytes) -> None:
+            """Keep the first 64 KiB of the check's output.
+
+            Parameters
+            ----------
+            chunk
+                A piece of it.
+            """
+            output.extend(chunk[: max(_MAX_CHECK_OUTPUT - len(output), 0)])
+
+        result = self.call({"op": "check", **fields}, collect, timeout=timeout)
+        return result, bytes(output)
 
     def status(self, python: str, key: str) -> bool:
         """Ask whether an environment is built.

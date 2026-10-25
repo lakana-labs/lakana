@@ -959,6 +959,69 @@ def connection_routing(
     return {"kind": kind.value, "grant": [[e.host, e.port] for e in found]}
 
 
+def connection_plan(
+    connections: Sequence[tuple[str, ConnectionKind, Mapping[str, object], Mapping[str, object]]],
+    *,
+    isolated: bool,
+    root_dir: Callable[[str, str], str],
+) -> ConnectionPlan:
+    """Plan where a task with these connections may go; a connection test plans one the same way.
+
+    The one place that turns connections into routes, so a task and the Docker runner's
+    connection check of one of its connections cannot reach different things.
+
+    Parameters
+    ----------
+    connections
+        ``(name, kind, address, settings)`` in declaration order, validated.
+    isolated
+        Whether the runner is the Docker runner: HTTPS kinds then go through the egress proxy
+        (``egress``) and database and ``tcp`` kinds through the relay (``relay``, ports from
+        15001, ``relay_port`` in the routing); the local runner connects directly.
+    root_dir
+        Maps a root and the connection naming it to the directory a task reads it from; it may
+        raise `TaskFailure`.
+
+    Returns
+    -------
+    ConnectionPlan
+        The routes, without the per-task caps (the caller checks them).
+    """
+    egress: list[tuple[str, int]] = []
+    relay: list[tuple[int, str, int]] = []
+    root_users: dict[str, str] = {}
+    routing: dict[str, dict[str, object]] = {}
+    for name, kind, address, settings in connections:
+        routing[name] = connection_routing(
+            name,
+            kind,
+            address,
+            settings,
+            root_dir=lambda root, name=name: root_dir(root, name),
+        )
+        if kind in MOUNT_KINDS:
+            root_users.setdefault(str(address["root"]), name)
+            continue
+        found = endpoints(kind, address, settings)
+        if not isolated:
+            continue
+        if kind in PROXY_KINDS:
+            for e in found:
+                if (e.host, e.port) not in egress:
+                    egress.append((e.host, e.port))
+        else:  # RELAY_KINDS: the three sets cover every kind (test_connection_endpoints)
+            routing[name]["relay_port"] = RELAY_FIRST_PORT + len(relay)
+            for e in found:
+                relay.append((RELAY_FIRST_PORT + len(relay), e.host, e.port))
+    return ConnectionPlan(
+        egress=tuple(egress),
+        relay=tuple(relay),
+        roots=tuple(root_users),
+        root_users=root_users,
+        routing=routing,
+    )
+
+
 @dataclass
 class PythonRuntime:
     """Runs claimed Python tasks; one instance serves the worker's lifetime.
@@ -1811,10 +1874,7 @@ class PythonRuntime:
                 ).where(Connection.environment_id == env.id, Connection.name.in_(names))
             ).all()
         }
-        egress: list[tuple[str, int]] = []
-        relay: list[tuple[int, str, int]] = []
-        root_users: dict[str, str] = {}
-        routing: dict[str, dict[str, object]] = {}
+        declared: list[tuple[str, ConnectionKind, Mapping[str, object], Mapping[str, object]]] = []
         for name in names:
             row = rows.get(name)
             if row is None:
@@ -1825,36 +1885,10 @@ class PythonRuntime:
                     "asset's connections, then deploy again",
                     FailureCode.NOT_FOUND,
                 )
-            kind = ConnectionKind(row.kind)
-            routing[name] = connection_routing(
-                name,
-                kind,
-                row.address,
-                row.settings,
-                root_dir=lambda root, name=name: self._root_dir(root, name),
-            )
-            if kind in MOUNT_KINDS:
-                root_users.setdefault(str(row.address["root"]), name)
-                continue
-            found = endpoints(kind, row.address, row.settings)
-            if not self.isolated:
-                continue
-            if kind in PROXY_KINDS:
-                for e in found:
-                    if (e.host, e.port) not in egress:
-                        egress.append((e.host, e.port))
-            else:  # RELAY_KINDS: the three sets cover every kind (test_connection_endpoints)
-                routing[name]["relay_port"] = RELAY_FIRST_PORT + len(relay)
-                for e in found:
-                    relay.append((RELAY_FIRST_PORT + len(relay), e.host, e.port))
-        self._check_caps(asset, egress, relay, root_users)
-        return ConnectionPlan(
-            egress=tuple(egress),
-            relay=tuple(relay),
-            roots=tuple(root_users),
-            root_users=root_users,
-            routing=routing,
-        )
+            declared.append((name, ConnectionKind(row.kind), row.address, row.settings))
+        plan = connection_plan(declared, isolated=self.isolated, root_dir=self._root_dir)
+        self._check_caps(asset, list(plan.egress), list(plan.relay), plan.root_users)
+        return plan
 
     def _root_dir(self, root: str, connection: str) -> str:
         """Find where a task reads an ingestion root.

@@ -1987,7 +1987,10 @@ def test_the_docker_isolation_tests_have_a_step_of_their_own_that_needs_docker()
 
     assert '-m "integration and not docker"' in first["run"]
     assert jobs["integration-docker"]["name"] == "integration (docker)"
-    assert docker["env"] == {"LAKANA_TEST_DOCKER": "1"}
+    assert docker["env"] == {
+        "LAKANA_TEST_DOCKER": "1",
+        "LAKANA_TEST_WHEELHOUSE": "${{ runner.temp }}/wheelhouse",
+    }
     assert docker["run"] == (
         'uv run pytest -m docker --basetemp "$RUNNER_TEMP/pytest-docker" '
         "packages/lakana-worker/tests"
@@ -2034,7 +2037,11 @@ def test_the_required_integration_check_passes_only_when_every_integration_job_d
 
 
 def test_the_services_tests_run_in_two_shards_and_the_python_assets_build_their_index() -> None:
-    """The longest integration step is split; the wheel index is built only where it is used."""
+    """The longest integration step is split; the wheel index is built only where it is used.
+
+    The Python-asset tests and the Docker tests use it (the Docker module runs one ingestion
+    asset end to end with the real lakana), each job with the same cache and build steps.
+    """
     jobs = _jobs("ci.yml")
     services = jobs["integration-services"]
     assert services["strategy"]["matrix"]["shard"] == [1, 2]
@@ -2048,8 +2055,20 @@ def test_the_services_tests_run_in_two_shards_and_the_python_assets_build_their_
     assert names.index("Build the wheel index for the Python-asset tests") < names.index(
         "Python-asset integration tests"
     )
+    docker = jobs["integration-docker"]
+    docker_names = [s.get("name") for s in docker["steps"]]
+    assert docker_names.index("Build the wheel index for the Python-asset tests") < (
+        docker_names.index("Docker isolation tests")
+    )
+    for step_name in (
+        "Restore the wheel index",
+        "Build the wheel index for the Python-asset tests",
+    ):
+        assert next(s for s in docker["steps"] if s.get("name") == step_name) == next(
+            s for s in assets["steps"] if s.get("name") == step_name
+        ), step_name
     for name, job in jobs.items():
-        if name != "integration-assets":
+        if name not in ("integration-assets", "integration-docker"):
             assert "build_wheelhouse.sh" not in str(job), name
 
 

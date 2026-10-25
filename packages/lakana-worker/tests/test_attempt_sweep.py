@@ -87,6 +87,15 @@ def test_it_removes_an_old_orphan_and_keeps_a_young_one(work: Path) -> None:
     assert young.exists()
 
 
+def test_it_removes_an_old_connection_check_directory_too(work: Path) -> None:
+    """A connection check's directory (``attempt-check_`` and mkdtemp's eight) is an attempt."""
+    old = _attempt(work, "attempt-check_ab12cd_3", _MAX_AGE + 1)
+    young = _attempt(work, "attempt-check_wxyz7890", _MAX_AGE - 1)
+    assert _sweeper(work).sweep() == 1
+    assert not old.exists()
+    assert young.exists()
+
+
 def test_it_keeps_an_old_directory_a_running_task_of_this_worker_holds(work: Path) -> None:
     held = _attempt(work, "attempt-abcd1234", _MAX_AGE * 5)
     sweeper = _sweeper(work)
@@ -114,7 +123,13 @@ def test_it_never_follows_a_symlink_named_like_an_attempt(work: Path, tmp_path: 
 def test_it_leaves_foreign_names_alone_and_logs_each_once(
     work: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    for name in ("venvs", "attempt-short", "attempt-abcd1234-extra", "notes.txt"):
+    for name in (
+        "venvs",
+        "attempt-short",
+        "attempt-abcd1234-extra",
+        "attempt-check_short",
+        "notes.txt",
+    ):
         entry = work / name
         entry.mkdir(mode=0o700) if name != "notes.txt" else entry.write_text("x")
         os.utime(entry, (_NOW - _MAX_AGE * 5, _NOW - _MAX_AGE * 5))
@@ -124,13 +139,14 @@ def test_it_leaves_foreign_names_alone_and_logs_each_once(
         assert sweeper.sweep() == 0
     assert sorted(p.name for p in work.iterdir()) == [
         "attempt-abcd1234-extra",
+        "attempt-check_short",
         "attempt-short",
         "notes.txt",
         "venvs",
     ]
     messages = [r.getMessage() for r in caplog.records]
     assert len([m for m in messages if "venvs" in m]) == 1
-    assert len(messages) == 4
+    assert len(messages) == 5
 
 
 def test_it_leaves_an_old_file_with_an_attempt_name_alone(work: Path) -> None:

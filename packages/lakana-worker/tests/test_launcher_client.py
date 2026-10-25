@@ -584,3 +584,27 @@ def test_an_owner_kept_from_an_earlier_process_is_read_back(tmp_path: Path) -> N
 
     assert claim_owner(tmp_path, "box-1") == "box-1.0123456789abcdef"
     assert (tmp_path / "launcher-owner").read_text() == "0123456789abcdef\n"
+
+
+def test_check_sends_the_op_and_collects_the_checks_output(answering: Answering) -> None:
+    """The output comes back whole (up to 64 KiB) beside the launcher's result."""
+    line = b'{"outcome": "dns", "message": "cannot resolve db.example.com"}\n'
+    answering.answers.append(
+        json.dumps({"log": base64.b64encode(line).decode()}).encode()
+        + b"\n"
+        + json.dumps({"log": base64.b64encode(b"x" * 70_000).decode()}).encode()
+        + b"\n"
+        + json.dumps({"result": {"exit": 0}}).encode()
+        + b"\n"
+    )
+
+    result, output = LauncherClient(Path("l.sock")).check({"check": "k1", "owner": "w"})
+
+    assert result == {"exit": 0}
+    assert output.startswith(line) and len(output) == 64 * 1024
+    assert json.loads(answering.received[0]) == {
+        "op": "check",
+        "check": "k1",
+        "owner": "w",
+        "token": "t" * 64,
+    }

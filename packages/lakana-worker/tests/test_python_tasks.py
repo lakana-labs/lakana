@@ -44,6 +44,7 @@ from check_run_helpers import (
     _outside_table,
     _refused_text,
 )
+from fake_launcher import FakeLauncher
 from sqlalchemy import delete as sqlalchemy_delete
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError, OperationalError
@@ -96,6 +97,8 @@ from lakana_core.models import (
     Base,
     CheckOutcome,
     Connection,
+    ConnectionTest,
+    ConnectionTestState,
     DeployKind,
     DeployRun,
     DeployStatus,
@@ -157,6 +160,7 @@ from lakana_core.secrets.service import SecretService
 from lakana_core.secrets.uses import SecretUse
 from lakana_core.storage.resolver import StorageResolver
 from lakana_worker.attempt_sweep import AttemptSweeper
+from lakana_worker.connection_tests import ConnectionTestLoop, DockerCheck
 from lakana_worker.deploy_sweep import DeploySweeper
 from lakana_worker.index_credentials import IndexAccess
 from lakana_worker.launcher_client import LauncherClient, LogSinkFailed
@@ -8256,3 +8260,82 @@ def test_a_stored_value_that_is_not_text_fails_the_task_for_good_naming_the_caus
         "--password-stdin (or --values-stdin)"
     )
     assert py.runner.tasks == []
+
+
+@pytest.mark.parametrize(
+    ("kind", "address", "settings"),
+    [
+        (ConnectionKind.POSTGRESQL, {"host": "db.example.com", "port": 5432, "database": "c"},
+         {"user": "reader"}),
+        (ConnectionKind.HTTP, {"base_url": "https://api.example.com"},
+         {"auth": "oauth2", "client_id": "l", "token_url": "https://login.example.com/token"}),
+        (ConnectionKind.TCP, {"host": "erp.example.com", "port": 1433}, {}),
+        (ConnectionKind.DIRECTORY, {"root": "shared", "path": "in"}, {}),
+    ],
+    ids=["postgresql", "http", "tcp", "directory"],
+)  # fmt: skip
+def test_a_task_and_a_connection_test_get_the_same_routes_for_one_connection(
+    py: PyWorld,
+    tmp_path: Path,
+    kind: ConnectionKind,
+    address: dict[str, object],
+    settings: dict[str, object],
+) -> None:
+    """The Docker runner's check reaches exactly what a task declaring the connection reaches.
+
+    Parameters
+    ----------
+    py
+        The world.
+    tmp_path
+        Pytest's directory, for the check's attempts directory.
+    kind
+        The connection's kind.
+    address
+        Its address.
+    settings
+        Its settings.
+    """
+    _connection(py, "src", kind, address, settings)
+    py.deploy(connections=["src"])
+    engine = py.engine(_writer(py.world), environments=FakeEnvironments())
+    run_claimed(engine, py.claim_python(engine))
+    (task,) = py.runner.tasks
+    with py.world.session() as session:
+        row = session.execute(select(Connection).where(Connection.name == "src")).scalar_one()
+        session.add(
+            ConnectionTest(
+                id=uuid.uuid4(),
+                connection_id=row.id,
+                environment_id=row.environment_id,
+                requested_by=py.world.admin.id,
+                state=ConnectionTestState.QUEUED,
+            )
+        )
+        session.commit()
+
+    def answer(request: dict[str, object], on_log: Callable[[bytes], None]) -> dict[str, object]:
+        on_log(b'{"outcome": "ok", "message": "reachable"}\n')
+        return {"exit": 0}
+
+    launcher = FakeLauncher(scripts={"check": answer})
+    attempts = tmp_path / "check-attempts"
+    attempts.mkdir(mode=0o700)
+    check = ConnectionTestLoop(
+        py.world.engine,
+        owner="w1",
+        key_provider=EnvKeyProvider(base64.b64encode(b"k" * 32).decode()),
+        runner_kind="docker",
+        ingestion_roots={},
+        docker=DockerCheck(client=launcher, owner="box-1.abc", work_dir=attempts),
+    )
+
+    assert check.step()
+
+    (request,) = launcher.requests
+    assert request["egress"] == [[host, port] for host, port in task.egress]
+    assert request["relay"] == [
+        {"listen": listen, "host": host, "port": port} for listen, host, port in task.relay
+    ]
+    assert request["roots"] == list(task.roots)
+    assert json.loads(request["stdin"])["routing"] == task.connections["src"]

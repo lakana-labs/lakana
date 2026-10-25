@@ -723,7 +723,10 @@ _NEXT_STEPS: dict[str, str] = {
     "dns": "Check the host name.",
     "refused": "Check the port and the source's firewall.",
     "timeout": "Check the host, the port and the network path between the worker and the source.",
-    "tls": "Check the CA (`lakana connection update NAME --ca-file ca.pem`).",
+    "tls": (
+        "Check the CA (`lakana connection update NAME --ca-file ca.pem`), or, when the message "
+        "names the TLS version, that the server offers TLS 1.2 or newer."
+    ),
     "not_allowed": "The address must be reachable from outside the Lakana stack.",
     "root_unavailable": "Check the root setting.",
     "not_found": "Check the path under the root (`lakana connection show NAME`).",
@@ -783,7 +786,7 @@ def test(
     """Test connection NAME: a worker checks that its host can be reached.
 
     Prints ``ok: <message>`` or ``<outcome>: <message>`` with what to do next; exits 1 unless the
-    outcome is ``ok``. Waits up to 60 seconds for a worker.
+    outcome is ``ok``. Waits up to 120 seconds for a worker.
 
     Parameters
     ----------

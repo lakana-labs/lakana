@@ -1238,7 +1238,10 @@ server (uvicorn on a loopback port, `python_asset_helpers.serving`) on Postgres 
   directory does not hold yet. CI runs this module in a job of its own, `integration (python
   assets)`, beside the tests that install no packages: it restores the directory from a cache keyed
   on `uv.lock` and `.python-version`, runs the script as its own step, and runs this module with
-  `LAKANA_TEST_WHEELHOUSE` set; the job has `timeout-minutes: 30` and a budget of 15 minutes. Each test project commits
+  `LAKANA_TEST_WHEELHOUSE` set; the job has `timeout-minutes: 30` and a budget of 15 minutes.
+  `integration (docker)` repeats the same cache and build steps and sets the variable too, for the
+  Docker module's end-to-end ingestion asset
+  (`test_an_ingestion_asset_reaches_its_declared_connections_and_nothing_else`). Each test project commits
   a copy as `wheelhouse/` and sets `[tool.uv] no-index = true`, `find-links = ["wheelhouse"]`;
   the worker under test has its proxy pointed at the discard port, so a build that reached for
   an index would fail. The directory is never committed to this repository.
@@ -1317,8 +1320,8 @@ four packages; it only starts subprocesses, so import-linter has nothing to obje
 
 The tests marked `docker` (also `integration`) start real containers through the launcher in
 the test process: `packages/lakana-worker/tests/docker_stack.py` builds the task image of the
-running Python from `Dockerfile.task` (its own context: the Docker SDK reads only the root
-`.dockerignore`), creates a work volume, a server stand-in labelled as the stack's `server`
+running Python from `Dockerfile.task` (its own context, with `task_build.py` and the connection
+check `_check.py`: the Docker SDK reads only the root `.dockerignore`), creates a work volume, a server stand-in labelled as the stack's `server`
 service and one environment with a stub harness that runs the attempt's `probe.py`. Every
 object carries `lakana-test=1` and its stack's `lakana-test-stack=<name>`, and is removed, also
 after a failure; a test that needs a launcher of its own (the one that stops it) brings up a
@@ -1389,6 +1392,25 @@ before the relay sees it on Engine 28; the relay's own outward address answers n
 source network's gateway, made after the launcher started, which the proxy's own copy of
 `refused.json` now holds; and teardown after exit, stop and
 timeout (nothing labelled with the run's id, no token expiry, the subnet resting).
+`test_connection_test_outcomes` (#308, M6 PR 5d), per route class, runs the worker's own path:
+`ConnectionTestLoop._run_check` with a `DockerCheck` whose client copies the attempt directory into
+the work volume and sends the check to the module's launcher over its socket (the `worker_side`
+fixture serves it), with the plan of `python_tasks.connection_plan`. Proxy: `ok` with the trust
+bundle, `tls` without it, `dns` for a name the proxy cannot resolve, `refused` for a closed port,
+`not_allowed` for a token that does not name the host. Relay: `ok` for PostgreSQL with
+`tls: disable` (only because the relay reported `connected`), `tls` (not offered) without it,
+`refused` to a closed port, and `timeout` for a blackholed port (the source's port 7000 accepts
+one connection it never takes, so later SYNs are dropped; the check says `ok` to the relay at once,
+the launcher waits for the relay's verdict, and the outcome is never `ok`). tcp: `ok`. Mount:
+`root_unavailable` through the launcher's refusal of a root it does not have. After each, nothing
+is labelled with the check's id.
+`test_an_ingestion_asset_reaches_its_declared_connections_and_nothing_else` (#308's "Done when")
+installs the wheelhouse's real `lakana[assets]` into an environment volume (it needs
+`LAKANA_TEST_WHEELHOUSE`, skipped without it, failed with `LAKANA_TEST_DOCKER=1`), serves the two
+connections' answers from the stand-in server's task route, and runs an asset through the
+worker's `DockerRunner` with the routes of `connection_plan`: `connections.get` gives the proxy
+URL and the relay address, httpx reaches the HTTPS source through the proxy with the trust bundle,
+a socket gets the PostgreSQL answer through the relay, and an undeclared host gets the proxy's 403.
 
 The test's Docker client and the launcher use one socket: `DOCKER_HOST` when it is
 `unix://<path>`, else `/var/run/docker.sock`; another `DOCKER_HOST` skips them (fails with

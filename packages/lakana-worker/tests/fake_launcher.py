@@ -1,9 +1,9 @@
-"""A scripted stand-in for `LauncherClient`, for the DockerRunner and environment tests."""
+"""A scripted stand-in for `LauncherClient`, for the DockerRunner, environment and check tests."""
 
 from __future__ import annotations
 
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -96,6 +96,27 @@ class FakeLauncher:
         """
         answer = self.call({"op": "status", "python": python, "environment": key})
         return answer.get("complete") is True
+
+    def check(
+        self, fields: Mapping[str, object], *, timeout: float = 60.0
+    ) -> tuple[dict[str, object], bytes]:
+        """Run the check script, collecting its output as `LauncherClient.check` does.
+
+        Parameters
+        ----------
+        fields
+            The request's fields without ``op``.
+        timeout
+            The caller's deadline, recorded.
+
+        Returns
+        -------
+        tuple
+            The script's result and everything it emitted.
+        """
+        output = bytearray()
+        result = self.call({"op": "check", **fields}, output.extend, timeout=timeout)
+        return result, bytes(output)
 
     def stop(self, ident: str, owner: str) -> bool:
         """Record a stop and release a waiting script.

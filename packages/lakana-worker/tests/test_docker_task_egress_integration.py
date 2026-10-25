@@ -17,24 +17,48 @@ probe is the task; the launcher runs it as the Docker runner would, with ``egres
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import io
 import ipaddress
 import json
+import os
 import tarfile
 import threading
 import time
 import uuid
-from collections.abc import Callable, Iterator
-from dataclasses import dataclass
+from collections.abc import Callable, Iterator, Mapping
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, cast
 
+import docker_stack
 import pytest
-from docker_stack import APP, Stack, build_task_image, docker_client, stack, start_egress
+from docker_stack import (
+    APP,
+    PYTHON,
+    Stack,
+    build_task_image,
+    docker_client,
+    serve,
+    stack,
+    start_egress,
+)
 from tls_fixture import issue_leaf, make_authority
 
+from lakana_core.connections.endpoints import endpoints
+from lakana_core.connections.kinds import ConnectionKind
+from lakana_worker import connection_tests
 from lakana_worker.launcher import egress
-from lakana_worker.launcher.requests import RelayRoute, StopRequest, container_name
+from lakana_worker.launcher.requests import (
+    RelayRoute,
+    StopRequest,
+    container_name,
+    environment_volume,
+)
+from lakana_worker.launcher_client import LauncherClient
+from lakana_worker.python_tasks import connection_plan
+from lakana_worker.runners import DockerRunner, PythonTask, StopSignal
 from lakana_worker.trust import build_trust_bundle
 
 pytestmark = [pytest.mark.integration, pytest.mark.docker, pytest.mark.slow]
@@ -69,11 +93,20 @@ def serve(port, handler):
     while True:
         connection, _ = server.accept()
         threading.Thread(target=handler, args=(connection,), daemon=True).start()
+held = socket.create_server(("0.0.0.0", 7000), backlog=0)
+fillers = []
+for _ in range(2):
+    filler = socket.socket()
+    filler.setblocking(False)
+    filler.connect_ex(("127.0.0.1", 7000))
+    fillers.append(filler)
 threading.Thread(target=serve, args=(5432, postgres), daemon=True).start()
 threading.Thread(target=serve, args=(9000, echo), daemon=True).start()
 serve(8443, https)
 """
-"""The source: TLS on 8443, the first PostgreSQL answer on 5432, an echo on 9000."""
+"""The source: TLS on 8443, the first PostgreSQL answer on 5432, an echo on 9000, and on 7000 a
+listener whose one-place queue its own connections fill and that never accepts, so the kernel
+drops every later SYN: a blackholed port."""
 
 _NEIGHBOUR_HOST = "postgres.lakana.test"
 _NEIGHBOUR = """import socket
@@ -750,3 +783,507 @@ def test_the_source_network_gateway_is_refused_once_the_launcher_lists_it(
 
     assert seen["proxy"] == {"status": "HTTP/1.1 403 Forbidden", "body": _internal(gateway, 8443)}
     assert any(ipaddress.ip_address(gateway) in ipaddress.ip_network(r) for r in copied), copied
+
+
+# --- the connection test (the launcher's check op) --------------------------------------------
+
+
+@dataclass
+class _Mirrored:
+    """The worker's launcher client, with the worker's attempt directories mirrored into the volume.
+
+    The worker's attempts directory is the launcher's work volume in production. Here the volume
+    is Docker's and the attempts directory a host directory, so before a run or a check its
+    attempt directory (code, task directories, trust bundle) is copied into the volume, then
+    the request goes to the real launcher over its socket.
+
+    Parameters
+    ----------
+    stack
+        The stack whose work volume receives the copies.
+    real
+        The `LauncherClient` on the served launcher.
+    root
+        The host attempts directory.
+    checks
+        The id of every check sent, in order.
+    """
+
+    stack: Stack
+    real: LauncherClient
+    root: Path
+    checks: list[str] = field(default_factory=list)
+
+    def _mirror(self, attempt: str) -> None:
+        """Copy one attempt directory into the work volume, owned by the task user.
+
+        Parameters
+        ----------
+        attempt
+            Its name.
+        """
+        top = self.root / attempt
+        entries: list[Any] = [(attempt, "dir", b"", top.stat().st_mode & 0o777, 10001)]
+        for path in sorted(top.rglob("*")):
+            name = f"{attempt}/{path.relative_to(top)}"
+            mode = path.stat().st_mode & 0o777
+            if path.is_dir():
+                entries.append((name, "dir", b"", mode, 10001))
+            else:
+                entries.append((name, "file", path.read_bytes(), mode, 10001))
+        self.stack.put(self.stack.work_volume, entries)
+
+    def call(
+        self,
+        request: dict[str, Any],
+        on_log: Callable[[bytes], None] | None = None,
+        *,
+        timeout: float | None = None,
+    ) -> dict[str, object]:
+        """Mirror a run's attempt, then send the request.
+
+        Parameters
+        ----------
+        request
+            The request.
+        on_log
+            The log sink.
+        timeout
+            The deadline.
+
+        Returns
+        -------
+        dict
+            The launcher's result.
+        """
+        if request.get("op") == "run":
+            self._mirror(str(request["attempt"]))
+        return self.real.call(request, on_log, timeout=timeout)
+
+    def stop(self, ident: str, owner: str) -> bool:
+        """Stop a run.
+
+        Parameters
+        ----------
+        ident
+            Its id.
+        owner
+            The worker.
+
+        Returns
+        -------
+        bool
+            The launcher's answer.
+        """
+        return self.real.stop(ident, owner)
+
+    def check(
+        self, fields: Mapping[str, object], *, timeout: float = 90.0
+    ) -> tuple[dict[str, object], bytes]:
+        """Mirror a check's attempt, then send the check.
+
+        Parameters
+        ----------
+        fields
+            The request's fields.
+        timeout
+            The deadline.
+
+        Returns
+        -------
+        tuple
+            The launcher's result and the check's output.
+        """
+        self._mirror(str(fields["attempt"]))
+        self.checks.append(str(fields["check"]))
+        return self.real.check(fields, timeout=timeout)
+
+
+@pytest.fixture
+def worker_side(
+    sources: Sources, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[_Mirrored]:
+    """Serve the module's launcher on a socket and give the worker a client and attempts dir.
+
+    Parameters
+    ----------
+    sources
+        The module's stack.
+    tmp_path
+        The working directory (for the socket) and the attempts directory.
+    monkeypatch
+        Changes the working directory.
+
+    Yields
+    ------
+    _Mirrored
+        The worker's launcher client.
+    """
+    assert sources.stack.launcher is not None
+    monkeypatch.chdir(tmp_path)
+    server, _ = serve(sources.stack.launcher)
+    attempts = tmp_path / "attempts"
+    attempts.mkdir(mode=0o700)
+    try:
+        yield _Mirrored(sources.stack, LauncherClient(Path("l.sock")), attempts)
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def _check(
+    sources: Sources,
+    worker: _Mirrored,
+    kind: str,
+    address: dict[str, object],
+    settings: dict[str, object],
+    *,
+    trust: bool,
+    egress_pairs: tuple[tuple[str, int], ...] | None = None,
+) -> tuple[str, str, str]:
+    """Run the connection check of one connection through the worker's own Docker path.
+
+    `ConnectionTestLoop._run_check` builds the attempt, the request and the outcome exactly as
+    in production (the plan of `connection_plan`, the relay's verdict, masking); only the
+    database row is skipped.
+
+    Parameters
+    ----------
+    sources
+        The module's stack.
+    worker
+        The worker's launcher client.
+    kind
+        The connection's kind.
+    address
+        Its address.
+    settings
+        Its settings.
+    trust
+        Whether the worker has the trust bundle with the source's authority.
+    egress_pairs
+        Replaces the planned proxy pairs, to send a token that does not name the host.
+
+    Returns
+    -------
+    tuple of str
+        The outcome, the message and the check's id.
+    """
+    loop = connection_tests.ConnectionTestLoop(
+        cast("Any", None),
+        owner="w1",
+        key_provider=cast("Any", None),
+        runner_kind="docker",
+        ingestion_roots={},
+        docker=connection_tests.DockerCheck(
+            client=worker,
+            owner="test",
+            work_dir=worker.root,
+            trust=sources.bundle if trust else None,
+        ),
+    )
+    connection_kind = ConnectionKind(kind)
+    plan = connection_plan(
+        [("src", connection_kind, address, settings)], isolated=True, root_dir=loop._root_dir
+    )
+    if egress_pairs is not None:
+        plan = dataclasses.replace(plan, egress=egress_pairs)
+    body = {
+        "name": "src",
+        "kind": kind,
+        "address": address,
+        "settings": settings,
+        "endpoints": [
+            {"host": e.host, "port": e.port, "role": e.role}
+            for e in endpoints(connection_kind, address, settings)
+        ],
+        "secret": None,
+    }
+    outcome, message = loop._run_check(body, plan)
+    return outcome, message, (worker.checks[-1] if worker.checks else "")
+
+
+_SOURCE_HTTPS = {"base_url": f"https://{_HOST}:8443"}
+_SOURCE_DB = {"host": _HOST, "port": 5432, "database": "crm"}
+
+
+@pytest.mark.parametrize(
+    ("kind", "address", "settings", "trust", "pairs", "outcome", "words"),
+    [
+        ("http", _SOURCE_HTTPS, {}, True, None, "ok", "reachable"),
+        ("http", _SOURCE_HTTPS, {}, False, None, "tls", f"not trusted for `{_HOST}`"),
+        ("http", {"base_url": "https://nowhere.lakana.test:8443"}, {}, True, None, "dns",
+         "cannot resolve nowhere.lakana.test"),
+        ("http", {"base_url": f"https://{_HOST}:9999"}, {}, True, None, "refused",
+         f"cannot reach {_HOST}:9999"),
+        ("http", _SOURCE_HTTPS, {}, True, ((_HOST, 9000),), "not_allowed",
+         "is not a destination this connection test may reach"),
+        ("postgresql", _SOURCE_DB, {"user": "r", "tls": "disable"}, False, None, "ok",
+         "TLS not used"),
+        ("postgresql", _SOURCE_DB, {"user": "r"}, False, None, "tls", "does not offer TLS"),
+        ("postgresql", {**_SOURCE_DB, "port": 5433}, {"user": "r", "tls": "disable"}, False, None,
+         "refused", f"the relay refused {_HOST}:5433: cannot reach"),
+        ("tcp", {"host": _HOST, "port": 9000}, {}, False, None, "ok", "reachable"),
+        ("tcp", {"host": _HOST, "port": 7000}, {}, False, None, "timeout", f"{_HOST}:7000"),
+        ("directory", {"root": "shared", "path": "in"}, {}, False, None, "root_unavailable",
+         "`src` names ingestion root `shared`, which this worker does not have"),
+    ],
+    ids=[
+        "ok-proxy", "tls-untrusted", "dns", "refused", "not-allowed", "ok-relay",
+        "tls-not-offered", "refused-relay", "ok-tcp", "blackholed-relay", "root-unavailable",
+    ],
+)  # fmt: skip
+def test_connection_test_outcomes(
+    sources: Sources,
+    worker_side: _Mirrored,
+    kind: str,
+    address: dict[str, object],
+    settings: dict[str, object],
+    trust: bool,
+    pairs: tuple[tuple[str, int], ...] | None,
+    outcome: str,
+    words: str,
+) -> None:
+    """Each outcome on a real engine, the check in the task image under a task's rules.
+
+    ``blackholed-relay``: port 7000 of the source accepts one connection it never takes, so the
+    kernel drops every later SYN; the relay's dial times out after the check said ``ok`` to the
+    relay, and the outcome is ``timeout``, never ``ok``. ``root-unavailable`` goes through the
+    launcher's refusal of a root it does not have, as in production.
+
+    Parameters
+    ----------
+    sources
+        The module's stack.
+    worker_side
+        The worker's launcher client.
+    kind
+        The connection's kind.
+    address
+        Its address.
+    settings
+        Its settings.
+    trust
+        Whether the check trusts the source's authority.
+    pairs
+        Proxy pairs replacing the planned ones (a token that does not name the host).
+    outcome
+        The expected outcome.
+    words
+        Part of the expected message.
+    """
+    found, message, ident = _check(
+        sources, worker_side, kind, address, settings, trust=trust, egress_pairs=pairs
+    )
+
+    assert (found, words in message) == (outcome, True), message
+    if ident:
+        assert not [name for name in sources.stack.labelled() if ident in name]
+
+
+# --- an ingestion asset, end to end -------------------------------------------------------------
+
+_E2E_KEY = "e" * 64
+"""The key of the environment with the real `lakana` from the wheelhouse."""
+
+_ASSET = f"""import json, socket, ssl
+
+import httpx
+
+from lakana import asset
+from lakana.ingest import connections
+
+
+@asset(connections=["api", "db"])
+def items():
+    api = connections.get("api")
+    tls = ssl.create_default_context()
+    with httpx.Client(proxy=api.proxy_url, verify=tls, timeout=20) as client:
+        declared = client.get("https://{_HOST}:8443/").text
+        try:
+            client.get("https://example.lakana.test/")
+            undeclared = "reached"
+        except httpx.ProxyError as exc:
+            undeclared = str(exc)
+    db = connections.get("db")
+    host, port = db.relay_address.split(":")
+    with socket.create_connection((host, int(port)), timeout=20) as sock:
+        sock.sendall({_SSL_REQUEST!r})
+        answer = sock.recv(1).decode()
+    print("E2E " + json.dumps(
+        {{"declared": declared, "undeclared": undeclared, "database": answer,
+          "relay": db.relay_address, "proxied": api.proxy_url is not None}}
+    ), flush=True)
+    raise RuntimeError("the probe is done")
+"""
+"""An ingestion asset as a team writes it: the SDK's `connections.get`, httpx through the proxy,
+a database socket through the relay; it prints what it reached and fails on purpose."""
+
+
+def _wheelhouse() -> Path:
+    """Find the wheel directory the real `lakana` is installed from, or skip.
+
+    Returns
+    -------
+    Path
+        `LAKANA_TEST_WHEELHOUSE`.
+    """
+    value = os.environ.get("LAKANA_TEST_WHEELHOUSE")
+    if not value:
+        message = "set LAKANA_TEST_WHEELHOUSE (scripts/build_wheelhouse.sh DIR) for this case"
+        if os.environ.get("LAKANA_TEST_DOCKER") == "1":
+            pytest.fail(message)
+        pytest.skip(message)
+    return Path(value)
+
+
+def _real_environment(stack: Stack, wheels: Path) -> None:
+    """Build the environment `_E2E_KEY` with the wheelhouse's `lakana`, as a build would.
+
+    Parameters
+    ----------
+    stack
+        The stack.
+    wheels
+        The wheel directory.
+    """
+    assert stack.launcher is not None
+    volume = environment_volume(stack.launcher.settings, PYTHON, _E2E_KEY)
+    if (stack.root / "state" / "environments" / f"{volume}.complete").exists():
+        return
+    store = f"{stack.name}-wheels"
+    stack.client.volumes.create(store, labels=stack.labels)
+    stack.client.volumes.create(volume, labels=stack.labels)
+    stack.put(
+        store,
+        [(path.name, "file", path.read_bytes(), 0o644, 10002) for path in wheels.glob("*.whl")],
+    )
+    stack.client.containers.run(
+        stack.image,
+        [
+            "sh",
+            "-c",
+            "python -m venv /env && /env/bin/python -m pip install -q --no-index "
+            "--find-links /wheels 'lakana[assets]'",
+        ],
+        user="10002:10002",
+        environment={"HOME": "/tmp"},
+        network_mode="none",
+        volumes={volume: {"bind": "/env", "mode": "rw"}, store: {"bind": "/wheels", "mode": "ro"}},
+        labels=stack.labels,
+        remove=True,
+    )
+    (stack.root / "state" / "environments" / f"{volume}.complete").write_text(volume)
+
+
+def _serve_connections(stack: Stack, bodies: dict[str, dict[str, object]]) -> None:
+    """Put each connection's answer where the stand-in server serves the task route.
+
+    The stack's server is ``python -m http.server`` in ``/``; the SDK's `connections.get` asks
+    ``GET /api/v1/tasks/self/connections/<name>``.
+
+    Parameters
+    ----------
+    stack
+        The stack.
+    bodies
+        Name to the server's answer.
+    """
+    (server,) = stack.client.containers.list(
+        filters={
+            "label": [
+                f"com.docker.compose.project={stack.name}",
+                "com.docker.compose.service=server",
+            ]
+        }
+    )
+    route = "api/v1/tasks/self/connections"
+    entries: list[Any] = []
+    for part in ("api", "api/v1", "api/v1/tasks", "api/v1/tasks/self", route):
+        entries.append((part, "dir", b"", 0o755, 0))
+    for name, body in bodies.items():
+        entries.append((f"{route}/{name}", "file", json.dumps(body), 0o644, 0))
+    server.put_archive("/", docker_stack._tar(entries))
+
+
+def test_an_ingestion_asset_reaches_its_declared_connections_and_nothing_else(
+    sources: Sources, worker_side: _Mirrored
+) -> None:
+    """#308: a real asset, run by the worker's Docker runner with the worker's plan.
+
+    The asset uses the SDK's `connections.get`: its HTTPS connection through the egress proxy
+    (with the trust bundle), its database through the relay; an undeclared host is refused by
+    the proxy. `DockerRunner` sends what `connection_plan` gives; the server is a stand-in that
+    answers only the connection route, so the asset prints what it reached and fails on purpose.
+    """
+    _real_environment(sources.stack, _wheelhouse())
+    declared = [
+        ("api", ConnectionKind.HTTP, {"base_url": f"https://{_HOST}:8443"}, {}),
+        ("db", ConnectionKind.POSTGRESQL, dict(_SOURCE_DB), {"user": "r", "tls": "disable"}),
+    ]
+    plan = connection_plan(declared, isolated=True, root_dir=lambda root, name: f"/ingest/{root}")
+    _serve_connections(
+        sources.stack,
+        {
+            name: {
+                "name": name,
+                "kind": kind.value,
+                "address": address,
+                "settings": settings,
+                "endpoints": [
+                    {"host": e.host, "port": e.port, "role": e.role}
+                    for e in endpoints(kind, address, settings)
+                ],
+                "secret": None,
+            }
+            for name, kind, address, settings in declared
+        },
+    )
+    attempt = worker_side.root / f"attempt-{uuid.uuid4().hex[:8]}"
+    attempt.mkdir(mode=0o700)
+    (attempt / "code").mkdir(mode=0o755)
+    (attempt / "code" / "items.py").write_text(_ASSET)
+    launcher = sources.stack.launcher
+    assert launcher is not None
+    runner = DockerRunner(
+        cast("LauncherClient", worker_side),
+        owner="test",
+        memory_mb=512,
+        cpus=1.0,
+        pids=128,
+        kill_grace=2.0,
+        trust=sources.bundle,
+    )
+    task = PythonTask(
+        code_dir=attempt / "code",
+        asset_path="items.py",
+        inputs={},
+        table="raw.items",
+        environment="dev",
+        server_url=f"http://{launcher.settings.server_alias}:8000",
+        token="t" * 48,
+        timeout_seconds=120,
+        venv=Path("/env"),
+        expected_snapshot_id="none",
+        attempt_dir=attempt,
+        environment_key=_E2E_KEY,
+        python=PYTHON,
+        connections=plan.routing,
+        egress=plan.egress,
+        relay=plan.relay,
+    )
+    output = bytearray()
+
+    outcome = runner.run(task, output.extend, StopSignal())
+
+    text = output.decode(errors="replace")
+    reports = [line for line in text.splitlines() if line.startswith("E2E ")]
+    assert reports, text
+    seen = json.loads(reports[-1].removeprefix("E2E "))
+    assert seen["declared"] == "hello, source"
+    assert seen["proxied"] is True
+    assert "403" in seen["undeclared"], seen
+    assert seen["database"] == "N"
+    assert seen["relay"] == "lakana-relay:15001"
+    assert outcome.succeeded is False
+    assert not [name for name in sources.stack.labelled() if "task" in name]

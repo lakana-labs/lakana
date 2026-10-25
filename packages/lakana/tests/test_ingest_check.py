@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import base64
 import contextlib
 import errno
@@ -945,3 +946,25 @@ def test_a_server_that_speaks_only_tls_1_1_is_a_tls_failure_naming_the_floor(
 def test_every_context_the_check_makes_refuses_tls_older_than_1_2(mode: str) -> None:
     context = _check._context(None, mode)
     assert context.minimum_version == ssl.TLSVersion.TLSv1_2
+
+
+def test_the_check_imports_only_the_standard_library() -> None:
+    """The task image runs `_check.py` on its own, by path, without the `lakana` package.
+
+    So every import must be of the standard library: no `lakana` module, no relative import, no
+    third-party package (the image installs none).
+    """
+    tree = ast.parse(Path(_check.__file__).read_text(encoding="utf-8"))
+    found: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            found += [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom):
+            assert node.level == 0, "a relative import needs the lakana package"
+            assert node.module is not None
+            found.append(node.module)
+
+    assert found, "the walk found no import at all"
+    roots = {name.split(".")[0] for name in found}
+    assert roots - {"__future__"} <= set(sys.stdlib_module_names), roots
+    assert "lakana" not in roots

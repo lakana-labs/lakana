@@ -98,9 +98,8 @@ TEST_STUCK_AFTER = timedelta(minutes=10)
 """How long a queued or running connection test may stay open; a request for a new test closes an
 older one as failed."""
 _TEST_STUCK = (
-    "no worker finished this test within 10 minutes; in this version only a worker with the "
-    "local runner runs connection tests — read that worker's log (`docker compose logs worker`, "
-    "or the `lakana local` terminal)"
+    "no worker finished this test within 10 minutes; check that a worker is running and read its "
+    "log (`docker compose logs worker`, or the `lakana local` terminal)"
 )
 _CLEAR_SECRET = "secret"  # nosec B105 -- the word a caller clears, not a credential
 

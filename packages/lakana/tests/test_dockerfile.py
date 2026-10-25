@@ -337,7 +337,59 @@ def test_the_task_image_carries_python_uv_and_the_build_entry_and_no_entrypoint(
     assert ignore.splitlines() == [
         "*",
         "!packages/lakana-worker/src/lakana_worker/launcher/task_build.py",
+        "!packages/lakana/src/lakana/ingest/_check.py",
     ]
+
+
+def _task_run_steps() -> list[str]:
+    """Join the task image's ``RUN`` instructions with their continuation lines.
+
+    Returns
+    -------
+    list of str
+        One string per ``RUN``, its lines joined with single spaces.
+    """
+    steps: list[str] = []
+    current: list[str] | None = None
+    for line in _TASK_DOCKERFILE.read_text(encoding="utf-8").splitlines():
+        if current is None and line.startswith("RUN "):
+            current = []
+        if current is not None:
+            current.append(line.rstrip("\\").strip())
+            if not line.endswith("\\"):
+                steps.append(" ".join(current))
+                current = None
+    return steps
+
+
+def test_the_task_image_holds_lakanas_own_check_and_runs_it_as_the_launcher_will() -> None:
+    """`/opt/lakana-check/check.py`: the standard-library check, copied, never a project's code.
+
+    The launcher's ``check`` op runs ``/usr/local/bin/python -I -B /opt/lakana-check/check.py``
+    (`CHECK_ENTRY`); the build runs it the same way once, and nothing but that file is added:
+    no wheel, no dependencies.
+    """
+    text = _TASK_DOCKERFILE.read_text(encoding="utf-8")
+    copy = "COPY packages/lakana/src/lakana/ingest/_check.py /opt/lakana-check/check.py"
+    (step,) = [s for s in _task_run_steps() if "/opt/lakana-check" in s]
+
+    assert copy in text
+    assert "/usr/local/bin/python -I -B /opt/lakana-check/check.py" in step
+    assert "does not know the kind" in step
+    # Root's and read-only, whatever owner and mode the file had in the build context.
+    assert step.startswith(
+        "RUN chown 0:0 /opt/lakana-check/check.py && chmod 0444 /opt/lakana-check/check.py && "
+    )
+    assert "dist/" not in text and "pip install" not in text
+    run = next(
+        i
+        for i, line in enumerate(text.splitlines())
+        if line.startswith("RUN ") and ("/opt/lakana-check" in line)
+    )
+    lines = text.splitlines()
+    assert lines.index(copy) < run
+    assert run < next(i for i, line in enumerate(lines) if "find / -xdev -perm /6000" in line)
+    assert run < lines.index("USER 10001:10003")
 
 
 def test_the_task_image_pins_the_same_uv_as_the_main_image() -> None:

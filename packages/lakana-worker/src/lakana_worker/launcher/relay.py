@@ -16,7 +16,9 @@ goes to stderr, which the launcher copies into the task's log.
 
 The plan arrives on stdin as one JSON object:
 ``{"address", "subnet", "refused": [cidr, ...], "reachable": [cidr, ...],
-"routes": [{"listen", "host", "port"}]}``; ``reachable`` is a test hook, empty in production.
+"routes": [{"listen", "host", "port"}], "verdicts": bool}``; ``reachable`` is a test hook, empty
+in production; ``verdicts`` (a connection check's relay) also reports each successful dial as
+``connected HOST:PORT``, the verdict the launcher waits for before it removes the relay.
 Standard library only, like the launcher.
 """
 
@@ -83,6 +85,10 @@ class RelayPlan:
     reachable
         IPv4 networks the relay may dial although it is attached to them (never a range of
         `refused`): `LauncherSettings.relay_reachable`, a test hook, empty in production.
+    verdicts
+        Whether each connection's dial is reported when it succeeds too (``connected
+        HOST:PORT``): a connection check's relay, whose launcher waits for a verdict; a task's
+        relay reports only refusals.
     """
 
     address: ipaddress.IPv4Address
@@ -90,6 +96,7 @@ class RelayPlan:
     refused: frozenset[Network]
     routes: tuple[RelayRoute, ...]
     reachable: frozenset[ipaddress.IPv4Network] = frozenset()
+    verdicts: bool = False
 
 
 def say(text: str) -> None:
@@ -134,8 +141,13 @@ def parse_plan(text: str) -> RelayPlan:
         "refused",
         "reachable",
         "routes",
+        "verdicts",
     }:
-        raise ValueError("the plan has exactly address, subnet, refused, reachable and routes")
+        raise ValueError(
+            "the plan has exactly address, subnet, refused, reachable, routes and verdicts"
+        )
+    if not isinstance(data["verdicts"], bool):
+        raise ValueError("verdicts: true or false")
     try:
         subnet = ipaddress.IPv4Network(str(data["subnet"]))
         address = ipaddress.IPv4Address(str(data["address"]))
@@ -164,7 +176,7 @@ def parse_plan(text: str) -> RelayPlan:
         routes.append(RelayRoute(listen, host, port))
     if len({route.listen for route in routes}) != len(routes):
         raise ValueError("routes: listen ports are distinct")
-    return RelayPlan(address, subnet, refused, tuple(routes), reachable)
+    return RelayPlan(address, subnet, refused, tuple(routes), reachable, data["verdicts"])
 
 
 def _refused(raw: object) -> frozenset[Network]:
@@ -257,6 +269,8 @@ def _handle(
             hint = f"; {_INTERNAL_HINT}" if exc.status == 403 else ""
             log(f"refused {route.host}:{route.port}: {exc.reason}{hint}")
             return
+        if plan.verdicts:
+            log(f"connected {route.host}:{route.port}")
         with upstream:
             relay_bytes(client, upstream, time.monotonic() + _FOREVER, idle=_FOREVER)
     finally:
