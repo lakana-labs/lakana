@@ -624,7 +624,7 @@ def test_an_error_while_running_the_check_finishes_the_test_as_failed(
     test_id = world.connection("svc")
     running = loop(world)
 
-    def broken(connection: dict[str, Any], routing: dict[str, Any]) -> tuple[str, str]:
+    def broken(connection: dict[str, Any], plan: object) -> tuple[str, str]:
         raise OSError(f"cannot start {SECRET}")
 
     monkeypatch.setattr(running, "_run_check", broken)

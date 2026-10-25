@@ -30,7 +30,7 @@ import tempfile
 import threading
 import time
 import uuid
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -38,7 +38,7 @@ from typing import Any, Protocol
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session
 
-from lakana_core.connections.endpoints import MOUNT_KINDS, PROXY_KINDS, endpoints
+from lakana_core.connections.endpoints import endpoints
 from lakana_core.connections.fetch import connection_secret
 from lakana_core.connections.kinds import ConnectionKind
 from lakana_core.connections.service import ConnectionTestQueue
@@ -60,7 +60,7 @@ from lakana_worker.processes import (
     prepare_private_directory,
     remove_private_tree,
 )
-from lakana_worker.python_tasks import RELAY_FIRST_PORT, connection_routing, local_root_dir
+from lakana_worker.python_tasks import ConnectionPlan, connection_plan, local_root_dir
 from lakana_worker.runners import MISSING_ROOT
 from lakana_worker.task_outcome import TaskFailure
 from lakana_worker.trust import install_trust
@@ -354,28 +354,34 @@ class ConnectionTestLoop:
             return False
         return True
 
-    def _root_dir(self, connection: str) -> Callable[[str], str]:
+    def _root_dir(self, root: str, connection: str) -> str:
         """Say where the check reads an ingestion root.
 
         Parameters
         ----------
+        root
+            The root's name.
         connection
-            The connection's name, for the message of a missing root.
+            The connection naming it, for the message of a missing root.
 
         Returns
         -------
-        Callable
-            Maps a root to ``/ingest/<root>`` under the Docker runner (the launcher mounts it,
-            or refuses a root it lacks); to the worker's own directory for it under the local
-            runner, raising `TaskFailure` for a root it lacks.
+        str
+            ``/ingest/<root>`` under the Docker runner (the launcher mounts it, or refuses a
+            root it lacks); the worker's own directory for it under the local runner.
+
+        Raises
+        ------
+        TaskFailure
+            Under the local runner, for a root the worker lacks.
         """
         if self._docker is not None:
-            return lambda root: posixpath.join(INGEST_MOUNT, root)
-        return lambda root: local_root_dir(self._roots, root, connection)
+            return posixpath.join(INGEST_MOUNT, root)
+        return local_root_dir(self._roots, root, connection)
 
     def _request(
         self, session: Session, test: ConnectionTest
-    ) -> tuple[dict[str, Any], dict[str, Any]] | tuple[str, str]:
+    ) -> tuple[dict[str, Any], ConnectionPlan] | tuple[str, str]:
         """Read the connection of a claimed test and build the check's input.
 
         Parameters
@@ -388,8 +394,9 @@ class ConnectionTestLoop:
         Returns
         -------
         tuple
-            ``(connection, routing)`` for the check; or ``(outcome, message)`` as two strings
-            when the check cannot run (a missing key, secret or root).
+            ``(connection, plan)`` for the check, the plan a task declaring only this connection
+            would get (`connection_plan`); or ``(outcome, message)`` as two strings when the
+            check cannot run (a missing key, secret or root).
         """
         row = session.get(Connection, test.connection_id)
         env = session.get(Environment, test.environment_id)
@@ -408,18 +415,13 @@ class ConnectionTestLoop:
                 return "failed", SECRET_GONE
         kind = ConnectionKind(row.kind)
         try:
-            routing = connection_routing(
-                row.name,
-                kind,
-                row.address,
-                row.settings,
-                root_dir=self._root_dir(row.name),
+            plan = connection_plan(
+                [(row.name, kind, row.address, row.settings)],
+                isolated=self._docker is not None,
+                root_dir=self._root_dir,
             )
         except TaskFailure as failure:
             return "root_unavailable", failure.message
-        if self._docker is not None and kind not in MOUNT_KINDS and kind not in PROXY_KINDS:
-            # A database or tcp connection goes through the check's relay, as a task's does.
-            routing["relay_port"] = RELAY_FIRST_PORT
         connection = {
             "name": row.name,
             "kind": kind.value,
@@ -431,17 +433,17 @@ class ConnectionTestLoop:
             ],
             "secret": secret,
         }
-        return connection, routing
+        return connection, plan
 
-    def _run_check(self, connection: dict[str, Any], routing: dict[str, Any]) -> tuple[str, str]:
+    def _run_check(self, connection: dict[str, Any], plan: ConnectionPlan) -> tuple[str, str]:
         """Run the check the way this worker's runner runs a task.
 
         Parameters
         ----------
         connection
             The check's ``connection`` input, secret included.
-        routing
-            The check's ``routing`` input.
+        plan
+            The connection's plan: its routing is the check's ``routing`` input.
 
         Returns
         -------
@@ -449,8 +451,9 @@ class ConnectionTestLoop:
             The outcome and message, masked.
         """
         secrets = [v for v in (connection["secret"] or {}).values() if isinstance(v, str)]
+        routing = plan.routing[connection["name"]]
         if self._docker is not None:
-            outcome, message = self._run_in_container(self._docker, connection, routing)
+            outcome, message = self._run_in_container(self._docker, connection, plan)
         else:
             outcome, message = self._run_locally(connection, routing)
         return outcome, _mask(message, secrets)
@@ -495,14 +498,14 @@ class ConnectionTestLoop:
         return answer
 
     def _run_in_container(
-        self, docker: DockerCheck, connection: dict[str, Any], routing: dict[str, Any]
+        self, docker: DockerCheck, connection: dict[str, Any], plan: ConnectionPlan
     ) -> tuple[str, str]:
         """Have the launcher run the check in a container of the task image.
 
-        The request carries what a task with this one connection would get: the proxy pairs
-        of an HTTPS kind, a relay route per endpoint of a database or ``tcp`` kind, the root of a
-        mounted kind, and the trust bundle, written into a private attempt directory that is
-        removed when the check ends.
+        The request carries the routes of `connection_plan`, the ones a task with this one
+        connection gets: the proxy pairs of an HTTPS kind, a relay route per endpoint of a
+        database or ``tcp`` kind, the root of a mounted kind; and the trust bundle, written into
+        a private attempt directory that is removed when the check ends.
 
         Parameters
         ----------
@@ -510,8 +513,8 @@ class ConnectionTestLoop:
             The launcher, owner, work directory and trust bundle.
         connection
             The check's ``connection`` input, secret included.
-        routing
-            The check's ``routing`` input.
+        plan
+            The connection's routes and routing.
 
         Returns
         -------
@@ -519,18 +522,8 @@ class ConnectionTestLoop:
             The outcome and message, unmasked. A launcher that refused, could not be reached or
             did not answer in time makes ``failed`` with its reason and the launcher's log.
         """
-        kind = routing["kind"]
-        grant = [(str(host), int(port)) for host, port in routing.get("grant", [])]
-        egress = list(dict.fromkeys(grant)) if kind in PROXY_KINDS else []
-        relay = (
-            [
-                {"listen": RELAY_FIRST_PORT + i, "host": host, "port": port}
-                for i, (host, port) in enumerate(grant)
-            ]
-            if "relay_port" in routing
-            else []
-        )
-        roots = [routing["root"]] if "root" in routing else []
+        routing = plan.routing[connection["name"]]
+        roots = list(plan.roots)
         try:
             prepare_private_directory(docker.work_dir)
             attempt = Path(tempfile.mkdtemp(prefix=CHECK_PREFIX, dir=docker.work_dir))
@@ -559,8 +552,11 @@ class ConnectionTestLoop:
                 "stdin": json.dumps({"connection": connection, "routing": routing}),
                 "roots": roots,
                 "trust": docker.trust is not None,
-                "egress": [[host, port] for host, port in egress],
-                "relay": relay,
+                "egress": [[host, port] for host, port in plan.egress],
+                "relay": [
+                    {"listen": listen, "host": host, "port": port}
+                    for listen, host, port in plan.relay
+                ],
             }
             try:
                 result, output = docker.client.check(fields, timeout=CHECK_WAIT_SECONDS)
