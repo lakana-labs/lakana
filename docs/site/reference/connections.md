@@ -106,9 +106,12 @@ endpoint too, so it counts as an address change.
 with the connection's address and settings. The worker checks, in this order, the host name (DNS),
 the connection (TCP), the TLS handshake with the connection's CA certificate, and, for a
 `directory` or `sqlite-file` connection, that the ingestion root exists and the path is under it.
-Credentials are checked per kind as the connection helpers land. The check runs on a worker that
-runs Python tasks; under the Docker runner it runs under the same network rules a task gets (the
-egress proxy, the relay), so an address a task could not reach fails the test too. The command waits
+Credentials are not checked yet: a connection with a secret ends its message with "credentials not
+checked yet", and each kind's credential check arrives with its helper. The check runs on a worker
+with the local runner, as a subprocess of the worker's Python that needs `lakana` installed next to
+the worker (without it the test fails and says so); a connection with a secret needs the worker's
+secrets master key (`LAKANA_SECRETS__MASTER_KEY_FILE`, as on the server). A worker with the Docker
+runner does not run connection tests yet, so a test waits for a local-runner worker. The command waits
 up to 60 seconds, prints the outcome and exits 1 unless it is `ok`. Only one test of a connection
 runs at a time; asking again meanwhile is refused (409), naming the open test and the command
 that shows it (`lakana connection test NAME --env ENV --id ID`). A test still queued or running

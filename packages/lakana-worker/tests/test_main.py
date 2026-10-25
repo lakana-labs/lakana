@@ -1,5 +1,6 @@
 """Tests for the `python -m lakana_worker` entry point."""
 
+import json
 import logging
 import math
 import os
@@ -268,6 +269,73 @@ def delivery_loop_stand_in(monkeypatch: pytest.MonkeyPatch) -> mock.MagicMock:
     loop.return_value.start.return_value.is_alive.return_value = False
     monkeypatch.setattr("lakana_worker.__main__.DeliveryLoop", loop)
     return loop
+
+
+@pytest.fixture(autouse=True)
+def connection_test_loop_stand_in(monkeypatch: pytest.MonkeyPatch) -> mock.MagicMock:
+    """Keep `main()` from starting a real connection test thread on an un-migrated SQLite file.
+
+    Parameters
+    ----------
+    monkeypatch
+        The pytest fixture.
+
+    Returns
+    -------
+    mock.MagicMock
+        The stand-in for the `ConnectionTestLoop` class.
+    """
+    loop = mock.MagicMock()
+    loop.return_value.start.return_value.is_alive.return_value = False
+    monkeypatch.setattr("lakana_worker.__main__.ConnectionTestLoop", loop)
+    return loop
+
+
+def test_main_runs_the_connection_test_loop_under_the_local_runner_and_stops_it_with_the_drain(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    connection_test_loop_stand_in: mock.MagicMock,
+) -> None:
+    monkeypatch.setenv("LAKANA_RUN__INGESTION_ROOTS", json.dumps({"shared": str(tmp_path)}))
+    poll = _run_with_loop(tmp_path, monkeypatch, mock.MagicMock())
+    connection_test_loop_stand_in.assert_called_once()
+    kwargs = connection_test_loop_stand_in.call_args.kwargs
+    assert kwargs["runner_kind"] == "local"
+    assert kwargs["owner"].count(":") == 2
+    assert kwargs["ingestion_roots"] == {"shared": str(tmp_path)}
+    assert kwargs["stop"] is poll.call_args.kwargs["drain"]
+    loop = connection_test_loop_stand_in.return_value
+    loop.start.assert_called_once()
+    loop.stop.assert_called_once()
+    loop.start.return_value.join.assert_called_once()
+
+
+def test_the_connection_test_loop_stops_even_when_the_dequeue_loop_raises(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    connection_test_loop_stand_in: mock.MagicMock,
+) -> None:
+    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{tmp_path}/lakana.db")
+    with (
+        mock.patch("lakana_worker.__main__.poll_forever", side_effect=RuntimeError("boom")),
+        mock.patch("lakana_worker.__main__.SchedulerLoop"),
+        mock.patch("lakana_worker.__main__.signal.signal"),
+        pytest.raises(RuntimeError),
+    ):
+        main()
+    connection_test_loop_stand_in.return_value.stop.assert_called_once()
+
+
+def test_a_docker_worker_starts_no_connection_test_loop_and_says_why(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    connection_test_loop_stand_in: mock.MagicMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO)
+    _main_with_docker(tmp_path, monkeypatch, lambda client, owner: 0)
+    connection_test_loop_stand_in.assert_not_called()
+    assert "This worker runs no connection tests" in caplog.text
 
 
 def test_main_runs_the_delivery_loop_on_its_own_thread_and_stops_it_with_the_drain(
