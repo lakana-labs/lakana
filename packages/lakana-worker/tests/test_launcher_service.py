@@ -3184,3 +3184,65 @@ def test_a_gateway_that_is_not_an_address_is_skipped(tmp_path: Path) -> None:
     _started(engine, tmp_path)
 
     assert _refused(tmp_path) == ["10.207.0.0/16", *_GATEWAYS, "fd12:3456::1/128"]
+
+
+def test_an_older_gateway_listing_never_replaces_a_newer_one(tmp_path: Path) -> None:
+    """Two network opens at once: a listing taken before a network existed must not win.
+
+    Open A lists before network G exists and is held there; G appears; open B lists and writes.
+    When A goes on, G stays refused, in the file and in what the relays get.
+    """
+    engine = FakeEngine()
+    launcher = _started(engine, tmp_path)
+    held = threading.Event()
+    listed = threading.Event()
+    real = engine.request
+
+    def request(
+        method: str, path: str, body: Any = None, *, query: Any = None, timeout: Any = 60.0
+    ) -> tuple[int, Any]:
+        answer = real(method, path, body, query=query, timeout=timeout)
+        if (
+            method == "GET"
+            and path == "/networks"
+            and not query
+            and threading.current_thread().name == "open-a"
+        ):
+            listed.set()
+            held.wait(5)
+        return answer
+
+    engine.request = request  # ty: ignore[invalid-assignment]
+    first = threading.Thread(target=launcher._write_refused, name="open-a")
+    first.start()
+    assert listed.wait(5)
+    engine.host_networks["late"] = {
+        "Labels": {},
+        "IPAM": {"Config": [{"Subnet": "192.168.77.0/24", "Gateway": "192.168.77.1"}]},
+    }
+    second = threading.Thread(target=launcher._write_refused, name="open-b")
+    second.start()
+    second.join(0.3)  # B either finished (no lock) or waits for A (lock)
+    held.set()
+    first.join(5)
+    second.join(5)
+
+    assert "192.168.77.1/32" in _refused(tmp_path)
+    assert "192.168.77.1/32" in launcher._refused
+
+
+def test_a_gateway_docker_spells_in_another_form_is_logged_naming_its_network(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A format change in Docker's answer must show, not leave a gateway silently unrefused."""
+    engine = FakeEngine()
+    engine.host_networks["odd"] = {
+        "Labels": {},
+        "IPAM": {"Config": [{"Gateway": "172.30.0.1/16"}, {"Gateway": ""}, {}]},
+    }
+
+    _started(engine, tmp_path)
+
+    warnings = [r.getMessage() for r in caplog.records if "odd" in r.getMessage()]
+    assert len(warnings) == 1
+    assert "172.30.0.1/16" in warnings[0] and "not an address" in warnings[0]

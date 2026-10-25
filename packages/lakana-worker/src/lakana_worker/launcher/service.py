@@ -542,6 +542,14 @@ class Launcher:
                 try:
                     address = ipaddress.ip_address(str(gateway))
                 except ValueError:
+                    if isinstance(gateway, str) and gateway:
+                        logger.warning(
+                            "Docker network %s has a gateway %r that is not an address; it is "
+                            "not refused. Report this with `docker network inspect %s`.",
+                            network.get("Name"),
+                            gateway,
+                            network.get("Name"),
+                        )
                     continue
                 found.add(str(ipaddress.ip_network(address)))
         return frozenset(found)
@@ -581,6 +589,26 @@ class Launcher:
             When starting, if Docker's networks cannot be listed or the file cannot be written.
         """
         path = self.settings.egress_key.parent / REFUSED_FILE
+        # The listing happens under the lock: a listing taken before another network open's
+        # must never be written after it, or a network made in between would drop out again.
+        with self._refused_lock:
+            self._list_and_write_refused(path, starting=starting)
+
+    def _list_and_write_refused(self, path: Path, *, starting: bool) -> None:
+        """List Docker's gateways and write the refused ranges; the caller holds the lock.
+
+        Parameters
+        ----------
+        path
+            ``refused.json``.
+        starting
+            Whether the launcher is starting (see `_write_refused`).
+
+        Raises
+        ------
+        StartError
+            When starting, if Docker's networks cannot be listed or the file cannot be written.
+        """
         try:
             gateways = self._docker_gateways()
         except EngineError as exc:
@@ -597,29 +625,28 @@ class Launcher:
                 exc,
             )
             return
-        with self._refused_lock:
-            self._gateways = gateways
-            self._refused = self._refused_ranges()
-            text = json.dumps({"refused": list(self._refused)})
-            if text == self._refused_text:
-                return
-            try:
-                self._replace_refused(path, text)
-            except OSError as exc:
-                reason = exc.strerror or type(exc).__name__
-                if starting:
-                    raise StartError(
-                        f"cannot write the refused ranges {path} ({reason}); mount the "
-                        "egress-key volume into the launcher, writable (see compose.yaml)."
-                    ) from None
-                logger.error(
-                    "Cannot write the refused ranges to %s (%s); the egress proxy keeps the ones "
-                    "written before.",
-                    path,
-                    reason,
-                )
-                return
-            self._refused_text = text
+        self._gateways = gateways
+        self._refused = self._refused_ranges()
+        text = json.dumps({"refused": list(self._refused)})
+        if text == self._refused_text:
+            return
+        try:
+            self._replace_refused(path, text)
+        except OSError as exc:
+            reason = exc.strerror or type(exc).__name__
+            if starting:
+                raise StartError(
+                    f"cannot write the refused ranges {path} ({reason}); mount the "
+                    "egress-key volume into the launcher, writable (see compose.yaml)."
+                ) from None
+            logger.error(
+                "Cannot write the refused ranges to %s (%s); the egress proxy keeps the ones "
+                "written before.",
+                path,
+                reason,
+            )
+            return
+        self._refused_text = text
 
     def _replace_refused(self, path: Path, text: str) -> None:
         """Write the refused ranges to a temporary file, flushed, then rename it into place.
