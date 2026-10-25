@@ -1127,13 +1127,6 @@ def test_the_compose_smoke_test_starts_the_worker_kinds_after_its_restart() -> N
         )
 
 
-CHECK_REQUIREMENTS = (
-    "uv export --frozen --package lakana --no-dev --no-emit-project --format requirements-txt "
-    "-o dist/check-requirements.txt"
-)
-"""Writes the pinned, hashed dependencies of the task image's connection check environment."""
-
-
 def test_the_compose_smoke_test_builds_its_wheels_for_the_image_s_python() -> None:
     """The wheel directory is for the interpreter the image has, never a version written down.
 
@@ -1153,12 +1146,10 @@ def test_the_compose_smoke_job_builds_a_task_image_and_hands_it_to_the_script() 
     steps = _jobs("ci.yml")["compose-smoke"]["steps"]
     commands = [c for s in steps for c in _commands(s)]
 
-    build = "docker build -f Dockerfile.task --build-arg PYTHON=3.14 -t lakana-task:ci-py3.14 ."
-    assert build in commands
+    assert "docker build -f Dockerfile.task --build-arg PYTHON=3.14 -t lakana-task:ci-py3.14 ." in (
+        commands
+    )
     assert "uv run --locked bash scripts/compose_smoke_test.sh lakana:ci lakana-task:ci" in commands
-    # The task image's check environment: the lakana wheel and its pinned dependencies.
-    assert commands.index(CHECK_REQUIREMENTS) < commands.index(build)
-    assert commands.index("uv build --all-packages -o dist") < commands.index(build)
 
 
 def test_the_release_compose_smoke_job_uses_the_published_task_images() -> None:
@@ -1197,23 +1188,9 @@ def test_the_compose_smoke_test_builds_only_a_local_task_image_and_pulls_a_publi
     loop = script.split('for version in 3.11 "$python"; do', 1)[1].split("\ndone\n", 1)[0]
 
     assert '*/*) docker pull "$reference" ;;' in loop
-    assert '*) task_context; docker build -f "$here/../Dockerfile.task"' in loop
+    assert '*) docker build -f "$here/../Dockerfile.task"' in loop
     assert "|| docker" not in loop and "&& ! docker pull" not in loop
     assert "2>&1" not in loop.split('docker pull "$reference"', 1)[1].split(";;", 1)[0]
-
-
-def test_the_compose_smoke_test_prepares_the_task_image_s_check_files_before_a_build() -> None:
-    """A task image built here needs `dist/lakana-*.whl` and `dist/check-requirements.txt`.
-
-    CI writes both before the script runs; the script makes what is missing, so a local run
-    builds the image too.
-    """
-    script = (ROOT / "scripts" / "compose_smoke_test.sh").read_text()
-    helper = script.split("task_context() {", 1)[1].split("\n}\n", 1)[0]
-
-    assert "uv build --package lakana --wheel -o dist" in helper
-    assert CHECK_REQUIREMENTS in helper
-    assert script.index("task_context() {") < script.index('for version in 3.11 "$python"; do')
 
 
 def test_the_release_compose_smoke_job_has_time_for_the_task_images() -> None:
@@ -1953,20 +1930,6 @@ def test_a_release_publishes_one_task_image_per_supported_python() -> None:
     )
     assert "PYTHON=${{ matrix.python }}" in build["with"]["build-args"]
     assert "publish-task-images" in _jobs("release.yml")["compose-smoke-release"]["needs"]
-
-
-def test_a_task_image_is_built_with_the_release_s_lakana_wheel_for_its_check() -> None:
-    """The tagged wheel from the shared `dist` artifact, and its pinned dependencies by hash."""
-    steps = _jobs("release.yml")["publish-task-images"]["steps"]
-    uses = [str(step.get("uses", "")) for step in steps]
-    download = next(i for i, u in enumerate(uses) if u.startswith("actions/download-artifact@"))
-    setup_uv = next(i for i, u in enumerate(uses) if u.startswith("astral-sh/setup-uv@"))
-    build = next(i for i, u in enumerate(uses) if "build-push-action" in u)
-    export = next(i for i, step in enumerate(steps) if CHECK_REQUIREMENTS in _commands(step))
-
-    assert steps[download]["with"] == {"name": "dist", "path": "dist"}
-    assert download < export < build
-    assert setup_uv < export
 
 
 def test_the_task_images_wait_for_the_approval_and_are_attested() -> None:

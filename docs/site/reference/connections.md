@@ -120,7 +120,7 @@ Credentials are not checked yet: a connection with a secret ends its message wit
 checked yet", and each kind's credential check arrives with its helper. Any worker runs the check.
 With the local runner it is a subprocess of the worker's Python that needs `lakana` installed next to
 the worker (without it the test fails and says so). With the Docker runner (the Compose bundle's
-default) the launcher runs it in a container of the task image, from the image's own copy of Lakana,
+default) the launcher runs it in a container of the task image, from the image's own copy of the check,
 with the network rules a task with that connection gets: through the egress proxy or the task's relay
 to the connection's endpoints only, its ingestion root read-only, the worker's trust bundle
 (`LAKANA_RUN__CA_BUNDLE`), no Lakana server on its network, 30 seconds and 256 MiB. A launcher that

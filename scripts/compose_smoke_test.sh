@@ -57,17 +57,6 @@ cleanup() {
 trap cleanup EXIT
 # The wheels must be for the image's interpreter, so ask the image which one it has.
 python=$(docker run --rm "$IMAGE" python -c 'import sys; print("%d.%d" % sys.version_info[:2])')
-# A task image built here copies the lakana wheel and its pinned dependencies from dist/ into
-# its connection check environment; CI writes both before it runs this script.
-task_context() {
-  (
-    cd "$here/.."
-    if ! compgen -G 'dist/lakana-[0-9]*.whl' >/dev/null; then uv build --package lakana --wheel -o dist; fi
-    if [ ! -e dist/check-requirements.txt ]; then
-      uv export --frozen --package lakana --no-dev --no-emit-project --format requirements-txt -o dist/check-requirements.txt
-    fi
-  )
-}
 # The task images. A published one (a reference with a registry or namespace) is pulled, and a
 # failed pull ends the run: the release smoke must run on the images it published. Only a local
 # tag (CI's lakana-task:ci) is built from this checkout when it is missing.
@@ -76,7 +65,7 @@ for version in 3.11 "$python"; do
   if docker image inspect "$reference" >/dev/null 2>&1; then continue; fi
   case "$TASK_IMAGE" in
     */*) docker pull "$reference" ;;
-    *) task_context; docker build -f "$here/../Dockerfile.task" --build-arg "PYTHON=$version" -t "$reference" "$here/.." ;;
+    *) docker build -f "$here/../Dockerfile.task" --build-arg "PYTHON=$version" -t "$reference" "$here/.." ;;
   esac
 done
 wheelhouse=${LAKANA_WHEELHOUSE:-}

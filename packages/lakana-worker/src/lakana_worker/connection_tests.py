@@ -9,13 +9,13 @@ worker that lost it records nothing and logs at info level).
 Under the local runner the check is a subprocess of the worker's own Python
 (``python -I -m lakana.ingest._check``): Lakana's own code, never the project's. Under the
 Docker runner the launcher's ``check`` op runs it in a container of the task image, from the
-image's own ``/opt/lakana-check`` environment, with the network rules a task with this one
-connection would get: its token for the egress proxy, its relay and its read-only root, and the
-worker's trust bundle in a private attempt directory (``attempt-check_*``) that is removed
-afterwards. Either way the connection and its secret travel on the check's standard input, never
-in its arguments or environment, and its message is masked once more here before it is stored.
-Neither the secret nor an exception's text appears in a log line: a failure is logged by its
-type.
+image's copy of the same file (``/opt/lakana-check/check.py``), with the network rules a task
+with this one connection would get (`connection_plan`): its token for the egress proxy, its
+relay and its read-only root, and the worker's trust bundle in a private attempt directory
+(``attempt-check_*``) that is removed afterwards. Either way the connection and its secret
+travel on the check's standard input, never in its arguments or environment, and its message is
+masked once more here before it is stored. Neither the secret nor an exception's text appears in
+a log line: a failure is logged by its type.
 """
 
 from __future__ import annotations

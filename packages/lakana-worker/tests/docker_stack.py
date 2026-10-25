@@ -14,10 +14,8 @@ import dataclasses
 import hashlib
 import io
 import os
-import subprocess  # nosec B404 -- uv builds the check's wheel for the test image
 import sys
 import tarfile
-import tempfile
 import threading
 import time
 import uuid
@@ -120,56 +118,11 @@ def docker_client() -> Any:
     return client
 
 
-def check_files(directory: Path) -> list[Path]:
-    """Build the lakana wheel and its pinned requirements, which the check environment installs.
-
-    Parameters
-    ----------
-    directory
-        Where both are written; empty.
-
-    Returns
-    -------
-    list of Path
-        The wheel and ``check-requirements.txt``, the files `Dockerfile.task` copies from
-        ``dist/``.
-    """
-    subprocess.run(  # nosec B603 B607 -- uv with fixed arguments, as the release builds them
-        ["uv", "build", "--package", "lakana", "--wheel", "-o", str(directory)],
-        cwd=REPO,
-        check=True,
-        capture_output=True,
-    )
-    requirements = directory / "check-requirements.txt"
-    subprocess.run(  # nosec B603 B607 -- likewise
-        [
-            "uv",
-            "export",
-            "--frozen",
-            "--package",
-            "lakana",
-            "--no-dev",
-            "--no-emit-project",
-            "--format",
-            "requirements-txt",
-            "-o",
-            str(requirements),
-        ],
-        cwd=REPO,
-        check=True,
-        capture_output=True,
-    )
-    (wheel,) = directory.glob("lakana-*.whl")
-    return [wheel, requirements]
-
-
 def build_task_image(client: Any) -> str:
     """Build the task image of this interpreter's Python from `Dockerfile.task`.
 
     The context is built here, holding only what `Dockerfile.task.dockerignore` admits: the
-    Docker SDK reads the root `.dockerignore`, which admits only `dist/`. Its ``dist/`` holds a
-    lakana wheel of this checkout and its pinned requirements (`check_files`), for the connection
-    check's environment.
+    Docker SDK reads the root `.dockerignore`, which admits only `dist/`.
 
     Parameters
     ----------
@@ -183,17 +136,13 @@ def build_task_image(client: Any) -> str:
     """
     tag = f"lakana-task:test-py{PYTHON}"
     context = io.BytesIO()
-    with (
-        tempfile.TemporaryDirectory(prefix="lakana-task-context-") as scratch,
-        tarfile.open(fileobj=context, mode="w") as archive,
-    ):
+    with tarfile.open(fileobj=context, mode="w") as archive:
         for relative in (
             "Dockerfile.task",
             "packages/lakana-worker/src/lakana_worker/launcher/task_build.py",
+            "packages/lakana/src/lakana/ingest/_check.py",
         ):
             archive.add(REPO / relative, arcname=relative)
-        for path in check_files(Path(scratch)):
-            archive.add(path, arcname=f"dist/{path.name}")
     context.seek(0)
     client.images.build(
         fileobj=context,

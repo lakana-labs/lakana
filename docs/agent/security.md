@@ -1286,13 +1286,13 @@ connections; a connection opens exactly its endpoints and nothing else.
   (`give the connection an address outside the Lakana stack (lakana connection update)`).
 - **The connection check (`check` op).** Under the docker runner `ConnectionTestLoop`
   (`connection_tests.py`) asks `LauncherClient.check` with exactly the routes a task with that one
-  connection would get, built from `connection_routing`: the `egress` pairs of a proxy kind, one
-  relay route per endpoint of a database or `tcp` kind (ports from 15001, `relay_port` in the
-  routing), the root of a mounted kind (`root_dir` `/ingest/<root>`). The worker's trust bundle is
+  connection would get, built by `python_tasks.connection_plan`, which `_connection_plan` uses
+  too (a test compares both per kind): the `egress` pairs of a proxy kind, one relay route per
+  endpoint of a database or `tcp` kind (ports from 15001, `relay_port` in the routing), the root of a mounted kind (`root_dir` `/ingest/<root>`). The worker's trust bundle is
   written into a private `attempt-check_*` directory (0700, under the work directory, removed when
   the check ends; `AttemptSweeper` sweeps a dead worker's). The launcher (`Launcher.check`,
-  `check_container_spec`) runs the task image's own environment, `CHECK_ENTRY` =
-  `/opt/lakana-check/bin/python -I -m lakana.ingest._check`; the request has no image, command,
+  `check_container_spec`) runs the check the task image carries, `CHECK_ENTRY` =
+  `/usr/local/bin/python -I -B /opt/lakana-check/check.py`; the request has no image, command,
   environment, code or limit field, only `python` from `LAUNCHER__IMAGES`. The container runs as the
   task user with the fixed `CHECK_LIMITS` (256 MiB, 0.5 CPU, 64 pids, 30 s, kill grace 1 s), a
   16 MiB `/tmp`, no `/code`, `/env` or `/work`, only the attempt's `trust` subpath and the allowed
@@ -1302,9 +1302,10 @@ connections; a connection opens exactly its endpoints and nothing else.
   treat a `check` name and its relay like a run's. The worker keeps at most 64 KiB of output, takes
   the last answer line and masks it again before storing it; no output reaches a log line. A
   refusal, an unreachable launcher or no answer within `CHECK_WAIT_SECONDS` (60) records `failed`
-  naming the launcher's log. `/opt/lakana-check` is installed from the release's own lakana wheel
-  and the `uv export` of its locked dependencies by hash (`--require-hashes`), and is not writable by
-  the task user.
+  naming the launcher's log. `/opt/lakana-check/check.py` is a root-owned copy of
+  `lakana/ingest/_check.py`, which imports only the standard library (an AST test in
+  `test_ingest_check.py` keeps it so); the image installs no package for it, and `-I` keeps the
+  script's directory and the environment out of its path, and `-B` writes no bytecode.
 - **What a task cannot reach, connections or not**: another task's network (each run its own
   /29; the relay and the proxy refuse the launcher's whole range), the Compose stack (attached
   networks; the relay sits on the outward network, the stack's `default`, so SeaweedFS's 18333 and

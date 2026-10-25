@@ -337,8 +337,7 @@ def test_the_task_image_carries_python_uv_and_the_build_entry_and_no_entrypoint(
     assert ignore.splitlines() == [
         "*",
         "!packages/lakana-worker/src/lakana_worker/launcher/task_build.py",
-        "!dist/lakana-*.whl",
-        "!dist/check-requirements.txt",
+        "!packages/lakana/src/lakana/ingest/_check.py",
     ]
 
 
@@ -363,29 +362,34 @@ def _task_run_steps() -> list[str]:
     return steps
 
 
-def test_the_task_image_holds_lakanas_own_check_environment() -> None:
-    """`/opt/lakana-check`: the pinned dependencies by hash, the wheel without dependencies.
+def test_the_task_image_holds_lakanas_own_check_and_runs_it_as_the_launcher_will() -> None:
+    """`/opt/lakana-check/check.py`: the standard-library check, copied, never a project's code.
 
-    The launcher's ``check`` op runs ``/opt/lakana-check/bin/python -I -m lakana.ingest._check``;
-    the build proves the import works, and the environment is read-only to the task user.
+    The launcher's ``check`` op runs ``/usr/local/bin/python -I -B /opt/lakana-check/check.py``
+    (`CHECK_ENTRY`); the build runs it the same way once, and nothing but that file is added:
+    no wheel, no dependencies.
     """
     text = _TASK_DOCKERFILE.read_text(encoding="utf-8")
-    copy = "COPY dist/lakana-*.whl dist/check-requirements.txt /tmp/lakana-check/"
+    copy = "COPY packages/lakana/src/lakana/ingest/_check.py /opt/lakana-check/check.py"
     (step,) = [s for s in _task_run_steps() if "/opt/lakana-check" in s]
 
     assert copy in text
-    assert step.startswith("RUN uv venv --python /usr/local/bin/python /opt/lakana-check &&")
-    assert "--no-cache --require-hashes -r /tmp/lakana-check/check-requirements.txt" in step
-    assert "--no-cache --no-deps /tmp/lakana-check/lakana-*.whl" in step
-    assert step.endswith(
-        '/opt/lakana-check/bin/python -I -c "import lakana.ingest._check" '
-        "&& rm -rf /tmp/lakana-check && chmod -R go-w /opt/lakana-check"
+    assert "/usr/local/bin/python -I -B /opt/lakana-check/check.py" in step
+    assert "does not know the kind" in step
+    # Root's and read-only, whatever owner and mode the file had in the build context.
+    assert step.startswith(
+        "RUN chown 0:0 /opt/lakana-check/check.py && chmod 0444 /opt/lakana-check/check.py && "
     )
-    assert text.index(copy) > text.index("COPY --from=uv /uv /usr/local/bin/uv")
-    assert text.index(step.split(" && ")[0]) < text.index(
-        "find / -xdev -perm /6000 -type f -exec chmod a-s {} +"
+    assert "dist/" not in text and "pip install" not in text
+    run = next(
+        i
+        for i, line in enumerate(text.splitlines())
+        if line.startswith("RUN ") and ("/opt/lakana-check" in line)
     )
-    assert text.index("/opt/lakana-check") < text.index("USER 10001:10003")
+    lines = text.splitlines()
+    assert lines.index(copy) < run
+    assert run < next(i for i, line in enumerate(lines) if "find / -xdev -perm /6000" in line)
+    assert run < lines.index("USER 10001:10003")
 
 
 def test_the_task_image_pins_the_same_uv_as_the_main_image() -> None:

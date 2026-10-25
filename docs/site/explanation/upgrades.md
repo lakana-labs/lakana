@@ -178,10 +178,9 @@ default: the launcher runs Lakana's own check in a container of the task image, 
 rules a task with that connection gets. Before, a test waited for a worker with the local runner.
 Upgrade the launcher, the task images and the workers together, as the bundle does: a launcher of
 an earlier release refuses the check (`the launcher refused the check: op must be one of ...`),
-and the test ends `failed` naming the upgrade. The task images are larger, since each holds the
-check's own copy of Lakana and its dependencies. A task image you build yourself from
-`Dockerfile.task` needs the `lakana` wheel and `dist/check-requirements.txt` in `dist/`; the
-file's header has both commands. See [Test a connection](../reference/connections.md#test-a-connection).
+and the test ends `failed` naming the upgrade. Each task image now holds the check, a single
+standard-library file at `/opt/lakana-check/check.py`; a task image you build yourself from
+this release's `Dockerfile.task` has it too. See [Test a connection](../reference/connections.md#test-a-connection).
 
 ### A Python asset's parameter `ctx` is not an input
 

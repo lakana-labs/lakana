@@ -969,7 +969,7 @@ def test_a_docker_check_whose_trust_cannot_be_installed_does_not_run(
 def test_a_docker_check_needs_no_lakana_next_to_the_worker(
     world: World, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The check lives in the task image's /opt/lakana-check, not in the worker's Python."""
+    """The check lives in the task image (/opt/lakana-check/check.py), not the worker's Python."""
     monkeypatch.setattr(connection_tests.importlib.util, "find_spec", lambda name: None)
     launcher = FakeLauncher(scripts={"check": answering(OK_LINE)})
     running, _ = docker_loop(world, tmp_path, launcher)

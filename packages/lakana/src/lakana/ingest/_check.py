@@ -1,16 +1,19 @@
 """The connection test's check of reachability and TLS.
 
-Run as ``python -I -m lakana.ingest._check``. It reads one JSON object from standard input,
-``{"connection": <TaskConnectionOut-shaped>, "routing": {...}}``, and writes one line,
-``{"outcome": ..., "message": ...}``, with exit status 0 whatever it found. The routing is what
-a task's description says about the connection (`relay_port`, `root_dir`, `path`).
+Run as ``python -I -m lakana.ingest._check`` (the local runner), or by path as
+``python -I -B /opt/lakana-check/check.py`` in the task image (the Docker runner). It reads one
+JSON object from standard input, ``{"connection": <TaskConnectionOut-shaped>, "routing":
+{...}}``, and writes one line, ``{"outcome": ..., "message": ...}``, with exit status 0 whatever
+it found. The routing is what a task's description says about the connection (`relay_port`,
+`root_dir`, `path`).
 
 This step checks reachability only: the name resolves, the port answers, the TLS handshake
 verifies as the connection is configured, a mounted root and path are there. The credential step
 of each kind arrives with its helper; until then a kind with a secret ends its message with
 "; credentials not checked yet". Every secret value is replaced by ``***`` in the message.
 
-The module uses the standard library only: it runs in an environment that holds nothing else.
+The module uses the standard library only, and imports nothing of `lakana`: the task image runs
+it as a lone file on its bare Python (`test_the_check_imports_only_the_standard_library`).
 """
 
 from __future__ import annotations

@@ -1317,10 +1317,8 @@ four packages; it only starts subprocesses, so import-linter has nothing to obje
 
 The tests marked `docker` (also `integration`) start real containers through the launcher in
 the test process: `packages/lakana-worker/tests/docker_stack.py` builds the task image of the
-running Python from `Dockerfile.task` (its own context: the Docker SDK reads only the root
-`.dockerignore`; its `dist/` holds a lakana wheel of the checkout and its `uv export`ed
-requirements, built by `check_files` with `uv`, for the image's `/opt/lakana-check`), creates a
-work volume, a server stand-in labelled as the stack's `server`
+running Python from `Dockerfile.task` (its own context, with `task_build.py` and the connection
+check `_check.py`: the Docker SDK reads only the root `.dockerignore`), creates a work volume, a server stand-in labelled as the stack's `server`
 service and one environment with a stub harness that runs the attempt's `probe.py`. Every
 object carries `lakana-test=1` and its stack's `lakana-test-stack=<name>`, and is removed, also
 after a failure; a test that needs a launcher of its own (the one that stops it) brings up a

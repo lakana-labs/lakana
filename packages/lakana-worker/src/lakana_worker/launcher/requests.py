@@ -231,13 +231,16 @@ class Limits:
 CHECK_LIMITS = Limits(memory_mb=256, cpus=0.5, pids=64, timeout_seconds=30)
 """A connection check's fixed limits: it opens a few sockets and prints one line.
 
-Measured on Docker 29 with the Python 3.14 task image: a peak of about 74 MiB resident (``lakana``
-imports httpx and pyarrow), so 256 MiB leaves room for TLS and a slow source.
+Measured on Docker 29 with the Python 3.14 task image: a peak of about 23 MiB resident (the check
+imports the standard library only), so 256 MiB leaves ample room for TLS and a slow source.
 """
 CHECK_GRACE = 1
 """Seconds between SIGTERM and SIGKILL when a check is stopped."""
-CHECK_ENTRY = ("/opt/lakana-check/bin/python", "-I", "-m", "lakana.ingest._check")
-"""The check's entry point: Lakana's own environment in the task image, never a project's."""
+CHECK_ENTRY = ("/usr/local/bin/python", "-I", "-B", "/opt/lakana-check/check.py")
+"""The check's entry point: the image's Python on Lakana's own standard-library check
+(``lakana/ingest/_check.py``, copied into the task image), never a project's code or environment.
+``-I`` keeps the script's directory, the environment and user site-packages out of the path; ``-B``
+writes no bytecode (the root filesystem is read-only, and the image build runs it the same way)."""
 
 
 @dataclass(frozen=True)
@@ -367,7 +370,7 @@ class CheckRequest:
     owner
         The worker that asked.
     python
-        Selects the task image, which holds the check's own environment.
+        Selects the task image, which holds the check at ``/opt/lakana-check/check.py``.
     attempt
         The worker's directory for this check in the work volume; only its ``trust``
         subdirectory is mounted.
@@ -1705,7 +1708,7 @@ def check_container_spec(
     """Describe the container of one connection check.
 
     The task image and the task user, but none of a task's code, environment or scratch: the
-    check runs Lakana's own module from ``/opt/lakana-check`` with a 16 MiB ``/tmp``, the
+    check runs Lakana's own ``/opt/lakana-check/check.py`` with a 16 MiB ``/tmp``, the
     connection's roots, the trust bundle and the proxy variable a task would get.
 
     Parameters

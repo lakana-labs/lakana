@@ -302,12 +302,6 @@ bad release never advances past the point that would have caught it:
   `dist/requirements.txt` (the shared `dist` artifact only carries wheels/sdists) and builds
   **multi-arch** (`linux/amd64,linux/arm64`, via `docker/setup-qemu-action` +
   `docker/setup-buildx-action`), pushing `ghcr.io/lakana-labs/lakana:<version>` — a public package.
-- **`publish-task-images`** (one leg per supported Python) has the same needs as
-  `publish-image`. It downloads the shared `dist` artifact and writes
-  `dist/check-requirements.txt` (`uv export --frozen --package lakana --no-dev
-  --no-emit-project`), so each task image's `/opt/lakana-check`, the connection check's
-  environment, holds the release's own lakana wheel and its locked dependencies by hash. It pushes
-  `ghcr.io/lakana-labs/lakana-task:<version>-py3.X`.
 - **`compose-smoke-release`** needs `publish-image` and `publish-task-images` and runs
   `scripts/compose_smoke_test.sh` against the just-pushed tag and its task images (the second
   argument, `ghcr.io/lakana-labs/lakana-task:<version>`; CI's `compose-smoke` builds

@@ -1443,7 +1443,7 @@ def test_a_check_refuses_what_a_run_refuses(changes: dict[str, Any], rule: str) 
 
 
 def test_a_check_container_runs_lakanas_check_and_nothing_of_a_task() -> None:
-    """No /code, /env or /work; the check environment's interpreter; a 16 MiB /tmp."""
+    """No /code, /env or /work; the image's Python on Lakana's own check; a 16 MiB /tmp."""
     request = parse_request(
         _raw(_with(CHECK, roots=["landing"], trust=True)), token=TOKEN, settings=SETTINGS
     )
@@ -1458,12 +1458,7 @@ def test_a_check_container_runs_lakanas_check_and_nothing_of_a_task() -> None:
     )
 
     assert spec["Image"] == "ghcr.io/lakana-labs/lakana-task:0.14.0-py3.13"
-    assert spec["Entrypoint"] == [
-        "/opt/lakana-check/bin/python",
-        "-I",
-        "-m",
-        "lakana.ingest._check",
-    ]
+    assert spec["Entrypoint"] == ["/usr/local/bin/python", "-I", "-B", "/opt/lakana-check/check.py"]
     assert spec["User"] == SETTINGS.task_user
     targets = [m["Target"] for m in spec["HostConfig"]["Mounts"]]
     assert targets == ["/ingest/landing", "/trust"]
