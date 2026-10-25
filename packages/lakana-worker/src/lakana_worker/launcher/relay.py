@@ -15,13 +15,15 @@ relay never looks at the bytes: TLS, if any, stays end to end. Why a connection 
 goes to stderr, which the launcher copies into the task's log.
 
 The plan arrives on stdin as one JSON object:
-``{"address", "subnet", "refused": [cidr, ...], "routes": [{"listen", "host", "port"}]}``.
+``{"address", "subnet", "refused": [cidr, ...], "reachable": [cidr, ...],
+"routes": [{"listen", "host", "port"}]}``; ``reachable`` is a test hook, empty in production.
 Standard library only, like the launcher.
 """
 
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import ipaddress
 import json
 import os
@@ -54,6 +56,8 @@ MAX_PER_PORT = RELAY_MAX_PER_PORT
 READY = "ready"
 """The line the relay writes once every port listens."""
 _MAX_PLAN = 64 * 1024
+_MAX_REACHABLE = 4
+"""The most networks a plan's ``reachable`` (a test hook) names."""
 _FOREVER = 7 * 86400.0
 """A relay connection ends when a side closes or the container goes, never for silence."""
 _INTERNAL_HINT = (
@@ -76,12 +80,16 @@ class RelayPlan:
         operator's ranges and the launcher's range of task networks.
     routes
         One per database connection.
+    reachable
+        IPv4 networks the relay may dial although it is attached to them (never a range of
+        `refused`): `LauncherSettings.relay_reachable`, a test hook, empty in production.
     """
 
     address: ipaddress.IPv4Address
     subnet: ipaddress.IPv4Network
     refused: frozenset[Network]
     routes: tuple[RelayRoute, ...]
+    reachable: frozenset[ipaddress.IPv4Network] = frozenset()
 
 
 def say(text: str) -> None:
@@ -120,8 +128,14 @@ def parse_plan(text: str) -> RelayPlan:
         data = json.loads(text)
     except ValueError:
         raise ValueError("the plan is one JSON object") from None
-    if not isinstance(data, dict) or set(data) != {"address", "subnet", "refused", "routes"}:
-        raise ValueError("the plan has exactly address, subnet, refused and routes")
+    if not isinstance(data, dict) or set(data) != {
+        "address",
+        "subnet",
+        "refused",
+        "reachable",
+        "routes",
+    }:
+        raise ValueError("the plan has exactly address, subnet, refused, reachable and routes")
     try:
         subnet = ipaddress.IPv4Network(str(data["subnet"]))
         address = ipaddress.IPv4Address(str(data["address"]))
@@ -130,6 +144,7 @@ def parse_plan(text: str) -> RelayPlan:
     if subnet.prefixlen != 29 or address not in subnet.hosts():
         raise ValueError("address must be a host address of subnet, a /29")
     refused = _refused(data["refused"])
+    reachable = _reachable(data["reachable"])
     raw = data["routes"]
     if not isinstance(raw, list) or not 1 <= len(raw) <= MAX_RELAY_ROUTES:
         raise ValueError(f"routes: 1 to {MAX_RELAY_ROUTES}")
@@ -149,7 +164,7 @@ def parse_plan(text: str) -> RelayPlan:
         routes.append(RelayRoute(listen, host, port))
     if len({route.listen for route in routes}) != len(routes):
         raise ValueError("routes: listen ports are distinct")
-    return RelayPlan(address, subnet, refused, tuple(routes))
+    return RelayPlan(address, subnet, refused, tuple(routes), reachable)
 
 
 def _refused(raw: object) -> frozenset[Network]:
@@ -177,6 +192,35 @@ def _refused(raw: object) -> frozenset[Network]:
         raise ValueError(rule)
     try:
         return frozenset(ipaddress.ip_network(item, strict=True) for item in raw)
+    except ValueError:
+        raise ValueError(rule) from None
+
+
+def _reachable(raw: object) -> frozenset[ipaddress.IPv4Network]:
+    """Read the plan's reachable networks, a test hook.
+
+    Parameters
+    ----------
+    raw
+        The ``reachable`` field.
+
+    Returns
+    -------
+    frozenset
+        The networks; empty in production.
+
+    Raises
+    ------
+    ValueError
+        Unless it is a list of at most 4 IPv4 networks in CIDR form without host bits.
+    """
+    rule = f"reachable: at most {_MAX_REACHABLE} IPv4 networks in CIDR form"
+    if not isinstance(raw, list) or len(raw) > _MAX_REACHABLE:
+        raise ValueError(rule)
+    if not all(isinstance(item, str) for item in raw):
+        raise ValueError(rule)
+    try:
+        return frozenset(ipaddress.IPv4Network(item, strict=True) for item in raw)
     except ValueError:
         raise ValueError(rule) from None
 
@@ -287,7 +331,7 @@ def serve(
     plan
         The plan.
     settings
-        For `dial`.
+        For `dial`; the plan's ``reachable`` networks are added to its own.
     ready
         Called once every port listens.
     stop
@@ -295,6 +339,8 @@ def serve(
     log
         Where closures and refusals are written; stderr by default.
     """
+    if plan.reachable:
+        settings = dataclasses.replace(settings, reachable=settings.reachable | plan.reachable)
     servers: list[socket.socket] = []
     try:
         for route in plan.routes:

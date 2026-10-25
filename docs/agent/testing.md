@@ -1356,6 +1356,36 @@ write with `EROFS` and holds `trust.pem` alone. `tls_fixture` leaves carry the i
 identifier, which Python 3.13's strict default context requires. `start_egress` also serves
 `test_docker_egress_integration.py`; `stack()` removes the networks a test made with its labels.
 
+`start_egress` runs the proxy in `build_egress_image`: the task image plus this checkout's
+launcher package at `/opt/lakana-launcher`, where the real egress image has it, because a task's
+relay runs `RELAY_COMMAND` in the egress container's image. The container carries the stack's
+Compose labels for `egress` (`_service_container`), and the network it is created on carries only
+test labels, so it is the outward network (`_outward_network`). The proxy reads a copy of the
+launcher's key and `refused.json`; `start_egress` wraps the launcher's `_replace_refused`, so every
+time the launcher writes the refused ranges (at each network open) the copy is replaced too, with
+a PAX nanosecond mtime: the proxy re-reads on a change of inode, mtime or size, and Docker may
+reuse the inode for a list of the same length. A network a test makes after the launcher started
+thus has its gateway refused from the next run on, as in production.
+
+`test_docker_task_egress_integration.py` (all `slow`) proves task egress (#308): a source container
+on a labelled network `<stack>-sources` serves TLS on 8443 (a private authority's leaf for
+`target.lakana.test`), a stand-in PostgreSQL that answers the first client message on 5432, and an
+echo on 9000; the egress service is created on that network with `reachable=<its subnet>`, and the
+module runs under `Stack.configured(relay_reachable=(subnet,))`, the relay's test hook (never a
+setting). `Stack.run(..., egress=..., relay=...)` passes the routes the worker would send. The
+cases: a declared HTTPS target through `LAKANA_EGRESS_PROXY` with the trust bundle (and no other
+proxy variable); the first PostgreSQL message and a mebibyte of every byte value through the
+relay; an undeclared host and port (the whole 403 with the task hint); the metadata address, the
+stack's server and the default bridge's gateway (read from Docker), each refused by the proxy
+(whole text) and the relay (the whole `lakana-relay: refused ...` line in the run's log); a range
+of `egress_refused` naming the source's network, refused through both, and the same target reached
+without it (a refused range wins over `reachable`); another task's token (`this token belongs to
+another client network`, its container's environment read with `Stack.container`); a client on
+the outward network, as root with `NET_ADMIN`, routing the task's /29 through the relay (refused
+before the relay sees it on Engine 28; the relay's own outward address answers nothing); the
+source network's gateway, made after the launcher started; and teardown after exit, stop and
+timeout (nothing labelled with the run's id, no token expiry, the subnet resting).
+
 The test's Docker client and the launcher use one socket: `DOCKER_HOST` when it is
 `unix://<path>`, else `/var/run/docker.sock`; another `DOCKER_HOST` skips them (fails with
 `LAKANA_TEST_DOCKER=1`), since the launcher speaks to Docker only over a Unix socket.

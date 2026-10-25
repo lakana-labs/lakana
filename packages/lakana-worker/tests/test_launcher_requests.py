@@ -8,6 +8,7 @@ an added capability or the host network.
 from __future__ import annotations
 
 import copy
+import dataclasses
 import json
 from pathlib import Path
 from typing import Any
@@ -1299,12 +1300,23 @@ def test_a_relay_plan_always_refuses_the_launchers_range_and_holds_at_most_256()
         "address": "10.207.0.14",
         "subnet": "10.207.0.8/29",
         "refused": ["172.17.0.1/32", "10.207.0.0/16"],
+        "reachable": [],
         "routes": [{"listen": 15001, "host": "db.example.com", "port": 5432}],
     }
     assert kept["refused"] == ["10.207.0.0/16", "172.17.0.1/32"]
     many = [f"10.0.{n}.1/32" for n in range(256)]
     with pytest.raises(ValueError, match="257 refused ranges, more than 256"):
         relay_plan(route, SETTINGS, "10.207.0.8/29", many)
+
+
+def test_a_relay_plan_carries_the_test_hooks_reachable_networks() -> None:
+    """`LauncherSettings.relay_reachable` (never loaded from the environment) goes in as is."""
+    route = (RelayRoute(15001, "db.example.com", 5432),)
+    settings = dataclasses.replace(SETTINGS, relay_reachable=("172.30.0.0/16",))
+
+    plan = json.loads(relay_plan(route, settings, "10.207.0.8/29", ["172.17.0.1/32"]))
+
+    assert plan["reachable"] == ["172.30.0.0/16"]
 
 
 @pytest.mark.parametrize(

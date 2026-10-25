@@ -2879,6 +2879,7 @@ def test_a_run_with_relay_routes_starts_its_relay_before_the_task(tmp_path: Path
         "address": address,
         "subnet": subnets[0],
         "refused": _refused(tmp_path),
+        "reachable": [],
         "routes": [{"listen": 15001, "host": "db.example.com", "port": 5432}],
     }
     kinds = [
@@ -3134,6 +3135,16 @@ def test_a_failed_listing_at_a_network_open_keeps_the_last_ranges_and_logs(
     assert result["exit"] == 0
     assert _refused(tmp_path) == written
     assert "cannot list Docker's networks to find their gateways" in caplog.text
+
+
+def test_the_relays_plan_carries_the_test_hooks_reachable_networks(tmp_path: Path) -> None:
+    """`LauncherSettings.relay_reachable` reaches the plan as ``reachable`` (empty otherwise)."""
+    engine = FakeEngine()
+    launcher = _started(engine, tmp_path, relay_reachable=("172.30.0.0/16",))
+
+    launcher.run(_egress_run(relay=(_DB,)), lambda line: None)
+
+    assert json.loads(engine.relay_stdin[0])["reachable"] == ["172.30.0.0/16"]
 
 
 def test_the_relays_plan_refuses_what_the_proxy_refuses(tmp_path: Path) -> None:

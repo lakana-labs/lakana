@@ -2,8 +2,8 @@
 
 How the worker reaches git remotes and webhook addresses through a proxy or with an internal CA,
 which certificate authorities its queries trust when they read an object store over HTTPS, which
-ones builds and tasks of Python assets trust, which addresses builds and tasks never reach, and
-what the worker refuses to reach. Where the settings go in a Compose bundle:
+ones builds and tasks of Python assets trust, how a task reaches its connections, which addresses
+builds and tasks never reach, and what the worker refuses to reach. Where the settings go in a Compose bundle:
 [Deploy with Compose](../how-to/deploy-with-compose.md). Every other setting:
 [Settings](settings.md).
 
@@ -123,6 +123,28 @@ A build that fails because a package index's certificate is not trusted adds a h
 failure: `a package index's certificate is not trusted; if your package index uses a private
 certificate authority, set LAKANA_RUN__CA_BUNDLE on the worker to a PEM file of it`. Where to set
 it in a Compose bundle: [Run Python tasks in containers](../how-to/run-python-tasks-in-containers.md#package-indexes-and-proxies).
+
+## How a task reaches its connections
+
+With the docker runner a Python task reaches only the endpoints of the
+[connections](connections.md) its asset declares: HTTPS (`http`, `s3`, `gcs`, `azure`) through the
+`egress` proxy, with a token of the task's own in `LAKANA_EGRESS_PROXY` that names exactly those
+hosts and ports; databases and `tcp` (`postgresql`, `mariadb`, `tcp`) through a relay of the
+task's own at `lakana-relay`; directories as read-only mounts. Everything else stays closed, and
+so do the addresses of the next section even when a connection names them. What that means for
+an operator, with every message:
+[Connections: what a task reaches](../how-to/run-python-tasks-in-containers.md#connections-what-a-task-reaches).
+
+- **A company proxy.** `LAKANA_EGRESS_UPSTREAM_PROXY` (in `.env`, `LAKANA_EGRESS__UPSTREAM_PROXY`
+  on `egress`) applies to tasks and their relays as it does to builds: a relay tunnels a
+  database connection through it too. Before `egress` or a relay asks that proxy, it checks the
+  host locally: a numeric host, and a name that resolves on the Docker host's network to an
+  address of the next section, is refused there.
+- **Certificates.** A connection whose source uses a private certificate authority takes it in
+  its own `ca_certificate` setting (`postgresql`, `mariadb`, `http`), for that connection.
+  `LAKANA_RUN__CA_BUNDLE` (above) adds an authority for every build and task.
+- **The local runner** has neither proxy nor relay: a task connects to its connections directly,
+  with the worker's own network access.
 
 ## Addresses builds and tasks never reach
 

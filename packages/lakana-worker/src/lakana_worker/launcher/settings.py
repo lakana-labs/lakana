@@ -190,6 +190,11 @@ class LauncherSettings:
         The module constants of the same name; fields so that tests can point them elsewhere.
     server_alias, egress_service, max_seconds, keep_environments
         The module constants of the same name; fields for the same reason.
+    relay_reachable
+        IPv4 networks (CIDR, at most 4) a task's relay may dial although it is attached to them,
+        passed in its plan as ``reachable``. Not a setting, never loaded from the environment:
+        the Docker tests put their database target on the egress service's network with it, as
+        `EgressSettings.reachable` does for the proxy. Empty in production.
     """
 
     stack: str
@@ -215,6 +220,7 @@ class LauncherSettings:
     egress_service: str = EGRESS_SERVICE
     max_seconds: int = MAX_SECONDS
     keep_environments: int = KEEP_ENVIRONMENTS
+    relay_reachable: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         """Name the work volume after the stack when none is given."""

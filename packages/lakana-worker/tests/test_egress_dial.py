@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import ipaddress
 import socket
 import socketserver
@@ -130,6 +131,33 @@ def test_extra_refused_networks_are_refused(
         )
 
     assert caught.value.status == 403
+
+
+def test_a_refused_range_wins_over_a_reachable_network(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`reachable` lets in an attached network, never an address the refused ranges hold.
+
+    The Docker tests set `reachable` to the network their target sits on and then refuse that
+    same network through `LAKANA_LAUNCHER__EGRESS_REFUSED`: the refusal must hold.
+    """
+    _resolving(monkeypatch, {"crm.lan": "10.207.0.10"})
+    network = ipaddress.ip_network("10.207.0.8/29")
+    settings = dataclasses.replace(_settings(tmp_path), reachable=frozenset({network}))
+
+    with pytest.raises(DialRefused) as caught:
+        dial("crm.lan", 5432, settings, refused=frozenset({network}))
+
+    assert (caught.value.status, caught.value.reason) == (403, egress.INTERNAL)
+    assert egress.forbidden(
+        ipaddress.ip_address("10.207.0.10"),
+        frozenset({network}),
+        frozenset({network}),
+        refused=frozenset({network}),
+    )
+    assert not egress.forbidden(
+        ipaddress.ip_address("10.207.0.10"), frozenset({network}), frozenset({network})
+    )
 
 
 def test_a_numeric_host_no_resolver_reads_is_refused(tmp_path: Path) -> None:

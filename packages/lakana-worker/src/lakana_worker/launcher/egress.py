@@ -190,8 +190,9 @@ class EgressSettings:
     head_seconds
         How long a client may take to send its request head.
     reachable
-        Networks a direct connection may reach although the built-in refusals cover them. Not
-        a setting: tests reach an index on loopback with it.
+        Networks a direct connection may reach although the built-in refusals cover them, never
+        a range of the launcher's refused ranges. Not a setting: tests reach an index on
+        loopback, or on a network the proxy is attached to, with it.
     refused_file
         The ranges the launcher writes for the proxy to refuse; ``refused.json`` next to `key`
         unless given. Not a setting either.
@@ -447,6 +448,8 @@ def forbidden(
     address: ipaddress.IPv4Address | ipaddress.IPv6Address,
     connected: frozenset[Network],
     reachable: frozenset[Network],
+    *,
+    refused: frozenset[Network] = frozenset(),
 ) -> bool:
     """Say whether a direct connection must not go to an address.
 
@@ -458,15 +461,20 @@ def forbidden(
         The networks the proxy's container is attached to.
     reachable
         `EgressSettings.reachable`.
+    refused
+        The launcher's refused ranges (Docker's gateways, the operator's ranges, the task
+        range): refused even where `reachable` would let the address through.
 
     Returns
     -------
     bool
-        ``True`` for loopback, link-local, multicast, unspecified, reserved, a metadata
-        address, or an address on a connected network.
+        ``True`` for an address in `refused`, loopback, link-local, multicast, unspecified,
+        reserved, a metadata address, or an address on a connected network.
     """
     if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped is not None:
         address = address.ipv4_mapped
+    if any(address in network for network in refused if network.version == address.version):
+        return True
     if any(address in network for network in reachable if network.version == address.version):
         return False
     return (
@@ -950,7 +958,7 @@ def dial(
     literal = _literal(host)
     if settings.upstream is not None:
         if literal is not None or check_names:
-            connected = _connected(settings, host, port) | refused
+            connected = _connected(settings, host, port)
             if literal is not None:
                 addresses = [literal]
             else:
@@ -959,7 +967,7 @@ def dial(
                 except OSError:
                     found = []
                 addresses = [ipaddress.ip_address(entry[4][0]) for entry in found]
-            if any(forbidden(a, connected, settings.reachable) for a in addresses):
+            if any(forbidden(a, connected, settings.reachable, refused=refused) for a in addresses):
                 logger.warning("Refused %s:%d: it resolves to a forbidden address.", host, port)
                 raise DialRefused(403, INTERNAL)
         return _through_upstream(host, port, settings)
@@ -967,11 +975,13 @@ def dial(
         found = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
     except OSError as exc:
         raise DialRefused(502, f"cannot resolve {host} ({exc.strerror or exc})") from None
-    connected = _connected(settings, host, port) | refused
+    connected = _connected(settings, host, port)
     allowed = [
         entry
         for entry in found
-        if not forbidden(ipaddress.ip_address(entry[4][0]), connected, settings.reachable)
+        if not forbidden(
+            ipaddress.ip_address(entry[4][0]), connected, settings.reachable, refused=refused
+        )
     ]
     if not allowed:
         logger.warning("Refused %s:%d: it resolves only to forbidden addresses.", host, port)

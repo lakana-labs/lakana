@@ -6,7 +6,8 @@ that isolates and what it does not, how to set it, and what each message means.
 
 Two services of the bundle do the work. `launcher` is the only one that holds the Docker socket:
 a worker asks it, over a Unix socket, to start a task or a build. `egress` is the only way out of
-a build container, to the package indexes the build may use.
+a build container, to the package indexes the build may use, and of a task container, to the
+connections its asset declares.
 
 ## What it isolates
 
@@ -14,9 +15,12 @@ a build container, to the package indexes the build may use.
   built environment (read-only, at `/env`), a private scratch directory (`/work`) and a private
   `/tmp`. Nothing of the worker's environment variables, settings, files or processes, and not
   the Docker socket. Its task token arrives on its standard input, as with the local runner.
-- **Other projects.** Each task has a network of its own, on which the Lakana server is the only
-  other member: not the host, not the internet, not another task, not the database or the object
-  store. A task resolves no name outside it. An environment belongs to one project in one
+- **Other projects.** Each task has a network of its own, which no other task shares. A task
+  whose asset declares no connection finds only the Lakana server there: not the host, not the
+  internet, not the database or the object store. A task with connections reaches exactly their
+  endpoints and nothing else, through the `egress` proxy and a relay of its own (see
+  [Connections: what a task reaches](#connections-what-a-task-reaches)). A task resolves no name
+  outside its network. An environment belongs to one project in one
   environment and is built for its `uv.lock`, `pyproject.toml`, Python and set of package indexes,
   by another user than the one the task runs as, so a task cannot change it.
 - **Resources.** Memory, CPUs and processes are limits of the container (`2GB`, `1` and `256` by
@@ -38,6 +42,16 @@ Inside the container a task runs without capabilities, with a read-only root fil
   you deploy.
 - **A task still reaches the server.** It talks to Lakana's REST API with its own task token, as
   before, and it can connect to every port the `server` container listens on.
+- **A declared host gets what the task sends it.** A task reads the credentials of the
+  connections its asset declares and can send them, and any data it reads, to any endpoint of
+  those connections. Review an asset's `connections` with its code. Its egress token is in its
+  environment (`LAKANA_EGRESS_PROXY`), but it is bound to the task's own network and lifetime: a
+  copy in another container, or after the task, opens nothing.
+- **The Docker host's own addresses, unless you list them.** `egress` and the relays refuse the
+  Docker host's gateway addresses and names, but not its LAN, VPN or other addresses: list them in
+  `LAKANA_EGRESS_REFUSED` (see [Package indexes and proxies](#package-indexes-and-proxies)).
+- **A `tcp` connection is encrypted only if your driver encrypts it.** The relay forwards bytes
+  and never looks at them; TLS, where the protocol has it, stays between the task and the source.
 - **Builds run your dependencies' build code.** A package built from source (a source
   distribution) runs its own code in the build container. That container holds the credentials of
   the package indexes its lock uses and the password in `LAKANA_RUN__INDEX_URL`, if it has one, and
@@ -77,6 +91,54 @@ protections stay.
 
 Budget the host's memory for the workers' own limits plus one task's memory
 (`LAKANA_RUN__TASK_MEMORY`) per worker: a task container's memory is outside the worker's limit.
+
+## Connections: what a task reaches
+
+A task reaches exactly the endpoints of the [connections](../reference/connections.md) its asset
+declares (`@asset(connections=["crm-db"])`), and nothing else:
+
+- **HTTPS** (`http`, `s3`, `gcs` and `azure` connections) goes through `egress`, with a token that
+  names the connection's host and port only, in the task's `LAKANA_EGRESS_PROXY`. Lakana's helpers
+  and `connections.get(...).proxy_url` use it; a library you call yourself needs it passed as its
+  proxy, because the task has no `HTTPS_PROXY`.
+- **Databases and `tcp`** (`postgresql`, `mariadb` and `tcp` connections) go through a relay of
+  the task's own: a small container on the task's network, `lakana-relay`, with one port per
+  connection from 15001, each forwarded to that connection's host and port only.
+  `connections.get(...).relay_address` names it. The relay never reads the bytes: TLS checks the
+  real host name, as before.
+- **Directories** (`directory` and `sqlite-file` connections) are read-only mounts at
+  `/ingest/<root>/<path>`, from `LAKANA_LAUNCHER__INGESTION_ROOTS`
+  (see [Ingestion roots](#ingestion-roots)).
+
+What a task cannot reach, with or without connections: another task, the Lakana stack (the
+database, the object store, the launcher; the server only through its own network), the cloud
+metadata address, the Docker host's loopback, gateways and names, and the ranges of
+`LAKANA_EGRESS_REFUSED`. A connection's host that resolves to one of these is refused whatever
+the asset declares. The full list is in
+[Addresses builds and tasks never reach](../reference/network-settings.md#addresses-builds-and-tasks-never-reach).
+
+**The `egress` service is required** for a task with an HTTPS or database connection. Without it
+running, such a task fails without retry: ``tasks with connections need the `egress` service;
+start it (Compose bundle) or remove the connection from the asset.`` A task without connections, or
+with directory connections only, does not need it.
+
+**Limits.** A task reaches at most 64 HTTPS hosts and 16 database endpoints. A relay has 64 MiB
+and carries at most 16 connections at once per database connection; the 17th is closed, and the
+task's log says so. A connection the relay refuses or closes is explained in the task's log, on a
+line that starts with `lakana-relay:`.
+
+**Certificates.** A source behind a private certificate authority: give the connection its
+`ca_certificate` (PostgreSQL, MariaDB, `http`), or set `LAKANA_RUN__CA_BUNDLE` for every build and
+task (see [Package indexes and proxies](#package-indexes-and-proxies)).
+
+**A company proxy.** `LAKANA_EGRESS_UPSTREAM_PROXY` applies to tasks and their relays too. Before
+`egress` asks that proxy, it refuses a host that resolves, on the Docker host's network, to one of
+the addresses above.
+
+**A source on the Docker host.** Its gateway address (such as `172.17.0.1`) and
+`host.docker.internal` are always refused. Reach it by another address of the host that you do
+not list in `LAKANA_EGRESS_REFUSED`, or better, move it off the host: every address of the
+Docker host that you leave out of that list is reachable by every task whose connection names it.
 
 ## Choose the Python
 
@@ -202,7 +264,9 @@ package index), the host would send that traffic into a task network instead: ch
 network does not use. A `/16` holds 6,144 networks at once; the addresses of a build's network
 are not given out again until a minute after its egress token expires.
 
-**Ingestion roots.** A `directory` or `sqlite-file` connection names a root (`--address
+#### Ingestion roots
+
+A `directory` or `sqlite-file` connection names a root (`--address
 '{"root": "shared", "path": "exports"}'`), and each worker maps that name to a host directory:
 the launcher with `LAKANA_LAUNCHER__INGESTION_ROOTS` for the docker runner, the worker itself with
 `LAKANA_RUN__INGESTION_ROOTS` for the local runner. Both take the same JSON object, such as
@@ -227,11 +291,11 @@ Set these under `environment:` of the `egress` service in `compose.yaml`.
 
 | Setting | Default | What it does |
 |---|---|---|
-| `LAKANA_EGRESS__UPSTREAM_PROXY` | none (from `LAKANA_EGRESS_UPSTREAM_PROXY` in `.env`) | The proxy builds go through, `http://[user:password@]host:port`. |
+| `LAKANA_EGRESS__UPSTREAM_PROXY` | none (from `LAKANA_EGRESS_UPSTREAM_PROXY` in `.env`) | The proxy builds, tasks and their relays go through, `http://[user:password@]host:port`. |
 | `LAKANA_EGRESS__MAX_CONNECTIONS` | `256` | Connections at once, 1 to 4096. |
 | `LAKANA_EGRESS__MAX_CONNECTIONS_PER_NETWORK` | `32` | Connections one build or task may hold at once, 1 to `LAKANA_EGRESS__MAX_CONNECTIONS`, so that one build cannot take the connections the others need. A build downloads at most 16 packages at once; keep this at 24 or more. A build past it gets `503` with the reason in uv's error. |
 | `LAKANA_EGRESS__LISTEN` | `0.0.0.0:3128` | Where the proxy listens. Leave it. |
-| `LAKANA_EGRESS__KEY` | `/run/lakana-egress/egress.key` | The key the launcher signs build tokens with; a new one at every launcher start. Leave it. |
+| `LAKANA_EGRESS__KEY` | `/run/lakana-egress/egress.key` | The key the launcher signs build and task tokens with; a new one at every launcher start. Leave it. |
 
 ## Remove everything, or recover from an incident
 
@@ -262,12 +326,17 @@ If a project may have deployed a malicious dependency or package, or a worker ma
 | `The Docker socket ... is writable by everyone` (launcher log) | The socket's mode lets any local user control Docker. | Restrict it to the docker group on the host: `chmod 660`, owned by root:docker. |
 | `this task was ended because it used more than its container's memory limit` | The task used more than `LAKANA_RUN__TASK_MEMORY`. A task process killed by signal 9 that Lakana neither stopped nor timed out reads the same way, because the memory limit is by far the most likely sender; a task that kills itself, an operator's `docker kill` or `docker rm -f`, or the host's own OOM killer also end a task with that signal and read as this message. | Read less in the task, or raise the setting. |
 | `... is not a destination this build may reach` (in uv's error), `Refused a build connection ... not in its token.` (egress log) | The build tried a host or port that is not one of its indexes. | Register the index (`lakana index add`), or set `LAKANA_RUN__INDEX_URL`, with the port in its URL; see [Package indexes and proxies](#package-indexes-and-proxies). |
+| `... is not a destination this task may reach; declare it in @asset(connections=[...]) ...` (the task's log) | The task tried a host or port that none of its asset's connections names. | Create a connection for it (`lakana connection create`), declare it in the asset's `connections`, and deploy; see [Connections: what a task reaches](#connections-what-a-task-reaches). |
+| ``tasks with connections need the `egress` service; start it (Compose bundle) or remove the connection from the asset.`` | The asset declares an HTTPS or database connection and the `egress` service is not running. | Start it: `egress` is part of the bundle's `compose.yaml`; look at `docker compose ps` and `docker compose logs egress`. |
+| `runner unavailable: ... the task's relay did not start: ...` | The relay of a task with a database connection did not report ready within 10 seconds; the message ends with its last line. | Look at `docker compose logs launcher`. The launcher and `egress` run the same release's image: upgrade them together. The task is retried. |
+| `runner unavailable: ... a task's relay goes out through the egress service's own network ...` | The `egress` container is on more or fewer than one network that the launcher did not create. | Attach `egress` to exactly one network, the bundle's `default`, as `compose.yaml` does. |
+| `lakana-relay: closed a connection to ...: 16 are open already, the most one connection of a task may hold` (the task's log) | The task opened more than 16 connections at once to one database connection. | Use fewer at once: a connection pool of 16 or fewer. |
 | ``LAKANA_LAUNCHER__EGRESS_REFUSED: `...` is not a network (host bits set; did you mean ...?)`` or ``... is not an IP address or CIDR range`` (launcher log; it stops) | An entry of `LAKANA_EGRESS_REFUSED` in `.env` is not a CIDR range or address, or a range has host bits set. | Write the range the message suggests, or a plain address, separated by commas; see [Addresses builds and tasks never reach](../reference/network-settings.md#addresses-builds-and-tasks-never-reach). |
 | `cannot list Docker's networks to find their gateways ...` (launcher log; it stops) | Docker did not answer the network listing, so the launcher cannot tell which addresses are the Docker host's. | Check the Docker daemon (`docker network ls`) and `docker compose logs launcher`, then start the launcher again. |
-| `... is not reachable through this proxy: it resolves to a loopback, link-local, metadata or internal address ...` (in uv's error or the task's log), or `lakana-relay: refused ...` (the task's log) | The host is loopback, metadata, part of the stack, a Docker network's gateway, a name of the Docker host such as `host.docker.internal`, or in `LAKANA_EGRESS_REFUSED`. | Give the index or the connection an address outside those ranges, or take its range out of `LAKANA_EGRESS_REFUSED`; see [Addresses builds and tasks never reach](../reference/network-settings.md#addresses-builds-and-tasks-never-reach). |
+| `... is not reachable through this proxy: it resolves to a loopback, link-local, metadata or internal address ...` (in uv's error or the task's log), or `lakana-relay: refused <host>:<port>: ...` (the task's log) | The host is loopback, metadata, part of the stack, a Docker network's gateway, a name of the Docker host such as `host.docker.internal`, or in `LAKANA_EGRESS_REFUSED`. A task's message ends with `give the connection an address outside the Lakana stack (lakana connection update)`. | Give the index or the connection an address outside those ranges (`lakana connection update`), or take its range out of `LAKANA_EGRESS_REFUSED`; see [Addresses builds and tasks never reach](../reference/network-settings.md#addresses-builds-and-tasks-never-reach). |
 | `the egress proxy cannot read the refused ranges the launcher writes ...` (`503`, in uv's error or the task's log) | The launcher has not written `refused.json` to the `egress-key` volume yet, or it is damaged. | Look at `docker compose logs launcher`; the file is written at every launcher start, so `docker compose restart launcher` writes it again. |
 | `a task's relay refuses at most 256 address ranges ...` | The host has so many Docker networks that their gateways and your ranges do not fit in a relay's list. | Remove the Docker networks nobody uses (`docker network prune`), or list wider ranges in `LAKANA_EGRESS_REFUSED`. |
-| `this client's network already holds 32 connections to the egress proxy ...` (in uv's error) | The build has `LAKANA_EGRESS__MAX_CONNECTIONS_PER_NETWORK` connections open already: its own code, a build backend for example, opens many. | The task is retried. If it keeps happening, raise the setting under `egress` in `compose.yaml`; see [The egress proxy](#the-egress-proxy). |
+| `this client's network already holds 32 connections to the egress proxy ...` (in uv's error or the task's log) | The build or task has `LAKANA_EGRESS__MAX_CONNECTIONS_PER_NETWORK` connections open already: its own code, a build backend for example, opens many. | The task is retried. If it keeps happening, raise the setting under `egress` in `compose.yaml`; see [The egress proxy](#the-egress-proxy). |
 | `python: must be one of "3.11", "3.12", "3.13", "3.14" ...` | The version has no task image, or lacks quotes. | Write one of the four, in quotes. |
 | `this project names Python X in lakana.yaml, and this worker runs Python tasks on its own Python Y without containers ...` | A local-runner worker took the task. | Run it on a worker with `LAKANA_RUN__RUNNER=docker`, or remove `python:`. |
 | `the launcher refused the task: run takes exactly the fields ...` or `the launcher refused the build: build takes exactly the fields ...`, with `The worker and the launcher are different releases` | The worker and the launcher run different releases (one was upgraded without the other), so they disagree on what a request holds. | Upgrade both to the same release: `docker compose pull`, then `docker compose up -d`. Every task fails until they match. |

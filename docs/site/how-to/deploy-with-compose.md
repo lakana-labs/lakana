@@ -145,7 +145,9 @@ The `launcher` service is the only one that holds the Docker socket. The worker 
 Unix socket in a volume only the two share, to start each Python task and each environment build
 in a container of its own; it has no network, no capabilities and a read-only filesystem. `egress`
 is the only way out of a build container: it lets a build reach the hosts of the package indexes
-its project may use and nothing else. If your network sends https through a proxy, set
+its project may use and nothing else. It is also the only way out of a task whose asset declares
+connections: such a task reaches exactly those connections' endpoints (see
+[Connections: what a task reaches](run-python-tasks-in-containers.md#connections-what-a-task-reaches)). If your network sends https through a proxy, set
 `LAKANA_EGRESS_UPSTREAM_PROXY` in `.env`. Docker Engine 28 or later is required; the launcher
 stops at start with a message on an older one. `LAKANA_DOCKER_SOCKET` in `.env` is the socket it
 mounts (`/var/run/docker.sock`; Docker installed as a snap uses the same path).
@@ -174,7 +176,7 @@ options decide where the secret is sent. Options an operator set there are repla
 
 Each Python task runs in a container of its own (`LAKANA_RUN__RUNNER=docker`, set by
 `LAKANA_RUNNER` in `.env`): its code and environment read-only, a private scratch directory, the
-server as the only thing it can reach, and its own memory (`LAKANA_RUN__TASK_MEMORY`, 2 GB), CPU
+server as the only thing it can reach besides the connections its asset declares, and its own memory (`LAKANA_RUN__TASK_MEMORY`, 2 GB), CPU
 (1) and process (256) limits. Environments are built once per `uv.lock`, `pyproject.toml`, Python
 and set of package indexes, in volumes the launcher names `<project>-env-…`. What that isolates
 and what it does not, its settings and its messages are in

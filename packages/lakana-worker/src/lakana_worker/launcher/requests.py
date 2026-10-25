@@ -1653,7 +1653,8 @@ def relay_plan(
         The run's routes.
     settings
         For the launcher's range of task networks, which the plan refuses whatever `refused`
-        holds.
+        holds, and the tests' `LauncherSettings.relay_reachable` (the plan's ``reachable``,
+        always present, empty in production).
     subnet
         The network's subnet.
     refused
@@ -1681,6 +1682,7 @@ def relay_plan(
             "address": relay_address(subnet),
             "subnet": subnet,
             "refused": ranges,
+            "reachable": list(settings.relay_reachable),
             "routes": [{"listen": r.listen, "host": r.host, "port": r.port} for r in routes],
         }
     ).encode("utf-8")

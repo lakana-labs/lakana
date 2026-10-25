@@ -55,7 +55,8 @@ added, bound or rotated while an attempt runs may appear in the log the worker c
 change secrets between runs. Every fetch is in the audit log; refusals are recorded
 at a limited rate per principal and the rest counted. The code you
 deploy can read the credentials of the connections its asset declares and send them anywhere the
-task can reach, so review an asset's `connections` with its code.
+task can reach (in a container, those connections' endpoints; with the local runner, anywhere), so
+review an asset's `connections` with its code.
 
 Keep the master key and the `.env` file of a Compose bundle with the people who run the instance: whoever
 holds them holds every secret, and a lost master key makes every stored secret unrecoverable. The steps
@@ -128,9 +129,15 @@ as two statements.
   reads, filters and masks included. Deploy Python only from people you would trust with the stored data,
   or run one instance per group that does not trust the other
   ([why](python-assets.md#isolation-one-instance-is-one-trust-domain)). With the docker runner, the
-  Compose bundle's default, each task runs in a container without the worker's credentials; containers
-  share the host's kernel, so this is not a sandbox for hostile code
+  Compose bundle's default, each task runs in a container without the worker's credentials, and
+  reaches the server and the endpoints of the connections its asset declares, nothing else;
+  containers share the host's kernel, so this is not a sandbox for hostile code
   ([Run Python tasks in containers](../how-to/run-python-tasks-in-containers.md)).
+- **A declared connection's host gets what the task sends it.** A task can send its declared
+  connections' credentials, and any data it reads, to those connections' endpoints. With
+  containers, an address of the Docker host that you do not list in `LAKANA_EGRESS_REFUSED` is
+  reachable when a connection names it
+  ([Addresses builds and tasks never reach](../reference/network-settings.md#addresses-builds-and-tasks-never-reach)).
 - **Files read outside Lakana.** A filter or a mask guards Lakana's own query path, not the files in
   the object storage. Keep the storage credentials with the people who run the instance.
 - **Local mode.** With storage on the local disk there is no cloud credential to scope, so a local

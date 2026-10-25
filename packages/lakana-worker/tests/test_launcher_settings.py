@@ -491,6 +491,18 @@ def test_a_blank_former_variable_is_ignored_and_a_set_one_says_to_remove_it() ->
         load_settings({**_BASE, "LAKANA_LAUNCHER__TASK_USER": "0:0"})
 
 
+def test_the_relays_reachable_networks_are_a_test_hook_and_never_loaded() -> None:
+    """`relay_reachable` lets the Docker tests' relay dial a network it is attached to.
+
+    The environment cannot set it: it is empty from `load_settings`, and a variable of that
+    name stops the launcher like any other unknown setting.
+    """
+    assert load_settings(_BASE).relay_reachable == ()
+    assert "RELAY_REACHABLE" not in KNOWN_SETTINGS
+    with pytest.raises(SettingsError, match=r"LAKANA_LAUNCHER__RELAY_REACHABLE is not a setting"):
+        load_settings({**_BASE, "LAKANA_LAUNCHER__RELAY_REACHABLE": "172.30.0.0/16"})
+
+
 _REPO = Path(__file__).resolve().parents[3]
 """The repository root: ``packages/lakana-worker/tests`` is three levels below it."""
 _COMPOSE = _REPO / "packages" / "lakana" / "src" / "lakana" / "cli" / "deploy" / "compose.yaml"

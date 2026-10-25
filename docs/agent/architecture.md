@@ -196,7 +196,7 @@ handling, and `docs/security/threat-model.md` for the local-mode threat row.
 sharing one instance, instead of the one-machine, no-Docker topology local mode runs.
 Where local mode is one SQLite file and a `file://` lake supervised as two OS processes by
 the CLI itself, team mode is nine Compose services (with `launcher` and `egress`, the Python
-task containers' launcher and the builds' egress proxy), plus two optional ones (`worker-interactive` and `worker-pipeline`, no replica until `.env` says so), each in its own container, built from
+task containers' launcher and the egress proxy of builds and of tasks with connections), plus two optional ones (`worker-interactive` and `worker-pipeline`, no replica until `.env` says so), each in its own container, built from
 one image (`Dockerfile`, repo root — the same image runs the server, every worker, and the
 one-shot setup job, differing only in the command):
 
@@ -704,7 +704,7 @@ poll loop, classification) are under "The run engine (M5c1)", "Python tasks (M5c
 | `lakana_worker.runners` | worker | `Runner`, `LocalProcessRunner`, `DockerRunner`, `unpack_code`. |
 | `lakana_worker.launcher_client` | worker | The worker's side of the launcher's socket: one request per connection with the launcher's token; `LauncherUnavailable`, `LauncherRefused`, `LauncherTimedOut`, `LogSinkFailed`; `claim_owner` names the worker for the launcher's labels. |
 | `lakana_worker.docker_environments` | worker | Environments built by the launcher, one volume per project, lock, `pyproject.toml`, Python and index set. |
-| `lakana_worker.launcher` | launcher (own service) | The only holder of the Docker socket: request schema, container specs, the Docker Engine client, the run/build/stop/status/cleanup operations, the Unix-socket server (`lakana-launcher`), and the builds' egress proxy (`launcher.egress`, the `egress` service) with its tokens (`launcher.egress_token`); standard library only (contract `launcher-stands-alone`). Security: `security.md`, "Task isolation: the launcher". User documentation: `docs/site/how-to/run-python-tasks-in-containers.md`. |
+| `lakana_worker.launcher` | launcher (own service) | The only holder of the Docker socket: request schema, container specs, the Docker Engine client, the run/build/stop/status/cleanup operations, the Unix-socket server (`lakana-launcher`), the egress proxy of builds and of tasks with connections (`launcher.egress`, the `egress` service) with its tokens (`launcher.egress_token`), and a task's relay for its database and `tcp` connections (`launcher.relay`, a container per run from the `egress` image); standard library only (contract `launcher-stands-alone`). Security: `security.md`, "Task isolation: the launcher" and "Task egress: connections, the proxy and the relay (M6)". User documentation: `docs/site/how-to/run-python-tasks-in-containers.md`. |
 | `lakana_worker.venvs` | worker | The venv cache. |
 | `lakana_worker.python_tasks` | worker | One Python attempt: prepare, supervise, classify. |
 | `lakana_worker.tasks`, `poller` | worker | Dispatch by manifest `kind`; query-only polling during a Python task. |

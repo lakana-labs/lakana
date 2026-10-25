@@ -34,8 +34,10 @@ has no authentication. It is reachable from the worker, because the gateway is o
 worker uses. User SQL cannot use it (DuckDB's HTTP filesystem cannot speak gRPC), but a Python
 task under the local runner runs as trusted code in the worker and could remove the storage
 identity, which makes storage unavailable until the gateway restarts. With the docker runner (the
-bundle's default) a task's network holds only the server, and a build reaches only its package
-indexes, so neither reaches the gateway. See the SeaweedFS item above for what else is and is not
+bundle's default) a task's network holds only the server, plus the `egress` proxy and the task's
+relay when its asset declares connections; a build reaches only its package indexes. The proxy and
+the relay refuse every network they are attached to, the bundle's own included, so neither a task
+nor a build reaches the gateway. See the SeaweedFS item above for what else is and is not
 protected.
 
 ## A symlinked parent directory of the profile file
