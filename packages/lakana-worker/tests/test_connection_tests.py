@@ -1140,3 +1140,70 @@ def test_the_loop_claims_with_a_lease_longer_than_the_check_wait(
 
     (left,) = leases
     assert left > connection_tests.CHECK_WAIT_SECONDS + 20
+
+
+_RELAY_HINT = "give the connection an address outside the Lakana stack (lakana connection update)"
+
+
+@pytest.mark.parametrize(
+    ("line", "outcome"),
+    [
+        (
+            "refused db.example.com:5432: cannot resolve db.example.com (Name or service not "
+            "known)",
+            "dns",
+        ),
+        ("refused db.example.com:5432: cannot reach db.example.com:5432 (Connection refused)",
+         "refused"),
+        ("refused db.example.com:5432: cannot reach db.example.com:5432 (timed out)", "timeout"),
+        (
+            "refused db.example.com:5432: it resolves to a loopback, link-local, metadata or "
+            f"internal address, which nothing Lakana starts may reach; {_RELAY_HINT}",
+            "not_allowed",
+        ),
+    ],
+)  # fmt: skip
+def test_a_relay_that_could_not_reach_the_target_overrides_the_checks_ok(
+    world: World, tmp_path: Path, line: str, outcome: str
+) -> None:
+    """Through the relay the check reaches the relay itself: its refusal line is the truth.
+
+    A ``tcp`` check, or a database with ``tls: disable``, connects to ``lakana-relay`` and says
+    ``ok`` even when the relay then cannot reach the target; the relay writes why.
+
+    Parameters
+    ----------
+    world
+        The world.
+    tmp_path
+        Pytest's directory.
+    line
+        The relay's line, after ``lakana-relay: ``.
+    outcome
+        The recorded outcome.
+    """
+    output = OK_LINE + f"lakana-relay: {line}\n".encode()
+    launcher = FakeLauncher(scripts={"check": answering(output)})
+    running, _ = docker_loop(world, tmp_path, launcher)
+    test_id = world.connection(
+        "crm",
+        kind="postgresql",
+        address={"host": "db.example.com", "port": 5432, "database": "c"},
+        settings={"user": "reader", "tls": "disable"},
+    )
+
+    assert running.step()
+
+    row = world.test(test_id)
+    assert (row.outcome, row.message) == (outcome, f"the relay {line}")
+
+
+def test_a_relay_line_that_is_not_a_refusal_changes_nothing(world: World, tmp_path: Path) -> None:
+    output = OK_LINE + b"lakana-relay: closed a connection to db.example.com:5432\n"
+    launcher = FakeLauncher(scripts={"check": answering(output)})
+    running, _ = docker_loop(world, tmp_path, launcher)
+    test_id = world.connection("svc")
+
+    assert running.step()
+
+    assert world.test(test_id).outcome == "ok"

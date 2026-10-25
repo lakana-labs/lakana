@@ -219,6 +219,42 @@ def _answer(output: str) -> tuple[str, str] | None:
     return None
 
 
+RELAY_REFUSED = "lakana-relay: refused "
+"""Starts the line a task's relay writes when it does not connect a client to its target."""
+
+
+def _relay_refusal(output: str) -> tuple[str, str] | None:
+    """Read the relay's refusal from a check's output, which outranks the check's own answer.
+
+    Through the relay the check connects to the relay itself, which accepts before it dials the
+    target: a ``tcp`` check, or a database with ``tls: disable``, would say ``ok`` for a target the
+    relay then cannot reach. The relay writes why into the same output.
+
+    Parameters
+    ----------
+    output
+        What the check and its relay printed.
+
+    Returns
+    -------
+    tuple of str or None
+        ``dns`` for a host that does not resolve, ``timeout`` for one that never answered,
+        ``refused`` for one that could not be reached otherwise, ``not_allowed`` for an
+        address nothing Lakana starts may reach; the message is the relay's line. `None` when the
+        relay refused nothing.
+    """
+    for line in output.splitlines():
+        if not line.startswith(RELAY_REFUSED):
+            continue
+        message = "the relay " + line.removeprefix("lakana-relay: ")
+        if "cannot resolve " in line:
+            return "dns", message
+        if "cannot reach " in line:
+            return ("timeout" if line.endswith("(timed out)") else "refused"), message
+        return "not_allowed", message
+    return None
+
+
 def _skew(refusal: str) -> bool:
     """Say whether a refusal means the worker and the launcher are different releases.
 
@@ -579,7 +615,11 @@ class ConnectionTestLoop:
             return "failed", CHECK_OOM
         if result.get("stopped") is True:
             return "failed", CHECK_STOPPED
-        answer = _answer(output.decode("utf-8", "replace"))
+        text = output.decode("utf-8", "replace")
+        refusal = _relay_refusal(text)
+        if refusal is not None:
+            return refusal
+        answer = _answer(text)
         if answer is None:
             logger.warning(
                 "A connection check ended without an answer (exit %s).", result.get("exit")
