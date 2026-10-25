@@ -1814,3 +1814,30 @@ def test_the_refused_ranges_file_sits_next_to_the_key_unless_set(tmp_path: Path)
     assert settings.refused_file == tmp_path / "k" / "refused.json"
     assert EgressSettings(refused_file=tmp_path / "r.json").refused_file == tmp_path / "r.json"
     assert load_settings({}).refused_file == Path("/run/lakana-egress/refused.json")
+
+
+@pytest.mark.parametrize("purpose", ["task", "build", "connection-test"])
+def test_the_docker_hosts_name_is_refused_for_every_purpose(tmp_path: Path, purpose: str) -> None:
+    """`host.docker.internal` is the Docker host, whatever it resolves to (or does not).
+
+    Parameters
+    ----------
+    tmp_path
+        For the key and the ranges.
+    purpose
+        The token's purpose.
+    """
+    server = _proxy(tmp_path)
+    key = ensure_key(tmp_path / "egress.key")
+    try:
+        token = mint(
+            key, [("host.docker.internal", 5432)], 2**40, purpose=purpose, network=LOOPBACK
+        )
+        status, said = _refusal(server, "host.docker.internal:5432", token)
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    reason = f"host.docker.internal:5432 is not reachable through this proxy: {egress.INTERNAL}"
+    assert status == b"403"
+    assert said == (reason if purpose == "build" else f"{reason}; {_TASK_NEXT_STEP}")

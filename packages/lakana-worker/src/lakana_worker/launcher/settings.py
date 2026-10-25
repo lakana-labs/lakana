@@ -15,11 +15,14 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import logging
 import os
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
+
+logger = logging.getLogger("lakana_worker.launcher")
 
 PREFIX = "LAKANA_LAUNCHER__"
 SUPPORTED_PYTHONS = ("3.11", "3.12", "3.13", "3.14")
@@ -391,8 +394,36 @@ def _egress_refused(environ: Mapping[str, str]) -> tuple[str, ...]:
             raise SettingsError(
                 f"{name}: `{entry}` is not a network (host bits set; did you mean {meant}?); {rule}"
             ) from None
-        ranges.append(str(network))
+        ranges.append(str(_unmapped(network, name)))
     return tuple(ranges)
+
+
+def _unmapped(
+    network: ipaddress.IPv4Network | ipaddress.IPv6Network, name: str
+) -> ipaddress.IPv4Network | ipaddress.IPv6Network:
+    """Write an IPv4-mapped IPv6 range (``::ffff:192.168.1.10``) as the IPv4 range it means.
+
+    The proxy and the relays judge a mapped address as its IPv4 address, so the IPv6 spelling
+    of a range would never match anything.
+
+    Parameters
+    ----------
+    network
+        A range of the setting.
+    name
+        The setting, for the log.
+
+    Returns
+    -------
+    IPv4Network or IPv6Network
+        The IPv4 range for a range inside ``::ffff:0:0/96``; `network` otherwise.
+    """
+    mapped = network.network_address.ipv4_mapped if network.version == 6 else None
+    if mapped is None or network.prefixlen < 96:
+        return network
+    ipv4 = ipaddress.IPv4Network(f"{mapped}/{network.prefixlen - 96}")
+    logger.info("%s: read the IPv4-mapped range %s as %s.", name, network, ipv4)
+    return ipv4
 
 
 def _path(environ: Mapping[str, str], name: str, default: Path) -> Path:

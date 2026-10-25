@@ -210,3 +210,56 @@ def test_through_an_upstream_proxy_an_unreadable_table_refuses_a_literal(
 
     assert caught.value.status == 503
     assert seen == []
+
+
+_HOST_NAMES = [
+    "host.docker.internal",
+    "gateway.docker.internal",
+    "docker.for.mac.host.internal",
+    "docker.for.mac.localhost",
+    "docker.for.win.localhost",
+]
+
+
+@pytest.mark.parametrize("spelling", ["plain", "upper", "trailing-dot"])
+@pytest.mark.parametrize("name", _HOST_NAMES)
+@pytest.mark.parametrize("upstream_proxy", [False, True], ids=["direct", "upstream"])
+@pytest.mark.parametrize("check_names", [True, False], ids=["task", "build"])
+def test_the_docker_hosts_well_known_names_are_refused_whatever_they_resolve_to(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    upstream: tuple[int, list[bytes]],
+    name: str,
+    spelling: str,
+    upstream_proxy: bool,
+    check_names: bool,
+) -> None:
+    """Docker Desktop resolves them to the host outside every gateway: refused by name.
+
+    Parameters
+    ----------
+    tmp_path
+        For the routing table.
+    monkeypatch
+        Makes the name resolve to a public address that would pass every address check.
+    upstream
+        A company proxy that must not be asked.
+    name
+        A well-known name.
+    spelling
+        How it is written.
+    upstream_proxy
+        Whether the dial goes through the company proxy.
+    check_names
+        Whether names are resolved before the company proxy (`False` for builds).
+    """
+    host = {"plain": name, "upper": name.upper(), "trailing-dot": f"{name}."}[spelling]
+    _resolving(monkeypatch, {host: "93.184.216.34"})
+    port, seen = upstream
+    settings = _settings(tmp_path, upstream=f"http://127.0.0.1:{port}" if upstream_proxy else None)
+
+    with pytest.raises(DialRefused) as caught:
+        dial(host, 443, settings, check_names=check_names)
+
+    assert (caught.value.status, caught.value.reason) == (403, egress.INTERNAL)
+    assert seen == []

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import re
 from pathlib import Path
@@ -198,6 +199,18 @@ def test_a_malformed_refused_range_stops_the_launcher(value: str, message: str) 
         load_settings({**_BASE, _REFUSED: value})
 
     assert str(caught.value) == message
+
+
+def test_an_ipv4_mapped_entry_is_read_as_its_ipv4_range() -> None:
+    """`::ffff:192.168.1.10` would never match (the checks map such addresses to IPv4 first)."""
+    settings = load_settings(
+        {**_BASE, _REFUSED: "::ffff:192.168.1.10, ::ffff:10.1.0.0/112, 192.168.2.0/24"}
+    )
+
+    assert settings.egress_refused == ("192.168.1.10/32", "10.1.0.0/16", "192.168.2.0/24")
+    refused = frozenset(ipaddress.ip_network(r) for r in settings.egress_refused)
+    for address in ("192.168.1.10", "::ffff:192.168.1.10", "10.1.200.3", "::ffff:10.1.200.3"):
+        assert egress.forbidden(ipaddress.ip_address(address), refused, frozenset()), address
 
 
 def test_sixty_four_refused_ranges_are_allowed() -> None:

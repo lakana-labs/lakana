@@ -619,3 +619,19 @@ def test_a_handler_thread_that_cannot_start_gives_its_slot_back(
         "(can't start new thread)"
     )
     assert not [line for line in harness.logs if "are open already" in line]
+
+
+def test_the_docker_hosts_name_is_refused_by_the_relay(
+    relay_on: Callable[..., RelayHarness], monkeypatch: pytest.MonkeyPatch, target: int
+) -> None:
+    """Even when it resolves to an address the relay would otherwise forward to."""
+    _resolving(monkeypatch, {"host.docker.internal": ["127.0.0.1"]})
+    harness = relay_on([(15001, "host.docker.internal", target)])
+
+    with harness.connect(15001) as client:
+        assert client.recv(1) == b""
+
+    assert harness.wait_for_log("refused") == (
+        f"refused host.docker.internal:{target}: {egress.INTERNAL}; give the connection an "
+        "address outside the Lakana stack (lakana connection update)"
+    )

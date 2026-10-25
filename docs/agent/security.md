@@ -1109,10 +1109,17 @@ access-controlled on the server; `read_only=True` seals it (0400/0500) for a tas
   at every network open (task, build, check: `_open_network`, after the network exists and
   before anything joins it) and writes every `IPAM.Config[].Gateway` (IPv4 and IPv6, as /32 or
   /128), `LAKANA_LAUNCHER__EGRESS_REFUSED` (comma-separated CIDRs or addresses, at most 64; a
-  malformed entry or host bits set stops the launcher naming the entry) and its own network
+  malformed entry or host bits set stops the launcher naming the entry; an IPv4-mapped entry is
+  written as its IPv4 form, because `forbidden` maps addresses to IPv4 first) and its own network
   range, merged and sorted, to `refused.json` next to `egress.key` (temporary file and rename,
-  0640 in the key's group, only when the content changed). A failed listing stops the start;
-  later it keeps the last set and logs. The proxy reads the file like the key (again when its
+  0640 in the key's group, only when the content changed). Listing and writing happen under one
+  lock, so an older listing never replaces a newer one. A failed listing stops the start; later
+  it keeps the last set and logs; a `Gateway` that does not parse is logged naming its network.
+  `dial` also refuses the Docker host's well-known names (`egress.DOCKER_HOST_NAMES`:
+  `host.docker.internal`, `gateway.docker.internal`, `docker.for.mac.host.internal`,
+  `docker.for.mac.localhost`, `docker.for.win.localhost`; any case, trailing dot) before any
+  resolution, for every purpose, direct or upstream: on Docker Desktop they resolve to the host
+  outside every gateway. The proxy reads the file like the key (again when its
   inode, time or size change; a failed read is not remembered) and refuses every address in it
   through `dial` (`connected | refused` into `forbidden`), direct or before an upstream proxy,
   for builds, tasks and connection tests alike; a missing or malformed file means no connection
@@ -1225,9 +1232,10 @@ start) authenticates a worker, compared with `hmac.compare_digest`.
 - **Egress residuals, accepted:**
   - a direct connection may reach private addresses outside the networks the proxy is attached
     to, Docker's gateways and `LAKANA_LAUNCHER__EGRESS_REFUSED` (a company index often is one).
-    The Docker host's other addresses, its LAN address above all, are refused only when the
-    operator lists them; the docs tell operators to list them and to bind host services to
-    loopback. A network made after the last listing is refused from the next network open on;
+    The Docker host's other addresses (LAN, VPN or Tailscale, `virbr0`, Docker Desktop's
+    `192.168.65.0/24`) are refused only when the operator lists them; the docs tell operators to
+    list every one and to bind host services to loopback. A network made after the last listing
+    is refused from the next network open on;
   - with `LAKANA_EGRESS__UPSTREAM_PROXY` the upstream proxy decides after the proxy's local
     check (numeric hosts, and for tasks and connection tests names that resolve here). A name is
     resolved twice, here and at the company proxy, so a split-horizon or rebinding name can pass

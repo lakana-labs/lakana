@@ -133,16 +133,23 @@ Each cell is a summary. The page named in the last column has the detail. The ch
 
 ## Notes for the next release
 
-### Builds and tasks never reach Docker's gateways; list your host's LAN address
+### Builds and tasks never reach the Docker host's gateways or names; list its other addresses
 
-Under the docker runner, builds, tasks and connection tests no longer reach the gateway address
-of any Docker network, such as `172.17.0.1`, where the Docker host itself answers. The host's
-other addresses are refused only when you list them: add the host's LAN address or subnet to
-`LAKANA_EGRESS_REFUSED` in `.env` (`LAKANA_EGRESS_REFUSED=192.168.1.0/24`), replace `compose.yaml`
-with this release's, which passes it to the launcher, and run `docker compose up -d`. Services
-on the Docker host that only Lakana's containers should not reach are safest bound to `127.0.0.1`.
-A package index or a source on one of those addresses is now refused (`... is not reachable
-through this proxy`): give it an address outside the refused ranges. See
+**Breaking.** Under the docker runner, builds, tasks and connection tests no longer reach the
+gateway address of any Docker network (such as `172.17.0.1`, where the Docker host itself
+answers) or the Docker host's well-known names (`host.docker.internal`,
+`gateway.docker.internal`, `docker.for.mac.host.internal`, `docker.for.mac.localhost`,
+`docker.for.win.localhost`). A package index or a source on the Docker host that a build or a
+task reached that way is now refused (`... is not reachable through this proxy`): reach it by
+another address of the host, one you do not list in `LAKANA_EGRESS_REFUSED`, or move it off the
+host.
+
+The host's other addresses are refused only when you list them: add every address of the Docker
+host (`ip -br addr`: LAN address or subnet, VPN or Tailscale `100.64.0.0/10`, `virbr0`, and on
+Docker Desktop `192.168.65.0/24`) to `LAKANA_EGRESS_REFUSED` in `.env`
+(`LAKANA_EGRESS_REFUSED=192.168.1.0/24,100.64.0.0/10`), replace `compose.yaml` with this
+release's, which passes it to the launcher, and run `docker compose up -d`. Services on the
+Docker host that Lakana's containers should not reach are safest bound to `127.0.0.1`. See
 [Addresses builds and tasks never reach](../reference/network-settings.md#addresses-builds-and-tasks-never-reach).
 
 ### A Python asset's parameter `ctx` is not an input

@@ -138,20 +138,26 @@ refuse, whatever a build's index or a connection's address says:
   `172.17.0.1` on Docker's default bridge: the Docker host itself answers there. The launcher
   lists them at its start and again whenever it opens a network, so a network made since is
   refused from the next task or build on;
+- the names Docker gives the Docker host, whatever they resolve to: `host.docker.internal`,
+  `gateway.docker.internal`, `docker.for.mac.host.internal`, `docker.for.mac.localhost` and
+  `docker.for.win.localhost`, in any case and with or without a trailing dot;
 - the ranges of `LAKANA_EGRESS_REFUSED` (below).
 
 Other private addresses stay reachable, because a company's package index or database often has
-one. So does the Docker host's own LAN address, unless you list it.
+one. So do the Docker host's own other addresses, unless you list them.
 
-**Add the Docker host's own LAN address or subnet** (and any other internal network a task must
-never reach) to `LAKANA_EGRESS_REFUSED` in the bundle's `.env`; bind services on the Docker host
-to loopback (`127.0.0.1`), not `0.0.0.0`. Docker's gateways (such as `172.17.0.1`) are refused
-without it. For example, the line `LAKANA_EGRESS_REFUSED=192.168.1.0/24,10.0.0.7` refuses a
-home or office subnet and one more host; run `docker compose up -d` after changing it.
+**List every address of the Docker host** in `LAKANA_EGRESS_REFUSED` in the bundle's `.env`
+(`ip -br addr` shows them): its LAN address or subnet, a VPN or Tailscale address
+(`100.64.0.0/10`), a libvirt bridge such as `virbr0`, and on Docker Desktop `192.168.65.0/24`,
+plus any other internal network a task must never reach. Bind services on the Docker host to
+loopback (`127.0.0.1`), not `0.0.0.0`. Docker's gateways (such as `172.17.0.1`) and the host
+names above are refused without it. For example, the line
+`LAKANA_EGRESS_REFUSED=192.168.1.0/24,100.64.0.0/10` refuses a home or office subnet and the
+Tailscale range; run `docker compose up -d` after changing it.
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `LAKANA_EGRESS_REFUSED` in `.env`, which sets `LAKANA_LAUNCHER__EGRESS_REFUSED` on the `launcher` service | empty | Comma-separated IPv4 or IPv6 CIDR ranges or single addresses (an address means that one host), at most 64. Blank entries are ignored. |
+| `LAKANA_EGRESS_REFUSED` in `.env`, which sets `LAKANA_LAUNCHER__EGRESS_REFUSED` on the `launcher` service | empty | Comma-separated IPv4 or IPv6 CIDR ranges or single addresses (an address means that one host), at most 64. Blank entries are ignored. An IPv4-mapped IPv6 entry such as `::ffff:192.168.1.10` is read as its IPv4 form (`192.168.1.10`), which the launcher's log notes. |
 
 A malformed entry stops the launcher at start, and `docker compose logs launcher` names it:
 

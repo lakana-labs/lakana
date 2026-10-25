@@ -813,6 +813,17 @@ class DialRefused(Exception):
         self.reason = reason
 
 
+DOCKER_HOST_NAMES = frozenset(
+    {
+        "host.docker.internal",
+        "gateway.docker.internal",
+        "docker.for.mac.host.internal",
+        "docker.for.mac.localhost",
+        "docker.for.win.localhost",
+    }
+)
+"""Names Docker gives the Docker host itself; refused whatever they resolve to (on Docker
+Desktop the host's address is outside every network's gateway)."""
 INTERNAL = (
     "it resolves to a loopback, link-local, metadata or internal address, which nothing Lakana "
     "starts may reach"
@@ -898,12 +909,14 @@ def dial(
 ) -> socket.socket:
     """Connect to a destination directly or through the upstream proxy, checking every address.
 
-    A direct connection resolves the host once and goes only to an address `forbidden` lets
-    through, so a name that resolves elsewhere a moment later gains nothing. Through an upstream
-    proxy, which resolves for itself, an IPv4 literal in any spelling is still checked, and with
-    `check_names` so is every address the name resolves to here: a company proxy on the Docker
-    host would otherwise reach the stack's own addresses. A name that does not resolve here goes
-    to the upstream proxy unchecked, as the proxy has always sent builds.
+    A name of `DOCKER_HOST_NAMES` is refused before anything else, in any case and with or
+    without a trailing dot. A direct connection resolves the host once and goes only to an
+    address `forbidden` lets through, so a name that resolves elsewhere a moment later gains
+    nothing. Through an upstream proxy, which resolves for itself, an IPv4 literal in any
+    spelling is still checked, and with `check_names` so is every address the name resolves to
+    here: a company proxy on the Docker host would otherwise reach the stack's own addresses. A
+    name that does not resolve here goes to the upstream proxy unchecked, as the proxy has
+    always sent builds.
 
     Parameters
     ----------
@@ -931,6 +944,9 @@ def dial(
         403 for a forbidden address (`INTERNAL`), 502 when the host cannot be resolved or
         reached or the upstream proxy refuses, 503 when the routing table cannot be read.
     """
+    if host.lower().rstrip(".") in DOCKER_HOST_NAMES:
+        logger.warning("Refused %s:%d: it names the Docker host.", host, port)
+        raise DialRefused(403, INTERNAL)
     literal = _literal(host)
     if settings.upstream is not None:
         if literal is not None or check_names:

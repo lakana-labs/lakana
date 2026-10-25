@@ -105,12 +105,15 @@ registered package indexes its lock names. A package's files must come from one 
 - **Addresses.** `egress` never connects to loopback, link-local (cloud metadata), multicast or
   reserved addresses, into the networks it is attached to (the bundle's own network with the
   server, the database and the object store, and the build networks), to the gateway of any
-  Docker network (such as `172.17.0.1`, where the Docker host answers), nor to the ranges of
-  `LAKANA_EGRESS_REFUSED` in `.env`. Other private addresses stay reachable, because a company's
-  package index often has one. Add the Docker host's own LAN address or subnet (and any other
-  internal network a task must never reach) to `LAKANA_EGRESS_REFUSED`; bind services on the
-  Docker host to loopback (`127.0.0.1`), not `0.0.0.0`. Docker's gateways are refused without
-  it. Details: [Addresses builds and tasks never reach](../reference/network-settings.md#addresses-builds-and-tasks-never-reach).
+  Docker network (such as `172.17.0.1`, where the Docker host answers), to the Docker host's
+  names (`host.docker.internal` and the like), nor to the ranges of `LAKANA_EGRESS_REFUSED` in
+  `.env`. Other private addresses stay reachable, because a company's package index often has
+  one. List every address of the Docker host in `LAKANA_EGRESS_REFUSED` (`ip -br addr`): its LAN
+  address or subnet, a VPN or Tailscale address (`100.64.0.0/10`), `virbr0`, and on Docker
+  Desktop `192.168.65.0/24`, plus any other internal network a task must never reach; bind
+  services on the Docker host to loopback (`127.0.0.1`), not `0.0.0.0`. Docker's gateways and
+  the host names are refused without it.
+  Details: [Addresses builds and tasks never reach](../reference/network-settings.md#addresses-builds-and-tasks-never-reach).
 - **A company proxy.** If your network sends https through a proxy, set
   `LAKANA_EGRESS_UPSTREAM_PROXY` in `.env` (`http://[user:password@]host:port`). `egress` then
   tunnels through that proxy. It still refuses a numeric host in the ranges above before it asks
@@ -251,7 +254,7 @@ If a project may have deployed a malicious dependency or package, or a worker ma
 | `... is not a destination this build may reach` (in uv's error), `Refused a build connection ... not in its token.` (egress log) | The build tried a host or port that is not one of its indexes. | Register the index (`lakana index add`), or set `LAKANA_RUN__INDEX_URL`, with the port in its URL; see [Package indexes and proxies](#package-indexes-and-proxies). |
 | ``LAKANA_LAUNCHER__EGRESS_REFUSED: `...` is not a network (host bits set; did you mean ...?)`` or ``... is not an IP address or CIDR range`` (launcher log; it stops) | An entry of `LAKANA_EGRESS_REFUSED` in `.env` is not a CIDR range or address, or a range has host bits set. | Write the range the message suggests, or a plain address, separated by commas; see [Addresses builds and tasks never reach](../reference/network-settings.md#addresses-builds-and-tasks-never-reach). |
 | `cannot list Docker's networks to find their gateways ...` (launcher log; it stops) | Docker did not answer the network listing, so the launcher cannot tell which addresses are the Docker host's. | Check the Docker daemon (`docker network ls`) and `docker compose logs launcher`, then start the launcher again. |
-| `... is not reachable through this proxy: it resolves to a loopback, link-local, metadata or internal address ...` (in uv's error or the task's log), or `lakana-relay: refused ...` (the task's log) | The host is loopback, metadata, part of the stack, a Docker network's gateway, or in `LAKANA_EGRESS_REFUSED`. | Give the index or the connection an address outside those ranges, or take its range out of `LAKANA_EGRESS_REFUSED`; see [Addresses builds and tasks never reach](../reference/network-settings.md#addresses-builds-and-tasks-never-reach). |
+| `... is not reachable through this proxy: it resolves to a loopback, link-local, metadata or internal address ...` (in uv's error or the task's log), or `lakana-relay: refused ...` (the task's log) | The host is loopback, metadata, part of the stack, a Docker network's gateway, a name of the Docker host such as `host.docker.internal`, or in `LAKANA_EGRESS_REFUSED`. | Give the index or the connection an address outside those ranges, or take its range out of `LAKANA_EGRESS_REFUSED`; see [Addresses builds and tasks never reach](../reference/network-settings.md#addresses-builds-and-tasks-never-reach). |
 | `the egress proxy cannot read the refused ranges the launcher writes ...` (`503`, in uv's error or the task's log) | The launcher has not written `refused.json` to the `egress-key` volume yet, or it is damaged. | Look at `docker compose logs launcher`; the file is written at every launcher start, so `docker compose restart launcher` writes it again. |
 | `a task's relay refuses at most 256 address ranges ...` | The host has so many Docker networks that their gateways and your ranges do not fit in a relay's list. | Remove the Docker networks nobody uses (`docker network prune`), or list wider ranges in `LAKANA_EGRESS_REFUSED`. |
 | `this client's network already holds 32 connections to the egress proxy ...` (in uv's error) | The build has `LAKANA_EGRESS__MAX_CONNECTIONS_PER_NETWORK` connections open already: its own code, a build backend for example, opens many. | The task is retried. If it keeps happening, raise the setting under `egress` in `compose.yaml`; see [The egress proxy](#the-egress-proxy). |
