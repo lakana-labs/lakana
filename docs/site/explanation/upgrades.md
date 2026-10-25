@@ -146,9 +146,16 @@ host.
 
 The host's other addresses are refused only when you list them: add every address of the Docker
 host (`ip -br addr`: LAN address or subnet, VPN or Tailscale `100.64.0.0/10`, `virbr0`, and on
-Docker Desktop `192.168.65.0/24`) to `LAKANA_EGRESS_REFUSED` in `.env`
+Docker Desktop `192.168.65.0/24`) to the Compose `.env` variable `LAKANA_EGRESS_REFUSED`
 (`LAKANA_EGRESS_REFUSED=192.168.1.0/24,100.64.0.0/10`), replace `compose.yaml` with this
-release's, which passes it to the launcher, and run `docker compose up -d`. Services on the
+release's, which passes it to the launcher as `LAKANA_LAUNCHER__EGRESS_REFUSED`, and run
+`docker compose up -d`. Without Compose, set `LAKANA_LAUNCHER__EGRESS_REFUSED` on the launcher
+itself.
+
+Upgrade the launcher and the workers together, as the bundle does: a task request now always
+carries its `egress` and `relay` fields, so a worker and a launcher of different releases refuse
+each other's requests (`the launcher refused the task: run takes exactly the fields ...`) and
+every Python task fails until both run this release. Services on the
 Docker host that Lakana's containers should not reach are safest bound to `127.0.0.1`. See
 [Addresses builds and tasks never reach](../reference/network-settings.md#addresses-builds-and-tasks-never-reach).
 
