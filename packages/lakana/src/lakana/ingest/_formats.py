@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import importlib
 import io
+import struct
 import zipfile
+import zlib
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
@@ -63,24 +65,57 @@ def format_of(name: str, given: str | None) -> str:
     return found
 
 
-def unpacked_size(data: bytes) -> int | None:
-    """Add up what a zip archive unpacks to, from its central directory, without unpacking it.
+_CHUNK = 64 * 1024
+"""How much of an archive entry is inflated at a time while it is counted."""
+_LOCAL_HEADER = struct.Struct("<4s2B4HL2L2H")
+
+
+def unpacked_size(data: bytes, limit: int) -> tuple[int, bool] | None:
+    """Count what a zip archive really inflates to, stopping once it passes a limit.
+
+    The central directory is the sender's claim and a reader inflates by the compressed stream,
+    so every deflated entry is inflated here in chunks and its real output counted; memory stays
+    at one chunk however large the entry is. An entry's declared sizes are used for entries
+    that are stored, not deflated.
 
     Parameters
     ----------
     data
         The file's bytes.
+    limit
+        The most bytes of output to count; counting stops when it is passed.
 
     Returns
     -------
-    int or None
-        The sum of the entries' uncompressed sizes; `None` when the bytes are no zip archive
-        (the reader then gives its own error).
+    tuple or None
+        The bytes counted and whether `limit` was passed (then the count is a lower bound);
+        `None` when the bytes are no zip archive or an entry cannot be inflated (the reader then
+        gives its own error).
     """
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as archive:
-            return sum(item.file_size for item in archive.infolist())
-    except zipfile.BadZipFile:
+            entries = archive.infolist()
+        total = 0
+        for item in entries:
+            if item.compress_type != zipfile.ZIP_DEFLATED:
+                total += max(item.file_size, item.compress_size)
+            else:
+                header = _LOCAL_HEADER.unpack_from(data, item.header_offset)
+                position = item.header_offset + _LOCAL_HEADER.size + header[-2] + header[-1]
+                inflater = zlib.decompressobj(-15)
+                while not inflater.eof and position < len(data):
+                    pending = data[position : position + _CHUNK]
+                    position += len(pending)
+                    while pending and not inflater.eof:
+                        out = inflater.decompress(pending, _CHUNK)
+                        total += len(out)
+                        if total > limit:
+                            return total, True
+                        pending = inflater.unconsumed_tail
+            if total > limit:
+                return total, True
+        return total, False
+    except (zipfile.BadZipFile, zlib.error, struct.error):
         return None
 
 
@@ -194,7 +229,18 @@ def parse(
                 schema_overrides=overrides,
             )
     except BaseException as exc:  # a reader's own error, a KeyError, or a native panic
-        if isinstance(exc, KeyboardInterrupt | SystemExit | GeneratorExit | FileShapeError):
+        # Not the file's fault: a request to stop, a worker that is out of resources, a missing
+        # module, or the error already made for the file.
+        if isinstance(
+            exc,
+            KeyboardInterrupt
+            | SystemExit
+            | GeneratorExit
+            | MemoryError
+            | RecursionError
+            | ImportError
+            | FileShapeError,
+        ):
             raise
         # polars reports a missing column its own way (a KeyError for sheets); say what it is.
         if overrides and format != "csv" and (cols := _columns_of(data, format, sheet, header_row)):

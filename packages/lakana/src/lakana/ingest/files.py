@@ -444,12 +444,12 @@ def read(
             data = source.read(entry.path, max_file_bytes)
         name = safe_name(f"{connection}/{entry.path}")
         kind = _formats.format_of(name, format)
-        unpacked = _formats.unpacked_size(data) if kind in _formats.ZIPPED else None
-        if unpacked is not None and unpacked > max_file_bytes:
+        counted = _formats.unpacked_size(data, max_file_bytes) if kind in _formats.ZIPPED else None
+        unpacked = None if counted is None else counted[0]
+        if counted is not None and counted[1]:
             raise CapExceeded(
-                f"`{name}` unpacks to {unpacked} bytes ({len(data)} bytes as a file), more "
-                f"than max_file_bytes ({max_file_bytes}); split the workbook or pass a larger "
-                "max_file_bytes"
+                f"`{name}` ({len(data)} bytes as a file) unpacks to more than max_file_bytes "
+                f"({max_file_bytes}) bytes; split the workbook or pass a larger max_file_bytes"
             )
         total += max(len(data), unpacked or 0)
         if total > max_total_bytes:

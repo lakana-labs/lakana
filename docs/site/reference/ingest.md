@@ -38,7 +38,7 @@ rows into one table.
 | `schema` | none | Column name to Polars type, such as `{"id": pl.Int64}`. Those columns get that type; the others are inferred. |
 | `since` | left out | See [Reading only new files](#reading-only-new-files). |
 | `modified_from` | `"mtime"` | Where a file's time comes from; only with `since`. |
-| `max_file_bytes` | 256 MiB | The largest file read. A workbook (`xlsx`, `xlsm`, `xlsb`, `ods`) counts what it unpacks to, which is read from its zip directory before it is parsed. |
+| `max_file_bytes` | 256 MiB | The largest file read. A workbook (`xlsx`, `xlsm`, `xlsb`, `ods`) counts what it really unpacks to: its entries are inflated in chunks before it is parsed, and the read stops as soon as the cap is passed. |
 | `max_total_bytes` | 256 MiB | The most bytes read in all (file bytes; a workbook counts its unpacked size). |
 | `max_files` | `10_000` | The most files read: with `since`, only files newer than it count. |
 
@@ -101,9 +101,10 @@ When no file is new, the table has zero rows. With `schema=` it has those column
 
 ### Memory
 
-The byte caps count bytes of files; for a workbook they count its unpacked size too. Parquet and
-other compressed data can need many times their file size in memory, and so can a text file with
-many rows. Lower `max_file_bytes` when the sender is not someone you trust; the worker's memory
+The byte caps count the bytes of files. For a workbook they also count what it really inflates
+to (not what its zip directory claims), so a small workbook cannot expand past them. Parquet is
+compressed too and is **not** checked that way: it can need many times its file size in memory,
+and so can a text file with many rows. Lower `max_file_bytes` when the sender is not someone you trust; the worker's memory
 limit is the last backstop and ends the task when it is passed.
 
 ### Links and unreadable directories

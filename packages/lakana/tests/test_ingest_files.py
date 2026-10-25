@@ -906,10 +906,9 @@ def test_a_small_workbook_that_unpacks_past_the_caps_is_refused_before_it_is_par
 
     with pytest.raises(CapExceeded) as caught:
         files.read("exports", "bomb.xlsx", max_file_bytes=1_000_000)
-    assert "`exports/bomb.xlsx` unpacks to 5000000 bytes" in str(caught.value)
-    assert f"{len(buffer.getvalue())} bytes" in str(caught.value)
-    assert "max_file_bytes (1000000)" in str(caught.value)
-    with pytest.raises(CapExceeded, match=r"max_total_bytes \(1000000\)"):
+    assert f"`exports/bomb.xlsx` ({len(buffer.getvalue())} bytes as a file)" in str(caught.value)
+    assert "unpacks to more than max_file_bytes (1000000)" in str(caught.value)
+    with pytest.raises(CapExceeded, match=r"unpacks to 5000000 bytes.*max_total_bytes \(1000000\)"):
         files.read("exports", "bomb.xlsx", max_total_bytes=1_000_000)
 
 
@@ -921,3 +920,66 @@ def test_a_file_that_is_no_zip_is_left_to_the_reader(root: Path) -> None:
 
     with pytest.raises(FileShapeError):
         files.read("exports", "a.xlsx")
+
+
+def test_a_workbook_whose_directory_lies_is_still_stopped_by_its_real_size(root: Path) -> None:
+    """The central directory says 1 byte; the stream inflates to 60 MB. Memory stays small."""
+    import struct
+    import tracemalloc
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("xl/worksheets/sheet1.xml", b"a" * 60_000_000)
+        archive.writestr("xl/other.xml", b"b" * 100)
+    raw = bytearray(buffer.getvalue())
+    start = 0
+    while (found := raw.find(b"PK\x01\x02", start)) != -1:
+        struct.pack_into("<L", raw, found + 24, 1)  # the entry's declared uncompressed size
+        start = found + 4
+    _write(root / "lie.xlsx", bytes(raw))
+
+    tracemalloc.start()
+    try:
+        with pytest.raises(CapExceeded, match=r"unpacks to more than max_file_bytes \(1000000\)"):
+            files.read("exports", "lie.xlsx", max_file_bytes=1_000_000)
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+    assert peak < 8_000_000
+
+
+def test_a_stored_entry_and_an_entry_that_cannot_be_inflated_are_handled(root: Path) -> None:
+    """Stored entries count their size; a broken deflate stream is left to the reader."""
+    from lakana.ingest import FileShapeError, _formats
+
+    stored = io.BytesIO()
+    with zipfile.ZipFile(stored, "w", zipfile.ZIP_STORED) as archive:
+        archive.writestr("a.xml", b"x" * 500)
+    assert _formats.unpacked_size(stored.getvalue(), 10_000) == (500, False)
+    assert _formats.unpacked_size(stored.getvalue(), 100) == (500, True)
+
+    broken = io.BytesIO()
+    with zipfile.ZipFile(broken, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("a.xml", b"y" * 1000)
+    raw = bytearray(broken.getvalue())
+    raw[40:60] = b"\xff" * 20  # inside the deflate stream
+    assert _formats.unpacked_size(bytes(raw), 10_000) is None
+    _write(root / "broken.xlsx", bytes(raw))
+    with pytest.raises(FileShapeError):
+        files.read("exports", "broken.xlsx")
+
+
+def test_a_resource_error_and_a_foreign_import_error_are_not_blamed_on_the_file(
+    root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """MemoryError, RecursionError and an ImportError that is not the engine's pass unchanged."""
+    _write(root / "a.csv", b"id\n1\n")
+    for failure in (MemoryError(), RecursionError(), ImportError("no module named foo")):
+
+        def fail(*args: object, failure: BaseException = failure, **kwargs: object) -> None:
+            raise failure
+
+        with monkeypatch.context() as patch:
+            patch.setattr(pl, "read_csv", fail)
+            with pytest.raises(type(failure)):
+                files.read("exports", "a.csv")
