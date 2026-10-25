@@ -38,9 +38,9 @@ rows into one table.
 | `schema` | none | Column name to Polars type, such as `{"id": pl.Int64}`. Those columns get that type; the others are inferred. |
 | `since` | left out | See [Reading only new files](#reading-only-new-files). |
 | `modified_from` | `"mtime"` | Where a file's time comes from; only with `since`. |
-| `max_file_bytes` | 256 MiB | The largest file read. |
-| `max_total_bytes` | 256 MiB | The most bytes read in all. |
-| `max_files` | `10_000` | The most files read. |
+| `max_file_bytes` | 256 MiB | The largest file read. A workbook (`xlsx`, `xlsm`, `xlsb`, `ods`) counts what it unpacks to, which is read from its zip directory before it is parsed. |
+| `max_total_bytes` | 256 MiB | The most bytes read in all (file bytes; a workbook counts its unpacked size). |
+| `max_files` | `10_000` | The most files read: with `since`, only files newer than it count. |
 
 Each cap must be a positive whole number; zero, a negative number or anything else is refused.
 
@@ -85,7 +85,10 @@ one already read. That happens when:
   1 second), so two files written close together share a time;
 - a writer keeps the source's time (`cp -p`, `rsync -t`, an archive unpacked with its dates), so
   a new file arrives with an old time;
-- one file is dated in the future, which moves the watermark ahead of every file that follows.
+- one file is dated in the future, which moves the watermark ahead of every file that follows;
+- a file is moved into the folder with `mv` or a rename: it keeps the time it was written, so if
+  a read has already moved the watermark past that time, the file is never read. Copy the file in
+  instead of moving it, or `touch` it after the move.
 
 If your source can do any of these, read by name instead: `modified_from="export-%Y-%m-%d.csv"`
 takes the time from a `strptime` pattern applied to the file's name (the part after the last
@@ -95,6 +98,13 @@ the pattern is skipped, with a line on the task's standard error. `modified_from
 
 When no file is new, the table has zero rows. With `schema=` it has those columns, plus
 `_source_modified` when `since` was passed; without `schema=` it has no columns.
+
+### Memory
+
+The byte caps count bytes of files; for a workbook they count its unpacked size too. Parquet and
+other compressed data can need many times their file size in memory, and so can a text file with
+many rows. Lower `max_file_bytes` when the sender is not someone you trust; the worker's memory
+limit is the last backstop and ends the task when it is passed.
 
 ### Links and unreadable directories
 
@@ -135,11 +145,13 @@ could end differently (the task is retried only when it could):
 | `... has no column ..., which schema= names` | A file lacks a column `schema=` names. | Fix the name in `schema=`, or the file. |
 | `... column ... is ..., which does not fit ... in the files before it` | A column has types that do not fit across files. | Pass `schema=` with one type for it, or narrow the pattern. |
 | `... check the file, or pass schema= with the column's type` | A file has a value its column cannot hold. The message names file, column, value and problem. | Fix the file, or pass `schema=` with a type that holds it. |
-| `the pattern ... matches more than max_files (...)` | Too many files match. | Narrow the pattern, pass `since=`, or raise `max_files`. |
+| `the pattern ... matches more than max_files (...) files to read` | Too many files would be read (with `since`, too many new ones). | Narrow the pattern, pass `since=` if you did not, or raise `max_files`. |
 | `... is N bytes, more than max_file_bytes (...)` | One file is too large. | Split the file, or raise `max_file_bytes`. |
 | `the files matching ... hold more than max_total_bytes (...)` | The files together are too large. | Narrow the pattern or pass `since=` to read fewer files, or raise `max_total_bytes`. |
 | `does not say when ... was modified; pass modified_from=` | The source gives no file time. | Pass `modified_from=` with the date pattern of the name. |
 | `modified_from= applies only with since=` | `modified_from` without `since`. | Pass `since=`, or drop `modified_from`. |
+| `... unpacks to N bytes (M bytes as a file), more than max_file_bytes (...)` | A workbook is small on disk but large unpacked. | Split the workbook, or raise `max_file_bytes`. |
+| ``... does not exist; check the connection's path with `lakana connection show` `` | The connection's path (or a directory in it) is missing under the root. | Check the path with `lakana connection show`, or create the directory under the root. |
 | `max_files= must be a positive whole number` (also `max_file_bytes=`, `max_total_bytes=`) | A cap is zero, negative or not a whole number. | Pass a positive whole number. |
 | `schema= maps a column to a Polars type such as pl.Int64; 'id' has 'int'` | A `schema=` value is not a Polars type. | Pass `pl.Int64`, not `"int"`. |
 | `the files cannot be combined: column 'x' is Date in ..., Int64 in ...` | A column has types that no common type holds across several files. | Pass `schema=` with one type for each such column, or narrow the pattern. |

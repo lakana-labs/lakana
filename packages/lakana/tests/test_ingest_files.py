@@ -16,7 +16,7 @@ import pytest
 
 from lakana import context
 from lakana.ingest import CapExceeded, IngestError, SourceError, _connections, files
-from lakana.ingest._directory import DirectoryError, RootUnavailable
+from lakana.ingest._directory import DirectoryError, DirectoryIOError, RootUnavailable
 
 _UTC = dt.UTC
 
@@ -780,3 +780,144 @@ def test_what_is_wrong_with_the_files_themselves_is_never_retried(root: Path) ->
         with pytest.raises(FileShapeError) as caught:
             case()
         assert caught.value.retryable is False
+
+
+def test_an_io_error_keeps_its_retry_type_through_files_read(
+    root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """EIO on a file is `DirectoryIOError` (`retryable = None`), named after the connection."""
+    _write(root / "a.csv", b"id\n1\n")
+    real = os.open
+
+    def failing(path: str, *args: object, **kwargs: object) -> int:
+        if path == "a.csv" and kwargs.get("dir_fd") is not None:
+            raise OSError(5, "Input/output error")
+        return real(path, *args, **kwargs)  # ty: ignore[invalid-argument-type]
+
+    monkeypatch.setattr(os, "open", failing)
+
+    with pytest.raises(DirectoryError) as caught:
+        files.read("exports", "*.csv")
+    assert type(caught.value) is DirectoryIOError
+    assert caught.value.retryable is None
+    assert str(caught.value).startswith("`exports`: ")
+
+
+def test_max_files_counts_the_files_that_will_be_read_not_the_listing(root: Path) -> None:
+    """Many old files and a few new ones: with `since`, only the new ones count."""
+    old = dt.datetime(2020, 1, 1, tzinfo=_UTC)
+    for number in range(12):
+        _write(root / f"old{number:02}.csv", b"id\n1\n", old)
+    _write(root / "new1.csv", b"id\n2\n", dt.datetime(2026, 10, 1, tzinfo=_UTC))
+    _write(root / "new2.csv", b"id\n3\n", dt.datetime(2026, 10, 2, tzinfo=_UTC))
+    since = dt.datetime(2026, 1, 1, tzinfo=_UTC)
+
+    table = files.read("exports", "*.csv", since=since, max_files=3)
+
+    assert table.column("id").to_pylist() == [2, 3]
+    with pytest.raises(CapExceeded) as caught:
+        files.read("exports", "*.csv", since=since, max_files=1)
+    assert "more than max_files (1)" in str(caught.value)
+    assert "pass since=" not in str(caught.value)
+    with pytest.raises(CapExceeded, match=r"narrow the pattern or pass since="):
+        files.read("exports", "*.csv", max_files=3)
+
+
+def test_a_workbook_without_a_worksheet_is_a_file_shape_error(root: Path) -> None:
+    """A workbook that lists no sheet names the file and says what to do."""
+    from lakana.ingest import FileShapeError
+
+    source = zipfile.ZipFile(io.BytesIO(_xlsx(pl.DataFrame({"id": [1]}), "Sheet1")))
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as target:
+        for item in source.infolist():
+            data = source.read(item.filename)
+            if item.filename == "xl/workbook.xml":
+                import re
+
+                data = re.sub(rb"<sheets>.*</sheets>", b"<sheets/>", data, flags=re.S)
+            target.writestr(item, data)
+    _write(root / "empty.xlsx", buffer.getvalue())
+
+    with pytest.raises(FileShapeError, match=r"`exports/empty\.xlsx`: .*check the file"):
+        files.read("exports", "empty.xlsx")
+
+
+def test_a_reader_that_panics_is_a_file_shape_error_but_an_interrupt_passes(
+    root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Anything a reader raises is the file's fault, except a request to stop."""
+    from lakana.ingest import FileShapeError
+
+    _write(root / "a.csv", b"id\n1\n")
+
+    class Panic(BaseException):  # stands in for pyo3's PanicException
+        pass
+
+    for failure in (Panic("boom"), IndexError("list index out of range")):
+
+        def fail(*args: object, failure: BaseException = failure, **kwargs: object) -> None:
+            raise failure
+
+        with monkeypatch.context() as patch:
+            patch.setattr(pl, "read_csv", fail)
+            with pytest.raises(FileShapeError, match=r"`exports/a\.csv`: "):
+                files.read("exports", "a.csv")
+
+    def stop(*args: object, **kwargs: object) -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(pl, "read_csv", stop)
+    with pytest.raises(KeyboardInterrupt):
+        files.read("exports", "a.csv")
+
+
+def test_a_missing_path_gets_a_next_step(root: Path) -> None:
+    """A base that does not exist says where to look and what to do."""
+    root.rename(root.parent / "moved")
+
+    with pytest.raises(DirectoryError) as caught:
+        files.read("exports", "*.csv")
+    assert "'in' does not exist" in str(caught.value)
+    assert "check the connection's path with `lakana connection show`" in str(caught.value)
+
+
+def test_control_characters_in_a_cell_are_escaped_in_the_message(root: Path) -> None:
+    """An escape sequence or a bidi override in a bad value never reaches a log raw."""
+    _write(root / "a.csv", "x\nab\x1b[31mRED‮\n".encode())
+
+    with pytest.raises(SourceError) as caught:
+        files.read("exports", "a.csv", schema={"x": pl.Int64})
+    message = str(caught.value)
+    assert "\x1b" not in message
+    assert "‮" not in message
+    assert "\\x1b" in message
+
+
+def test_a_small_workbook_that_unpacks_past_the_caps_is_refused_before_it_is_parsed(
+    root: Path,
+) -> None:
+    """A zip bomb of a workbook: the unpacked size counts against both byte caps."""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("xl/worksheets/sheet1.xml", b"a" * 5_000_000)
+    _write(root / "bomb.xlsx", buffer.getvalue())
+    assert len(buffer.getvalue()) < 20_000
+
+    with pytest.raises(CapExceeded) as caught:
+        files.read("exports", "bomb.xlsx", max_file_bytes=1_000_000)
+    assert "`exports/bomb.xlsx` unpacks to 5000000 bytes" in str(caught.value)
+    assert f"{len(buffer.getvalue())} bytes" in str(caught.value)
+    assert "max_file_bytes (1000000)" in str(caught.value)
+    with pytest.raises(CapExceeded, match=r"max_total_bytes \(1000000\)"):
+        files.read("exports", "bomb.xlsx", max_total_bytes=1_000_000)
+
+
+def test_a_file_that_is_no_zip_is_left_to_the_reader(root: Path) -> None:
+    """A `.xlsx` that is not a zip gets the reader's error, not a size error."""
+    from lakana.ingest import FileShapeError
+
+    _write(root / "a.xlsx", b"not a zip")
+
+    with pytest.raises(FileShapeError):
+        files.read("exports", "a.xlsx")

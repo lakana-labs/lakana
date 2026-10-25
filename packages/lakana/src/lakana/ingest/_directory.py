@@ -210,7 +210,13 @@ def _open_dir(root_dir: str, parts: list[str]) -> int:
             try:
                 below = os.open(part, _DIR, dir_fd=fd)
             except OSError as exc:
-                failure = _failure(exc, _why(fd, part, exc))
+                reason = _why(fd, part, exc)
+                if isinstance(exc, FileNotFoundError) or exc.errno == errno.ENOTDIR:
+                    reason += (
+                        "; check the connection's path with `lakana connection show`, or "
+                        "create the directory under the root"
+                    )
+                failure = _failure(exc, reason)
                 raise failure from None
             os.close(fd)
             fd = below

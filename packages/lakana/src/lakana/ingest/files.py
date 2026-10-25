@@ -210,7 +210,7 @@ def _naming(conn: FetchedConnection) -> Generator[None]:
     RootUnavailable
         With the fixed root text, for a root this worker does not have.
     DirectoryError
-        The source's own, prefixed with the connection's name.
+        The source's own class (`DirectoryIOError` too), prefixed with the connection's name.
     CapExceeded
         The source's own, prefixed with the connection's name.
     """
@@ -221,10 +221,9 @@ def _naming(conn: FetchedConnection) -> Generator[None]:
         raise _directory.RootUnavailable(
             _check.MISSING_ROOT.format(connection=conn.name, root=root)
         ) from None
-    except _directory.DirectoryError as exc:
-        raise _directory.DirectoryError(f"`{conn.name}`: {exc}") from None
-    except CapExceeded as exc:
-        raise CapExceeded(f"`{conn.name}`: {exc}") from None
+    except (_directory.DirectoryError, CapExceeded) as exc:
+        # The same class, so its `retryable` survives (an I/O error may pass; a missing path not).
+        raise type(exc)(f"`{conn.name}`: {exc}") from None
 
 
 def _positive(**caps: object) -> None:
@@ -393,7 +392,8 @@ def read(
     conn = fetch(connection)
     source = _source(conn)
     with _naming(conn):
-        listing = source.list(pattern, max_files)
+        # The cap counts the files that will be read, so it applies after `since` filters.
+        listing = source.list(pattern, _directory.MAX_ENTRIES)
     for skipped in listing.skipped:
         print(
             f"files.read: `{connection}`: skipped {skipped!r} (a symbolic link, not a regular "
@@ -421,6 +421,12 @@ def read(
                 continue
             modified = named
         if after is None or (modified is not None and modified > after):
+            if len(chosen) == max_files:
+                advice = "narrow the pattern" + ("" if with_since else " or pass since=")
+                raise CapExceeded(
+                    f"`{connection}`: the pattern {pattern!r} matches more than max_files "
+                    f"({max_files}) files to read; {advice}"
+                )
             chosen.append((entry, modified))
     if not chosen:
         return _empty(schema, with_since)
@@ -436,14 +442,28 @@ def read(
     for entry, modified in chosen:
         with _naming(conn):
             data = source.read(entry.path, max_file_bytes)
-        total += len(data)
-        if total > max_total_bytes:
-            raise too_many
         name = safe_name(f"{connection}/{entry.path}")
+        kind = _formats.format_of(name, format)
+        unpacked = _formats.unpacked_size(data) if kind in _formats.ZIPPED else None
+        if unpacked is not None and unpacked > max_file_bytes:
+            raise CapExceeded(
+                f"`{name}` unpacks to {unpacked} bytes ({len(data)} bytes as a file), more "
+                f"than max_file_bytes ({max_file_bytes}); split the workbook or pass a larger "
+                "max_file_bytes"
+            )
+        total += max(len(data), unpacked or 0)
+        if total > max_total_bytes:
+            if unpacked is not None and unpacked > len(data):
+                raise CapExceeded(
+                    f"`{name}` unpacks to {unpacked} bytes ({len(data)} bytes as a file); with "
+                    f"the files before it that is more than max_total_bytes ({max_total_bytes}); "
+                    "narrow the pattern or pass since= to read fewer files"
+                )
+            raise too_many
         frame = _formats.parse(
             data,
             name=name,
-            format=_formats.format_of(name, format),
+            format=kind,
             sheet=sheet,
             header_row=header_row,
             schema=schema,

@@ -7,7 +7,9 @@ module is imported, so the CLI can import it without the ``assets`` extra.
 
 from __future__ import annotations
 
+import importlib
 import io
+import zipfile
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
@@ -20,6 +22,8 @@ FORMATS = ("csv", "parquet", "json", "ndjson", "xlsx", "xlsm", "xlsb", "xls", "o
 """The formats `parse` reads."""
 SPREADSHEETS = frozenset({"xlsx", "xlsm", "xlsb", "xls", "ods"})
 """The formats with sheets, read with the calamine engine (fastexcel)."""
+ZIPPED = frozenset({"xlsx", "xlsm", "xlsb", "ods"})
+"""The spreadsheet formats that are zip archives, whose unpacked size `unpacked_size` reads."""
 _WITH_HEADER = SPREADSHEETS | {"csv"}
 _ALIASES = {"jsonl": "ndjson"}
 _PROBLEM_CHARS = 500
@@ -57,6 +61,27 @@ def format_of(name: str, given: str | None) -> str:
     if "." not in name.rsplit("/", 1)[-1] or found not in FORMATS:
         raise IngestError(f"cannot tell the format of `{name}`; pass format= ({known})")
     return found
+
+
+def unpacked_size(data: bytes) -> int | None:
+    """Add up what a zip archive unpacks to, from its central directory, without unpacking it.
+
+    Parameters
+    ----------
+    data
+        The file's bytes.
+
+    Returns
+    -------
+    int or None
+        The sum of the entries' uncompressed sizes; `None` when the bytes are no zip archive
+        (the reader then gives its own error).
+    """
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            return sum(item.file_size for item in archive.infolist())
+    except zipfile.BadZipFile:
+        return None
 
 
 def _problem(exc: BaseException) -> str:
@@ -130,7 +155,10 @@ def parse(
     if header_row < 0:
         raise IngestError("header_row= is the 1-based row of the column names, or 0 for none")
     overrides = dict(schema) if schema else None
-    errors: tuple[type[BaseException], ...] = (pl.exceptions.PolarsError, ValueError)
+    if format in SPREADSHEETS:
+        # A missing engine is the worker's fault, not the file's: let the ImportError out.
+        importlib.import_module("fastexcel")
+
     source = io.BytesIO(data)
     try:
         if format == "csv":
@@ -157,9 +185,6 @@ def parse(
         elif format == "ndjson":
             frame = pl.read_ndjson(source, schema_overrides=overrides)
         else:
-            import fastexcel
-
-            errors = (*errors, fastexcel.FastExcelError)
             frame = pl.read_excel(
                 source,
                 sheet_name=sheet,
@@ -168,12 +193,15 @@ def parse(
                 read_options={"header_row": header_row - 1} if header_row > 0 else {},
                 schema_overrides=overrides,
             )
-    except (*errors, KeyError) as exc:
+    except BaseException as exc:  # a reader's own error, a KeyError, or a native panic
+        if isinstance(exc, KeyboardInterrupt | SystemExit | GeneratorExit | FileShapeError):
+            raise
         # polars reports a missing column its own way (a KeyError for sheets); say what it is.
         if overrides and format != "csv" and (cols := _columns_of(data, format, sheet, header_row)):
             _require_columns(name, overrides, cols)
         raise FileShapeError(
-            f"`{name}`: {_problem(exc)}; check the file, or pass schema= with the column's type"
+            f"`{name}`: {safe_name(_problem(exc))}; check the file, or pass schema= with the "
+            "column's type"
         ) from None
     _require_columns(name, overrides, frame.columns)
     return frame
@@ -343,7 +371,7 @@ def _not_combinable(
         for column, found in kinds.items()
         if len(found) > 1
     ]
-    detail = "; ".join(differing) or _problem(failure)
+    detail = "; ".join(differing) or safe_name(_problem(failure))
     return (
         f"the files cannot be combined: {detail}; pass schema= with one type for each such "
         "column, or narrow the pattern"
