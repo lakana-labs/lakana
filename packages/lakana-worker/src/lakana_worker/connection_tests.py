@@ -17,6 +17,7 @@ loop refuses to be built for it, and a test stays queued.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import logging
 import subprocess  # nosec B404 -- runs Lakana's own module with a fixed argument list
@@ -81,7 +82,11 @@ SECRET_GONE = (  # nosec B105 -- a message about a secret, not a credential
     "--help`)"
 )
 NO_LAKANA = "install lakana next to the worker to run connection tests"
-CHECK_TIMED_OUT = f"the check did not finish within {CHECK_TIMEOUT_SECONDS} s"
+CHECK_TIMED_OUT = (
+    f"the check did not finish within {CHECK_TIMEOUT_SECONDS} s; an endpoint may accept "
+    "connections but never answer: check each host and port"
+)
+NOT_RUN = "the check could not run (see the worker's log)"
 CHECK_BROKEN = "the check ended without an answer (see the worker's log)"
 
 
@@ -105,6 +110,21 @@ def _mask(text: str, secrets: list[str]) -> str:
     redactor.feed(text.encode("utf-8", "replace"))
     redactor.close()
     return masked.decode("utf-8", "replace")
+
+
+def _has_check() -> bool:
+    """Say whether the worker's Python can import the check.
+
+    Returns
+    -------
+    bool
+        `False` when `lakana` is not installed next to the worker. The subprocess runs the same
+        interpreter, so what is found here is what it will import.
+    """
+    try:
+        return importlib.util.find_spec("lakana.ingest._check") is not None
+    except (ImportError, ValueError):
+        return False
 
 
 class ConnectionTestLoop:
@@ -270,6 +290,8 @@ class ConnectionTestLoop:
             answered nonsense is ``failed`` (``timeout`` for the time limit), with a message
             that names the next step.
         """
+        if not _has_check():
+            return "failed", NO_LAKANA
         secrets = [v for v in (connection["secret"] or {}).values() if isinstance(v, str)]
         env = {"LAKANA_CA_BUNDLE": str(self._trust)} if self._trust is not None else {}
         try:
@@ -283,9 +305,8 @@ class ConnectionTestLoop:
                 check=False,
             )
         except subprocess.TimeoutExpired:
+            logger.warning("A connection check did not finish within %d s.", CHECK_TIMEOUT_SECONDS)
             return "timeout", CHECK_TIMED_OUT
-        if "No module named" in done.stderr and "lakana" in done.stderr:
-            return "failed", NO_LAKANA
         try:
             answer = json.loads(done.stdout.strip().splitlines()[-1])
             outcome, message = str(answer["outcome"]), str(answer["message"])
@@ -310,13 +331,22 @@ class ConnectionTestLoop:
             if test is None:
                 return False
             test_id, expires = test.id, test.lease_expires_at
-            prepared = self._request(session, test)
+            try:
+                prepared = self._request(session, test)
+            except Exception as exc:
+                # The text of a decryption or database error could quote a secret.
+                logger.warning("A connection test could not be prepared (%s).", type(exc).__name__)
+                prepared = ("failed", NOT_RUN)
             session.rollback()
         # No transaction is open from here until the result is recorded.
         if isinstance(prepared[0], str):
             outcome, message = str(prepared[0]), str(prepared[1])
         else:
-            outcome, message = self._run_check(prepared[0], prepared[1])
+            try:
+                outcome, message = self._run_check(prepared[0], prepared[1])
+            except Exception as exc:
+                logger.warning("A connection check failed to run (%s).", type(exc).__name__)
+                outcome, message = "failed", NOT_RUN
         del prepared
         with Session(self._engine) as session:
             recorded = self._service(session).finish_test(

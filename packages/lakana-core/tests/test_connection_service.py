@@ -8,11 +8,11 @@ import inspect
 import json
 import logging
 import uuid
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from types import MappingProxyType
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from core_test_helpers import deploy_manifest
@@ -2378,3 +2378,40 @@ def test_the_worker_of_a_closed_test_is_ignored_afterwards(world: World) -> None
     assert recorded is False
     closed = service.test_result(world.data_engineer, "prod", "crm-db", str(stuck.id))
     assert (closed.outcome, closed.message) == (ConnectionTestOutcome.FAILED, _STUCK)
+
+
+def test_a_request_locks_the_open_test_it_reads(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A worker's `finish_test` must not slip between the read and the stale close."""
+    world.postgres(world.data_engineer)
+    service = world.connections()
+    service.request_test(world.data_engineer, "prod", "crm-db")
+    locked: list[bool] = []
+    original = cast("Callable[..., object]", world.session.execute)
+
+    def spy(statement: object, *args: object, **kwargs: object) -> object:
+        """Record whether a select of connection tests asks for a row lock.
+
+        Parameters
+        ----------
+        statement
+            The statement.
+        *args
+            Passed on.
+        **kwargs
+            Passed on.
+
+        Returns
+        -------
+        object
+            The result.
+        """
+        if "connection_tests.state IN" in str(statement):
+            locked.append(getattr(statement, "_for_update_arg", None) is not None)
+        return original(statement, *args, **kwargs)
+
+    monkeypatch.setattr(world.session, "execute", spy)
+    with pytest.raises(ConflictError):
+        service.request_test(world.data_engineer, "prod", "crm-db")
+    assert locked and all(locked)

@@ -277,10 +277,23 @@ def _tls(sock: socket.socket, host: str, ca_pem: str | None, mode: str) -> socke
     -------
     socket.socket
         The TLS socket, or `sock` for ``disable``.
+
+    Raises
+    ------
+    _Found
+        ``failed`` when the file `LAKANA_CA_BUNDLE` names cannot be read.
     """
     if mode == "disable":
         return sock
-    context = ssl.create_default_context(cafile=os.environ.get("LAKANA_CA_BUNDLE"))
+    bundle = os.environ.get("LAKANA_CA_BUNDLE")
+    try:
+        context = ssl.create_default_context(cafile=bundle)
+    except (FileNotFoundError, PermissionError):
+        raise _Found(
+            "failed",
+            f"the trust bundle `{bundle}` (LAKANA_CA_BUNDLE) cannot be read; check that the file "
+            "exists on this worker",
+        ) from None
     if ca_pem:
         context.load_verify_locations(cadata=ca_pem)
     if mode == "require":

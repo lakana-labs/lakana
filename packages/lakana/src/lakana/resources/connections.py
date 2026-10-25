@@ -133,13 +133,15 @@ def _still(environment: str, name: str, test: ConnectionTest, timeout: float) ->
     Returns
     -------
     str
-        What state it is in, which worker log to read, and how to look again.
+        What state it is in, who runs tests (queued) or which worker log to read (running), and
+        how to look again.
     """
     again = f"Look again with lakana connection test {name} --env {environment} --id {test.id}"
     if test.state == "queued":
         found = (
-            f"no worker has taken it. A worker that runs Python tasks runs connection tests; "
-            f"see `docker compose logs worker`. {again}"
+            "no worker has taken it. In this version only a worker with the local runner runs "
+            "connection tests; under the Docker runner they arrive in the next release. "
+            f"{again}"
         )
     else:
         found = f"a worker took it; see `docker compose logs worker`. {again}"

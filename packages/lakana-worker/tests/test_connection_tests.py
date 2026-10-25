@@ -372,14 +372,11 @@ def test_a_wrong_master_key_says_so_and_never_the_ciphertext(world: World) -> No
     assert SECRET not in row.message
 
 
-def test_a_worker_without_lakana_says_to_install_it(
+def test_a_worker_without_lakana_says_to_install_it_and_starts_no_subprocess(
     world: World, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    fake_check(
-        monkeypatch,
-        stderr="/usr/bin/python: No module named lakana.ingest\n",
-        returncode=1,
-    )
+    calls = fake_check(monkeypatch)
+    monkeypatch.setattr(connection_tests.importlib.util, "find_spec", lambda name: None)
     test_id = world.connection("svc")
     assert loop(world).step()
     row = world.test(test_id)
@@ -387,6 +384,24 @@ def test_a_worker_without_lakana_says_to_install_it(
         "failed",
         "install lakana next to the worker to run connection tests",
     )
+    assert calls == []
+
+
+def test_a_worker_with_lakana_looks_for_the_check_module(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    asked: list[str] = []
+    real = connection_tests.importlib.util.find_spec
+
+    def find(name: str) -> object:
+        asked.append(name)
+        return real(name)
+
+    monkeypatch.setattr(connection_tests.importlib.util, "find_spec", find)
+    test_id = world.connection("svc")
+    assert loop(world).step()
+    assert asked == ["lakana.ingest._check"]
+    assert world.test(test_id).outcome == "refused"
 
 
 def test_a_check_that_answers_nonsense_is_a_failed_test(
@@ -401,7 +416,7 @@ def test_a_check_that_answers_nonsense_is_a_failed_test(
 
 
 def test_a_check_that_runs_too_long_is_a_timeout(
-    world: World, monkeypatch: pytest.MonkeyPatch
+    world: World, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     def slow(
         argv: list[str], *, timeout: float, **kwargs: object
@@ -410,9 +425,16 @@ def test_a_check_that_runs_too_long_is_a_timeout(
 
     monkeypatch.setattr(connection_tests.subprocess, "run", slow)
     test_id = world.connection("svc")
-    assert loop(world).step()
+    with caplog.at_level(logging.WARNING, logger="lakana_worker.connection_tests"):
+        assert loop(world).step()
     row = world.test(test_id)
-    assert (row.outcome, row.message) == ("timeout", "the check did not finish within 30 s")
+    assert (row.outcome, row.message) == (
+        "timeout",
+        "the check did not finish within 30 s; an endpoint may accept connections but never "
+        "answer: check each host and port",
+    )
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert warnings == ["A connection check did not finish within 30 s."]
 
 
 def test_a_test_whose_lease_ran_out_is_taken_again(world: World) -> None:
@@ -499,3 +521,23 @@ def test_a_failing_step_is_logged_by_type_only_and_the_loop_goes_on(
     assert "RuntimeError" in text
     assert SECRET not in text
     assert len([r for r in caplog.records if r.levelno == logging.WARNING]) == 1
+
+
+def test_an_error_after_the_claim_finishes_the_test_as_failed_and_logs_the_type_only(
+    world: World, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    test_id = world.connection("svc", secret={"password": SECRET})
+    running = loop(world)
+
+    def broken(session: Session, test: ConnectionTest) -> object:
+        raise RuntimeError(f"decrypting said {SECRET}")
+
+    monkeypatch.setattr(running, "_request", broken)
+    with caplog.at_level(logging.WARNING, logger="lakana_worker.connection_tests"):
+        assert running.step() is True
+    row = world.test(test_id)
+    assert (row.state, row.outcome) == (ConnectionTestState.DONE, "failed")
+    assert row.message == "the check could not run (see the worker's log)"
+    text = " ".join(r.getMessage() for r in caplog.records)
+    assert "RuntimeError" in text
+    assert SECRET not in text

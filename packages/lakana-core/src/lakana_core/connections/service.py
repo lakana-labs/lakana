@@ -885,12 +885,14 @@ class ConnectionService:
         with refuse_concurrent_change(self._session, f"connection `{shown(name)}`"):
             row = self._find(env, name, lock=True)
             open_test = self._session.execute(
-                select(ConnectionTest).where(
+                select(ConnectionTest)
+                .where(
                     ConnectionTest.connection_id == row.id,
                     ConnectionTest.state.in_(
                         (ConnectionTestState.QUEUED, ConnectionTestState.RUNNING)
                     ),
                 )
+                .with_for_update()
             ).scalar_one_or_none()
             if open_test is not None:
                 if utcnow() - open_test.created_at <= TEST_STUCK_AFTER:

@@ -347,8 +347,9 @@ def test_a_test_nobody_took_times_out_naming_the_worker(monkeypatch: pytest.Monk
         connections.test("prod", "crm-db", timeout=60.0)
 
     assert str(raised.value) == (
-        "the test of `crm-db` is still queued after 60s: no worker has taken it. A worker that "
-        "runs Python tasks runs connection tests; see `docker compose logs worker`. Look again "
+        "the test of `crm-db` is still queued after 60s: no worker has taken it. In this "
+        "version only a worker with the local runner runs connection tests; under the Docker "
+        "runner they arrive in the next release. Look again "
         f"with lakana connection test crm-db --env prod --id {_TEST_ID}"
     )
 

@@ -590,3 +590,21 @@ def test_unreadable_input_is_a_failed_outcome_not_a_crash() -> None:
     )
     assert done.returncode == 0
     assert json.loads(done.stdout)["outcome"] == "failed"
+
+
+def test_a_missing_trust_bundle_is_named_not_blamed_on_the_host(
+    authority: Authority, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    served = tmp_path / "served"
+    served.mkdir()
+    gone = tmp_path / "gone.pem"
+    monkeypatch.setenv("LAKANA_CA_BUNDLE", str(gone))
+    with serving(served, authority, tmp_path) as server:
+        port = int(server.base.rsplit(":", 1)[1])
+        body = connection("http", {"base_url": f"https://localhost:{port}"})
+        outcome, message = _check.check(body, {}, timeout=FAST)
+    assert outcome == "failed"
+    assert message == (
+        f"the trust bundle `{gone}` (LAKANA_CA_BUNDLE) cannot be read; check that the file "
+        "exists on this worker"
+    )
