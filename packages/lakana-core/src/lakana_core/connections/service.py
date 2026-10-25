@@ -98,8 +98,9 @@ TEST_STUCK_AFTER = timedelta(minutes=10)
 """How long a queued or running connection test may stay open; a request for a new test closes an
 older one as failed."""
 _TEST_STUCK = (
-    "no worker finished this test within 10 minutes; a worker that runs Python tasks runs "
-    "connection tests — see `docker compose logs worker`"
+    "no worker finished this test within 10 minutes; in this version only a worker with the "
+    "local runner runs connection tests — read that worker's log (`docker compose logs worker`, "
+    "or the `lakana local` terminal)"
 )
 _CLEAR_SECRET = "secret"  # nosec B105 -- the word a caller clears, not a credential
 
@@ -222,6 +223,150 @@ def _refuse_task(p: PrincipalRef) -> None:
     """
     if p.task_scope is not None:
         raise PermissionDenied(_TASK_REFUSED)
+
+
+class ConnectionTestQueue:
+    """The worker's side of the connection test queue: claim, finish, close.
+
+    These are the worker's own queue operations, not acts of a person, so they take no
+    authorization object (`request_test` and `test_result` keep `MANAGE_CONNECTION`).
+
+    Parameters
+    ----------
+    session
+        Database session; `claim` and `finish` commit.
+    """
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def claim(self, owner: str, *, lease_seconds: int = 60, now: datetime) -> ConnectionTest | None:
+        """Claim the oldest test that is queued or whose lease ran out, under a lease.
+
+        Parameters
+        ----------
+        owner
+            The claiming worker's id.
+        lease_seconds
+            How long the claim lasts.
+        now
+            The time of the claim; the lease runs from it.
+
+        Returns
+        -------
+        ConnectionTest or None
+            The test, now running; `None` when there is none to claim.
+        """
+        row = self._session.scalars(
+            select(ConnectionTest)
+            .where(
+                or_(
+                    ConnectionTest.state == ConnectionTestState.QUEUED,
+                    (ConnectionTest.state == ConnectionTestState.RUNNING)
+                    & (ConnectionTest.lease_expires_at <= now),
+                )
+            )
+            .order_by(ConnectionTest.created_at)
+            .limit(1)
+            .with_for_update(skip_locked=True)
+        ).first()
+        if row is None:
+            self._session.rollback()
+            return None
+        row.state = ConnectionTestState.RUNNING
+        row.lease_owner = owner
+        row.lease_expires_at = now + timedelta(seconds=lease_seconds)
+        self._session.commit()
+        return row
+
+    def finish(
+        self,
+        test_id: uuid.UUID,
+        owner: str,
+        lease_expires_at: datetime | None,
+        outcome: str,
+        message: str,
+    ) -> bool:
+        """Record what a test found, if the caller still holds its lease.
+
+        Parameters
+        ----------
+        test_id
+            The test's id.
+        owner
+            The worker that claimed it.
+        lease_expires_at
+            The lease expiry that claim set; the record must match it exactly.
+        outcome
+            A `ConnectionTestOutcome` value.
+        message
+            What was found, already redacted; cut to 1,000 characters.
+
+        Returns
+        -------
+        bool
+            `True` when it was recorded; `False` when the lease had changed hands (nothing
+            is changed then).
+        """
+        row = self._session.execute(
+            select(ConnectionTest).where(ConnectionTest.id == test_id).with_for_update()
+        ).scalar_one_or_none()
+        if (
+            row is None
+            or row.state != ConnectionTestState.RUNNING
+            or row.lease_owner != owner
+            or row.lease_expires_at != lease_expires_at
+        ):
+            self._session.rollback()
+            return False
+        env = self._session.get(Environment, row.environment_id)
+        connection = self._session.get(Connection, row.connection_id)
+        assert env is not None and connection is not None  # nosec B101 -- foreign keys
+        self.close(row, connection.name, env.name, ConnectionTestOutcome(outcome), message)
+        self._session.commit()
+        return True
+
+    def close(
+        self,
+        test: ConnectionTest,
+        connection: str,
+        environment: str,
+        outcome: ConnectionTestOutcome,
+        message: str,
+    ) -> None:
+        """Finish a test and audit it; the caller commits.
+
+        Parameters
+        ----------
+        test
+            The test.
+        connection
+            The connection's name.
+        environment
+            The environment's name.
+        outcome
+            What it found.
+        message
+            The message; cut to 1,000 characters.
+        """
+        test.state = ConnectionTestState.DONE
+        test.outcome = outcome
+        test.message = message[:1000]
+        test.finished_at = utcnow()
+        test.lease_owner = None
+        test.lease_expires_at = None
+        AuditService(self._session).record(
+            test.requested_by,
+            AuditEventType.CONNECTION_TESTED,
+            securable=Securable.environment_scope(environment),
+            detail={
+                "connection": connection,
+                "environment": environment,
+                "test_id": str(test.id),
+                "state": ConnectionTestState.DONE.value,
+                "outcome": outcome.value,
+            },
+        )
 
 
 class ConnectionService:
@@ -904,7 +1049,7 @@ class ConnectionService:
                         f"lakana connection test {shown(name)} --env {shown(env.name)} "
                         f"--id {open_test.id}"
                     )
-                self._close(
+                ConnectionTestQueue(self._session).close(
                     open_test, row.name, env.name, ConnectionTestOutcome.FAILED, _TEST_STUCK
                 )
             test = ConnectionTest(
@@ -984,7 +1129,7 @@ class ConnectionService:
     def claim_test(
         self, owner: str, *, lease_seconds: int = 60, now: datetime
     ) -> ConnectionTest | None:
-        """Claim the oldest test that is queued or whose lease ran out, under a lease.
+        """Claim the oldest queued test; see `ConnectionTestQueue.claim`.
 
         Parameters
         ----------
@@ -993,34 +1138,14 @@ class ConnectionService:
         lease_seconds
             How long the claim lasts.
         now
-            The time of the claim; the lease runs from it.
+            The time of the claim.
 
         Returns
         -------
         ConnectionTest or None
             The test, now running; `None` when there is none to claim.
         """
-        row = self._session.scalars(
-            select(ConnectionTest)
-            .where(
-                or_(
-                    ConnectionTest.state == ConnectionTestState.QUEUED,
-                    (ConnectionTest.state == ConnectionTestState.RUNNING)
-                    & (ConnectionTest.lease_expires_at <= now),
-                )
-            )
-            .order_by(ConnectionTest.created_at)
-            .limit(1)
-            .with_for_update(skip_locked=True)
-        ).first()
-        if row is None:
-            self._session.rollback()
-            return None
-        row.state = ConnectionTestState.RUNNING
-        row.lease_owner = owner
-        row.lease_expires_at = now + timedelta(seconds=lease_seconds)
-        self._session.commit()
-        return row
+        return ConnectionTestQueue(self._session).claim(owner, lease_seconds=lease_seconds, now=now)
 
     def finish_test(
         self,
@@ -1030,7 +1155,7 @@ class ConnectionService:
         outcome: str,
         message: str,
     ) -> bool:
-        """Record what a test found, if the caller still holds its lease.
+        """Record what a test found; see `ConnectionTestQueue.finish`.
 
         Parameters
         ----------
@@ -1039,76 +1164,19 @@ class ConnectionService:
         owner
             The worker that claimed it.
         lease_expires_at
-            The lease expiry that claim set; the record must match it exactly.
+            The lease expiry that claim set.
         outcome
             A `ConnectionTestOutcome` value.
         message
-            What was found, already redacted; cut to 1,000 characters.
+            What was found, already redacted.
 
         Returns
         -------
         bool
-            `True` when it was recorded; `False` when the lease had changed hands (nothing
-            is changed then).
+            `True` when it was recorded; `False` when the lease had changed hands.
         """
-        row = self._session.execute(
-            select(ConnectionTest).where(ConnectionTest.id == test_id).with_for_update()
-        ).scalar_one_or_none()
-        if (
-            row is None
-            or row.state != ConnectionTestState.RUNNING
-            or row.lease_owner != owner
-            or row.lease_expires_at != lease_expires_at
-        ):
-            self._session.rollback()
-            return False
-        env = self._session.get(Environment, row.environment_id)
-        connection = self._session.get(Connection, row.connection_id)
-        assert env is not None and connection is not None  # nosec B101 -- foreign keys
-        self._close(row, connection.name, env.name, ConnectionTestOutcome(outcome), message)
-        self._session.commit()
-        return True
-
-    def _close(
-        self,
-        test: ConnectionTest,
-        connection: str,
-        environment: str,
-        outcome: ConnectionTestOutcome,
-        message: str,
-    ) -> None:
-        """Finish a test and audit it; the caller commits.
-
-        Parameters
-        ----------
-        test
-            The test.
-        connection
-            The connection's name.
-        environment
-            The environment's name.
-        outcome
-            What it found.
-        message
-            The message; cut to 1,000 characters.
-        """
-        test.state = ConnectionTestState.DONE
-        test.outcome = outcome
-        test.message = message[:1000]
-        test.finished_at = utcnow()
-        test.lease_owner = None
-        test.lease_expires_at = None
-        AuditService(self._session).record(
-            test.requested_by,
-            AuditEventType.CONNECTION_TESTED,
-            securable=Securable.environment_scope(environment),
-            detail={
-                "connection": connection,
-                "environment": environment,
-                "test_id": str(test.id),
-                "state": ConnectionTestState.DONE.value,
-                "outcome": outcome.value,
-            },
+        return ConnectionTestQueue(self._session).finish(
+            test_id, owner, lease_expires_at, outcome, message
         )
 
     def _exists(self, env: Environment, name: str) -> bool:

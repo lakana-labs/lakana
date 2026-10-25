@@ -722,7 +722,7 @@ def delete(
 _NEXT_STEPS: dict[str, str] = {
     "dns": "Check the host name.",
     "refused": "Check the port and the source's firewall.",
-    "timeout": "Check the network path and the egress service's upstream proxy.",
+    "timeout": "Check the host, the port and the network path between the worker and the source.",
     "tls": "Check the CA (`lakana connection update NAME --ca-file ca.pem`).",
     "not_allowed": "The address must be reachable from outside the Lakana stack.",
     "root_unavailable": "Check the root setting.",

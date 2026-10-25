@@ -32,6 +32,7 @@ from lakana_core.models import (
     Environment,
     Principal,
     PrincipalType,
+    Secret,
 )
 from lakana_core.secrets.keys import EnvKeyProvider
 from lakana_worker import connection_tests
@@ -541,3 +542,85 @@ def test_an_error_after_the_claim_finishes_the_test_as_failed_and_logs_the_type_
     text = " ".join(r.getMessage() for r in caplog.records)
     assert "RuntimeError" in text
     assert SECRET not in text
+
+
+def test_find_spec_failing_means_lakana_is_not_installed(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def broken(name: str) -> object:
+        raise ValueError(name)
+
+    monkeypatch.setattr(connection_tests.importlib.util, "find_spec", broken)
+    test_id = world.connection("svc")
+    assert loop(world).step()
+    assert world.test(test_id).message == (
+        "install lakana next to the worker to run connection tests"
+    )
+
+
+def test_a_connection_that_vanished_fails_the_test(world: World) -> None:
+    ghost = ConnectionTest(id=uuid.uuid4(), connection_id=uuid.uuid4(), environment_id=uuid.uuid4())
+    with Session(world.engine) as session:
+        assert loop(world)._request(session, ghost) == (
+            "failed",
+            "the connection no longer exists",
+        )
+
+
+def test_an_unbound_secret_fails_the_test_without_running_a_check(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = fake_check(monkeypatch)
+    test_id = world.connection("svc", secret={"password": SECRET})
+    with Session(world.engine) as session:
+        session.execute(update(Secret).values(use_kind=None, use_target_id=None))
+        session.commit()
+    assert loop(world).step()
+    row = world.test(test_id)
+    assert (row.outcome, row.message) == (
+        "failed",
+        "the connection's secret is not bound to it; bind it again (see `lakana connection "
+        "update --help`)",
+    )
+    assert calls == []
+
+
+def test_a_revoked_secret_fails_the_test(world: World, monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = fake_check(monkeypatch)
+    test_id = world.connection("svc", secret={"password": SECRET})
+    with Session(world.engine) as session:
+        session.execute(update(Secret).values(revoked_at=db_now(session)))
+        session.commit()
+    assert loop(world).step()
+    row = world.test(test_id)
+    assert row.outcome == "failed"
+    assert row.message is not None and "revoked or missing" in row.message
+    assert calls == []
+
+
+def test_an_outcome_the_check_does_not_define_is_a_failed_test(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_check(monkeypatch, json.dumps({"outcome": "great", "message": "x"}) + "\n")
+    test_id = world.connection("svc")
+    assert loop(world).step()
+    row = world.test(test_id)
+    assert (row.outcome, row.message) == ("failed", connection_tests.CHECK_BROKEN)
+
+
+def test_an_error_while_running_the_check_finishes_the_test_as_failed(
+    world: World, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    test_id = world.connection("svc")
+    running = loop(world)
+
+    def broken(connection: dict[str, Any], routing: dict[str, Any]) -> tuple[str, str]:
+        raise OSError(f"cannot start {SECRET}")
+
+    monkeypatch.setattr(running, "_run_check", broken)
+    with caplog.at_level(logging.WARNING, logger="lakana_worker.connection_tests"):
+        assert running.step()
+    row = world.test(test_id)
+    assert (row.outcome, row.message) == ("failed", connection_tests.NOT_RUN)
+    assert "OSError" in caplog.text
+    assert SECRET not in caplog.text

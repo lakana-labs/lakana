@@ -72,6 +72,12 @@ What each setting means, and its default:
 | Create, change, delete and test a connection | `MANAGE_CONNECTION` on the environment | `ADMIN`, `DATA_ENGINEER` |
 | List and show connections | `READ_ENVIRONMENT` on the environment | every role on it |
 
+Testing a connection is a probe from the worker: with the local runner it dials from the worker's host
+to any address the connection names and lists paths under the ingestion roots, so
+`MANAGE_CONNECTION` lets a data engineer without `DEPLOY` find out which ports and paths the worker
+can reach (see the [threat model](../explanation/security.md)). Under the Docker runner a test runs
+under a task's own network rules.
+
 A task cannot list or show connections, whatever its token's rights: a request with a task token
 is refused (403) without naming any connection. A running task reads only the connections its
 asset declares, one by one
@@ -106,6 +112,9 @@ endpoint too, so it counts as an address change.
 with the connection's address and settings. The worker checks, in this order, the host name (DNS),
 the connection (TCP), the TLS handshake with the connection's CA certificate, and, for a
 `directory` or `sqlite-file` connection, that the ingestion root exists and the path is under it.
+For an `http` connection with an OAuth2 `token_url` the token host is checked the same way as the
+base URL, and the test is not `ok` unless both pass; the message names the host that failed. The TLS
+of a `mariadb` connection is not checked yet (the check reads the server's greeting only).
 Credentials are not checked yet: a connection with a secret ends its message with "credentials not
 checked yet", and each kind's credential check arrives with its helper. The check runs on a worker
 with the local runner, as a subprocess of the worker's Python that needs `lakana` installed next to
@@ -116,18 +125,20 @@ up to 60 seconds, prints the outcome and exits 1 unless it is `ok`. Only one tes
 runs at a time; asking again meanwhile is refused (409), naming the open test and the command
 that shows it (`lakana connection test NAME --env ENV --id ID`). A test still queued or running
 after 10 minutes is stuck: the next request finishes it as `failed` ("no worker finished this
-test within 10 minutes; …", with the worker's log to read) and queues a new one.
+test within 10 minutes; …", naming the worker's log to read) and queues a new one.
 
 `--no-wait` queues the test and prints its id; `--id ID` shows that test later (or the one a
 timed-out wait named). A test nobody takes within the wait ends with an error that says whether a
-worker took it and which log to read (`docker compose logs worker`); the test itself goes on.
+worker took it; a test nobody took says that only a worker with the local runner runs tests in this
+version, and one a worker took names the worker's log (`docker compose logs worker`, or the
+`lakana local` terminal). The test itself goes on.
 
 | Outcome | What it means | What to do |
 |---|---|---|
 | `ok` | The source can be reached. | Nothing. |
 | `dns` | The host name did not resolve. | Check the host name. |
 | `refused` | The host refused the connection. | Check the port and the source's firewall. |
-| `timeout` | The connection did not answer in time. | Check the network path and the egress service's upstream proxy. |
+| `timeout` | The connection did not answer in time. | Check the host, the port and the network path between the worker and the source. |
 | `tls` | The TLS handshake failed. | Check the CA: `lakana connection update NAME --ca-file ca.pem`. |
 | `not_allowed` | The address is one a task may not reach. | The address must be reachable from outside the Lakana stack. |
 | `root_unavailable` | The worker does not have the ingestion root. | Check the root setting. |

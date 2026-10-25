@@ -361,7 +361,9 @@ def test_a_test_a_worker_took_times_out_naming_its_log(monkeypatch: pytest.Monke
         connections.test("prod", "crm-db", timeout=10.0)
 
     assert str(raised.value).startswith("the test of `crm-db` is still running after 10s: ")
-    assert "`docker compose logs worker`" in str(raised.value)
+    assert (
+        "read the worker's log (`docker compose logs worker`, or the `lakana local` terminal)"
+    ) in str(raised.value)
     assert str(raised.value).endswith(f"--env prod --id {_TEST_ID}")
 
 

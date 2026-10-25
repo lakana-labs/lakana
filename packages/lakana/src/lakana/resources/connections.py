@@ -144,7 +144,10 @@ def _still(environment: str, name: str, test: ConnectionTest, timeout: float) ->
             f"{again}"
         )
     else:
-        found = f"a worker took it; see `docker compose logs worker`. {again}"
+        found = (
+            "a worker took it; read the worker's log (`docker compose logs worker`, or the "
+            f"`lakana local` terminal). {again}"
+        )
     return f"the test of `{name}` is still {test.state} after {timeout:g}s: {found}"
 
 

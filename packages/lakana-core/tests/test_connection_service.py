@@ -2284,8 +2284,9 @@ def test_a_message_is_cut_at_1000_characters(world: World) -> None:
 
 
 _STUCK = (
-    "no worker finished this test within 10 minutes; a worker that runs Python tasks runs "
-    "connection tests — see `docker compose logs worker`"
+    "no worker finished this test within 10 minutes; in this version only a worker with the "
+    "local runner runs connection tests — read that worker's log (`docker compose logs worker`, "
+    "or the `lakana local` terminal)"
 )
 
 

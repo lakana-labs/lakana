@@ -1,9 +1,10 @@
 """The connection test loop: claim a queued test, run the check, record what it found.
 
 `ConnectionTestLoop` mirrors `notify.DeliveryLoop`: a daemon thread claims one test at a time
-under a lease (`ConnectionService.claim_test`), runs `lakana.ingest._check` with no transaction
-open and records the outcome while the lease is still this worker's (`finish_test`; a worker
-that lost it records nothing and logs at info level).
+under a lease (`ConnectionTestQueue.claim`), runs `lakana.ingest._check` with no transaction
+open and records the outcome while the lease is still this worker's
+(`ConnectionTestQueue.finish`; a
+worker that lost it records nothing and logs at info level).
 
 Under the local runner the check is a subprocess of the worker's own Python
 (``python -I -m lakana.ingest._check``): Lakana's own code, never the project's. The connection
@@ -31,11 +32,10 @@ from typing import Any
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session
 
-from lakana_core.auth import AllowAllAuthorization
 from lakana_core.connections.endpoints import endpoints
 from lakana_core.connections.fetch import connection_secret
 from lakana_core.connections.kinds import ConnectionKind
-from lakana_core.connections.service import ConnectionService
+from lakana_core.connections.service import ConnectionTestQueue
 from lakana_core.db import db_now
 from lakana_core.models import Connection, ConnectionTest, Environment
 from lakana_core.secrets.keys import KeyProvider
@@ -187,21 +187,6 @@ class ConnectionTestLoop:
         self._idle = idle_seconds
         self._trust = trust
 
-    def _service(self, session: Session) -> ConnectionService:
-        """Build the service that claims and finishes tests.
-
-        Parameters
-        ----------
-        session
-            The session.
-
-        Returns
-        -------
-        ConnectionService
-            A service whose claim and finish need no principal.
-        """
-        return ConnectionService(session, AllowAllAuthorization(), self._keys)
-
     def _has_master_key(self) -> bool:
         """Say whether this worker can read secrets at all.
 
@@ -327,7 +312,7 @@ class ConnectionTestLoop:
             `False` when none was queued.
         """
         with Session(self._engine) as session:
-            test = self._service(session).claim_test(self._owner, now=db_now(session))
+            test = ConnectionTestQueue(session).claim(self._owner, now=db_now(session))
             if test is None:
                 return False
             test_id, expires = test.id, test.lease_expires_at
@@ -349,7 +334,7 @@ class ConnectionTestLoop:
                 outcome, message = "failed", NOT_RUN
         del prepared
         with Session(self._engine) as session:
-            recorded = self._service(session).finish_test(
+            recorded = ConnectionTestQueue(session).finish(
                 test_id, self._owner, expires, outcome, message
             )
         if not recorded:

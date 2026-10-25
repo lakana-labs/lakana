@@ -373,11 +373,10 @@ def _check_https(body: Mapping[str, Any], routing: Mapping[str, Any], t: float) 
     """
     kind = body["kind"]
     ca_pem = body["settings"].get("ca_certificate")
-    if kind == "http":
+    targets = [(str(e["host"]), int(e["port"])) for e in body["endpoints"]]
+    if not targets and kind == "http":
         parts = urlsplit(str(body["address"]["base_url"]))
         targets = [(parts.hostname or "", parts.port or 443)]
-    else:
-        targets = [(str(e["host"]), int(e["port"])) for e in body["endpoints"]]
     for host, port in targets:
         _https_endpoint(host, port, ca_pem, routing, t)
     shown = ", ".join(f"`{h}:{p}`" for h, p in targets)
@@ -503,10 +502,7 @@ def _check_tcp(body: Mapping[str, Any], routing: Mapping[str, Any], t: float) ->
         The outcome and `TCP_OK`.
     """
     host, port = str(body["address"]["host"]), int(body["address"]["port"])
-    try:
-        _open(host, port, routing, t).close()
-    except OSError as exc:
-        _raise_network(exc, host, port, t)
+    _open(host, port, routing, t).close()
     return "ok", TCP_OK
 
 
