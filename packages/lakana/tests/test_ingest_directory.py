@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime as dt
 import os
 import socket
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -292,10 +293,10 @@ def test_a_directory_that_cannot_be_listed_names_it(
 ) -> None:
     """A directory that opens but cannot be listed names itself and the next step."""
 
-    def refuse(fd: int) -> list[str]:
+    def refuse(fd: int) -> object:
         raise PermissionError(13, "Permission denied")
 
-    monkeypatch.setattr(os, "listdir", refuse)
+    monkeypatch.setattr(os, "scandir", refuse)
 
     with pytest.raises(DirectoryError, match=r"'\.' cannot be listed .*read access"):
         walk(str(tree), "exports", "*.csv", max_files=10)
@@ -344,3 +345,124 @@ def test_a_modification_time_is_kept_to_the_microsecond(tree: Path) -> None:
     (first,) = walk(str(tree), "exports", "a.csv", max_files=1).files
 
     assert first.modified == dt.datetime(2026, 9, 21, 14, 13, 20, 123_456, tzinfo=dt.UTC)
+
+
+def test_a_directory_that_cannot_be_searched_names_it_and_the_next_step(tree: Path) -> None:
+    """Readable but not searchable (mode 0444): a `DirectoryError` naming it, not a raw error."""
+    locked = tree / "exports" / "locked"
+    locked.mkdir()
+    (locked / "x.csv").write_bytes(b"id\n")
+    locked.chmod(0o444)
+    try:
+        if os.access(locked / "x.csv", os.R_OK):
+            pytest.skip("running with the right to search any directory")
+        with pytest.raises(DirectoryError) as caught:
+            walk(str(tree), "exports", "**/*.csv", max_files=10)
+    finally:
+        locked.chmod(0o755)
+
+    assert "'locked'" in str(caught.value)
+    assert "(Permission denied)" in str(caught.value)
+    assert "give this worker read and search access to it or narrow the pattern" in str(
+        caught.value
+    )
+    assert caught.value.retryable is False
+
+
+def test_a_component_that_fails_to_open_for_another_reason_names_it(
+    tree: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An I/O error on a directory is reported with its cause."""
+    real = os.open
+
+    def failing(path: str, flags: int, *args: object, **kwargs: object) -> int:
+        if path == "2026" and kwargs.get("dir_fd") is not None:
+            raise OSError(5, "Input/output error")
+        return real(path, flags, *args, **kwargs)  # ty: ignore[invalid-argument-type]
+
+    monkeypatch.setattr(os, "open", failing)
+
+    with pytest.raises(DirectoryError, match=r"'2026' cannot be opened \(Input/output error\)"):
+        walk(str(tree), "exports", "**/*.csv", max_files=10)
+
+
+def test_a_file_removed_between_listing_and_stat_is_skipped(
+    tree: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A name that is gone when it is examined is left out, not an error."""
+    real = os.stat
+
+    def vanishing(path: str, *args: object, **kwargs: object) -> os.stat_result:
+        if path == "a.csv" and kwargs.get("dir_fd") is not None:
+            raise FileNotFoundError(2, "gone")
+        return real(path, *args, **kwargs)  # ty: ignore[invalid-argument-type]
+
+    monkeypatch.setattr(os, "stat", vanishing)
+
+    assert [f.path for f in walk(str(tree), "exports", "*.csv", max_files=10).files] == ["b.csv"]
+
+
+def test_a_fifo_where_the_pattern_needs_a_directory_is_neither_listed_nor_skipped(
+    tree: Path,
+) -> None:
+    """`sub/*.csv` cannot match below a FIFO named `sub`: it is not a candidate at all."""
+    os.mkfifo(tree / "exports" / "sub")
+
+    listing = walk(str(tree), "exports", "sub/*.csv", max_files=10)
+
+    assert (listing.files, listing.skipped) == ([], [])
+
+
+def test_a_root_written_with_a_trailing_slash_is_not_followed_when_it_is_a_link(
+    tree: Path, tmp_path: Path
+) -> None:
+    """The kernel follows a final link when the path ends in `/`; the root is stripped first."""
+    link = tmp_path / "link"
+    link.symlink_to(tree)
+
+    with pytest.raises(RootUnavailable):
+        walk(f"{link}/", "exports", "*.csv", max_files=10)
+    assert [f.path for f in walk(f"{tree}/", "exports", "*.csv", max_files=10).files] == [
+        "a.csv",
+        "b.csv",
+    ]
+
+
+def test_the_entry_limit_stops_a_directory_before_it_is_loaded(
+    tree: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The directory is iterated, not listed whole: the walk stops at the limit."""
+    seen: list[str] = []
+    real = os.scandir
+
+    class _Counting:
+        def __init__(self, fd: int) -> None:
+            self.inner = real(fd)
+
+        def __enter__(self) -> _Counting:
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            self.inner.close()
+
+        def __iter__(self) -> Iterator[os.DirEntry[str]]:
+            for entry in self.inner:
+                seen.append(entry.name)
+                yield entry
+
+    monkeypatch.setattr(os, "scandir", _Counting)
+    monkeypatch.setattr("lakana.ingest._directory.MAX_ENTRIES", 2)
+
+    with pytest.raises(DirectoryError, match="more than 2 entries"):
+        walk(str(tree), "exports", "*.csv", max_files=10)
+    assert 0 < len(seen) <= 3
+
+
+def test_a_modification_time_past_year_9999_names_the_file(
+    tree: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A time `datetime` cannot hold is a `DirectoryError`, not an `OverflowError`."""
+    monkeypatch.setattr("lakana.ingest._directory._EPOCH", dt.datetime(9999, 12, 31, tzinfo=dt.UTC))
+
+    with pytest.raises(DirectoryError, match=r"'a\.csv' has a modification time"):
+        walk(str(tree), "exports", "*.csv", max_files=10)

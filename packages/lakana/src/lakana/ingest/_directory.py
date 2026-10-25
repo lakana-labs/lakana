@@ -168,7 +168,7 @@ def _open_dir(root_dir: str, parts: list[str]) -> int:
         If a component below is missing, a link or not a directory.
     """
     try:
-        fd = os.open(root_dir, _DIR)
+        fd = os.open(root_dir.rstrip("/") or "/", _DIR)
     except OSError as exc:
         raise RootUnavailable(
             f"the ingestion root {root_dir} is not available ({exc.strerror})"
@@ -324,20 +324,24 @@ def _entries(
         entries.
     """
     shown = "/".join(prefix) or "."
+    names: list[str] = []
     try:
-        names = sorted(os.listdir(fd))
+        with os.scandir(fd) as scanner:
+            for found in scanner:
+                budget[0] -= 1
+                if budget[0] < 0:
+                    raise DirectoryError(
+                        f"the walk looked at more than {MAX_ENTRIES} entries; narrow the pattern"
+                    )
+                names.append(found.name)
     except OSError as exc:
         raise DirectoryError(
             f"{shown!r} cannot be listed ({exc.strerror}); give this worker read access to it "
             "or narrow the pattern"
         ) from None
+    names.sort()
     end = len(pattern)
     for name in names:
-        budget[0] -= 1
-        if budget[0] < 0:
-            raise DirectoryError(
-                f"the walk looked at more than {MAX_ENTRIES} entries; narrow the pattern"
-            )
         after = _step(pattern, states, name)
         if not after:
             continue
@@ -345,6 +349,11 @@ def _entries(
             info = os.stat(name, dir_fd=fd, follow_symlinks=False)
         except FileNotFoundError:
             continue
+        except OSError as exc:
+            raise DirectoryError(
+                f"{shown!r} cannot be searched ({exc.strerror}); give this worker read and "
+                "search access to it or narrow the pattern"
+            ) from None
         path = [*prefix, name]
         deeper = any(i < end for i in after)
         if stat.S_ISDIR(info.st_mode):
@@ -417,7 +426,13 @@ def walk(root_dir: str, base: str, pattern: str, *, max_files: int) -> Listing:
                     f"the pattern {pattern!r} matches more than max_files ({max_files}) files; "
                     "narrow the pattern or pass since="
                 )
-            modified = _EPOCH + dt.timedelta(microseconds=info.st_mtime_ns // 1000)
+            try:
+                modified = _EPOCH + dt.timedelta(microseconds=info.st_mtime_ns // 1000)
+            except OverflowError:
+                raise DirectoryError(
+                    f"{'/'.join(path)!r} has a modification time past the year 9999, which "
+                    "cannot be read; set a time that is not in the far future"
+                ) from None
             listing.files.append(FileEntry("/".join(path), info.st_size, modified))
     finally:
         os.close(fd)

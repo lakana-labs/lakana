@@ -576,3 +576,183 @@ def test_a_conflict_in_a_later_file_is_found_after_files_that_fit() -> None:
         SourceError, match=r"`c\.csv`: column 'x' is List\(Int64\), which does not fit Int64"
     ):
         _formats.combine(frames, ["a.csv", "b.csv", "c.csv"])
+
+
+@pytest.mark.parametrize("name", ["a.json", "a.ndjson", "a.parquet", "a.xlsx", "a.csv"])
+def test_a_schema_column_the_file_lacks_is_refused_in_every_format(root: Path, name: str) -> None:
+    """The promised message, on every format: file and column named."""
+    frame = pl.DataFrame({"id": [1]})
+    if name.endswith(".json"):
+        data = frame.write_json().encode()
+    elif name.endswith(".ndjson"):
+        data = frame.write_ndjson().encode()
+    elif name.endswith(".parquet"):
+        buffer = io.BytesIO()
+        frame.write_parquet(buffer)
+        data = buffer.getvalue()
+    elif name.endswith(".xlsx"):
+        data = _xlsx(frame, "Sheet1")
+    else:
+        data = b"id\n1\n"
+    _write(root / name, data)
+
+    with pytest.raises(SourceError) as caught:
+        files.read("exports", name, schema={"when": pl.Datetime})
+    assert str(caught.value) == f"`exports/{name}` has no column 'when', which schema= names"
+
+
+@pytest.mark.parametrize(
+    "order",
+    [("date", "int", "dec"), ("date", "dec", "int")],
+    ids=["date-int-decimal", "date-decimal-int"],
+)
+def test_types_that_only_fit_in_one_file_order_are_refused_in_every_order(order: str) -> None:
+    """File order never decides whether a column is silently coerced."""
+    from lakana.ingest import _formats
+
+    kinds = {
+        "date": pl.DataFrame({"x": [dt.date(2020, 1, 1)]}),
+        "int": pl.DataFrame({"x": [1]}),
+        "dec": pl.DataFrame({"x": [1]}).cast({"x": pl.Decimal(10, 2)}),
+    }
+
+    with pytest.raises(SourceError, match=r"column 'x'.*schema=") as caught:
+        _formats.combine([kinds[k] for k in order], [f"{k}.csv" for k in order])
+    assert "`" in str(caught.value)
+
+
+def test_files_that_cannot_be_combined_are_named_with_their_types() -> None:
+    """When no single pair is to blame the message lists each file's type."""
+    from lakana.ingest import _formats
+
+    frames = [
+        pl.DataFrame({"x": [dt.date(2020, 1, 1)]}),
+        pl.DataFrame({"x": [1]}),
+        pl.DataFrame({"x": [1]}).cast({"x": pl.Decimal(10, 2)}),
+    ]
+
+    with pytest.raises(SourceError) as caught:
+        _formats.combine(frames, ["a.csv", "b.csv", "c.csv"])
+    message = str(caught.value)
+    assert "`a.csv`" in message
+    assert "`c.csv`" in message
+    assert "pass schema=" in message
+
+
+@pytest.mark.parametrize("argument", ["max_files", "max_file_bytes", "max_total_bytes"])
+@pytest.mark.parametrize("value", [0, -1, 1.5, True, "10"])
+def test_a_cap_must_be_a_positive_whole_number(root: Path, argument: str, value: object) -> None:
+    """A zero or negative cap would disable or break the check; it is refused."""
+    _write(root / "a.csv", b"id\n1\n")
+
+    with pytest.raises(IngestError, match=rf"{argument}= must be a positive whole number"):
+        files.read("exports", "*.csv", **{argument: value})  # ty: ignore[invalid-argument-type]
+    with pytest.raises(IngestError, match=r"max_files= must be a positive whole number"):
+        files.list("exports", "*.csv", max_files=0)
+
+
+def test_a_schema_value_that_is_no_polars_type_names_the_column(root: Path) -> None:
+    """`schema={"id": "int"}` says what `schema=` takes, naming the column and the value."""
+    _write(root / "a.csv", b"id\n1\n")
+
+    with pytest.raises(IngestError) as caught:
+        files.read("exports", "a.csv", schema={"id": "int"})
+    assert str(caught.value) == (
+        "schema= maps a column to a Polars type such as pl.Int64; 'id' has 'int'"
+    )
+    assert files.read("exports", "a.csv", schema={"id": pl.Int64()}).num_rows == 1
+
+
+@pytest.mark.parametrize("kind", ["http", "s3", "gcs", "azure"])
+def test_a_store_or_web_connection_is_told_to_use_connections_get(
+    root: Path, monkeypatch: pytest.MonkeyPatch, kind: str
+) -> None:
+    """Kinds `files.read` does not read yet point to the connection's own client."""
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(files, "fetch", lambda name: SimpleNamespace(name=name, kind=kind))
+
+    with pytest.raises(IngestError) as caught:
+        files.read("store", "*.csv")
+    assert str(caught.value) == (
+        f"files.read reads directory connections; `store` is {kind}: "
+        "use connections.get with the team's own client"
+    )
+
+
+def test_a_newline_in_a_file_name_cannot_forge_a_line_in_a_message(root: Path) -> None:
+    """Control characters in a name are written as escapes in every message."""
+    _write(root / "a\n[ERROR] forged.dat", b"id\n1\n")
+
+    with pytest.raises(IngestError) as caught:
+        files.read("exports", "*.dat")
+    assert "\n" not in str(caught.value)
+    assert "a\\x0a[ERROR] forged.dat" in str(caught.value)
+
+    _write(root / "b\nforged.csv", b"id\n1\n1,2,3,\x00\n")
+    with pytest.raises(SourceError) as parse_caught:
+        files.read("exports", "b*.csv", schema={"zzz": pl.Int64})
+    assert "\n" not in str(parse_caught.value)
+
+
+def test_the_total_cap_is_checked_against_sizes_before_any_file_is_read(
+    root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A file that would push the sum past the cap is refused before it is read."""
+    _write(root / "a.csv", b"id\n1\n")
+    _write(root / "b.csv", b"id\n2\n")
+    reads: list[str] = []
+    real = files._DirectorySource.read
+
+    def counting(self: object, path: str, max_bytes: int) -> bytes:
+        reads.append(path)
+        return real(self, path, max_bytes)  # ty: ignore[invalid-argument-type]
+
+    monkeypatch.setattr(files._DirectorySource, "read", counting)
+
+    with pytest.raises(CapExceeded, match="hold more than max_total_bytes"):
+        files.read("exports", "*.csv", max_total_bytes=8)
+    assert reads == []
+
+
+def test_a_file_that_cannot_be_read_at_all_keeps_the_readers_message_with_a_schema(
+    root: Path,
+) -> None:
+    """With `schema=`, a file that is no JSON says so; it is not mistaken for a missing column."""
+    _write(root / "a.json", b"this is not json")
+
+    with pytest.raises(SourceError, match=r"`exports/a\.json`: .*check the file"):
+        files.read("exports", "a.json", schema={"id": pl.Int64})
+
+
+def test_a_failure_of_the_file_by_file_merge_is_still_a_source_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If polars refuses the merge of two files that pass the column checks, say so plainly."""
+    from lakana.ingest import _formats
+
+    real = pl.concat
+
+    def failing(items: object, *, how: str) -> pl.DataFrame:
+        if how == "diagonal_relaxed":
+            raise pl.exceptions.SchemaError("no common type")
+        return real(items, how=how)  # ty: ignore[invalid-argument-type]
+
+    monkeypatch.setattr(pl, "concat", failing)
+    frames = [pl.DataFrame({"x": [1]}), pl.DataFrame({"x": [2]}), pl.DataFrame({"x": [3]})]
+
+    with pytest.raises(
+        SourceError, match=r"the files cannot be combined: no common type; pass schema="
+    ):
+        _formats.combine(frames, ["a.csv", "b.csv", "c.csv"])
+
+
+def test_a_file_that_grows_after_listing_still_counts_toward_the_total(
+    root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The listing's size passes the pre-check; what is really read is counted too."""
+    _write(root / "a.csv", b"id\n1\n")
+    monkeypatch.setattr(files._DirectorySource, "read", lambda self, path, max_bytes: b"x" * 20)
+
+    with pytest.raises(CapExceeded, match="hold more than max_total_bytes"):
+        files.read("exports", "*.csv", max_total_bytes=8)

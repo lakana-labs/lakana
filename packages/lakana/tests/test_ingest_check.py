@@ -454,6 +454,14 @@ def test_a_symbolic_link_as_the_root_is_refused(tmp_path: Path) -> None:
     assert _check.check(body, routing, timeout=FAST)[0] == "failed"
 
 
+def test_a_root_with_a_trailing_slash_is_not_followed_when_it_is_a_link(tmp_path: Path) -> None:
+    (tmp_path / "real").mkdir()
+    (tmp_path / "root").symlink_to(tmp_path / "real")
+    body = connection("directory", {"root": "shared", "path": ""})
+    routing = {"root": "shared", "root_dir": f"{tmp_path / 'root'}/", "path": ""}
+    assert _check.check(body, routing, timeout=FAST)[0] == "failed"
+
+
 def test_a_sqlite_file_must_be_a_regular_file(tmp_path: Path) -> None:
     (tmp_path / "data.db").write_bytes(b"x")
     (tmp_path / "dir.db").mkdir()

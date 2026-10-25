@@ -7,6 +7,7 @@ it to the harness's own rule (a function's error is retried).
 
 from __future__ import annotations
 
+import re
 from typing import ClassVar
 
 
@@ -43,3 +44,45 @@ class CapExceeded(IngestError):
     """A read went past one of its limits; the same read would again."""
 
     retryable: ClassVar[bool | None] = False
+
+
+_UNSAFE = re.compile(
+    r"[\x00-\x1f\x7f-\x9f\u061c\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]"
+)
+
+
+def _escaped(match: re.Match[str]) -> str:
+    r"""Spell one unsafe character the way Python writes it.
+
+    Parameters
+    ----------
+    match
+        The character.
+
+    Returns
+    -------
+    str
+        `\x0a` for a code point below 256, `\u202e` above.
+    """
+    code = ord(match.group())
+    return f"\\x{code:02x}" if code < 0x100 else f"\\u{code:04x}"
+
+
+def safe_name(text: str) -> str:
+    r"""Make a file name safe to put in a message: control characters become escapes.
+
+    A name with a line feed would otherwise start a new line in a task's log or a failure
+    message, which could forge a line.
+
+    Parameters
+    ----------
+    text
+        A file name or a path, as the source reported it.
+
+    Returns
+    -------
+    str
+        `text` with every control and bidirectional control character written as an escape
+        such as `\x0a`.
+    """
+    return _UNSAFE.sub(_escaped, text)

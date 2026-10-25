@@ -42,8 +42,18 @@ rows into one table.
 | `max_total_bytes` | 256 MiB | The most bytes read in all. |
 | `max_files` | `10_000` | The most files read. |
 
+Each cap must be a positive whole number; zero, a negative number or anything else is refused.
+
 Files that differ are combined: a column a file lacks is filled with nulls, and a column whose
 types differ takes the type that fits both (Int64 and Float64 give Float64).
+
+### What a pattern matches
+
+- `*` and `?` match names that start with a dot too, and `**` goes into directories such as
+  `.git` or `.snapshot`; write the pattern so it names what you want (`exports/2026-*.csv`).
+- Matching is case-sensitive: `*.csv` does not match `A.CSV`. Use `[cC][sS][vV]` for both.
+- A hard link is a regular file and is read like any other; Lakana does not tell where its
+  content lives. Keep a root free of hard links to files that must stay unread.
 
 ### Formats
 
@@ -67,10 +77,19 @@ file: a column it names that a file lacks fails, naming the file and the column.
 - **`since=<datetime>`**, usually `ctx.watermark()`: only files modified strictly after it are
   read, and the column is added. A naive datetime is UTC. Any other value is refused.
 
-A file modified exactly at the watermark is not read again. A source that writes new files
-with an old time, or an export that never changes its date, is better read by name:
-`modified_from="export-%Y-%m-%d.csv"` takes the time from a `strptime` pattern applied to the
-file's name (the part after the last `/`; a date means midnight UTC). A name that does not fit
+A new file whose modification time equals the stored watermark is **never read**: `since`
+means strictly after, so the last time is not read again, and a file that shares it is taken for
+one already read. That happens when:
+
+- the filesystem keeps coarse times (FAT and exFAT keep 2 seconds; some NFS and SMB servers keep
+  1 second), so two files written close together share a time;
+- a writer keeps the source's time (`cp -p`, `rsync -t`, an archive unpacked with its dates), so
+  a new file arrives with an old time;
+- one file is dated in the future, which moves the watermark ahead of every file that follows.
+
+If your source can do any of these, read by name instead: `modified_from="export-%Y-%m-%d.csv"`
+takes the time from a `strptime` pattern applied to the file's name (the part after the last
+`/`; a date means midnight UTC), so a file is new when its name is. A name that does not fit
 the pattern is skipped, with a line on the task's standard error. `modified_from` without
 `since` is refused.
 
@@ -109,4 +128,10 @@ bytes) and `modified` (timestamp in UTC).
 | `the files matching ... hold more than max_total_bytes (...)` | The files together are too large. | Narrow the pattern or pass `since=` to read fewer files, or raise `max_total_bytes`. |
 | `does not say when ... was modified; pass modified_from=` | The source gives no file time. | Pass `modified_from=` with the date pattern of the name. |
 | `modified_from= applies only with since=` | `modified_from` without `since`. | Pass `since=`, or drop `modified_from`. |
+| `max_files= must be a positive whole number` (also `max_file_bytes=`, `max_total_bytes=`) | A cap is zero, negative or not a whole number. | Pass a positive whole number. |
+| `schema= maps a column to a Polars type such as pl.Int64; 'id' has 'int'` | A `schema=` value is not a Polars type. | Pass `pl.Int64`, not `"int"`. |
+| `the files cannot be combined: column 'x' is Date in ..., Int64 in ...` | A column has types that no common type holds across several files. | Pass `schema=` with one type for each such column, or narrow the pattern. |
+| `... cannot be searched (Permission denied); give this worker read and search access to it` | A directory the pattern needs can be listed but not searched. | Give the worker search (execute) access, or narrow the pattern. |
+| `... has a modification time past the year 9999` | A file is dated beyond what a timestamp holds. | Set a sane time on the file. |
+| `files.read reads directory connections; ... is s3: use connections.get with the team's own client` | The connection is `http`, `s3`, `gcs` or `azure`. | Read it in your asset with `connections.get` and your own client. |
 | `since= takes a datetime or None` | `since` has another type. | Pass `ctx.watermark()` of an asset with `watermark="_source_modified"`. |

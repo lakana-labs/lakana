@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING, Any, Final, Protocol
 
 from lakana.ingest import _check, _directory, _formats
 from lakana.ingest._connections import FetchedConnection, fetch
-from lakana.ingest._errors import CapExceeded, IngestError
+from lakana.ingest._errors import CapExceeded, IngestError, safe_name
 
 if TYPE_CHECKING:
     import pyarrow as pa
@@ -43,6 +43,10 @@ _OTHER_HELPER = {
     "mariadb": "sql.read",
     "sqlite-file": "sql.read",
     "tcp": "connections.get with the team's own driver",
+    "http": "connections.get with the team's own client",
+    "s3": "connections.get with the team's own client",
+    "gcs": "connections.get with the team's own client",
+    "azure": "connections.get with the team's own client",
 }
 
 
@@ -223,6 +227,24 @@ def _naming(conn: FetchedConnection) -> Generator[None]:
         raise CapExceeded(f"`{conn.name}`: {exc}") from None
 
 
+def _positive(**caps: object) -> None:
+    """Refuse a cap that is not a positive whole number.
+
+    Parameters
+    ----------
+    **caps
+        Argument name to the value the asset passed.
+
+    Raises
+    ------
+    IngestError
+        Naming the argument.
+    """
+    for argument, value in caps.items():
+        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+            raise IngestError(f"{argument}= must be a positive whole number, not {value!r}")
+
+
 def _as_utc(since: object) -> dt.datetime | None:
     """Read ``since=``: `None`, or a datetime (a naive one is UTC).
 
@@ -318,7 +340,8 @@ def read(
         A connection the asset declares (kind ``directory``).
     pattern
         A glob relative to the connection's path: ``*``, ``?`` and ``[...]`` within a name,
-        ``**`` for any number of directories, such as ``"orders/*.csv"``.
+        ``**`` for any number of directories, such as ``"orders/*.csv"``. ``*`` matches names
+        that start with a dot, matching is case-sensitive, and a hard link is read as a file.
     format
         ``csv``, ``parquet``, ``json``, ``ndjson`` (or ``jsonl``), ``xlsx``, ``xlsm``,
         ``xlsb``, ``xls`` or ``ods``; from each file's extension when `None`.
@@ -363,6 +386,8 @@ def read(
     SourceError
         When a file cannot be parsed or does not fit the others; the message names the file.
     """
+    _positive(max_files=max_files, max_file_bytes=max_file_bytes, max_total_bytes=max_total_bytes)
+    _formats.check_schema(schema)
     if modified_from != "mtime" and since is UNSET:
         raise IngestError("modified_from= applies only with since=")
     conn = fetch(connection)
@@ -401,17 +426,20 @@ def read(
         return _empty(schema, with_since)
     import polars as pl
 
+    too_many = CapExceeded(
+        f"`{connection}`: the files matching {pattern!r} hold more than max_total_bytes "
+        f"({max_total_bytes}); narrow the pattern or pass since= to read fewer files"
+    )
+    if sum(entry.size for entry, _ in chosen) > max_total_bytes:
+        raise too_many
     frames, names, total = [], [], 0
     for entry, modified in chosen:
         with _naming(conn):
             data = source.read(entry.path, max_file_bytes)
         total += len(data)
         if total > max_total_bytes:
-            raise CapExceeded(
-                f"`{connection}`: the files matching {pattern!r} hold more than max_total_bytes "
-                f"({max_total_bytes}); narrow the pattern or pass since= to read fewer files"
-            )
-        name = f"{connection}/{entry.path}"
+            raise too_many
+        name = safe_name(f"{connection}/{entry.path}")
         frame = _formats.parse(
             data,
             name=name,
@@ -456,6 +484,7 @@ def list(connection: str, pattern: str, *, max_files: int = 10_000) -> pa.Table:
     """
     import pyarrow as pa
 
+    _positive(max_files=max_files)
     conn = fetch(connection)
     source = _source(conn)
     with _naming(conn):

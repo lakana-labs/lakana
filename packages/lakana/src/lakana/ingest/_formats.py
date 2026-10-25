@@ -11,7 +11,7 @@ import io
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
-from lakana.ingest._errors import IngestError, SourceError
+from lakana.ingest._errors import IngestError, SourceError, safe_name
 
 if TYPE_CHECKING:
     import polars as pl
@@ -46,6 +46,7 @@ def format_of(name: str, given: str | None) -> str:
         For an unknown ``format=`` or, without one, an extension that is not a format.
     """
     known = ", ".join(FORMATS)
+    name = safe_name(name)
     if given is not None:
         found = _ALIASES.get(given.lower(), given.lower())
         if found not in FORMATS:
@@ -118,6 +119,8 @@ def parse(
     """
     import polars as pl
 
+    name = safe_name(name)
+    check_schema(schema)
     if sheet is not None and format not in SPREADSHEETS:
         raise IngestError(f"sheet= applies to spreadsheets; `{name}` is {format}")
     if header_row != 1 and format not in _WITH_HEADER:
@@ -165,12 +168,79 @@ def parse(
                 read_options={"header_row": header_row - 1} if header_row > 0 else {},
                 schema_overrides=overrides,
             )
-    except errors as exc:
+    except (*errors, KeyError) as exc:
+        # polars reports a missing column its own way (a KeyError for sheets); say what it is.
+        if overrides and format != "csv" and (cols := _columns_of(data, format, sheet, header_row)):
+            _require_columns(name, overrides, cols)
         raise SourceError(
             f"`{name}`: {_problem(exc)}; check the file, or pass schema= with the column's type"
         ) from None
     _require_columns(name, overrides, frame.columns)
     return frame
+
+
+def _columns_of(data: bytes, format: str, sheet: str | None, header_row: int) -> list[str]:
+    """Read a file's column names without ``schema=``, for the message of a failed read.
+
+    Parameters
+    ----------
+    data
+        The file's bytes.
+    format
+        The file's format (not ``csv`` or ``parquet``, which check their names first).
+    sheet
+        A spreadsheet's sheet, or `None`.
+    header_row
+        The 1-based header row of a sheet.
+
+    Returns
+    -------
+    list of str
+        The columns; empty when the file cannot be read at all (the caller's own error is
+        the better message then).
+    """
+    import polars as pl
+
+    source = io.BytesIO(data)
+    try:
+        if format == "json":
+            return pl.read_json(source).columns
+        if format == "ndjson":
+            return pl.read_ndjson(source).columns
+        return pl.read_excel(
+            source,
+            sheet_name=sheet,
+            engine="calamine",
+            has_header=header_row > 0,
+            read_options={"header_row": header_row - 1} if header_row > 0 else {},
+        ).columns
+    except Exception:
+        return []
+
+
+def check_schema(schema: Mapping[str, Any] | None) -> None:
+    """Refuse a ``schema=`` value that is not a Polars type.
+
+    Parameters
+    ----------
+    schema
+        ``schema=``, or `None`.
+
+    Raises
+    ------
+    IngestError
+        Naming the first column whose value is not a Polars type.
+    """
+    import polars as pl
+
+    for column, kind in (schema or {}).items():
+        if not (
+            isinstance(kind, pl.DataType)
+            or (isinstance(kind, type) and issubclass(kind, pl.DataType))
+        ):
+            raise IngestError(
+                f"schema= maps a column to a Polars type such as pl.Int64; {column!r} has {kind!r}"
+            )
 
 
 def _require_columns(name: str, schema: Mapping[str, Any] | None, columns: Sequence[str]) -> None:
@@ -217,10 +287,11 @@ def combine(frames: Sequence[pl.DataFrame], names: Sequence[str]) -> pl.DataFram
     """
     import polars as pl
 
+    names = [safe_name(n) for n in names]
     try:
         return pl.concat(frames, how="diagonal_relaxed")
-    except pl.exceptions.PolarsError:
-        pass
+    except pl.exceptions.PolarsError as failure:
+        first = failure
     combined = frames[0]
     for frame, name in zip(frames[1:], names[1:], strict=True):
         for column in frame.columns:
@@ -234,5 +305,46 @@ def combine(frames: Sequence[pl.DataFrame], names: Sequence[str]) -> pl.DataFram
                     f"{combined.schema[column]} in the files before it; pass schema= with one "
                     "type for it, or narrow the pattern"
                 ) from None
-        combined = pl.concat([combined, frame], how="diagonal_relaxed")
-    return combined  # pragma: no cover -- diagonal_relaxed failed, so some pair conflicts
+        try:
+            combined = pl.concat([combined, frame], how="diagonal_relaxed")
+        except pl.exceptions.PolarsError:
+            break
+    raise SourceError(_not_combinable(frames, names, first))
+
+
+def _not_combinable(
+    frames: Sequence[pl.DataFrame], names: Sequence[str], failure: BaseException
+) -> str:
+    """Say which columns differ in type, and in which files, when no one pair is to blame.
+
+    Parameters
+    ----------
+    frames
+        One frame per file.
+    names
+        The files' names.
+    failure
+        What the combination raised.
+
+    Returns
+    -------
+    str
+        The message: columns that differ with their types per file, and the next step.
+    """
+    kinds: dict[str, dict[str, list[str]]] = {}
+    for frame, name in zip(frames, names, strict=True):
+        for column, dtype in frame.schema.items():
+            kinds.setdefault(column, {}).setdefault(str(dtype), []).append(name)
+    differing = [
+        f"column {column!r} is "
+        + ", ".join(
+            f"{dtype} in {', '.join(f'`{n}`' for n in where)}" for dtype, where in found.items()
+        )
+        for column, found in kinds.items()
+        if len(found) > 1
+    ]
+    detail = "; ".join(differing) or _problem(failure)
+    return (
+        f"the files cannot be combined: {detail}; pass schema= with one type for each such "
+        "column, or narrow the pattern"
+    )
