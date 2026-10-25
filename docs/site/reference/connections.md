@@ -343,13 +343,17 @@ local runner connects directly.
 | `postgresql`, `mariadb`, `tcp` | `relay_address` is `lakana-relay:<port>` (ports from 15001, in the order the asset declares its connections); connect there instead of `address["host"]`. TLS still checks the real host name. | `relay_address` is `None`: connect to `address` directly. |
 | `directory`, `sqlite-file` | `root_path` is `/ingest/<root>/<path>`, read-only. | `root_path` is `<directory>/<path>`, where `<directory>` is the root's entry in `LAKANA_RUN__INGESTION_ROOTS`. |
 
-A task reaches at most 64 hosts through the egress proxy, 16 database endpoints through its
-relay and 16 ingestion roots; an asset that declares more fails without retry, naming the cap:
-split it into several assets. The deploy already allows at most 16 connections per asset.
+An asset declares at most 16 connections (the deploy refuses more), and a connection has at most
+two endpoints (an `http` connection's base URL and token URL), so a task reaches at most 32 hosts
+through the egress proxy and 16 database endpoints through its relay, and mounts at most 16
+ingestion roots. One more limit: the hosts and ports of a task's HTTPS connections travel in one
+egress token of at most 8192 characters, which only very long host names exceed. An asset over a
+limit fails without retry, naming it: split its connections across several assets.
 
 **A connection changed during an attempt is retried.** The task gets the endpoints the worker
 read when the attempt started. If `lakana connection update` changes where the connection points
-(a host or port, or the root or path of a `directory` or `sqlite-file` connection) while the
+(a host or port, the root or path of a `directory` or `sqlite-file` connection, or its kind, when
+it was deleted and created again) while the
 attempt runs, its first `get` of that connection fails with ``connection `crm-db`
 changed after this attempt started; the next attempt uses the new address``, keeps nothing, and
 the attempt is retried while the asset has retries left (`retries:`, as for any transient
@@ -402,7 +406,8 @@ every `CONNECTION_*` event.
 | ``connection `crm-db` is not declared by asset `bronze.customers` `` (403) | The task asked for a connection its deployed asset does not declare. Add it to `@asset(connections=[...])` and deploy. |
 | ``connection `crm-db` is not in environment `dev` `` (403) | The asset declares it, but the task's environment has no connection of that name (it was deleted since the deploy). Create it: `lakana connection create crm-db --env dev ...`. |
 | ``only a running task can fetch a connection`` (403) | Only a task's own token, while the task runs, may fetch a credential. Read connections with `lakana connection show` instead; it never shows the secret. |
-| ``connection `crm-db` changed after this attempt started; the next attempt uses the new address`` | The connection's address (or a directory's root or path) changed while the attempt ran. The attempt is retried with the new address while the asset has retries left. To avoid it, change connections between runs. |
+| ``connection `crm-db` changed after this attempt started; the next attempt uses the new address`` | The connection's address (or a directory's root or path, or its kind) changed while the attempt ran. The attempt is retried with the new address while the asset has retries left. To avoid it, change connections between runs. |
 | ``` `exports` names ingestion root `shared`, which this worker does not have. Set it in `LAKANA_LAUNCHER__INGESTION_ROOTS` (Docker runner) or `LAKANA_RUN__INGESTION_ROOTS` (local runner). ``` | The connection's `root` is not set on the worker that took the task. An operator adds it to the setting the message names for that worker's runner and restarts it ([Ingestion roots](../how-to/run-python-tasks-in-containers.md#ingestion-roots)). Not retried. |
 | ``asset `x` reaches 70 hosts through the egress proxy; a task may reach at most 64 — split the asset`` (or ``… database endpoints; a task's relay forwards at most 16``, ``… ingestion roots; a task mounts at most 16``) | The asset declares more than one task can be given. Split it into several assets. Not retried. |
+| ``asset `x` declares more or longer host names than one task's egress token can carry (… characters of payload, at most 8192); split its connections across several assets`` | The host names of the asset's HTTPS connections are too long, together, for one task's egress token. Split the connections across several assets. Not retried. |
 | ``` `crm-db` is not declared by this asset: add it to @asset(connections=[...]) and deploy. ``` | `connections.get` was asked for a name the asset does not declare; nothing was sent. Add the name and deploy. This error is not retried. |

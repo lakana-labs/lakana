@@ -75,6 +75,16 @@ serve(8443, https)
 """
 """The source: TLS on 8443, the first PostgreSQL answer on 5432, an echo on 9000."""
 
+_NEIGHBOUR_HOST = "postgres.lakana.test"
+_NEIGHBOUR = """import socket
+server = socket.create_server(("0.0.0.0", 5432))
+while True:
+    connection, _ = server.accept()
+    connection.sendall(b"N")
+    connection.close()
+"""
+"""A stand-in for a service of the stack (Postgres) beside the source: it answers anyone."""
+
 _HELPERS = r"""
 import base64, hashlib, json, os, socket, ssl, sys, time
 from urllib.parse import urlsplit
@@ -155,6 +165,12 @@ class Sources:
         The trust bundle with the private authority of the source's certificate.
     bridge_gateway
         The gateway of Docker's default bridge, where the Docker host answers.
+    neighbour
+        The address of a second container on the source's network, which the test hooks do not
+        make reachable: a service of the stack on the egress service's network, as Postgres is
+        on the Compose bundle's.
+    egress
+        The egress container, whose copy of the refused ranges a test reads.
     """
 
     stack: Stack
@@ -162,6 +178,8 @@ class Sources:
     subnet: str
     bundle: bytes
     bridge_gateway: str
+    neighbour: str
+    egress: Any
 
 
 def _files(entries: dict[str, bytes]) -> bytes:
@@ -184,6 +202,25 @@ def _files(entries: dict[str, bytes]) -> bytes:
             info.size, info.mode, info.uid, info.gid = len(data), 0o400, 10001, 10001
             archive.addfile(info, io.BytesIO(data))
     return buffer.getvalue()
+
+
+def _address(container: Any, network: str) -> str:  # ruff: ignore[any-type] (Docker SDK)
+    """Read a container's address on a network.
+
+    Parameters
+    ----------
+    container
+        The container.
+    network
+        The network's name.
+
+    Returns
+    -------
+    str
+        Its IPv4 address there.
+    """
+    container.reload()
+    return str(container.attrs["NetworkSettings"]["Networks"][network]["IPAddress"])
 
 
 @pytest.fixture(scope="module")
@@ -229,10 +266,32 @@ def sources(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Sources]:
                 _files({"leaf.pem": certificate.read_bytes(), "leaf.key": key.read_bytes()}),
             )
             source.start()
-            start_egress(current, network=network.name, reachable=subnet)
+            neighbour = client.containers.run(
+                image,
+                ["python", "-I", "-c", _NEIGHBOUR],
+                detach=True,
+                user="10001:10001",
+                labels=current.labels,
+                network=network.name,
+                networking_config={
+                    network.name: client.api.create_endpoint_config(aliases=[_NEIGHBOUR_HOST])
+                },
+            )
+            # Only the source itself is made reachable: the rest of its network stays attached,
+            # and so refused, as the Compose network is for the real egress service and relays.
+            reachable = f"{_address(source, network.name)}/32"
+            egress = start_egress(current, network=network.name, reachable=reachable)
             bridge = client.networks.get("bridge").attrs["IPAM"]["Config"][0]["Gateway"]
-            with current.configured(relay_reachable=(subnet,)):
-                yield Sources(current, network.name, subnet, bundle, str(bridge))
+            with current.configured(relay_reachable=(reachable,)):
+                yield Sources(
+                    current,
+                    network.name,
+                    subnet,
+                    bundle,
+                    str(bridge),
+                    _address(neighbour, network.name),
+                    egress,
+                )
     finally:
         client.close()
 
@@ -417,8 +476,12 @@ def test_the_metadata_address_is_refused(sources: Sources) -> None:
     assert _relay_refused("169.254.169.254", 80) in log.splitlines()
 
 
-def test_an_attached_network_is_refused(sources: Sources) -> None:
-    """The stack's own server, on the task's network, is refused through proxy and relay."""
+def test_the_tasks_own_network_is_refused(sources: Sources) -> None:
+    """The stack's server, on the task's network, is refused through proxy and relay.
+
+    Its address is in the launcher's task range, which is refused as well as attached; the next
+    test proves the attached rule on its own.
+    """
     seen, log = _run(
         sources,
         "report(proxy=fetch('server', 8000), relay=relay(15001, size=1))\n",
@@ -429,6 +492,30 @@ def test_an_attached_network_is_refused(sources: Sources) -> None:
     assert seen["proxy"] == {"status": "HTTP/1.1 403 Forbidden", "body": _internal("server", 8000)}
     assert seen["relay"] == ""
     assert _relay_refused("server", 8000) in log.splitlines()
+
+
+def test_an_attached_network_outside_every_refused_range_is_refused(sources: Sources) -> None:
+    """A service beside the source, on the egress service's network, in no refused range.
+
+    Only the rule that the proxy and the relay never connect into a network they are attached
+    to (read from their kernel's routes) refuses it: this is how they keep away from Postgres and
+    SeaweedFS on the Compose bundle's network.
+    """
+    assert sources.stack.launcher is not None
+    address = ipaddress.ip_address(sources.neighbour)
+    refused = [ipaddress.ip_network(r) for r in sources.stack.launcher._refused]
+    assert not [r for r in refused if address in r], refused
+    host = _NEIGHBOUR_HOST
+    seen, log = _run(
+        sources,
+        f"report(proxy=fetch({host!r}, 5432), relay=relay(15001, size=1))\n",
+        egress_pairs=((host, 5432),),
+        relay=(RelayRoute(15001, host, 5432),),
+    )
+
+    assert seen["proxy"] == {"status": "HTTP/1.1 403 Forbidden", "body": _internal(host, 5432)}
+    assert seen["relay"] == ""
+    assert _relay_refused(host, 5432) in log.splitlines()
 
 
 def test_the_default_bridge_gateway_is_refused(sources: Sources) -> None:
@@ -645,11 +732,21 @@ def test_a_relay_refusal_reaches_the_task_log(sources: Sources) -> None:
 def test_the_source_network_gateway_is_refused_once_the_launcher_lists_it(
     sources: Sources,
 ) -> None:
-    """The source's network was made after the launcher started; its gateway is refused now."""
+    """The source's network was made after the launcher started; its gateway is refused now.
+
+    The proxy's own copy of the refused ranges holds it: the launcher wrote it again at a later
+    network open, and the proxy read the new file.
+    """
     network: Any = sources.stack.client.networks.get(sources.network)
     gateway = str(network.attrs["IPAM"]["Config"][0]["Gateway"])
     seen, _ = _run(
         sources, f"report(proxy=fetch({gateway!r}, 8443))\n", egress_pairs=((gateway, 8443),)
     )
+    stream, _ = sources.egress.get_archive(f"{APP}/refused.json")
+    with tarfile.open(fileobj=io.BytesIO(b"".join(stream))) as archive:
+        member = archive.extractfile("refused.json")
+        assert member is not None
+        copied = json.loads(member.read())["refused"]
 
     assert seen["proxy"] == {"status": "HTTP/1.1 403 Forbidden", "body": _internal(gateway, 8443)}
+    assert any(ipaddress.ip_address(gateway) in ipaddress.ip_network(r) for r in copied), copied

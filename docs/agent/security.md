@@ -1261,11 +1261,14 @@ connections; a connection opens exactly its endpoints and nothing else.
   in one select and computes each one's endpoints with core's
   `lakana_core.connections.endpoints.endpoints` (the same function the server's fetch uses). Only
   an isolated runner sends routes: `egress` (host:port pairs of `PROXY_KINDS`, at most
-  `MAX_EGRESS` = 64, the token's capacity), `relay` (one `RelayRoute` per endpoint of
+  `MAX_EGRESS` = 64, the token's pair capacity; with the deploy's 16 connections of at most two
+  endpoints the real ceiling is 32 pairs, or the token's 8192-character payload for very long
+  host names, which the launcher refuses with `EGRESS_TOKEN_TOO_LONG` and the worker turns into a
+  permanent failure naming the asset and the split), `relay` (one `RelayRoute` per endpoint of
   `RELAY_KINDS`, listen ports from 15001, at most 16) and `roots` (the root names of
   `MOUNT_KINDS`, at most 16). Over a cap the attempt fails permanently naming it, before any
   process starts. The task gets the routing in its stdin description (`grant`, `relay_port`,
-  `root_path`); the SDK's `fetch` compares the fetched endpoints with the `grant` and raises the
+  `root_path`); the SDK's `fetch` compares the fetched kind with the routing's and the endpoints with the `grant` and raises the
   retryable `ConnectionChanged` when a connection changed during the attempt, caching nothing.
 - **The launcher enforces them.** A run with `egress` gets the `egress` service on its network
   and a token of purpose `task` bound to the run's /29 and to its timeout and kill grace plus a
@@ -1285,7 +1288,8 @@ connections; a connection opens exactly its endpoints and nothing else.
 - **Proved on a real engine** by `test_docker_task_egress_integration.py` (docker tier, see
   `docs/agent/testing.md`): a declared HTTPS target through the proxy with the trust bundle, a
   database and a `tcp` route through the relay, an undeclared host, the metadata address, the
-  stack's server, the default bridge's gateway, a configured range (refused with it, reached
+  stack's server, a service on the egress service's network in no refused range (the
+  attached-network rule alone), the default bridge's gateway, a configured range (refused with it, reached
   without), a borrowed token, a client outside the task's network, and teardown after exit, stop
   and timeout. The tests reach their source on a network the proxy and relay are attached to
   through two test hooks that are never settings: `EgressSettings.reachable` and
@@ -1304,7 +1308,10 @@ connections; a connection opens exactly its endpoints and nothing else.
     in `LAKANA_EGRESS_REFUSED` (the docs say to, and to bind host services to loopback);
   - `tcp` traffic is encrypted only if the team's driver encrypts it; the relay never reads it;
   - a relay holds 64 MiB and 16 connections per route; a task can exhaust its own relay, never
-    another task's.
+    another task's;
+  - an ingestion root is mounted whole (`_ingestion_mount`): a task reads every path under a root
+    its connection names, other connections' paths included; the how-to says to give each group
+    of data that some tasks must not read a root of its own.
 
 ### The relay (M6)
 

@@ -422,7 +422,9 @@ Postgres and SeaweedFS's port 18333); loopback in every spelling, link-local and
 address; the gateway of every Docker network, listed at every network open, and the Docker host's
 well-known names; the ranges of `LAKANA_EGRESS_REFUSED`; any host:port the asset does not declare
 (403 naming what to declare). A task with routes refuses to start without the `egress` service.
-Proved on a real engine by `test_docker_task_egress_integration.py`.
+Proved on a real engine by `test_docker_task_egress_integration.py`, the attached-network rule on
+its own by a service beside the source on the egress service's network that no refused range
+holds.
 
 What it does not protect against. Each is accepted.
 
@@ -445,6 +447,9 @@ What it does not protect against. Each is accepted.
    the company proxy resolves the name again (residual 11 of "Task isolation (M7b)").
 7. **A task can exhaust its own relay** (64 MiB, 16 connections per route) and its share of the
    proxy (`LAKANA_EGRESS__MAX_CONNECTIONS_PER_NETWORK`), never another task's relay.
+8. **An ingestion root is mounted whole.** A task whose `directory` or `sqlite-file` connection
+   names a root reads every path under it, other connections' paths included. The how-to tells
+   operators to give each group of data that some tasks must not read a root of its own.
 
 ## CI OIDC exchange (#15)
 

@@ -160,9 +160,9 @@ def fetch(name: str) -> FetchedConnection:
     ConnectionRefused
         When the server refuses (its text, unchanged).
     ConnectionChanged
-        When its endpoints, or a mounted connection's root and path, are no longer those the
-        worker gave this attempt (retryable; nothing is kept, so the next attempt fetches it
-        again).
+        When its kind, its endpoints, or a mounted connection's root and path, are no longer
+        those the worker gave this attempt (retryable; nothing is kept, so the next attempt
+        fetches it again).
     """
     state = context.current()
     if name not in state.declared:
@@ -181,13 +181,33 @@ def fetch(name: str) -> FetchedConnection:
                 if isinstance(value, str):
                     context.register_secret(value)
         fetched = FetchedConnection.from_body(name, body, routing=state.connections.get(name, {}))
-        if not _matches_grant(fetched) or not _matches_mount(fetched):
+        if not _matches_kind(fetched) or not _matches_grant(fetched) or not _matches_mount(fetched):
             raise ConnectionChanged(
                 f"connection `{name}` changed after this attempt started; the next attempt uses "
                 "the new address"
             )
         _CACHE[name] = fetched
     return _CACHE[name]
+
+
+def _matches_kind(fetched: FetchedConnection) -> bool:
+    """Say whether a fetched connection still has the kind the worker routed.
+
+    The kind decides the route (proxy, relay or mount): a connection recreated with another
+    kind on the same host and port would get the proxy's or the relay's refusal, which names
+    the wrong next step.
+
+    Parameters
+    ----------
+    fetched
+        The connection as fetched, with its routing.
+
+    Returns
+    -------
+    bool
+        True without a ``kind`` in the routing; otherwise whether the two kinds are equal.
+    """
+    return "kind" not in fetched.routing or fetched.routing["kind"] == fetched.kind
 
 
 def _matches_grant(fetched: FetchedConnection) -> bool:

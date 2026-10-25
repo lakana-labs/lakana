@@ -24,7 +24,7 @@ from typing import Any, NoReturn
 from urllib.parse import quote, unquote, urlsplit, urlunsplit
 
 from lakana_worker.launcher.egress_token import MAX_TARGETS as MAX_TOKEN_TARGETS
-from lakana_worker.launcher.egress_token import valid_host
+from lakana_worker.launcher.egress_token import TOKEN_TOO_LONG, valid_host
 from lakana_worker.launcher.settings import LauncherSettings
 
 MAX_REQUEST_BYTES = 512 * 1024
@@ -50,6 +50,8 @@ RELAY_PIDS = MAX_RELAY_ROUTES * (RELAY_MAX_PER_PORT + 1) + 2 + 16
 route at their maximum, the main thread and Docker's init, and 16 to spare."""
 MAX_RELAY_REFUSED = 256
 """The most ranges a relay's plan refuses."""
+EGRESS_TOKEN_TOO_LONG = f"egress: {TOKEN_TOO_LONG}"
+"""How the refusal of a run whose egress pairs do not fit in one token begins."""
 EGRESS_MISSING = (
     "tasks with connections need the `egress` service; start it (Compose bundle) or remove the "
     "connection from the asset."

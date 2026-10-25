@@ -240,6 +240,29 @@ def test_a_connection_that_matches_its_grant_is_kept() -> None:
     assert fake.asked == ["crm-db"]
 
 
+def test_a_database_connection_recreated_as_https_on_the_same_endpoint_is_a_change() -> None:
+    """Same host and port, another kind: the relay route is useless and the token lacks the pair."""
+    rekinded = {
+        **_BODY,
+        "kind": "http",
+        "address": {"base_url": "https://db.example.com:5432"},
+        "settings": {},
+    }
+    _state(rekinded, routing={**_GRANT, "relay_port": 15001})
+
+    with pytest.raises(ConnectionChanged) as caught:
+        connections.get("crm-db")
+    assert caught.value.retryable is True
+
+
+def test_an_https_connection_recreated_as_a_database_on_the_same_endpoint_is_a_change() -> None:
+    """The reverse: the worker granted the proxy, so no relay port exists for the new kind."""
+    _state(_BODY, routing={"kind": "http", "grant": [["db.example.com", 5432]]})
+
+    with pytest.raises(ConnectionChanged):
+        connections.get("crm-db")
+
+
 def test_a_grant_that_is_not_a_list_reads_as_a_change() -> None:
     """A broken description fails safe: the attempt is retried rather than run unchecked."""
     _state(_BODY, routing={"kind": "postgresql", "grant": "db.example.com"})

@@ -47,7 +47,7 @@ from typing import Protocol
 
 from lakana_core.runs.failures import FailureCode
 from lakana_worker.git import HFS_IGNORABLE, fold_name
-from lakana_worker.launcher.requests import EGRESS_MISSING, allowed_roots
+from lakana_worker.launcher.requests import EGRESS_MISSING, EGRESS_TOKEN_TOO_LONG, allowed_roots
 from lakana_worker.launcher_client import (
     RELEASE_SKEW,
     LauncherClient,
@@ -1310,12 +1310,19 @@ def _own_refusal(refusal: str, task: PythonTask) -> str | None:
     Returns
     -------
     str or None
-        `EGRESS_MISSING` as it is; `MISSING_ROOT` for the first of the task's roots the
-        launcher does not list; `None` for every other refusal (the operator's problem, given
-        the generic text).
+        `EGRESS_MISSING` as it is; for egress pairs too long for one token, a text naming the
+        asset and the split; `MISSING_ROOT` for the first of the task's roots the launcher does
+        not list; `None` for every other refusal (the operator's problem, given the generic
+        text).
     """
     if refusal == EGRESS_MISSING:
         return EGRESS_MISSING
+    if refusal.startswith(EGRESS_TOKEN_TOO_LONG):
+        size = refusal.removeprefix(EGRESS_TOKEN_TOO_LONG).split(";", 1)[0].strip()
+        return (
+            f"asset `{task.table}` declares more or longer host names than one task's egress "
+            f"token can carry {size}; split its connections across several assets"
+        )
     allowed = allowed_roots(refusal)
     if allowed is None:
         return None

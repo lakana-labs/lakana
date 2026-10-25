@@ -106,9 +106,11 @@ declares (`@asset(connections=["crm-db"])`), and nothing else:
   connection from 15001, each forwarded to that connection's host and port only.
   `connections.get(...).relay_address` names it. The relay never reads the bytes: TLS checks the
   real host name, as before.
-- **Directories** (`directory` and `sqlite-file` connections) are read-only mounts at
-  `/ingest/<root>/<path>`, from `LAKANA_LAUNCHER__INGESTION_ROOTS`
-  (see [Ingestion roots](#ingestion-roots)).
+- **Directories** (`directory` and `sqlite-file` connections) are read-only mounts from
+  `LAKANA_LAUNCHER__INGESTION_ROOTS` (see [Ingestion roots](#ingestion-roots)); the task reads its
+  connection at `/ingest/<root>/<path>`. The launcher mounts the **whole root**, so a task can
+  also read the other paths under that root, those of other connections included. Give each
+  group of data that some tasks must not read a root of its own.
 
 What a task cannot reach, with or without connections: another task, the Lakana stack (the
 database, the object store, the launcher; the server only through its own network), the cloud
@@ -122,7 +124,9 @@ running, such a task fails without retry: ``tasks with connections need the `egr
 start it (Compose bundle) or remove the connection from the asset.`` A task without connections, or
 with directory connections only, does not need it.
 
-**Limits.** A task reaches at most 64 HTTPS hosts and 16 database endpoints. A relay has 64 MiB
+**Limits.** A task reaches at most 32 HTTPS hosts (16 connections of at most two endpoints each,
+whose host names must also fit in one egress token) and 16 database endpoints; an asset over a
+limit fails without retry, naming it. A relay has 64 MiB
 and carries at most 16 connections at once per database connection; the 17th is closed, and the
 task's log says so. A connection the relay refuses or closes is explained in the task's log, on a
 line that starts with `lakana-relay:`.

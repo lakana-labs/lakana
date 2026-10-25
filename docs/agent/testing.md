@@ -1370,20 +1370,24 @@ thus has its gateway refused from the next run on, as in production.
 `test_docker_task_egress_integration.py` (all `slow`) proves task egress (#308): a source container
 on a labelled network `<stack>-sources` serves TLS on 8443 (a private authority's leaf for
 `target.lakana.test`), a stand-in PostgreSQL that answers the first client message on 5432, and an
-echo on 9000; the egress service is created on that network with `reachable=<its subnet>`, and the
-module runs under `Stack.configured(relay_reachable=(subnet,))`, the relay's test hook (never a
-setting). `Stack.run(..., egress=..., relay=...)` passes the routes the worker would send. The
+echo on 9000, and a neighbour (`postgres.lakana.test`, a stand-in for a stack service) on the same
+network; the egress service is created on that network with `reachable=<the source's /32>`, and
+the module runs under `Stack.configured(relay_reachable=(<the same /32>,))`, the relay's test hook
+(never a setting), so the rest of the network stays attached and refused. `Stack.run(..., egress=..., relay=...)` passes the routes the worker would send. The
 cases: a declared HTTPS target through `LAKANA_EGRESS_PROXY` with the trust bundle (and no other
 proxy variable); the first PostgreSQL message and a mebibyte of every byte value through the
 relay; an undeclared host and port (the whole 403 with the task hint); the metadata address, the
-stack's server and the default bridge's gateway (read from Docker), each refused by the proxy
+stack's server on the task's network (also in the task range), the neighbour (attached and in no
+refused range, so only the attached-network rule refuses it) and the default bridge's gateway
+(read from Docker), each refused by the proxy
 (whole text) and the relay (the whole `lakana-relay: refused ...` line in the run's log); a range
 of `egress_refused` naming the source's network, refused through both, and the same target reached
 without it (a refused range wins over `reachable`); another task's token (`this token belongs to
 another client network`, its container's environment read with `Stack.container`); a client on
 the outward network, as root with `NET_ADMIN`, routing the task's /29 through the relay (refused
 before the relay sees it on Engine 28; the relay's own outward address answers nothing); the
-source network's gateway, made after the launcher started; and teardown after exit, stop and
+source network's gateway, made after the launcher started, which the proxy's own copy of
+`refused.json` now holds; and teardown after exit, stop and
 timeout (nothing labelled with the run's id, no token expiry, the subnet resting).
 
 The test's Docker client and the launcher use one socket: `DOCKER_HOST` when it is

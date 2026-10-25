@@ -13,7 +13,7 @@ import pytest
 from fake_launcher import FakeLauncher, refusing
 
 from lakana_core.runs.failures import FailureCode
-from lakana_worker.launcher.requests import EGRESS_MISSING
+from lakana_worker.launcher.requests import EGRESS_MISSING, EGRESS_TOKEN_TOO_LONG
 from lakana_worker.launcher_client import (
     LauncherClient,
     LauncherTimedOut,
@@ -403,6 +403,25 @@ def test_an_egress_missing_refusal_is_its_own_text(tmp_path: Path) -> None:
     outcome, _, _ = _run(tmp_path, launcher, egress=(("api.example.com", 443),))
 
     assert outcome.error_message == EGRESS_MISSING
+    assert outcome.retryable is False
+    assert outcome.failure_code is FailureCode.NO_RUNTIME
+
+
+def test_a_token_too_long_refusal_names_the_asset_and_the_split(tmp_path: Path) -> None:
+    """Not the operator's settings: the asset's host names do not fit in one task's token."""
+    refusal = (
+        f"{EGRESS_TOKEN_TOO_LONG} (8858 characters of payload, at most 8192); grant fewer or "
+        "shorter host names"
+    )
+    launcher = FakeLauncher(scripts={"run": refusing(refusal)})
+
+    outcome, _, _ = _run(tmp_path, launcher, egress=(("api.example.com", 443),))
+
+    assert outcome.error_message == (
+        "asset `gold.scores` declares more or longer host names than one task's egress token "
+        "can carry (8858 characters of payload, at most 8192); split its connections across "
+        "several assets"
+    )
     assert outcome.retryable is False
     assert outcome.failure_code is FailureCode.NO_RUNTIME
 

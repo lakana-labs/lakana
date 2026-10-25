@@ -27,6 +27,7 @@ from launcher_fakes import FakeEngine, settings
 from lakana_worker.launcher.egress_token import read_key, verify
 from lakana_worker.launcher.engine import EngineError
 from lakana_worker.launcher.requests import (
+    EGRESS_TOKEN_TOO_LONG,
     INGEST_PROBE_SCRIPT,
     RELAY_COMMAND,
     RELAY_PIDS,
@@ -3369,6 +3370,20 @@ def test_egress_pairs_that_do_not_fit_in_a_token_are_refused_and_leave_nothing(
 
     assert engine.created("task") == []
     assert "lakana-task-t1" not in engine.networks
+
+
+def test_pairs_too_long_for_a_token_are_refused_with_the_fixed_beginning(tmp_path: Path) -> None:
+    """32 pairs of long host names fit the count but not the token: the worker reads the text."""
+    engine = FakeEngine()
+    launcher = _started(engine, tmp_path)
+    label = "h" * 62
+    pairs = tuple((f"{label}.{label}.{label}.n{n:02d}.example.com", 443) for n in range(32))
+
+    with pytest.raises(Refused) as caught:
+        launcher.run(_egress_run(egress=pairs), lambda line: None)
+
+    assert str(caught.value).startswith(EGRESS_TOKEN_TOO_LONG)
+    assert engine.created("task") == []
 
 
 def test_a_relay_fails_the_run_when_docker_cannot_describe_an_egress_network(
