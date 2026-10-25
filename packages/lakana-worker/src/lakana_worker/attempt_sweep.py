@@ -1,16 +1,17 @@
 """Removal of attempt directories a dead worker left behind.
 
 A Python task's private directory lives under ``<worker cache>/attempts`` and
-is removed when the attempt ends. A worker that is killed mid-task never gets
-there. `AttemptSweeper` removes such leftovers, and it is the only code that
-deletes in that directory without having created what it deletes, so it is
-deliberately narrow:
+is removed when the attempt ends, as is a connection check's under the Docker
+runner. A worker that is killed mid-task never gets there. `AttemptSweeper`
+removes such leftovers, and it is the only code that deletes in that directory
+without having created what it deletes, so it is deliberately narrow:
 
 - it lists only the direct children of the worker's own work directory, and
   only when that directory is the private one the worker itself requires
   (a real directory, owned by the worker's user, mode 0700);
 - it removes only a real directory, owned by the worker's user, whose name is
-  one `tempfile.mkdtemp(prefix="attempt-")` produces; anything else is left
+  one `tempfile.mkdtemp(prefix="attempt-")` produces, or the
+  ``attempt-check_`` of a connection check's directory; anything else is left
   alone and logged once;
 - removal is `remove_private_tree`, which never follows a symlink;
 - a worker holds a shared `flock` on a descriptor of its attempt directory from
@@ -47,8 +48,9 @@ from lakana_worker.processes import (
 
 logger = logging.getLogger(__name__)
 
-_ATTEMPT_NAME = re.compile(r"attempt-[a-z0-9_]{8}")
-"""What `tempfile.mkdtemp(prefix="attempt-")` creates: eight lowercase letters, digits or ``_``."""
+_ATTEMPT_NAME = re.compile(r"attempt-(?:check_)?[a-z0-9_]{8}")
+"""What `tempfile.mkdtemp` creates with the prefix ``attempt-`` (a task) or ``attempt-check_`` (a
+connection check): eight lowercase letters, digits or ``_`` after it."""
 
 
 _OPEN_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC

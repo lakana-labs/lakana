@@ -862,8 +862,9 @@ code in this area has to know.
   `LAKANA_RUN__RUNNER=local` keep this, and the trust domain includes holders of
   `MANAGE_CONNECTION` there: a connection test dials from the worker's host (any address the
   connection names; paths under the ingestion roots), a probe a data engineer without `DEPLOY`
-  did not have before. In this version a `DockerRunner` worker runs no connection tests; from
-  the next release a test runs there in a container under a task's own network rules.
+  did not have before. A `DockerRunner` worker runs a test through the launcher's `check` op
+  instead (see "Task egress: connections, the proxy and the relay (M6)"): the task image, the
+  task's network rules for that one connection, so it reaches only what such a task could.
 - **`DockerRunner` isolates projects, not hostile code.** Each task runs in a container that the
   launcher (`lakana_worker.launcher`) starts with fixed fields (`requests.run_container_spec`,
   `_host_config`): uid 10001 in group 10003 (`TASK_USER`; builds run as 10002:10002, so a task
@@ -1283,6 +1284,27 @@ connections; a connection opens exactly its endpoints and nothing else.
   before any network or container exists (`EGRESS_MISSING`, a permanent failure with its own
   text). Every refusal of an address is the same `INTERNAL` reason, with the task's next step
   (`give the connection an address outside the Lakana stack (lakana connection update)`).
+- **The connection check (`check` op).** Under the docker runner `ConnectionTestLoop`
+  (`connection_tests.py`) asks `LauncherClient.check` with exactly the routes a task with that one
+  connection would get, built from `connection_routing`: the `egress` pairs of a proxy kind, one
+  relay route per endpoint of a database or `tcp` kind (ports from 15001, `relay_port` in the
+  routing), the root of a mounted kind (`root_dir` `/ingest/<root>`). The worker's trust bundle is
+  written into a private `attempt-check_*` directory (0700, under the work directory, removed when
+  the check ends; `AttemptSweeper` sweeps a dead worker's). The launcher (`Launcher.check`,
+  `check_container_spec`) runs the task image's own environment, `CHECK_ENTRY` =
+  `/opt/lakana-check/bin/python -I -m lakana.ingest._check`; the request has no image, command,
+  environment, code or limit field, only `python` from `LAUNCHER__IMAGES`. The container runs as the
+  task user with the fixed `CHECK_LIMITS` (256 MiB, 0.5 CPU, 64 pids, 30 s, kill grace 1 s), a
+  16 MiB `/tmp`, no `/code`, `/env` or `/work`, only the attempt's `trust` subpath and the allowed
+  roots, read-only. Its network holds no server (the connection and its secret travel on stdin): the
+  egress service joins with a token of purpose `connection-test` when it has pairs, minted after the
+  image pull, and its relay starts when it has routes; `stop`, the abandon watcher and `cleanup`
+  treat a `check` name and its relay like a run's. The worker keeps at most 64 KiB of output, takes
+  the last answer line and masks it again before storing it; no output reaches a log line. A
+  refusal, an unreachable launcher or no answer within `CHECK_WAIT_SECONDS` (60) records `failed`
+  naming the launcher's log. `/opt/lakana-check` is installed from the release's own lakana wheel
+  and the `uv export` of its locked dependencies by hash (`--require-hashes`), and is not writable by
+  the task user.
 - **What a task cannot reach, connections or not**: another task's network (each run its own
   /29; the relay and the proxy refuse the launcher's whole range), the Compose stack (attached
   networks; the relay sits on the outward network, the stack's `default`, so SeaweedFS's 18333 and

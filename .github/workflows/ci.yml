@@ -671,6 +671,7 @@ jobs:
         run: |
           uv build --all-packages -o dist
           uv export --frozen --no-dev --all-packages --no-emit-workspace -o dist/requirements.txt
+          uv export --frozen --package lakana --no-dev --no-emit-project --format requirements-txt -o dist/check-requirements.txt
           docker build -t lakana:ci .
           docker build -f Dockerfile.task --build-arg PYTHON=3.14 -t lakana-task:ci-py3.14 .
           uv run --locked bash scripts/compose_smoke_test.sh lakana:ci lakana-task:ci

@@ -1,2 +1,4 @@
 *
 !packages/lakana-worker/src/lakana_worker/launcher/task_build.py
+!dist/lakana-*.whl
+!dist/check-requirements.txt

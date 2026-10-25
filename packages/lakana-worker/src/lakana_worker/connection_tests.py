@@ -7,13 +7,15 @@ open and records the outcome while the lease is still this worker's
 worker that lost it records nothing and logs at info level).
 
 Under the local runner the check is a subprocess of the worker's own Python
-(``python -I -m lakana.ingest._check``): Lakana's own code, never the project's. The connection
-and its secret travel on its standard input, never in its arguments or environment, and its
-message is masked once more here before it is stored. Neither the secret nor an exception's text
-appears in a log line: a failure is logged by its type.
-
-The Docker runner's check (a container of the task image) arrives with Task 20b; until then the
-loop refuses to be built for it, and a test stays queued.
+(``python -I -m lakana.ingest._check``): Lakana's own code, never the project's. Under the
+Docker runner the launcher's ``check`` op runs it in a container of the task image, from the
+image's own ``/opt/lakana-check`` environment, with the network rules a task with this one
+connection would get: its token for the egress proxy, its relay and its read-only root, and the
+worker's trust bundle in a private attempt directory (``attempt-check_*``) that is removed
+afterwards. Either way the connection and its secret travel on the check's standard input, never
+in its arguments or environment, and its message is masked once more here before it is stored.
+Neither the secret nor an exception's text appears in a log line: a failure is logged by its
+type.
 """
 
 from __future__ import annotations
@@ -21,27 +23,47 @@ from __future__ import annotations
 import importlib.util
 import json
 import logging
+import posixpath
 import subprocess  # nosec B404 -- runs Lakana's own module with a fixed argument list
 import sys
+import tempfile
 import threading
 import time
-from collections.abc import Mapping
+import uuid
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session
 
-from lakana_core.connections.endpoints import endpoints
+from lakana_core.connections.endpoints import MOUNT_KINDS, PROXY_KINDS, endpoints
 from lakana_core.connections.fetch import connection_secret
 from lakana_core.connections.kinds import ConnectionKind
 from lakana_core.connections.service import ConnectionTestQueue
 from lakana_core.db import db_now
 from lakana_core.models import Connection, ConnectionTest, Environment
 from lakana_core.secrets.keys import KeyProvider
-from lakana_worker.processes import OutputRedactor
-from lakana_worker.python_tasks import connection_routing, local_root_dir
+from lakana_worker.launcher.requests import CHECK_LIMITS, INGEST_MOUNT, allowed_roots
+from lakana_worker.launcher_client import (
+    CHECK_WAIT_SECONDS,
+    RELEASE_SKEW,
+    LauncherRefused,
+    LauncherTimedOut,
+    LauncherUnavailable,
+    release_skew,
+)
+from lakana_worker.processes import (
+    OutputRedactor,
+    UnsafeDirectory,
+    prepare_private_directory,
+    remove_private_tree,
+)
+from lakana_worker.python_tasks import RELAY_FIRST_PORT, connection_routing, local_root_dir
+from lakana_worker.runners import MISSING_ROOT
 from lakana_worker.task_outcome import TaskFailure
+from lakana_worker.trust import install_trust
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +110,66 @@ CHECK_TIMED_OUT = (
 )
 NOT_RUN = "the check could not run (see the worker's log)"
 CHECK_BROKEN = "the check ended without an answer (see the worker's log)"
+LAUNCHER_LOG = "see `docker compose logs launcher`"
+CHECK_OOM = (
+    f"the check ran out of its {CHECK_LIMITS.memory_mb} MiB of memory before it answered; "
+    f"{LAUNCHER_LOG}"
+)
+CHECK_STOPPED = f"the launcher stopped the check before it answered; {LAUNCHER_LOG}"
+NO_ATTEMPT_DIR = (
+    "the worker's task directory is not private; an operator must make it a real directory "
+    "owned by the worker's user with mode 0700 (the worker log names it)"
+)
+CHECK_PREFIX = "attempt-check_"
+"""Starts the name of a check's attempt directory; `tempfile.mkdtemp` adds eight characters."""
+PYTHON = f"{sys.version_info.major}.{sys.version_info.minor}"
+"""The task image a check runs in: the worker's own Python, as for a task that names none."""
+
+
+class CheckClient(Protocol):
+    """What the Docker runner's check needs of `LauncherClient`."""
+
+    def check(
+        self, fields: Mapping[str, object], *, timeout: float = CHECK_WAIT_SECONDS
+    ) -> tuple[dict[str, object], bytes]:
+        """Run one check and collect its output.
+
+        Parameters
+        ----------
+        fields
+            The ``check`` request's fields without ``op`` and the token.
+        timeout
+            Seconds to the result.
+
+        Returns
+        -------
+        tuple
+            The launcher's result and the check's output.
+        """
+        ...  # pragma: no cover
+
+
+@dataclass(frozen=True)
+class DockerCheck:
+    """What a worker with the Docker runner runs its checks with.
+
+    Parameters
+    ----------
+    client
+        The launcher.
+    owner
+        This worker's launcher owner (`claim_owner`), the one its tasks run under.
+    work_dir
+        The attempts directory, the launcher's work volume.
+    trust
+        The worker's trust bundle (`LAKANA_RUN__CA_BUNDLE`), written into each check's attempt;
+        `None` for none.
+    """
+
+    client: CheckClient
+    owner: str
+    work_dir: Path
+    trust: bytes | None = None
 
 
 def _mask(text: str, secrets: list[str]) -> str:
@@ -110,6 +192,73 @@ def _mask(text: str, secrets: list[str]) -> str:
     redactor.feed(text.encode("utf-8", "replace"))
     redactor.close()
     return masked.decode("utf-8", "replace")
+
+
+def _answer(output: str) -> tuple[str, str] | None:
+    """Read the check's answer: the last line of its output that is one.
+
+    Parameters
+    ----------
+    output
+        What the check printed; a container's output may hold other lines before it.
+
+    Returns
+    -------
+    tuple of str or None
+        The outcome and message; `None` when no line is an answer with a known outcome.
+    """
+    for line in reversed(output.strip().splitlines()):
+        try:
+            answer = json.loads(line)
+            outcome, message = str(answer["outcome"]), str(answer["message"])
+        except (ValueError, KeyError, TypeError):
+            continue
+        return (outcome, message) if outcome in OUTCOMES else None
+    return None
+
+
+def _skew(refusal: str) -> bool:
+    """Say whether a refusal means the worker and the launcher are different releases.
+
+    Parameters
+    ----------
+    refusal
+        The launcher's reason.
+
+    Returns
+    -------
+    bool
+        `True` for a launcher that does not know the ``check`` op (an earlier release) or
+        disagrees on its fields.
+    """
+    return release_skew(refusal) or refusal.startswith("op must be one of")
+
+
+def _root_refusal(refusal: str, connection: str, roots: list[str]) -> str | None:
+    """Say whether the launcher refused the check over the connection's ingestion root.
+
+    Parameters
+    ----------
+    refusal
+        The launcher's reason.
+    connection
+        The connection's name.
+    roots
+        The roots the check asked for: none, or the connection's one.
+
+    Returns
+    -------
+    str or None
+        `MISSING_ROOT` when the launcher does not list the root; the launcher's own reason when
+        its probe found the root unsafe (it names the root and what to do); `None` otherwise.
+    """
+    for root in roots:
+        allowed = allowed_roots(refusal)
+        if allowed is not None and root not in allowed:
+            return MISSING_ROOT.format(connection=connection, root=root)
+        if f"ingestion root '{root}'" in refusal:
+            return refusal
+    return None
 
 
 def _has_check() -> bool:
@@ -139,25 +288,27 @@ class ConnectionTestLoop:
     key_provider
         Unwraps a connection's secret.
     runner_kind
-        The worker's runner. Only ``local`` is supported in this version.
+        The worker's runner: ``local`` or ``docker``.
     ingestion_roots
-        The worker's ingestion roots (name to directory), for ``directory`` and ``sqlite-file``
-        connections.
-    client
-        Reserved for the Docker runner's launcher client (Task 20b); unused.
+        The local runner's ingestion roots (name to directory), for ``directory`` and
+        ``sqlite-file`` connections; the Docker runner's launcher mounts its own.
+    docker
+        The launcher, owner, work directory and trust bundle of the Docker runner; required
+        with ``docker``, ignored otherwise.
     stop
         The event that ends the loop; a new one when `None`.
     idle_seconds
         The sleep when no test was queued, and after a failing step.
     trust
         A PEM file the check trusts in addition to Python's own roots (the local runner's trust
-        bundle), passed as ``LAKANA_CA_BUNDLE``; `None` for none.
+        bundle), passed as ``LAKANA_CA_BUNDLE``; `None` for none. The Docker runner's bundle
+        is `DockerCheck.trust`.
 
     Raises
     ------
     ValueError
-        For a runner other than ``local``: the Docker runner's check is not built yet, and
-        running it on the worker's own network would test a different path than a task takes.
+        For a runner other than ``local`` and ``docker``, and for ``docker`` without `docker`:
+        a check on the worker's own network would test a different path than a task takes.
     """
 
     def __init__(
@@ -168,21 +319,23 @@ class ConnectionTestLoop:
         key_provider: KeyProvider,
         runner_kind: str,
         ingestion_roots: Mapping[str, str],
-        client: object | None = None,
+        docker: DockerCheck | None = None,
         stop: threading.Event | None = None,
         idle_seconds: float = IDLE_SECONDS,
         trust: Path | None = None,
     ) -> None:
-        if runner_kind != "local":
+        if runner_kind not in ("local", "docker"):
             raise ValueError(
-                f"connection tests run under the local runner only (this worker's runner is "
-                f"`{runner_kind}`); the Docker runner's check is not available yet"
+                f"connection tests run under the local or the docker runner, not the runner "
+                f"`{runner_kind}`"
             )
+        if runner_kind == "docker" and docker is None:
+            raise ValueError("the Docker runner's connection check needs the launcher")
         self._engine = engine
         self._owner = owner
         self._keys = key_provider
         self._roots = dict(ingestion_roots)
-        self._client = client
+        self._docker = docker if runner_kind == "docker" else None
         self._stop = stop if stop is not None else threading.Event()
         self._idle = idle_seconds
         self._trust = trust
@@ -200,6 +353,25 @@ class ConnectionTestLoop:
         except Exception:  # LakanaError, whatever the provider raises: no usable key
             return False
         return True
+
+    def _root_dir(self, connection: str) -> Callable[[str], str]:
+        """Say where the check reads an ingestion root.
+
+        Parameters
+        ----------
+        connection
+            The connection's name, for the message of a missing root.
+
+        Returns
+        -------
+        Callable
+            Maps a root to ``/ingest/<root>`` under the Docker runner (the launcher mounts it,
+            or refuses a root it lacks); to the worker's own directory for it under the local
+            runner, raising `TaskFailure` for a root it lacks.
+        """
+        if self._docker is not None:
+            return lambda root: posixpath.join(INGEST_MOUNT, root)
+        return lambda root: local_root_dir(self._roots, root, connection)
 
     def _request(
         self, session: Session, test: ConnectionTest
@@ -241,10 +413,13 @@ class ConnectionTestLoop:
                 kind,
                 row.address,
                 row.settings,
-                root_dir=lambda root: local_root_dir(self._roots, root, row.name),
+                root_dir=self._root_dir(row.name),
             )
         except TaskFailure as failure:
             return "root_unavailable", failure.message
+        if self._docker is not None and kind not in MOUNT_KINDS and kind not in PROXY_KINDS:
+            # A database or tcp connection goes through the check's relay, as a task's does.
+            routing["relay_port"] = RELAY_FIRST_PORT
         connection = {
             "name": row.name,
             "kind": kind.value,
@@ -259,6 +434,28 @@ class ConnectionTestLoop:
         return connection, routing
 
     def _run_check(self, connection: dict[str, Any], routing: dict[str, Any]) -> tuple[str, str]:
+        """Run the check the way this worker's runner runs a task.
+
+        Parameters
+        ----------
+        connection
+            The check's ``connection`` input, secret included.
+        routing
+            The check's ``routing`` input.
+
+        Returns
+        -------
+        tuple of str
+            The outcome and message, masked.
+        """
+        secrets = [v for v in (connection["secret"] or {}).values() if isinstance(v, str)]
+        if self._docker is not None:
+            outcome, message = self._run_in_container(self._docker, connection, routing)
+        else:
+            outcome, message = self._run_locally(connection, routing)
+        return outcome, _mask(message, secrets)
+
+    def _run_locally(self, connection: dict[str, Any], routing: dict[str, Any]) -> tuple[str, str]:
         """Run the check in a subprocess of this worker's Python.
 
         Parameters
@@ -271,13 +468,12 @@ class ConnectionTestLoop:
         Returns
         -------
         tuple of str
-            The outcome and message, masked. A check that did not run, did not finish or
+            The outcome and message, unmasked. A check that did not run, did not finish or
             answered nonsense is ``failed`` (``timeout`` for the time limit), with a message
             that names the next step.
         """
         if not _has_check():
             return "failed", NO_LAKANA
-        secrets = [v for v in (connection["secret"] or {}).values() if isinstance(v, str)]
         env = {"LAKANA_CA_BUNDLE": str(self._trust)} if self._trust is not None else {}
         try:
             done = subprocess.run(  # nosec B603 -- fixed argv, own module
@@ -292,15 +488,106 @@ class ConnectionTestLoop:
         except subprocess.TimeoutExpired:
             logger.warning("A connection check did not finish within %d s.", CHECK_TIMEOUT_SECONDS)
             return "timeout", CHECK_TIMED_OUT
-        try:
-            answer = json.loads(done.stdout.strip().splitlines()[-1])
-            outcome, message = str(answer["outcome"]), str(answer["message"])
-        except (IndexError, ValueError, KeyError, TypeError):
+        answer = _answer(done.stdout)
+        if answer is None:
             logger.warning("A connection check ended without an answer (exit %s).", done.returncode)
             return "failed", CHECK_BROKEN
-        if outcome not in OUTCOMES:
+        return answer
+
+    def _run_in_container(
+        self, docker: DockerCheck, connection: dict[str, Any], routing: dict[str, Any]
+    ) -> tuple[str, str]:
+        """Have the launcher run the check in a container of the task image.
+
+        The request carries what a task with this one connection would get: the proxy pairs
+        of an HTTPS kind, a relay route per endpoint of a database or ``tcp`` kind, the root of a
+        mounted kind, and the trust bundle, written into a private attempt directory that is
+        removed when the check ends.
+
+        Parameters
+        ----------
+        docker
+            The launcher, owner, work directory and trust bundle.
+        connection
+            The check's ``connection`` input, secret included.
+        routing
+            The check's ``routing`` input.
+
+        Returns
+        -------
+        tuple of str
+            The outcome and message, unmasked. A launcher that refused, could not be reached or
+            did not answer in time makes ``failed`` with its reason and the launcher's log.
+        """
+        kind = routing["kind"]
+        grant = [(str(host), int(port)) for host, port in routing.get("grant", [])]
+        egress = list(dict.fromkeys(grant)) if kind in PROXY_KINDS else []
+        relay = (
+            [
+                {"listen": RELAY_FIRST_PORT + i, "host": host, "port": port}
+                for i, (host, port) in enumerate(grant)
+            ]
+            if "relay_port" in routing
+            else []
+        )
+        roots = [routing["root"]] if "root" in routing else []
+        try:
+            prepare_private_directory(docker.work_dir)
+            attempt = Path(tempfile.mkdtemp(prefix=CHECK_PREFIX, dir=docker.work_dir))
+        except UnsafeDirectory:
+            logger.warning(
+                "The task directory %s is not private: it must be a real directory owned by the "
+                "worker's user with mode 0700. Connection tests fail until it is.",
+                docker.work_dir,
+            )
+            return "failed", NO_ATTEMPT_DIR
+        except OSError as exc:
+            return "failed", f"could not prepare the check's directory: {exc.strerror or exc}"
+        try:
+            if docker.trust is not None:
+                try:
+                    install_trust(docker.trust, attempt)
+                except OSError as exc:
+                    return "failed", (
+                        f"could not prepare the check's directory: {exc.strerror or exc}"
+                    )
+            fields: dict[str, object] = {
+                "check": uuid.uuid4().hex,
+                "owner": docker.owner,
+                "python": PYTHON,
+                "attempt": attempt.name,
+                "stdin": json.dumps({"connection": connection, "routing": routing}),
+                "roots": roots,
+                "trust": docker.trust is not None,
+                "egress": [[host, port] for host, port in egress],
+                "relay": relay,
+            }
+            try:
+                result, output = docker.client.check(fields, timeout=CHECK_WAIT_SECONDS)
+            except LauncherRefused as exc:
+                root = _root_refusal(str(exc), connection["name"], roots)
+                if root is not None:
+                    return "root_unavailable", root
+                next_step = RELEASE_SKEW if _skew(str(exc)) else LAUNCHER_LOG
+                return "failed", f"the launcher refused the check: {exc}; {next_step}"
+            except (LauncherUnavailable, LauncherTimedOut) as exc:
+                return "failed", f"{exc}; {LAUNCHER_LOG}"
+        finally:
+            if not remove_private_tree(attempt):
+                logger.warning("The check's directory %s was not removed completely.", attempt)
+        if result.get("timed_out") is True:
+            return "timeout", CHECK_TIMED_OUT
+        if result.get("oom_killed") is True:
+            return "failed", CHECK_OOM
+        if result.get("stopped") is True:
+            return "failed", CHECK_STOPPED
+        answer = _answer(output.decode("utf-8", "replace"))
+        if answer is None:
+            logger.warning(
+                "A connection check ended without an answer (exit %s).", result.get("exit")
+            )
             return "failed", CHECK_BROKEN
-        return outcome, _mask(message, secrets)
+        return answer
 
     def step(self) -> bool:
         """Claim one test, run it and record the result.

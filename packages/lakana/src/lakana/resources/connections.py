@@ -139,8 +139,8 @@ def _still(environment: str, name: str, test: ConnectionTest, timeout: float) ->
     again = f"Look again with lakana connection test {name} --env {environment} --id {test.id}"
     if test.state == "queued":
         found = (
-            "no worker has taken it. In this version only a worker with the local runner runs "
-            "connection tests; under the Docker runner they arrive in the next release. "
+            "no worker has taken it. A worker of either runner runs connection tests: check "
+            "that one is running (`docker compose ps worker`, or the `lakana local` terminal). "
             f"{again}"
         )
     else:

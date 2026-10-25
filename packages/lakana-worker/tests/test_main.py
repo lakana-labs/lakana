@@ -27,7 +27,7 @@ from lakana_core.projects.limits import DeployLimits
 from lakana_worker import deploy_sweep, pipeline
 from lakana_worker.__main__ import _python_runtime, configure_logging, main, make_worker_id
 from lakana_worker.docker_environments import DockerEnvironments
-from lakana_worker.launcher_client import LauncherUnavailable
+from lakana_worker.launcher_client import LauncherClient, LauncherUnavailable
 from lakana_worker.python_support import PythonSupport
 from lakana_worker.python_tasks import PythonRuntime
 from lakana_worker.runners import DockerRunner, LocalProcessRunner
@@ -326,16 +326,33 @@ def test_the_connection_test_loop_stops_even_when_the_dequeue_loop_raises(
     connection_test_loop_stand_in.return_value.stop.assert_called_once()
 
 
-def test_a_docker_worker_starts_no_connection_test_loop_and_says_why(
+def test_a_docker_worker_runs_the_connection_test_loop_through_its_launcher(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     connection_test_loop_stand_in: mock.MagicMock,
-    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    caplog.set_level(logging.INFO)
-    _main_with_docker(tmp_path, monkeypatch, lambda client, owner: 0)
-    connection_test_loop_stand_in.assert_not_called()
-    assert "This worker runs no connection tests" in caplog.text
+    """The check runs in a container: the loop gets the launcher, its owner and the work volume."""
+    poll = _main_with_docker(tmp_path, monkeypatch, lambda client, owner: 0)
+    connection_test_loop_stand_in.assert_called_once()
+    kwargs = connection_test_loop_stand_in.call_args.kwargs
+    assert kwargs["runner_kind"] == "docker"
+    assert kwargs["ingestion_roots"] == {}
+    assert kwargs["stop"] is poll.call_args.kwargs["drain"]
+    docker = kwargs["docker"]
+    assert isinstance(docker.client, LauncherClient)
+    assert docker.owner.startswith("worker-7.")
+    assert docker.work_dir == tmp_path / "xdg" / "lakana-worker" / "attempts"
+    assert docker.trust is None
+    connection_test_loop_stand_in.return_value.start.assert_called_once()
+
+
+def test_a_local_worker_gives_the_connection_test_loop_no_launcher(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    connection_test_loop_stand_in: mock.MagicMock,
+) -> None:
+    _run_with_loop(tmp_path, monkeypatch, mock.MagicMock())
+    assert connection_test_loop_stand_in.call_args.kwargs["docker"] is None
 
 
 def test_main_runs_the_delivery_loop_on_its_own_thread_and_stops_it_with_the_drain(

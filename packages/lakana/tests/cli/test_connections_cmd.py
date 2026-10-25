@@ -625,6 +625,7 @@ def test_a_refused_test_prints_the_outcome_and_its_next_step_and_exits_1(tmp_pat
         ("dns", "Check the host name."),
         ("timeout", "the network path between the worker and the source"),
         ("tls", "lakana connection update NAME --ca-file ca.pem"),
+        ("tls", "that the server offers TLS 1.2 or newer"),
         ("not_allowed", "reachable from outside the Lakana stack"),
         ("root_unavailable", "Check the root setting."),
         ("not_found", "lakana connection show NAME"),

@@ -75,9 +75,9 @@ What each setting means, and its default:
 Testing a connection is a probe from the worker: with the local runner it dials from the worker's host
 to any address the connection names and lists paths under the ingestion roots, so
 `MANAGE_CONNECTION` lets a data engineer without `DEPLOY` find out which ports and paths the worker
-can reach (see the [threat model](../explanation/security.md)). In this version a worker with the
-Docker runner runs no connection tests; from the next release a test runs there in a container under
-a task's own network rules.
+can reach (see the [threat model](../explanation/security.md)). With the Docker runner a test runs in
+a container under the network rules a task with that connection gets, so it reaches only what such a
+task could.
 
 A task cannot list or show connections, whatever its token's rights: a request with a task token
 is refused (403) without naming any connection. A running task reads only the connections its
@@ -117,11 +117,16 @@ For an `http` connection with an OAuth2 `token_url` the token host is checked th
 base URL, and the test is not `ok` unless both pass; the message names the host that failed. The TLS
 of a `mariadb` connection is not checked yet (the check reads the server's greeting only).
 Credentials are not checked yet: a connection with a secret ends its message with "credentials not
-checked yet", and each kind's credential check arrives with its helper. The check runs on a worker
-with the local runner, as a subprocess of the worker's Python that needs `lakana` installed next to
-the worker (without it the test fails and says so); a connection with a secret needs the worker's
-secrets master key (`LAKANA_SECRETS__MASTER_KEY_FILE`, as on the server). A worker with the Docker
-runner does not run connection tests yet, so a test waits for a local-runner worker. The command waits
+checked yet", and each kind's credential check arrives with its helper. Any worker runs the check.
+With the local runner it is a subprocess of the worker's Python that needs `lakana` installed next to
+the worker (without it the test fails and says so). With the Docker runner (the Compose bundle's
+default) the launcher runs it in a container of the task image, from the image's own copy of Lakana,
+with the network rules a task with that connection gets: through the egress proxy or the task's relay
+to the connection's endpoints only, its ingestion root read-only, the worker's trust bundle
+(`LAKANA_RUN__CA_BUNDLE`), no Lakana server on its network, 30 seconds and 256 MiB. A launcher that
+refuses the check or cannot be reached makes the test `failed` with the reason and the launcher's
+log to read (`docker compose logs launcher`). A connection with a secret needs the worker's secrets master
+key (`LAKANA_SECRETS__MASTER_KEY_FILE`, as on the server). The command waits
 up to 60 seconds, prints the outcome and exits 1 unless it is `ok`. Only one test of a connection
 runs at a time; asking again meanwhile is refused (409), naming the open test and the command
 that shows it (`lakana connection test NAME --env ENV --id ID`). A test still queued or running
@@ -130,8 +135,8 @@ test within 10 minutes; …", naming the worker's log to read) and queues a new 
 
 `--no-wait` queues the test and prints its id; `--id ID` shows that test later (or the one a
 timed-out wait named). A test nobody takes within the wait ends with an error that says whether a
-worker took it; a test nobody took says that only a worker with the local runner runs tests in this
-version, and one a worker took names the worker's log (`docker compose logs worker`, or the
+worker took it; a test nobody took says to check that a worker is running (`docker compose ps
+worker`, or the `lakana local` terminal), and one a worker took names the worker's log (`docker compose logs worker`, or the
 `lakana local` terminal). The test itself goes on.
 
 | Outcome | What it means | What to do |
@@ -140,7 +145,7 @@ version, and one a worker took names the worker's log (`docker compose logs work
 | `dns` | The host name did not resolve. | Check the host name. |
 | `refused` | The host refused the connection. | Check the port and the source's firewall. |
 | `timeout` | The connection did not answer in time. | Check the host, the port and the network path between the worker and the source. |
-| `tls` | The TLS handshake failed. | Check the CA: `lakana connection update NAME --ca-file ca.pem`. |
+| `tls` | The TLS handshake failed: the server's certificate is not trusted, or the server offers only TLS older than 1.2, which Lakana refuses (the message says which). | Check the CA: `lakana connection update NAME --ca-file ca.pem`. When the message names the TLS version, upgrade the server to TLS 1.2 or newer. |
 | `not_allowed` | The address is one a task may not reach. | The address must be reachable from outside the Lakana stack. |
 | `root_unavailable` | The worker does not have the ingestion root. | Check the root setting. |
 | `not_found` | The path under the root does not exist. | Check the path under the root: `lakana connection show NAME`. |

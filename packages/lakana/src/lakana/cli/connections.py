@@ -723,7 +723,10 @@ _NEXT_STEPS: dict[str, str] = {
     "dns": "Check the host name.",
     "refused": "Check the port and the source's firewall.",
     "timeout": "Check the host, the port and the network path between the worker and the source.",
-    "tls": "Check the CA (`lakana connection update NAME --ca-file ca.pem`).",
+    "tls": (
+        "Check the CA (`lakana connection update NAME --ca-file ca.pem`), or, when the message "
+        "names the TLS version, that the server offers TLS 1.2 or newer."
+    ),
     "not_allowed": "The address must be reachable from outside the Lakana stack.",
     "root_unavailable": "Check the root setting.",
     "not_found": "Check the path under the root (`lakana connection show NAME`).",
