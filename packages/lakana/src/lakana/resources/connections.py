@@ -390,7 +390,7 @@ class Connections:
         name: str,
         *,
         wait: bool = True,
-        timeout: float = 60.0,
+        timeout: float = 120.0,
         test_id: str | None = None,
     ) -> ConnectionTest:
         """Test a connection: a worker checks that its host can be reached.

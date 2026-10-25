@@ -743,7 +743,7 @@ def test_a_test_that_never_finishes_is_an_error_with_its_id(
     result = invoke(make_state(tmp_path, api), "connection", "test", "crm-db", "--env", "prod")
 
     assert result.exit_code == 1
-    assert "still queued after 60s" in result.stderr
+    assert "still queued after 120s" in result.stderr
     assert "check it later with lakana query status" not in result.stderr
 
 

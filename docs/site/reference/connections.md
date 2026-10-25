@@ -145,7 +145,7 @@ A launcher that
 refuses the check or cannot be reached makes the test `failed` with the reason and the launcher's
 log to read (`docker compose logs launcher`). A connection with a secret needs the worker's secrets master
 key (`LAKANA_SECRETS__MASTER_KEY_FILE`, as on the server). The command waits
-up to 60 seconds, prints the outcome and exits 1 unless it is `ok`. Only one test of a connection
+up to 120 seconds, prints the outcome and exits 1 unless it is `ok`. Only one test of a connection
 runs at a time; asking again meanwhile is refused (409), naming the open test and the command
 that shows it (`lakana connection test NAME --env ENV --id ID`). A test still queued or running
 after 10 minutes is stuck: the next request finishes it as `failed` ("no worker finished this
@@ -343,7 +343,7 @@ events = client.audit_events.list(kind="connection")
 `update` takes `address`, `settings`, `secret`, `secret_values` and `clear` (a list of names).
 
 `client.connections.test("prod", "crm-db")` queues a test and polls it (0.5 s, growing to 2 s) until
-it is done or `timeout` (60 s) passes, and returns a `ConnectionTest` with `id`, `state`,
+it is done or `timeout` (120 s) passes, and returns a `ConnectionTest` with `id`, `state`,
 `outcome`, `message`, `created_at` and `finished_at`. `wait=False` returns it as queued;
 `test_id=` looks at an earlier test. A test nobody finished in time raises `TimeoutError`, naming
 the state, the worker log to read and the command that looks again.

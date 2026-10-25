@@ -786,7 +786,7 @@ def test(
     """Test connection NAME: a worker checks that its host can be reached.
 
     Prints ``ok: <message>`` or ``<outcome>: <message>`` with what to do next; exits 1 unless the
-    outcome is ``ok``. Waits up to 60 seconds for a worker.
+    outcome is ``ok``. Waits up to 120 seconds for a worker.
 
     Parameters
     ----------
