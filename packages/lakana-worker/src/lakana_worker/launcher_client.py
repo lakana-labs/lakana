@@ -41,8 +41,10 @@ _HOST_PART = 110
 """Longest host part of an owner: with ``.`` and the token it stays within the launcher's 128."""
 _CLAIMS: list[int] = []
 """Descriptors of the owner files this process holds locked, open until it ends."""
-CHECK_WAIT_SECONDS = 60.0
-"""How long a worker waits for a connection check: its 30 seconds, a relay's 10 and a margin."""
+CHECK_WAIT_SECONDS = 90.0
+"""How long a worker waits for a connection check: its 30 seconds and 1 s grace, a relay's 10 s
+start, the 20 s wait for the relay's verdict (`RELAY_VERDICT_SECONDS`) and a margin for the
+image pull and the network."""
 _MAX_CHECK_OUTPUT = 64 * 1024
 _TRANSIENT_REFUSALS = ("the launcher is busy:", "no request line arrived in time")
 """Refusals that say the launcher could not take the request now, not that it was wrong."""

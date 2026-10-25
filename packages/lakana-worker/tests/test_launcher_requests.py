@@ -1305,6 +1305,7 @@ def test_a_relay_plan_always_refuses_the_launchers_range_and_holds_at_most_256()
         "refused": ["172.17.0.1/32", "10.207.0.0/16"],
         "reachable": [],
         "routes": [{"listen": 15001, "host": "db.example.com", "port": 5432}],
+        "verdicts": False,
     }
     assert kept["refused"] == ["10.207.0.0/16", "172.17.0.1/32"]
     many = [f"10.0.{n}.1/32" for n in range(256)]
@@ -1508,3 +1509,12 @@ def test_a_check_container_keeps_a_tasks_hardening_and_its_own_fixed_limits() ->
     assert host["NetworkMode"] == "lakana-check-k0f3c9a1e"
     assert "server" not in json.dumps(spec)
     assert not any(item.startswith("LAKANA_EGRESS_PROXY=") for item in spec["Env"])
+
+
+def test_a_checks_relay_plan_asks_for_verdicts() -> None:
+    """A check's relay says when it connected; a task's never does."""
+    route = (RelayRoute(15001, "db.example.com", 5432),)
+
+    plan = json.loads(relay_plan(route, SETTINGS, "10.207.0.8/29", [], verdicts=True))
+
+    assert plan["verdicts"] is True

@@ -24,6 +24,8 @@ from typing import Any
 import pytest
 from launcher_fakes import FakeEngine, settings
 
+from lakana_worker.launcher import egress as egress_module
+from lakana_worker.launcher import service as service_module
 from lakana_worker.launcher.egress_token import read_key, verify
 from lakana_worker.launcher.engine import EngineError
 from lakana_worker.launcher.requests import (
@@ -2884,6 +2886,7 @@ def test_a_run_with_relay_routes_starts_its_relay_before_the_task(tmp_path: Path
         "refused": _refused(tmp_path),
         "reachable": [],
         "routes": [{"listen": 15001, "host": "db.example.com", "port": 5432}],
+        "verdicts": False,
     }
     kinds = [
         b["Labels"]["lakana.launcher.kind"] for m, p, b in engine.calls if p == "/containers/create"
@@ -3477,7 +3480,7 @@ def test_the_relay_reader_ends_quietly_when_its_stream_breaks() -> None:
     last: list[str] = []
     emitted: list[dict[str, object]] = []
 
-    Launcher._read_relay(Broken(), ready, last, emitted.append)  # ty: ignore[invalid-argument-type]
+    Launcher._read_relay(Broken(), ready, last, emitted.append, threading.Event())  # ty: ignore[invalid-argument-type]
 
     assert not ready.is_set() and last == [] and emitted == []
 
@@ -3545,8 +3548,8 @@ def test_a_check_has_no_server_and_a_connection_test_token(tmp_path: Path) -> No
 
 
 def test_a_check_with_relay_routes_gets_its_relay(tmp_path: Path) -> None:
-    """The relay joins the check's network, as a run's joins the task's."""
-    engine = FakeEngine()
+    """The relay joins the check's network, as a run's joins the task's, and reports verdicts."""
+    engine = FakeEngine(relay_output=[b"lakana-relay: ready\n", _CONNECTED])
     launcher = _started(engine, tmp_path, built=False)
 
     launcher.check(_check(relay=(_DB,)), lambda line: None)
@@ -3554,6 +3557,7 @@ def test_a_check_with_relay_routes_gets_its_relay(tmp_path: Path) -> None:
     (relay,) = engine.created("relay")
     assert relay["HostConfig"]["NetworkMode"] == "lakana-check-k1"
     assert relay["Labels"]["lakana.launcher.id"] == "k1"
+    assert json.loads(engine.relay_stdin[0])["verdicts"] is True
     assert engine.containers == {}
 
 
@@ -3679,3 +3683,85 @@ def test_a_check_mounts_a_usable_root_read_only_and_nothing_of_a_task(tmp_path: 
     (spec,) = engine.created("check")
     mounts = spec["HostConfig"]["Mounts"]
     assert [(m["Target"], m["ReadOnly"]) for m in mounts] == [("/ingest/data", True)]
+
+
+_CONNECTED = b"lakana-relay: connected db.example.com:5432\n"
+
+
+def test_a_check_waits_for_its_relays_verdict_that_comes_after_the_check_exits(
+    tmp_path: Path,
+) -> None:
+    """The check said `ok` at once; the relay was still dialling. Its line is not lost."""
+    engine = FakeEngine(relay_output=[b"lakana-relay: ready\n", 0.5, _CONNECTED])
+    launcher = _started(engine, tmp_path, built=False)
+    emitted: list[dict[str, object]] = []
+
+    result = launcher.check(_check(relay=(_DB,)), emitted.append)
+
+    assert result["exit"] == 0
+    assert _CONNECTED in _logs(emitted)
+    assert engine.containers == {}
+
+
+def test_a_check_waits_for_a_late_refusal_too(tmp_path: Path) -> None:
+    line = (
+        b"lakana-relay: refused db.example.com:5432: cannot reach db.example.com:5432 (timed out)\n"
+    )
+    engine = FakeEngine(relay_output=[b"lakana-relay: ready\n", 0.5, line])
+    launcher = _started(engine, tmp_path, built=False)
+    emitted: list[dict[str, object]] = []
+
+    launcher.check(_check(relay=(_DB,)), emitted.append)
+
+    assert line in _logs(emitted)
+
+
+def test_a_verdict_that_never_comes_ends_the_wait_at_its_bound(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No line within the bound (the dial timeout and a margin): the relay goes, the check ends."""
+    monkeypatch.setattr(service_module, "_RELAY_VERDICT_SECONDS", 0.3)
+    engine = FakeEngine()
+    launcher = _started(engine, tmp_path, built=False)
+    started = time.monotonic()
+
+    result = launcher.check(_check(relay=(_DB,)), lambda line: None)
+
+    assert result["exit"] == 0
+    assert 0.3 <= time.monotonic() - started < 5
+    assert engine.containers == {}
+
+
+def test_a_task_never_waits_for_a_relay_verdict(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only a check's relay reports verdicts; a run ends as soon as its task does."""
+    monkeypatch.setattr(service_module, "_RELAY_VERDICT_SECONDS", 30.0)
+    engine = FakeEngine()
+    launcher = _started(engine, tmp_path)
+    started = time.monotonic()
+
+    launcher.run(_egress_run(relay=(_DB,)), lambda line: None)
+
+    assert time.monotonic() - started < 10
+
+
+def test_the_relay_verdict_bound_covers_the_dial_timeout() -> None:
+    assert service_module._RELAY_VERDICT_SECONDS > egress_module._CONNECT_SECONDS
+
+
+def test_a_relay_line_that_is_no_verdict_does_not_end_the_wait(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only ``connected`` or ``refused`` is a verdict; another line is passed on and waited past."""
+    monkeypatch.setattr(service_module, "_RELAY_VERDICT_SECONDS", 0.5)
+    other = b"lakana-relay: closed a connection on 15001: 16 are open already\n"
+    engine = FakeEngine(relay_output=[b"lakana-relay: ready\n", other])
+    launcher = _started(engine, tmp_path, built=False)
+    emitted: list[dict[str, object]] = []
+    started = time.monotonic()
+
+    launcher.check(_check(relay=(_DB,)), emitted.append)
+
+    assert other in _logs(emitted)
+    assert time.monotonic() - started >= 0.5

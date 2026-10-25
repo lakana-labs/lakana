@@ -38,6 +38,7 @@ from lakana_core.models import (
 from lakana_core.secrets.keys import EnvKeyProvider
 from lakana_worker import connection_tests
 from lakana_worker.connection_tests import ConnectionTestLoop, DockerCheck
+from lakana_worker.launcher.requests import CHECK_GRACE, CHECK_LIMITS, RELAY_VERDICT_SECONDS
 from lakana_worker.launcher_client import LauncherTimedOut, LauncherUnavailable
 
 SECRET = "hunter2-s3cr3t"
@@ -658,7 +659,9 @@ def work_dir(tmp_path: Path) -> Path:
     return attempts
 
 
-def answering(output: bytes, result: dict[str, object] | None = None) -> Script:
+def answering(
+    output: bytes, result: dict[str, object] | None = None, *, verdict: bool = True
+) -> Script:
     """Build a `check` script that prints `output` and returns `result`.
 
     Parameters
@@ -667,6 +670,9 @@ def answering(output: bytes, result: dict[str, object] | None = None) -> Script:
         What the check printed.
     result
         The launcher's result; a clean exit by default.
+    verdict
+        Whether each relay route then reports ``connected``, as a check's relay does once it has
+        dialled the source.
 
     Returns
     -------
@@ -676,6 +682,9 @@ def answering(output: bytes, result: dict[str, object] | None = None) -> Script:
 
     def script(request: dict[str, Any], on_log: Callable[[bytes], None]) -> dict[str, object]:
         on_log(output)
+        if verdict:
+            for route in request["relay"]:
+                on_log(f"lakana-relay: connected {route['host']}:{route['port']}\n".encode())
         return result or {"exit": 0, "oom_killed": False, "timed_out": False, "stopped": False}
 
     return script
@@ -1207,3 +1216,139 @@ def test_a_relay_line_that_is_not_a_refusal_changes_nothing(world: World, tmp_pa
     assert running.step()
 
     assert world.test(test_id).outcome == "ok"
+
+
+def _database(world: World, tls: str = "disable") -> uuid.UUID:
+    """Queue a test of a PostgreSQL connection, which goes through the relay.
+
+    Parameters
+    ----------
+    world
+        The world.
+    tls
+        Its ``tls`` setting.
+
+    Returns
+    -------
+    uuid.UUID
+        The test's id.
+    """
+    return world.connection(
+        "crm",
+        kind="postgresql",
+        address={"host": "db.example.com", "port": 5432, "database": "c"},
+        settings={"user": "reader", "tls": tls},
+    )
+
+
+def test_ok_through_the_relay_needs_the_relays_connected_line(world: World, tmp_path: Path) -> None:
+    """The check reached the relay; only the relay can say it reached the source."""
+    launcher = FakeLauncher(scripts={"check": answering(OK_LINE)})
+    running, _ = docker_loop(world, tmp_path, launcher)
+    test_id = _database(world)
+
+    assert running.step()
+
+    assert world.test(test_id).outcome == "ok"
+
+
+def test_ok_through_the_relay_without_a_verdict_is_a_timeout(world: World, tmp_path: Path) -> None:
+    """A source that drops packets: the relay's dial outlasted its wait and said nothing."""
+    launcher = FakeLauncher(scripts={"check": answering(OK_LINE, verdict=False)})
+    running, _ = docker_loop(world, tmp_path, launcher)
+    test_id = _database(world)
+
+    assert running.step()
+
+    row = world.test(test_id)
+    assert (row.outcome, row.message) == (
+        "timeout",
+        f"the relay did not reach db.example.com:5432 within {int(RELAY_VERDICT_SECONDS)} s; "
+        "check the host, the port and the source's firewall",
+    )
+
+
+def test_another_outcome_through_the_relay_stands_without_a_verdict(
+    world: World, tmp_path: Path
+) -> None:
+    """`tls` (the source said it offers no TLS) proves the source answered: it stays."""
+    answer = json.dumps({"outcome": "tls", "message": "no TLS"}).encode() + b"\n"
+    launcher = FakeLauncher(scripts={"check": answering(answer)})
+    running, _ = docker_loop(world, tmp_path, launcher)
+    test_id = _database(world, tls="verify-full")
+
+    assert running.step()
+
+    assert world.test(test_id).outcome == "tls"
+
+
+def test_ok_through_the_proxy_needs_no_relay_verdict(world: World, tmp_path: Path) -> None:
+    """The proxy answers CONNECT only once it reached the source."""
+    launcher = FakeLauncher(scripts={"check": answering(OK_LINE)})
+    running, _ = docker_loop(world, tmp_path, launcher)
+    test_id = world.connection("api", kind="http", address={"base_url": "https://api.example.com"})
+
+    assert running.step()
+
+    assert world.test(test_id).outcome == "ok"
+
+
+@pytest.mark.parametrize(
+    ("line", "next_step"),
+    [
+        ("refused db.example.com:5432: the upstream proxy refused db.example.com:5432: "
+         "HTTP/1.1 502 Bad Gateway", "; see `docker compose logs egress`"),
+        ("refused db.example.com:5432: cannot reach the upstream proxy (TimeoutError)",
+         "; see `docker compose logs egress`"),
+        ("refused db.example.com:5432: the egress proxy cannot read its routing table, so it "
+         "makes no direct connection; see `docker compose logs egress`", ""),
+        ("refused db.example.com:5432: something new", "; see `docker compose logs launcher`"),
+    ],
+)  # fmt: skip
+def test_a_relay_refusal_that_is_not_about_the_source_is_failed_with_its_log(
+    world: World, tmp_path: Path, line: str, next_step: str
+) -> None:
+    """The upstream proxy and the routing table are the operator's, not the source's.
+
+    Parameters
+    ----------
+    world
+        The world.
+    tmp_path
+        Pytest's directory.
+    line
+        The relay's line, after ``lakana-relay: ``.
+    next_step
+        What the message ends with after the relay's line.
+    """
+    launcher = FakeLauncher(
+        scripts={"check": answering(OK_LINE + f"lakana-relay: {line}\n".encode())}
+    )
+    running, _ = docker_loop(world, tmp_path, launcher)
+    test_id = _database(world)
+
+    assert running.step()
+
+    row = world.test(test_id)
+    assert (row.outcome, row.message) == ("failed", f"the relay {line}{next_step}")
+
+
+def test_a_relay_refusal_of_a_malformed_host_is_not_allowed(world: World, tmp_path: Path) -> None:
+    line = "refused db.example.com:5432: db..x is neither a host name nor an IPv4 address"
+    launcher = FakeLauncher(
+        scripts={"check": answering(OK_LINE + f"lakana-relay: {line}\n".encode())}
+    )
+    running, _ = docker_loop(world, tmp_path, launcher)
+    test_id = _database(world)
+
+    assert running.step()
+
+    assert world.test(test_id).outcome == "not_allowed"
+
+
+def test_the_check_wait_covers_the_check_the_relay_start_and_the_verdict() -> None:
+    """The worker waits longer than the launcher can take; the lease longer than the wait."""
+    assert (
+        CHECK_LIMITS.timeout_seconds + CHECK_GRACE + 10 + RELAY_VERDICT_SECONDS + 15
+    ) <= connection_tests.CHECK_WAIT_SECONDS
+    assert int(connection_tests.CHECK_WAIT_SECONDS) + 30 == connection_tests.LEASE_SECONDS

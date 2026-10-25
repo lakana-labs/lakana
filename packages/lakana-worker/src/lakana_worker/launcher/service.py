@@ -60,6 +60,7 @@ from lakana_worker.launcher.requests import (
     LABEL_SHARED,
     LABEL_STACK,
     MAX_RELAY_REFUSED,
+    RELAY_VERDICT_SECONDS,
     BuildRequest,
     CheckRequest,
     CleanupRequest,
@@ -202,6 +203,10 @@ class _Live:
 
 
 _RELAY_READY_SECONDS = 10.0
+_RELAY_VERDICT_SECONDS = RELAY_VERDICT_SECONDS
+"""The launcher's wait for a check's relay verdict (`RELAY_VERDICT_SECONDS`); tests shorten it."""
+_VERDICTS = ("connected ", "refused ")
+"""What starts a relay line that reports a dial's outcome, after the ``lakana-relay: `` prefix."""
 _RELAY_LINE = "lakana-relay: "
 
 
@@ -217,11 +222,15 @@ class _Relay:
         Its attached stream, read by `reader`.
     reader
         The thread that copies its lines into the task's log.
+    verdict
+        Set once the relay reported a dial's outcome (``connected`` or ``refused``), which
+        only a check's relay does for a successful dial.
     """
 
     cid: str
     stream: socket.socket
     reader: threading.Thread
+    verdict: threading.Event = field(default_factory=threading.Event)
 
 
 def _expired(labels: object, moment: float) -> bool:
@@ -1343,7 +1352,7 @@ class Launcher:
                     deadline=deadline,
                     proxy_url=proxy_url,
                 )
-                return self._supervise(
+                result = self._supervise(
                     name,
                     spec,
                     live,
@@ -1351,6 +1360,11 @@ class Launcher:
                     emit_locked,
                     stdin=request.stdin,
                 )
+                if relay is not None and result.get("stopped") is not True:
+                    # The relay accepts before it dials, so the check may have ended first:
+                    # wait for the relay to say whether it reached the source.
+                    relay.verdict.wait(_RELAY_VERDICT_SECONDS)
+                return result
             finally:
                 if relay is not None:
                     self._stop_relay(relay)
@@ -1439,7 +1453,7 @@ class Launcher:
         with self._refused_lock:
             refused = self._refused
         try:
-            plan = relay_plan(routes, self.settings, subnet, refused)
+            plan = relay_plan(routes, self.settings, subnet, refused, verdicts=kind == "check")
         except ValueError as exc:
             raise EngineError(
                 f"a task's relay refuses at most {MAX_RELAY_REFUSED} address ranges, and the "
@@ -1487,9 +1501,10 @@ class Launcher:
                 raise EngineError(f"Docker could not start the relay: {_message(body)}")
             _send_input(stream, plan)
             ready = threading.Event()
+            verdict = threading.Event()
             last: list[str] = []
             reader = threading.Thread(
-                target=self._read_relay, args=(stream, ready, last, emit), daemon=True
+                target=self._read_relay, args=(stream, ready, last, emit, verdict), daemon=True
             )
             reader.start()
             if not ready.wait(_RELAY_READY_SECONDS):
@@ -1500,11 +1515,15 @@ class Launcher:
                 stream.close()
             self._remove_container(relay_cid)
             raise
-        return _Relay(relay_cid, stream, reader)
+        return _Relay(relay_cid, stream, reader, verdict)
 
     @staticmethod
     def _read_relay(
-        stream: socket.socket, ready: threading.Event, last: list[str], emit: Emit
+        stream: socket.socket,
+        ready: threading.Event,
+        last: list[str],
+        emit: Emit,
+        verdict: threading.Event,
     ) -> None:
         """Copy a relay's lines: ``ready`` releases the run, every later line goes to its log.
 
@@ -1518,6 +1537,8 @@ class Launcher:
             Receives the lines before ``ready``, for the reason a relay did not start.
         emit
             Sends a line to the caller; a caller that has gone is left to the run to notice.
+        verdict
+            Set after a line that reports a dial's outcome has been sent.
         """
         pending = b""
         try:
@@ -1534,11 +1555,16 @@ class Launcher:
                         continue
                     with contextlib.suppress(Exception):
                         emit({"log": base64.b64encode(raw + b"\n").decode("ascii")})
+                    if line.removeprefix(_RELAY_LINE).startswith(_VERDICTS):
+                        verdict.set()
         except OSError:
             return  # the relay was removed
 
     def _stop_relay(self, relay: _Relay) -> None:
-        """Remove a task's relay; its stream ends and its reader with it.
+        """Remove a relay; its stream ends, and its reader sends what it had read before it ends.
+
+        The stream is closed only after the reader has drained it (or after 5 seconds), so a
+        line already buffered still reaches the caller.
 
         Parameters
         ----------
@@ -1546,8 +1572,8 @@ class Launcher:
             The relay.
         """
         self._remove_container(relay.cid)
-        relay.stream.close()
         relay.reader.join(timeout=5)
+        relay.stream.close()
 
     @staticmethod
     def _not_built(python: str, environment: str) -> EngineError:

@@ -238,6 +238,10 @@ imports the standard library only), so 256 MiB leaves ample room for TLS and a s
 """
 CHECK_GRACE = 1
 """Seconds between SIGTERM and SIGKILL when a check is stopped."""
+RELAY_VERDICT_SECONDS = 20.0
+"""How long a check's relay may take to report its dial after the check ended: the proxy's 15 s
+connect timeout plus resolving and a margin. The launcher waits this long before it removes the
+relay; a check whose relay said nothing within it never reached the source."""
 CHECK_ENTRY = ("/usr/local/bin/python", "-I", "-B", "/opt/lakana-check/check.py")
 """The check's entry point: the image's Python on Lakana's own standard-library check
 (``lakana/ingest/_check.py``, copied into the task image), never a project's code or environment.
@@ -1868,6 +1872,8 @@ def relay_plan(
     settings: LauncherSettings,
     subnet: str,
     refused: Sequence[str],
+    *,
+    verdicts: bool = False,
 ) -> bytes:
     """Write the plan a relay reads on stdin.
 
@@ -1885,6 +1891,8 @@ def relay_plan(
         The ranges the relay refuses as a target besides the built-in ones: every Docker
         network's gateway, `LauncherSettings.egress_refused` and the launcher's range, as the
         launcher wrote them for the proxy.
+    verdicts
+        Whether the relay also reports a successful dial (a connection check's relay).
 
     Returns
     -------
@@ -1908,6 +1916,7 @@ def relay_plan(
             "refused": ranges,
             "reachable": list(settings.relay_reachable),
             "routes": [{"listen": r.listen, "host": r.host, "port": r.port} for r in routes],
+            "verdicts": verdicts,
         }
     ).encode("utf-8")
 

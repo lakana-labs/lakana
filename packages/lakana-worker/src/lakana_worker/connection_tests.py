@@ -45,7 +45,13 @@ from lakana_core.connections.service import ConnectionTestQueue
 from lakana_core.db import db_now
 from lakana_core.models import Connection, ConnectionTest, Environment
 from lakana_core.secrets.keys import KeyProvider
-from lakana_worker.launcher.requests import CHECK_LIMITS, INGEST_MOUNT, allowed_roots
+from lakana_worker.launcher.egress import INTERNAL
+from lakana_worker.launcher.requests import (
+    CHECK_LIMITS,
+    INGEST_MOUNT,
+    RELAY_VERDICT_SECONDS,
+    allowed_roots,
+)
 from lakana_worker.launcher_client import (
     CHECK_WAIT_SECONDS,
     RELEASE_SKEW,
@@ -71,9 +77,9 @@ IDLE_SECONDS = 2.0
 """How long the loop sleeps when no test is queued."""
 
 LEASE_SECONDS = int(CHECK_WAIT_SECONDS) + 30
-"""How long a claimed test belongs to this worker: the longest wait for a Docker check (the
-launcher's 30 s, a relay's start and a margin, `CHECK_WAIT_SECONDS`) plus 30 s to prepare it and
-record the result, so no other worker retakes a test still running."""
+"""How long a claimed test belongs to this worker: the longest wait for a Docker check
+(`CHECK_WAIT_SECONDS`: the check, a relay's start and the wait for the relay's verdict) plus
+30 s to prepare it and record the result, so no other worker retakes a test still running."""
 
 CHECK_TIMEOUT_SECONDS = 30
 """The time the check subprocess may take."""
@@ -221,14 +227,17 @@ def _answer(output: str) -> tuple[str, str] | None:
 
 RELAY_REFUSED = "lakana-relay: refused "
 """Starts the line a task's relay writes when it does not connect a client to its target."""
+RELAY_CONNECTED = "lakana-relay: connected "
+"""Starts the line a check's relay writes once it has dialled the target."""
+EGRESS_LOG = "; see `docker compose logs egress`"
 
 
 def _relay_refusal(output: str) -> tuple[str, str] | None:
     """Read the relay's refusal from a check's output, which outranks the check's own answer.
 
     Through the relay the check connects to the relay itself, which accepts before it dials the
-    target: a ``tcp`` check, or a database with ``tls: disable``, would say ``ok`` for a target the
-    relay then cannot reach. The relay writes why into the same output.
+    target, so only the relay knows whether the source answered; it writes why it did not into
+    the same output.
 
     Parameters
     ----------
@@ -238,20 +247,29 @@ def _relay_refusal(output: str) -> tuple[str, str] | None:
     Returns
     -------
     tuple of str or None
-        ``dns`` for a host that does not resolve, ``timeout`` for one that never answered,
-        ``refused`` for one that could not be reached otherwise, ``not_allowed`` for an
-        address nothing Lakana starts may reach; the message is the relay's line. `None` when the
-        relay refused nothing.
+        About the source: ``dns`` for a host that does not resolve, ``timeout`` for one that
+        never answered, ``refused`` for one that could not be reached otherwise, ``not_allowed``
+        for an address nothing Lakana starts may reach or a host that is not one. About the
+        operator's side (the upstream proxy, the routing table, anything unknown): ``failed``,
+        with the egress or the launcher log to read. The message is the relay's line. `None`
+        when the relay refused nothing.
     """
     for line in output.splitlines():
         if not line.startswith(RELAY_REFUSED):
             continue
         message = "the relay " + line.removeprefix("lakana-relay: ")
-        if "cannot resolve " in line:
+        reason = line.removeprefix(RELAY_REFUSED).split(": ", 1)[-1]
+        if reason.startswith("the egress proxy cannot read its routing table"):
+            return "failed", message
+        if "upstream proxy" in reason:
+            return "failed", message + EGRESS_LOG
+        if reason.startswith("cannot resolve "):
             return "dns", message
-        if "cannot reach " in line:
-            return ("timeout" if line.endswith("(timed out)") else "refused"), message
-        return "not_allowed", message
+        if reason.startswith("cannot reach "):
+            return ("timeout" if reason.endswith("(timed out)") else "refused"), message
+        if reason.startswith(INTERNAL) or "is neither a host name nor an IPv4 address" in reason:
+            return "not_allowed", message
+        return "failed", f"{message}; {LAUNCHER_LOG}"
     return None
 
 
@@ -620,6 +638,19 @@ class ConnectionTestLoop:
         if refusal is not None:
             return refusal
         answer = _answer(text)
+        if answer is not None and answer[0] == "ok" and plan.relay:
+            # The check reached the relay, which accepts before it dials: only the relay's
+            # own line says the source answered.
+            missing = [
+                f"{host}:{port}"
+                for _, host, port in plan.relay
+                if f"{RELAY_CONNECTED}{host}:{port}" not in text.splitlines()
+            ]
+            if missing:
+                return "timeout", (
+                    f"the relay did not reach {missing[0]} within {int(RELAY_VERDICT_SECONDS)} s; "
+                    "check the host, the port and the source's firewall"
+                )
         if answer is None:
             logger.warning(
                 "A connection check ended without an answer (exit %s).", result.get("exit")

@@ -8,6 +8,7 @@ import json
 import socket
 import struct
 import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -145,8 +146,8 @@ class FakeEngine:
         Docker's own networks (unlabelled), by name, each with its IPAM: the default ``bridge``
         with its gateway 172.17.0.1, and ``host`` without an address.
     relay_output
-        What every relay container writes to stderr after reading its plan; it then runs until
-        it is removed.
+        What every relay container writes to stderr after reading its plan, in order (a float is
+        a pause of that many seconds); it then runs until it is removed.
     relay_stdin
         The plan each relay received.
     """
@@ -208,7 +209,7 @@ class FakeEngine:
             "host": {"Labels": {}, "IPAM": {"Config": []}},
         }
     )
-    relay_output: list[bytes] = field(default_factory=lambda: [b"lakana-relay: ready\n"])
+    relay_output: list[bytes | float] = field(default_factory=lambda: [b"lakana-relay: ready\n"])
     relay_stdin: list[bytes] = field(default_factory=list)
     _released: dict[str, threading.Event] = field(default_factory=dict)
     _count: int = 0
@@ -553,7 +554,10 @@ class FakeEngine:
                 received += chunk
             self.relay_stdin.append(received)
             for chunk in self.relay_output:
-                theirs.sendall(struct.pack(">BxxxI", 2, len(chunk)) + chunk)
+                if isinstance(chunk, bytes):
+                    theirs.sendall(struct.pack(">BxxxI", 2, len(chunk)) + chunk)
+                else:
+                    time.sleep(chunk)  # a pause, as a dial that takes its time
             self._released[container_id].wait(30)
         except OSError:
             pass  # the launcher closed its end
