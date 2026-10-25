@@ -744,3 +744,48 @@ def test_a_test_that_never_finishes_is_an_error_with_its_id(
     assert result.exit_code == 1
     assert "still queued after 60s" in result.stderr
     assert "check it later with lakana query status" not in result.stderr
+
+
+def test_a_test_with_json_output_prints_the_test_as_json_and_exits_by_its_outcome(
+    tmp_path: Path,
+) -> None:
+    api = FakeApi()
+    api.on("POST", f"{_BASE}/crm-db/tests", status=202, json=_test_body("queued"))
+    api.on(
+        "GET",
+        f"{_BASE}/crm-db/tests/{_TEST_ID}",
+        json=_test_body("done", "refused", "db.example.com:5432 refused the connection"),
+    )
+
+    result = invoke(
+        make_state(tmp_path, api),
+        "--output",
+        "json",
+        "connection",
+        "test",
+        "crm-db",
+        "--env",
+        "prod",
+    )
+
+    assert result.exit_code == 1
+    body = json.loads(result.stdout)
+    assert (body["id"], body["outcome"], body["state"]) == (_TEST_ID, "refused", "done")
+
+
+def test_an_outcome_this_version_does_not_know_is_printed_without_a_next_step(
+    tmp_path: Path,
+) -> None:
+    api = FakeApi()
+    api.on("POST", f"{_BASE}/crm-db/tests", status=202, json=_test_body("queued"))
+    api.on(
+        "GET",
+        f"{_BASE}/crm-db/tests/{_TEST_ID}",
+        json=_test_body("done", "quota", "the source said no"),
+    )
+
+    result = invoke(make_state(tmp_path, api), "connection", "test", "crm-db", "--env", "prod")
+
+    assert result.exit_code == 1
+    assert "quota: the source said no" in result.stdout
+    assert "Next:" not in result.stdout + result.stderr

@@ -53,6 +53,10 @@ MISSING_ROOT = (
 )
 """The same text as the worker's `MISSING_ROOT`; this module cannot import it."""
 
+_OLD_TLS = frozenset(
+    {"UNSUPPORTED_PROTOCOL", "TLSV1_ALERT_PROTOCOL_VERSION", "NO_PROTOCOLS_AVAILABLE"}
+)
+"""How OpenSSL says that the peer offers only a protocol older than the floor."""
 _SSL_REQUEST = struct.pack("!ii", 8, 80877103)
 _PROXY_HEAD_LIMIT = 16384
 
@@ -118,6 +122,12 @@ def _network_failure(exc: OSError, host: str, port: int, timeout: float) -> _Fou
         return _Found("refused", f"{where} refused the connection")
     if isinstance(exc, TimeoutError) or "timed out" in str(exc):
         return _Found("timeout", f"{where} did not answer within {timeout:g} s")
+    if isinstance(exc, ssl.SSLError) and (exc.reason or "") in _OLD_TLS:
+        return _Found(
+            "tls",
+            f"the server at {where} offers only TLS older than 1.2, which Lakana refuses; "
+            "upgrade the server's TLS to 1.2 or newer",
+        )
     if isinstance(exc, ssl.SSLError):
         return _Found("failed", f"the TLS handshake with {where} failed ({exc.reason or 'error'})")
     return _Found("failed", f"could not reach {where} ({exc.strerror or type(exc).__name__})")
@@ -258,6 +268,44 @@ def _open(host: str, port: int, routing: Mapping[str, Any], timeout: float) -> s
         _raise_network(exc, dialed[0], dialed[1], timeout)
 
 
+def _context(ca_pem: str | None, mode: str) -> ssl.SSLContext:
+    """Build the TLS context of a check: TLS 1.2 or newer, verification as configured.
+
+    Parameters
+    ----------
+    ca_pem
+        The connection's own CA certificates (PEM), trusted in addition to the bundle.
+    mode
+        ``verify-full`` or ``require``.
+
+    Returns
+    -------
+    ssl.SSLContext
+        The context.
+
+    Raises
+    ------
+    _Found
+        ``failed`` when the file `LAKANA_CA_BUNDLE` names cannot be read.
+    """
+    bundle = os.environ.get("LAKANA_CA_BUNDLE")
+    try:
+        context = ssl.create_default_context(cafile=bundle)
+    except (FileNotFoundError, PermissionError):
+        raise _Found(
+            "failed",
+            f"the trust bundle `{bundle}` (LAKANA_CA_BUNDLE) cannot be read; check that the file "
+            "exists on this worker",
+        ) from None
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    if ca_pem:
+        context.load_verify_locations(cadata=ca_pem)
+    if mode == "require":
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+    return context
+
+
 def _tls(sock: socket.socket, host: str, ca_pem: str | None, mode: str) -> socket.socket:
     """Run the TLS handshake as the connection is configured.
 
@@ -285,20 +333,7 @@ def _tls(sock: socket.socket, host: str, ca_pem: str | None, mode: str) -> socke
     """
     if mode == "disable":
         return sock
-    bundle = os.environ.get("LAKANA_CA_BUNDLE")
-    try:
-        context = ssl.create_default_context(cafile=bundle)
-    except (FileNotFoundError, PermissionError):
-        raise _Found(
-            "failed",
-            f"the trust bundle `{bundle}` (LAKANA_CA_BUNDLE) cannot be read; check that the file "
-            "exists on this worker",
-        ) from None
-    if ca_pem:
-        context.load_verify_locations(cadata=ca_pem)
-    if mode == "require":
-        context.check_hostname = False
-        context.verify_mode = ssl.CERT_NONE
+    context = _context(ca_pem, mode)
     return context.wrap_socket(sock, server_hostname=host)
 
 

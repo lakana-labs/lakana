@@ -464,6 +464,21 @@ def test_main_warns_when_the_notification_thread_does_not_stop(
     assert "The notification thread did not stop within 5 s" in caplog.text
 
 
+def test_main_warns_when_the_connection_test_thread_does_not_stop(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    connection_test_loop_stand_in: mock.MagicMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setenv("LAKANA_RUN__DRAIN_GRACE_SECONDS", "1")
+    thread = connection_test_loop_stand_in.return_value.start.return_value
+    thread.is_alive.return_value = True
+    with caplog.at_level("WARNING", logger="lakana_worker.__main__"):
+        _run_with_loop(tmp_path, monkeypatch, mock.MagicMock())
+    thread.join.assert_called_once_with(timeout=5.0)
+    assert "The connection test thread did not stop within 5 s" in caplog.text
+
+
 def test_main_refuses_a_ca_bundle_the_worker_cannot_read(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

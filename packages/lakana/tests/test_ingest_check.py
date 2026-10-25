@@ -910,3 +910,38 @@ def test_a_proxy_that_opens_the_tunnel_carries_the_handshake(
         "ok",
         "reachable: `api.example.com:443`, TLS verified",
     )
+
+
+def test_a_server_that_speaks_only_tls_1_1_is_a_tls_failure_naming_the_floor(
+    authority: Authority, tmp_path: Path
+) -> None:
+    cert, key = issue_leaf(authority, tmp_path)
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    with pytest.warns(DeprecationWarning):
+        context.minimum_version = ssl.TLSVersion.TLSv1
+        context.maximum_version = ssl.TLSVersion.TLSv1_1
+    context.set_ciphers("ALL:@SECLEVEL=0")
+    context.load_cert_chain(cert, key)
+
+    def old(sock: socket.socket) -> None:
+        with contextlib.suppress(OSError, ssl.SSLError):
+            context.wrap_socket(sock, server_side=True).close()
+
+    with listening(old) as port:
+        body = connection(
+            "http",
+            {"base_url": f"https://localhost:{port}"},
+            {"ca_certificate": authority.ca_file.read_text()},
+        )
+        outcome, message = _check.check(body, {}, timeout=FAST)
+    assert outcome == "tls"
+    assert message == (
+        f"the server at `localhost:{port}` offers only TLS older than 1.2, which Lakana refuses; "
+        "upgrade the server's TLS to 1.2 or newer"
+    )
+
+
+@pytest.mark.parametrize("mode", ["verify-full", "require"])
+def test_every_context_the_check_makes_refuses_tls_older_than_1_2(mode: str) -> None:
+    context = _check._context(None, mode)
+    assert context.minimum_version == ssl.TLSVersion.TLSv1_2
