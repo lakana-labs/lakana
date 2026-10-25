@@ -39,9 +39,14 @@ from lakana_worker.launcher.egress import (
     relay_bytes,
 )
 from lakana_worker.launcher.egress_token import valid_host
-from lakana_worker.launcher.requests import MAX_RELAY_ROUTES, RELAY_PORTS, RelayRoute
+from lakana_worker.launcher.requests import (
+    MAX_RELAY_ROUTES,
+    RELAY_MAX_PER_PORT,
+    RELAY_PORTS,
+    RelayRoute,
+)
 
-MAX_PER_PORT = 16
+MAX_PER_PORT = RELAY_MAX_PER_PORT
 """The most connections one route carries at once."""
 READY = "ready"
 """The line the relay writes once every port listens."""
@@ -221,9 +226,17 @@ def _accept(
             )
             client.close()
             continue
-        threading.Thread(
-            target=_handle, args=(client, route, plan, settings, slots, log), daemon=True
-        ).start()
+        try:
+            threading.Thread(
+                target=_handle, args=(client, route, plan, settings, slots, log), daemon=True
+            ).start()
+        except RuntimeError as exc:  # the container's process limit: this port must live on
+            log(
+                f"closed a connection to {route.host}:{route.port}: the relay cannot start "
+                f"another thread ({exc})"
+            )
+            client.close()
+            slots.release()
 
 
 def serve(

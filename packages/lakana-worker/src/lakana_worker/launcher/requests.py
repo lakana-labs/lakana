@@ -42,6 +42,11 @@ MAX_RELAY_ROUTES = 16
 """The most database connections one task's relay forwards."""
 RELAY_PORTS = range(15001, 15065)
 """The ports a relay listens on, one per route."""
+RELAY_MAX_PER_PORT = 16
+"""The most connections one route of a relay carries at once."""
+RELAY_PIDS = MAX_RELAY_ROUTES * (RELAY_MAX_PER_PORT + 1) + 2 + 16
+"""The relay container's process limit: a thread per connection and an accepting thread per
+route at their maximum, the main thread and Docker's init, and 16 to spare."""
 EGRESS_MISSING = (
     "tasks with connections need the `egress` service; start it (Compose bundle) or remove the "
     "connection from the asset."
@@ -1573,7 +1578,7 @@ def relay_container_spec(
     if upstream:
         env.append(f"LAKANA_EGRESS__UPSTREAM_PROXY={upstream}")
     # No timer of its own: the relay is removed with its run, or by the reaper at the deadline.
-    limits = Limits(memory_mb=64, cpus=0.25, pids=32, timeout_seconds=0)
+    limits = Limits(memory_mb=64, cpus=0.25, pids=RELAY_PIDS, timeout_seconds=0)
     return {
         "Image": image,
         "Entrypoint": list(RELAY_COMMAND),

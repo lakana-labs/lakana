@@ -488,3 +488,35 @@ def test_main_refuses_a_bad_plan_on_stderr(
 
     assert exited.value.code == 2
     assert capsys.readouterr().err == "lakana-relay: cannot start: the plan is one JSON object\n"
+
+
+def test_a_handler_thread_that_cannot_start_gives_its_slot_back(
+    relay_on: Callable[..., RelayHarness], monkeypatch: pytest.MonkeyPatch, target: int
+) -> None:
+    """Past the process limit `Thread.start` raises: the client is closed, the port lives on.
+
+    More failures than the port has slots, then a connection that works: a leaked slot would
+    close it as the seventeenth.
+    """
+    harness = relay_on([(15001, "localhost", target)])
+    real = threading.Thread.start
+    failures = [MAX_PER_PORT + 1]
+
+    def start(self: threading.Thread) -> None:
+        if getattr(self, "_target", None) is relay._handle and failures[0] > 0:
+            failures[0] -= 1
+            raise RuntimeError("can't start new thread")
+        real(self)
+
+    monkeypatch.setattr(threading.Thread, "start", start)
+    for _ in range(MAX_PER_PORT + 1):
+        with harness.connect(15001) as client:
+            assert client.recv(1) == b""
+
+    with harness.connect(15001) as client:
+        assert _echoes(client, b"ping") == b"ping"
+    assert harness.wait_for_log("cannot start another thread") == (
+        f"closed a connection to localhost:{target}: the relay cannot start another thread "
+        "(can't start new thread)"
+    )
+    assert not [line for line in harness.logs if "are open already" in line]

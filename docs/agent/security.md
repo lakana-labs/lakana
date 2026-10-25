@@ -1205,11 +1205,16 @@ start) authenticates a worker, compared with `hmac.compare_digest`.
     checked after a build);
   - the network range can shadow a LAN route (above);
   - a launcher bug is host root.
-- **Egress residuals, accepted:** a direct connection may reach private addresses outside the
-  networks the proxy is attached to (a company index often is one; operator ranges are #303);
-  with `LAKANA_EGRESS__UPSTREAM_PROXY` the upstream proxy decides after the proxy's local check
-  (numeric hosts, and for tasks and connection tests names that resolve here); a tunnel whose writes block can outlive its token's expiry by up to
-  the 300 s idle timeout.
+- **Egress residuals, accepted:**
+  - a direct connection may reach private addresses outside the networks the proxy is attached
+    to (a company index often is one; operator ranges are #303);
+  - with `LAKANA_EGRESS__UPSTREAM_PROXY` the upstream proxy decides after the proxy's local
+    check (numeric hosts, and for tasks and connection tests names that resolve here). A name is
+    resolved twice, here and at the company proxy, so a split-horizon or rebinding name can pass
+    the local check, and a name that does not resolve here is not checked at all. This is
+    inherent: a CONNECT to the checked IP would break the name-based allow-lists of company
+    proxies;
+  - a tunnel whose writes block can outlive its token's expiry by up to the 300 s idle timeout.
 
 ### The relay (M6)
 
@@ -1226,7 +1231,8 @@ connection's target.
 - **What it listens on.** Only that address, one port per route (plan: `address`, `subnet`,
   `internal`, 1-16 `routes`). It closes any peer outside the /29 and allows at most 16 connections
   per port (the 17th is closed with a line naming the limit). A port not in the plan is refused by
-  the kernel.
+  the kernel. A connection whose thread cannot start (`RuntimeError` at the process limit) is
+  closed with a line naming the cause and gives its slot back, so the port keeps serving.
 - **The checks.** Each connection resolves its target once and dials the address that passed
   `dial`, the proxy's shared check: loopback in every spelling the C library reads (`127.1`,
   `0x7f.1`, `2130706433`, octal), link-local and the metadata address, multicast, unspecified,
@@ -1242,7 +1248,9 @@ connection's target.
   upstream. Builds keep their own literal rule (`_allowed_host`) and are not name-checked.
 - **Limits.** Idle time is a week (a database may be silent through a long query; the proxy keeps
   five minutes). Container: user 65534:65534, `CapDrop: ALL`, read-only root, no mounts, 1 MiB
-  `/tmp`, 64 MiB, 0.25 CPU, 32 pids, no-new-privileges as detected, labelled kind `relay` with the
+  `/tmp`, 64 MiB, 0.25 CPU, 290 pids (`RELAY_PIDS`: 16 routes of 16 handler threads and one
+  accepting thread each, the main thread, Docker's init, 16 to spare), no-new-privileges as
+  detected, labelled kind `relay` with the
   run's id, owner and deadline (the reaper removes it like any labelled object; `cleanup` spares
   the relay of a live run). It must report `lakana-relay: ready` within 10 s or the run fails with
   `the task's relay did not start: <its last line>` and no task container exists.

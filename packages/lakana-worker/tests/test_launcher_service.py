@@ -29,6 +29,7 @@ from lakana_worker.launcher.engine import EngineError
 from lakana_worker.launcher.requests import (
     INGEST_PROBE_SCRIPT,
     RELAY_COMMAND,
+    RELAY_PIDS,
     BuildRequest,
     CleanupRequest,
     Limits,
@@ -2862,7 +2863,8 @@ def test_a_run_with_relay_routes_starts_its_relay_before_the_task(tmp_path: Path
     assert relay["Env"] == ["PATH=/usr/local/bin:/usr/bin:/bin", "PYTHONDONTWRITEBYTECODE=1"]
     host = relay["HostConfig"]
     assert host["Memory"] == host["MemorySwap"] == 64 * 1024 * 1024
-    assert (host["NanoCpus"], host["PidsLimit"]) == (250_000_000, 32)
+    assert (host["NanoCpus"], host["PidsLimit"]) == (250_000_000, RELAY_PIDS)
+    assert RELAY_PIDS >= 16 * (16 + 1) + 2  # a handler per connection, an acceptor per route
     assert (host["CapDrop"], host["ReadonlyRootfs"], host["Mounts"]) == (["ALL"], True, [])
     assert host["NetworkMode"] == "lakana-task-t1"
     assert relay["NetworkingConfig"] == {
