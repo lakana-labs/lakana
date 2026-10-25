@@ -1575,6 +1575,35 @@ class Connection:
 
 
 @dataclass(frozen=True)
+class ConnectionTest:
+    """A test of a connection: queued, taken by a worker, then done with an outcome.
+
+    Parameters
+    ----------
+    id
+        The test's id.
+    state
+        ``queued``, ``running`` or ``done``.
+    outcome
+        Once done: ``ok``, ``dns``, ``refused``, ``timeout``, ``tls``, ``not_allowed``,
+        ``root_unavailable``, ``not_found``, ``credentials`` or ``failed``; `None` before.
+    message
+        What the test found, redacted; `None` before it is done.
+    created_at
+        When it was requested.
+    finished_at
+        When it was done; `None` before.
+    """
+
+    id: str
+    state: str
+    outcome: str | None
+    message: str | None
+    created_at: datetime
+    finished_at: datetime | None
+
+
+@dataclass(frozen=True)
 class ConnectionPage:
     """One page of an environment's connections, newest first.
 

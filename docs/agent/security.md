@@ -859,7 +859,11 @@ code in this area has to know.
   What bounds a task is its token. Therefore everyone who may deploy Python code to an
   instance is trusted with everything its worker can read; run one instance per client. Never
   describe this runner as isolation in code, docs or messages. Local mode and
-  `LAKANA_RUN__RUNNER=local` keep this.
+  `LAKANA_RUN__RUNNER=local` keep this, and the trust domain includes holders of
+  `MANAGE_CONNECTION` there: a connection test dials from the worker's host (any address the
+  connection names; paths under the ingestion roots), a probe a data engineer without `DEPLOY`
+  did not have before. In this version a `DockerRunner` worker runs no connection tests; from
+  the next release a test runs there in a container under a task's own network rules.
 - **`DockerRunner` isolates projects, not hostile code.** Each task runs in a container that the
   launcher (`lakana_worker.launcher`) starts with fixed fields (`requests.run_container_spec`,
   `_host_config`): uid 10001 in group 10003 (`TASK_USER`; builds run as 10002:10002, so a task
@@ -3424,10 +3428,11 @@ From the threat model:
   git repository — the trust boundary is PR review, not the runtime. Lakana is not a sandbox
   for hostile code; treating it as one would trade real usability for theatre.
   `LocalProcessRunner` runs a task as the worker's user: one instance is one trust domain, and
-  everyone who may deploy Python code is trusted with everything the worker can read (see
-  "Python tasks and bound task tokens"). `DockerRunner` isolates projects from each other and
-  from the worker, not hostile code from the host: containers share the kernel (see "Task
-  isolation: the launcher").
+  everyone who may deploy Python code is trusted with everything the worker can read, and on a
+  local-runner instance a holder of `MANAGE_CONNECTION` can probe what the worker host reaches
+  through a connection test (see "Python tasks and bound task tokens"). `DockerRunner`
+  isolates projects from each other and from the worker, not hostile code from the host:
+  containers share the kernel (see "Task isolation: the launcher").
 - **Inference from a model, and code in a pickled artifact (M5c2b).** An artifact is all or
   nothing: no row filter or column mask applies to a file, so a model reveals what it was trained on
   to everyone who may read it, and loading a pickle runs what the file contains. See "The artifact

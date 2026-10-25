@@ -769,3 +769,7 @@ def test_the_next_cursor_points_after_the_last_event_shown(session: Session) -> 
     rest = service.query(admin, limit=2, cursor=first.next_cursor)
     assert len(rest.items) == 1
     assert rest.next_cursor is None
+
+
+def test_a_connection_tests_id_is_shown() -> None:
+    assert "test_id" in SHOWN_FIELDS

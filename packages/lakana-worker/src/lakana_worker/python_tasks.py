@@ -879,6 +879,86 @@ def _refuse_if_stopped(session: Session, keeper: LeaseKeeper, run_id: uuid.UUID)
         raise TaskFailure(stop[0], _stop_text(stop), stop_code(stop[0]))
 
 
+def local_root_dir(ingestion_roots: Mapping[str, str], root: str, connection: str) -> str:
+    """Find the directory of an ingestion root under the local runner.
+
+    Parameters
+    ----------
+    ingestion_roots
+        The worker's roots (`LAKANA_RUN__INGESTION_ROOTS`): name to absolute path.
+    root
+        The root's name.
+    connection
+        The connection naming it, for the message.
+
+    Returns
+    -------
+    str
+        The worker's own directory for the root.
+
+    Raises
+    ------
+    TaskFailure
+        Permanent when the worker has no such root (`MISSING_ROOT`).
+    """
+    directory = ingestion_roots.get(root)
+    if directory is None:
+        raise TaskFailure(
+            FailureKind.PERMANENT,
+            MISSING_ROOT.format(connection=connection, root=root),
+            FailureCode.NO_RUNTIME,
+        )
+    return directory
+
+
+def connection_routing(
+    name: str,
+    kind: ConnectionKind,
+    address: Mapping[str, object],
+    settings: Mapping[str, object],
+    *,
+    root_dir: Callable[[str], str],
+) -> dict[str, object]:
+    """Describe one connection to a task: its kind and what it may reach.
+
+    The part of a task's routing that depends on the connection alone; a task's plan and the
+    connection test both build it, so they cannot disagree. A runner-specific ``relay_port`` is
+    added by the caller.
+
+    Parameters
+    ----------
+    name
+        The connection's name, for the message of a missing root.
+    kind
+        Its kind.
+    address
+        Its validated address.
+    settings
+        Its validated settings.
+    root_dir
+        Maps a root's name to the directory a task reads it from; called for the mounted kinds
+        only, and it may raise `TaskFailure`.
+
+    Returns
+    -------
+    dict
+        ``kind`` and the ``grant`` of host and port pairs; for a mounted kind ``kind``,
+        ``root``, ``root_dir``, ``path`` and ``root_path``.
+    """
+    if kind in MOUNT_KINDS:
+        root, path = str(address["root"]), str(address["path"])
+        directory = root_dir(root)
+        return {
+            "kind": kind.value,
+            "root": root,
+            "root_dir": directory,
+            "path": path,
+            "root_path": posixpath.join(directory, path),
+        }
+    found = endpoints(kind, address, settings)
+    return {"kind": kind.value, "grant": [[e.host, e.port] for e in found]}
+
+
 @dataclass
 class PythonRuntime:
     """Runs claimed Python tasks; one instance serves the worker's lifetime.
@@ -1746,20 +1826,17 @@ class PythonRuntime:
                     FailureCode.NOT_FOUND,
                 )
             kind = ConnectionKind(row.kind)
+            routing[name] = connection_routing(
+                name,
+                kind,
+                row.address,
+                row.settings,
+                root_dir=lambda root, name=name: self._root_dir(root, name),
+            )
             if kind in MOUNT_KINDS:
-                root, path = str(row.address["root"]), str(row.address["path"])
-                root_users.setdefault(root, name)
-                root_dir = self._root_dir(root, name)
-                routing[name] = {
-                    "kind": kind.value,
-                    "root": root,
-                    "root_dir": root_dir,
-                    "path": path,
-                    "root_path": posixpath.join(root_dir, path),
-                }
+                root_users.setdefault(str(row.address["root"]), name)
                 continue
             found = endpoints(kind, row.address, row.settings)
-            routing[name] = {"kind": kind.value, "grant": [[e.host, e.port] for e in found]}
             if not self.isolated:
                 continue
             if kind in PROXY_KINDS:
@@ -1802,14 +1879,7 @@ class PythonRuntime:
         """
         if self.isolated:
             return posixpath.join(INGEST_MOUNT, root)
-        directory = self.ingestion_roots.get(root)
-        if directory is None:
-            raise TaskFailure(
-                FailureKind.PERMANENT,
-                MISSING_ROOT.format(connection=connection, root=root),
-                FailureCode.NO_RUNTIME,
-            )
-        return directory
+        return local_root_dir(self.ingestion_roots, root, connection)
 
     def _check_caps(
         self,

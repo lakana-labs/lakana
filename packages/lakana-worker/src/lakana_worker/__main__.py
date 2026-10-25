@@ -51,6 +51,7 @@ from lakana_core.storage.resolver import StorageResolver
 from lakana_worker.attempt_sweep import AttemptSweeper
 from lakana_worker.ca_bundle import CaBundleError, find_ca_bundle, query_ca_bundle
 from lakana_worker.caches import CacheKeeper, CachePaths, PackageCacheTrim, TrimSettings
+from lakana_worker.connection_tests import ConnectionTestLoop
 from lakana_worker.deploy import DeploySettings, platform_version
 from lakana_worker.deploy_sweep import DeploySweeper, sweep_deploy_checkouts
 from lakana_worker.docker_environments import DockerEnvironments
@@ -489,6 +490,8 @@ def main() -> None:
     `LAKANA_RUN__LEASE_SECONDS` claims nothing and stops the query it runs, and it claims
     nothing before its first heartbeat. After a clean stop the thread is stopped and joined and
     the row removed; after an error, or when the thread does not end, the row is left to age out.
+    Under the local runner a thread of its own (`ConnectionTestLoop`) runs the connection tests
+    that `lakana connection test` queues; a drain stops it claiming, and it holds no test then.
     Job notifications are delivered by a thread of their own (`DeliveryLoop`) unless
     `LAKANA_WORKER__NOTIFICATIONS=false`; a drain stops it claiming (it holds no unsent row). A
     worker with no usable secrets master key starts none and says so.
@@ -755,6 +758,25 @@ def main() -> None:
             "LAKANA_WORKER__NOTIFICATIONS=false: this worker delivers no job notifications. "
             "Another worker must, or queued notifications wait."
         )
+    connection_tests: ConnectionTestLoop | None = None
+    connection_tests_thread: threading.Thread | None = None
+    if settings.run.runner == "local":
+        # The drain event stops its claiming; one test is claimed at a time, so none is left held.
+        connection_tests = ConnectionTestLoop(
+            engine,
+            owner=worker_id,
+            key_provider=key_provider,
+            runner_kind=settings.run.runner,
+            ingestion_roots=runtime.ingestion_roots,
+            stop=drain,
+            trust=runtime.venvs.ca_bundle,
+        )
+        connection_tests_thread = connection_tests.start()
+    else:
+        logger.info(
+            "This worker runs no connection tests: the Docker runner's check is not available "
+            "yet, so `lakana connection test` waits for a worker with the local runner."
+        )
     try:
         poll_forever(
             session_factory,
@@ -793,6 +815,13 @@ def main() -> None:
             delivery_thread.join(timeout=join_timeout)
             if delivery_thread.is_alive():
                 logger.warning("The notification thread did not stop within %.0f s.", join_timeout)
+        if connection_tests is not None and connection_tests_thread is not None:
+            connection_tests.stop()
+            connection_tests_thread.join(timeout=join_timeout)
+            if connection_tests_thread.is_alive():
+                logger.warning(
+                    "The connection test thread did not stop within %.0f s.", join_timeout
+                )
         heartbeat.stop()
         heartbeat_thread.join(timeout=_SCHEDULER_JOIN_FLOOR_SECONDS)
         heartbeat_ended = not heartbeat_thread.is_alive()

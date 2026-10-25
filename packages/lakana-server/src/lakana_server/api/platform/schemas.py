@@ -2289,6 +2289,35 @@ class ConnectionPage(BaseModel):
     next_cursor: str | None
 
 
+class ConnectionTestOut(BaseModel):
+    """Response body for a connection test.
+
+    Parameters
+    ----------
+    id
+        The test's id.
+    state
+        ``queued``, ``running`` or ``done``.
+    outcome
+        What the test found once ``done``: ``ok``, ``dns``, ``refused``, ``timeout``, ``tls``,
+        ``not_allowed``, ``root_unavailable``, ``not_found``, ``credentials`` or ``failed``;
+        `null` before.
+    message
+        What it found, redacted, at most 1,000 characters; `null` before it is done.
+    created_at
+        When it was requested.
+    finished_at
+        When it was done; `null` before.
+    """
+
+    id: uuid.UUID
+    state: str
+    outcome: str | None
+    message: str | None
+    created_at: datetime
+    finished_at: datetime | None
+
+
 class EndpointOut(BaseModel):
     """One host and port a connection reaches.
 

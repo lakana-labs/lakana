@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Iterable, Iterator, Mapping
 from datetime import datetime
 from typing import Any
 
 from lakana._http import HttpTransport, every_page, query_params
-from lakana._models import Connection, ConnectionPage, DeclaringAsset
+from lakana._models import Connection, ConnectionPage, ConnectionTest, DeclaringAsset
 from lakana._routes import ROUTES
 from lakana.errors import InvalidResponse
 from lakana.resources.artifacts import _ODD_ANSWER, _object
@@ -56,6 +57,41 @@ def _connection_from_json(data: object) -> Connection:
         raise InvalidResponse(_ODD_ANSWER.format(what="a connection")) from None
 
 
+def _connection_test_from_json(data: object) -> ConnectionTest:
+    """Build a `ConnectionTest` from a `ConnectionTestOut` body.
+
+    A field this SDK does not know is ignored.
+
+    Parameters
+    ----------
+    data
+        The decoded body.
+
+    Returns
+    -------
+    ConnectionTest
+        The test.
+
+    Raises
+    ------
+    InvalidResponse
+        If `data` is not an object with every field of a test.
+    """
+    try:
+        assert isinstance(data, dict)  # nosec B101 -- an untrusted answer; caught just below
+        finished = data["finished_at"]
+        return ConnectionTest(
+            id=str(data["id"]),
+            state=str(data["state"]),
+            outcome=data["outcome"],
+            message=data["message"],
+            created_at=datetime.fromisoformat(data["created_at"]),
+            finished_at=None if finished is None else datetime.fromisoformat(finished),
+        )
+    except (AssertionError, KeyError, TypeError, ValueError):
+        raise InvalidResponse(_ODD_ANSWER.format(what="a connection test")) from None
+
+
 def _page_from_json(data: dict[str, Any]) -> ConnectionPage:
     """Build a `ConnectionPage` from a `ConnectionPage` body.
 
@@ -78,6 +114,41 @@ def _page_from_json(data: dict[str, Any]) -> ConnectionPage:
     if not isinstance(items, list) or not (cursor is None or isinstance(cursor, str)):
         raise InvalidResponse(_ODD_ANSWER.format(what="the connections"))
     return ConnectionPage(items=[_connection_from_json(item) for item in items], next_cursor=cursor)
+
+
+def _still(environment: str, name: str, test: ConnectionTest, timeout: float) -> str:
+    """Write the message of a test that is not done in time.
+
+    Parameters
+    ----------
+    environment
+        The environment.
+    name
+        The connection's name.
+    test
+        The test as last seen.
+    timeout
+        The seconds waited.
+
+    Returns
+    -------
+    str
+        What state it is in, who runs tests (queued) or which worker log to read (running), and
+        how to look again.
+    """
+    again = f"Look again with lakana connection test {name} --env {environment} --id {test.id}"
+    if test.state == "queued":
+        found = (
+            "no worker has taken it. In this version only a worker with the local runner runs "
+            "connection tests; under the Docker runner they arrive in the next release. "
+            f"{again}"
+        )
+    else:
+        found = (
+            "a worker took it; read the worker's log (`docker compose logs worker`, or the "
+            f"`lakana local` terminal). {again}"
+        )
+    return f"the test of `{name}` is still {test.state} after {timeout:g}s: {found}"
 
 
 class Connections:
@@ -312,3 +383,69 @@ class Connections:
             ROUTES["connections.delete"],
             path_params={"environment_name": environment, "connection_name": name},
         )
+
+    def test(
+        self,
+        environment: str,
+        name: str,
+        *,
+        wait: bool = True,
+        timeout: float = 60.0,
+        test_id: str | None = None,
+    ) -> ConnectionTest:
+        """Test a connection: a worker checks that its host can be reached.
+
+        Needs `MANAGE_CONNECTION` in the environment. Queues a test (or, with `test_id`, looks at
+        an earlier one) and, with `wait`, polls it with a growing pause (0.5 s up to 2 s) until
+        it is done.
+
+        Parameters
+        ----------
+        environment
+            The environment.
+        name
+            The connection's name.
+        wait
+            Poll until the test is done; `False` returns it as it is (usually ``queued``).
+        timeout
+            Seconds to keep polling.
+        test_id
+            Look at this earlier test instead of queueing a new one.
+
+        Returns
+        -------
+        ConnectionTest
+            The test; ``state == "done"`` when waited for, with its `outcome`.
+
+        Raises
+        ------
+        lakana.errors.Conflict
+            If a test of this connection is already queued or running.
+        lakana.errors.NotFound
+            If the environment, the connection or the test does not exist.
+        TimeoutError
+            If the test is not done after `timeout` seconds; the message says whether a worker
+            took it and how to look again.
+        """
+        path_params = {"environment_name": environment, "connection_name": name}
+        if test_id is None:
+            response = self._transport.request(ROUTES["connections.test"], path_params=path_params)
+        else:
+            response = self._transport.request(
+                ROUTES["connections.test_get"], path_params={**path_params, "test_id": test_id}
+            )
+        test = _connection_test_from_json(_object(response, "a connection test"))
+        if not wait:
+            return test
+        deadline = time.monotonic() + timeout
+        interval = 0.5
+        while test.state != "done":
+            if time.monotonic() >= deadline:
+                raise TimeoutError(_still(environment, name, test, timeout))
+            time.sleep(interval)
+            interval = min(interval * 2, 2.0)
+            response = self._transport.request(
+                ROUTES["connections.test_get"], path_params={**path_params, "test_id": test.id}
+            )
+            test = _connection_test_from_json(_object(response, "a connection test"))
+        return test

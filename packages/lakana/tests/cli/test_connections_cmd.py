@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+import pytest
 from conftest import FakeApi, invoke, make_state
 
 _BASE = "/api/v1/environments/prod/connections"
@@ -568,3 +569,223 @@ def test_create_with_a_named_secret_says_which_it_uses(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.output
     assert _sent(api, "POST")[0]["secret"] == "crm-pw"
     assert "Created connection crm-db in prod using secret crm-pw" in result.stdout
+
+
+_TEST_ID = "6f1c1f0e-0a52-4b7b-9d0e-2f3a4b5c6d7e"
+
+
+def _test_body(
+    state: str, outcome: str | None = None, message: str | None = None
+) -> dict[str, Any]:
+    """Build a `ConnectionTestOut` body.
+
+    Parameters
+    ----------
+    state
+        ``queued``, ``running`` or ``done``.
+    outcome
+        The outcome once done.
+    message
+        The message once done.
+
+    Returns
+    -------
+    dict
+        The body.
+    """
+    return {
+        "id": _TEST_ID,
+        "state": state,
+        "outcome": outcome,
+        "message": message,
+        "created_at": "2026-10-25T12:00:00+00:00",
+        "finished_at": "2026-10-25T12:00:03+00:00" if state == "done" else None,
+    }
+
+
+def test_a_refused_test_prints_the_outcome_and_its_next_step_and_exits_1(tmp_path: Path) -> None:
+    api = FakeApi()
+    api.on("POST", f"{_BASE}/crm-db/tests", status=202, json=_test_body("queued"))
+    api.on(
+        "GET",
+        f"{_BASE}/crm-db/tests/{_TEST_ID}",
+        json=_test_body("done", "refused", "db.example.com:5432 refused the connection"),
+    )
+
+    result = invoke(make_state(tmp_path, api), "connection", "test", "crm-db", "--env", "prod")
+
+    assert result.exit_code == 1
+    assert "refused: db.example.com:5432 refused the connection" in result.stdout
+    assert "the port and the source's firewall" in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize(
+    ("outcome", "next_step"),
+    [
+        ("dns", "Check the host name."),
+        ("timeout", "the network path between the worker and the source"),
+        ("tls", "lakana connection update NAME --ca-file ca.pem"),
+        ("not_allowed", "reachable from outside the Lakana stack"),
+        ("root_unavailable", "Check the root setting."),
+        ("not_found", "lakana connection show NAME"),
+        ("credentials", "Check the secret."),
+        ("failed", "See the worker's log."),
+    ],
+)
+def test_every_outcome_that_is_not_ok_names_its_next_step(
+    tmp_path: Path, outcome: str, next_step: str
+) -> None:
+    """Each outcome prints its own next step, and none of them names the egress proxy.
+
+    Parameters
+    ----------
+    tmp_path
+        A directory for the CLI's state.
+    outcome
+        The outcome the server reports.
+    next_step
+        A part of the next step the CLI must print for it.
+    """
+    api = FakeApi()
+    api.on("POST", f"{_BASE}/crm-db/tests", status=202, json=_test_body("queued"))
+    api.on(
+        "GET", f"{_BASE}/crm-db/tests/{_TEST_ID}", json=_test_body("done", outcome, "what happened")
+    )
+
+    result = invoke(make_state(tmp_path, api), "connection", "test", "crm-db", "--env", "prod")
+
+    assert result.exit_code == 1
+    assert f"{outcome}: what happened" in result.stdout
+    assert next_step in result.stdout + result.stderr
+    assert "proxy" not in result.stdout + result.stderr
+
+
+def test_an_ok_test_prints_ok_and_exits_0(tmp_path: Path) -> None:
+    api = FakeApi()
+    api.on("POST", f"{_BASE}/crm-db/tests", status=202, json=_test_body("queued"))
+    api.on("GET", f"{_BASE}/crm-db/tests/{_TEST_ID}", json=_test_body("done", "ok", "reached it"))
+
+    result = invoke(make_state(tmp_path, api), "connection", "test", "crm-db", "--env", "prod")
+
+    assert result.exit_code == 0
+    assert result.stdout.strip() == "ok: reached it"
+
+
+def test_no_wait_prints_the_id_and_how_to_look_again(tmp_path: Path) -> None:
+    api = FakeApi()
+    api.on("POST", f"{_BASE}/crm-db/tests", status=202, json=_test_body("queued"))
+
+    result = invoke(
+        make_state(tmp_path, api), "connection", "test", "crm-db", "--env", "prod", "--no-wait"
+    )
+
+    assert result.exit_code == 0
+    assert _TEST_ID in result.stdout
+    assert f"lakana connection test crm-db --env prod --id {_TEST_ID}" in result.stdout
+    assert [r.method for r in api.requests] == ["POST"]
+
+
+def test_id_looks_at_an_earlier_test(tmp_path: Path) -> None:
+    api = FakeApi()
+    api.on(
+        "GET", f"{_BASE}/crm-db/tests/{_TEST_ID}", json=_test_body("done", "dns", "no such host")
+    )
+
+    result = invoke(
+        make_state(tmp_path, api),
+        "connection",
+        "test",
+        "crm-db",
+        "--env",
+        "prod",
+        "--id",
+        _TEST_ID,
+    )
+
+    assert result.exit_code == 1
+    assert "dns: no such host" in result.stdout
+    assert "Check the host name." in result.stdout + result.stderr
+    assert [r.method for r in api.requests] == ["GET"]
+
+
+def test_every_outcome_but_ok_has_a_next_step() -> None:
+    from lakana.cli.connections import next_step
+
+    outcomes = [
+        "dns",
+        "refused",
+        "timeout",
+        "tls",
+        "not_allowed",
+        "root_unavailable",
+        "not_found",
+        "credentials",
+        "failed",
+    ]
+
+    assert all(next_step(outcome) for outcome in outcomes)
+    assert next_step("ok") is None
+    assert "--ca-file ca.pem" in (next_step("tls") or "")
+    assert "lakana connection show" in (next_step("not_found") or "")
+
+
+def test_a_test_that_never_finishes_is_an_error_with_its_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("lakana.resources.connections.time.sleep", lambda _s: None)
+    ticks = iter(range(0, 1000, 30))
+    monkeypatch.setattr("lakana.resources.connections.time.monotonic", lambda: next(ticks))
+    api = FakeApi()
+    api.on("POST", f"{_BASE}/crm-db/tests", status=202, json=_test_body("queued"))
+    api.on("GET", f"{_BASE}/crm-db/tests/{_TEST_ID}", json=_test_body("queued"))
+
+    result = invoke(make_state(tmp_path, api), "connection", "test", "crm-db", "--env", "prod")
+
+    assert result.exit_code == 1
+    assert "still queued after 60s" in result.stderr
+    assert "check it later with lakana query status" not in result.stderr
+
+
+def test_a_test_with_json_output_prints_the_test_as_json_and_exits_by_its_outcome(
+    tmp_path: Path,
+) -> None:
+    api = FakeApi()
+    api.on("POST", f"{_BASE}/crm-db/tests", status=202, json=_test_body("queued"))
+    api.on(
+        "GET",
+        f"{_BASE}/crm-db/tests/{_TEST_ID}",
+        json=_test_body("done", "refused", "db.example.com:5432 refused the connection"),
+    )
+
+    result = invoke(
+        make_state(tmp_path, api),
+        "--output",
+        "json",
+        "connection",
+        "test",
+        "crm-db",
+        "--env",
+        "prod",
+    )
+
+    assert result.exit_code == 1
+    body = json.loads(result.stdout)
+    assert (body["id"], body["outcome"], body["state"]) == (_TEST_ID, "refused", "done")
+
+
+def test_an_outcome_this_version_does_not_know_is_printed_without_a_next_step(
+    tmp_path: Path,
+) -> None:
+    api = FakeApi()
+    api.on("POST", f"{_BASE}/crm-db/tests", status=202, json=_test_body("queued"))
+    api.on(
+        "GET",
+        f"{_BASE}/crm-db/tests/{_TEST_ID}",
+        json=_test_body("done", "quota", "the source said no"),
+    )
+
+    result = invoke(make_state(tmp_path, api), "connection", "test", "crm-db", "--env", "prod")
+
+    assert result.exit_code == 1
+    assert "quota: the source said no" in result.stdout
+    assert "Next:" not in result.stdout + result.stderr

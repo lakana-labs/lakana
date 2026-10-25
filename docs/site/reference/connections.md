@@ -9,7 +9,8 @@ at different servers. An asset names the connections it reads from in
 the asset's task, `lakana.ingest.connections.get` reads a declared connection with its secret
 ([How a task gets its credential](#how-a-task-gets-its-credential)).
 
-Creating or changing a connection reaches no source: it only stores where the source is. The
+Creating or changing a connection reaches no source: it only stores where the source is. To find
+out whether the source can be reached, [test the connection](#test-a-connection). The
 connection's name and kind never change; to change them, delete it and create it again. The
 deleted connection's secret stays in the environment, unbound, and keeps its name, so new values
 for the new connection create a secret under the next free name (`crm-db-connection-2`, below).
@@ -68,8 +69,15 @@ What each setting means, and its default:
 
 | Action | Right | Roles that have it |
 |---|---|---|
-| Create, change and delete a connection | `MANAGE_CONNECTION` on the environment | `ADMIN`, `DATA_ENGINEER` |
+| Create, change, delete and test a connection | `MANAGE_CONNECTION` on the environment | `ADMIN`, `DATA_ENGINEER` |
 | List and show connections | `READ_ENVIRONMENT` on the environment | every role on it |
+
+Testing a connection is a probe from the worker: with the local runner it dials from the worker's host
+to any address the connection names and lists paths under the ingestion roots, so
+`MANAGE_CONNECTION` lets a data engineer without `DEPLOY` find out which ports and paths the worker
+can reach (see the [threat model](../explanation/security.md)). In this version a worker with the
+Docker runner runs no connection tests; from the next release a test runs there in a container under
+a task's own network rules.
 
 A task cannot list or show connections, whatever its token's rights: a request with a task token
 is refused (403) without naming any connection. A running task reads only the connections its
@@ -98,6 +106,49 @@ the same change gives new values: a new address (`host`, `port`, `base_url`, `en
 `token_url`. A data engineer who moves a database to a new host gives its password again in the
 same command. A new `region` of an `s3` connection whose endpoint is the default moves the
 endpoint too, so it counts as an address change.
+
+## Test a connection
+
+`lakana connection test crm-db --env prod` asks a worker to check that the source can be reached
+with the connection's address and settings. The worker checks, in this order, the host name (DNS),
+the connection (TCP), the TLS handshake with the connection's CA certificate, and, for a
+`directory` or `sqlite-file` connection, that the ingestion root exists and the path is under it.
+For an `http` connection with an OAuth2 `token_url` the token host is checked the same way as the
+base URL, and the test is not `ok` unless both pass; the message names the host that failed. The TLS
+of a `mariadb` connection is not checked yet (the check reads the server's greeting only).
+Credentials are not checked yet: a connection with a secret ends its message with "credentials not
+checked yet", and each kind's credential check arrives with its helper. The check runs on a worker
+with the local runner, as a subprocess of the worker's Python that needs `lakana` installed next to
+the worker (without it the test fails and says so); a connection with a secret needs the worker's
+secrets master key (`LAKANA_SECRETS__MASTER_KEY_FILE`, as on the server). A worker with the Docker
+runner does not run connection tests yet, so a test waits for a local-runner worker. The command waits
+up to 60 seconds, prints the outcome and exits 1 unless it is `ok`. Only one test of a connection
+runs at a time; asking again meanwhile is refused (409), naming the open test and the command
+that shows it (`lakana connection test NAME --env ENV --id ID`). A test still queued or running
+after 10 minutes is stuck: the next request finishes it as `failed` ("no worker finished this
+test within 10 minutes; …", naming the worker's log to read) and queues a new one.
+
+`--no-wait` queues the test and prints its id; `--id ID` shows that test later (or the one a
+timed-out wait named). A test nobody takes within the wait ends with an error that says whether a
+worker took it; a test nobody took says that only a worker with the local runner runs tests in this
+version, and one a worker took names the worker's log (`docker compose logs worker`, or the
+`lakana local` terminal). The test itself goes on.
+
+| Outcome | What it means | What to do |
+|---|---|---|
+| `ok` | The source can be reached. | Nothing. |
+| `dns` | The host name did not resolve. | Check the host name. |
+| `refused` | The host refused the connection. | Check the port and the source's firewall. |
+| `timeout` | The connection did not answer in time. | Check the host, the port and the network path between the worker and the source. |
+| `tls` | The TLS handshake failed. | Check the CA: `lakana connection update NAME --ca-file ca.pem`. |
+| `not_allowed` | The address is one a task may not reach. | The address must be reachable from outside the Lakana stack. |
+| `root_unavailable` | The worker does not have the ingestion root. | Check the root setting. |
+| `not_found` | The path under the root does not exist. | Check the path under the root: `lakana connection show NAME`. |
+| `credentials` | The source refused the secret. | Check the secret. |
+| `failed` | The check failed in another way, or no worker finished it within 10 minutes. | See the worker's log. |
+
+The message after the outcome is at most 1,000 characters and holds no secret value. The command
+prints the next step on standard error; `--output json` prints the test as the REST answer below.
 
 ## Command line
 
@@ -212,6 +263,8 @@ lakana audit list --kind connection --env dev
 | `GET /api/v1/environments/{env}/connections/{name}` | `READ_ENVIRONMENT` | the connection; 404 names no other connection |
 | `PATCH /api/v1/environments/{env}/connections/{name}` | `MANAGE_CONNECTION`, and `MANAGE_SECRET` as above | the connection |
 | `DELETE /api/v1/environments/{env}/connections/{name}` | `MANAGE_CONNECTION` | 204; 409 while a deployed project version declares it |
+| `POST /api/v1/environments/{env}/connections/{name}/tests` | `MANAGE_CONNECTION` | 202 and the test `{"id", "state", "outcome", "message", "created_at", "finished_at"}` (`state` is `queued`, `running` or `done`; `outcome` and `message` are `null` until done); 409 (naming the open test's id) while a test of the connection is queued or running and less than 10 minutes old; an older one is finished as `failed` first |
+| `GET /api/v1/environments/{env}/connections/{name}/tests/{test_id}` | `MANAGE_CONNECTION` | the test; 404 for a test of another connection |
 | `GET /api/v1/audit-events?kind=connection` | `READ_AUDIT_LOG` | every `CONNECTION_*` event; combines with the other filters |
 | `GET /api/v1/tasks/self/connections/{name}` | the token of a running task whose asset declares `name` | `{"name", "kind", "address", "settings", "endpoints": [{"host", "port", "role"}], "secret"}`, with `Cache-Control: no-store`; 403 otherwise (below), 401 for a token whose attempt has ended or was claimed again. For the helpers of `lakana.ingest`; the SDK's `client.task_connections.get(name)` returns the body as it is |
 
@@ -265,6 +318,12 @@ events = client.audit_events.list(kind="connection")
 ```
 
 `update` takes `address`, `settings`, `secret`, `secret_values` and `clear` (a list of names).
+
+`client.connections.test("prod", "crm-db")` queues a test and polls it (0.5 s, growing to 2 s) until
+it is done or `timeout` (60 s) passes, and returns a `ConnectionTest` with `id`, `state`,
+`outcome`, `message`, `created_at` and `finished_at`. `wait=False` returns it as queued;
+`test_id=` looks at an earlier test. A test nobody finished in time raises `TimeoutError`, naming
+the state, the worker log to read and the command that looks again.
 
 ## How a task gets its credential
 
@@ -381,6 +440,7 @@ it counted among the hidden nodes, without its name.
 | `CONNECTION_CREATED` | A connection was created. | `name`, `kind`, `address`, `secret` (its name) |
 | `CONNECTION_UPDATED` | A connection changed. | `name`, `changed` (such as `address.host`, `settings.tls`, `secret`), `address`, `secret` |
 | `CONNECTION_DELETED` | A connection was deleted. | `name`, `kind` |
+| `CONNECTION_TESTED` | A test was requested (`state` is `queued`) and when it finished (`state` is `done`, with `outcome`). | `connection`, `environment`, `test_id`, `state`; `outcome` once done |
 | `CONNECTION_CREDENTIAL_FETCHED` | A running task fetched a connection it declares. | `connection`, `environment`, `repository`, `asset`, `run_id`, `task_run_id`, `attempt`; `reason` (`secret_not_bound` or `secret_unreadable`) when it got no secret |
 | `CONNECTION_CREDENTIAL_REFUSED` | A fetch was refused. Recorded at most `LAKANA_DENIAL_AUDIT__PER_PRINCIPAL_PER_MINUTE` times a minute per principal, the first of each reason always; the others are counted in `suppressed` of the next one recorded. | the same fields as far as they are known, and `reason`: `not_bound`, `not_declared` or `not_in_environment` |
 | `SECRET_CREATED`, `SECRET_BOUND` | New values created the connection's secret, or a secret was bound to a connection or let go of it. | `use` is `connection`; `url` of `SECRET_BOUND` is every `host:port` the connection sends the secret to, such as `api.example.com:443, login.example.org:443` for an `oauth2` connection whose token URL is on another host |
@@ -408,6 +468,6 @@ every `CONNECTION_*` event.
 | ``only a running task can fetch a connection`` (403) | Only a task's own token, while the task runs, may fetch a credential. Read connections with `lakana connection show` instead; it never shows the secret. |
 | ``connection `crm-db` changed after this attempt started; the next attempt uses the new address`` | The connection's address (or a directory's root or path, or its kind) changed while the attempt ran. The attempt is retried with the new address while the asset has retries left. To avoid it, change connections between runs. |
 | ``` `exports` names ingestion root `shared`, which this worker does not have. Set it in `LAKANA_LAUNCHER__INGESTION_ROOTS` (Docker runner) or `LAKANA_RUN__INGESTION_ROOTS` (local runner). ``` | The connection's `root` is not set on the worker that took the task. An operator adds it to the setting the message names for that worker's runner and restarts it ([Ingestion roots](../how-to/run-python-tasks-in-containers.md#ingestion-roots)). Not retried. |
-| ``asset `x` reaches 70 hosts through the egress proxy; a task may reach at most 64 — split the asset`` (or ``… database endpoints; a task's relay forwards at most 16``, ``… ingestion roots; a task mounts at most 16``) | The asset declares more than one task can be given. Split it into several assets. Not retried. |
+| ``an asset declares at most 16 connections`` (the deploy is refused) | One asset declares more connections than a task can be given. Split it into several assets. The limits of the hosts, database endpoints and ingestion roots one task gets follow from it and cannot be reached through a deploy (at most 32 hosts, 16 endpoints, 16 roots), so the worker's own refusals (``asset `x` reaches 65 hosts through the egress proxy; a task may reach at most 64 — split the asset``, ``… 17 database endpoints; a task's relay forwards at most 16``, ``… 17 ingestion roots; a task mounts at most 16``) are a safeguard you should not meet. They are not retried. |
 | ``asset `x` declares more or longer host names than one task's egress token can carry (… characters of payload, at most 8192); split its connections across several assets`` | The host names of the asset's HTTPS connections are too long, together, for one task's egress token. Split the connections across several assets. Not retried. |
 | ``` `crm-db` is not declared by this asset: add it to @asset(connections=[...]) and deploy. ``` | `connections.get` was asked for a name the asset does not declare; nothing was sent. Add the name and deploy. This error is not retried. |

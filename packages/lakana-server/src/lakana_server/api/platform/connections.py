@@ -12,10 +12,12 @@ from pydantic import SecretStr
 
 from lakana_core.auth import PrincipalRef
 from lakana_core.connections.service import ConnectionService, ConnectionView
+from lakana_core.models import ConnectionTest
 from lakana_server.api.platform.schemas import (
     ConnectionCreate,
     ConnectionOut,
     ConnectionPage,
+    ConnectionTestOut,
     ConnectionUpdate,
     DeclaringAssetOut,
 )
@@ -277,3 +279,103 @@ def delete_connection(
         The connection service for this request.
     """
     service.delete(principal, environment_name, connection_name)
+
+
+def _test_out(test: ConnectionTest) -> ConnectionTestOut:
+    """Build a response body from a test row.
+
+    Parameters
+    ----------
+    test
+        The test.
+
+    Returns
+    -------
+    ConnectionTestOut
+        The body.
+    """
+    return ConnectionTestOut(
+        id=test.id,
+        state=test.state.value,
+        outcome=test.outcome.value if test.outcome is not None else None,
+        message=test.message,
+        created_at=test.created_at,
+        finished_at=test.finished_at,
+    )
+
+
+@router.post(
+    "/{connection_name}/tests",
+    response_model=ConnectionTestOut,
+    status_code=202,
+    responses=errors(403, 404, 409),
+)
+def request_connection_test(
+    environment_name: str,
+    connection_name: str,
+    principal: PrincipalRef = Depends(get_principal),
+    service: ConnectionService = Depends(get_connection_service),
+) -> ConnectionTestOut:
+    """Queue a test of a connection.
+
+    A worker checks that the connection's host can be reached with its settings and secret and
+    records an outcome; poll the test with `GET .../tests/{test_id}`. Needs
+    `MANAGE_CONNECTION` in the environment. Answers 404 when the environment or the
+    connection does not exist and 409, naming the open test, while a test of the connection that
+    is under 10 minutes old is queued or running; an older open test is finished as failed first.
+
+    Parameters
+    ----------
+    environment_name
+        The environment.
+    connection_name
+        The connection's name.
+    principal
+        The authenticated caller.
+    service
+        The connection service for this request.
+
+    Returns
+    -------
+    ConnectionTestOut
+        The queued test.
+    """
+    return _test_out(service.request_test(principal, environment_name, connection_name))
+
+
+@router.get(
+    "/{connection_name}/tests/{test_id}",
+    response_model=ConnectionTestOut,
+    responses=errors(403, 404),
+)
+def get_connection_test(
+    environment_name: str,
+    connection_name: str,
+    test_id: str,
+    principal: PrincipalRef = Depends(get_principal),
+    service: ConnectionService = Depends(get_connection_service),
+) -> ConnectionTestOut:
+    """Show a test of a connection: its state and, once done, its outcome and message.
+
+    Needs `MANAGE_CONNECTION` in the environment. Answers 404 when the environment or the
+    connection does not exist, or the connection has no such test.
+
+    Parameters
+    ----------
+    environment_name
+        The environment.
+    connection_name
+        The connection's name.
+    test_id
+        The test's id.
+    principal
+        The authenticated caller.
+    service
+        The connection service for this request.
+
+    Returns
+    -------
+    ConnectionTestOut
+        The test.
+    """
+    return _test_out(service.test_result(principal, environment_name, connection_name, test_id))

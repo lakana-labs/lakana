@@ -1457,6 +1457,21 @@ Its secret stays in the environment, unbound.
 | `--env` | text | none | Environment (default: the profile's). |
 | `--yes` | flag | off | Don't ask for confirmation. |
 
+### `lakana connection test`
+
+Usage: `lakana connection test [OPTIONS] {name}`
+
+Test connection NAME: a worker checks that its host can be reached.
+
+Prints ``ok: <message>`` or ``<outcome>: <message>`` with what to do next; exits 1 unless the outcome is ``ok``. Waits up to 60 seconds for a worker.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `NAME` | text | required |  |
+| `--env` | text | none | Environment (default: the profile's). |
+| `--no-wait` | flag | off | Queue the test and print its id; don't wait. |
+| `--id` | text | none | Show an earlier test of NAME instead of starting one. |
+
 ## `lakana repo`
 
 Usage: `lakana repo [OPTIONS] COMMAND [ARGS]...`

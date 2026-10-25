@@ -8,11 +8,11 @@ import inspect
 import json
 import logging
 import uuid
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import MappingProxyType
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from core_test_helpers import deploy_manifest
@@ -45,6 +45,9 @@ from lakana_core.models import (
     AuditEvent,
     AuditEventType,
     Connection,
+    ConnectionTest,
+    ConnectionTestOutcome,
+    ConnectionTestState,
     Environment,
     Principal,
     PrincipalType,
@@ -2077,3 +2080,339 @@ def test_a_name_the_environment_reserves_is_skipped_for_a_new_secret(world: Worl
         ).scalar_one_or_none()
         is None
     )
+
+
+_NOW = datetime(2026, 10, 25, 12, 0, tzinfo=UTC)
+
+
+def _claimed(
+    world: World, owner: str = "worker-1", *, lease_seconds: int = 60, now: datetime = _NOW
+) -> ConnectionTest:
+    """Claim the oldest test at `_NOW`.
+
+    Parameters
+    ----------
+    world
+        The world.
+    owner
+        The claiming worker.
+    lease_seconds
+        The lease.
+    now
+        The time of the claim.
+
+    Returns
+    -------
+    ConnectionTest
+        The claimed row.
+    """
+    claimed = world.connections().claim_test(owner, lease_seconds=lease_seconds, now=now)
+    assert claimed is not None
+    return claimed
+
+
+def test_a_test_is_requested_queued_and_audited(world: World) -> None:
+    world.postgres(world.data_engineer)
+
+    test = world.connections().request_test(world.data_engineer, "prod", "crm-db")
+
+    assert (test.state, test.outcome, test.message, test.finished_at) == (
+        ConnectionTestState.QUEUED,
+        None,
+        None,
+        None,
+    )
+    assert test.connection_id == world.connection_id("prod", "crm-db")
+    event = world.events(AuditEventType.CONNECTION_TESTED)[-1]
+    assert event.detail == {
+        "connection": "crm-db",
+        "environment": "prod",
+        "test_id": str(test.id),
+        "state": "queued",
+    }
+    assert event.securable_environment == "prod"
+    shown = world.connections().test_result(world.data_engineer, "prod", "crm-db", str(test.id))
+    assert shown.id == test.id
+
+
+def test_a_second_test_is_refused_while_one_is_queued_or_running(world: World) -> None:
+    world.postgres(world.data_engineer)
+    service = world.connections()
+    first = service.request_test(world.data_engineer, "prod", "crm-db")
+    see = f"see it with lakana connection test crm-db --env prod --id {first.id}"
+
+    with pytest.raises(ConflictError) as queued:
+        service.request_test(world.data_engineer, "prod", "crm-db")
+    _claimed(world)
+    with pytest.raises(ConflictError) as running:
+        service.request_test(world.data_engineer, "prod", "crm-db")
+
+    assert str(queued.value) == f"a test of `crm-db` is already queued; {see}"
+    assert str(running.value) == f"a test of `crm-db` is already running; {see}"
+    service.finish_test(first.id, "worker-1", _NOW + timedelta(seconds=60), "ok", "fine")
+    again = service.request_test(world.data_engineer, "prod", "crm-db")
+    assert again.id != first.id
+
+
+def test_a_test_needs_manage_connection_and_an_existing_connection(world: World) -> None:
+    world.postgres(world.data_engineer)
+    test = world.connections().request_test(world.data_engineer, "prod", "crm-db")
+
+    with pytest.raises(PermissionDenied):
+        world.connections().request_test(world.analyst, "prod", "crm-db")
+    with pytest.raises(PermissionDenied):
+        world.connections().test_result(world.analyst, "prod", "crm-db", str(test.id))
+    with pytest.raises(NotFoundError, match="has no connection `nope`"):
+        world.connections().request_test(world.data_engineer, "prod", "nope")
+
+
+def test_a_test_of_another_connection_or_an_odd_id_is_not_found(world: World) -> None:
+    world.postgres(world.data_engineer)
+    world.postgres(world.data_engineer, "other-db")
+    test = world.connections().request_test(world.data_engineer, "prod", "crm-db")
+    service = world.connections()
+
+    for name, test_id in (
+        ("other-db", str(test.id)),
+        ("crm-db", str(uuid.uuid4())),
+        ("crm-db", "x"),
+    ):
+        with pytest.raises(
+            NotFoundError,
+            match=f"connection `{name}` has no test `{test_id}`; `lakana connection test {name} ",
+        ):
+            service.test_result(world.data_engineer, "prod", name, test_id)
+
+
+def test_claim_takes_the_oldest_queued_test_and_sets_the_lease(world: World) -> None:
+    world.postgres(world.data_engineer)
+    world.postgres(world.data_engineer, "other-db")
+    service = world.connections()
+    older = service.request_test(world.data_engineer, "prod", "crm-db")
+    younger = service.request_test(world.data_engineer, "prod", "other-db")
+    for row, age in ((older, 10), (younger, 5)):
+        world.session.execute(
+            sa_update(ConnectionTest)
+            .where(ConnectionTest.id == row.id)
+            .values(created_at=_NOW - timedelta(minutes=age))
+        )
+    world.session.commit()
+
+    first = _claimed(world, lease_seconds=30)
+    second = _claimed(world, "worker-2")
+
+    assert (first.id, first.state, first.lease_owner) == (
+        older.id,
+        ConnectionTestState.RUNNING,
+        "worker-1",
+    )
+    assert first.lease_expires_at == _NOW + timedelta(seconds=30)
+    assert second.id == younger.id
+    assert service.claim_test("worker-3", now=_NOW) is None
+
+
+def test_claim_takes_a_running_test_whose_lease_ran_out(world: World) -> None:
+    world.postgres(world.data_engineer)
+    test = world.connections().request_test(world.data_engineer, "prod", "crm-db")
+    _claimed(world, lease_seconds=60)
+
+    assert world.connections().claim_test("worker-2", now=_NOW + timedelta(seconds=59)) is None
+    taken = _claimed(world, "worker-2", now=_NOW + timedelta(seconds=60))
+
+    assert (taken.id, taken.lease_owner) == (test.id, "worker-2")
+    assert taken.lease_expires_at == _NOW + timedelta(seconds=120)
+
+
+def test_finish_records_the_outcome_and_audits_it(world: World) -> None:
+    world.postgres(world.data_engineer)
+    test = world.connections().request_test(world.data_engineer, "prod", "crm-db")
+    claimed = _claimed(world)
+
+    recorded = world.connections().finish_test(
+        test.id, "worker-1", claimed.lease_expires_at, "refused", "connection refused"
+    )
+
+    assert recorded is True
+    done = world.connections().test_result(world.data_engineer, "prod", "crm-db", str(test.id))
+    assert (done.state, done.outcome, done.message) == (
+        ConnectionTestState.DONE,
+        ConnectionTestOutcome.REFUSED,
+        "connection refused",
+    )
+    assert done.finished_at is not None
+    assert done.lease_owner is None and done.lease_expires_at is None
+    tested = world.events(AuditEventType.CONNECTION_TESTED)
+    assert [event.detail["state"] for event in tested] == ["queued", "done"]
+    assert tested[-1].detail == {
+        "connection": "crm-db",
+        "environment": "prod",
+        "test_id": str(test.id),
+        "state": "done",
+        "outcome": "refused",
+    }
+    assert tested[-1].principal_id == world.data_engineer.id
+
+
+def test_finish_by_a_stale_owner_or_lease_is_ignored(world: World) -> None:
+    world.postgres(world.data_engineer)
+    test = world.connections().request_test(world.data_engineer, "prod", "crm-db")
+    first_lease = _claimed(world, "worker-1").lease_expires_at
+    second_lease = _claimed(world, "worker-2", now=_NOW + timedelta(seconds=61)).lease_expires_at
+    service = world.connections()
+
+    wrong_owner = service.finish_test(test.id, "worker-1", second_lease, "ok", "late")
+    old_lease = service.finish_test(test.id, "worker-2", first_lease, "ok", "late")
+
+    assert (wrong_owner, old_lease) == (False, False)
+    row = service.test_result(world.data_engineer, "prod", "crm-db", str(test.id))
+    assert (row.state, row.outcome) == (ConnectionTestState.RUNNING, None)
+    assert len(world.events(AuditEventType.CONNECTION_TESTED)) == 1
+    assert service.finish_test(test.id, "worker-2", second_lease, "ok", "fine") is True
+
+
+def test_a_message_is_cut_at_1000_characters(world: World) -> None:
+    world.postgres(world.data_engineer)
+    test = world.connections().request_test(world.data_engineer, "prod", "crm-db")
+    claimed = _claimed(world)
+
+    world.connections().finish_test(
+        test.id, "worker-1", claimed.lease_expires_at, "failed", "x" * 5000
+    )
+
+    done = world.connections().test_result(world.data_engineer, "prod", "crm-db", str(test.id))
+    assert done.message == "x" * 1000
+
+
+_STUCK = (
+    "no worker finished this test within 10 minutes; in this version only a worker with the "
+    "local runner runs connection tests — read that worker's log (`docker compose logs worker`, "
+    "or the `lakana local` terminal)"
+)
+
+
+def _aged(world: World, test_id: uuid.UUID, minutes: int) -> None:
+    """Make a test older.
+
+    Parameters
+    ----------
+    world
+        The world.
+    test_id
+        The test.
+    minutes
+        How many minutes before now it was created.
+    """
+    world.session.execute(
+        sa_update(ConnectionTest)
+        .where(ConnectionTest.id == test_id)
+        .values(created_at=datetime.now(UTC) - timedelta(minutes=minutes))
+    )
+    world.session.commit()
+
+
+def test_a_stale_queued_test_is_closed_as_failed_and_the_new_one_queued(world: World) -> None:
+    world.postgres(world.data_engineer)
+    service = world.connections()
+    stuck = service.request_test(world.data_engineer, "prod", "crm-db")
+    _aged(world, stuck.id, 11)
+
+    fresh = service.request_test(world.data_engineer, "prod", "crm-db")
+
+    assert fresh.id != stuck.id and fresh.state == ConnectionTestState.QUEUED
+    closed = service.test_result(world.data_engineer, "prod", "crm-db", str(stuck.id))
+    assert (closed.state, closed.outcome, closed.message) == (
+        ConnectionTestState.DONE,
+        ConnectionTestOutcome.FAILED,
+        _STUCK,
+    )
+    assert closed.finished_at is not None and closed.lease_owner is None
+    tested = world.events(AuditEventType.CONNECTION_TESTED)
+    assert [(e.detail["test_id"], e.detail["state"]) for e in tested] == [
+        (str(stuck.id), "queued"),
+        (str(stuck.id), "done"),
+        (str(fresh.id), "queued"),
+    ]
+    assert tested[1].detail["outcome"] == "failed"
+
+
+def test_a_stale_running_test_is_closed_the_same_way(world: World) -> None:
+    world.postgres(world.data_engineer)
+    service = world.connections()
+    stuck = service.request_test(world.data_engineer, "prod", "crm-db")
+    _claimed(world, now=datetime.now(UTC) - timedelta(minutes=9))
+    _aged(world, stuck.id, 11)
+
+    fresh = service.request_test(world.data_engineer, "prod", "crm-db")
+
+    closed = service.test_result(world.data_engineer, "prod", "crm-db", str(stuck.id))
+    assert (closed.state, closed.outcome, closed.message) == (
+        ConnectionTestState.DONE,
+        ConnectionTestOutcome.FAILED,
+        _STUCK,
+    )
+    assert fresh.state == ConnectionTestState.QUEUED
+
+
+def test_a_test_inside_ten_minutes_still_gets_the_409(world: World) -> None:
+    world.postgres(world.data_engineer)
+    service = world.connections()
+    open_test = service.request_test(world.data_engineer, "prod", "crm-db")
+    _aged(world, open_test.id, 9)
+
+    with pytest.raises(ConflictError):
+        service.request_test(world.data_engineer, "prod", "crm-db")
+
+    row = service.test_result(world.data_engineer, "prod", "crm-db", str(open_test.id))
+    assert row.state == ConnectionTestState.QUEUED
+
+
+def test_the_worker_of_a_closed_test_is_ignored_afterwards(world: World) -> None:
+    world.postgres(world.data_engineer)
+    service = world.connections()
+    stuck = service.request_test(world.data_engineer, "prod", "crm-db")
+    lease = _claimed(world, now=datetime.now(UTC)).lease_expires_at
+    _aged(world, stuck.id, 11)
+    service.request_test(world.data_engineer, "prod", "crm-db")
+
+    recorded = service.finish_test(stuck.id, "worker-1", lease, "ok", "late")
+
+    assert recorded is False
+    closed = service.test_result(world.data_engineer, "prod", "crm-db", str(stuck.id))
+    assert (closed.outcome, closed.message) == (ConnectionTestOutcome.FAILED, _STUCK)
+
+
+def test_a_request_locks_the_open_test_it_reads(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A worker's `finish_test` must not slip between the read and the stale close."""
+    world.postgres(world.data_engineer)
+    service = world.connections()
+    service.request_test(world.data_engineer, "prod", "crm-db")
+    locked: list[bool] = []
+    original = cast("Callable[..., object]", world.session.execute)
+
+    def spy(statement: object, *args: object, **kwargs: object) -> object:
+        """Record whether a select of connection tests asks for a row lock.
+
+        Parameters
+        ----------
+        statement
+            The statement.
+        *args
+            Passed on.
+        **kwargs
+            Passed on.
+
+        Returns
+        -------
+        object
+            The result.
+        """
+        if "connection_tests.state IN" in str(statement):
+            locked.append(getattr(statement, "_for_update_arg", None) is not None)
+        return original(statement, *args, **kwargs)
+
+    monkeypatch.setattr(world.session, "execute", spy)
+    with pytest.raises(ConflictError):
+        service.request_test(world.data_engineer, "prod", "crm-db")
+    assert locked and all(locked)

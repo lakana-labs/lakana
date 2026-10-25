@@ -17,7 +17,7 @@ from typing import Annotated, Any
 
 import typer
 
-from lakana._models import Connection
+from lakana._models import Connection, ConnectionTest
 from lakana.cli import _output
 from lakana.cli._state import CliError, confirm, resolve_environment, state_of
 from lakana.cli.secrets import read_values
@@ -717,6 +717,118 @@ def delete(
     _output.done(
         state, f"Deleted connection {_output.inline(name)} in {_output.inline(environment)}"
     )
+
+
+_NEXT_STEPS: dict[str, str] = {
+    "dns": "Check the host name.",
+    "refused": "Check the port and the source's firewall.",
+    "timeout": "Check the host, the port and the network path between the worker and the source.",
+    "tls": "Check the CA (`lakana connection update NAME --ca-file ca.pem`).",
+    "not_allowed": "The address must be reachable from outside the Lakana stack.",
+    "root_unavailable": "Check the root setting.",
+    "not_found": "Check the path under the root (`lakana connection show NAME`).",
+    "credentials": "Check the secret.",
+    "failed": "See the worker's log.",
+}
+"""What to do about each outcome of a connection test that is not `ok`."""
+
+
+def next_step(outcome: str | None) -> str | None:
+    """Say what to do about the outcome of a connection test.
+
+    Parameters
+    ----------
+    outcome
+        The outcome.
+
+    Returns
+    -------
+    str or None
+        The advice; `None` for ``ok`` and for an outcome this version does not know.
+    """
+    return _NEXT_STEPS.get(outcome or "")
+
+
+def _test_line(test: ConnectionTest) -> str:
+    """Write what a test found, or where it is.
+
+    Parameters
+    ----------
+    test
+        The test.
+
+    Returns
+    -------
+    str
+        ``<outcome>: <message>`` once done; the state and id before.
+    """
+    if test.state != "done":
+        return f"Test {_output.inline(test.id)} is {_output.inline(test.state)}."
+    return f"{_output.inline(test.outcome or 'failed')}: {_output.inline(test.message or '')}"
+
+
+@connection_app.command("test")
+def test(
+    ctx: typer.Context,
+    name: str,
+    env: _ENV = None,
+    no_wait: Annotated[
+        bool, typer.Option("--no-wait", help="Queue the test and print its id; don't wait.")
+    ] = False,
+    test_id: Annotated[
+        str | None,
+        typer.Option("--id", help="Show an earlier test of NAME instead of starting one."),
+    ] = None,
+) -> None:
+    """Test connection NAME: a worker checks that its host can be reached.
+
+    Prints ``ok: <message>`` or ``<outcome>: <message>`` with what to do next; exits 1 unless the
+    outcome is ``ok``. Waits up to 60 seconds for a worker.
+
+    Parameters
+    ----------
+    ctx
+        The Typer context.
+    name
+        The connection's name.
+    env
+        The environment.
+    no_wait
+        Print the test's id without waiting for the outcome.
+    test_id
+        Show this earlier test instead of starting one.
+
+    Raises
+    ------
+    CliError
+        If a worker did not finish the test in time (exit 1).
+    typer.Exit
+        With code 1 when the outcome is not ``ok``.
+    """
+    state = state_of(ctx)
+    environment = resolve_environment(state, env)
+    try:
+        result = state.client().connections.test(
+            environment, name, wait=not no_wait, test_id=test_id
+        )
+    except TimeoutError as exc:
+        raise CliError(str(exc), 1, kind="ConnectionTestTimeout") from exc
+    again = (
+        f"lakana connection test {_output.inline(name)} --env {_output.inline(environment)} "
+        f"--id {_output.inline(result.id)}"
+    )
+    if state.output == "json":
+        _output.print_json(result)
+    elif result.state != "done":
+        sys.stdout.write(_output.safe_text(f"{_test_line(result)} Look again with {again}") + "\n")
+    else:
+        sys.stdout.write(_output.safe_text(_test_line(result)) + "\n")
+    if result.state != "done" or result.outcome == "ok":
+        return
+    advice = next_step(result.outcome)
+    if advice:
+        _output.next_step(state, advice)
+    raise typer.Exit(1)
 
 
 def register(app: typer.Typer) -> None:

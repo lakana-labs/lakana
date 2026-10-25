@@ -128,7 +128,12 @@ as two statements.
   the worker's operating system user, so someone who may deploy Python code can read what the worker
   reads, filters and masks included. Deploy Python only from people you would trust with the stored data,
   or run one instance per group that does not trust the other
-  ([why](python-assets.md#isolation-one-instance-is-one-trust-domain)). With the docker runner, the
+  ([why](python-assets.md#isolation-one-instance-is-one-trust-domain)). The same holds for whoever may
+  manage connections: with the local runner, a connection test dials from the worker's host to any
+  address the connection names, so a data engineer without the right to deploy can probe which ports and
+  ingestion-root paths the worker can reach. In this version a worker with the Docker runner runs no
+  connection tests; from the next release they run there under a task's own network rules. With the
+  docker runner, the
   Compose bundle's default, each task runs in a container without the worker's credentials, and
   reaches the server and the endpoints of the connections its asset declares, nothing else;
   containers share the host's kernel, so this is not a sandbox for hostile code
