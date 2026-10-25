@@ -29,9 +29,11 @@ from lakana_worker.launcher.engine import EngineError
 from lakana_worker.launcher.requests import (
     EGRESS_TOKEN_TOO_LONG,
     INGEST_PROBE_SCRIPT,
+    LABEL_DEADLINE,
     RELAY_COMMAND,
     RELAY_PIDS,
     BuildRequest,
+    CheckRequest,
     CleanupRequest,
     Limits,
     Refused,
@@ -3496,3 +3498,184 @@ def test_a_run_stopped_while_its_relay_starts_never_creates_the_task(tmp_path: P
     assert result == {"exit": None, "oom_killed": False, "timed_out": False, "stopped": True}
     assert engine.created("task") == []
     assert engine.containers == {} and "lakana-task-t1" not in engine.networks
+
+
+def _check(**fields: Any) -> CheckRequest:
+    """Build a check request.
+
+    Parameters
+    ----------
+    **fields
+        Fields to replace.
+
+    Returns
+    -------
+    CheckRequest
+        The request.
+    """
+    return replace(
+        CheckRequest(
+            check="k1", owner="w1", python="3.13", attempt="attempt-k1", stdin=b'{"c": 1}'
+        ),
+        **fields,
+    )
+
+
+def test_a_check_has_no_server_and_a_connection_test_token(tmp_path: Path) -> None:
+    """Only the proxy joins a check's network; its token has purpose `connection-test`."""
+    engine = FakeEngine(output=[b'{"outcome": "ok", "message": "reachable"}\n'])
+    launcher = _started(engine, tmp_path, built=False)
+    emitted: list[dict[str, object]] = []
+
+    result = launcher.check(_check(egress=(("api.example.com", 443),)), emitted.append)
+
+    assert result["exit"] == 0
+    assert _logs(emitted) == b'{"outcome": "ok", "message": "reachable"}\n'
+    connects = [b for m, p, b in engine.calls if p == "/networks/lakana-check-k1/connect"]
+    assert connects == [{"Container": "c-egress", "EndpointConfig": {"Aliases": ["egress"]}}]
+    (spec,) = engine.created("check")
+    proxy = next(v for v in spec["Env"] if v.startswith("LAKANA_EGRESS_PROXY="))
+    token = proxy.split("http://lakana:", 1)[1].removesuffix("@egress:3128")
+    key = read_key(tmp_path / "egress.key")
+    assert key is not None
+    grant = verify(key, token, time.time())
+    assert grant is not None and grant.purpose == "connection-test"
+    assert engine.stdin[-1] == b'{"c": 1}'
+    assert engine.containers == {} and "lakana-check-k1" not in engine.networks
+
+
+def test_a_check_with_relay_routes_gets_its_relay(tmp_path: Path) -> None:
+    """The relay joins the check's network, as a run's joins the task's."""
+    engine = FakeEngine()
+    launcher = _started(engine, tmp_path, built=False)
+
+    launcher.check(_check(relay=(_DB,)), lambda line: None)
+
+    (relay,) = engine.created("relay")
+    assert relay["HostConfig"]["NetworkMode"] == "lakana-check-k1"
+    assert relay["Labels"]["lakana.launcher.id"] == "k1"
+    assert engine.containers == {}
+
+
+def test_a_check_with_connections_without_the_egress_service_is_refused(tmp_path: Path) -> None:
+    """The same fixed refusal as a run's."""
+    engine = FakeEngine(services={"server": "c-server"})
+    launcher = _started(engine, tmp_path, built=False)
+
+    with pytest.raises(Refused, match="tasks with connections need the `egress` service"):
+        launcher.check(_check(relay=(_DB,)), lambda line: None)
+
+
+def test_a_check_can_be_stopped_by_its_owner(tmp_path: Path) -> None:
+    """`stop` reaches a check as it reaches a run."""
+    engine = FakeEngine(hold=True)
+    launcher = _started(engine, tmp_path, built=False)
+    results: list[dict[str, object]] = []
+    worker = threading.Thread(
+        target=lambda: results.append(launcher.check(_check(), lambda line: None))
+    )
+    worker.start()
+    _until(
+        lambda: any(
+            c["running"] and c["Labels"]["lakana.launcher.kind"] == "check"
+            for c in list(engine.containers.values())
+        )
+    )
+
+    assert launcher.stop(StopRequest("k1", "w1")) == {"stopped": True}
+    worker.join(10)
+    assert results[0]["stopped"] is True
+
+
+def test_a_check_token_is_measured_from_after_the_image_pull(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """As for a run: a token minted before a ten-minute pull would have expired at the start."""
+    engine = FakeEngine()
+    launcher = _started(engine, tmp_path, built=False)
+    engine.images.clear()
+    skew = [0.0]
+    real = time.time
+    monkeypatch.setattr(time, "time", lambda: real() + skew[0])
+
+    def slow_pull() -> None:
+        """Let a ten-minute pull pass on the clock."""
+        skew[0] += 600.0
+
+    engine.hooks["pull"] = slow_pull
+
+    launcher.check(_check(egress=(("api.example.com", 443),)), lambda line: None)
+
+    (spec,) = engine.created("check")
+    env = dict(item.split("=", 1) for item in spec["Env"])
+    token = env["LAKANA_EGRESS_PROXY"].removeprefix("http://lakana:").removesuffix("@egress:3128")
+    key = read_key(tmp_path / "egress.key")
+    assert key is not None
+    grant = verify(key, token, time.time())
+    assert grant is not None
+    assert time.time() + 30 < grant.expires <= time.time() + 30 + 1 + 61
+    assert int(spec["Labels"][LABEL_DEADLINE]) > time.time() + 30
+
+
+def test_a_worker_that_left_during_a_checks_pull_never_starts_it(tmp_path: Path) -> None:
+    """The check's caller hung up while the image was pulled: no network, no container."""
+    engine = FakeEngine(hold=True)
+    launcher = _started(engine, tmp_path, built=False)
+    engine.images.clear()
+    engine.hooks["pull"] = lambda: launcher.abandon(
+        container_name(launcher.settings, "check", "k1"), "w1"
+    )
+
+    result = launcher.check(_check(egress=(("api.example.com", 443),)), lambda line: None)
+
+    assert result["stopped"] is True
+    assert engine.created("check") == [] and _started_count(engine) == 0
+    assert engine.networks == {}
+
+
+def test_a_worker_that_left_before_the_check_registered_never_starts_it(tmp_path: Path) -> None:
+    """The watcher can fire before the request reaches `check`; nothing is pulled or created."""
+    engine = FakeEngine()
+    launcher = _started(engine, tmp_path, built=False)
+    launcher.abandon(container_name(launcher.settings, "check", "k1"), "w1")
+    before = len(engine.calls)
+
+    result = launcher.check(_check(), lambda line: None)
+
+    assert result["stopped"] is True and result["exit"] is None
+    assert [p for m, p, _ in engine.calls[before:] if m == "POST"] == []
+
+
+def test_a_check_naming_an_unusable_root_is_refused_with_its_reason(tmp_path: Path) -> None:
+    """The launcher's probe found the root unsafe: a check is refused as a run is."""
+    engine = FakeEngine(probe_exits={"data": 4})
+    launcher = _roots(tmp_path, engine)
+
+    with pytest.raises(Refused, match="ingestion root 'data' holds a socket"):
+        launcher.check(_check(roots=("data",)), lambda line: None)
+
+    assert engine.created("check") == []
+
+
+def test_a_check_with_egress_needs_a_started_launcher(tmp_path: Path) -> None:
+    """Without `start()` there is no egress key to sign the check's token with."""
+    engine = FakeEngine()
+    launcher = Launcher(settings(tmp_path), engine)
+
+    with pytest.raises(RuntimeError, match="only available after start"):
+        launcher.check(_check(egress=(("api.example.com", 443),)), lambda line: None)
+
+    assert not [p for m, p, _ in engine.calls if m in ("POST", "DELETE")]
+
+
+def test_a_check_mounts_a_usable_root_read_only_and_nothing_of_a_task(tmp_path: Path) -> None:
+    """The root the probe accepted, at ``/ingest/<root>``; no code, environment or work mount."""
+    engine = FakeEngine()
+    launcher = _roots(tmp_path, engine)
+
+    result = launcher.check(_check(roots=("data",)), lambda line: None)
+
+    assert result["exit"] == 0
+    (spec,) = engine.created("check")
+    mounts = spec["HostConfig"]["Mounts"]
+    assert [(m["Target"], m["ReadOnly"]) for m in mounts] == [("/ingest/data", True)]

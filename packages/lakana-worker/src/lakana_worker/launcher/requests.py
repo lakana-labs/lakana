@@ -161,6 +161,21 @@ FIELDS: dict[str, frozenset[str]] = {
         }
     )
     | _LIMITS,
+    "check": frozenset(
+        {
+            "token",
+            "op",
+            "check",
+            "owner",
+            "python",
+            "attempt",
+            "stdin",
+            "roots",
+            "trust",
+            "egress",
+            "relay",
+        }
+    ),
     "stop": frozenset({"token", "op", "id", "owner"}),
     "status": frozenset({"token", "op", "python", "environment"}),
     "cleanup": frozenset({"token", "op", "owner"}),
@@ -211,6 +226,18 @@ class Limits:
     cpus: float
     pids: int
     timeout_seconds: int
+
+
+CHECK_LIMITS = Limits(memory_mb=256, cpus=0.5, pids=64, timeout_seconds=30)
+"""A connection check's fixed limits: it opens a few sockets and prints one line.
+
+Measured on Docker 29 with the Python 3.14 task image: a peak of about 74 MiB resident (``lakana``
+imports httpx and pyarrow), so 256 MiB leaves room for TLS and a slow source.
+"""
+CHECK_GRACE = 1
+"""Seconds between SIGTERM and SIGKILL when a check is stopped."""
+CHECK_ENTRY = ("/opt/lakana-check/bin/python", "-I", "-m", "lakana.ingest._check")
+"""The check's entry point: Lakana's own environment in the task image, never a project's."""
 
 
 @dataclass(frozen=True)
@@ -330,6 +357,44 @@ class BuildRequest:
 
 
 @dataclass(frozen=True)
+class CheckRequest:
+    """Check one connection under the rules a task with it would get.
+
+    Parameters
+    ----------
+    check
+        The check's id; names the container and its network.
+    owner
+        The worker that asked.
+    python
+        Selects the task image, which holds the check's own environment.
+    attempt
+        The worker's directory for this check in the work volume; only its ``trust``
+        subdirectory is mounted.
+    stdin
+        The connection, its secret and its routing. Left out of `repr`.
+    roots
+        Allowed ingestion roots to mount read-only.
+    trust
+        Whether the container mounts the attempt's trust bundle at ``/trust``.
+    egress
+        As a run's.
+    relay
+        As a run's.
+    """
+
+    check: str
+    owner: str
+    python: str
+    attempt: str
+    stdin: bytes = field(repr=False)
+    roots: tuple[str, ...] = ()
+    trust: bool = False
+    egress: tuple[tuple[str, int], ...] = ()
+    relay: tuple[RelayRoute, ...] = ()
+
+
+@dataclass(frozen=True)
 class StopRequest:
     """Stop a running task or build of the worker that asks.
 
@@ -374,7 +439,7 @@ class CleanupRequest:
     owner: str
 
 
-Request = RunRequest | BuildRequest | StopRequest | StatusRequest | CleanupRequest
+Request = RunRequest | BuildRequest | CheckRequest | StopRequest | StatusRequest | CleanupRequest
 
 
 def _encodes(text: str) -> bool:
@@ -924,23 +989,8 @@ def _run(data: dict[str, Any], settings: LauncherSettings) -> RunRequest:
     Refused
         For the first field that breaks its rule.
     """
-    stdin = data["stdin"]
-    if (
-        not isinstance(stdin, str)
-        or not _encodes(stdin)
-        or len(stdin.encode("utf-8")) > MAX_STDIN_BYTES
-    ):
-        raise Refused("stdin: a string of at most 256 KiB")
-    roots = data["roots"]
-    names = ", ".join(sorted(settings.ingestion_roots)) or _NO_ROOTS
-    root_rule = f"{ROOTS_REFUSAL}{names})"
-    if (
-        not isinstance(roots, list)
-        or len(roots) > MAX_ROOTS
-        or not all(isinstance(r, str) and r in settings.ingestion_roots for r in roots)
-        or len(set(roots)) != len(roots)
-    ):
-        raise Refused(root_rule)
+    stdin = _stdin(data)
+    roots = _roots(data, settings)
     return RunRequest(
         task=_pattern(data, "task", _ID, _ID_RULE),
         owner=_pattern(data, "owner", _OWNER, _OWNER_RULE),
@@ -949,8 +999,101 @@ def _run(data: dict[str, Any], settings: LauncherSettings) -> RunRequest:
         attempt=_pattern(data, "attempt", _ATTEMPT, _ATTEMPT_RULE),
         limits=_limits(data, settings),
         kill_grace_seconds=_integer(data, "kill_grace_seconds", 0, MAX_KILL_GRACE),
-        stdin=stdin.encode("utf-8"),
-        roots=tuple(roots),
+        stdin=stdin,
+        roots=roots,
+        trust=_trust(data),
+        egress=_egress(data),
+        relay=_relay_routes(data),
+    )
+
+
+def _stdin(data: dict[str, Any]) -> bytes:
+    """Read ``stdin``.
+
+    Parameters
+    ----------
+    data
+        The request.
+
+    Returns
+    -------
+    bytes
+        Its UTF-8 bytes.
+
+    Raises
+    ------
+    Refused
+        For anything but a string of at most 256 KiB.
+    """
+    stdin = data["stdin"]
+    if (
+        not isinstance(stdin, str)
+        or not _encodes(stdin)
+        or len(stdin.encode("utf-8")) > MAX_STDIN_BYTES
+    ):
+        raise Refused("stdin: a string of at most 256 KiB")
+    return stdin.encode("utf-8")
+
+
+def _roots(data: dict[str, Any], settings: LauncherSettings) -> tuple[str, ...]:
+    """Read ``roots``.
+
+    Parameters
+    ----------
+    data
+        The request.
+    settings
+        The allowed roots.
+
+    Returns
+    -------
+    tuple of str
+        The names.
+
+    Raises
+    ------
+    Refused
+        Unless it is a list of distinct allowed names.
+    """
+    roots = data["roots"]
+    names = ", ".join(sorted(settings.ingestion_roots)) or _NO_ROOTS
+    if (
+        not isinstance(roots, list)
+        or len(roots) > MAX_ROOTS
+        or not all(isinstance(r, str) and r in settings.ingestion_roots for r in roots)
+        or len(set(roots)) != len(roots)
+    ):
+        raise Refused(f"{ROOTS_REFUSAL}{names})")
+    return tuple(roots)
+
+
+def _check(data: dict[str, Any], settings: LauncherSettings) -> CheckRequest:
+    """Read a ``check`` request.
+
+    Parameters
+    ----------
+    data
+        The request.
+    settings
+        The allow-lists.
+
+    Returns
+    -------
+    CheckRequest
+        The request.
+
+    Raises
+    ------
+    Refused
+        For the first field that breaks its rule.
+    """
+    return CheckRequest(
+        check=_pattern(data, "check", _ID, _ID_RULE),
+        owner=_pattern(data, "owner", _OWNER, _OWNER_RULE),
+        python=_python(data, settings),
+        attempt=_pattern(data, "attempt", _ATTEMPT, _ATTEMPT_RULE),
+        stdin=_stdin(data),
+        roots=_roots(data, settings),
         trust=_trust(data),
         egress=_egress(data),
         relay=_relay_routes(data),
@@ -1075,6 +1218,8 @@ def parse_request(raw: bytes, *, token: str, settings: LauncherSettings) -> Requ
         return _run(data, settings)
     if op == "build":
         return _build(data, settings)
+    if op == "check":
+        return _check(data, settings)
     if op == "stop":
         return StopRequest(
             _pattern(data, "id", _ID, _ID_RULE), _pattern(data, "owner", _OWNER, _OWNER_RULE)
@@ -1544,6 +1689,76 @@ def run_container_spec(
             container_name(settings, "task", request.task),
             mounts,
             "rw,noexec,nosuid,nodev,size=64m",
+            no_new_privileges=no_new_privileges,
+        ),
+    }
+
+
+def check_container_spec(
+    request: CheckRequest,
+    settings: LauncherSettings,
+    *,
+    no_new_privileges: bool,
+    deadline: int,
+    proxy_url: str | None = None,
+) -> dict[str, Any]:
+    """Describe the container of one connection check.
+
+    The task image and the task user, but none of a task's code, environment or scratch: the
+    check runs Lakana's own module from ``/opt/lakana-check`` with a 16 MiB ``/tmp``, the
+    connection's roots, the trust bundle and the proxy variable a task would get.
+
+    Parameters
+    ----------
+    request
+        The check.
+    settings
+        Images, work volume, user and roots.
+    no_new_privileges
+        Whether to set the option.
+    deadline
+        Epoch seconds after which the reaper removes the container.
+    proxy_url
+        ``http://lakana:<token>@egress:3128`` for a check with egress, else `None`.
+
+    Returns
+    -------
+    dict
+        The body of ``POST /containers/create``.
+    """
+    mounts = [_ingestion_mount(settings, name) for name in request.roots]
+    env = [
+        "PATH=/usr/local/bin:/usr/bin:/bin",
+        "HOME=/tmp",
+        "TMPDIR=/tmp",
+        "PYTHONUNBUFFERED=1",
+        "PYTHONDONTWRITEBYTECODE=1",
+    ]
+    if request.trust:
+        mounts.append(_trust_mount(settings, request.attempt))
+        env += [f"SSL_CERT_FILE={TRUST_PATH}", f"LAKANA_CA_BUNDLE={TRUST_PATH}"]
+    if proxy_url is not None:
+        env.append(f"LAKANA_EGRESS_PROXY={proxy_url}")
+    return {
+        "Image": settings.images[request.python],
+        "Entrypoint": list(CHECK_ENTRY),
+        "Cmd": [],
+        "User": settings.task_user,
+        "WorkingDir": "/",
+        "Env": env,
+        "AttachStdin": True,
+        "AttachStdout": True,
+        "AttachStderr": True,
+        "OpenStdin": True,
+        "StdinOnce": True,
+        "Tty": False,
+        "NetworkDisabled": False,
+        "Labels": labels(settings, "check", request.check, request.owner, deadline),
+        "HostConfig": _host_config(
+            CHECK_LIMITS,
+            container_name(settings, "check", request.check),
+            mounts,
+            "rw,noexec,nosuid,nodev,size=16m",
             no_new_privileges=no_new_privileges,
         ),
     }

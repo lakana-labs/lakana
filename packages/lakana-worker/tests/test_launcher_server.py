@@ -791,3 +791,99 @@ def test_removing_a_stale_socket_refuses_a_planted_file_and_a_wrong_directory(
     monkeypatch.setattr(server_module, "_ROOT_UID", os.getuid() + 1)
     with pytest.raises(StartError, match="must belong to root"):
         remove_stale_socket(tmp_path / "l.sock")
+
+
+def test_a_check_is_served_with_its_output_and_result(served: Served) -> None:
+    """A `check` line gets the check's output as log lines, then the result."""
+    request: dict[str, object] = {
+        "token": served.token,
+        "op": "check",
+        "check": "k1",
+        "owner": "w1",
+        "python": "3.13",
+        "attempt": "attempt-k1",
+        "stdin": "{}",
+        "roots": [],
+        "trust": False,
+        "egress": [],
+        "relay": [],
+    }
+
+    answer = _call(request)
+
+    assert "log" in answer[0]
+    assert answer[-1] == {
+        "result": {"exit": 0, "oom_killed": False, "timed_out": False, "stopped": False}
+    }
+
+
+CHECK: dict[str, object] = {
+    "op": "check",
+    "check": "k1",
+    "owner": "w1",
+    "python": "3.13",
+    "attempt": "attempt-k1",
+    "stdin": "{}",
+    "roots": [],
+    "trust": False,
+    "egress": [],
+    "relay": [],
+}
+
+
+def test_a_worker_that_hangs_up_mid_check_gets_its_container_removed(served: Served) -> None:
+    """The watcher abandons a check by its own name, as it does a run."""
+    engine = served.engine
+    client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    client.connect("l.sock")
+    client.sendall(json.dumps({**CHECK, "token": served.token}).encode() + b"\n")
+    _wait_for(
+        lambda: any(
+            c["running"] and c["Labels"]["lakana.launcher.kind"] == "check"
+            for c in list(engine.containers.values())
+        )
+    )
+
+    client.close()
+
+    _wait_for(lambda: not engine.containers and not engine.networks)
+    _wait_for(lambda: not served.launcher._live)
+
+
+def test_a_worker_that_hangs_up_mid_build_gets_its_container_removed(served: Served) -> None:
+    """A build is watched under its own name too."""
+    engine = served.engine
+    build = {
+        "op": "build",
+        "build": "b1",
+        "owner": "w1",
+        "python": "3.13",
+        "environment": "b" * 64,
+        "attempt": "attempt-b1",
+        "indexes": [],
+        "operator_index": None,
+        "targets": ["pypi.org:443"],
+        "no_build": True,
+        "memory_mb": 256,
+        "cpus": 1,
+        "pids": 64,
+        "timeout_seconds": 30,
+        "max_bytes": 1024**3,
+        "trust": False,
+    }
+    client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    client.connect("l.sock")
+    client.sendall(json.dumps({**build, "token": served.token}).encode() + b"\n")
+    _wait_for(
+        lambda: any(
+            c["running"] and c["Labels"]["lakana.launcher.kind"] == "build"
+            for c in list(engine.containers.values())
+        )
+    )
+
+    client.close()
+
+    _wait_for(lambda: not served.launcher._live)
+    assert not any(
+        c["Labels"]["lakana.launcher.kind"] == "build" for c in list(engine.containers.values())
+    )

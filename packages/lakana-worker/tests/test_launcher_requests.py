@@ -10,6 +10,7 @@ from __future__ import annotations
 import copy
 import dataclasses
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +24,7 @@ from lakana_worker.launcher.requests import (
     MAX_REQUEST_BYTES,
     ROOTS_REFUSAL,
     BuildRequest,
+    CheckRequest,
     CleanupRequest,
     Refused,
     RelayRoute,
@@ -33,6 +35,7 @@ from lakana_worker.launcher.requests import (
     build_container_spec,
     build_targets,
     cache_volume,
+    check_container_spec,
     environment_volume,
     network_spec,
     parse_request,
@@ -1367,3 +1370,109 @@ def test_another_refusal_names_no_allowed_roots(text: str) -> None:
         A refusal.
     """
     assert allowed_roots(text) is None
+
+
+CHECK: dict[str, Any] = {
+    "token": TOKEN,
+    "op": "check",
+    "check": "k0f3c9a1e",
+    "owner": "worker-1",
+    "python": "3.13",
+    "attempt": "attempt-chk_1",
+    "stdin": '{"connection": {}}',
+    "roots": [],
+    "trust": False,
+    "egress": [],
+    "relay": [],
+}
+
+
+def test_a_check_is_read_with_the_runs_rules() -> None:
+    """Every shared field keeps its run rule; a check has no environment, code or limits."""
+    request = parse_request(
+        _raw(
+            _with(
+                CHECK,
+                roots=["landing"],
+                trust=True,
+                egress=[["api.example.com", 443]],
+                relay=[{"listen": 15001, "host": "db.example.com", "port": 5432}],
+            )
+        ),
+        token=TOKEN,
+        settings=SETTINGS,
+    )
+
+    assert request == CheckRequest(
+        check="k0f3c9a1e",
+        owner="worker-1",
+        python="3.13",
+        attempt="attempt-chk_1",
+        stdin=b'{"connection": {}}',
+        roots=("landing",),
+        trust=True,
+        egress=(("api.example.com", 443),),
+        relay=(RelayRoute(15001, "db.example.com", 5432),),
+    )
+    assert "connection" not in repr(request)  # the secret travels in stdin
+
+
+@pytest.mark.parametrize(
+    ("changes", "rule"),
+    [
+        ({"environment": KEY}, "check takes exactly the fields"),
+        ({"memory_mb": 4096}, "check takes exactly the fields"),
+        ({"attempt": "../x"}, "attempt"),
+        ({"roots": ["elsewhere"]}, "roots: a list of distinct names"),
+        ({"egress": [["DB", 1]]}, "egress: a list of at most 64"),
+        ({"stdin": 5}, "stdin: a string of at most 256 KiB"),
+    ],
+)
+def test_a_check_refuses_what_a_run_refuses(changes: dict[str, Any], rule: str) -> None:
+    """Unknown fields, a bad attempt, roots, egress or stdin: refused with the field's rule.
+
+    Parameters
+    ----------
+    changes
+        Fields to set.
+    rule
+        Part of the refusal.
+    """
+    with pytest.raises(Refused, match=re.escape(rule)):
+        parse_request(_raw(_with(CHECK, **changes)), token=TOKEN, settings=SETTINGS)
+
+
+def test_a_check_container_runs_lakanas_check_and_nothing_of_a_task() -> None:
+    """No /code, /env or /work; the check environment's interpreter; a 16 MiB /tmp."""
+    request = parse_request(
+        _raw(_with(CHECK, roots=["landing"], trust=True)), token=TOKEN, settings=SETTINGS
+    )
+    assert isinstance(request, CheckRequest)
+
+    spec = check_container_spec(
+        request,
+        SETTINGS,
+        no_new_privileges=True,
+        deadline=99,
+        proxy_url="http://lakana:t@egress:3128",
+    )
+
+    assert spec["Image"] == "ghcr.io/lakana-labs/lakana-task:0.14.0-py3.13"
+    assert spec["Entrypoint"] == [
+        "/opt/lakana-check/bin/python",
+        "-I",
+        "-m",
+        "lakana.ingest._check",
+    ]
+    assert spec["User"] == SETTINGS.task_user
+    targets = [m["Target"] for m in spec["HostConfig"]["Mounts"]]
+    assert targets == ["/ingest/landing", "/trust"]
+    assert all(m["ReadOnly"] for m in spec["HostConfig"]["Mounts"])
+    assert spec["HostConfig"]["Mounts"][1]["VolumeOptions"]["Subpath"] == "attempt-chk_1/trust"
+    assert spec["HostConfig"]["Tmpfs"] == {"/tmp": "rw,noexec,nosuid,nodev,size=16m"}
+    assert spec["HostConfig"]["Memory"] == 256 * 1024 * 1024
+    assert spec["HostConfig"]["NetworkMode"] == "lakana-check-k0f3c9a1e"
+    assert spec["Labels"]["lakana.launcher.kind"] == "check"
+    env = dict(item.split("=", 1) for item in spec["Env"])
+    assert env["LAKANA_EGRESS_PROXY"] == "http://lakana:t@egress:3128"
+    assert env["SSL_CERT_FILE"] == env["LAKANA_CA_BUNDLE"] == "/trust/trust.pem"

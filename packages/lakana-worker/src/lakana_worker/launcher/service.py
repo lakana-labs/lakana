@@ -49,6 +49,8 @@ from lakana_worker.launcher.egress import REFUSED_FILE
 from lakana_worker.launcher.egress_token import mint, rotate_key
 from lakana_worker.launcher.engine import API_VERSION, Engine, EngineError
 from lakana_worker.launcher.requests import (
+    CHECK_GRACE,
+    CHECK_LIMITS,
     DEADLINE_MARGIN,
     EGRESS_MISSING,
     LABEL_DEADLINE,
@@ -59,6 +61,7 @@ from lakana_worker.launcher.requests import (
     LABEL_STACK,
     MAX_RELAY_REFUSED,
     BuildRequest,
+    CheckRequest,
     CleanupRequest,
     Refused,
     RelayRoute,
@@ -69,6 +72,7 @@ from lakana_worker.launcher.requests import (
     build_container_spec,
     build_targets,
     cache_volume,
+    check_container_spec,
     container_name,
     environment_volume,
     ingestion_probe_spec,
@@ -1053,6 +1057,8 @@ class Launcher:
             return self.run(request, emit)
         if isinstance(request, BuildRequest):
             return self.build(request, emit)
+        if isinstance(request, CheckRequest):
+            return self.check(request, emit)
         if isinstance(request, StopRequest):
             return self.stop(request)
         if isinstance(request, StatusRequest):
@@ -1221,6 +1227,108 @@ class Launcher:
         except ValueError as exc:
             raise Refused(f"egress: {exc}") from None
         return f"http://lakana:{token}@egress:{EGRESS_PORT}"
+
+    def check(self, request: CheckRequest, emit: Emit) -> dict[str, object]:
+        """Run one connection check to its end.
+
+        Its network holds no server: the check gets its connection on stdin. With egress the
+        proxy joins it with a token of purpose ``connection-test``; with relay routes a relay
+        starts first, as for a run.
+
+        Parameters
+        ----------
+        request
+            The check.
+        emit
+            Sends ``{"log": <base64>}`` lines: the check's one result line among them.
+
+        Returns
+        -------
+        dict
+            ``exit``, ``oom_killed``, ``timed_out``, ``stopped``.
+
+        Raises
+        ------
+        Refused
+            As `run` does.
+        EngineError
+            As `run` does.
+        RuntimeError
+            If a check with egress reaches a launcher that has not started.
+        Exception
+            Whatever `emit` raises when the caller is gone; likewise.
+        """
+        for root in request.roots:
+            if root in self.unusable_roots:
+                raise Refused(self.unusable_roots[root])
+        if (request.egress or request.relay) and not self._running(self.settings.egress_service):
+            raise Refused(EGRESS_MISSING)
+        if request.egress and self._egress_key is None:
+            raise RuntimeError("the egress key is only available after start()")
+        lock = threading.Lock()
+
+        def emit_locked(line: dict[str, object]) -> None:
+            """Send one line; the relay's reader and the check's stream share the caller.
+
+            Parameters
+            ----------
+            line
+                The line.
+            """
+            with lock:
+                emit(line)
+
+        name = container_name(self.settings, "check", request.check)
+        live = self._register(name, request.owner, CHECK_GRACE, CHECK_LIMITS.memory_mb)
+        seconds = CHECK_LIMITS.timeout_seconds + CHECK_GRACE
+        try:
+            if live.stopped.is_set():
+                return dict(_STOPPED_BEFORE_START)
+            # Pull first, as for a run: the token's and the deadline's time start after it.
+            self._ensure_image(self.settings.images[request.python])
+            if live.stopped.is_set():
+                return dict(_STOPPED_BEFORE_START)
+            deadline = _deadline(seconds)
+            services = [(self.settings.egress_service, "egress")] if request.egress else []
+            network = self._open_network("check", request.check, request.owner, services, deadline)
+            relay: _Relay | None = None
+            try:
+                proxy_url = (
+                    self._proxy_url(network, request.egress, seconds, "connection-test")
+                    if request.egress
+                    else None
+                )
+                if request.relay:
+                    relay = self._start_relay(
+                        "check",
+                        request.check,
+                        request.owner,
+                        request.relay,
+                        network,
+                        emit_locked,
+                        deadline,
+                    )
+                spec = check_container_spec(
+                    request,
+                    self.settings,
+                    no_new_privileges=self.no_new_privileges,
+                    deadline=deadline,
+                    proxy_url=proxy_url,
+                )
+                return self._supervise(
+                    name,
+                    spec,
+                    live,
+                    CHECK_LIMITS.timeout_seconds,
+                    emit_locked,
+                    stdin=request.stdin,
+                )
+            finally:
+                if relay is not None:
+                    self._stop_relay(relay)
+                self.close_network(network)
+        finally:
+            self.forget(name, request.owner, live)
 
     def _outward_network(self, info: dict[str, Any]) -> str:
         """Find the network the egress service reaches out through.
@@ -1606,7 +1714,7 @@ class Launcher:
             has not started its container never will). `False` when no run of this owner is
             registered under the id, or Docker did not carry out the stop: the caller asks again.
         """
-        for kind in ("task", "build"):
+        for kind in ("task", "build", "check"):
             name = container_name(self.settings, kind, request.id)
             with self._lock:
                 live = self._live.get(name)
@@ -2009,7 +2117,8 @@ class Launcher:
             found = container.get("Labels") or {}
             if found.get(LABEL_KIND) == "relay":
                 # A relay belongs to its task: it stays while the task's run is live.
-                names.add(container_name(self.settings, "task", str(found.get(LABEL_ID, ""))))
+                ident = str(found.get(LABEL_ID, ""))
+                names |= {container_name(self.settings, k, ident) for k in ("task", "check")}
             if names & live:
                 continue
             self._remove_container(str(container["Id"]))
@@ -2189,7 +2298,7 @@ class Launcher:
         Parameters
         ----------
         kind
-            ``task`` or ``build``.
+            ``task``, ``build`` or ``check``.
         ident
             Its id.
         owner
@@ -2315,7 +2424,7 @@ class Launcher:
         name
             The network's name.
         kind
-            ``task`` or ``build``.
+            ``task``, ``build`` or ``check``.
         ident
             Its id.
         owner
