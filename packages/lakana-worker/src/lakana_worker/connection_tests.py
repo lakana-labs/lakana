@@ -47,6 +47,7 @@ from lakana_core.models import Connection, ConnectionTest, Environment
 from lakana_core.secrets.keys import KeyProvider
 from lakana_worker.launcher.egress import INTERNAL
 from lakana_worker.launcher.requests import (
+    CHECK_ENTRY,
     CHECK_LIMITS,
     INGEST_MOUNT,
     RELAY_VERDICT_SECONDS,
@@ -124,6 +125,11 @@ CHECK_OOM = (
     f"{LAUNCHER_LOG}"
 )
 CHECK_STOPPED = f"the launcher stopped the check before it answered; {LAUNCHER_LOG}"
+NO_CHECK_IN_IMAGE = (
+    "the task image has no connection check (/opt/lakana-check/check.py): it is older than this "
+    "worker or was built without it; pull or rebuild the task image of this Lakana version "
+    "(the images in LAKANA_LAUNCHER__IMAGES)"
+)
 NO_ATTEMPT_DIR = (
     "the worker's task directory is not private; an operator must make it a real directory "
     "owned by the worker's user with mode 0700 (the worker log names it)"
@@ -656,6 +662,9 @@ class ConnectionTestLoop:
             logger.warning(
                 "A connection check ended without an answer (exit %s).", result.get("exit")
             )
+            # Python's own exit status for a script it cannot open: an image without the check.
+            if result.get("exit") == 2 or f"can't open file '{CHECK_ENTRY[-1]}'" in text:
+                return "failed", NO_CHECK_IN_IMAGE
             return "failed", CHECK_BROKEN
         return answer
 

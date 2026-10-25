@@ -1366,3 +1366,43 @@ def test_a_connected_line_counts_only_for_its_exact_host_and_port(
     assert running.step()
 
     assert world.test(test_id).outcome == "timeout"
+
+
+@pytest.mark.parametrize(
+    ("output", "result"),
+    [
+        (
+            b"/usr/local/bin/python: can't open file '/opt/lakana-check/check.py': "
+            b"[Errno 2] No such file or directory\n",
+            {"exit": 2},
+        ),
+        (b"", {"exit": 2}),
+    ],
+    ids=["cannot-open", "exit-2"],
+)
+def test_a_task_image_without_the_check_names_the_image_and_the_next_step(
+    world: World, tmp_path: Path, output: bytes, result: dict[str, object]
+) -> None:
+    """An older or self-built task image has no /opt/lakana-check/check.py.
+
+    Parameters
+    ----------
+    world
+        The world.
+    tmp_path
+        Pytest's directory.
+    output
+        What the container printed.
+    result
+        The launcher's result.
+    """
+    launcher = FakeLauncher(scripts={"check": answering(output, result)})
+    running, _ = docker_loop(world, tmp_path, launcher)
+    test_id = world.connection("svc")
+
+    assert running.step()
+
+    row = world.test(test_id)
+    assert (row.outcome, row.message) == ("failed", connection_tests.NO_CHECK_IN_IMAGE)
+    assert "task image" in connection_tests.NO_CHECK_IN_IMAGE
+    assert "pull or rebuild" in connection_tests.NO_CHECK_IN_IMAGE
