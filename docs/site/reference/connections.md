@@ -124,10 +124,24 @@ default) the launcher runs it in a container of the task image, from the image's
 with the network rules a task with that connection gets: through the egress proxy or the task's relay
 to the connection's endpoints only, its ingestion root read-only, the worker's trust bundle
 (`LAKANA_RUN__CA_BUNDLE`), no Lakana server on its network, 30 seconds and 256 MiB. Its token
-for the egress proxy has the purpose `connection-test` and names only the connection's endpoints;
-a database or `tcp` connection goes through a relay of its own, and when the relay cannot reach
-the source the outcome is the relay's (`dns`, `refused`, `timeout` or `not_allowed`, the message
-starting `the relay refused`), so a connection the relay accepted is never `ok` by mistake. A launcher that
+for the egress proxy has the purpose `connection-test` and names only the connection's endpoints.
+How the outcome is decided depends on the route class:
+
+- **proxy** (`http`, `s3`, `gcs`, `azure`): the proxy answers the check only once it has reached
+  the source, so its answer is the outcome;
+- **relay** (`postgresql`, `mariadb`, `tcp`): the relay accepts the check's connection before it
+  dials the source, so the test is `ok` only when the relay reports that it reached the source.
+  The launcher waits up to 20 seconds for that report. A relay that could not reach the source
+  gives `dns`, `refused`, `timeout` or `not_allowed`, with a message that starts `the relay
+  refused`; a relay that reported nothing within the 20 seconds gives `timeout` ("the relay did
+  not reach HOST:PORT within 20 s"). A relay refusal about the operator's side (the upstream proxy,
+  the egress proxy's routing table) gives `failed`, naming `docker compose logs egress`;
+- **tcp** connections take the relay route, and the check only connects, so their `ok` means the
+  relay reached the source;
+- **mount** (`directory`, `sqlite-file`): the root must be one the launcher mounts (else
+  `root_unavailable`), and the path must exist under it (else `not_found`).
+
+A launcher that
 refuses the check or cannot be reached makes the test `failed` with the reason and the launcher's
 log to read (`docker compose logs launcher`). A connection with a secret needs the worker's secrets master
 key (`LAKANA_SECRETS__MASTER_KEY_FILE`, as on the server). The command waits

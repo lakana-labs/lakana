@@ -1292,7 +1292,7 @@ connections; a connection opens exactly its endpoints and nothing else.
   written into a private `attempt-check_*` directory (0700, under the work directory, removed when
   the check ends; `AttemptSweeper` sweeps a dead worker's); the launcher refuses a check naming any
   other attempt, so a check never mounts a task's. The worker claims a test for
-  `LEASE_SECONDS` (`CHECK_WAIT_SECONDS` + 30), so no other worker retakes a running check. The launcher (`Launcher.check`,
+  `LEASE_SECONDS` (`CHECK_WAIT_SECONDS` + 30, 120 s), so no other worker retakes a running check. The launcher (`Launcher.check`,
   `check_container_spec`) runs the check the task image carries, `CHECK_ENTRY` =
   `/usr/local/bin/python -I -B /opt/lakana-check/check.py`; the request has no image, command,
   environment, code or limit field, only `python` from `LAUNCHER__IMAGES`. The container runs as the
@@ -1301,12 +1301,17 @@ connections; a connection opens exactly its endpoints and nothing else.
   roots, read-only. Its network holds no server (the connection and its secret travel on stdin): the
   egress service joins with a token of purpose `connection-test` when it has pairs, minted after the
   image pull, and its relay starts when it has routes; `stop`, the abandon watcher and `cleanup`
-  treat a `check` name and its relay like a run's. The worker keeps at most 64 KiB of output; a
-  `lakana-relay: refused` line decides the outcome first (the relay accepts before it dials, so the
-  check's own `ok` proves only the relay), else the last answer line; it masks the message again
-  before storing it; no output reaches a log line. `test_connection_test_outcomes` proves the
-  outcomes on a real engine. A
-  refusal, an unreachable launcher or no answer within `CHECK_WAIT_SECONDS` (60) records `failed`
+  treat a `check` name and its relay like a run's. A check's relay plan has `verdicts: true`: the
+  relay reports a successful dial (`connected HOST:PORT`) as well as a refusal, and the launcher
+  waits up to `RELAY_VERDICT_SECONDS` (20) for that verdict before it removes the relay, joining
+  its reader before it closes the stream. The worker keeps at most 64 KiB of output; a
+  `lakana-relay: refused` line decides the outcome first (source refusals map to `dns`, `refused`,
+  `timeout`, `not_allowed`; the upstream proxy, the routing table and unknown texts to `failed`),
+  then the last answer line, and through the relay an `ok` without the relay's `connected` line is
+  `timeout` (the relay accepts before it dials, so the check's own `ok` proves only the relay); it
+  masks the message again before storing it; no output reaches a log line.
+  `test_connection_test_outcomes` proves the outcomes per route class on a real engine. A
+  refusal, an unreachable launcher or no answer within `CHECK_WAIT_SECONDS` (90) records `failed`
   naming the launcher's log. `/opt/lakana-check/check.py` is a root-owned copy of
   `lakana/ingest/_check.py`, which imports only the standard library (an AST test in
   `test_ingest_check.py` keeps it so); the image installs no package for it, and `-I` keeps the

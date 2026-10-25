@@ -1389,15 +1389,25 @@ before the relay sees it on Engine 28; the relay's own outward address answers n
 source network's gateway, made after the launcher started, which the proxy's own copy of
 `refused.json` now holds; and teardown after exit, stop and
 timeout (nothing labelled with the run's id, no token expiry, the subnet resting).
-`test_connection_test_outcomes` (#308, M6 PR 5d) runs the launcher's `check` op against the same
-source, with the routes and routing of `python_tasks.connection_plan` and the answer read as the
-worker's loop reads it (`_relay_refusal`, then `_answer`): `ok` through the proxy with the trust
-bundle; `tls` without it; `dns` for a name the proxy cannot resolve; `refused` for a closed port;
-`not_allowed` for a token that does not name the host; `ok` for a PostgreSQL connection with
-`tls: disable` and `tls` (not offered) without it, both through the relay; `refused` through the
-relay to a closed port (the relay's line outranks the check's `ok`); `ok` for `tcp`; and
-`root_unavailable` for a root the launcher does not mount. After each, nothing is labelled with
-the check's id.
+`test_connection_test_outcomes` (#308, M6 PR 5d), per route class, runs the worker's own path:
+`ConnectionTestLoop._run_check` with a `DockerCheck` whose client copies the attempt directory into
+the work volume and sends the check to the module's launcher over its socket (the `worker_side`
+fixture serves it), with the plan of `python_tasks.connection_plan`. Proxy: `ok` with the trust
+bundle, `tls` without it, `dns` for a name the proxy cannot resolve, `refused` for a closed port,
+`not_allowed` for a token that does not name the host. Relay: `ok` for PostgreSQL with
+`tls: disable` (only because the relay reported `connected`), `tls` (not offered) without it,
+`refused` to a closed port, and `timeout` for a blackholed port (the source's port 7000 accepts
+one connection it never takes, so later SYNs are dropped; the check says `ok` to the relay at once,
+the launcher waits for the relay's verdict, and the outcome is never `ok`). tcp: `ok`. Mount:
+`root_unavailable` through the launcher's refusal of a root it does not have. After each, nothing
+is labelled with the check's id.
+`test_an_ingestion_asset_reaches_its_declared_connections_and_nothing_else` (#308's "Done when")
+installs the wheelhouse's real `lakana[assets]` into an environment volume (it needs
+`LAKANA_TEST_WHEELHOUSE`, skipped without it, failed with `LAKANA_TEST_DOCKER=1`), serves the two
+connections' answers from the stand-in server's task route, and runs an asset through the
+worker's `DockerRunner` with the routes of `connection_plan`: `connections.get` gives the proxy
+URL and the relay address, httpx reaches the HTTPS source through the proxy with the trust bundle,
+a socket gets the PostgreSQL answer through the relay, and an undeclared host gets the proxy's 403.
 
 The test's Docker client and the launcher use one socket: `DOCKER_HOST` when it is
 `unix://<path>`, else `/var/run/docker.sock`; another `DOCKER_HOST` skips them (fails with
