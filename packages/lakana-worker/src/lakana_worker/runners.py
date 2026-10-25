@@ -47,6 +47,7 @@ from typing import Protocol
 
 from lakana_core.runs.failures import FailureCode
 from lakana_worker.git import HFS_IGNORABLE, fold_name
+from lakana_worker.launcher.requests import EGRESS_MISSING, allowed_roots
 from lakana_worker.launcher_client import (
     RELEASE_SKEW,
     LauncherClient,
@@ -215,13 +216,25 @@ class PythonTask:
         The encoded watermark the worker read (``<type>:<value>``), or `None` when the table
         has none yet.
     connections
-        Each connection the asset declares to what the harness needs about it (its ``kind``).
+        Each connection the asset declares to its routing, as the harness gets it: its ``kind``,
+        and the ``grant`` (the ``[host, port]`` pairs the attempt may reach) with a
+        ``relay_port`` under the Docker runner, or a mounted root's ``root_dir``, ``path`` and
+        ``root_path``.
     table_exists
         Whether the asset's table existed when the worker read it (one created by a first run
         of zero rows has no snapshot and still exists).
     hidden
         Secret values the log redactor masks in the task's output. Left out of `repr` and never
         sent to the harness.
+    egress
+        The ``(host, port)`` pairs the task may reach through the egress proxy (Docker runner).
+    relay
+        The relay's routes, ``(listen port, host, port)`` each (Docker runner).
+    roots
+        The ingestion roots the task reads, in declaration order.
+    root_users
+        Each of `roots` to the first connection naming it, for the message when a root is
+        missing.
     """
 
     code_dir: Path
@@ -249,6 +262,10 @@ class PythonTask:
     connections: Mapping[str, Mapping[str, object]] = field(default_factory=dict)
     table_exists: bool = False
     hidden: tuple[str, ...] = field(default=(), repr=False)
+    egress: tuple[tuple[str, int], ...] = ()
+    relay: tuple[tuple[int, str, int], ...] = ()
+    roots: tuple[str, ...] = ()
+    root_users: Mapping[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -1272,6 +1289,42 @@ def _grace_seconds(kill_grace: float) -> int:
     return min(_MAX_KILL_GRACE_SECONDS, max(0, math.ceil(kill_grace)))
 
 
+MISSING_ROOT = (
+    "`{connection}` names ingestion root `{root}`, which this worker does not have. Set it in "
+    "`LAKANA_LAUNCHER__INGESTION_ROOTS` (Docker runner) or `LAKANA_RUN__INGESTION_ROOTS` "
+    "(local runner)."
+)
+"""The failure of a task whose connection names a root the worker cannot give it."""
+
+
+def _own_refusal(refusal: str, task: PythonTask) -> str | None:
+    """Turn a launcher refusal the asset's connections caused into its fixed text.
+
+    Parameters
+    ----------
+    refusal
+        The launcher's refusal.
+    task
+        The refused task, with its roots and the connections that named them.
+
+    Returns
+    -------
+    str or None
+        `EGRESS_MISSING` as it is; `MISSING_ROOT` for the first of the task's roots the
+        launcher does not list; `None` for every other refusal (the operator's problem, given
+        the generic text).
+    """
+    if refusal == EGRESS_MISSING:
+        return EGRESS_MISSING
+    allowed = allowed_roots(refusal)
+    if allowed is None:
+        return None
+    for root in task.roots:
+        if root not in allowed:
+            return MISSING_ROOT.format(connection=task.root_users[root], root=root)
+    return None
+
+
 class DockerRunner:
     """Run a task in a container of its own, through the launcher.
 
@@ -1300,8 +1353,6 @@ class DockerRunner:
         Seconds between SIGTERM and SIGKILL on a stop (`LAKANA_RUN__KILL_GRACE`).
     poll_seconds
         How often the stop signal is checked.
-    roots
-        Allowed ingestion roots to mount.
     trust
         The worker's trust bundle as bytes (`lakana_worker.trust`); `None` without
         `LAKANA_RUN__CA_BUNDLE`.
@@ -1320,7 +1371,6 @@ class DockerRunner:
         pids: int,
         kill_grace: float = 10.0,
         poll_seconds: float = 0.2,
-        roots: tuple[str, ...] = (),
         trust: bytes | None = None,
         deadline_margin: float = DEADLINE_MARGIN_SECONDS,
     ) -> None:
@@ -1331,7 +1381,6 @@ class DockerRunner:
         self._pids = pids
         self._kill_grace = kill_grace
         self._poll_seconds = poll_seconds
-        self._roots = roots
         self._trust = trust
         self._deadline_margin = deadline_margin
 
@@ -1474,10 +1523,12 @@ class DockerRunner:
             "stdin": task_description(
                 task, result_path=f"/work/{RESULT_FILE}", work_dir="/work", parent_pid=None
             ).decode("utf-8"),
-            "roots": list(self._roots),
+            "roots": list(task.roots),
             "trust": self._trust is not None,
-            "egress": [],
-            "relay": [],
+            "egress": [[host, port] for host, port in task.egress],
+            "relay": [
+                {"listen": listen, "host": host, "port": port} for listen, host, port in task.relay
+            ],
         }
         sink = OutputRedactor(secrets_to_hide, on_log)
         box: dict[str, object] = {}
@@ -1544,6 +1595,14 @@ class DockerRunner:
                 succeeded=False, error_message=str(error), failure_code=FailureCode.NO_RUNTIME
             )
         if isinstance(error, LauncherRefused):
+            own = _own_refusal(str(error), task)
+            if own is not None:
+                return RunOutcome(
+                    succeeded=False,
+                    error_message=own,
+                    retryable=False,
+                    failure_code=FailureCode.NO_RUNTIME,
+                )
             next_step = (
                 RELEASE_SKEW
                 if release_skew(str(error))

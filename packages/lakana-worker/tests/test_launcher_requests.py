@@ -20,6 +20,7 @@ from lakana_worker.launcher.requests import (
     LABEL_STACK,
     MAX_EGRESS,
     MAX_REQUEST_BYTES,
+    ROOTS_REFUSAL,
     BuildRequest,
     CleanupRequest,
     Refused,
@@ -27,6 +28,7 @@ from lakana_worker.launcher.requests import (
     RunRequest,
     StatusRequest,
     StopRequest,
+    allowed_roots,
     build_container_spec,
     build_targets,
     cache_volume,
@@ -1303,3 +1305,53 @@ def test_a_relay_plan_always_refuses_the_launchers_range_and_holds_at_most_256()
     many = [f"10.0.{n}.1/32" for n in range(256)]
     with pytest.raises(ValueError, match="257 refused ranges, more than 256"):
         relay_plan(route, SETTINGS, "10.207.0.8/29", many)
+
+
+@pytest.mark.parametrize(
+    ("roots", "allowed"),
+    [
+        ({"landing": "/srv/landing", "raw": "/srv/raw"}, frozenset({"landing", "raw"})),
+        ({}, frozenset()),
+    ],
+    ids=["two-roots", "none-is-set"],
+)
+def test_the_roots_refusal_names_the_roots_the_launcher_has(
+    roots: dict[str, str], allowed: frozenset[str]
+) -> None:
+    """The worker reads the allowed names back from the launcher's own refusal text.
+
+    Parameters
+    ----------
+    roots
+        The launcher's ingestion roots.
+    allowed
+        What `allowed_roots` reads from the refusal.
+    """
+    settings = LauncherSettings(
+        stack="lakana", images=SETTINGS.images, work_volume="w", ingestion_roots=roots
+    )
+    with pytest.raises(Refused) as caught:
+        parse_request(_raw(_with(RUN, roots=["shared"])), token=TOKEN, settings=settings)
+
+    assert str(caught.value).startswith(ROOTS_REFUSAL)
+    assert allowed_roots(str(caught.value)) == allowed
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "python must be one of 3.14 (LAKANA_LAUNCHER__IMAGES)",
+        "ingestion root 'x' holds a socket, pipe or device node",
+        ROOTS_REFUSAL + "landing",
+    ],
+    ids=["other-field", "probe", "unterminated"],
+)
+def test_another_refusal_names_no_allowed_roots(text: str) -> None:
+    """Only the roots rule itself is read; anything else is `None`.
+
+    Parameters
+    ----------
+    text
+        A refusal.
+    """
+    assert allowed_roots(text) is None

@@ -161,6 +161,7 @@ Every variable is also in the [settings reference](../reference/settings.md).
 | `LAKANA_RUN__TASK_MEMORY` | `2GB` | A task's and a build's memory, outside the worker's own limit. |
 | `LAKANA_RUN__TASK_CPUS` | `1` | A task's and a build's CPUs. |
 | `LAKANA_RUN__TASK_PIDS` | `256` | A task's and a build's most processes. |
+| `LAKANA_RUN__INGESTION_ROOTS` | none | Local runner only: host directories, by name, that a `directory` or `sqlite-file` connection reads. The docker runner ignores it; see [Ingestion roots](#ingestion-roots). |
 
 `LAKANA_RUN__VENV_BUILD_TIMEOUT`, `LAKANA_RUN__VENV_MAX_BYTES`, `LAKANA_RUN__KILL_GRACE` and
 `LAKANA_RUN__INDEX_URL` apply to both runners. `LAKANA_RUN__VENV_CACHE`, `LAKANA_RUN__VENV_KEEP` and
@@ -192,7 +193,7 @@ first two. Keep your additions when you replace `compose.yaml` on an upgrade.
 | `LAKANA_LAUNCHER__MAX_PIDS` | `4096` | The most processes one task or build may ask for. |
 | `LAKANA_LAUNCHER__NETWORK_RANGE` | `10.207.0.0/16` | The private IPv4 range (a `/24` or larger) that each task and build network gets 8 addresses from. |
 | `LAKANA_LAUNCHER__EGRESS_REFUSED` | none (from `LAKANA_EGRESS_REFUSED` in `.env`) | Address ranges builds, tasks and connection tests never reach, besides Docker's gateways and the ranges always refused: comma-separated CIDR ranges or addresses, at most 64, such as `192.168.1.0/24,10.0.0.7`. List the Docker host's LAN address or subnet. A malformed entry stops the launcher, naming it. |
-| `LAKANA_LAUNCHER__INGESTION_ROOTS` | none | Host directories, by name, that a task may read at `/ingest/<name>`. No task asks for one in this release; data loading will. |
+| `LAKANA_LAUNCHER__INGESTION_ROOTS` | none | Host directories, by name, that a task may read at `/ingest/<name>`, as JSON such as `{"shared": "/srv/landing"}`. A task gets only the roots its `directory` and `sqlite-file` connections name. |
 | `LAKANA_LAUNCHER__PROBE_MAX_ENTRIES` | `100000` | The most entries the start-up check looks at in one ingestion root. |
 
 **The network range.** Task and build networks take their addresses from
@@ -201,7 +202,16 @@ package index), the host would send that traffic into a task network instead: ch
 network does not use. A `/16` holds 6,144 networks at once; the addresses of a build's network
 are not given out again until a minute after its egress token expires.
 
-**Ingestion roots.** The launcher refuses `/`, a directory under or holding `/run`, `/var/run`,
+**Ingestion roots.** A `directory` or `sqlite-file` connection names a root (`--address
+'{"root": "shared", "path": "exports"}'`), and each worker maps that name to a host directory:
+the launcher with `LAKANA_LAUNCHER__INGESTION_ROOTS` for the docker runner, the worker itself with
+`LAKANA_RUN__INGESTION_ROOTS` for the local runner. Both take the same JSON object, such as
+`{"shared": "/srv/landing"}`, and refuse the same directories; a refused value stops the
+launcher or the worker at start, naming the setting. A task whose connection names a root its
+worker lacks fails without retry: ``` `exports` names ingestion root `shared`, which this worker
+does not have ... ```.
+
+The launcher refuses `/`, a directory under or holding `/run`, `/var/run`,
 `/var/lib/docker`, `/var/lib/containerd`, `/var/snap/docker`, `/proc`, `/sys`, `/dev`, `/etc`,
 `/root` or `/boot`, and the Docker socket's or its own socket's directory. At start it looks at each root
 from inside a container and refuses
@@ -266,4 +276,6 @@ If a project may have deployed a malicious dependency or package, or a worker ma
 | `LAKANA_RUN__HTTPS_PROXY applies to builds of the local runner ...` (worker log) | A local-runner setting on a docker-runner worker. | Unset it, and set `LAKANA_EGRESS_UPSTREAM_PROXY` in `.env` for a proxy; see [Package indexes and proxies](#package-indexes-and-proxies). |
 | `LAKANA_RUN__CA_BUNDLE names /x, which ...` (the worker stops at start) | The file is missing or unreadable in the worker, over 1 MiB, holds no certificate, a damaged certificate, a private key, or a `TRUSTED CERTIFICATE` block. | Do what the message's cause says; each cause and its fix: [The trust bundle of builds and tasks](../reference/network-settings.md#the-trust-bundle-of-builds-and-tasks). |
 | `a package index's certificate is not trusted; if your package index uses a private certificate authority, set LAKANA_RUN__CA_BUNDLE ...` (in a build's failure) | uv could not verify the index's certificate (`invalid peer certificate: UnknownIssuer`). | Set `LAKANA_RUN__CA_BUNDLE` to the PEM file of the authority that signed it; see [Package indexes and proxies](#package-indexes-and-proxies). |
+| ``` `exports` names ingestion root `shared`, which this worker does not have ... ``` | The connection's root is not in `LAKANA_LAUNCHER__INGESTION_ROOTS` (docker runner) or `LAKANA_RUN__INGESTION_ROOTS` (local runner) of the worker that took the task. | Add it to that setting and restart the launcher or the worker; see [Ingestion roots](#ingestion-roots). |
+| `LAKANA_RUN__INGESTION_ROOTS must be a JSON object from a name ...` (the worker stops at start) | A root is not an absolute directory, or is a system directory, the Docker socket's or the launcher socket's directory. | Give each root a directory of its own outside those, such as `/srv/landing`. |
 | `timed out: the launcher reported no end of the task's container ...` | The launcher did not report the container's end within the task's timeout, its kill grace and 15 minutes. | Read `docker compose logs launcher`; the worker closed its connection, which removes the container. |

@@ -56,6 +56,7 @@ from lakana_worker.deploy_sweep import DeploySweeper, sweep_deploy_checkouts
 from lakana_worker.docker_environments import DockerEnvironments
 from lakana_worker.executor import check_limits, install_drain, install_heartbeat
 from lakana_worker.heartbeat import WorkerHeartbeat
+from lakana_worker.launcher.settings import check_ingestion_roots
 from lakana_worker.launcher_client import LauncherClient, LauncherUnavailable, claim_owner
 from lakana_worker.memory import resolve_limit, start_watchdog
 from lakana_worker.notify import DeliveryLoop, NotifySettings
@@ -248,7 +249,9 @@ def _python_runtime(
         `LAKANA_RUN__CA_BUNDLE`, the trust bundle (Mozilla's roots plus the certificates of that
         file) is built once in memory; builds and tasks of both runners trust it. The Docker
         runner writes those bytes into each attempt; only the local runner writes them to
-        ``<cache>/trust-<digest>.pem``, a name no other worker's bundle shares.
+        ``<cache>/trust-<digest>.pem``, a name no other worker's bundle shares. The local
+        runner reads `directory` and `sqlite-file` connections from
+        `LAKANA_RUN__INGESTION_ROOTS`.
 
     Raises
     ------
@@ -256,7 +259,8 @@ def _python_runtime(
         If `LAKANA_RUN__CA_BUNDLE` names a file the containers cannot trust (unreadable, over
         1 MiB, no certificate, a private key, a ``TRUSTED CERTIFICATE`` block), or the local
         runner cannot write the bundle to the cache; the message names the setting or the path,
-        and the cause.
+        and the cause. If `LAKANA_RUN__INGESTION_ROOTS` names a directory the launcher would
+        refuse as a root (its rule and its words, `check_ingestion_roots`).
     """
     cache = worker_cache_dir()
     if python.reason() is None:
@@ -274,6 +278,11 @@ def _python_runtime(
         trust_file = write_trust_file(trust, cache) if trust is not None and local else None
     except TrustBundleError as exc:
         raise SystemExit(str(exc)) from None
+    roots_refused = check_ingestion_roots(
+        run.ingestion_roots, run.launcher_socket, variable="LAKANA_RUN__INGESTION_ROOTS"
+    )
+    if roots_refused is not None:
+        raise SystemExit(roots_refused)
     cap, timeout = settings.task_tokens.max_ttl_seconds, settings.query_limits.timeout_seconds
     needed = token_ttl(timeout, run.kill_grace)
     if cap < needed:
@@ -363,6 +372,7 @@ def _python_runtime(
         ),
         caches=CacheKeeper(paths, interval=run.sweep_interval, trim=trim, stop=stop),
         environments=environments,
+        ingestion_roots=dict(run.ingestion_roots) if environments is None else {},
     )
 
 

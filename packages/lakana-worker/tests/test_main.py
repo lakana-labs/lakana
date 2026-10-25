@@ -2164,6 +2164,33 @@ def test_a_run_ca_bundle_with_a_private_key_stops_the_worker(
     assert not list((tmp_path / "xdg").glob("**/trust*.pem"))
 
 
+def test_a_run_ingestion_root_the_launcher_would_refuse_stops_the_worker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The local runner's roots follow the launcher's rule, checked at start."""
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg"))
+    settings = Settings(
+        database={"url": f"sqlite:///{tmp_path}/lakana.db"},  # type: ignore[arg-type]
+        run={"ingestion_roots": {"x": "/proc"}},  # type: ignore[arg-type]
+    )
+    with pytest.raises(SystemExit) as caught:
+        _python_runtime(settings, PythonSupport(server_url="http://s", uv="/bin/uv"))
+    assert str(caught.value).startswith("LAKANA_RUN__INGESTION_ROOTS must be a JSON object")
+
+
+def test_the_local_runner_gets_the_run_ingestion_roots(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The runtime keeps the roots so it can route a `directory` connection to them."""
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg"))
+    settings = Settings(
+        database={"url": f"sqlite:///{tmp_path}/lakana.db"},  # type: ignore[arg-type]
+        run={"ingestion_roots": {"shared": "/srv/in"}},  # type: ignore[arg-type]
+    )
+    runtime = _python_runtime(settings, PythonSupport(server_url="http://s", uv="/bin/uv"))
+    assert dict(runtime.ingestion_roots) == {"shared": "/srv/in"}
+
+
 def test_the_docker_runner_and_its_builds_get_the_workers_bundle(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

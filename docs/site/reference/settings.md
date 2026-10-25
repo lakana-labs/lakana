@@ -149,6 +149,7 @@ Compose](../how-to/deploy-with-compose.md).
 | `LAKANA_RUN__TASK_MEMORY` | text | `2GB` | server, worker | Memory limit of each task container and environment build container, with a unit such as 2GB or 512MB (binary: 1GB is 1024MB; at least 64MB). It is outside the worker's own memory limit. Read with `LAKANA_RUN__RUNNER=docker` only. |
 | `LAKANA_RUN__TASK_CPUS` | number, above 0, 1024 or less | `1` | server, worker | CPUs of each task container and environment build container. Read with `LAKANA_RUN__RUNNER=docker` only. |
 | `LAKANA_RUN__TASK_PIDS` | whole number, 16 or more, 4194304 or less | `256` | server, worker | Most processes in each task container and environment build container. Read with `LAKANA_RUN__RUNNER=docker` only. |
+| `LAKANA_RUN__INGESTION_ROOTS` | mapping | `{}` | server, worker | Name to absolute host directory that a `directory` or `sqlite-file` connection may read under the local runner (JSON object; empty by default). The Docker runner ignores it: its launcher has `LAKANA_LAUNCHER__INGESTION_ROOTS`. The worker refuses at start the same directories the launcher refuses (system directories, the Docker socket's, its own socket's). |
 
 ## `LAKANA_LOG__*`
 

@@ -13,6 +13,7 @@ import pytest
 from fake_launcher import FakeLauncher, refusing
 
 from lakana_core.runs.failures import FailureCode
+from lakana_worker.launcher.requests import EGRESS_MISSING
 from lakana_worker.launcher_client import (
     LauncherClient,
     LauncherTimedOut,
@@ -316,12 +317,105 @@ def test_the_limits_are_whole_seconds_within_the_launcher_rules(
 
 
 def test_the_ingestion_roots_are_sent(tmp_path: Path) -> None:
-    """The launcher mounts only roots on its own allow-list; the worker names them."""
+    """The launcher mounts only roots on its own allow-list; the worker names the task's."""
     launcher = FakeLauncher(scripts={"run": _writes(None, _DONE)})
 
-    _run(tmp_path, launcher, {"roots": ("landing",)})
+    _run(tmp_path, launcher, roots=("landing",), root_users={"landing": "exports"})
 
     assert launcher.requests[0]["roots"] == ["landing"]
+
+
+def test_egress_and_relay_are_sent_from_the_task(tmp_path: Path) -> None:
+    """Each task gets the proxy pairs and relay routes of its own connections."""
+    launcher = FakeLauncher(scripts={"run": _writes(None, _DONE)})
+
+    _run(
+        tmp_path,
+        launcher,
+        egress=(("api.example.com", 443),),
+        relay=((15001, "db.example.com", 5432),),
+    )
+
+    request = launcher.requests[0]
+    assert request["egress"] == [["api.example.com", 443]]
+    assert request["relay"] == [{"listen": 15001, "host": "db.example.com", "port": 5432}]
+
+
+_ROOT_TEXT = (
+    "`exports` names ingestion root `shared`, which this worker does not have. Set it in "
+    "`LAKANA_LAUNCHER__INGESTION_ROOTS` (Docker runner) or `LAKANA_RUN__INGESTION_ROOTS` "
+    "(local runner)."
+)
+
+
+@pytest.mark.parametrize("allowed", ["landing", "none is set"], ids=["another-root", "no-root"])
+def test_a_roots_refusal_becomes_the_fixed_root_text(tmp_path: Path, allowed: str) -> None:
+    """The launcher lacks a root the task needs: the text names the connection and both settings.
+
+    Parameters
+    ----------
+    tmp_path
+        The test's directory.
+    allowed
+        What the launcher's refusal lists.
+    """
+    launcher = FakeLauncher(
+        scripts={
+            "run": refusing(
+                f"roots: a list of distinct names from LAKANA_LAUNCHER__INGESTION_ROOTS ({allowed})"
+            )
+        }
+    )
+
+    outcome, _, _ = _run(
+        tmp_path,
+        launcher,
+        roots=("landing", "shared") if allowed == "landing" else ("shared",),
+        root_users={"landing": "drops", "shared": "exports"},
+    )
+
+    assert outcome.error_message == _ROOT_TEXT
+    assert outcome.retryable is False
+    assert outcome.failure_code is FailureCode.NO_RUNTIME
+
+
+def test_a_roots_refusal_naming_every_root_keeps_the_generic_text(tmp_path: Path) -> None:
+    """A refusal the worker cannot pin on one root (too many, say) is an operator's problem."""
+    launcher = FakeLauncher(
+        scripts={
+            "run": refusing(
+                "roots: a list of distinct names from LAKANA_LAUNCHER__INGESTION_ROOTS (shared)"
+            )
+        }
+    )
+
+    outcome, _, _ = _run(tmp_path, launcher, roots=("shared",), root_users={"shared": "exports"})
+
+    assert outcome.error_message is not None
+    assert outcome.error_message.startswith("the launcher refused the task: roots:")
+    assert outcome.retryable is False
+
+
+def test_an_egress_missing_refusal_is_its_own_text(tmp_path: Path) -> None:
+    """No operator suffix: the text already says to start the egress service."""
+    launcher = FakeLauncher(scripts={"run": refusing(EGRESS_MISSING)})
+
+    outcome, _, _ = _run(tmp_path, launcher, egress=(("api.example.com", 443),))
+
+    assert outcome.error_message == EGRESS_MISSING
+    assert outcome.retryable is False
+    assert outcome.failure_code is FailureCode.NO_RUNTIME
+
+
+def test_a_probe_refusal_of_a_root_keeps_the_generic_text(tmp_path: Path) -> None:
+    """A root the launcher has but refuses to mount is an operator problem, not the asset's."""
+    reason = "ingestion root 'shared' holds a socket, pipe or device node; fix it"
+    launcher = FakeLauncher(scripts={"run": refusing(reason)})
+
+    outcome, _, _ = _run(tmp_path, launcher, roots=("shared",), root_users={"shared": "exports"})
+
+    assert outcome.error_message is not None
+    assert outcome.error_message.startswith(f"the launcher refused the task: {reason}. ")
 
 
 def test_an_out_of_memory_kill_is_the_memory_stop_reason(tmp_path: Path) -> None:

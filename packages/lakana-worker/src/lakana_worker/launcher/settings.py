@@ -523,6 +523,62 @@ def _unsafe_root(path: Path, socket: Path) -> bool:
     return any(_is_under(path, bad) or _is_under(bad, path) for bad in sensitive)
 
 
+def _roots_message(variable: str) -> str:
+    """Write the rule an ingestion-roots setting breaks.
+
+    Parameters
+    ----------
+    variable
+        The setting's name.
+
+    Returns
+    -------
+    str
+        What the setting must be, naming it.
+    """
+    return (
+        f"{variable} must be a JSON object from a name (lower-case letters, digits, "
+        "'-' and '_') to an absolute host directory that is not a system directory, not the "
+        "Docker socket's directory and not the launcher's own: / and anything that holds or sits "
+        "under /run, /var/run, /var/lib/docker, /proc, /sys, /dev or /etc is refused."
+    )
+
+
+def check_ingestion_roots(
+    roots: Mapping[str, object],
+    socket: Path,
+    variable: str = "LAKANA_LAUNCHER__INGESTION_ROOTS",
+) -> str | None:
+    """Check ingestion roots by the launcher's rule: plain names, safe absolute directories.
+
+    The launcher checks `LAKANA_LAUNCHER__INGESTION_ROOTS` with it, and the worker its local
+    runner's `LAKANA_RUN__INGESTION_ROOTS`, so both refuse the same directories in the same words.
+
+    Parameters
+    ----------
+    roots
+        Name to host directory, as read from the setting.
+    socket
+        The launcher's socket: its directory may not be a root either.
+    variable
+        The setting's name, for the message.
+
+    Returns
+    -------
+    str or None
+        The refusal, naming `variable`; `None` when every root is acceptable.
+    """
+    for key, value in roots.items():
+        if (
+            _ROOT_NAME.match(key) is None
+            or not isinstance(value, str)
+            or not _plain_absolute(value)
+            or _unsafe_root(Path(value), socket)
+        ):
+            return _roots_message(variable)
+    return None
+
+
 def load_settings(environ: Mapping[str, str]) -> LauncherSettings:
     """Read and check every `LAKANA_LAUNCHER__*` setting.
 
@@ -578,22 +634,12 @@ def load_settings(environ: Mapping[str, str]) -> LauncherSettings:
         for key, value in images.items()
     ):
         raise SettingsError(images_message)
-    roots_message = (
-        f"{PREFIX}INGESTION_ROOTS must be a JSON object from a name (lower-case letters, digits, "
-        "'-' and '_') to an absolute host directory that is not a system directory, not the "
-        "Docker socket's directory and not the launcher's own: / and anything that holds or sits "
-        "under /run, /var/run, /var/lib/docker, /proc, /sys, /dev or /etc is refused."
-    )
+    variable = f"{PREFIX}INGESTION_ROOTS"
     socket = _path(environ, "SOCKET", LauncherSettings.socket)
-    roots = _json_object(environ, "INGESTION_ROOTS", roots_message) or {}
-    for key, value in roots.items():
-        if (
-            _ROOT_NAME.match(key) is None
-            or not isinstance(value, str)
-            or not _plain_absolute(value)
-            or _unsafe_root(Path(value), socket)
-        ):
-            raise SettingsError(roots_message)
+    roots = _json_object(environ, "INGESTION_ROOTS", _roots_message(variable)) or {}
+    refusal = check_ingestion_roots(roots, socket, variable=variable)
+    if refusal is not None:
+        raise SettingsError(refusal)
     no_new_privileges = (_get(environ, "NO_NEW_PRIVILEGES") or "auto").lower()
     if no_new_privileges not in ("auto", "on"):
         raise SettingsError(

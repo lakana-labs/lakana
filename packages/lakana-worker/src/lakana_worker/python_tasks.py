@@ -37,6 +37,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
+import posixpath
 import re
 import sys
 import tempfile
@@ -57,6 +58,7 @@ from lakana_core.catalog.identity import resolve_table_id
 from lakana_core.catalog.metadata import read_metadata
 from lakana_core.catalog.service import CatalogService
 from lakana_core.catalog.writes import SnapshotPin, target_changed_message
+from lakana_core.connections.endpoints import MOUNT_KINDS, PROXY_KINDS, endpoints
 from lakana_core.connections.fetch import connection_secret
 from lakana_core.connections.kinds import ConnectionKind
 from lakana_core.errors import ConflictError, LakanaError, NotFoundError, ValidationError
@@ -121,6 +123,7 @@ from lakana_worker.index_credentials import (
     IndexCredentialError,
     resolve_index_access,
 )
+from lakana_worker.launcher.requests import MAX_EGRESS, MAX_RELAY_ROUTES, MAX_ROOTS, RELAY_PORTS
 from lakana_worker.launcher_client import LogSinkFailed
 from lakana_worker.processes import (
     CappedSink,
@@ -132,6 +135,7 @@ from lakana_worker.python_support import CANNOT_RUN, PythonSupport
 from lakana_worker.runners import (
     MAX_ERROR_MESSAGE_CHARS,
     MAX_TASK_OUTPUT_BYTES,
+    MISSING_ROOT,
     CodeUnpackError,
     CodeUnpackFailed,
     PythonTask,
@@ -537,6 +541,47 @@ class _TargetState:
     seen: KeptSeen = field(default=KeptSeen(None, None, None), compare=False)
 
 
+MAX_TASK_EGRESS = MAX_EGRESS
+"""The most host:port pairs a task reaches through the egress proxy: what its token holds."""
+MAX_TASK_RELAY = MAX_RELAY_ROUTES
+"""The most database endpoints a task's relay forwards."""
+MAX_TASK_ROOTS = MAX_ROOTS
+"""The most ingestion roots the launcher mounts into one task."""
+RELAY_FIRST_PORT = RELAY_PORTS.start
+"""The relay port of a task's first database endpoint; the next ones count up from it."""
+INGEST_MOUNT = "/ingest"
+"""Where the launcher mounts a task's ingestion roots, one directory per root."""
+
+
+@dataclass(frozen=True)
+class ConnectionPlan:
+    """Where a task's declared connections let it go: exactly their endpoints, nothing more.
+
+    Parameters
+    ----------
+    egress
+        The ``(host, port)`` pairs of the HTTPS kinds, for the egress proxy's token (Docker
+        runner), in declaration order without repeats.
+    relay
+        ``(listen port, host, port)`` for each endpoint of the database kinds, ports from 15001
+        in declaration order (Docker runner).
+    roots
+        The ingestion roots the mounted kinds read, without repeats.
+    root_users
+        Each of `roots` to the first connection naming it.
+    routing
+        Each declared name to what the task description says about it: ``kind`` and ``grant``
+        (the endpoints the attempt was granted) plus ``relay_port`` for a database under the
+        Docker runner, or ``kind``, ``root_dir``, ``path`` and ``root_path`` for a mounted kind.
+    """
+
+    egress: tuple[tuple[str, int], ...] = ()
+    relay: tuple[tuple[int, str, int], ...] = ()
+    roots: tuple[str, ...] = ()
+    root_users: dict[str, str] = field(default_factory=dict)
+    routing: dict[str, dict[str, object]] = field(default_factory=dict)
+
+
 @dataclass(frozen=True)
 class _Prepared:
     """What the run needs, as plain values (no ORM object crosses the long run).
@@ -582,8 +627,9 @@ class _Prepared:
         The merge key's columns.
     watermark_column
         The asset's `watermark` column, if it has one.
-    connections
-        Each connection the asset declares to its ``kind``, in the order declared.
+    plan
+        Where the declared connections let the task go (`ConnectionPlan`); its `routing` is
+        `connections`.
     """
 
     environment: str
@@ -605,7 +651,18 @@ class _Prepared:
     write: str = "replace"
     key: tuple[str, ...] = ()
     watermark_column: str | None = None
-    connections: dict[str, dict[str, object]] = field(default_factory=dict)
+    plan: ConnectionPlan = field(default_factory=lambda: ConnectionPlan())
+
+    @property
+    def connections(self) -> dict[str, dict[str, object]]:
+        """Each connection the asset declares to its routing, in the order declared.
+
+        Returns
+        -------
+        dict
+            `plan.routing`.
+        """
+        return self.plan.routing
 
 
 _CANNOT_HIDE = (
@@ -857,6 +914,9 @@ class PythonRuntime:
     environments
         Gets each task's environment from the launcher (`LAKANA_RUN__RUNNER=docker`); `None`
         builds venvs locally with `acquire_venv`, the local runner.
+    ingestion_roots
+        `LAKANA_RUN__INGESTION_ROOTS`: root name to the directory a local task reads it from.
+        The Docker runner ignores it: the launcher mounts its own roots at ``/ingest/<root>``.
     """
 
     support: PythonSupport
@@ -871,6 +931,7 @@ class PythonRuntime:
     deploy_sweeper: DeploySweeper | None = None
     caches: CacheKeeper | None = None
     environments: DockerEnvironments | None = None
+    ingestion_roots: Mapping[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         """Refuse a runner and environments that disagree about isolation.
@@ -1258,6 +1319,10 @@ class PythonRuntime:
                     connections=prepared.connections,
                     table_exists=before.table_id is not None,
                     hidden=hidden,
+                    egress=prepared.plan.egress,
+                    relay=prepared.plan.relay,
+                    roots=prepared.plan.roots,
+                    root_users=prepared.plan.root_users,
                 ),
                 sink,
                 stop,
@@ -1504,7 +1569,7 @@ class PythonRuntime:
                 "again with this release",
                 FailureCode.CODE_CHANGED,
             )
-        connections = self._connections(session, env, entry, claimed.asset)
+        plan = self._connection_plan(session, env, entry, claimed.asset)
         reason = self.support.reason()
         if reason is not None:
             raise TaskFailure(
@@ -1612,15 +1677,19 @@ class PythonRuntime:
             write=write,
             key=key,
             watermark_column=watermark_column,
-            connections=connections,
+            plan=plan,
         )
         return prepared, tarball
 
-    @staticmethod
-    def _connections(
-        session: Session, env: Environment, entry: Mapping[str, object], asset: str
-    ) -> dict[str, dict[str, object]]:
-        """Read the kind of every connection the asset declares.
+    def _connection_plan(
+        self, session: Session, env: Environment, entry: Mapping[str, object], asset: str
+    ) -> ConnectionPlan:
+        """Plan where the task may go: the endpoints of the connections the asset declares.
+
+        Only what the declared connections hold reaches the plan, so the task's token, relay and
+        mounts grant exactly those endpoints and roots. Under the Docker runner HTTPS kinds go
+        through the egress proxy and database kinds through the task's relay; the local runner
+        connects directly and reads roots from `ingestion_roots`.
 
         Parameters
         ----------
@@ -1635,28 +1704,35 @@ class PythonRuntime:
 
         Returns
         -------
-        dict
-            Each declared name to ``{"kind": ...}``, in the order declared; empty for an asset
-            that declares none.
+        ConnectionPlan
+            Empty for an asset that declares no connection.
 
         Raises
         ------
         TaskFailure
-            Permanent when the environment no longer has one of them (a deploy checks this,
-            so only a change since can cause it).
+            Permanent when the environment no longer has one of them (a deploy checks this, so
+            only a change since can cause it); when the local runner lacks a root a connection
+            names; and when the plan exceeds what one task may hold (64 proxy pairs, 16 relay
+            routes, 16 mounted roots), naming the cap.
         """
         names = entry_connections(entry)
         if not names:
-            return {}
-        kinds = dict(
-            session.execute(
-                select(Connection.name, Connection.kind).where(
-                    Connection.environment_id == env.id, Connection.name.in_(names)
-                )
+            return ConnectionPlan()
+        rows = {
+            row.name: row
+            for row in session.execute(
+                select(
+                    Connection.name, Connection.kind, Connection.address, Connection.settings
+                ).where(Connection.environment_id == env.id, Connection.name.in_(names))
             ).all()
-        )
+        }
+        egress: list[tuple[str, int]] = []
+        relay: list[tuple[int, str, int]] = []
+        root_users: dict[str, str] = {}
+        routing: dict[str, dict[str, object]] = {}
         for name in names:
-            if name not in kinds:
+            row = rows.get(name)
+            if row is None:
                 raise TaskFailure(
                     FailureKind.PERMANENT,
                     f"{asset} declares the connection `{name}`, which environment {env.name} "
@@ -1664,7 +1740,114 @@ class PythonRuntime:
                     "asset's connections, then deploy again",
                     FailureCode.NOT_FOUND,
                 )
-        return {name: {"kind": ConnectionKind(kinds[name]).value} for name in names}
+            kind = ConnectionKind(row.kind)
+            if kind in MOUNT_KINDS:
+                root, path = str(row.address["root"]), str(row.address["path"])
+                root_users.setdefault(root, name)
+                root_dir = self._root_dir(root, name)
+                routing[name] = {
+                    "kind": kind.value,
+                    "root_dir": root_dir,
+                    "path": path,
+                    "root_path": posixpath.join(root_dir, path),
+                }
+                continue
+            found = endpoints(kind, row.address, row.settings)
+            routing[name] = {"kind": kind.value, "grant": [[e.host, e.port] for e in found]}
+            if not self.isolated:
+                continue
+            if kind in PROXY_KINDS:
+                for e in found:
+                    if (e.host, e.port) not in egress:
+                        egress.append((e.host, e.port))
+            else:  # RELAY_KINDS: the three sets cover every kind (test_connection_endpoints)
+                routing[name]["relay_port"] = RELAY_FIRST_PORT + len(relay)
+                for e in found:
+                    relay.append((RELAY_FIRST_PORT + len(relay), e.host, e.port))
+        self._check_caps(asset, egress, relay, root_users)
+        return ConnectionPlan(
+            egress=tuple(egress),
+            relay=tuple(relay),
+            roots=tuple(root_users),
+            root_users=root_users,
+            routing=routing,
+        )
+
+    def _root_dir(self, root: str, connection: str) -> str:
+        """Find where a task reads an ingestion root.
+
+        Parameters
+        ----------
+        root
+            The root's name.
+        connection
+            The connection naming it, for the message.
+
+        Returns
+        -------
+        str
+            ``/ingest/<root>`` under the Docker runner (the launcher refuses a root it lacks);
+            the worker's own directory for it under the local runner.
+
+        Raises
+        ------
+        TaskFailure
+            Permanent under the local runner when `LAKANA_RUN__INGESTION_ROOTS` lacks the root.
+        """
+        if self.isolated:
+            return posixpath.join(INGEST_MOUNT, root)
+        directory = self.ingestion_roots.get(root)
+        if directory is None:
+            raise TaskFailure(
+                FailureKind.PERMANENT,
+                MISSING_ROOT.format(connection=connection, root=root),
+                FailureCode.NO_RUNTIME,
+            )
+        return directory
+
+    def _check_caps(
+        self,
+        asset: str,
+        egress: list[tuple[str, int]],
+        relay: list[tuple[int, str, int]],
+        roots: Mapping[str, str],
+    ) -> None:
+        """Refuse a plan bigger than one task's token, relay or mounts can hold.
+
+        Parameters
+        ----------
+        asset
+            The asset, for the message.
+        egress
+            The proxy pairs.
+        relay
+            The relay routes.
+        roots
+            The roots to mount.
+
+        Raises
+        ------
+        TaskFailure
+            Permanent, naming the count and the cap, for the first that is exceeded.
+        """
+        if len(egress) > MAX_TASK_EGRESS:
+            message = (
+                f"asset `{asset}` reaches {len(egress)} hosts through the egress proxy; a task "
+                f"may reach at most {MAX_TASK_EGRESS} — split the asset"
+            )
+        elif len(relay) > MAX_TASK_RELAY:
+            message = (
+                f"asset `{asset}` reaches {len(relay)} database endpoints; a task's relay "
+                f"forwards at most {MAX_TASK_RELAY} — split the asset"
+            )
+        elif self.isolated and len(roots) > MAX_TASK_ROOTS:
+            message = (
+                f"asset `{asset}` reads {len(roots)} ingestion roots; a task mounts at most "
+                f"{MAX_TASK_ROOTS} — split the asset"
+            )
+        else:
+            return
+        raise TaskFailure(FailureKind.PERMANENT, message, FailureCode.NO_RUNTIME)
 
     @staticmethod
     def _output_of(entry: Mapping[str, object], asset: str) -> str:

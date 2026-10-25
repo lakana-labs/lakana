@@ -7826,8 +7826,14 @@ def test_a_write_no_run_may_do_is_never_run_as_a_replace(
     assert py.runner.tasks == []
 
 
-def _connection(py: PyWorld, name: str = "crm-db") -> None:
-    """Add a PostgreSQL connection to `dev`.
+def _connection(
+    py: PyWorld,
+    name: str = "crm-db",
+    kind: ConnectionKind = ConnectionKind.POSTGRESQL,
+    address: dict[str, object] | None = None,
+    settings: dict[str, object] | None = None,
+) -> None:
+    """Add a connection to `dev`; a PostgreSQL one at db.example.com:5432 by default.
 
     Parameters
     ----------
@@ -7835,6 +7841,12 @@ def _connection(py: PyWorld, name: str = "crm-db") -> None:
         The world.
     name
         Its name.
+    kind
+        Its kind.
+    address
+        Its address; the default PostgreSQL one when `None`.
+    settings
+        Its settings; none when `None`.
     """
     with py.world.session() as session:
         env = session.execute(select(Environment).where(Environment.name == "dev")).scalar_one()
@@ -7843,13 +7855,159 @@ def _connection(py: PyWorld, name: str = "crm-db") -> None:
                 id=uuid.uuid4(),
                 environment_id=env.id,
                 name=name,
-                kind=ConnectionKind.POSTGRESQL,
-                address={"host": "db.example.com", "port": 5432, "database": "crm"},
-                settings={},
+                kind=kind,
+                address=address
+                if address is not None
+                else {"host": "db.example.com", "port": 5432, "database": "crm"},
+                settings=settings or {},
                 created_by=py.world.admin.id,
             )
         )
         session.commit()
+
+
+def test_a_docker_task_is_routed_to_every_declared_connection(py: PyWorld) -> None:
+    """Proxy pairs, relay ports in declaration order, roots; routing in the description."""
+    _connection(py)  # crm-db: postgresql db.example.com:5432
+    _connection(
+        py,
+        "api",
+        ConnectionKind.HTTP,
+        {"base_url": "https://api.example.com"},
+        {"auth": "oauth2", "token_url": "https://login.example.com/token"},
+    )
+    _connection(py, "exports", ConnectionKind.DIRECTORY, {"root": "shared", "path": "in"}, {})
+    _connection(py, "erp", ConnectionKind.TCP, {"host": "erp.example.com", "port": 1433}, {})
+    _connection(py, "files", ConnectionKind.SQLITE_FILE, {"root": "shared", "path": "a.db"}, {})
+    _connection(py, "api2", ConnectionKind.HTTP, {"base_url": "https://api.example.com/v2"}, {})
+    py.deploy(connections=["crm-db", "api", "exports", "erp", "files", "api2"])
+    engine = py.engine(_writer(py.world), environments=FakeEnvironments())
+    run_claimed(engine, py.claim_python(engine))
+
+    (task,) = py.runner.tasks
+    assert task.egress == (("api.example.com", 443), ("login.example.com", 443))
+    assert task.relay == ((15001, "db.example.com", 5432), (15002, "erp.example.com", 1433))
+    assert (task.roots, dict(task.root_users)) == (("shared",), {"shared": "exports"})
+    assert task.connections == {
+        "crm-db": {"kind": "postgresql", "grant": [["db.example.com", 5432]], "relay_port": 15001},
+        "api": {"kind": "http", "grant": [["api.example.com", 443], ["login.example.com", 443]]},
+        "exports": {"kind": "directory", "root_dir": "/ingest/shared", "path": "in",
+                    "root_path": "/ingest/shared/in"},
+        "erp": {"kind": "tcp", "grant": [["erp.example.com", 1433]], "relay_port": 15002},
+        "files": {"kind": "sqlite-file", "root_dir": "/ingest/shared", "path": "a.db",
+                  "root_path": "/ingest/shared/a.db"},
+        "api2": {"kind": "http", "grant": [["api.example.com", 443]]},
+    }  # fmt: skip
+    assert _task(py.world, "gold.scores").status is TaskStatus.SUCCEEDED
+
+
+def test_a_task_without_connections_sends_empty_lists(py: PyWorld) -> None:
+    engine = py.engine(_writer(py.world), environments=FakeEnvironments())
+    run_claimed(engine, py.claim_python(engine))
+
+    (task,) = py.runner.tasks
+    assert (task.egress, task.relay, task.roots, dict(task.root_users)) == ((), (), (), {})
+    assert task.connections == {}
+
+
+def test_the_local_runner_routes_directly_and_reads_its_roots(py: PyWorld, tmp_path: Path) -> None:
+    """No proxy, no relay: the grant still travels, and a root is the worker's own directory."""
+    _connection(py)
+    _connection(py, "exports", ConnectionKind.DIRECTORY, {"root": "shared", "path": "in"}, {})
+    _connection(py, "api", ConnectionKind.HTTP, {"base_url": "https://api.example.com"}, {})
+    py.deploy(connections=["crm-db", "exports", "api"])
+    engine = py.engine(_writer(py.world), ingestion_roots={"shared": str(tmp_path)})
+    run_claimed(engine, py.claim_python(engine))
+
+    (task,) = py.runner.tasks
+    assert (task.egress, task.relay) == ((), ())
+    assert (task.roots, dict(task.root_users)) == (("shared",), {"shared": "exports"})
+    assert task.connections == {
+        "crm-db": {"kind": "postgresql", "grant": [["db.example.com", 5432]]},
+        "exports": {"kind": "directory", "root_dir": str(tmp_path), "path": "in",
+                    "root_path": str(tmp_path / "in")},
+        "api": {"kind": "http", "grant": [["api.example.com", 443]]},
+    }  # fmt: skip
+
+
+_ROOT_TEXT = (
+    "`exports` names ingestion root `shared`, which this worker does not have. Set it in "
+    "`LAKANA_LAUNCHER__INGESTION_ROOTS` (Docker runner) or `LAKANA_RUN__INGESTION_ROOTS` "
+    "(local runner)."
+)
+
+
+def test_a_root_the_local_worker_does_not_have_fails_before_any_process(py: PyWorld) -> None:
+    _connection(py, "exports", ConnectionKind.DIRECTORY, {"root": "shared", "path": "in"}, {})
+    py.deploy(connections=["exports"])
+    task, message = _fails(py, py.engine(_writer(py.world), ingestion_roots={"other": "/srv/x"}))
+
+    assert (task.status, task.attempt, task.failure_code) == (TaskStatus.FAILED, 1, "no_runtime")
+    assert message == _ROOT_TEXT
+    assert py.runner.tasks == []
+
+
+def test_too_many_relay_endpoints_fail_naming_the_cap(py: PyWorld) -> None:
+    """A stored manifest is untrusted: one with more connections than a deploy allows."""
+    names = [f"db-{n:02d}" for n in range(18)]
+    for n, name in enumerate(names):
+        _connection(py, name, ConnectionKind.TCP, {"host": f"h{n}.example.com", "port": 5432}, {})
+    py.deploy(connections=names)
+    task, message = _fails(py, py.engine(_writer(py.world), environments=FakeEnvironments()))
+
+    assert (task.status, task.attempt, task.failure_code) == (TaskStatus.FAILED, 1, "no_runtime")
+    assert message == (
+        "asset `gold.scores` reaches 18 database endpoints; a task's relay forwards at most 16 "
+        "— split the asset"
+    )
+    assert py.runner.tasks == []
+
+
+def test_relay_endpoints_beyond_the_cap_are_fine_on_the_local_runner(py: PyWorld) -> None:
+    """The local runner has no relay, so its cap does not apply."""
+    names = [f"db-{n:02d}" for n in range(17)]
+    for n, name in enumerate(names):
+        _connection(py, name, ConnectionKind.TCP, {"host": f"h{n}.example.com", "port": 5432}, {})
+    py.deploy(connections=names)
+    engine = py.engine(_writer(py.world))
+    run_claimed(engine, py.claim_python(engine))
+
+    (task,) = py.runner.tasks
+    assert task.relay == ()
+    assert "relay_port" not in task.connections["db-16"]
+
+
+def test_too_many_egress_hosts_fail_naming_the_cap(py: PyWorld) -> None:
+    names = [f"api-{n:02d}" for n in range(35)]
+    for n, name in enumerate(names):
+        _connection(
+            py,
+            name,
+            ConnectionKind.HTTP,
+            {"base_url": f"https://a{n}.example.com"},
+            {"auth": "oauth2", "token_url": f"https://t{n}.example.com/token"},
+        )
+    py.deploy(connections=names)
+    task, message = _fails(py, py.engine(_writer(py.world), environments=FakeEnvironments()))
+
+    assert (task.status, task.attempt, task.failure_code) == (TaskStatus.FAILED, 1, "no_runtime")
+    assert message == (
+        "asset `gold.scores` reaches 70 hosts through the egress proxy; a task may reach at "
+        "most 64 — split the asset"
+    )
+
+
+def test_too_many_ingestion_roots_fail_naming_the_cap(py: PyWorld) -> None:
+    names = [f"dir-{n:02d}" for n in range(17)]
+    for n, name in enumerate(names):
+        _connection(py, name, ConnectionKind.DIRECTORY, {"root": f"r{n}", "path": "."}, {})
+    py.deploy(connections=names)
+    task, message = _fails(py, py.engine(_writer(py.world), environments=FakeEnvironments()))
+
+    assert (task.status, task.attempt, task.failure_code) == (TaskStatus.FAILED, 1, "no_runtime")
+    assert message == (
+        "asset `gold.scores` reads 17 ingestion roots; a task mounts at most 16 — split the asset"
+    )
 
 
 def test_the_task_carries_the_kind_of_every_declared_connection(py: PyWorld) -> None:
@@ -7860,7 +8018,9 @@ def test_the_task_carries_the_kind_of_every_declared_connection(py: PyWorld) -> 
     run_claimed(engine, py.claim_python(engine))
     (task,) = py.runner.tasks
     assert task.write == "replace"
-    assert task.connections == {"crm-db": {"kind": "postgresql"}}
+    assert task.connections == {
+        "crm-db": {"kind": "postgresql", "grant": [["db.example.com", 5432]]}
+    }
     assert _task(py.world, "gold.scores").status is TaskStatus.SUCCEEDED
 
 
@@ -7882,7 +8042,9 @@ def test_a_connection_deleted_after_the_attempt_was_prepared_hides_nothing(
     run_claimed(engine, py.claim_python(engine))
 
     (task,) = py.runner.tasks
-    assert task.connections == {"crm-db": {"kind": "postgresql"}}
+    assert task.connections == {
+        "crm-db": {"kind": "postgresql", "grant": [["db.example.com", 5432]]}
+    }
     assert task.hidden == ()
     assert _task(py.world, "gold.scores").status is TaskStatus.SUCCEEDED
 

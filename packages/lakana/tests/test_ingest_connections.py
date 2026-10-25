@@ -81,13 +81,17 @@ class _Client:
     task_connections: _TaskConnections
 
 
-def _state(answer: dict[str, object] | Exception) -> _TaskConnections:
+def _state(
+    answer: dict[str, object] | Exception, routing: dict[str, object] | None = None
+) -> _TaskConnections:
     """Set the task state of an attempt of `gold.scores` that declares `crm-db`.
 
     Parameters
     ----------
     answer
         What the fake server answers.
+    routing
+        The task description's entry for `crm-db`; only its kind when `None`.
 
     Returns
     -------
@@ -101,7 +105,7 @@ def _state(answer: dict[str, object] | Exception) -> _TaskConnections:
             environment="dev",
             asset="gold.scores",
             declared=frozenset({"crm-db"}),
-            connections={"crm-db": {"kind": "postgresql"}},
+            connections={"crm-db": routing if routing is not None else {"kind": "postgresql"}},
         )
     )
     return fake
@@ -206,3 +210,99 @@ def test_the_errors_say_whether_another_attempt_could_help() -> None:
     assert SourceError.retryable is None
     for kind in (ConnectionNotDeclared, ConnectionRefused, CapExceeded, ConnectionChanged):
         assert issubclass(kind, IngestError)
+
+
+_GRANT: dict[str, object] = {"kind": "postgresql", "grant": [["db.example.com", 5432]]}
+
+
+def test_a_connection_changed_since_the_grant_fails_transiently() -> None:
+    """Review Focus 4: the fetched endpoints differ from the grant the attempt started with."""
+    moved = {**_BODY, "endpoints": [{"host": "db2.example.com", "port": 5432, "role": "service"}]}
+    fake = _state(moved, routing=_GRANT)
+
+    with pytest.raises(ConnectionChanged) as caught:
+        connections.get("crm-db")
+    assert str(caught.value) == (
+        "connection `crm-db` changed after this attempt started; the next attempt uses the new "
+        "address"
+    )
+    assert caught.value.retryable is True
+    with pytest.raises(ConnectionChanged):
+        connections.get("crm-db")
+    assert fake.asked == ["crm-db", "crm-db"]
+    assert _PASSWORD in context.current().secrets
+
+
+def test_a_connection_that_matches_its_grant_is_kept() -> None:
+    fake = _state(_BODY, routing=_GRANT)
+    connections.get("crm-db")
+    connections.get("crm-db")
+    assert fake.asked == ["crm-db"]
+
+
+def test_a_grant_that_is_not_a_list_reads_as_a_change() -> None:
+    """A broken description fails safe: the attempt is retried rather than run unchecked."""
+    _state(_BODY, routing={"kind": "postgresql", "grant": "db.example.com"})
+    with pytest.raises(ConnectionChanged):
+        connections.get("crm-db")
+
+
+def test_get_fills_the_routing_fields(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Docker routing: a relay address for a database, the proxy for HTTPS, a path for a root."""
+    proxy = "http://lakana:tok@egress:3128"
+    monkeypatch.setenv("LAKANA_EGRESS_PROXY", proxy)
+    _state(_BODY, routing={**_GRANT, "relay_port": 15002})
+    db = connections.get("crm-db")
+    assert (db.relay_address, db.proxy_url, db.root_path) == ("lakana-relay:15002", None, None)
+
+    _connections.clear()
+    api_body = {
+        **_BODY,
+        "kind": "http",
+        "address": {"base_url": "https://api.example.com"},
+        "settings": {},
+        "endpoints": [{"host": "api.example.com", "port": 443, "role": "service"}],
+    }
+    _state(api_body, routing={"kind": "http", "grant": [["api.example.com", 443]]})
+    api = connections.get("crm-db")
+    assert (api.relay_address, api.proxy_url, api.root_path) == (None, proxy, None)
+
+    _connections.clear()
+    files_body = {
+        **_BODY,
+        "kind": "directory",
+        "address": {"root": "shared", "path": "in"},
+        "settings": {},
+        "endpoints": [],
+        "secret": None,
+    }
+    _state(
+        files_body,
+        routing={
+            "kind": "directory",
+            "root_dir": "/ingest/shared",
+            "path": "in",
+            "root_path": "/ingest/shared/in",
+        },
+    )
+    files = connections.get("crm-db")
+    assert (files.relay_address, files.proxy_url, files.root_path) == (
+        None,
+        None,
+        "/ingest/shared/in",
+    )
+
+
+def test_without_routing_fields_they_stay_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The local runner: no relay port, no proxy in the environment; connect to `address`."""
+    monkeypatch.delenv("LAKANA_EGRESS_PROXY", raising=False)
+    _state(
+        {
+            **_BODY,
+            "kind": "http",
+            "endpoints": [{"host": "api.example.com", "port": 443, "role": "service"}],
+        },
+        routing={"kind": "http", "grant": [["api.example.com", 443]]},
+    )
+    found = connections.get("crm-db")
+    assert (found.proxy_url, found.relay_address, found.root_path) == (None, None, None)

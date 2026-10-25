@@ -516,3 +516,13 @@ def test_deploy_and_harness_agree_that_two_artifact_parameters_may_not_differ_on
     else:
         harness_refuses = False
     assert deploy_refuses is harness_refuses is clash
+
+
+def test_the_sdk_routes_the_kinds_the_worker_routes() -> None:
+    """The SDK gives the proxy to the kinds the worker sends through it; the relay's alias."""
+    from lakana.ingest import connections as sdk_connections
+    from lakana_core.connections.endpoints import PROXY_KINDS
+    from lakana_worker.launcher.requests import RELAY_ALIAS
+
+    assert {kind.value for kind in PROXY_KINDS} == sdk_connections._PROXY_KINDS
+    assert sdk_connections._RELAY_HOST == RELAY_ALIAS

@@ -13,7 +13,12 @@ from dataclasses import dataclass, field
 
 from lakana import context
 from lakana.errors import PermissionDenied
-from lakana.ingest._errors import ConnectionNotDeclared, ConnectionRefused, IngestError
+from lakana.ingest._errors import (
+    ConnectionChanged,
+    ConnectionNotDeclared,
+    ConnectionRefused,
+    IngestError,
+)
 
 
 @dataclass(frozen=True)
@@ -54,8 +59,9 @@ class FetchedConnection:
     secret
         Its secret's values, or `None`. Left out of `repr`.
     routing
-        What the task description says about it (its ``kind``; from the Docker runner later
-        its relay port and mount).
+        What the task description says about it: its ``kind``, the ``grant`` of host and port
+        pairs and, under the Docker runner, its ``relay_port``; for a mounted kind
+        ``root_dir``, ``path`` and ``root_path``.
     """
 
     name: str
@@ -153,6 +159,9 @@ def fetch(name: str) -> FetchedConnection:
         Before any request, for a name the asset does not declare.
     ConnectionRefused
         When the server refuses (its text, unchanged).
+    ConnectionChanged
+        When its endpoints are no longer those the worker granted this attempt (retryable;
+        nothing is kept, so the next attempt fetches it again).
     """
     state = context.current()
     if name not in state.declared:
@@ -170,10 +179,40 @@ def fetch(name: str) -> FetchedConnection:
             for value in secret.values():
                 if isinstance(value, str):
                     context.register_secret(value)
-        _CACHE[name] = FetchedConnection.from_body(
-            name, body, routing=state.connections.get(name, {})
-        )
+        fetched = FetchedConnection.from_body(name, body, routing=state.connections.get(name, {}))
+        if "grant" in fetched.routing and not _matches_grant(fetched):
+            raise ConnectionChanged(
+                f"connection `{name}` changed after this attempt started; the next attempt uses "
+                "the new address"
+            )
+        _CACHE[name] = fetched
     return _CACHE[name]
+
+
+def _matches_grant(fetched: FetchedConnection) -> bool:
+    """Say whether a fetched connection reaches exactly the endpoints the worker granted.
+
+    The worker read the connection before the task started and let it reach those endpoints
+    only; a change since (``lakana connection update``) would point the task at a host its
+    proxy, relay or token refuses.
+
+    Parameters
+    ----------
+    fetched
+        The connection as fetched, with its routing.
+
+    Returns
+    -------
+    bool
+        Whether the endpoints and the ``grant`` are the same set of host and port pairs; a
+        malformed ``grant`` never matches.
+    """
+    grant = fetched.routing.get("grant")
+    if not isinstance(grant, list) or not all(
+        isinstance(pair, list) and len(pair) == 2 for pair in grant
+    ):
+        return False
+    return {(e.host, e.port) for e in fetched.endpoints} == {tuple(pair) for pair in grant}
 
 
 def clear() -> None:
