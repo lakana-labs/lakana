@@ -31,6 +31,7 @@ from lakana_worker.launcher.requests import (
     CleanupRequest,
     Limits,
     Refused,
+    RelayRoute,
     RunRequest,
     StatusRequest,
     StopRequest,
@@ -2261,8 +2262,8 @@ def test_concurrent_networks_get_different_subnets(tmp_path: Path) -> None:
     """Allocation happens under the lock."""
     launcher = _started(FakeEngine(), tmp_path)
 
-    first = launcher._open_network("task", "t1", "w1", None, 0)
-    second = launcher._open_network("build", "b1", "w1", None, 0)
+    first = launcher._open_network("task", "t1", "w1", [], 0)
+    second = launcher._open_network("build", "b1", "w1", [], 0)
 
     assert launcher._subnets[first] == "10.207.0.0/29"
     assert launcher._subnets[second] == "10.207.0.8/29"
@@ -2284,7 +2285,7 @@ def test_subnets_of_networks_that_survive_the_start_are_recovered(tmp_path: Path
     launcher = _started(engine, tmp_path)
 
     assert launcher._subnets == {"lakana-task-stuck": "10.207.0.0/29"}
-    assert launcher._open_network("task", "t1", "w1", None, 0) and (
+    assert launcher._open_network("task", "t1", "w1", [], 0) and (
         launcher._subnets["lakana-task-t1"] == "10.207.0.8/29"
     )
 
@@ -2294,7 +2295,7 @@ def test_a_subnet_docker_says_overlaps_is_skipped(tmp_path: Path) -> None:
     engine = FakeEngine(overlaps={"10.207.0.0/29"})
     launcher = _started(engine, tmp_path)
 
-    name = launcher._open_network("task", "t1", "w1", None, 0)
+    name = launcher._open_network("task", "t1", "w1", [], 0)
 
     assert launcher._subnets[name] == "10.207.0.8/29"
     assert "10.207.0.0/29" in launcher._used_subnets
@@ -2306,7 +2307,7 @@ def test_a_range_full_of_overlaps_gives_up_with_the_setting_named(tmp_path: Path
     launcher = _started(engine, tmp_path)
 
     with pytest.raises(EngineError, match="LAKANA_LAUNCHER__NETWORK_RANGE"):
-        launcher._open_network("task", "t1", "w1", None, 0)
+        launcher._open_network("task", "t1", "w1", [], 0)
 
     assert launcher._subnets == {}
 
@@ -2315,10 +2316,10 @@ def test_runs_beyond_the_concurrency_bound_are_refused_naming_the_setting(tmp_pa
     """A /24 holds 32 networks; the bound is below that, so a burst cannot use them all."""
     launcher = _started(FakeEngine(), tmp_path, network_range="10.207.0.0/24")
     for number in range(24):
-        launcher._open_network("task", f"t{number}", "w1", None, 0)
+        launcher._open_network("task", f"t{number}", "w1", [], 0)
 
     with pytest.raises(EngineError, match="LAKANA_LAUNCHER__NETWORK_RANGE") as caught:
-        launcher._open_network("task", "t99", "w1", None, 0)
+        launcher._open_network("task", "t99", "w1", [], 0)
 
     assert "24 of 24" in str(caught.value)
 
@@ -2329,14 +2330,14 @@ def test_an_exhausted_pool_is_an_error_naming_the_setting(tmp_path: Path) -> Non
     launcher._used_subnets.update(f"10.207.0.{8 * n}/29" for n in range(32))
 
     with pytest.raises(EngineError, match="no free address range"):
-        launcher._open_network("task", "t1", "w1", None, 0)
+        launcher._open_network("task", "t1", "w1", [], 0)
 
 
 def test_a_network_that_cannot_be_deleted_keeps_its_subnet(tmp_path: Path) -> None:
     """Only a removed network gives its addresses back."""
     engine = FakeEngine()
     launcher = _started(engine, tmp_path)
-    name = launcher._open_network("task", "t1", "w1", None, 0)
+    name = launcher._open_network("task", "t1", "w1", [], 0)
     _intercept(engine, lambda m, p, b: m == "DELETE", (500, {"message": "busy"}))
 
     launcher.close_network(name)
@@ -2605,7 +2606,7 @@ def test_a_build_subnet_rests_until_its_token_has_expired(
     second, _ = launcher.open_build_network("b2", "w1", [("pypi.org", 443)], 60)
     assert launcher._subnets[second] != str(grant.network)
     launcher.close_network(second)
-    task = launcher._open_network("task", "t1", "w1", None, 0)
+    task = launcher._open_network("task", "t1", "w1", [], 0)
     assert launcher._subnets[task] != str(grant.network)
     launcher.close_network(task)
 
@@ -2641,3 +2642,135 @@ def test_resting_subnets_count_against_the_network_cap(tmp_path: Path) -> None:
 
     with pytest.raises(EngineError, match="6 resting"):
         launcher.open_build_network("b9", "w1", [("pypi.org", 443)], 60)
+
+
+_DB = RelayRoute(15001, "db.example.com", 5432)
+
+
+def _egress_run(**fields: Any) -> RunRequest:
+    """Build a run request with egress pairs or relay routes.
+
+    Parameters
+    ----------
+    **fields
+        `egress`, `relay` and other fields to replace.
+
+    Returns
+    -------
+    RunRequest
+        The request.
+    """
+    return replace(_run(), **fields)
+
+
+def _subnet_of(launcher: Launcher, engine: FakeEngine) -> list[str]:
+    """Record the subnet each network of a launcher gets.
+
+    Parameters
+    ----------
+    launcher
+        The launcher.
+    engine
+        Its fake engine.
+
+    Returns
+    -------
+    list of str
+        Filled as networks are created.
+    """
+    subnets: list[str] = []
+    allocate = launcher._allocate_subnet
+
+    def remember(name: str) -> str:
+        """Record the subnet.
+
+        Parameters
+        ----------
+        name
+            The network.
+
+        Returns
+        -------
+        str
+            The subnet.
+        """
+        subnets.append(allocate(name))
+        return subnets[-1]
+
+    launcher._allocate_subnet = remember  # ty: ignore[invalid-assignment]
+    return subnets
+
+
+def test_a_run_with_egress_gets_the_proxy_and_a_task_token_for_exactly_its_pairs(
+    tmp_path: Path,
+) -> None:
+    """Server and proxy join the task network; the token is purpose `task`, bound to its /29."""
+    engine = FakeEngine()
+    launcher = _started(engine, tmp_path)
+    subnets = _subnet_of(launcher, engine)
+    pairs = (("api.example.com", 443), ("login.example.com", 443))
+
+    launcher.run(_egress_run(egress=pairs), lambda line: None)
+
+    connects = [b for m, p, b in engine.calls if p == "/networks/lakana-task-t1/connect"]
+    assert connects == [
+        {"Container": "c-server", "EndpointConfig": {"Aliases": ["server"]}},
+        {"Container": "c-egress", "EndpointConfig": {"Aliases": ["egress"]}},
+    ]
+    (spec,) = engine.created("task")
+    env = dict(item.split("=", 1) for item in spec["Env"])
+    assert not {"HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY"} & set(env)
+    token = env["LAKANA_EGRESS_PROXY"].removeprefix("http://lakana:").removesuffix("@egress:3128")
+    key = read_key(tmp_path / "egress.key")
+    assert key is not None
+    grant = verify(key, token, time.time())
+    assert grant is not None
+    assert (grant.purpose, grant.targets) == ("task", frozenset(pairs))
+    assert grant.network == ipaddress.ip_network(subnets[0])
+    assert time.time() + 30 + 3 < grant.expires <= time.time() + 30 + 3 + 61
+    assert "lakana-task-t1" not in engine.networks
+    assert subnets[0] in launcher._resting  # no other network gets it while the token lives
+
+
+@pytest.mark.parametrize(
+    "fields", [{"egress": (("api.example.com", 443),)}, {"relay": (_DB,)}], ids=["egress", "relay"]
+)
+def test_a_run_with_connections_without_the_egress_service_is_refused_first(
+    tmp_path: Path, fields: dict[str, Any]
+) -> None:
+    """The fixed refusal, before any network or container exists.
+
+    Parameters
+    ----------
+    tmp_path
+        The state directory.
+    fields
+        Egress pairs or relay routes.
+    """
+    engine = FakeEngine(services={"server": "c-server"})
+    launcher = _started(engine, tmp_path)
+    before = len(engine.calls)
+
+    with pytest.raises(Refused) as caught:
+        launcher.run(_egress_run(**fields), lambda line: None)
+
+    assert str(caught.value) == (
+        "tasks with connections need the `egress` service; start it (Compose bundle) or remove "
+        "the connection from the asset."
+    )
+    assert not [p for m, p, _ in engine.calls[before:] if m in ("POST", "DELETE")]
+
+
+def test_a_run_without_connections_keeps_the_server_only_posture(tmp_path: Path) -> None:
+    """One attachment, no token, no proxy variable, no relay, no resting subnet."""
+    engine = FakeEngine()
+    launcher = _started(engine, tmp_path)
+    subnets = _subnet_of(launcher, engine)
+
+    launcher.run(_run(), lambda line: None)
+
+    assert [b["Container"] for m, p, b in engine.calls if p.endswith("/connect")] == ["c-server"]
+    (spec,) = engine.created("task")
+    assert not any(item.startswith("LAKANA_EGRESS_PROXY=") for item in spec["Env"])
+    assert engine.created("relay") == []
+    assert subnets[0] not in launcher._resting

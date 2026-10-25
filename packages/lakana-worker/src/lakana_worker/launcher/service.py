@@ -41,7 +41,7 @@ from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 from urllib.parse import quote
 
 from lakana_worker.launcher.egress import PORT as EGRESS_PORT
@@ -49,6 +49,7 @@ from lakana_worker.launcher.egress_token import mint, rotate_key
 from lakana_worker.launcher.engine import API_VERSION, Engine, EngineError
 from lakana_worker.launcher.requests import (
     DEADLINE_MARGIN,
+    EGRESS_MISSING,
     LABEL_DEADLINE,
     LABEL_KIND,
     LABEL_OWNER,
@@ -857,12 +858,16 @@ class Launcher:
     def run(self, request: RunRequest, emit: Emit) -> dict[str, object]:
         """Run one task attempt to its end.
 
+        A run with ``egress`` gets the egress proxy on its network and a token for exactly those
+        pairs in `LAKANA_EGRESS_PROXY`; a run with ``relay`` gets its relay container first. A
+        run with neither reaches the server alone.
+
         Parameters
         ----------
         request
             The run.
         emit
-            Sends ``{"log": <base64>}`` lines.
+            Sends ``{"log": <base64>}`` lines; called from one thread at a time.
 
         Returns
         -------
@@ -872,16 +877,24 @@ class Launcher:
         Raises
         ------
         Refused
-            If the run names an ingestion root that failed its start-up probe.
+            If the run names an ingestion root that failed its start-up probe, has egress or
+            relay routes while the egress service is not running (`EGRESS_MISSING`), or its
+            pairs do not fit in a token; nothing is left behind.
         EngineError
-            If Docker refuses a step or the environment is not built; the container and network
-            are removed first.
+            If Docker refuses a step, the relay does not start or the environment is not built;
+            the containers and the network are removed first.
+        RuntimeError
+            If a run with egress reaches a launcher that has not started.
         Exception
             Whatever `emit` raises when the caller is gone; likewise.
         """
         for root in request.roots:
             if root in self.unusable_roots:
                 raise Refused(self.unusable_roots[root])
+        if (request.egress or request.relay) and not self._running(self.settings.egress_service):
+            raise Refused(EGRESS_MISSING)
+        if request.egress and self._egress_key is None:
+            raise RuntimeError("the egress key is only available after start()")
         name = container_name(self.settings, "task", request.task)
         live = self._register(
             name, request.owner, request.kill_grace_seconds, request.limits.memory_mb
@@ -894,19 +907,27 @@ class Launcher:
             self._touch(volume)
             if live.stopped.is_set():
                 return dict(_STOPPED_BEFORE_START)
-            network = self._open_network(
-                "task",
-                request.task,
-                request.owner,
-                (self.settings.server_service, self.settings.server_alias),
-                deadline,
-            )
+            services = [(self.settings.server_service, self.settings.server_alias)]
+            if request.egress:
+                services.append((self.settings.egress_service, "egress"))
+            network = self._open_network("task", request.task, request.owner, services, deadline)
             try:
+                proxy_url = (
+                    self._proxy_url(
+                        network,
+                        request.egress,
+                        request.limits.timeout_seconds + request.kill_grace_seconds,
+                        "task",
+                    )
+                    if request.egress
+                    else None
+                )
                 spec = run_container_spec(
                     request,
                     self.settings,
                     no_new_privileges=self.no_new_privileges,
                     deadline=deadline,
+                    proxy_url=proxy_url,
                 )
                 self._ensure_image(spec["Image"])
                 # A pull takes minutes; a prune or an eviction in that time must not let Docker
@@ -914,12 +935,59 @@ class Launcher:
                 if not self._built(volume):
                     raise self._not_built(request.python, request.environment)
                 return self._supervise(
-                    name, spec, live, request.limits.timeout_seconds, emit, stdin=request.stdin
+                    name,
+                    spec,
+                    live,
+                    request.limits.timeout_seconds,
+                    emit,
+                    stdin=request.stdin,
                 )
             finally:
                 self.close_network(network)
         finally:
             self.forget(name, request.owner, live)
+
+    def _proxy_url(
+        self, network: str, pairs: tuple[tuple[str, int], ...], seconds: int, purpose: str
+    ) -> str:
+        """Mint an egress token bound to a network and its lifetime plus a minute.
+
+        Parameters
+        ----------
+        network
+            The run's network, open already; its subnet rests until the token expires.
+        pairs
+            The host and port pairs.
+        seconds
+            The run's timeout and kill grace.
+        purpose
+            ``task`` or ``connection-test``: picks the proxy's next step in a refusal.
+
+        Returns
+        -------
+        str
+            ``http://lakana:<token>@egress:3128``.
+
+        Raises
+        ------
+        Refused
+            If the pairs do not fit in a token.
+        """
+        expires = int(time.time()) + seconds + 60
+        with self._lock:
+            subnet = self._subnets[network]
+            self._token_expiry[network] = expires
+        try:
+            token = mint(
+                cast("bytes", self._egress_key),
+                pairs,
+                expires,
+                purpose=purpose,
+                network=ipaddress.ip_network(subnet),
+            )
+        except ValueError as exc:
+            raise Refused(f"egress: {exc}") from None
+        return f"http://lakana:{token}@egress:{EGRESS_PORT}"
 
     @staticmethod
     def _not_built(python: str, environment: str) -> EngineError:
@@ -1685,10 +1753,10 @@ class Launcher:
         kind: str,
         ident: str,
         owner: str,
-        service: tuple[str, str] | None,
+        services: Sequence[tuple[str, str]],
         deadline: int,
     ) -> str:
-        """Create a task's or build's network and attach a service to it.
+        """Create a task's or build's network and attach services to it, in order.
 
         Parameters
         ----------
@@ -1698,8 +1766,8 @@ class Launcher:
             Its id.
         owner
             The worker.
-        service
-            Compose service and alias to attach, or `None`.
+        services
+            Compose service and alias pairs to attach (the server first for a task).
         deadline
             Epoch seconds after which the reaper removes the network.
 
@@ -1711,24 +1779,24 @@ class Launcher:
         Raises
         ------
         EngineError
-            If Docker refuses it, no subnet is free, too many networks are in use, or the
+            If Docker refuses it, no subnet is free, too many networks are in use, or a
             service is not running; nothing is left behind.
         """
         name = container_name(self.settings, kind, ident)
         self._create_network(name, kind, ident, owner, deadline)
-        if service is not None:
-            try:
-                cid = self._service_container(service[0])
+        try:
+            for service, alias in services:
+                cid = self._service_container(service)
                 status, body = self.engine.request(
                     "POST",
                     f"/networks/{quote(name, safe='')}/connect",
-                    {"Container": cid, "EndpointConfig": {"Aliases": [service[1]]}},
+                    {"Container": cid, "EndpointConfig": {"Aliases": [alias]}},
                 )
                 if status != 200:
-                    raise EngineError(f"Docker could not attach {service[0]}: {_message(body)}")
-            except EngineError:
-                self.close_network(name)
-                raise
+                    raise EngineError(f"Docker could not attach {service}: {_message(body)}")
+        except EngineError:
+            self.close_network(name)
+            raise
         return name
 
     def _running(self, service: str) -> bool:
@@ -1787,8 +1855,8 @@ class Launcher:
         if self._egress_key is None:
             raise RuntimeError("the egress key is only available after start()")
         egress = self._running(self.settings.egress_service)
-        service = (self.settings.egress_service, "egress") if egress else None
-        network = self._open_network("build", build, owner, service, _deadline(seconds))
+        services = [(self.settings.egress_service, "egress")] if egress else []
+        network = self._open_network("build", build, owner, services, _deadline(seconds))
         if not egress:
             return network, None
         expires = int(time.time()) + seconds + 60

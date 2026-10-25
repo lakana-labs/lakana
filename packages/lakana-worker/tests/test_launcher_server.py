@@ -45,6 +45,8 @@ RUN = {
     "stdin": "{}",
     "roots": [],
     "trust": False,
+    "egress": [],
+    "relay": [],
 }
 
 

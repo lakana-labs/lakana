@@ -1502,3 +1502,67 @@ def test_an_index_on_another_port_without_a_credential_is_reachable(
     assert answer.split()[1] == b"200" and echoed == b"ping"
     assert _status(proxy.port, f"localhost:{undeclared}", token) == b"403"
     assert _status(proxy.port, "localhost:443", token) == b"403"
+
+
+def _refusal(server: EgressServer, target: str, token: str) -> tuple[bytes, str]:
+    """Send a CONNECT that the proxy refuses and read its status and reason.
+
+    Parameters
+    ----------
+    server
+        The proxy.
+    target
+        ``host:port``.
+    token
+        The token.
+
+    Returns
+    -------
+    tuple
+        The status code and the one-line reason.
+    """
+    answer, connection = _connect(server.server_address[1], target, token)
+    with connection:
+        body = connection.recv(4096)
+    return answer.split()[1], body.decode().strip()
+
+
+@pytest.mark.parametrize(
+    ("purpose", "reason"),
+    [
+        (
+            "task",
+            "api.other.com:443 is not a destination this task may reach; declare it in "
+            "@asset(connections=[...]) and create it with lakana connection create",
+        ),
+        (
+            "connection-test",
+            "api.other.com:443 is not a destination this connection test may reach; check the "
+            "connection's address with lakana connection show",
+        ),
+    ],
+)
+def test_an_unlisted_host_is_refused_with_the_purposes_next_step(
+    tmp_path: Path, purpose: str, reason: str
+) -> None:
+    """A task or a connection test hears what to do about a host its token does not name.
+
+    Parameters
+    ----------
+    tmp_path
+        For the key.
+    purpose
+        The token's purpose.
+    reason
+        The whole refusal.
+    """
+    server = _proxy(tmp_path)
+    key = ensure_key(tmp_path / "egress.key")
+    try:
+        token = mint(key, [("api.example.com", 443)], 2**40, purpose=purpose, network=LOOPBACK)
+        status, said = _refusal(server, "api.other.com:443", token)
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    assert (status, said) == (b"403", reason)

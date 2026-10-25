@@ -86,8 +86,12 @@ _HINTS = {
         "register the index (lakana index add) or set LAKANA_RUN__INDEX_URL, with the port "
         "in its URL"
     ),
+    "task": "declare it in @asset(connections=[...]) and create it with lakana connection create",
+    "connection-test": "check the connection's address with lakana connection show",
 }
-"""What a refused client of each purpose can do about it."""
+"""What a refused client of each purpose can do about a host its token does not name."""
+_SUBJECTS = {"connection-test": "connection test"}
+"""How a refusal names a client whose purpose is not a plain word."""
 _NEVER = (
     ipaddress.ip_network("0.0.0.0/8"),
     ipaddress.ip_network("100.100.100.200/32"),
@@ -598,7 +602,9 @@ class _Handler(socketserver.BaseRequestHandler):
             )
             hint = _HINTS.get(grant.purpose, "ask for it to be allowed")
             raise _Refused(
-                403, f"{host}:{port} is not a destination this {grant.purpose} may reach; {hint}"
+                403,
+                f"{host}:{port} is not a destination this "
+                f"{_SUBJECTS.get(grant.purpose, grant.purpose)} may reach; {hint}",
             )
         upstream = self.proxy.open(host, port)
         with upstream:

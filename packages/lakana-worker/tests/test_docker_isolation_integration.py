@@ -506,6 +506,8 @@ def test_a_worker_that_disappears_leaves_no_container_and_no_process(
         "stdin": '{"asset_path": "probe.py"}',
         "roots": [],
         "trust": False,
+        "egress": [],
+        "relay": [],
     }
     try:
         client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
