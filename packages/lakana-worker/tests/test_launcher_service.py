@@ -3515,7 +3515,7 @@ def _check(**fields: Any) -> CheckRequest:
     """
     return replace(
         CheckRequest(
-            check="k1", owner="w1", python="3.13", attempt="attempt-k1", stdin=b'{"c": 1}'
+            check="k1", owner="w1", python="3.13", attempt="attempt-check_k1", stdin=b'{"c": 1}'
         ),
         **fields,
     )

@@ -1113,3 +1113,30 @@ def test_a_roots_refusal_that_lists_the_root_is_an_ordinary_refusal(
         row.message
         == f"the launcher refused the check: {refusal}; see `docker compose logs launcher`"
     )
+
+
+def test_the_loop_claims_with_a_lease_longer_than_the_check_wait(
+    world: World, tmp_path: Path
+) -> None:
+    """A Docker check may wait `CHECK_WAIT_SECONDS` for the launcher: the lease outlasts it.
+
+    Otherwise another worker retakes a test still running, and this worker's result is lost.
+    """
+    leases: list[float] = []
+
+    def script(request: dict[str, Any], on_log: Callable[[bytes], None]) -> dict[str, object]:
+        with Session(world.engine) as session:
+            row = session.scalars(select(ConnectionTest)).one()
+            assert row.lease_expires_at is not None
+            leases.append((row.lease_expires_at - db_now(session)).total_seconds())
+        on_log(OK_LINE)
+        return {"exit": 0}
+
+    launcher = FakeLauncher(scripts={"check": script})
+    running, _ = docker_loop(world, tmp_path, launcher)
+    world.connection("svc")
+
+    assert running.step()
+
+    (left,) = leases
+    assert left > connection_tests.CHECK_WAIT_SECONDS + 20

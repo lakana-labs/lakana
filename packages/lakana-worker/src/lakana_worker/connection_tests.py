@@ -70,8 +70,10 @@ logger = logging.getLogger(__name__)
 IDLE_SECONDS = 2.0
 """How long the loop sleeps when no test is queued."""
 
-LEASE_SECONDS = 60
-"""How long a claimed test belongs to this worker; a check takes at most about 30 s."""
+LEASE_SECONDS = int(CHECK_WAIT_SECONDS) + 30
+"""How long a claimed test belongs to this worker: the longest wait for a Docker check (the
+launcher's 30 s, a relay's start and a margin, `CHECK_WAIT_SECONDS`) plus 30 s to prepare it and
+record the result, so no other worker retakes a test still running."""
 
 CHECK_TIMEOUT_SECONDS = 30
 """The time the check subprocess may take."""
@@ -595,7 +597,9 @@ class ConnectionTestLoop:
             `False` when none was queued.
         """
         with Session(self._engine) as session:
-            test = ConnectionTestQueue(session).claim(self._owner, now=db_now(session))
+            test = ConnectionTestQueue(session).claim(
+                self._owner, lease_seconds=LEASE_SECONDS, now=db_now(session)
+            )
             if test is None:
                 return False
             test_id, expires = test.id, test.lease_expires_at

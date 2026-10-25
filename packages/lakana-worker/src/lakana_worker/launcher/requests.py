@@ -109,6 +109,7 @@ _ID = re.compile(r"\A[a-z0-9][a-z0-9-]{0,62}\Z")
 _OWNER = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
 _KEY = re.compile(r"\A[0-9a-f]{64}\Z")
 _ATTEMPT = re.compile(r"\Aattempt-[a-z0-9_]{1,32}\Z")
+_CHECK_ATTEMPT = re.compile(r"\Aattempt-check_[a-z0-9_]{1,32}\Z")
 _HOST = re.compile(
     r"\A(?=.{1,253}\Z)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*\Z"
 )
@@ -122,6 +123,7 @@ _ID_RULE = "lower-case letters, digits and '-', at most 63"
 _OWNER_RULE = "letters, digits, '.', '_', ':' and '-', at most 128"
 _KEY_RULE = "64 lower-case hex digits"
 _ATTEMPT_RULE = "an attempt directory's name"
+_CHECK_ATTEMPT_RULE = "a connection check's attempt directory, attempt-check_<name>"
 
 _LIMITS = frozenset({"memory_mb", "cpus", "pids", "timeout_seconds"})
 FIELDS: dict[str, frozenset[str]] = {
@@ -1094,7 +1096,7 @@ def _check(data: dict[str, Any], settings: LauncherSettings) -> CheckRequest:
         check=_pattern(data, "check", _ID, _ID_RULE),
         owner=_pattern(data, "owner", _OWNER, _OWNER_RULE),
         python=_python(data, settings),
-        attempt=_pattern(data, "attempt", _ATTEMPT, _ATTEMPT_RULE),
+        attempt=_pattern(data, "attempt", _CHECK_ATTEMPT, _CHECK_ATTEMPT_RULE),
         stdin=_stdin(data),
         roots=_roots(data, settings),
         trust=_trust(data),

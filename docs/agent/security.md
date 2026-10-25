@@ -1290,7 +1290,9 @@ connections; a connection opens exactly its endpoints and nothing else.
   too (a test compares both per kind): the `egress` pairs of a proxy kind, one relay route per
   endpoint of a database or `tcp` kind (ports from 15001, `relay_port` in the routing), the root of a mounted kind (`root_dir` `/ingest/<root>`). The worker's trust bundle is
   written into a private `attempt-check_*` directory (0700, under the work directory, removed when
-  the check ends; `AttemptSweeper` sweeps a dead worker's). The launcher (`Launcher.check`,
+  the check ends; `AttemptSweeper` sweeps a dead worker's); the launcher refuses a check naming any
+  other attempt, so a check never mounts a task's. The worker claims a test for
+  `LEASE_SECONDS` (`CHECK_WAIT_SECONDS` + 30), so no other worker retakes a running check. The launcher (`Launcher.check`,
   `check_container_spec`) runs the check the task image carries, `CHECK_ENTRY` =
   `/usr/local/bin/python -I -B /opt/lakana-check/check.py`; the request has no image, command,
   environment, code or limit field, only `python` from `LAUNCHER__IMAGES`. The container runs as the

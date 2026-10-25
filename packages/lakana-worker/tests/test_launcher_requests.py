@@ -1378,7 +1378,7 @@ CHECK: dict[str, Any] = {
     "check": "k0f3c9a1e",
     "owner": "worker-1",
     "python": "3.13",
-    "attempt": "attempt-chk_1",
+    "attempt": "attempt-check_1",
     "stdin": '{"connection": {}}',
     "roots": [],
     "trust": False,
@@ -1407,7 +1407,7 @@ def test_a_check_is_read_with_the_runs_rules() -> None:
         check="k0f3c9a1e",
         owner="worker-1",
         python="3.13",
-        attempt="attempt-chk_1",
+        attempt="attempt-check_1",
         stdin=b'{"connection": {}}',
         roots=("landing",),
         trust=True,
@@ -1463,7 +1463,7 @@ def test_a_check_container_runs_lakanas_check_and_nothing_of_a_task() -> None:
     targets = [m["Target"] for m in spec["HostConfig"]["Mounts"]]
     assert targets == ["/ingest/landing", "/trust"]
     assert all(m["ReadOnly"] for m in spec["HostConfig"]["Mounts"])
-    assert spec["HostConfig"]["Mounts"][1]["VolumeOptions"]["Subpath"] == "attempt-chk_1/trust"
+    assert spec["HostConfig"]["Mounts"][1]["VolumeOptions"]["Subpath"] == "attempt-check_1/trust"
     assert spec["HostConfig"]["Tmpfs"] == {"/tmp": "rw,noexec,nosuid,nodev,size=16m"}
     assert spec["HostConfig"]["Memory"] == 256 * 1024 * 1024
     assert spec["HostConfig"]["NetworkMode"] == "lakana-check-k0f3c9a1e"
@@ -1471,3 +1471,40 @@ def test_a_check_container_runs_lakanas_check_and_nothing_of_a_task() -> None:
     env = dict(item.split("=", 1) for item in spec["Env"])
     assert env["LAKANA_EGRESS_PROXY"] == "http://lakana:t@egress:3128"
     assert env["SSL_CERT_FILE"] == env["LAKANA_CA_BUNDLE"] == "/trust/trust.pem"
+
+
+def test_a_check_must_name_a_check_attempt_never_a_tasks() -> None:
+    """Strict: a check's attempt directory is ``attempt-check_*``, so it cannot name a task's."""
+    with pytest.raises(Refused, match="attempt"):
+        parse_request(
+            _raw(_with(CHECK, attempt="attempt-abc_1234")), token=TOKEN, settings=SETTINGS
+        )
+    with pytest.raises(Refused, match="attempt"):
+        parse_request(_raw(_with(CHECK, attempt="attempt-check_")), token=TOKEN, settings=SETTINGS)
+
+    request = parse_request(
+        _raw(_with(CHECK, attempt="attempt-check_ab12cd_3")), token=TOKEN, settings=SETTINGS
+    )
+    assert isinstance(request, CheckRequest) and request.attempt == "attempt-check_ab12cd_3"
+
+
+def test_a_check_container_keeps_a_tasks_hardening_and_its_own_fixed_limits() -> None:
+    """Pinned here, so a later change to `_host_config` cannot loosen a check silently."""
+    request = parse_request(_raw(CHECK), token=TOKEN, settings=SETTINGS)
+    assert isinstance(request, CheckRequest)
+
+    spec = check_container_spec(request, SETTINGS, no_new_privileges=True, deadline=99)
+
+    host = spec["HostConfig"]
+    assert host["Memory"] == 256 * 1024 * 1024
+    assert host["MemorySwap"] == host["Memory"]
+    assert host["PidsLimit"] == 64
+    assert host["NanoCpus"] == 500_000_000
+    assert host["ReadonlyRootfs"] is True
+    assert host["CapDrop"] == ["ALL"]
+    assert host["Privileged"] is False
+    assert host["SecurityOpt"] == ["no-new-privileges"]
+    assert spec["User"] == SETTINGS.task_user and not spec["User"].startswith("0")
+    assert host["NetworkMode"] == "lakana-check-k0f3c9a1e"
+    assert "server" not in json.dumps(spec)
+    assert not any(item.startswith("LAKANA_EGRESS_PROXY=") for item in spec["Env"])
