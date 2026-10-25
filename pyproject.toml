@@ -34,6 +34,9 @@ dev = [
     # Test-only: polars' `write_excel` makes the spreadsheets of the files helper's tests.
     # BSD-2-Clause.
     "xlsxwriter>=3.2",
+    # Test-only here: the spreadsheet reader `lakana[assets]` brings to a task; the tests of
+    # `lakana.ingest.files` run without that extra installed. MIT.
+    "fastexcel>=0.21",
 ]
 # The documentation site (docs/site). Built in CI; published at the public beta.
 docs = [

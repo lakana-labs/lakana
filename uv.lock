@@ -19,6 +19,7 @@ members = [
 dev = [
     { name = "cryptography", specifier = ">=50.0.2" },
     { name = "docker", specifier = ">=7.1" },
+    { name = "fastexcel", specifier = ">=0.21" },
     { name = "hatchling", specifier = ">=1.27" },
     { name = "httpx", specifier = ">=0.28" },
     { name = "hypothesis", specifier = ">=6.170.5" },
