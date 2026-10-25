@@ -940,7 +940,6 @@ class Launcher:
         live = self._register(
             name, request.owner, request.kill_grace_seconds, request.limits.memory_mb
         )
-        deadline = _deadline(request.limits.timeout_seconds + request.kill_grace_seconds)
         try:
             volume = environment_volume(self.settings, request.python, request.environment)
             if not self._built(volume):
@@ -948,6 +947,15 @@ class Launcher:
             self._touch(volume)
             if live.stopped.is_set():
                 return dict(_STOPPED_BEFORE_START)
+            # Pull first: the token's and the deadline's time start after it, and a pull takes
+            # minutes in which a prune or an eviction must not let Docker create the volume
+            # empty at the mount.
+            self._ensure_image(self.settings.images[request.python])
+            if not self._built(volume):
+                raise self._not_built(request.python, request.environment)
+            if live.stopped.is_set():
+                return dict(_STOPPED_BEFORE_START)
+            deadline = _deadline(request.limits.timeout_seconds + request.kill_grace_seconds)
             services = [(self.settings.server_service, self.settings.server_alias)]
             if request.egress:
                 services.append((self.settings.egress_service, "egress"))
@@ -981,11 +989,6 @@ class Launcher:
                     deadline=deadline,
                     proxy_url=proxy_url,
                 )
-                self._ensure_image(spec["Image"])
-                # A pull takes minutes; a prune or an eviction in that time must not let Docker
-                # create the volume empty at the mount.
-                if not self._built(volume):
-                    raise self._not_built(request.python, request.environment)
                 return self._supervise(
                     name,
                     spec,

@@ -249,7 +249,8 @@ def load_settings(environ: Mapping[str, str]) -> EgressSettings:
     if not per_network.isdigit() or not 1 <= int(per_network) <= int(connections):
         raise SettingsError(
             f"{PREFIX}MAX_CONNECTIONS_PER_NETWORK must be a whole number from 1 to "
-            f"{PREFIX}MAX_CONNECTIONS ({connections}): the connections one build may hold at once."
+            f"{PREFIX}MAX_CONNECTIONS ({connections}): the connections one build or task may "
+            "hold at once."
         )
     return EgressSettings(
         key=Path(get("KEY") or str(defaults.key)),
@@ -565,8 +566,9 @@ class _Handler(socketserver.BaseRequestHandler):
             self._answer(
                 503,
                 f"this client's network already holds {cap} connections to the egress proxy, "
-                "the most one build may hold at once (LAKANA_EGRESS__MAX_CONNECTIONS_PER_NETWORK"
-                "); try again when one of them has ended",
+                "the most one build or task may hold at once "
+                "(LAKANA_EGRESS__MAX_CONNECTIONS_PER_NETWORK); "
+                "try again when one of them has ended",
             )
             return
         try:

@@ -210,7 +210,7 @@ Set these under `environment:` of the `egress` service in `compose.yaml`.
 |---|---|---|
 | `LAKANA_EGRESS__UPSTREAM_PROXY` | none (from `LAKANA_EGRESS_UPSTREAM_PROXY` in `.env`) | The proxy builds go through, `http://[user:password@]host:port`. |
 | `LAKANA_EGRESS__MAX_CONNECTIONS` | `256` | Connections at once, 1 to 4096. |
-| `LAKANA_EGRESS__MAX_CONNECTIONS_PER_NETWORK` | `32` | Connections one build may hold at once, 1 to `LAKANA_EGRESS__MAX_CONNECTIONS`, so that one build cannot take the connections the others need. A build downloads at most 16 packages at once; keep this at 24 or more. A build past it gets `503` with the reason in uv's error. |
+| `LAKANA_EGRESS__MAX_CONNECTIONS_PER_NETWORK` | `32` | Connections one build or task may hold at once, 1 to `LAKANA_EGRESS__MAX_CONNECTIONS`, so that one build cannot take the connections the others need. A build downloads at most 16 packages at once; keep this at 24 or more. A build past it gets `503` with the reason in uv's error. |
 | `LAKANA_EGRESS__LISTEN` | `0.0.0.0:3128` | Where the proxy listens. Leave it. |
 | `LAKANA_EGRESS__KEY` | `/run/lakana-egress/egress.key` | The key the launcher signs build tokens with; a new one at every launcher start. Leave it. |
 

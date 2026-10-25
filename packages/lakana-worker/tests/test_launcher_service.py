@@ -2772,6 +2772,35 @@ def test_a_run_with_egress_gets_the_proxy_and_a_task_token_for_exactly_its_pairs
     assert subnets[0] in launcher._resting  # no other network gets it while the token lives
 
 
+def test_a_task_token_is_measured_from_after_the_image_pull(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A pull takes minutes; a token minted before it would expire before the task's timeout."""
+    engine = FakeEngine()
+    launcher = _started(engine, tmp_path)
+    engine.images.clear()
+    skew = [0.0]
+    real = time.time
+    monkeypatch.setattr(time, "time", lambda: real() + skew[0])
+
+    def slow_pull() -> None:
+        """Let a ten-minute pull pass on the clock."""
+        skew[0] += 600.0
+
+    engine.hooks["pull"] = slow_pull
+
+    launcher.run(_egress_run(egress=(("api.example.com", 443),)), lambda line: None)
+
+    (spec,) = engine.created("task")
+    env = dict(item.split("=", 1) for item in spec["Env"])
+    token = env["LAKANA_EGRESS_PROXY"].removeprefix("http://lakana:").removesuffix("@egress:3128")
+    key = read_key(tmp_path / "egress.key")
+    assert key is not None
+    grant = verify(key, token, time.time())
+    assert grant is not None
+    assert time.time() + 30 < grant.expires <= time.time() + 30 + 3 + 61
+
+
 @pytest.mark.parametrize(
     "fields", [{"egress": (("api.example.com", 443),)}, {"relay": (_DB,)}], ids=["egress", "relay"]
 )

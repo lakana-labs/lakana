@@ -631,6 +631,7 @@ def test_one_build_holding_its_cap_cannot_starve_another(tmp_path: Path, index: 
 
     assert status == b"503"
     assert b"already holds 3 connections" in body
+    assert b"one build or task may hold" in body
     assert b"LAKANA_EGRESS__MAX_CONNECTIONS_PER_NETWORK" in body
     assert other == b"200"
 
