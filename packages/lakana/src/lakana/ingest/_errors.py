@@ -36,6 +36,12 @@ class ConnectionChanged(IngestError):
     retryable: ClassVar[bool | None] = True
 
 
+class UsageError(IngestError):
+    """The call's own arguments, or the connection's kind, are wrong; every attempt would fail."""
+
+    retryable: ClassVar[bool | None] = False
+
+
 class SourceError(IngestError):
     """The source answered with an error; the message says what it said."""
 

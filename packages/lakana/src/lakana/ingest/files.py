@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING, Any, Final, Protocol
 
 from lakana.ingest import _check, _directory, _formats
 from lakana.ingest._connections import FetchedConnection, fetch
-from lakana.ingest._errors import CapExceeded, IngestError, safe_name
+from lakana.ingest._errors import CapExceeded, UsageError, safe_name
 
 if TYPE_CHECKING:
     import pyarrow as pa
@@ -171,7 +171,7 @@ def _source(conn: FetchedConnection) -> _Source:
 
     Raises
     ------
-    IngestError
+    UsageError
         For a kind `read` does not read, naming the helper that does, or a ``directory``
         connection the task description has no root for.
     """
@@ -179,12 +179,12 @@ def _source(conn: FetchedConnection) -> _Source:
         kinds = ", ".join(KINDS)
         helper = _OTHER_HELPER.get(conn.kind)
         hint = f": use {helper}" if helper else ""
-        raise IngestError(
+        raise UsageError(
             f"files.read reads {kinds} connections; `{conn.name}` is {conn.kind}{hint}"
         )
     root_dir, base = conn.routing.get("root_dir"), conn.routing.get("path")
     if not isinstance(root_dir, str) or not isinstance(base, str):
-        raise IngestError(
+        raise UsageError(
             f"the task description has no ingestion root for `{conn.name}`; check that the "
             "worker runs the server's version of Lakana"
         )
@@ -236,12 +236,12 @@ def _positive(**caps: object) -> None:
 
     Raises
     ------
-    IngestError
+    UsageError
         Naming the argument.
     """
     for argument, value in caps.items():
         if isinstance(value, bool) or not isinstance(value, int) or value < 1:
-            raise IngestError(f"{argument}= must be a positive whole number, not {value!r}")
+            raise UsageError(f"{argument}= must be a positive whole number, not {value!r}")
 
 
 def _as_utc(since: object) -> dt.datetime | None:
@@ -259,13 +259,13 @@ def _as_utc(since: object) -> dt.datetime | None:
 
     Raises
     ------
-    IngestError
+    UsageError
         For anything else.
     """
     if since is None:
         return None
     if not isinstance(since, dt.datetime):
-        raise IngestError(
+        raise UsageError(
             f"since= takes a datetime or None, not {type(since).__name__}; pass "
             "ctx.watermark() of an asset with watermark='_source_modified'"
         )
@@ -377,7 +377,7 @@ def read(
     ------
     ConnectionNotDeclared
         For a connection the asset does not declare.
-    IngestError
+    UsageError
         For a connection of another kind, a bad argument, or a path or pattern the walker
         refuses (`DirectoryError`, not retried).
     CapExceeded
@@ -388,7 +388,7 @@ def read(
     _positive(max_files=max_files, max_file_bytes=max_file_bytes, max_total_bytes=max_total_bytes)
     _formats.check_schema(schema)
     if modified_from != "mtime" and since is UNSET:
-        raise IngestError("modified_from= applies only with since=")
+        raise UsageError("modified_from= applies only with since=")
     conn = fetch(connection)
     source = _source(conn)
     with _naming(conn):
@@ -406,7 +406,7 @@ def read(
     for entry in listing.files:
         modified = entry.modified
         if with_since and modified_from == "mtime" and modified is None:
-            raise IngestError(
+            raise UsageError(
                 f"`{connection}` does not say when {entry.path!r} was modified; pass "
                 "modified_from= with the date pattern of its name"
             )
@@ -497,7 +497,7 @@ def list(connection: str, pattern: str, *, max_files: int = 10_000) -> pa.Table:
 
     Raises
     ------
-    IngestError
+    UsageError
         As `read`.
     CapExceeded
         For more matches than `max_files`.

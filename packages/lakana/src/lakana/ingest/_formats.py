@@ -15,7 +15,7 @@ import zlib
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
-from lakana.ingest._errors import FileShapeError, IngestError, safe_name
+from lakana.ingest._errors import FileShapeError, UsageError, safe_name
 
 if TYPE_CHECKING:
     import polars as pl
@@ -48,7 +48,7 @@ def format_of(name: str, given: str | None) -> str:
 
     Raises
     ------
-    IngestError
+    UsageError
         For an unknown ``format=`` or, without one, an extension that is not a format.
     """
     known = ", ".join(FORMATS)
@@ -56,12 +56,12 @@ def format_of(name: str, given: str | None) -> str:
     if given is not None:
         found = _ALIASES.get(given.lower(), given.lower())
         if found not in FORMATS:
-            raise IngestError(f"format={given!r} is not a format files.read reads ({known})")
+            raise UsageError(f"format={given!r} is not a format files.read reads ({known})")
         return found
     extension = name.rsplit("/", 1)[-1].rpartition(".")[2].lower()
     found = _ALIASES.get(extension, extension)
     if "." not in name.rsplit("/", 1)[-1] or found not in FORMATS:
-        raise IngestError(f"cannot tell the format of `{name}`; pass format= ({known})")
+        raise UsageError(f"cannot tell the format of `{name}`; pass format= ({known})")
     return found
 
 
@@ -171,7 +171,7 @@ def parse(
 
     Raises
     ------
-    IngestError
+    UsageError
         For ``sheet=`` on a file without sheets, or ``header_row`` other than 1 on a file
         without a header row.
     FileShapeError
@@ -182,13 +182,11 @@ def parse(
     name = safe_name(name)
     check_schema(schema)
     if sheet is not None and format not in SPREADSHEETS:
-        raise IngestError(f"sheet= applies to spreadsheets; `{name}` is {format}")
+        raise UsageError(f"sheet= applies to spreadsheets; `{name}` is {format}")
     if header_row != 1 and format not in _WITH_HEADER:
-        raise IngestError(
-            f"header_row= applies to CSV files and spreadsheets; `{name}` is {format}"
-        )
+        raise UsageError(f"header_row= applies to CSV files and spreadsheets; `{name}` is {format}")
     if header_row < 0:
-        raise IngestError("header_row= is the 1-based row of the column names, or 0 for none")
+        raise UsageError("header_row= is the 1-based row of the column names, or 0 for none")
     overrides = dict(schema) if schema else None
     if format in SPREADSHEETS:
         # A missing engine is the worker's fault, not the file's: let the ImportError out.
@@ -339,8 +337,35 @@ def _require_columns(name: str, schema: Mapping[str, Any] | None, columns: Seque
         raise FileShapeError(f"`{name}` has no column {missing[0]!r}, which schema= names")
 
 
+def _fits(dtypes: Sequence[pl.DataType]) -> bool:
+    """Say whether a column's types in several files may be combined.
+
+    Only the same type, signed integers of different widths (they widen to the widest) and
+    floats of different widths are combined; anything else would change what a value means.
+
+    Parameters
+    ----------
+    dtypes
+        The column's type in each file that has values for it.
+
+    Returns
+    -------
+    bool
+        Whether the files' types fit.
+    """
+    first = dtypes[0]
+    if all(d == first for d in dtypes):
+        return True
+    return all(d.is_signed_integer() for d in dtypes) or all(d.is_float() for d in dtypes)
+
+
 def combine(frames: Sequence[pl.DataFrame], names: Sequence[str]) -> pl.DataFrame:
     """Combine the files' rows, filling a column a file lacks with nulls.
+
+    A column keeps one type family across files: the same type, signed integers (widened to
+    the widest) or floats (to the widest) combine, and a file in which the column is all null
+    takes the type of the others. Nothing else is converted: a date and a number, text and a
+    number, an integer and a float are refused.
 
     Parameters
     ----------
@@ -352,73 +377,52 @@ def combine(frames: Sequence[pl.DataFrame], names: Sequence[str]) -> pl.DataFram
     Returns
     -------
     polars.DataFrame
-        All rows; a column's type is the common type of its files' types.
+        All rows; a column's type is the widest of its files' types.
 
     Raises
     ------
     FileShapeError
-        When a column's types in two files have no common type; names the file and the column.
+        When a column's types in the files do not fit; names each file and type, and says to
+        pass ``schema=``.
     """
     import polars as pl
 
     names = [safe_name(n) for n in names]
-    try:
-        return pl.concat(frames, how="diagonal_relaxed")
-    except pl.exceptions.PolarsError as failure:
-        first = failure
-    combined = frames[0]
-    for frame, name in zip(frames[1:], names[1:], strict=True):
-        for column in frame.columns:
-            if column not in combined.columns:
-                continue
-            try:
-                pl.concat([combined.select(column), frame.select(column)], how="vertical_relaxed")
-            except pl.exceptions.PolarsError:
-                raise FileShapeError(
-                    f"`{name}`: column {column!r} is {frame.schema[column]}, which does not fit "
-                    f"{combined.schema[column]} in the files before it; pass schema= with one "
-                    "type for it, or narrow the pattern"
-                ) from None
-        try:
-            combined = pl.concat([combined, frame], how="diagonal_relaxed")
-        except pl.exceptions.PolarsError:
-            break
-    raise FileShapeError(_not_combinable(frames, names, first))
-
-
-def _not_combinable(
-    frames: Sequence[pl.DataFrame], names: Sequence[str], failure: BaseException
-) -> str:
-    """Say which columns differ in type, and in which files, when no one pair is to blame.
-
-    Parameters
-    ----------
-    frames
-        One frame per file.
-    names
-        The files' names.
-    failure
-        What the combination raised.
-
-    Returns
-    -------
-    str
-        The message: columns that differ with their types per file, and the next step.
-    """
-    kinds: dict[str, dict[str, list[str]]] = {}
-    for frame, name in zip(frames, names, strict=True):
-        for column, dtype in frame.schema.items():
-            kinds.setdefault(column, {}).setdefault(str(dtype), []).append(name)
-    differing = [
-        f"column {column!r} is "
-        + ", ".join(
-            f"{dtype} in {', '.join(f'`{n}`' for n in where)}" for dtype, where in found.items()
+    if len(frames) == 1:
+        return frames[0]
+    conflicts: list[str] = []
+    adapted = list(frames)
+    columns = dict.fromkeys(column for frame in frames for column in frame.columns)
+    for column in columns:
+        holders = [i for i, frame in enumerate(frames) if column in frame.columns]
+        valued = [i for i in holders if frames[i][column].null_count() < frames[i].height]
+        if not valued:
+            continue
+        if not _fits([frames[i].schema[column] for i in valued]):
+            where: dict[str, list[str]] = {}
+            for i in valued:
+                where.setdefault(str(frames[i].schema[column]), []).append(names[i])
+            conflicts.append(
+                f"column {column!r} is "
+                + ", ".join(
+                    f"{dtype} in {', '.join(f'`{n}`' for n in found)}"
+                    for dtype, found in where.items()
+                )
+            )
+            continue
+        target = frames[valued[0]].schema[column]
+        for i in holders:
+            if i not in valued and frames[i].schema[column] != target:
+                adapted[i] = adapted[i].with_columns(pl.col(column).cast(target))
+    if conflicts:
+        raise FileShapeError(
+            f"the files cannot be combined: {'; '.join(conflicts)}; pass schema= with one type "
+            "for each such column, or narrow the pattern"
         )
-        for column, found in kinds.items()
-        if len(found) > 1
-    ]
-    detail = "; ".join(differing) or safe_name(_problem(failure))
-    return (
-        f"the files cannot be combined: {detail}; pass schema= with one type for each such "
-        "column, or narrow the pattern"
-    )
+    try:
+        return pl.concat(adapted, how="diagonal_relaxed")
+    except pl.exceptions.PolarsError as failure:
+        raise FileShapeError(
+            f"the files cannot be combined: {safe_name(_problem(failure))}; pass schema= with "
+            "one type for each such column, or narrow the pattern"
+        ) from None

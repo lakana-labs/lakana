@@ -334,7 +334,10 @@ def test_a_column_that_does_not_fit_names_the_file_and_the_column(root: Path) ->
 
     with pytest.raises(
         SourceError,
-        match=r"`exports/b\.ndjson`: column 'tags' is List\(Int64\), which does not fit Int64",
+        match=(
+            r"column 'tags' is Int64 in `exports/a\.ndjson`, "
+            r"List\(Int64\) in `exports/b\.ndjson`"
+        ),
     ):
         files.read("exports", "*.ndjson")
 
@@ -573,7 +576,7 @@ def test_a_conflict_in_a_later_file_is_found_after_files_that_fit() -> None:
     ]
 
     with pytest.raises(
-        SourceError, match=r"`c\.csv`: column 'x' is List\(Int64\), which does not fit Int64"
+        SourceError, match=r"column 'x' is Int64 in `a\.csv`, `b\.csv`, List\(Int64\) in `c\.csv`"
     ):
         _formats.combine(frames, ["a.csv", "b.csv", "c.csv"])
 
@@ -983,3 +986,124 @@ def test_a_resource_error_and_a_foreign_import_error_are_not_blamed_on_the_file(
             patch.setattr(pl, "read_csv", fail)
             with pytest.raises(type(failure)):
                 files.read("exports", "a.csv")
+
+
+def _pq(frame: pl.DataFrame) -> bytes:
+    """Write a frame as Parquet bytes.
+
+    Parameters
+    ----------
+    frame
+        The rows.
+
+    Returns
+    -------
+    bytes
+        The file.
+    """
+    buffer = io.BytesIO()
+    frame.write_parquet(buffer)
+    return buffer.getvalue()
+
+
+@pytest.mark.parametrize("order", ["date-first", "int-first"])
+def test_a_date_and_an_integer_are_never_merged_into_day_numbers(root: Path, order: str) -> None:
+    """Date in one file, a plain number in another: refused in both orders, both files named."""
+    from lakana.ingest import FileShapeError
+
+    dates = _pq(pl.DataFrame({"d": [dt.date(2026, 1, 1)]}))
+    ints = _pq(pl.DataFrame({"d": [7]}))
+    first, second = (dates, ints) if order == "date-first" else (ints, dates)
+    _write(root / "a.parquet", first)
+    _write(root / "b.parquet", second)
+
+    with pytest.raises(FileShapeError) as caught:
+        files.read("exports", "*.parquet")
+    message = str(caught.value)
+    assert "column 'd'" in message
+    assert "`exports/a.parquet`" in message
+    assert "`exports/b.parquet`" in message
+    assert "Date" in message
+    assert "Int64" in message
+    assert "pass schema=" in message
+
+
+@pytest.mark.parametrize(
+    ("left", "right"),
+    [
+        (pl.DataFrame({"x": ["1"]}), pl.DataFrame({"x": [1]})),
+        (pl.DataFrame({"x": [1]}), pl.DataFrame({"x": [1.5]})),
+        (
+            pl.DataFrame({"x": [dt.date(2026, 1, 1)]}),
+            pl.DataFrame({"x": [dt.datetime(2026, 1, 1)]}),
+        ),
+        (pl.DataFrame({"x": [True]}), pl.DataFrame({"x": [1]})),
+        (pl.DataFrame({"x": [1]}).cast(pl.UInt8), pl.DataFrame({"x": [1]})),
+    ],
+    ids=["string-number", "int-float", "date-datetime", "bool-int", "unsigned-signed"],
+)
+def test_other_mixed_types_are_refused(left: pl.DataFrame, right: pl.DataFrame) -> None:
+    """Anything beyond the allowed widenings needs `schema=`."""
+    from lakana.ingest import FileShapeError, _formats
+
+    for frames in ([left, right], [right, left]):
+        with pytest.raises(FileShapeError, match=r"column 'x' is .*pass schema="):
+            _formats.combine(frames, ["a", "b"])
+
+
+def test_the_allowed_widenings_still_combine() -> None:
+    """Signed integers widen to the widest, floats to Float64, and an all-null column adapts."""
+    from lakana.ingest import _formats
+
+    ints = _formats.combine(
+        [pl.DataFrame({"x": [1]}).cast(pl.Int8), pl.DataFrame({"x": [2]}).cast(pl.Int32)],
+        ["a", "b"],
+    )
+    assert ints.schema["x"] == pl.Int32
+    floats = _formats.combine(
+        [pl.DataFrame({"x": [1.5]}).cast(pl.Float32), pl.DataFrame({"x": [2.5]})], ["a", "b"]
+    )
+    assert floats.schema["x"] == pl.Float64
+    for nulls in (
+        pl.DataFrame({"x": [None]}),
+        pl.DataFrame({"x": [None]}, schema={"x": pl.String}),
+    ):
+        merged = _formats.combine([nulls, pl.DataFrame({"x": [3]})], ["a", "b"])
+        assert merged.schema["x"] == pl.Int64
+        assert merged["x"].to_list() == [None, 3]
+        merged = _formats.combine([pl.DataFrame({"x": [3]}), nulls], ["a", "b"])
+        assert merged["x"].to_list() == [3, None]
+    same = _formats.combine([pl.DataFrame({"x": [1]}), pl.DataFrame({"x": [2]})], ["a", "b"])
+    assert same["x"].to_list() == [1, 2]
+    assert _formats.combine([pl.DataFrame({"x": [1]})], ["a"]).height == 1
+    empty = pl.DataFrame({"x": [None]})
+    assert _formats.combine([empty, empty], ["a", "b"])["x"].to_list() == [None, None]
+
+
+def test_an_argument_error_is_not_retried(root: Path) -> None:
+    """A wrong kind, format, sheet, cap, header row or pattern fails every attempt."""
+    from lakana import runner
+    from lakana.ingest import UsageError
+
+    assert issubclass(UsageError, IngestError)
+    _write(root / "a.csv", b"id\n1\n")
+    _write(root / "a.dat", b"id\n1\n")
+    cases = [
+        lambda: files.read("crm-db", "*.csv"),
+        lambda: files.read("exports", "a.dat"),
+        lambda: files.read("exports", "a.csv", format="xml"),
+        lambda: files.read("exports", "a.csv", sheet="s"),
+        lambda: files.read("exports", "a.csv", header_row=-1),
+        lambda: files.read("exports", "a.csv", max_files=0),
+        lambda: files.list("exports", "a.csv", max_files=0),
+        lambda: files.read("exports", "a.csv", modified_from="%Y"),
+        lambda: files.read("exports", "a.csv", since="yesterday"),  # ty: ignore[invalid-argument-type]
+        lambda: files.read("exports", "../x"),
+        lambda: files.read("exports", ""),
+    ]
+    for case in cases:
+        with pytest.raises(IngestError) as caught:
+            case()
+        assert isinstance(caught.value, (UsageError, DirectoryError)), caught.value
+        assert caught.value.retryable is False
+        assert runner._retryable("function", caught.value) is False

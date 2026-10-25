@@ -44,8 +44,12 @@ rows into one table.
 
 Each cap must be a positive whole number; zero, a negative number or anything else is refused.
 
-Files that differ are combined: a column a file lacks is filled with nulls, and a column whose
-types differ takes the type that fits both (Int64 and Float64 give Float64).
+Files that differ are combined: a column a file lacks is filled with nulls, and a column that is
+all null in one file takes the type of the others. A column's type must stay in one family:
+signed integers of different widths widen to the widest, and floats to Float64. Nothing else is
+converted: a date and a number, text and a number, an integer and a float, or a date and a
+timestamp are refused, naming each file and type, so a value never changes meaning by the order
+of the files. Pass `schema=` with one type for the column.
 
 ### What a pattern matches
 
@@ -130,6 +134,7 @@ could end differently (the task is retried only when it could):
 
 | Class | Meaning | Retried |
 |---|---|---|
+| `UsageError` | The call is wrong: a connection of another kind, an unknown extension or `format=`, `sheet=` or `header_row=` where they mean nothing, a cap that is not a positive whole number, `since=` of the wrong type, `modified_from=` without `since=`. Every attempt fails the same way. | No |
 | `FileShapeError` (a `SourceError`) | The files are wrong: types that do not fit across files, a `schema=` column a file lacks, a `schema=` value that is no Polars type, a file that cannot be parsed. The same files fail every attempt. | No |
 | `SourceError` | The source answered with an error, which may pass. | Yes |
 | `DirectoryError` | A directory or file is missing, a link, not a directory, or denied; or the pattern is refused. The same path fails every attempt. | No |
