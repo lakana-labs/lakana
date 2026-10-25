@@ -94,6 +94,13 @@ _NAME_RULE = (
 _BOTH = "give either --secret or --password-stdin/--values-stdin, not both"
 _MAX_SECRET_NUMBER = 100
 """The highest N of a new secret's name `<connection>-connection-N`."""
+TEST_STUCK_AFTER = timedelta(minutes=10)
+"""How long a queued or running connection test may stay open; a request for a new test closes an
+older one as failed."""
+_TEST_STUCK = (
+    "no worker finished this test within 10 minutes; a worker that runs Python tasks runs "
+    "connection tests — see `docker compose logs worker`"
+)
 _CLEAR_SECRET = "secret"  # nosec B105 -- the word a caller clears, not a credential
 
 
@@ -869,7 +876,8 @@ class ConnectionService:
         NotFoundError
             If the environment or the connection does not exist.
         ConflictError
-            While a test of this connection is queued or running.
+            While a test of this connection, at most `TEST_STUCK_AFTER` old, is queued or
+            running. An older open test is finished as failed first.
         """
         scope = Securable.environment_scope(environment)
         self._authz.authorize(p, Action.MANAGE_CONNECTION, scope)
@@ -877,18 +885,25 @@ class ConnectionService:
         with refuse_concurrent_change(self._session, f"connection `{shown(name)}`"):
             row = self._find(env, name, lock=True)
             open_test = self._session.execute(
-                select(ConnectionTest.id).where(
+                select(ConnectionTest).where(
                     ConnectionTest.connection_id == row.id,
                     ConnectionTest.state.in_(
                         (ConnectionTestState.QUEUED, ConnectionTestState.RUNNING)
                     ),
                 )
-            ).first()
+            ).scalar_one_or_none()
             if open_test is not None:
-                self._session.rollback()
-                raise ConflictError(
-                    f"a test of `{shown(name)}` is already running; see it with "
-                    f"lakana connection test {shown(name)} --env {shown(env.name)}"
+                if utcnow() - open_test.created_at <= TEST_STUCK_AFTER:
+                    state = open_test.state.value
+                    self._session.rollback()
+                    raise ConflictError(
+                        f"a test of `{shown(name)}` is already "
+                        f"{'queued' if state == 'queued' else 'running'}; see it with "
+                        f"lakana connection test {shown(name)} --env {shown(env.name)} "
+                        f"--id {open_test.id}"
+                    )
+                self._close(
+                    open_test, row.name, env.name, ConnectionTestOutcome.FAILED, _TEST_STUCK
                 )
             test = ConnectionTest(
                 id=uuid.uuid4(),
@@ -1048,27 +1063,51 @@ class ConnectionService:
         env = self._session.get(Environment, row.environment_id)
         connection = self._session.get(Connection, row.connection_id)
         assert env is not None and connection is not None  # nosec B101 -- foreign keys
-        row.state = ConnectionTestState.DONE
-        found = ConnectionTestOutcome(outcome)
-        row.outcome = found
-        row.message = message[:1000]
-        row.finished_at = utcnow()
-        row.lease_owner = None
-        row.lease_expires_at = None
-        AuditService(self._session).record(
-            row.requested_by,
-            AuditEventType.CONNECTION_TESTED,
-            securable=Securable.environment_scope(env.name),
-            detail={
-                "connection": connection.name,
-                "environment": env.name,
-                "test_id": str(row.id),
-                "state": ConnectionTestState.DONE.value,
-                "outcome": found.value,
-            },
-        )
+        self._close(row, connection.name, env.name, ConnectionTestOutcome(outcome), message)
         self._session.commit()
         return True
+
+    def _close(
+        self,
+        test: ConnectionTest,
+        connection: str,
+        environment: str,
+        outcome: ConnectionTestOutcome,
+        message: str,
+    ) -> None:
+        """Finish a test and audit it; the caller commits.
+
+        Parameters
+        ----------
+        test
+            The test.
+        connection
+            The connection's name.
+        environment
+            The environment's name.
+        outcome
+            What it found.
+        message
+            The message; cut to 1,000 characters.
+        """
+        test.state = ConnectionTestState.DONE
+        test.outcome = outcome
+        test.message = message[:1000]
+        test.finished_at = utcnow()
+        test.lease_owner = None
+        test.lease_expires_at = None
+        AuditService(self._session).record(
+            test.requested_by,
+            AuditEventType.CONNECTION_TESTED,
+            securable=Securable.environment_scope(environment),
+            detail={
+                "connection": connection,
+                "environment": environment,
+                "test_id": str(test.id),
+                "state": ConnectionTestState.DONE.value,
+                "outcome": outcome.value,
+            },
+        )
 
     def _exists(self, env: Environment, name: str) -> bool:
         """Say whether an environment has a connection of this name.

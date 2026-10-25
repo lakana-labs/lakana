@@ -817,8 +817,8 @@ def test_a_test_is_queued_shown_and_refused_while_open(client_as: ClientAs) -> N
     )
     assert again.status_code == 409
     assert again.json()["detail"] == (
-        "a test of `crm-db` is already running; "
-        "see it with lakana connection test crm-db --env prod"
+        "a test of `crm-db` is already queued; "
+        f"see it with lakana connection test crm-db --env prod --id {body['id']}"
     )
     assert shown.status_code == 200 and shown.json() == body
     assert _VALUE not in queued.text + shown.text

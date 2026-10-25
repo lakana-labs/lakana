@@ -321,7 +321,8 @@ def request_connection_test(
     A worker checks that the connection's host can be reached with its settings and secret and
     records an outcome; poll the test with `GET .../tests/{test_id}`. Needs
     `MANAGE_CONNECTION` in the environment. Answers 404 when the environment or the
-    connection does not exist and 409 while a test of the connection is queued or running.
+    connection does not exist and 409, naming the open test, while a test of the connection that
+    is under 10 minutes old is queued or running; an older open test is finished as failed first.
 
     Parameters
     ----------

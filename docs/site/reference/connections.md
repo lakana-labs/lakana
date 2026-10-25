@@ -110,7 +110,10 @@ Credentials are checked per kind as the connection helpers land. The check runs 
 runs Python tasks; under the Docker runner it runs under the same network rules a task gets (the
 egress proxy, the relay), so an address a task could not reach fails the test too. The command waits
 up to 60 seconds, prints the outcome and exits 1 unless it is `ok`. Only one test of a connection
-runs at a time; asking again meanwhile is refused (409) and names the command that shows it.
+runs at a time; asking again meanwhile is refused (409), naming the open test and the command
+that shows it (`lakana connection test NAME --env ENV --id ID`). A test still queued or running
+after 10 minutes is stuck: the next request finishes it as `failed` ("no worker finished this
+test within 10 minutes; …", with the worker's log to read) and queues a new one.
 
 `--no-wait` queues the test and prints its id; `--id ID` shows that test later (or the one a
 timed-out wait named). A test nobody takes within the wait ends with an error that says whether a
@@ -127,7 +130,7 @@ worker took it and which log to read (`docker compose logs worker`); the test it
 | `root_unavailable` | The worker does not have the ingestion root. | Check the root setting. |
 | `not_found` | The path under the root does not exist. | Check the path under the root: `lakana connection show NAME`. |
 | `credentials` | The source refused the secret. | Check the secret. |
-| `failed` | The check failed in another way. | See the worker's log. |
+| `failed` | The check failed in another way, or no worker finished it within 10 minutes. | See the worker's log. |
 
 The message after the outcome is at most 1,000 characters and holds no secret value. The command
 prints the next step on standard error; `--output json` prints the test as the REST answer below.
@@ -245,7 +248,7 @@ lakana audit list --kind connection --env dev
 | `GET /api/v1/environments/{env}/connections/{name}` | `READ_ENVIRONMENT` | the connection; 404 names no other connection |
 | `PATCH /api/v1/environments/{env}/connections/{name}` | `MANAGE_CONNECTION`, and `MANAGE_SECRET` as above | the connection |
 | `DELETE /api/v1/environments/{env}/connections/{name}` | `MANAGE_CONNECTION` | 204; 409 while a deployed project version declares it |
-| `POST /api/v1/environments/{env}/connections/{name}/tests` | `MANAGE_CONNECTION` | 202 and the test `{"id", "state", "outcome", "message", "created_at", "finished_at"}` (`state` is `queued`, `running` or `done`; `outcome` and `message` are `null` until done); 409 while a test of the connection is queued or running |
+| `POST /api/v1/environments/{env}/connections/{name}/tests` | `MANAGE_CONNECTION` | 202 and the test `{"id", "state", "outcome", "message", "created_at", "finished_at"}` (`state` is `queued`, `running` or `done`; `outcome` and `message` are `null` until done); 409 (naming the open test's id) while a test of the connection is queued or running and less than 10 minutes old; an older one is finished as `failed` first |
 | `GET /api/v1/environments/{env}/connections/{name}/tests/{test_id}` | `MANAGE_CONNECTION` | the test; 404 for a test of another connection |
 | `GET /api/v1/audit-events?kind=connection` | `READ_AUDIT_LOG` | every `CONNECTION_*` event; combines with the other filters |
 | `GET /api/v1/tasks/self/connections/{name}` | the token of a running task whose asset declares `name` | `{"name", "kind", "address", "settings", "endpoints": [{"host", "port", "role"}], "secret"}`, with `Cache-Control: no-store`; 403 otherwise (below), 401 for a token whose attempt has ended or was claimed again. For the helpers of `lakana.ingest`; the SDK's `client.task_connections.get(name)` returns the body as it is |
