@@ -11,7 +11,7 @@ import io
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
-from lakana.ingest._errors import IngestError, SourceError, safe_name
+from lakana.ingest._errors import FileShapeError, IngestError, safe_name
 
 if TYPE_CHECKING:
     import polars as pl
@@ -114,7 +114,7 @@ def parse(
     IngestError
         For ``sheet=`` on a file without sheets, or ``header_row`` other than 1 on a file
         without a header row.
-    SourceError
+    FileShapeError
         When the file cannot be parsed; the message names the file and the problem.
     """
     import polars as pl
@@ -172,7 +172,7 @@ def parse(
         # polars reports a missing column its own way (a KeyError for sheets); say what it is.
         if overrides and format != "csv" and (cols := _columns_of(data, format, sheet, header_row)):
             _require_columns(name, overrides, cols)
-        raise SourceError(
+        raise FileShapeError(
             f"`{name}`: {_problem(exc)}; check the file, or pass schema= with the column's type"
         ) from None
     _require_columns(name, overrides, frame.columns)
@@ -228,7 +228,7 @@ def check_schema(schema: Mapping[str, Any] | None) -> None:
 
     Raises
     ------
-    IngestError
+    FileShapeError
         Naming the first column whose value is not a Polars type.
     """
     import polars as pl
@@ -238,7 +238,7 @@ def check_schema(schema: Mapping[str, Any] | None) -> None:
             isinstance(kind, pl.DataType)
             or (isinstance(kind, type) and issubclass(kind, pl.DataType))
         ):
-            raise IngestError(
+            raise FileShapeError(
                 f"schema= maps a column to a Polars type such as pl.Int64; {column!r} has {kind!r}"
             )
 
@@ -257,12 +257,12 @@ def _require_columns(name: str, schema: Mapping[str, Any] | None, columns: Seque
 
     Raises
     ------
-    SourceError
+    FileShapeError
         Naming the file and the first missing column.
     """
     missing = [column for column in schema or {} if column not in columns]
     if missing:
-        raise SourceError(f"`{name}` has no column {missing[0]!r}, which schema= names")
+        raise FileShapeError(f"`{name}` has no column {missing[0]!r}, which schema= names")
 
 
 def combine(frames: Sequence[pl.DataFrame], names: Sequence[str]) -> pl.DataFrame:
@@ -282,7 +282,7 @@ def combine(frames: Sequence[pl.DataFrame], names: Sequence[str]) -> pl.DataFram
 
     Raises
     ------
-    SourceError
+    FileShapeError
         When a column's types in two files have no common type; names the file and the column.
     """
     import polars as pl
@@ -300,7 +300,7 @@ def combine(frames: Sequence[pl.DataFrame], names: Sequence[str]) -> pl.DataFram
             try:
                 pl.concat([combined.select(column), frame.select(column)], how="vertical_relaxed")
             except pl.exceptions.PolarsError:
-                raise SourceError(
+                raise FileShapeError(
                     f"`{name}`: column {column!r} is {frame.schema[column]}, which does not fit "
                     f"{combined.schema[column]} in the files before it; pass schema= with one "
                     "type for it, or narrow the pattern"
@@ -309,7 +309,7 @@ def combine(frames: Sequence[pl.DataFrame], names: Sequence[str]) -> pl.DataFram
             combined = pl.concat([combined, frame], how="diagonal_relaxed")
         except pl.exceptions.PolarsError:
             break
-    raise SourceError(_not_combinable(frames, names, first))
+    raise FileShapeError(_not_combinable(frames, names, first))
 
 
 def _not_combinable(

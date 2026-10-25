@@ -14,6 +14,7 @@ from lakana.ingest._errors import (
     ConnectionChanged,
     ConnectionNotDeclared,
     ConnectionRefused,
+    FileShapeError,
     IngestError,
     SourceError,
 )
@@ -23,6 +24,7 @@ __all__ = [
     "ConnectionChanged",
     "ConnectionNotDeclared",
     "ConnectionRefused",
+    "FileShapeError",
     "IngestError",
     "SourceError",
     "connections",

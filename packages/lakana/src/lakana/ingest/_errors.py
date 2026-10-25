@@ -40,6 +40,12 @@ class SourceError(IngestError):
     """The source answered with an error; the message says what it said."""
 
 
+class FileShapeError(SourceError):
+    """The files themselves are wrong (types, columns or content); the same files fail again."""
+
+    retryable: ClassVar[bool | None] = False
+
+
 class CapExceeded(IngestError):
     """A read went past one of its limits; the same read would again."""
 

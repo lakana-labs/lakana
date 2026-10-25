@@ -466,3 +466,73 @@ def test_a_modification_time_past_year_9999_names_the_file(
 
     with pytest.raises(DirectoryError, match=r"'a\.csv' has a modification time"):
         walk(str(tree), "exports", "*.csv", max_files=10)
+
+
+def _eio_on(monkeypatch: pytest.MonkeyPatch, call: str, name: str) -> None:
+    """Make `os.<call>` raise EIO for one name opened or examined relative to a directory.
+
+    Parameters
+    ----------
+    monkeypatch
+        pytest's patcher.
+    call
+        ``open`` or ``stat``.
+    name
+        The entry whose access fails.
+    """
+    real = getattr(os, call)
+
+    def failing(path: str, *args: object, **kwargs: object) -> object:
+        if path == name and kwargs.get("dir_fd") is not None:
+            raise OSError(5, "Input/output error")
+        return real(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, call, failing)
+
+
+def test_a_missing_or_denied_path_is_permanent_and_an_io_error_is_not(
+    tree: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The same path fails every attempt when it is gone or denied; an I/O error may pass."""
+    with pytest.raises(DirectoryError) as missing:
+        walk(str(tree), "nowhere", "*.csv", max_files=10)
+    with pytest.raises(DirectoryError) as gone:
+        read(str(tree), "exports", "gone.csv", max_bytes=100)
+    assert missing.value.retryable is False
+    assert gone.value.retryable is False
+
+    def refuse(fd: int) -> object:
+        raise PermissionError(13, "Permission denied")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "scandir", refuse)
+        with pytest.raises(DirectoryError) as denied:
+            walk(str(tree), "exports", "*.csv", max_files=10)
+    assert denied.value.retryable is False
+
+    for call, name, act in (
+        ("open", "2026", lambda: walk(str(tree), "exports", "**/*.csv", max_files=10)),
+        ("open", "a.csv", lambda: read(str(tree), "exports", "a.csv", max_bytes=100)),
+        ("stat", "a.csv", lambda: walk(str(tree), "exports", "*.csv", max_files=10)),
+        ("open", "exports", lambda: walk(str(tree), "exports", "*.csv", max_files=10)),
+    ):
+        with monkeypatch.context() as patch:
+            _eio_on(patch, call, name)
+            with pytest.raises(DirectoryError) as io_error:
+                act()
+        assert io_error.value.retryable is None, (call, name)
+
+
+def test_an_io_error_while_listing_a_directory_may_be_retried(
+    tree: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A listing that fails with EIO is not a fact about the tree."""
+
+    def refuse(fd: int) -> object:
+        raise OSError(5, "Input/output error")
+
+    monkeypatch.setattr(os, "scandir", refuse)
+
+    with pytest.raises(DirectoryError) as caught:
+        walk(str(tree), "exports", "*.csv", max_files=10)
+    assert caught.value.retryable is None

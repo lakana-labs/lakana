@@ -756,3 +756,27 @@ def test_a_file_that_grows_after_listing_still_counts_toward_the_total(
 
     with pytest.raises(CapExceeded, match="hold more than max_total_bytes"):
         files.read("exports", "*.csv", max_total_bytes=8)
+
+
+def test_what_is_wrong_with_the_files_themselves_is_never_retried(root: Path) -> None:
+    """A type conflict, a missing schema column, a bad schema value or an unparsable file.
+
+    Each fails every attempt: `FileShapeError`, `retryable = False`, still a `SourceError`.
+    """
+    from lakana.ingest import FileShapeError, _formats
+
+    assert issubclass(FileShapeError, SourceError)
+    assert SourceError.retryable is None
+    _write(root / "a.csv", b"id\n1\n")
+    _write(root / "bad.json", b"this is not json")
+    conflict = [pl.DataFrame({"x": [1]}), pl.DataFrame({"x": [[1]]})]
+    cases = [
+        lambda: files.read("exports", "a.csv", schema={"when": pl.Datetime}),
+        lambda: files.read("exports", "a.csv", schema={"id": "int"}),
+        lambda: files.read("exports", "bad.json"),
+        lambda: _formats.combine(conflict, ["a", "b"]),
+    ]
+    for case in cases:
+        with pytest.raises(FileShapeError) as caught:
+            case()
+        assert caught.value.retryable is False

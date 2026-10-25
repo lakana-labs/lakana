@@ -114,6 +114,38 @@ def _segments(text: str, what: str) -> list[str]:
     return parts
 
 
+class DirectoryIOError(DirectoryError):
+    """An I/O error on a path that is there; another attempt may end differently."""
+
+    retryable: ClassVar[bool | None] = None
+
+
+_PERMANENT = (FileNotFoundError, PermissionError, NotADirectoryError, IsADirectoryError)
+
+
+def _failure(exc: OSError, message: str) -> DirectoryError:
+    """Choose the error for an operating-system failure by its cause.
+
+    A path that is missing, not a directory, a link or denied fails every attempt; anything
+    else (an I/O error, a stale handle) may pass.
+
+    Parameters
+    ----------
+    exc
+        What the system call raised.
+    message
+        The message, naming the path and the next step.
+
+    Returns
+    -------
+    DirectoryError
+        Not retried for a permanent cause, `DirectoryIOError` otherwise.
+    """
+    if isinstance(exc, _PERMANENT) or exc.errno in (errno.ELOOP, errno.ENOTDIR):
+        return DirectoryError(message)
+    return DirectoryIOError(message)
+
+
 def _why(directory: int, name: str, exc: OSError) -> str:
     """Explain why a component below the root could not be opened.
 
@@ -178,7 +210,8 @@ def _open_dir(root_dir: str, parts: list[str]) -> int:
             try:
                 below = os.open(part, _DIR, dir_fd=fd)
             except OSError as exc:
-                raise DirectoryError(_why(fd, part, exc)) from None
+                failure = _failure(exc, _why(fd, part, exc))
+                raise failure from None
             os.close(fd)
             fd = below
     except BaseException:
@@ -335,10 +368,12 @@ def _entries(
                     )
                 names.append(found.name)
     except OSError as exc:
-        raise DirectoryError(
+        failure = _failure(
+            exc,
             f"{shown!r} cannot be listed ({exc.strerror}); give this worker read access to it "
-            "or narrow the pattern"
-        ) from None
+            "or narrow the pattern",
+        )
+        raise failure from None
     names.sort()
     end = len(pattern)
     for name in names:
@@ -350,10 +385,12 @@ def _entries(
         except FileNotFoundError:
             continue
         except OSError as exc:
-            raise DirectoryError(
+            failure = _failure(
+                exc,
                 f"{shown!r} cannot be searched ({exc.strerror}); give this worker read and "
-                "search access to it or narrow the pattern"
-            ) from None
+                "search access to it or narrow the pattern",
+            )
+            raise failure from None
         path = [*prefix, name]
         deeper = any(i < end for i in after)
         if stat.S_ISDIR(info.st_mode):
@@ -369,10 +406,12 @@ def _entries(
                     # Swapped for a link or a file, or removed, since it was listed.
                     yield path, None
                     continue
-                raise DirectoryError(
+                failure = _failure(
+                    exc,
                     f"{_why(fd, name, exc)}; give this worker read access to it or narrow the "
-                    "pattern"
-                ) from None
+                    "pattern",
+                )
+                raise failure from None
             try:
                 yield from _entries(below, path, pattern, after, budget)
             finally:
@@ -473,9 +512,8 @@ def read(root_dir: str, base: str, relative: str, *, max_bytes: int) -> bytes:
         try:
             handle = os.open(parts[-1], _FILE, dir_fd=fd)
         except OSError as exc:
-            raise DirectoryError(
-                f"{relative!r} cannot be read: {_why(fd, parts[-1], exc)}"
-            ) from None
+            failure = _failure(exc, f"{relative!r} cannot be read: {_why(fd, parts[-1], exc)}")
+            raise failure from None
     finally:
         os.close(fd)
     try:

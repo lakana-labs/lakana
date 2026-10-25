@@ -114,6 +114,18 @@ bytes) and `modified` (timestamp in UTC).
 
 ### Errors
 
+A helper raises a subclass of `lakana.ingest.IngestError`, and each says whether another attempt
+could end differently (the task is retried only when it could):
+
+| Class | Meaning | Retried |
+|---|---|---|
+| `FileShapeError` (a `SourceError`) | The files are wrong: types that do not fit across files, a `schema=` column a file lacks, a `schema=` value that is no Polars type, a file that cannot be parsed. The same files fail every attempt. | No |
+| `SourceError` | The source answered with an error, which may pass. | Yes |
+| `DirectoryError` | A directory or file is missing, a link, not a directory, or denied; or the pattern is refused. The same path fails every attempt. | No |
+| `DirectoryError` from an I/O error (`EIO` and the like) on a path that is there | The disk or share failed this time. | Yes |
+| `CapExceeded` | A cap was reached. | No |
+
+
 | Message starts or contains | Cause | Next step |
 |---|---|---|
 | `files.read reads directory connections; ... is postgresql: use sql.read` | The connection is of another kind. | Use the helper the message names. |
