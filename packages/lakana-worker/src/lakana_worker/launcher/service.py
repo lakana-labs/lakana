@@ -402,6 +402,35 @@ def read_frames(stream: _Receiver) -> Iterator[bytes]:
             yield payload
 
 
+def _serialized(emit: Emit) -> Emit:
+    """Wrap a caller's `emit` so a relay's reader and a container's stream never interleave.
+
+    Parameters
+    ----------
+    emit
+        The caller's sink.
+
+    Returns
+    -------
+    Emit
+        A sink that sends one line at a time.
+    """
+    lock = threading.Lock()
+
+    def emit_locked(line: dict[str, object]) -> None:
+        """Send one line.
+
+        Parameters
+        ----------
+        line
+            The line.
+        """
+        with lock:
+            emit(line)
+
+    return emit_locked
+
+
 class Launcher:
     """Runs tasks and builds in containers, from parsed requests.
 
@@ -1098,25 +1127,8 @@ class Launcher:
         Exception
             Whatever `emit` raises when the caller is gone; likewise.
         """
-        for root in request.roots:
-            if root in self.unusable_roots:
-                raise Refused(self.unusable_roots[root])
-        if (request.egress or request.relay) and not self._running(self.settings.egress_service):
-            raise Refused(EGRESS_MISSING)
-        if request.egress and self._egress_key is None:
-            raise RuntimeError("the egress key is only available after start()")
-        lock = threading.Lock()
-
-        def emit_locked(line: dict[str, object]) -> None:
-            """Send one line; the relay's reader and the task's stream share the caller.
-
-            Parameters
-            ----------
-            line
-                The line.
-            """
-            with lock:
-                emit(line)
+        self._admit(request.roots, request.egress, request.relay)
+        emit_locked = _serialized(emit)
 
         name = container_name(self.settings, "task", request.task)
         live = self._register(
@@ -1228,6 +1240,39 @@ class Launcher:
             raise Refused(f"egress: {exc}") from None
         return f"http://lakana:{token}@egress:{EGRESS_PORT}"
 
+    def _admit(
+        self,
+        roots: tuple[str, ...],
+        egress: tuple[tuple[str, int], ...],
+        relay: tuple[RelayRoute, ...],
+    ) -> None:
+        """Refuse a run or check this launcher cannot give its roots and routes.
+
+        Parameters
+        ----------
+        roots
+            The ingestion roots it names.
+        egress
+            Its proxy pairs.
+        relay
+            Its relay routes.
+
+        Raises
+        ------
+        Refused
+            For a root that failed its start-up probe, or routes while the egress service is not
+            running (`EGRESS_MISSING`).
+        RuntimeError
+            For egress pairs before `start()`, which makes the key that signs their token.
+        """
+        for root in roots:
+            if root in self.unusable_roots:
+                raise Refused(self.unusable_roots[root])
+        if (egress or relay) and not self._running(self.settings.egress_service):
+            raise Refused(EGRESS_MISSING)
+        if egress and self._egress_key is None:
+            raise RuntimeError("the egress key is only available after start()")
+
     def check(self, request: CheckRequest, emit: Emit) -> dict[str, object]:
         """Run one connection check to its end.
 
@@ -1258,25 +1303,8 @@ class Launcher:
         Exception
             Whatever `emit` raises when the caller is gone; likewise.
         """
-        for root in request.roots:
-            if root in self.unusable_roots:
-                raise Refused(self.unusable_roots[root])
-        if (request.egress or request.relay) and not self._running(self.settings.egress_service):
-            raise Refused(EGRESS_MISSING)
-        if request.egress and self._egress_key is None:
-            raise RuntimeError("the egress key is only available after start()")
-        lock = threading.Lock()
-
-        def emit_locked(line: dict[str, object]) -> None:
-            """Send one line; the relay's reader and the check's stream share the caller.
-
-            Parameters
-            ----------
-            line
-                The line.
-            """
-            with lock:
-                emit(line)
+        self._admit(request.roots, request.egress, request.relay)
+        emit_locked = _serialized(emit)
 
         name = container_name(self.settings, "check", request.check)
         live = self._register(name, request.owner, CHECK_GRACE, CHECK_LIMITS.memory_mb)
