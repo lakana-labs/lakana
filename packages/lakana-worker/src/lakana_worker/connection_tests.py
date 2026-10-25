@@ -230,6 +230,7 @@ RELAY_REFUSED = "lakana-relay: refused "
 RELAY_CONNECTED = "lakana-relay: connected "
 """Starts the line a check's relay writes once it has dialled the target."""
 EGRESS_LOG = "; see `docker compose logs egress`"
+"""Ends the message of a relay refusal on the operator's side: the egress service's log."""
 
 
 def _relay_refusal(output: str) -> tuple[str, str] | None:

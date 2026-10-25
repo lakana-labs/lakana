@@ -3787,3 +3787,19 @@ def test_a_check_is_supervised_for_its_fixed_30_seconds(
     launcher.check(_check(), lambda line: None)
 
     assert seen == [30]
+
+
+def test_a_relays_output_buffered_at_its_removal_still_reaches_the_caller(tmp_path: Path) -> None:
+    """The stream is closed only after the reader drained it: the last lines are not lost."""
+    first = b"lakana-relay: closed a connection on 15001: 16 are open already\n"
+    second = b"lakana-relay: closed a connection on 15001: 16 are open already (again)\n"
+    engine = FakeEngine(
+        relay_output=[b"lakana-relay: ready\n", _CONNECTED],
+        relay_last_words=[first, 0.3, second],
+    )
+    launcher = _started(engine, tmp_path, built=False)
+    emitted: list[dict[str, object]] = []
+
+    launcher.check(_check(relay=(_DB,)), emitted.append)
+
+    assert first in _logs(emitted) and second in _logs(emitted)

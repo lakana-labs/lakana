@@ -1352,3 +1352,17 @@ def test_the_check_wait_covers_the_check_the_relay_start_and_the_verdict() -> No
         CHECK_LIMITS.timeout_seconds + CHECK_GRACE + 10 + RELAY_VERDICT_SECONDS + 15
     ) <= connection_tests.CHECK_WAIT_SECONDS
     assert int(connection_tests.CHECK_WAIT_SECONDS) + 30 == connection_tests.LEASE_SECONDS
+
+
+def test_a_connected_line_counts_only_for_its_exact_host_and_port(
+    world: World, tmp_path: Path
+) -> None:
+    """``connected db.example.com:54321`` is not the verdict for ``db.example.com:5432``."""
+    output = OK_LINE + b"lakana-relay: connected db.example.com:54321\n"
+    launcher = FakeLauncher(scripts={"check": answering(output, verdict=False)})
+    running, _ = docker_loop(world, tmp_path, launcher)
+    test_id = _database(world)
+
+    assert running.step()
+
+    assert world.test(test_id).outcome == "timeout"
