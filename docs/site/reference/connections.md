@@ -75,8 +75,9 @@ What each setting means, and its default:
 Testing a connection is a probe from the worker: with the local runner it dials from the worker's host
 to any address the connection names and lists paths under the ingestion roots, so
 `MANAGE_CONNECTION` lets a data engineer without `DEPLOY` find out which ports and paths the worker
-can reach (see the [threat model](../explanation/security.md)). Under the Docker runner a test runs
-under a task's own network rules.
+can reach (see the [threat model](../explanation/security.md)). In this version a worker with the
+Docker runner runs no connection tests; from the next release a test runs there in a container under
+a task's own network rules.
 
 A task cannot list or show connections, whatever its token's rights: a request with a task token
 is refused (403) without naming any connection. A running task reads only the connections its

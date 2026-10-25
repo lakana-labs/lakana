@@ -619,6 +619,47 @@ def test_a_refused_test_prints_the_outcome_and_its_next_step_and_exits_1(tmp_pat
     assert "the port and the source's firewall" in result.stdout + result.stderr
 
 
+@pytest.mark.parametrize(
+    ("outcome", "next_step"),
+    [
+        ("dns", "Check the host name."),
+        ("timeout", "the network path between the worker and the source"),
+        ("tls", "lakana connection update NAME --ca-file ca.pem"),
+        ("not_allowed", "reachable from outside the Lakana stack"),
+        ("root_unavailable", "Check the root setting."),
+        ("not_found", "lakana connection show NAME"),
+        ("credentials", "Check the secret."),
+        ("failed", "See the worker's log."),
+    ],
+)
+def test_every_outcome_that_is_not_ok_names_its_next_step(
+    tmp_path: Path, outcome: str, next_step: str
+) -> None:
+    """Each outcome prints its own next step, and none of them names the egress proxy.
+
+    Parameters
+    ----------
+    tmp_path
+        A directory for the CLI's state.
+    outcome
+        The outcome the server reports.
+    next_step
+        A part of the next step the CLI must print for it.
+    """
+    api = FakeApi()
+    api.on("POST", f"{_BASE}/crm-db/tests", status=202, json=_test_body("queued"))
+    api.on(
+        "GET", f"{_BASE}/crm-db/tests/{_TEST_ID}", json=_test_body("done", outcome, "what happened")
+    )
+
+    result = invoke(make_state(tmp_path, api), "connection", "test", "crm-db", "--env", "prod")
+
+    assert result.exit_code == 1
+    assert f"{outcome}: what happened" in result.stdout
+    assert next_step in result.stdout + result.stderr
+    assert "proxy" not in result.stdout + result.stderr
+
+
 def test_an_ok_test_prints_ok_and_exits_0(tmp_path: Path) -> None:
     api = FakeApi()
     api.on("POST", f"{_BASE}/crm-db/tests", status=202, json=_test_body("queued"))
