@@ -34,6 +34,7 @@ from lakana_worker.launcher.requests import (
     network_spec,
     parse_request,
     probe_container_spec,
+    relay_plan,
     run_container_spec,
     uv_index_value,
     volume_spec,
@@ -1281,3 +1282,24 @@ def test_a_task_without_a_proxy_url_has_no_proxy_variable() -> None:
     spec = run_container_spec(request, SETTINGS, no_new_privileges=True)
 
     assert not any(item.startswith("LAKANA_EGRESS_PROXY=") for item in spec["Env"])
+
+
+def test_a_relay_plan_always_refuses_the_launchers_range_and_holds_at_most_256() -> None:
+    """The given ranges in their order, the task range added when missing; too many is an error."""
+    route = (RelayRoute(15001, "db.example.com", 5432),)
+
+    plan = json.loads(relay_plan(route, SETTINGS, "10.207.0.8/29", ["172.17.0.1/32"]))
+    kept = json.loads(
+        relay_plan(route, SETTINGS, "10.207.0.8/29", ["10.207.0.0/16", "172.17.0.1/32"])
+    )
+
+    assert plan == {
+        "address": "10.207.0.14",
+        "subnet": "10.207.0.8/29",
+        "refused": ["172.17.0.1/32", "10.207.0.0/16"],
+        "routes": [{"listen": 15001, "host": "db.example.com", "port": 5432}],
+    }
+    assert kept["refused"] == ["10.207.0.0/16", "172.17.0.1/32"]
+    many = [f"10.0.{n}.1/32" for n in range(256)]
+    with pytest.raises(ValueError, match="257 refused ranges, more than 256"):
+        relay_plan(route, SETTINGS, "10.207.0.8/29", many)

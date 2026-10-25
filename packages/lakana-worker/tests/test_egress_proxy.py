@@ -17,7 +17,7 @@ import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import pytest
 from fake_launcher import FakeLauncher
@@ -153,13 +153,32 @@ def index() -> Iterator[int]:
     server.server_close()
 
 
-def _proxy(tmp_path: Path, **changes: object) -> EgressServer:
+def _write_refused(tmp_path: Path, ranges: object) -> None:
+    """Write the refused ranges as the launcher does, next to the key.
+
+    Parameters
+    ----------
+    tmp_path
+        The key's directory.
+    ranges
+        The ranges; `None` removes the file.
+    """
+    path = tmp_path / "refused.json"
+    if ranges is None:
+        path.unlink(missing_ok=True)
+    else:
+        path.write_text(json.dumps({"refused": ranges}), encoding="utf-8")
+
+
+def _proxy(tmp_path: Path, *, ranges: object = (), **changes: object) -> EgressServer:
     """Start a proxy on loopback with a key and routing tables of its own under `tmp_path`.
 
     Parameters
     ----------
     tmp_path
         For the key.
+    ranges
+        The refused ranges the launcher wrote; none by default, `None` for no file.
     **changes
         Settings to replace.
 
@@ -169,6 +188,7 @@ def _proxy(tmp_path: Path, **changes: object) -> EgressServer:
         The running proxy.
     """
     ensure_key(tmp_path / "egress.key")
+    _write_refused(tmp_path, None if ranges is None else list(cast("tuple[str, ...]", ranges)))
     route = tmp_path / "proxy-route"
     route.write_text(_HEADER + _GOOD, encoding="ascii")  # attached: 10.207.0.8/29 only
     values: dict[str, object] = {
@@ -1615,3 +1635,182 @@ def test_a_build_refused_for_an_internal_address_gets_no_connection_hint(tmp_pat
         b"403",
         f"127.1:443 is not reachable through this proxy: {egress.INTERNAL}",
     )
+
+
+_TASK_NEXT_STEP = (
+    "give the connection an address outside the Lakana stack (lakana connection update)"
+)
+
+
+@pytest.mark.parametrize(
+    ("purpose", "target", "ranges"),
+    [
+        ("task", "10.99.0.1:5432", ["10.99.0.1/32"]),  # a Docker network's gateway
+        ("build", "10.99.0.1:443", ["10.99.0.1/32"]),
+        ("connection-test", "10.99.0.1:5432", ["10.99.0.1/32"]),
+        ("task", "gateway.example.com:5432", ["10.99.0.1/32"]),  # a name that resolves there
+        ("task", "192.0.2.10:443", ["192.0.2.0/24"]),  # the operator's range
+        ("build", "192.0.2.10:443", ["192.0.2.0/24"]),
+    ],
+)
+def test_an_address_in_the_refused_ranges_is_refused_for_every_purpose(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, purpose: str, target: str, ranges: list[str]
+) -> None:
+    """Gateways and the operator's ranges are refused like the stack; tasks hear the next step.
+
+    Parameters
+    ----------
+    tmp_path
+        For the key and the ranges.
+    monkeypatch
+        For the resolver.
+    purpose
+        The token's purpose.
+    target
+        ``host:port``.
+    ranges
+        What the launcher wrote.
+    """
+    real = socket.getaddrinfo
+
+    def resolve(
+        host: str, port: int, family: int = 0, type: int = 0, proto: int = 0, flags: int = 0
+    ) -> list[Any]:
+        if host == "gateway.example.com":
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("10.99.0.1", port))]
+        return real(host, port, family, type, proto, flags)
+
+    monkeypatch.setattr(egress.socket, "getaddrinfo", resolve)
+    server = _proxy(tmp_path, ranges=ranges)
+    key = ensure_key(tmp_path / "egress.key")
+    host, _, port = target.rpartition(":")
+    try:
+        token = mint(key, [(host, int(port))], 2**40, purpose=purpose, network=LOOPBACK)
+        status, said = _refusal(server, target, token)
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    reason = f"{target} is not reachable through this proxy: {egress.INTERNAL}"
+    assert status == b"403"
+    assert said == (reason if purpose == "build" else f"{reason}; {_TASK_NEXT_STEP}")
+
+
+def test_the_refused_ranges_apply_before_an_upstream_proxy_is_asked(tmp_path: Path) -> None:
+    """Through a company proxy too: a literal in the ranges never leaves."""
+    asked: list[bytes] = []
+
+    class Upstream(socketserver.BaseRequestHandler):
+        def handle(self) -> None:
+            asked.append(self.request.recv(4096))
+
+    upstream = _upstream(Upstream)
+    server = _proxy(
+        tmp_path,
+        ranges=["10.99.0.0/24"],
+        upstream=f"http://127.0.0.1:{upstream.server_address[1]}",
+    )
+    key = ensure_key(tmp_path / "egress.key")
+    try:
+        for purpose in ("task", "build"):
+            token = mint(key, [("10.99.0.1", 5432)], 2**40, purpose=purpose, network=LOOPBACK)
+            status, _ = _refusal(server, "10.99.0.1:5432", token)
+            assert status == b"403"
+    finally:
+        server.shutdown()
+        server.server_close()
+        upstream.shutdown()
+        upstream.server_close()
+
+    assert asked == []
+
+
+def test_a_target_outside_the_refused_ranges_still_tunnels(tmp_path: Path, index: int) -> None:
+    """Ranges that do not hold the index change nothing."""
+    server = _proxy(tmp_path, ranges=["10.99.0.1/32", "192.0.2.0/24", "fd12:3456::1/128"])
+    running = Running(server.server_address[1], index, ensure_key(tmp_path / "egress.key"))
+    try:
+        answer, connection = _connect(running.port, f"localhost:{index}", running.token())
+        with connection:
+            connection.sendall(b"ping")
+            echoed = connection.recv(4)
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    assert answer.split()[1] == b"200" and echoed == b"ping"
+
+
+_UNREADABLE_RANGES = (
+    "the egress proxy cannot read the refused ranges the launcher writes; see "
+    "`docker compose logs launcher`"
+)
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        None,
+        "{",
+        "[]",
+        '{"refused": "10.0.0.0/8"}',
+        '{"refused": ["lan"]}',
+        '{"refused": ["10.0.0.5/8"]}',
+        '{"refused": [], "extra": 1}',
+    ],
+    ids=["missing", "not-json", "not-an-object", "not-a-list", "not-a-range", "host-bits", "extra"],
+)
+def test_unreadable_refused_ranges_fail_closed(
+    tmp_path: Path, index: int, content: str | None
+) -> None:
+    """Without the launcher's ranges the proxy cannot tell the Docker host apart: 503.
+
+    Parameters
+    ----------
+    tmp_path
+        For the key and the ranges.
+    index
+        A target that would otherwise tunnel.
+    content
+        The file's text; `None` for no file.
+    """
+    server = _proxy(tmp_path, ranges=None)
+    if content is not None:
+        (tmp_path / "refused.json").write_text(content, encoding="utf-8")
+    key = ensure_key(tmp_path / "egress.key")
+    try:
+        token = mint(key, [("localhost", index)], 2**40, purpose="task", network=LOOPBACK)
+        status, said = _refusal(server, f"localhost:{index}", token)
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    assert (status, said) == (b"503", _UNREADABLE_RANGES)
+
+
+def test_rewritten_refused_ranges_are_picked_up_without_a_restart(
+    tmp_path: Path, index: int
+) -> None:
+    """Missing, then written, then broken: each connection sees the file as it is now."""
+    server = _proxy(tmp_path, ranges=None)
+    running = Running(server.server_address[1], index, ensure_key(tmp_path / "egress.key"))
+    try:
+        first = _status(running.port, f"localhost:{index}", running.token())
+        _write_refused(tmp_path, ["10.99.0.1/32"])
+        second = _status(running.port, f"localhost:{index}", running.token())
+        (tmp_path / "refused.json").write_text("{", encoding="utf-8")
+        third = _status(running.port, f"localhost:{index}", running.token())
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    assert (first, second, third) == (b"503", b"200", b"503")
+
+
+def test_the_refused_ranges_file_sits_next_to_the_key_unless_set(tmp_path: Path) -> None:
+    """Like `reachable`, the file's place is not a setting: the key's directory."""
+    settings = EgressSettings(key=tmp_path / "k" / "egress.key")
+
+    assert settings.refused_file == tmp_path / "k" / "refused.json"
+    assert EgressSettings(refused_file=tmp_path / "r.json").refused_file == tmp_path / "r.json"
+    assert load_settings({}).refused_file == Path("/run/lakana-egress/refused.json")

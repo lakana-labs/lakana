@@ -124,6 +124,89 @@ def test_the_network_range_and_the_total_memory_can_be_set() -> None:
     assert settings.network_range == "192.168.64.0/24" and settings.max_total_memory_mb == 131072
 
 
+_REFUSED = "LAKANA_LAUNCHER__EGRESS_REFUSED"
+_REFUSED_FORMAT = (
+    "list CIDR ranges or addresses separated by commas, such as 192.168.1.0/24,10.0.0.7."
+)
+
+
+def test_the_refused_ranges_are_read_and_an_address_is_one_host() -> None:
+    """Blank entries are ignored; an address means /32 or /128; IPv6 works too."""
+    settings = load_settings(
+        {
+            "LAKANA_LAUNCHER__STACK": "lakana",
+            "LAKANA_LAUNCHER__IMAGES": _IMAGES,
+            _REFUSED: "192.168.1.0/24, 10.0.0.7,,fd00::/8",
+        }
+    )
+
+    assert settings.egress_refused == ("192.168.1.0/24", "10.0.0.7/32", "fd00::/8")
+    assert "EGRESS_REFUSED" in KNOWN_SETTINGS
+
+
+@pytest.mark.parametrize("value", [None, "", "  ", " , ,"])
+def test_no_refused_ranges_by_default(value: str | None) -> None:
+    """Unset, blank or only commas: nothing beyond the built-in refusals.
+
+    Parameters
+    ----------
+    value
+        The variable's value, or `None` for unset.
+    """
+    environ = {"LAKANA_LAUNCHER__STACK": "lakana", "LAKANA_LAUNCHER__IMAGES": _IMAGES}
+    if value is not None:
+        environ[_REFUSED] = value
+
+    assert load_settings(environ).egress_refused == ()
+
+
+@pytest.mark.parametrize(
+    ("value", "message"),
+    [
+        (
+            "192.168.1.5/24",
+            f"{_REFUSED}: `192.168.1.5/24` is not a network (host bits set; did you mean "
+            f"192.168.1.0/24?); {_REFUSED_FORMAT}",
+        ),
+        (
+            "10.0.0.0/8,lan",
+            f"{_REFUSED}: `lan` is not an IP address or CIDR range; {_REFUSED_FORMAT}",
+        ),
+        (
+            "10.0.0.0/33",
+            f"{_REFUSED}: `10.0.0.0/33` is not an IP address or CIDR range; {_REFUSED_FORMAT}",
+        ),
+        pytest.param(
+            ",".join(f"10.0.{n}.0/24" for n in range(65)),
+            f"{_REFUSED} lists 65 ranges, more than 64; list wider ranges instead, such as "
+            "192.168.0.0/16.",
+            id="65-ranges",
+        ),
+    ],
+)
+def test_a_malformed_refused_range_stops_the_launcher(value: str, message: str) -> None:
+    """Host bits set, not an address, or too many: the message names the entry and the format.
+
+    Parameters
+    ----------
+    value
+        The variable's value.
+    message
+        The whole error.
+    """
+    with pytest.raises(SettingsError) as caught:
+        load_settings({**_BASE, _REFUSED: value})
+
+    assert str(caught.value) == message
+
+
+def test_sixty_four_refused_ranges_are_allowed() -> None:
+    """The cap is 64, inclusive."""
+    value = ",".join(f"10.0.{n}.0/24" for n in range(64))
+
+    assert len(load_settings({**_BASE, _REFUSED: value}).egress_refused) == 64
+
+
 def test_an_allowed_ingestion_root_is_kept() -> None:
     """A plain host directory passes."""
     settings = load_settings(
@@ -466,6 +549,11 @@ def test_the_bundle_gives_the_launcher_and_the_proxy_settings_they_accept() -> N
     }
 
     settings = load_settings(_bundle_environment("launcher", values))
+    refusing = load_settings(
+        _bundle_environment("launcher", {**values, "LAKANA_EGRESS_REFUSED": "192.168.1.0/24"})
+    )
+    assert settings.egress_refused == ()
+    assert refusing.egress_refused == ("192.168.1.0/24",)
     proxy = egress.load_settings(_bundle_environment("egress", values))
 
     assert settings.stack == "lakana"

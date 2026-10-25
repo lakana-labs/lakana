@@ -2878,7 +2878,7 @@ def test_a_run_with_relay_routes_starts_its_relay_before_the_task(tmp_path: Path
     assert plan == {
         "address": address,
         "subnet": subnets[0],
-        "internal": launcher.settings.network_range,
+        "refused": _refused(tmp_path),
         "routes": [{"listen": 15001, "host": "db.example.com", "port": 5432}],
     }
     kinds = [
@@ -3003,3 +3003,184 @@ def test_cleanup_spares_the_relay_of_a_live_run_and_removes_an_orphan(tmp_path: 
 
     assert launcher.cleanup(CleanupRequest("w1")) == {"removed": 1}
     assert engine.containers == {}
+
+
+_GATEWAYS = ["172.17.0.1/32", "172.18.0.1/32"]
+"""The fake's default bridge and Compose network gateways (IPv4)."""
+
+
+def _refused(tmp_path: Path) -> list[str]:
+    """Read the refused ranges the launcher wrote for the proxy.
+
+    Parameters
+    ----------
+    tmp_path
+        The state directory, which also holds the egress key.
+
+    Returns
+    -------
+    list of str
+        The ranges.
+    """
+    return json.loads((tmp_path / "refused.json").read_text(encoding="utf-8"))["refused"]
+
+
+def _networks_listing_answers(engine: FakeEngine, reply: Any) -> None:
+    """Answer the unfiltered ``GET /networks`` (the gateway listing) with `reply`.
+
+    Parameters
+    ----------
+    engine
+        The fake engine.
+    reply
+        The status and body.
+    """
+    real = engine.request
+
+    def request(
+        method: str, path: str, body: Any = None, *, query: Any = None, timeout: Any = 60.0
+    ) -> tuple[int, Any]:
+        if method == "GET" and path == "/networks" and not query:
+            return reply
+        return real(method, path, body, query=query, timeout=timeout)
+
+    engine.request = request  # ty: ignore[invalid-assignment]
+
+
+def test_start_writes_every_docker_gateway_and_the_operator_ranges_for_the_proxy(
+    tmp_path: Path,
+) -> None:
+    """Default bridge, Compose networks (IPv4 and IPv6), the setting and the launcher's range."""
+    engine = FakeEngine()
+
+    _started(engine, tmp_path, egress_refused=("192.0.2.0/24", "fd00:1::/32"))
+
+    assert _refused(tmp_path) == [
+        "10.207.0.0/16",
+        *_GATEWAYS,
+        "192.0.2.0/24",
+        "fd00:1::/32",
+        "fd12:3456::1/128",
+    ]
+    info = (tmp_path / "refused.json").stat()
+    assert stat.S_IMODE(info.st_mode) == 0o640
+    assert info.st_gid == (tmp_path / "egress.key").stat().st_gid
+    assert not [p for p in tmp_path.iterdir() if p.name.endswith(".tmp")]
+
+
+def test_a_network_made_after_start_is_refused_before_the_next_run_attaches_anything(
+    tmp_path: Path,
+) -> None:
+    """Refreshed at every network open, after the network exists, before a service joins it."""
+    engine = FakeEngine()
+    launcher = _started(engine, tmp_path)
+    engine.host_networks["other-project_default"] = {
+        "Labels": {"com.docker.compose.project": "other-project"},
+        "IPAM": {"Config": [{"Subnet": "192.168.77.0/24", "Gateway": "192.168.77.1"}]},
+    }
+    seen: list[list[str]] = []
+    real = engine.request
+
+    def request(
+        method: str, path: str, body: Any = None, *, query: Any = None, timeout: Any = 60.0
+    ) -> tuple[int, Any]:
+        if path.endswith("/connect") and not seen:
+            seen.append(_refused(tmp_path))
+        return real(method, path, body, query=query, timeout=timeout)
+
+    engine.request = request  # ty: ignore[invalid-assignment]
+
+    launcher.run(_run(), lambda line: None)
+
+    assert seen == [["10.207.0.0/16", *_GATEWAYS, "192.168.77.1/32", "fd12:3456::1/128"]]
+
+
+def test_the_refused_ranges_are_written_only_when_they_change(tmp_path: Path) -> None:
+    """A run that finds the same networks leaves the file alone: the proxy reads nothing new."""
+    engine = FakeEngine()
+    launcher = _started(engine, tmp_path)
+    before = (tmp_path / "refused.json").stat()
+
+    launcher.run(_run(), lambda line: None)
+
+    after = (tmp_path / "refused.json").stat()
+    assert (after.st_ino, after.st_mtime_ns) == (before.st_ino, before.st_mtime_ns)
+
+
+def test_start_stops_when_docker_cannot_list_its_networks(tmp_path: Path) -> None:
+    """Without the gateways the proxy would let a task reach the Docker host: no start."""
+    engine = FakeEngine()
+    _networks_listing_answers(engine, (500, {"message": "daemon busy"}))
+
+    with pytest.raises(StartError) as caught:
+        _started(engine, tmp_path)
+
+    assert str(caught.value).startswith("cannot list Docker's networks to find their gateways")
+    assert "daemon busy" in str(caught.value)
+    assert not (tmp_path / "refused.json").exists()
+
+
+def test_a_failed_listing_at_a_network_open_keeps_the_last_ranges_and_logs(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A busy daemon does not fail the run; the ranges written at start stay in force."""
+    engine = FakeEngine()
+    launcher = _started(engine, tmp_path)
+    written = _refused(tmp_path)
+    _networks_listing_answers(engine, (500, {"message": "daemon busy"}))
+
+    result = launcher.run(_run(), lambda line: None)
+
+    assert result["exit"] == 0
+    assert _refused(tmp_path) == written
+    assert "cannot list Docker's networks to find their gateways" in caplog.text
+
+
+def test_the_relays_plan_refuses_what_the_proxy_refuses(tmp_path: Path) -> None:
+    """The relay gets the same list as `refused.json`, current at its start."""
+    engine = FakeEngine()
+    launcher = _started(engine, tmp_path, egress_refused=("192.0.2.0/24",))
+    engine.host_networks["late"] = {
+        "Labels": {},
+        "IPAM": {"Config": [{"Subnet": "192.168.88.0/24", "Gateway": "192.168.88.1"}]},
+    }
+
+    launcher.run(_egress_run(relay=(_DB,)), lambda line: None)
+
+    plan = json.loads(engine.relay_stdin[0])
+    assert plan["refused"] == _refused(tmp_path)
+    assert "192.168.88.1/32" in plan["refused"] and "192.0.2.0/24" in plan["refused"]
+
+
+def test_a_relay_is_refused_when_docker_has_more_gateways_than_its_plan_holds(
+    tmp_path: Path,
+) -> None:
+    """The plan holds at most 256 ranges; past them the run fails naming the next step."""
+    engine = FakeEngine()
+    for n in range(300):
+        engine.host_networks[f"n{n}"] = {
+            "Labels": {},
+            "IPAM": {"Config": [{"Subnet": "x", "Gateway": f"10.{n // 200}.{n % 200}.1"}]},
+        }
+    launcher = _started(engine, tmp_path)
+
+    with pytest.raises(EngineError, match="at most 256") as caught:
+        launcher.run(_egress_run(relay=(_DB,)), lambda line: None)
+
+    assert "docker network prune" in str(caught.value)
+    assert engine.created("relay") == [] and engine.created("task") == []
+    assert "lakana-task-t1" not in engine.networks
+
+
+def test_a_gateway_that_is_not_an_address_is_skipped(tmp_path: Path) -> None:
+    """Docker leaves `Gateway` out or empty for some drivers; nothing else is read from it."""
+    engine = FakeEngine()
+    engine.host_networks["odd"] = {
+        "Labels": {},
+        "IPAM": {"Config": [{"Subnet": "10.1.0.0/24", "Gateway": ""}, {"Gateway": "nope"}, "x"]},
+    }
+    engine.host_networks["none"] = {"Labels": {}, "IPAM": None}
+
+    _started(engine, tmp_path)
+
+    assert _refused(tmp_path) == ["10.207.0.0/16", *_GATEWAYS, "fd12:3456::1/128"]

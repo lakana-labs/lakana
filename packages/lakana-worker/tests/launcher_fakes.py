@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import socket
 import struct
@@ -62,6 +63,30 @@ def _labels_match(labels: dict[str, str], query: dict[str, Any] | None) -> bool:
     return all(labels.get(item.split("=", 1)[0]) == item.split("=", 1)[1] for item in wanted)
 
 
+def _with_gateways(network: dict[str, Any]) -> dict[str, Any]:
+    """List a launcher network's IPAM as Docker does: a subnet's first host is its gateway.
+
+    Parameters
+    ----------
+    network
+        The network as the fake keeps it.
+
+    Returns
+    -------
+    dict
+        Its ``IPAM`` with a ``Gateway`` in every ``Config`` entry.
+    """
+    ipam = network.get("spec", {}).get("IPAM", {"Config": []})
+    configs = []
+    for config in ipam.get("Config", []):
+        try:
+            gateway = str(next(ipaddress.ip_network(config["Subnet"]).hosts()))
+        except ValueError:
+            gateway = ""  # Docker would not have made it; a test planted it
+        configs.append({**config, "Gateway": gateway})
+    return {**ipam, "Config": configs}
+
+
 @dataclass
 class FakeEngine:
     """Answers the launcher's Engine API calls from its own small state, recording each one.
@@ -115,7 +140,10 @@ class FakeEngine:
     service_info
         Service container id to what ``GET /containers/{id}/json`` answers for it.
     compose_networks
-        Networks Compose made (not the launcher's), by name, each with its labels.
+        Networks Compose made (not the launcher's), by name, each with its labels and IPAM.
+    host_networks
+        Docker's own networks (unlabelled), by name, each with its IPAM: the default ``bridge``
+        with its gateway 172.17.0.1, and ``host`` without an address.
     relay_output
         What every relay container writes to stderr after reading its plan; it then runs until
         it is removed.
@@ -162,7 +190,22 @@ class FakeEngine:
             "lakana_default": {
                 "Labels": {"com.docker.compose.network": "default"},
                 "Containers": {},
+                "IPAM": {
+                    "Config": [
+                        {"Subnet": "172.18.0.0/16", "Gateway": "172.18.0.1"},
+                        {"Subnet": "fd12:3456::/64", "Gateway": "fd12:3456::1"},
+                    ]
+                },
             }
+        }
+    )
+    host_networks: dict[str, dict[str, Any]] = field(
+        default_factory=lambda: {
+            "bridge": {
+                "Labels": {},
+                "IPAM": {"Config": [{"Subnet": "172.17.0.0/16", "Gateway": "172.17.0.1"}]},
+            },
+            "host": {"Labels": {}, "IPAM": {"Config": []}},
         }
     )
     relay_output: list[bytes] = field(default_factory=lambda: [b"lakana-relay: ready\n"])
@@ -282,15 +325,14 @@ class FakeEngine:
             self.networks[body["Name"]] = {"Labels": body["Labels"], "Containers": {}, "spec": body}
             return 201, {"Id": body["Name"]}
         if parts == ["networks"]:
-            return 200, [
-                {
-                    "Name": name,
-                    "Labels": n["Labels"],
-                    "IPAM": n.get("spec", {}).get("IPAM", {"Config": []}),
-                }
+            listed = [
+                {"Name": name, "Labels": n["Labels"], "IPAM": _with_gateways(n)}
                 for name, n in self.networks.items()
-                if _labels_match(n["Labels"], query)
+            ] + [
+                {"Name": name, "Labels": n["Labels"], "IPAM": n.get("IPAM", {"Config": []})}
+                for name, n in (self.compose_networks | self.host_networks).items()
             ]
+            return 200, [n for n in listed if _labels_match(n["Labels"], query)]
         if parts[0] == "networks":
             return self._network(method, parts[1], parts[2] if len(parts) > 2 else None, body)
         if parts == ["volumes", "create"]:

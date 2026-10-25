@@ -18,6 +18,7 @@ import ipaddress
 import json
 import math
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any, NoReturn
 from urllib.parse import quote, unquote, urlsplit, urlunsplit
@@ -47,6 +48,8 @@ RELAY_MAX_PER_PORT = 16
 RELAY_PIDS = MAX_RELAY_ROUTES * (RELAY_MAX_PER_PORT + 1) + 2 + 16
 """The relay container's process limit: a thread per connection and an accepting thread per
 route at their maximum, the main thread and Docker's init, and 16 to spare."""
+MAX_RELAY_REFUSED = 256
+"""The most ranges a relay's plan refuses."""
 EGRESS_MISSING = (
     "tasks with connections need the `egress` service; start it (Compose bundle) or remove the "
     "connection from the asset."
@@ -1609,7 +1612,12 @@ def relay_container_spec(
     }
 
 
-def relay_plan(routes: tuple[RelayRoute, ...], settings: LauncherSettings, subnet: str) -> bytes:
+def relay_plan(
+    routes: tuple[RelayRoute, ...],
+    settings: LauncherSettings,
+    subnet: str,
+    refused: Sequence[str],
+) -> bytes:
     """Write the plan a relay reads on stdin.
 
     Parameters
@@ -1617,20 +1625,35 @@ def relay_plan(routes: tuple[RelayRoute, ...], settings: LauncherSettings, subne
     routes
         The run's routes.
     settings
-        For the launcher's range of task networks, which the relay refuses as a target.
+        For the launcher's range of task networks, which the plan refuses whatever `refused`
+        holds.
     subnet
         The network's subnet.
+    refused
+        The ranges the relay refuses as a target besides the built-in ones: every Docker
+        network's gateway, `LauncherSettings.egress_refused` and the launcher's range, as the
+        launcher wrote them for the proxy.
 
     Returns
     -------
     bytes
         One JSON object.
+
+    Raises
+    ------
+    ValueError
+        If there are more than `MAX_RELAY_REFUSED` ranges.
     """
+    ranges = list(refused)
+    if settings.network_range not in ranges:
+        ranges.append(settings.network_range)
+    if len(ranges) > MAX_RELAY_REFUSED:
+        raise ValueError(f"{len(ranges)} refused ranges, more than {MAX_RELAY_REFUSED}")
     return json.dumps(
         {
             "address": relay_address(subnet),
             "subnet": subnet,
-            "internal": settings.network_range,
+            "refused": ranges,
             "routes": [{"listen": r.listen, "host": r.host, "port": r.port} for r in routes],
         }
     ).encode("utf-8")

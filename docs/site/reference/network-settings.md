@@ -2,7 +2,8 @@
 
 How the worker reaches git remotes and webhook addresses through a proxy or with an internal CA,
 which certificate authorities its queries trust when they read an object store over HTTPS, which
-ones builds and tasks of Python assets trust, and what it refuses to reach. Where the settings go in a Compose bundle:
+ones builds and tasks of Python assets trust, which addresses builds and tasks never reach, and
+what the worker refuses to reach. Where the settings go in a Compose bundle:
 [Deploy with Compose](../how-to/deploy-with-compose.md). Every other setting:
 [Settings](settings.md).
 
@@ -122,6 +123,54 @@ A build that fails because a package index's certificate is not trusted adds a h
 failure: `a package index's certificate is not trusted; if your package index uses a private
 certificate authority, set LAKANA_RUN__CA_BUNDLE on the worker to a PEM file of it`. Where to set
 it in a Compose bundle: [Run Python tasks in containers](../how-to/run-python-tasks-in-containers.md#package-indexes-and-proxies).
+
+## Addresses builds and tasks never reach
+
+With the docker runner, environment builds, Python tasks and connection tests reach the outside
+only through the `egress` proxy, and a task's database connections through its relay. Both
+refuse, whatever a build's index or a connection's address says:
+
+- loopback, link-local (the cloud metadata address `169.254.169.254`), multicast, unspecified
+  and reserved addresses, in every spelling (`127.1`, `0x7f.1`);
+- the bundle's own network (the server, the database and the object store) and every task and
+  build network (`LAKANA_LAUNCHER__NETWORK_RANGE`);
+- the gateway address of every Docker network on the host, whoever made it, such as
+  `172.17.0.1` on Docker's default bridge: the Docker host itself answers there. The launcher
+  lists them at its start and again whenever it opens a network, so a network made since is
+  refused from the next task or build on;
+- the ranges of `LAKANA_EGRESS_REFUSED` (below).
+
+Other private addresses stay reachable, because a company's package index or database often has
+one. So does the Docker host's own LAN address, unless you list it.
+
+**Add the Docker host's own LAN address or subnet** (and any other internal network a task must
+never reach) to `LAKANA_EGRESS_REFUSED` in the bundle's `.env`; bind services on the Docker host
+to loopback (`127.0.0.1`), not `0.0.0.0`. Docker's gateways (such as `172.17.0.1`) are refused
+without it. For example, the line `LAKANA_EGRESS_REFUSED=192.168.1.0/24,10.0.0.7` refuses a
+home or office subnet and one more host; run `docker compose up -d` after changing it.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `LAKANA_EGRESS_REFUSED` in `.env`, which sets `LAKANA_LAUNCHER__EGRESS_REFUSED` on the `launcher` service | empty | Comma-separated IPv4 or IPv6 CIDR ranges or single addresses (an address means that one host), at most 64. Blank entries are ignored. |
+
+A malformed entry stops the launcher at start, and `docker compose logs launcher` names it:
+
+- ``LAKANA_LAUNCHER__EGRESS_REFUSED: `192.168.1.5/24` is not a network (host bits set; did you
+  mean 192.168.1.0/24?); list CIDR ranges or addresses separated by commas, such as
+  192.168.1.0/24,10.0.0.7.``
+- ``LAKANA_LAUNCHER__EGRESS_REFUSED: `lan` is not an IP address or CIDR range; …``
+- `LAKANA_LAUNCHER__EGRESS_REFUSED lists 65 ranges, more than 64; list wider ranges instead,
+  such as 192.168.0.0/16.`
+
+A build, task or connection test that tries a refused address fails with
+`<host>:<port> is not reachable through this proxy: it resolves to a loopback, link-local,
+metadata or internal address, which nothing Lakana starts may reach` (a task and a connection
+test add `give the connection an address outside the Lakana stack (lakana connection update)`);
+a task's database connection writes `lakana-relay: refused <host>:<port>: …` to the task's log.
+If the address is one the task should reach, take it out of `LAKANA_EGRESS_REFUSED`, or give the
+index or connection an address outside the refused ranges. With
+`LAKANA_EGRESS_UPSTREAM_PROXY`, the proxy refuses these addresses before it asks your company's
+proxy; that proxy resolves a name again, so keep internal ranges refused in its own rules too.
 
 ## Webhook network settings
 

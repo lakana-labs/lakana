@@ -1,13 +1,14 @@
 """The launcher's settings, read once from its environment (`LAKANA_LAUNCHER__*`).
 
-Every error names the variable and says what to write. None echoes a value: the ingestion roots
-are host paths an operator may not want in a log.
+Every error names the variable and says what to write. None echoes a value, except the entry of
+`EGRESS_REFUSED` it refuses (an address range, never a secret): the ingestion roots are host
+paths an operator may not want in a log.
 
 Only what a person needs to decide is a variable: the stack name, the allowed images, the allowed
-ingestion roots, the Unix socket, whether ``no-new-privileges`` is required, and the ceilings of a
-task's memory, CPUs and processes. Everything else (users, service names, the Docker socket's
-path, the state directory) is a module constant: a variable that nobody should change is a way to
-break the isolation.
+ingestion roots, the Unix socket, whether ``no-new-privileges`` is required, the ceilings of a
+task's memory, CPUs and processes, and the address ranges nothing Lakana starts may reach.
+Everything else (users, service names, the Docker socket's path, the state directory) is a
+module constant: a variable that nobody should change is a way to break the isolation.
 """
 
 from __future__ import annotations
@@ -81,8 +82,11 @@ KNOWN_SETTINGS = (
     "PROBE_MAX_ENTRIES",
     "NETWORK_RANGE",
     "MAX_TOTAL_MEMORY_MB",
+    "EGRESS_REFUSED",
 )
 """The names after the prefix that the launcher reads."""
+MAX_REFUSED = 64
+"""The most ranges `LAKANA_LAUNCHER__EGRESS_REFUSED` lists."""
 _CONSTANT_NOW = frozenset(
     {
         "TASK_USER",
@@ -172,6 +176,10 @@ class LauncherSettings:
     probe_max_entries
         Most entries the start-up probe looks at in one ingestion root; a root with more is
         unusable until the cap is raised.
+    egress_refused
+        Address ranges in CIDR form (an address as ``/32`` or ``/128``) that the egress proxy
+        and the relays refuse, besides Docker's gateways and the built-in refusals: the Docker
+        host's own LAN address or subnet, and any other network nothing Lakana starts may reach.
     work_volume
         The named volume of the worker's attempt directories; ``<stack>-task-work`` unless a
         test says otherwise. Not an environment variable.
@@ -193,6 +201,7 @@ class LauncherSettings:
     probe_max_entries: int = 100000
     network_range: str = NETWORK_RANGE
     max_total_memory_mb: int = 65536
+    egress_refused: tuple[str, ...] = ()
     docker_socket: Path = DOCKER_SOCKET
     state_dir: Path = STATE_DIR
     egress_key: Path = EGRESS_KEY
@@ -337,6 +346,53 @@ def _network_range(environ: Mapping[str, str]) -> str:
     if network.prefixlen > 24 or not any(network.subnet_of(block) for block in _PRIVATE_BLOCKS):
         raise SettingsError(rule)
     return str(network)
+
+
+def _egress_refused(environ: Mapping[str, str]) -> tuple[str, ...]:
+    """Read the address ranges egress refuses besides the built-in ones.
+
+    Parameters
+    ----------
+    environ
+        The environment.
+
+    Returns
+    -------
+    tuple of str
+        Each range in CIDR form, in the order given; an address becomes ``/32`` or ``/128``.
+        Empty when unset.
+
+    Raises
+    ------
+    SettingsError
+        For more than `MAX_REFUSED` entries, an entry that is not an address or a range, or a
+        range with host bits set; the message names the entry and the format.
+    """
+    name = f"{PREFIX}EGRESS_REFUSED"
+    entries = [entry.strip() for entry in (_get(environ, "EGRESS_REFUSED") or "").split(",")]
+    entries = [entry for entry in entries if entry]
+    if len(entries) > MAX_REFUSED:
+        raise SettingsError(
+            f"{name} lists {len(entries)} ranges, more than {MAX_REFUSED}; list wider ranges "
+            "instead, such as 192.168.0.0/16."
+        )
+    rule = "list CIDR ranges or addresses separated by commas, such as 192.168.1.0/24,10.0.0.7."
+    ranges: list[str] = []
+    for entry in entries:
+        try:
+            network = ipaddress.ip_network(entry, strict=True)
+        except ValueError:
+            try:
+                meant = ipaddress.ip_network(entry, strict=False)
+            except ValueError:
+                raise SettingsError(
+                    f"{name}: `{entry}` is not an IP address or CIDR range; {rule}"
+                ) from None
+            raise SettingsError(
+                f"{name}: `{entry}` is not a network (host bits set; did you mean {meant}?); {rule}"
+            ) from None
+        ranges.append(str(network))
+    return tuple(ranges)
 
 
 def _path(environ: Mapping[str, str], name: str, default: Path) -> Path:
@@ -532,4 +588,5 @@ def load_settings(environ: Mapping[str, str]) -> LauncherSettings:
         probe_max_entries=_number(environ, "PROBE_MAX_ENTRIES", 100000, 1, 1_000_000_000),
         network_range=_network_range(environ),
         max_total_memory_mb=max_total,
+        egress_refused=_egress_refused(environ),
     )

@@ -45,6 +45,7 @@ from typing import Any, Protocol, cast
 from urllib.parse import quote
 
 from lakana_worker.launcher.egress import PORT as EGRESS_PORT
+from lakana_worker.launcher.egress import REFUSED_FILE
 from lakana_worker.launcher.egress_token import mint, rotate_key
 from lakana_worker.launcher.engine import API_VERSION, Engine, EngineError
 from lakana_worker.launcher.requests import (
@@ -56,6 +57,7 @@ from lakana_worker.launcher.requests import (
     LABEL_OWNER,
     LABEL_SHARED,
     LABEL_STACK,
+    MAX_RELAY_REFUSED,
     BuildRequest,
     CleanupRequest,
     Refused,
@@ -425,6 +427,10 @@ class Launcher:
         self._reserved_mb = 0
         self._key: bytes | None = None
         self._egress_key: bytes | None = None
+        self._gateways: frozenset[str] = frozenset()
+        self._refused: tuple[str, ...] = ()
+        self._refused_text: str | None = None
+        self._refused_lock = threading.Lock()
         self._reaper_stop = threading.Event()
 
     # --- start-up -----------------------------------------------------------------------
@@ -436,7 +442,8 @@ class Launcher:
         ------
         StartError
             If the engine is older than `MIN_ENGINE_MAJOR` or cannot make an isolated network,
-            the option is ``on`` and does not work here, or an ingestion root fails its probe.
+            the option is ``on`` and does not work here, an ingestion root fails its probe, or
+            Docker's networks cannot be listed or the refused ranges cannot be written.
         EngineError
             If Docker cannot be reached.
         """
@@ -504,6 +511,148 @@ class Launcher:
                 "launcher, writable (see compose.yaml)."
             ) from None
         self._check_ingestion_roots()
+        self._write_refused(starting=True)
+
+    # --- refused ranges -----------------------------------------------------------------
+
+    def _docker_gateways(self) -> frozenset[str]:
+        """List the gateway address of every Docker network, whoever made it.
+
+        The Docker host answers on each of them (172.17.0.1 on the default bridge, one per
+        Compose network), so a service on the host that listens on every address would be
+        reachable from the proxy and the relays through them.
+
+        Returns
+        -------
+        frozenset of str
+            Each gateway as a ``/32`` or ``/128`` network; a `Gateway` that is not an address
+            is skipped.
+
+        Raises
+        ------
+        EngineError
+            If Docker does not list its networks.
+        """
+        found: set[str] = set()
+        for network in self._list("/networks", {}, "networks"):
+            ipam = network.get("IPAM") if isinstance(network, dict) else None
+            configs = ipam.get("Config") if isinstance(ipam, dict) else None
+            for config in configs if isinstance(configs, list) else []:
+                gateway = config.get("Gateway") if isinstance(config, dict) else None
+                try:
+                    address = ipaddress.ip_address(str(gateway))
+                except ValueError:
+                    continue
+                found.add(str(ipaddress.ip_network(address)))
+        return frozenset(found)
+
+    def _refused_ranges(self) -> tuple[str, ...]:
+        """Join the last known gateways, the operator's ranges and the launcher's own range.
+
+        Returns
+        -------
+        tuple of str
+            The ranges in CIDR form, IPv4 then IPv6, sorted, and merged where one holds or
+            adjoins another (a task network's gateway sits inside the launcher's range).
+        """
+        texts = (*self._gateways, *self.settings.egress_refused, self.settings.network_range)
+        networks = [ipaddress.ip_network(text) for text in texts]
+        v4 = [n for n in networks if isinstance(n, ipaddress.IPv4Network)]
+        v6 = [n for n in networks if isinstance(n, ipaddress.IPv6Network)]
+        merged = [*ipaddress.collapse_addresses(v4), *ipaddress.collapse_addresses(v6)]
+        return tuple(str(network) for network in merged)
+
+    def _write_refused(self, *, starting: bool = False) -> None:
+        """List Docker's gateways and write the refused ranges for the proxy, if they changed.
+
+        The file is ``refused.json`` next to the egress key, written to a temporary file and
+        renamed into place, mode 0640 in the key's group. The proxy reads it again when it
+        changes; each relay gets the ranges current at its start in its plan.
+
+        Parameters
+        ----------
+        starting
+            Whether the launcher is starting: a failure then stops it. Later, a failure keeps
+            the ranges known before and is logged.
+
+        Raises
+        ------
+        StartError
+            When starting, if Docker's networks cannot be listed or the file cannot be written.
+        """
+        path = self.settings.egress_key.parent / REFUSED_FILE
+        try:
+            gateways = self._docker_gateways()
+        except EngineError as exc:
+            if starting:
+                raise StartError(
+                    f"cannot list Docker's networks to find their gateways ({exc}); the egress "
+                    "proxy and the relays refuse every gateway (the Docker host answers there), "
+                    "so the launcher does not start without them. Check `docker compose logs "
+                    "launcher` and the Docker daemon."
+                ) from None
+            logger.warning(
+                "Kept the refused ranges known before: cannot list Docker's networks to find "
+                "their gateways (%s); a network made since is refused from the next listing on.",
+                exc,
+            )
+            return
+        with self._refused_lock:
+            self._gateways = gateways
+            self._refused = self._refused_ranges()
+            text = json.dumps({"refused": list(self._refused)})
+            if text == self._refused_text:
+                return
+            try:
+                self._replace_refused(path, text)
+            except OSError as exc:
+                reason = exc.strerror or type(exc).__name__
+                if starting:
+                    raise StartError(
+                        f"cannot write the refused ranges {path} ({reason}); mount the "
+                        "egress-key volume into the launcher, writable (see compose.yaml)."
+                    ) from None
+                logger.error(
+                    "Cannot write the refused ranges to %s (%s); the egress proxy keeps the ones "
+                    "written before.",
+                    path,
+                    reason,
+                )
+                return
+            self._refused_text = text
+
+    def _replace_refused(self, path: Path, text: str) -> None:
+        """Write the refused ranges to a temporary file, flushed, then rename it into place.
+
+        Parameters
+        ----------
+        path
+            ``refused.json``.
+        text
+            Its content.
+
+        Raises
+        ------
+        OSError
+            If the file cannot be written or renamed.
+        """
+        temporary = path.with_name(f".{path.name}.{secrets.token_hex(8)}.tmp")
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC
+        descriptor = os.open(temporary, flags, 0o640)
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                handle.write(text)
+                handle.flush()
+                os.fchmod(handle.fileno(), 0o640)
+                with contextlib.suppress(OSError):  # the key's directory sets the group already
+                    group = os.stat(self.settings.egress_key).st_gid
+                    if os.fstat(handle.fileno()).st_gid != group:
+                        os.fchown(handle.fileno(), -1, group)
+                os.fsync(handle.fileno())
+            os.replace(temporary, path)
+        finally:
+            with contextlib.suppress(OSError):
+                temporary.unlink()
 
     def _check_isolated_network(self, version: str) -> None:
         """Make an isolated network and see that Docker kept the mode, then remove it.
@@ -1118,9 +1267,23 @@ class Launcher:
         Raises
         ------
         EngineError
-            If Docker refuses a step, or the relay does not report ready within 10 seconds
-            (the message has its last line); the relay is removed first.
+            If Docker refuses a step, the refused ranges do not fit in the plan, or the relay
+            does not report ready within 10 seconds (the message has its last line); the relay
+            is removed first.
         """
+        with self._lock:
+            subnet = self._subnets[network]
+        with self._refused_lock:
+            refused = self._refused
+        try:
+            plan = relay_plan(routes, self.settings, subnet, refused)
+        except ValueError as exc:
+            raise EngineError(
+                f"a task's relay refuses at most {MAX_RELAY_REFUSED} address ranges, and the "
+                "gateways of Docker's networks, LAKANA_LAUNCHER__EGRESS_REFUSED and the "
+                f"launcher's range make {exc}; remove the Docker networks nobody uses "
+                "(docker network prune) or list wider ranges in LAKANA_LAUNCHER__EGRESS_REFUSED"
+            ) from None
         cid = self._service_container(self.settings.egress_service)
         status, info = self.engine.request("GET", f"/containers/{quote(cid, safe='')}/json")
         if status != 200 or not isinstance(info, dict) or not info.get("Image"):
@@ -1134,8 +1297,6 @@ class Launcher:
             ),
             "",
         )
-        with self._lock:
-            subnet = self._subnets[network]
         spec = relay_container_spec(
             self.settings,
             kind=kind,
@@ -1161,7 +1322,7 @@ class Launcher:
             status, body = self.engine.request("POST", f"/containers/{relay_cid}/start")
             if status != 204:
                 raise EngineError(f"Docker could not start the relay: {_message(body)}")
-            _send_input(stream, relay_plan(routes, self.settings, subnet))
+            _send_input(stream, plan)
             ready = threading.Event()
             last: list[str] = []
             reader = threading.Thread(
@@ -2025,6 +2186,9 @@ class Launcher:
         name = container_name(self.settings, kind, ident)
         self._create_network(name, kind, ident, owner, deadline)
         try:
+            # Before anything joins it: a network made since the last listing, by anyone, is
+            # refused from this run on.
+            self._write_refused()
             for service, alias in services:
                 cid = self._service_container(service)
                 status, body = self.engine.request(

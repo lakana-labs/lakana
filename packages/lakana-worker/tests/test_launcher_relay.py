@@ -131,7 +131,7 @@ def relay_on(tmp_path: Path) -> Iterator[Callable[..., RelayHarness]]:
     Yields
     ------
     callable
-        ``(routes, reachable=LOOPBACK, table=True) -> RelayHarness``.
+        ``(routes, reachable=LOOPBACK, table=True, refused=(range,)) -> RelayHarness``.
     """
     started: list[RelayHarness] = []
     route = tmp_path / "route"
@@ -142,12 +142,13 @@ def relay_on(tmp_path: Path) -> Iterator[Callable[..., RelayHarness]]:
         *,
         reachable: frozenset[object] = frozenset({LOOPBACK}),
         table: bool = True,
+        refused: tuple[str, ...] = ("10.207.0.0/16",),
     ) -> RelayHarness:
         subnet = ipaddress.IPv4Network(f"127.{next(_SUBNETS)}.{len(started)}.0/29")
         plan = RelayPlan(
             address=list(subnet.hosts())[-1],
             subnet=subnet,
-            internal=ipaddress.IPv4Network("10.207.0.0/16"),
+            refused=frozenset(ipaddress.ip_network(r) for r in refused),
             routes=tuple(RelayRoute(*r) for r in routes),
         )
         settings = EgressSettings(
@@ -396,53 +397,90 @@ _GOOD_ROUTE = '{"listen": 15001, "host": "db.example.com", "port": 5432}'
     ("plan", "message"),
     [
         ("{", "the plan is one JSON object"),
-        ("[]", "exactly address, subnet, internal and routes"),
+        ("[]", "exactly address, subnet, refused and routes"),
         (
-            '{"address": "10.0.0.6", "subnet": "10.0.0.0/29", "internal": "10.0.0.0/16", '
+            '{"address": "10.0.0.6", "subnet": "10.0.0.0/29", "refused": ["10.0.0.0/16"], '
             f'"routes": [{_GOOD_ROUTE}], "extra": 1}}',
-            "exactly address, subnet, internal and routes",
+            "exactly address, subnet, refused and routes",
         ),
         (
-            '{"address": "10.0.0.9", "subnet": "10.0.0.0/29", "internal": "10.0.0.0/16", '
+            '{"address": "10.0.0.9", "subnet": "10.0.0.0/29", "refused": ["10.0.0.0/16"], '
             f'"routes": [{_GOOD_ROUTE}]}}',
             "address must be a host address of subnet",
         ),
         (
-            '{"address": "10.0.0.7", "subnet": "10.0.0.0/29", "internal": "10.0.0.0/16", '
+            '{"address": "10.0.0.7", "subnet": "10.0.0.0/29", "refused": ["10.0.0.0/16"], '
             f'"routes": [{_GOOD_ROUTE}]}}',
             "address must be a host address of subnet",
         ),
         (
-            '{"address": "10.0.0.6", "subnet": "10.0.0.0/28", "internal": "10.0.0.0/16", '
+            '{"address": "10.0.0.6", "subnet": "10.0.0.0/28", "refused": ["10.0.0.0/16"], '
             f'"routes": [{_GOOD_ROUTE}]}}',
             "a /29",
         ),
         (
-            '{"address": "10.0.0.6", "subnet": "10.0.0.0/29", "internal": "x", "routes": []}',
-            "IPv4 in CIDR form",
+            '{"address": "x", "subnet": "10.0.0.0/29", "refused": ["10.0.0.0/16"], "routes": []}',
+            "address and subnet are IPv4",
+        ),
+        (
+            '{"address": "10.0.0.6", "subnet": "10.0.0.0/29", "refused": ["x"], '
+            f'"routes": [{_GOOD_ROUTE}]}}',
+            "refused: each entry is an IPv4 or IPv6 network in CIDR form",
+        ),
+        (
+            '{"address": "10.0.0.6", "subnet": "10.0.0.0/29", "refused": ["10.0.0.5/16"], '
+            f'"routes": [{_GOOD_ROUTE}]}}',
+            "refused: each entry is an IPv4 or IPv6 network in CIDR form",
+        ),
+        (
+            '{"address": "10.0.0.6", "subnet": "10.0.0.0/29", "refused": [7], '
+            f'"routes": [{_GOOD_ROUTE}]}}',
+            "refused: each entry is an IPv4 or IPv6 network in CIDR form",
+        ),
+        (
+            '{"address": "10.0.0.6", "subnet": "10.0.0.0/29", "refused": [], '
+            f'"routes": [{_GOOD_ROUTE}]}}',
+            "refused: 1 to 256",
+        ),
+        (
+            '{"address": "10.0.0.6", "subnet": "10.0.0.0/29", "refused": "10.0.0.0/16", '
+            f'"routes": [{_GOOD_ROUTE}]}}',
+            "refused: 1 to 256",
+        ),
+        pytest.param(
+            '{"address": "10.0.0.6", "subnet": "10.0.0.0/29", "refused": ['
+            + ", ".join(f'"10.{n // 256}.{n % 256}.1/32"' for n in range(257))
+            + f'], "routes": [{_GOOD_ROUTE}]}}',
+            "refused: 1 to 256",
+            id="257-refused",
         ),
         (
             '{"address": "10.0.0.6", "subnet": "10.0.0.0/29", "internal": "10.0.0.0/16", '
+            f'"routes": [{_GOOD_ROUTE}]}}',
+            "exactly address, subnet, refused and routes",
+        ),
+        (
+            '{"address": "10.0.0.6", "subnet": "10.0.0.0/29", "refused": ["10.0.0.0/16"], '
             '"routes": []}',
             "routes: 1 to 16",
         ),
         (
-            '{"address": "10.0.0.6", "subnet": "10.0.0.0/29", "internal": "10.0.0.0/16", '
+            '{"address": "10.0.0.6", "subnet": "10.0.0.0/29", "refused": ["10.0.0.0/16"], '
             '"routes": [{"listen": 99, "host": "db", "port": 5432}]}',
             "listen ports are 15001 to 15064",
         ),
         (
-            '{"address": "10.0.0.6", "subnet": "10.0.0.0/29", "internal": "10.0.0.0/16", '
+            '{"address": "10.0.0.6", "subnet": "10.0.0.0/29", "refused": ["10.0.0.0/16"], '
             '"routes": [{"listen": 15001, "host": "DB", "port": 5432}]}',
             "a lower-case host",
         ),
         (
-            '{"address": "10.0.0.6", "subnet": "10.0.0.0/29", "internal": "10.0.0.0/16", '
+            '{"address": "10.0.0.6", "subnet": "10.0.0.0/29", "refused": ["10.0.0.0/16"], '
             '"routes": [{"listen": 15001, "host": "db", "port": 0}]}',
             "a port from 1 to 65535",
         ),
         (
-            '{"address": "10.0.0.6", "subnet": "10.0.0.0/29", "internal": "10.0.0.0/16", '
+            '{"address": "10.0.0.6", "subnet": "10.0.0.0/29", "refused": ["10.0.0.0/16"], '
             f'"routes": [{_GOOD_ROUTE}, {_GOOD_ROUTE}]}}',
             "listen ports are distinct",
         ),
@@ -465,14 +503,21 @@ def test_a_malformed_plan_is_refused(plan: str, message: str) -> None:
 def test_a_plan_is_read() -> None:
     """The fields the launcher writes come back typed."""
     plan = parse_plan(
-        '{"address": "10.207.0.6", "subnet": "10.207.0.0/29", "internal": "10.207.0.0/16", '
+        '{"address": "10.207.0.6", "subnet": "10.207.0.0/29", '
+        '"refused": ["10.207.0.0/16", "172.17.0.1/32", "fd12:3456::1/128"], '
         f'"routes": [{_GOOD_ROUTE}]}}'
     )
 
     assert plan == RelayPlan(
         address=ipaddress.IPv4Address("10.207.0.6"),
         subnet=ipaddress.IPv4Network("10.207.0.0/29"),
-        internal=ipaddress.IPv4Network("10.207.0.0/16"),
+        refused=frozenset(
+            {
+                ipaddress.ip_network("10.207.0.0/16"),
+                ipaddress.ip_network("172.17.0.1/32"),
+                ipaddress.ip_network("fd12:3456::1/128"),
+            }
+        ),
         routes=(RelayRoute(15001, "db.example.com", 5432),),
     )
 
@@ -488,6 +533,60 @@ def test_main_refuses_a_bad_plan_on_stderr(
 
     assert exited.value.code == 2
     assert capsys.readouterr().err == "lakana-relay: cannot start: the plan is one JSON object\n"
+
+
+@pytest.mark.parametrize(
+    ("host", "answer", "refused"),
+    [
+        ("db.example.com", "172.17.0.1", ("10.207.0.0/16", "172.17.0.1/32")),  # docker0
+        ("crm.lan", "192.0.2.44", ("10.207.0.0/16", "192.0.2.0/24")),  # the operator's range
+    ],
+)
+def test_a_target_in_the_refused_ranges_is_not_dialled(
+    relay_on: Callable[..., RelayHarness],
+    monkeypatch: pytest.MonkeyPatch,
+    host: str,
+    answer: str,
+    refused: tuple[str, ...],
+) -> None:
+    """A Docker gateway or an operator's range from the plan is refused like the stack.
+
+    Parameters
+    ----------
+    relay_on
+        Starts the relay.
+    monkeypatch
+        For the resolver.
+    host
+        The connection's host.
+    answer
+        Where it resolves to.
+    refused
+        The plan's ranges.
+    """
+    _resolving(monkeypatch, {host: [answer]})
+    harness = relay_on([(15001, host, 5432)], refused=refused)
+
+    with harness.connect(15001) as client:
+        assert client.recv(1) == b""
+
+    assert harness.wait_for_log("refused") == (
+        f"refused {host}:5432: {egress.INTERNAL}; give the connection an address outside the "
+        "Lakana stack (lakana connection update)"
+    )
+
+
+def test_a_target_outside_the_refused_ranges_is_forwarded(
+    relay_on: Callable[..., RelayHarness], target: int
+) -> None:
+    """Ranges that do not hold the target change nothing."""
+    harness = relay_on(
+        [(15001, "localhost", target)],
+        refused=("10.207.0.0/16", "172.17.0.1/32", "192.0.2.0/24", "fd12:3456::1/128"),
+    )
+
+    with harness.connect(15001) as client:
+        assert _echoes(client, b"ping") == b"ping"
 
 
 def test_a_handler_thread_that_cannot_start_gives_its_slot_back(

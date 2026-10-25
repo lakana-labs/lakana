@@ -15,6 +15,7 @@ the workers, with its type and default, is in the [settings reference](settings.
 | `LAKANA_RUNNER` | `docker` (each Python task in a container of its own, isolated) or `local` (as the worker's own processes, not isolated); sets `LAKANA_RUN__RUNNER` on every worker. A bundle whose `.env` predates the key runs `docker`. With `local`, `launcher` and `egress` still start and need what they need (see [Python assets](../how-to/deploy-with-compose.md#python-assets)). |
 | `LAKANA_DOCKER_SOCKET` | The Docker socket the `launcher` service mounts (`/var/run/docker.sock`). |
 | `LAKANA_EGRESS_UPSTREAM_PROXY` | `http://[user:password@]host:port` of the proxy your network sends https through, for environment builds; empty for none. |
+| `LAKANA_EGRESS_REFUSED` | Address ranges no build, task or connection test may reach, besides the ones always refused: comma-separated CIDR ranges or addresses (`192.168.1.0/24,10.0.0.7`), at most 64; empty for none. Put this host's own LAN address or subnet here. Sets `LAKANA_LAUNCHER__EGRESS_REFUSED`; see [Addresses builds and tasks never reach](network-settings.md#addresses-builds-and-tasks-never-reach). A bundle whose `.env` predates the key refuses no extra range. |
 | `LAKANA_BIND` | The host address the server's port is published on (see [Exposing it](../how-to/deploy-with-compose.md#exposing-it)). |
 | `LAKANA_PORT` | The host port the server is published on. |
 | `LAKANA_WORKERS` | Worker replica count, used by `deploy: {replicas: ${LAKANA_WORKERS}}`. |

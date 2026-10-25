@@ -1075,10 +1075,11 @@ access-controlled on the server; `read_only=True` seals it (0400/0500) for a tas
   metadata addresses, nor to a network its own container is attached to (read from
   `/proc/net/route`: the Compose network and every build network; a table it cannot read means
   no direct connection at all, 503, and so does any line it cannot parse or an IPv6 table that
-  exists but cannot be read; a missing IPv6 table means IPv6 is off), resolving once and
-  connecting to a checked address (no DNS rebinding); other private addresses stay reachable,
-  because a company index often is one. The head must arrive whole within 10 s and 16 KiB,
-  strictly CRLF, one `Proxy-Authorization`, at most 64 lines; at most 256 connections (503
+  exists but cannot be read; a missing IPv6 table means IPv6 is off), nor to a range of
+  `refused.json` (below), resolving once and connecting to a checked address (no DNS rebinding);
+  other private addresses stay reachable, because a company index often is one. The head must
+  arrive whole within 10 s and 16 KiB, strictly CRLF, one `Proxy-Authorization`, at most 64
+  lines; at most 256 connections (503
   beyond, then closed without a thread), and at most 32 from one client network
   (`LAKANA_EGRESS__MAX_CONNECTIONS_PER_NETWORK`, #302): the most specific attached network that
   holds the client's address (a build's /29), or the address alone, counted from the accept,
@@ -1101,6 +1102,22 @@ access-controlled on the server; `read_only=True` seals it (0400/0500) for a tas
   (`python -I -S`, standard library only) and reads `/run/lakana-egress/egress.key` (0640,
   root:10001, in a set-group-id directory 2750 root:10001) from the `egress-key` volume, which
   only `launcher` (writes) and `egress` (read-only) mount.
+- **Docker's gateways and the operator's ranges.** The Docker host answers on the gateway of
+  every Docker network (172.17.0.1 on the default bridge, one per Compose network), outside the
+  networks the proxy is attached to, so a host service listening on `0.0.0.0` was reachable
+  through NAT. The launcher lists `GET /networks` (all networks, no label filter) at start and
+  at every network open (task, build, check: `_open_network`, after the network exists and
+  before anything joins it) and writes every `IPAM.Config[].Gateway` (IPv4 and IPv6, as /32 or
+  /128), `LAKANA_LAUNCHER__EGRESS_REFUSED` (comma-separated CIDRs or addresses, at most 64; a
+  malformed entry or host bits set stops the launcher naming the entry) and its own network
+  range, merged and sorted, to `refused.json` next to `egress.key` (temporary file and rename,
+  0640 in the key's group, only when the content changed). A failed listing stops the start;
+  later it keeps the last set and logs. The proxy reads the file like the key (again when its
+  inode, time or size change; a failed read is not remembered) and refuses every address in it
+  through `dial` (`connected | refused` into `forbidden`), direct or before an upstream proxy,
+  for builds, tasks and connection tests alike; a missing or malformed file means no connection
+  at all, 503 naming `docker compose logs launcher`. Each relay gets the same list, current at
+  its start, in its plan.
 - **Incident response.** When an environment may be poisoned (a malicious dependency or vendored
   package was deployed) or a worker may be compromised:
   1. Stop the workers (`docker compose stop worker`), so nothing builds or runs meanwhile.
@@ -1207,7 +1224,10 @@ start) authenticates a worker, compared with `hmac.compare_digest`.
   - a launcher bug is host root.
 - **Egress residuals, accepted:**
   - a direct connection may reach private addresses outside the networks the proxy is attached
-    to (a company index often is one; operator ranges are #303);
+    to, Docker's gateways and `LAKANA_LAUNCHER__EGRESS_REFUSED` (a company index often is one).
+    The Docker host's other addresses, its LAN address above all, are refused only when the
+    operator lists them; the docs tell operators to list them and to bind host services to
+    loopback. A network made after the last listing is refused from the next network open on;
   - with `LAKANA_EGRESS__UPSTREAM_PROXY` the upstream proxy decides after the proxy's local
     check (numeric hosts, and for tasks and connection tests names that resolve here). A name is
     resolved twice, here and at the company proxy, so a split-horizon or rebinding name can pass
@@ -1229,15 +1249,19 @@ connection's target.
   `relay_address(subnet)` (the /29's last host, alias `lakana-relay`) and the egress service's one
   other network (`_outward_network`; the launcher fails naming them unless there is exactly one).
 - **What it listens on.** Only that address, one port per route (plan: `address`, `subnet`,
-  `internal`, 1-16 `routes`). It closes any peer outside the /29 and allows at most 16 connections
-  per port (the 17th is closed with a line naming the limit). A port not in the plan is refused by
-  the kernel. A connection whose thread cannot start (`RuntimeError` at the process limit) is
-  closed with a line naming the cause and gives its slot back, so the port keeps serving.
+  1-256 `refused` ranges, 1-16 `routes`). It closes any peer outside the /29 and allows at most 16
+  connections per port (the 17th is closed with a line naming the limit). A port not in the plan
+  is refused by the kernel. A connection whose thread cannot start (`RuntimeError` at the
+  process limit) is closed with a line naming the cause and gives its slot back, so the port
+  keeps serving.
 - **The checks.** Each connection resolves its target once and dials the address that passed
   `dial`, the proxy's shared check: loopback in every spelling the C library reads (`127.1`,
   `0x7f.1`, `2130706433`, octal), link-local and the metadata address, multicast, unspecified,
   reserved, every network the relay is attached to (so the whole Compose stack: it sits on the
-  outward network), and the launcher's whole task-network range, attached or not. A refusal is
+  outward network), and the plan's `refused` ranges: every Docker network's gateway,
+  `LAKANA_LAUNCHER__EGRESS_REFUSED` and the launcher's whole task-network range, attached or not
+  (`relay_plan` adds the range when missing). More than 256 ranges fail the run before the relay
+  exists, naming `docker network prune`. A refusal is
   one line, `lakana-relay: refused <host>:<port>: <reason>; give the connection an address outside
   the Lakana stack (lakana connection update)`, which reaches the task's log. An unreadable table
   fails closed.
@@ -1254,7 +1278,6 @@ connection's target.
   run's id, owner and deadline (the reaper removes it like any labelled object; `cleanup` spares
   the relay of a live run). It must report `lakana-relay: ready` within 10 s or the run fails with
   `the task's relay did not start: <its last line>` and no task container exists.
-- **Later (Task 18b).** Docker's gateways and the operator's ranges are refused too.
 
 ## The artifact store (M5c2b)
 

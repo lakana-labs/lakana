@@ -133,6 +133,18 @@ Each cell is a summary. The page named in the last column has the detail. The ch
 
 ## Notes for the next release
 
+### Builds and tasks never reach Docker's gateways; list your host's LAN address
+
+Under the docker runner, builds, tasks and connection tests no longer reach the gateway address
+of any Docker network, such as `172.17.0.1`, where the Docker host itself answers. The host's
+other addresses are refused only when you list them: add the host's LAN address or subnet to
+`LAKANA_EGRESS_REFUSED` in `.env` (`LAKANA_EGRESS_REFUSED=192.168.1.0/24`), replace `compose.yaml`
+with this release's, which passes it to the launcher, and run `docker compose up -d`. Services
+on the Docker host that only Lakana's containers should not reach are safest bound to `127.0.0.1`.
+A package index or a source on one of those addresses is now refused (`... is not reachable
+through this proxy`): give it an address outside the refused ranges. See
+[Addresses builds and tasks never reach](../reference/network-settings.md#addresses-builds-and-tasks-never-reach).
+
 ### A Python asset's parameter `ctx` is not an input
 
 A parameter named `ctx` now receives the asset's context and is never an input. A project whose

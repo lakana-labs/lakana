@@ -1035,6 +1035,20 @@ def test_the_task_image_follows_the_lakana_image(tmp_path: Path, released: None)
     assert env["LAKANA_TASK_IMAGE"] == "ghcr.io/lakana-labs/lakana-task:0.4.0"
     assert (env["LAKANA_RUNNER"], env["LAKANA_DOCKER_SOCKET"]) == ("docker", "/var/run/docker.sock")
     assert env["LAKANA_EGRESS_UPSTREAM_PROXY"] == ""
+    assert env["LAKANA_EGRESS_REFUSED"] == ""
+
+
+def test_the_launcher_refuses_the_ranges_of_the_env_file(tmp_path: Path, released: None) -> None:
+    """`LAKANA_EGRESS_REFUSED` reaches the launcher; empty by default, with a comment above it."""
+    launcher = _services(tmp_path)["launcher"]
+    lines = (tmp_path / "b" / ".env").read_text().splitlines()
+
+    assert launcher["environment"]["LAKANA_LAUNCHER__EGRESS_REFUSED"] == (
+        "${LAKANA_EGRESS_REFUSED:-}"
+    )
+    at = lines.index("LAKANA_EGRESS_REFUSED=''")
+    assert lines[at - 1].startswith("# ") and "LAN address" in lines[at - 1]
+    assert lines[at - 2].startswith("LAKANA_EGRESS_UPSTREAM_PROXY=")
 
 
 def test_the_env_file_explains_the_four_task_container_keys(tmp_path: Path, released: None) -> None:

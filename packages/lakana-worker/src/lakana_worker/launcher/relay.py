@@ -6,14 +6,16 @@ attached to the task's network and to the network the egress proxy reaches out t
 listens only on its address in the task's /29, one port per route, at most 16 connections per
 port, and closes a connection from any other address. Each accepted connection resolves its
 target once and checks every address as the proxy does (never loopback, link-local, metadata,
-multicast, reserved, a network the relay is attached to or the launcher's range of task
-networks; no direct connection when the routes cannot be read), then dials through the proxy's
-`dial`, so an upstream proxy applies the same way. The relay never looks at the bytes: TLS, if
-any, stays end to end. Why a connection was refused goes to stderr, which the launcher copies
-into the task's log.
+multicast, reserved, a network the relay is attached to, or a range of the plan's `refused`:
+every Docker network's gateway, the operator's `LAKANA_LAUNCHER__EGRESS_REFUSED` and the
+launcher's range of task networks; no direct connection when the routes cannot be read), then
+dials through the proxy's `dial`, so an upstream proxy applies the same way. A connection that
+cannot get a thread (the container's process limit) is closed and its slot given back. The
+relay never looks at the bytes: TLS, if any, stays end to end. Why a connection was refused
+goes to stderr, which the launcher copies into the task's log.
 
 The plan arrives on stdin as one JSON object:
-``{"address", "subnet", "internal", "routes": [{"listen", "host", "port"}]}``.
+``{"address", "subnet", "refused": [cidr, ...], "routes": [{"listen", "host", "port"}]}``.
 Standard library only, like the launcher.
 """
 
@@ -38,8 +40,9 @@ from lakana_worker.launcher.egress import (
     load_settings,
     relay_bytes,
 )
-from lakana_worker.launcher.egress_token import valid_host
+from lakana_worker.launcher.egress_token import Network, valid_host
 from lakana_worker.launcher.requests import (
+    MAX_RELAY_REFUSED,
     MAX_RELAY_ROUTES,
     RELAY_MAX_PER_PORT,
     RELAY_PORTS,
@@ -68,15 +71,16 @@ class RelayPlan:
         Its address in the task's network; the only one it listens on.
     subnet
         The task's /29; a client from elsewhere is closed.
-    internal
-        The launcher's range of task networks, refused as a target.
+    refused
+        Ranges refused as a target besides the built-in ones: Docker's gateways, the
+        operator's ranges and the launcher's range of task networks.
     routes
         One per database connection.
     """
 
     address: ipaddress.IPv4Address
     subnet: ipaddress.IPv4Network
-    internal: ipaddress.IPv4Network
+    refused: frozenset[Network]
     routes: tuple[RelayRoute, ...]
 
 
@@ -116,16 +120,16 @@ def parse_plan(text: str) -> RelayPlan:
         data = json.loads(text)
     except ValueError:
         raise ValueError("the plan is one JSON object") from None
-    if not isinstance(data, dict) or set(data) != {"address", "subnet", "internal", "routes"}:
-        raise ValueError("the plan has exactly address, subnet, internal and routes")
+    if not isinstance(data, dict) or set(data) != {"address", "subnet", "refused", "routes"}:
+        raise ValueError("the plan has exactly address, subnet, refused and routes")
     try:
         subnet = ipaddress.IPv4Network(str(data["subnet"]))
-        internal = ipaddress.IPv4Network(str(data["internal"]))
         address = ipaddress.IPv4Address(str(data["address"]))
     except ValueError:
-        raise ValueError("address, subnet and internal are IPv4 in CIDR form") from None
+        raise ValueError("address and subnet are IPv4, subnet in CIDR form") from None
     if subnet.prefixlen != 29 or address not in subnet.hosts():
         raise ValueError("address must be a host address of subnet, a /29")
+    refused = _refused(data["refused"])
     raw = data["routes"]
     if not isinstance(raw, list) or not 1 <= len(raw) <= MAX_RELAY_ROUTES:
         raise ValueError(f"routes: 1 to {MAX_RELAY_ROUTES}")
@@ -145,7 +149,36 @@ def parse_plan(text: str) -> RelayPlan:
         routes.append(RelayRoute(listen, host, port))
     if len({route.listen for route in routes}) != len(routes):
         raise ValueError("routes: listen ports are distinct")
-    return RelayPlan(address, subnet, internal, tuple(routes))
+    return RelayPlan(address, subnet, refused, tuple(routes))
+
+
+def _refused(raw: object) -> frozenset[Network]:
+    """Read the plan's refused ranges.
+
+    Parameters
+    ----------
+    raw
+        The ``refused`` field.
+
+    Returns
+    -------
+    frozenset
+        The networks.
+
+    Raises
+    ------
+    ValueError
+        Unless it is a list of 1 to `MAX_RELAY_REFUSED` networks in CIDR form without host bits.
+    """
+    if not isinstance(raw, list) or not 1 <= len(raw) <= MAX_RELAY_REFUSED:
+        raise ValueError(f"refused: 1 to {MAX_RELAY_REFUSED} ranges")
+    rule = "refused: each entry is an IPv4 or IPv6 network in CIDR form"
+    if not all(isinstance(item, str) for item in raw):
+        raise ValueError(rule)
+    try:
+        return frozenset(ipaddress.ip_network(item, strict=True) for item in raw)
+    except ValueError:
+        raise ValueError(rule) from None
 
 
 def _handle(
@@ -165,7 +198,7 @@ def _handle(
     route
         Its route.
     plan
-        For the launcher's range.
+        For the refused ranges.
     settings
         For `dial`.
     slots
@@ -175,7 +208,7 @@ def _handle(
     """
     try:
         try:
-            upstream = dial(route.host, route.port, settings, refused=frozenset({plan.internal}))
+            upstream = dial(route.host, route.port, settings, refused=plan.refused)
         except DialRefused as exc:
             hint = f"; {_INTERNAL_HINT}" if exc.status == 403 else ""
             log(f"refused {route.host}:{route.port}: {exc.reason}{hint}")

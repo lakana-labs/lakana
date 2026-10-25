@@ -9,9 +9,13 @@ the client sends to the index. Nothing here knows what a build is: the token say
 may reach, so another kind of client (an ingestion task's connections) needs only other tokens.
 
 Whatever a token says, a direct connection never goes to loopback, link-local (the cloud
-metadata address), multicast, unspecified or reserved addresses, a known metadata address, or a
+metadata address), multicast, unspecified or reserved addresses, a known metadata address, a
 network the proxy's own container is attached to (the Compose network with the server, the
-database and the object store, and every build network). A host is resolved once and the
+database and the object store, and every build network), or a range the launcher writes to
+``refused.json`` next to the key: the gateway of every Docker network (the Docker host's own
+addresses there, such as 172.17.0.1), the operator's `LAKANA_LAUNCHER__EGRESS_REFUSED` and the
+launcher's range of task networks. Without a readable ``refused.json`` the proxy connects to
+nothing (503), and it reads the file again whenever it changes. A host is resolved once and the
 connection goes to an address that passed the check, so a name that resolves elsewhere a moment
 later (DNS rebinding) gains nothing. Private addresses outside those networks stay reachable: a
 company's package index is often one. With `LAKANA_EGRESS__UPSTREAM_PROXY` the proxy tunnels
@@ -39,11 +43,13 @@ import base64
 import binascii
 import contextlib
 import ipaddress
+import json
 import logging
 import os
 import selectors
 import socket
 import socketserver
+import stat
 import threading
 import time
 from collections.abc import Callable, Mapping
@@ -111,8 +117,57 @@ _NEVER = (
 metadata addresses outside link-local (Alibaba Cloud, AWS over IPv6)."""
 
 
+REFUSED_FILE = "refused.json"
+"""The file next to the key that holds ``{"refused": [cidr, ...]}``, written by the launcher."""
+_MAX_REFUSED_BYTES = 1 << 20
+_UNREADABLE_REFUSED = (
+    "the egress proxy cannot read the refused ranges the launcher writes; see "
+    "`docker compose logs launcher`"
+)
+
+
 class SettingsError(Exception):
     """A setting is malformed; the text names it."""
+
+
+def read_refused(path: Path) -> frozenset[Network] | None:
+    """Read the ranges the launcher wrote for the proxy to refuse.
+
+    Parameters
+    ----------
+    path
+        ``refused.json``: one object, ``{"refused": [cidr, ...]}``. A link is not followed.
+
+    Returns
+    -------
+    frozenset or None
+        The networks; `None` when the file is missing, a link, not a regular file, larger than
+        1 MiB, or not exactly that object with networks in CIDR form.
+    """
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+    except OSError:
+        return None
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            return None
+        raw = os.read(descriptor, _MAX_REFUSED_BYTES + 1)
+    except OSError:
+        return None
+    finally:
+        os.close(descriptor)
+    if len(raw) > _MAX_REFUSED_BYTES:
+        return None
+    try:
+        data = json.loads(raw.decode("utf-8"))
+        if not isinstance(data, dict) or set(data) != {"refused"}:
+            return None
+        ranges = data["refused"]
+        if not isinstance(ranges, list) or not all(isinstance(r, str) for r in ranges):
+            return None
+        return frozenset(ipaddress.ip_network(r, strict=True) for r in ranges)
+    except ValueError:  # also UnicodeDecodeError and json's JSONDecodeError
+        return None
 
 
 @dataclass(frozen=True)
@@ -137,6 +192,9 @@ class EgressSettings:
     reachable
         Networks a direct connection may reach although the built-in refusals cover them. Not
         a setting: tests reach an index on loopback with it.
+    refused_file
+        The ranges the launcher writes for the proxy to refuse; ``refused.json`` next to `key`
+        unless given. Not a setting either.
     route, route6
         The kernel's routing tables, read for the attached networks. Not settings either.
     """
@@ -150,6 +208,12 @@ class EgressSettings:
     reachable: frozenset[Network] = frozenset()
     route: Path = field(default_factory=lambda: _ROUTE)
     route6: Path = field(default_factory=lambda: _ROUTE6)
+    refused_file: Path = field(default=Path())
+
+    def __post_init__(self) -> None:
+        """Put the refused ranges' file next to the key unless a path is given."""
+        if self.refused_file == Path():
+            object.__setattr__(self, "refused_file", self.key.parent / REFUSED_FILE)
 
 
 def _port(text: str) -> int | None:
@@ -850,8 +914,9 @@ def dial(
     settings
         The upstream proxy, the routing tables and `reachable`.
     refused
-        Networks refused besides the built-in ones (the relay passes the launcher's range of
-        task networks).
+        Networks refused besides the built-in ones: Docker's gateways, the operator's ranges
+        and the launcher's range of task networks (the proxy reads them from
+        ``refused.json``, the relay from its plan).
     check_names
         Whether a name is resolved here and checked before it goes to the upstream proxy.
 
@@ -981,6 +1046,10 @@ class EgressServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
         self.threads = threading.BoundedSemaphore(settings.max_connections + _SPARE_THREADS)
         self._key: tuple[tuple[int, int, int], bytes | None] = ((-1, -1, -1), None)
         self._key_lock = threading.Lock()
+        self._refused: tuple[tuple[int, int, int], frozenset[Network] | None] = (
+            (-1, -1, -1),
+            None,
+        )
         self._count_lock = threading.Lock()
         self._threads_by: dict[Network, int] = {}
         self._slots_by: dict[Network, int] = {}
@@ -1194,6 +1263,28 @@ class EgressServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
                 self._key = (stamp, key)
             return self._key[1]
 
+    def refused(self) -> frozenset[Network] | None:
+        """Read the launcher's refused ranges, again whenever the file changed.
+
+        Returns
+        -------
+        frozenset or None
+            The ranges; `None` while the file is missing or malformed. A failed read is not
+            remembered: the next connection reads the file again.
+        """
+        try:
+            info = os.stat(self.settings.refused_file)
+        except OSError:
+            return None
+        stamp = (info.st_ino, info.st_mtime_ns, info.st_size)
+        with self._key_lock:
+            if self._refused[0] != stamp:
+                ranges = read_refused(self.settings.refused_file)
+                if ranges is None:
+                    return None
+                self._refused = (stamp, ranges)
+            return self._refused[1]
+
     def open(self, host: str, port: int, purpose: str) -> socket.socket:
         """Connect to a host for a client, directly or through the upstream proxy.
 
@@ -1217,10 +1308,20 @@ class EgressServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
         ------
         _Refused
             403 when the host resolves to forbidden addresses; 502 when it cannot be reached or
-            the upstream proxy refuses; 503 without a readable routing table.
+            the upstream proxy refuses; 503 without a readable routing table or refused ranges.
         """
+        refused = self.refused()
+        if refused is None:
+            logger.error(
+                "Refused %s:%d: cannot read the refused ranges at %s, which the launcher writes "
+                "at its start; no connection is made.",
+                host,
+                port,
+                self.settings.refused_file,
+            )
+            raise _Refused(503, _UNREADABLE_REFUSED)
         try:
-            return dial(host, port, self.settings, check_names=purpose != "build")
+            return dial(host, port, self.settings, refused=refused, check_names=purpose != "build")
         except DialRefused as exc:
             reason = exc.reason
             if exc.status == 403:
