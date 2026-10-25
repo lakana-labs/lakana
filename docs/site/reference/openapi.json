@@ -10292,6 +10292,230 @@
         }
       }
     },
+    "/api/v1/environments/{environment_name}/connections/{connection_name}/tests": {
+      "post": {
+        "tags": [
+          "connections"
+        ],
+        "summary": "Queue a test of a connection",
+        "description": "A worker checks that the connection's host can be reached with its settings and secret and records an outcome; poll the test with `GET .../tests/{test_id}`. Needs `MANAGE_CONNECTION` in the environment. Answers 404 when the environment or the connection does not exist and 409 while a test of the connection is queued or running.",
+        "operationId": "request_connection_test_api_v1_environments__environment_name__connections__connection_name__tests_post",
+        "parameters": [
+          {
+            "name": "environment_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Environment Name"
+            },
+            "description": "The environment."
+          },
+          {
+            "name": "connection_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connection Name"
+            },
+            "description": "The connection's name."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token."
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionTestOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token is missing, wrong, expired or revoked.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/environments/{environment_name}/connections/{connection_name}/tests/{test_id}": {
+      "get": {
+        "tags": [
+          "connections"
+        ],
+        "summary": "Show a test of a connection: its state and, once done, its outcome and message",
+        "description": "Needs `MANAGE_CONNECTION` in the environment. Answers 404 when the environment or the connection does not exist, or the connection has no such test.",
+        "operationId": "get_connection_test_api_v1_environments__environment_name__connections__connection_name__tests__test_id__get",
+        "parameters": [
+          {
+            "name": "environment_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Environment Name"
+            },
+            "description": "The environment."
+          },
+          {
+            "name": "connection_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connection Name"
+            },
+            "description": "The connection's name."
+          },
+          {
+            "name": "test_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Test Id"
+            },
+            "description": "The test's id."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionTestOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token is missing, wrong, expired or revoked.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/tasks/self/connections/{name}": {
       "get": {
         "tags": [
@@ -17506,6 +17730,69 @@
         ],
         "title": "ConnectionPage",
         "description": "One page of an environment's connections, newest first.\n\nParameters\n----------\nitems\n    The connections of this page.\nnext_cursor\n    Pass back as `?cursor=` to fetch the next page; `null` on the last page."
+      },
+      "ConnectionTestOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "state": {
+            "type": "string",
+            "title": "State"
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outcome"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "state",
+          "outcome",
+          "message",
+          "created_at",
+          "finished_at"
+        ],
+        "title": "ConnectionTestOut",
+        "description": "Response body for a connection test.\n\nParameters\n----------\nid\n    The test's id.\nstate\n    ``queued``, ``running`` or ``done``.\noutcome\n    What the test found once ``done``: ``ok``, ``dns``, ``refused``, ``timeout``, ``tls``,\n    ``not_allowed``, ``root_unavailable``, ``not_found``, ``credentials`` or ``failed``;\n    `null` before.\nmessage\n    What it found, redacted, at most 1,000 characters; `null` before it is done.\ncreated_at\n    When it was requested.\nfinished_at\n    When it was done; `null` before."
       },
       "ConnectionUpdate": {
         "properties": {

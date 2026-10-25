@@ -101,6 +101,7 @@ COMMANDS: dict[str, tuple[str, ...]] = {
     "connection show": ("connections.get",),
     "connection update": ("connections.get", "connections.update"),
     "connection delete": ("connections.delete",),
+    "connection test": ("connections.test",),
     "repo add": ("repositories.create",),
     "repo list": ("repositories.list",),
     "repo show": ("repositories.get",),

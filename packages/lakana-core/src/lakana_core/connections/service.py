@@ -27,10 +27,10 @@ import builtins
 import uuid
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, NoReturn
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -61,6 +61,9 @@ from lakana_core.models import (
     LIVE_ENVIRONMENT,
     AuditEventType,
     Connection,
+    ConnectionTest,
+    ConnectionTestOutcome,
+    ConnectionTestState,
     Environment,
     EnvironmentDeployment,
     JobVersion,
@@ -69,6 +72,7 @@ from lakana_core.models import (
     Secret,
     SecretUseKind,
 )
+from lakana_core.models.base import utcnow
 from lakana_core.pagination import Page, newest_first
 from lakana_core.projects.manifest import manifest_assets, read_entry_connections
 from lakana_core.secrets.keys import KeyProvider
@@ -840,6 +844,231 @@ class ConnectionService:
             )
             self._session.delete(row)
             self._session.commit()
+
+    def request_test(self, p: PrincipalRef, environment: str, name: str) -> ConnectionTest:
+        """Queue a check that a connection is reachable; a worker runs it.
+
+        Parameters
+        ----------
+        p
+            The acting principal.
+        environment
+            The environment's name.
+        name
+            The connection's name.
+
+        Returns
+        -------
+        ConnectionTest
+            The queued test.
+
+        Raises
+        ------
+        PermissionDenied
+            Without `MANAGE_CONNECTION` on the environment.
+        NotFoundError
+            If the environment or the connection does not exist.
+        ConflictError
+            While a test of this connection is queued or running.
+        """
+        scope = Securable.environment_scope(environment)
+        self._authz.authorize(p, Action.MANAGE_CONNECTION, scope)
+        env = self._environment(environment)
+        with refuse_concurrent_change(self._session, f"connection `{shown(name)}`"):
+            row = self._find(env, name, lock=True)
+            open_test = self._session.execute(
+                select(ConnectionTest.id).where(
+                    ConnectionTest.connection_id == row.id,
+                    ConnectionTest.state.in_(
+                        (ConnectionTestState.QUEUED, ConnectionTestState.RUNNING)
+                    ),
+                )
+            ).first()
+            if open_test is not None:
+                self._session.rollback()
+                raise ConflictError(
+                    f"a test of `{shown(name)}` is already running; see it with "
+                    f"lakana connection test {shown(name)} --env {shown(env.name)}"
+                )
+            test = ConnectionTest(
+                id=uuid.uuid4(),
+                connection_id=row.id,
+                environment_id=env.id,
+                requested_by=p.id,
+                state=ConnectionTestState.QUEUED,
+            )
+            self._session.add(test)
+            AuditService(self._session).record(
+                p.id,
+                AuditEventType.CONNECTION_TESTED,
+                securable=scope,
+                detail={
+                    "connection": row.name,
+                    "environment": env.name,
+                    "test_id": str(test.id),
+                    "state": ConnectionTestState.QUEUED.value,
+                },
+            )
+            self._session.commit()
+        return test
+
+    def test_result(
+        self, p: PrincipalRef, environment: str, name: str, test_id: str
+    ) -> ConnectionTest:
+        """Show one test of a connection.
+
+        Parameters
+        ----------
+        p
+            The acting principal.
+        environment
+            The environment's name.
+        name
+            The connection's name.
+        test_id
+            The test's id.
+
+        Returns
+        -------
+        ConnectionTest
+            The test.
+
+        Raises
+        ------
+        PermissionDenied
+            Without `MANAGE_CONNECTION` on the environment.
+        NotFoundError
+            If the environment or the connection does not exist, or the connection has no such
+            test (a test of another connection is not shown).
+        """
+        self._authz.authorize(p, Action.MANAGE_CONNECTION, Securable.environment_scope(environment))
+        env = self._environment(environment)
+        row = self._find(env, name)
+        try:
+            wanted = uuid.UUID(test_id)
+        except (ValueError, AttributeError, TypeError):
+            wanted = None
+        test = (
+            self._session.execute(
+                select(ConnectionTest).where(
+                    ConnectionTest.id == wanted, ConnectionTest.connection_id == row.id
+                )
+            ).scalar_one_or_none()
+            if wanted is not None
+            else None
+        )
+        if test is None:
+            raise NotFoundError(
+                f"connection `{shown(name)}` has no test `{shown(str(test_id))}`; "
+                f"`lakana connection test {shown(name)} --env {shown(env.name)}` starts one"
+            )
+        return test
+
+    def claim_test(
+        self, owner: str, *, lease_seconds: int = 60, now: datetime
+    ) -> ConnectionTest | None:
+        """Claim the oldest test that is queued or whose lease ran out, under a lease.
+
+        Parameters
+        ----------
+        owner
+            The claiming worker's id.
+        lease_seconds
+            How long the claim lasts.
+        now
+            The time of the claim; the lease runs from it.
+
+        Returns
+        -------
+        ConnectionTest or None
+            The test, now running; `None` when there is none to claim.
+        """
+        row = self._session.scalars(
+            select(ConnectionTest)
+            .where(
+                or_(
+                    ConnectionTest.state == ConnectionTestState.QUEUED,
+                    (ConnectionTest.state == ConnectionTestState.RUNNING)
+                    & (ConnectionTest.lease_expires_at <= now),
+                )
+            )
+            .order_by(ConnectionTest.created_at)
+            .limit(1)
+            .with_for_update(skip_locked=True)
+        ).first()
+        if row is None:
+            self._session.rollback()
+            return None
+        row.state = ConnectionTestState.RUNNING
+        row.lease_owner = owner
+        row.lease_expires_at = now + timedelta(seconds=lease_seconds)
+        self._session.commit()
+        return row
+
+    def finish_test(
+        self,
+        test_id: uuid.UUID,
+        owner: str,
+        lease_expires_at: datetime | None,
+        outcome: str,
+        message: str,
+    ) -> bool:
+        """Record what a test found, if the caller still holds its lease.
+
+        Parameters
+        ----------
+        test_id
+            The test's id.
+        owner
+            The worker that claimed it.
+        lease_expires_at
+            The lease expiry that claim set; the record must match it exactly.
+        outcome
+            A `ConnectionTestOutcome` value.
+        message
+            What was found, already redacted; cut to 1,000 characters.
+
+        Returns
+        -------
+        bool
+            `True` when it was recorded; `False` when the lease had changed hands (nothing
+            is changed then).
+        """
+        row = self._session.execute(
+            select(ConnectionTest).where(ConnectionTest.id == test_id).with_for_update()
+        ).scalar_one_or_none()
+        if (
+            row is None
+            or row.state != ConnectionTestState.RUNNING
+            or row.lease_owner != owner
+            or row.lease_expires_at != lease_expires_at
+        ):
+            self._session.rollback()
+            return False
+        env = self._session.get(Environment, row.environment_id)
+        connection = self._session.get(Connection, row.connection_id)
+        assert env is not None and connection is not None  # nosec B101 -- foreign keys
+        row.state = ConnectionTestState.DONE
+        found = ConnectionTestOutcome(outcome)
+        row.outcome = found
+        row.message = message[:1000]
+        row.finished_at = utcnow()
+        row.lease_owner = None
+        row.lease_expires_at = None
+        AuditService(self._session).record(
+            row.requested_by,
+            AuditEventType.CONNECTION_TESTED,
+            securable=Securable.environment_scope(env.name),
+            detail={
+                "connection": connection.name,
+                "environment": env.name,
+                "test_id": str(row.id),
+                "state": ConnectionTestState.DONE.value,
+                "outcome": found.value,
+            },
+        )
+        self._session.commit()
+        return True
 
     def _exists(self, env: Environment, name: str) -> bool:
         """Say whether an environment has a connection of this name.

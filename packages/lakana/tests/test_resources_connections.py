@@ -207,3 +207,176 @@ def test_a_task_fetches_its_connection_by_name_and_gets_the_body_as_sent() -> No
 def test_a_task_fetch_whose_answer_is_not_an_object_is_refused(body: Any) -> None:  # ruff: ignore[any-type]
     with pytest.raises(InvalidResponse, match="a connection"):
         _task_connections(body, []).get("crm-db")
+
+
+_TEST_ID = "6f1c1f0e-0a52-4b7b-9d0e-2f3a4b5c6d7e"
+_TEST_PATH = "/api/v1/environments/prod/connections/crm-db/tests"
+
+
+def _test_body(state: str, outcome: str | None = None, message: str | None = None) -> dict:
+    """Build a `ConnectionTestOut` body.
+
+    Parameters
+    ----------
+    state
+        ``queued``, ``running`` or ``done``.
+    outcome
+        The outcome once done.
+    message
+        The message once done.
+
+    Returns
+    -------
+    dict
+        The body.
+    """
+    return {
+        "id": _TEST_ID,
+        "state": state,
+        "outcome": outcome,
+        "message": message,
+        "created_at": "2026-10-25T12:00:00+00:00",
+        "finished_at": "2026-10-25T12:00:03+00:00" if state == "done" else None,
+    }
+
+
+class _Clock:
+    """A clock that moves only when the code sleeps; records every sleep."""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+        self.sleeps: list[float] = []
+
+    def monotonic(self) -> float:
+        """Read the clock.
+
+        Returns
+        -------
+        float
+            Seconds since the start.
+        """
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        """Move the clock.
+
+        Parameters
+        ----------
+        seconds
+            How long to sleep.
+        """
+        self.sleeps.append(seconds)
+        self.now += seconds
+
+
+def _scripted(
+    monkeypatch: pytest.MonkeyPatch, posted: dict, polled: list[dict], sent: list[httpx.Request]
+) -> tuple[Connections, _Clock]:
+    """Build the resource over a transport that answers a POST, then each GET in turn.
+
+    Parameters
+    ----------
+    monkeypatch
+        Replaces the clock.
+    posted
+        The POST answer.
+    polled
+        The GET answers; the last repeats.
+    sent
+        Receives every request.
+
+    Returns
+    -------
+    tuple
+        The resource and its clock.
+    """
+    clock = _Clock()
+    monkeypatch.setattr("lakana.resources.connections.time.sleep", clock.sleep)
+    monkeypatch.setattr("lakana.resources.connections.time.monotonic", clock.monotonic)
+    answers = iter(polled)
+    last = polled[-1]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent.append(request)
+        if request.method == "POST":
+            return httpx.Response(202, json=posted)
+        return httpx.Response(200, json=next(answers, last))
+
+    client = httpx.Client(transport=httpx.MockTransport(handler), base_url=_CONFIG.url)
+    return Connections(HttpTransport(_CONFIG, http_client=client)), clock
+
+
+def test_test_without_waiting_returns_the_queued_test(monkeypatch: pytest.MonkeyPatch) -> None:
+    sent: list[httpx.Request] = []
+    connections, clock = _scripted(monkeypatch, _test_body("queued"), [_test_body("queued")], sent)
+
+    test = connections.test("prod", "crm-db", wait=False)
+
+    assert [(r.method, r.url.path) for r in sent] == [("POST", _TEST_PATH)]
+    assert (test.id, test.state, test.outcome, test.message) == (_TEST_ID, "queued", None, None)
+    assert test.finished_at is None
+    assert clock.sleeps == []
+
+
+def test_test_polls_with_backoff_until_it_is_done(monkeypatch: pytest.MonkeyPatch) -> None:
+    sent: list[httpx.Request] = []
+    polled = [
+        _test_body("queued"),
+        _test_body("running"),
+        _test_body("running"),
+        _test_body("running"),
+        _test_body("done", "refused", "connection refused"),
+    ]
+    connections, clock = _scripted(monkeypatch, _test_body("queued"), polled, sent)
+
+    test = connections.test("prod", "crm-db")
+
+    assert (test.state, test.outcome, test.message) == ("done", "refused", "connection refused")
+    assert test.finished_at is not None
+    assert [(r.method, r.url.path) for r in sent] == [
+        ("POST", _TEST_PATH),
+        *[("GET", f"{_TEST_PATH}/{_TEST_ID}")] * 5,
+    ]
+    assert clock.sleeps == [0.5, 1.0, 2.0, 2.0, 2.0]
+
+
+def test_a_test_nobody_took_times_out_naming_the_worker(monkeypatch: pytest.MonkeyPatch) -> None:
+    connections, _ = _scripted(monkeypatch, _test_body("queued"), [_test_body("queued")], [])
+
+    with pytest.raises(TimeoutError) as raised:
+        connections.test("prod", "crm-db", timeout=60.0)
+
+    assert str(raised.value) == (
+        "the test of `crm-db` is still queued after 60s: no worker has taken it. A worker that "
+        "runs Python tasks runs connection tests; see `docker compose logs worker`. Look again "
+        f"with lakana connection test crm-db --env prod --id {_TEST_ID}"
+    )
+
+
+def test_a_test_a_worker_took_times_out_naming_its_log(monkeypatch: pytest.MonkeyPatch) -> None:
+    connections, _ = _scripted(monkeypatch, _test_body("queued"), [_test_body("running")], [])
+
+    with pytest.raises(TimeoutError) as raised:
+        connections.test("prod", "crm-db", timeout=10.0)
+
+    assert str(raised.value).startswith("the test of `crm-db` is still running after 10s: ")
+    assert "`docker compose logs worker`" in str(raised.value)
+    assert str(raised.value).endswith(f"--env prod --id {_TEST_ID}")
+
+
+def test_test_with_an_id_shows_that_test_without_queueing(monkeypatch: pytest.MonkeyPatch) -> None:
+    sent: list[httpx.Request] = []
+    done = _test_body("done", "ok", "reachable")
+    connections, _ = _scripted(monkeypatch, done, [done], sent)
+
+    test = connections.test("prod", "crm-db", test_id=_TEST_ID, wait=False)
+
+    assert [(r.method, r.url.path) for r in sent] == [("GET", f"{_TEST_PATH}/{_TEST_ID}")]
+    assert test.outcome == "ok"
+
+
+def test_an_odd_test_answer_is_an_invalid_response(monkeypatch: pytest.MonkeyPatch) -> None:
+    connections, _ = _scripted(monkeypatch, {"id": _TEST_ID}, [{"id": _TEST_ID}], [])
+
+    with pytest.raises(InvalidResponse):
+        connections.test("prod", "crm-db", wait=False)

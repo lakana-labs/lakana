@@ -141,6 +141,7 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "table_id",
         "target",
         "task_run_id",
+        "test_id",
         "type",
         "url",
         "use",

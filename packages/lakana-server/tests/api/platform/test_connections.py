@@ -511,8 +511,10 @@ def test_every_route_needs_a_credential(client: TestClient) -> None:
         client.get(f"{_BASE}/crm-db"),
         client.patch(f"{_BASE}/crm-db", json={"settings": {"user": "x"}}),
         client.delete(f"{_BASE}/crm-db"),
+        client.post(f"{_BASE}/crm-db/tests"),
+        client.get(f"{_BASE}/crm-db/tests/{uuid.uuid4()}"),
     )
-    assert [call.status_code for call in calls] == [401] * 5
+    assert [call.status_code for call in calls] == [401] * 7
 
 
 def test_secret_values_are_never_echoed_or_logged(
@@ -793,3 +795,63 @@ def test_binding_shows_every_host_the_secret_goes_to(
     assert bound.status_code == 200, bound.text
     assert bound.json()["use_target_url"] == hosts
     assert _details(client, AuditEventType.SECRET_BOUND)[-1]["url"] == hosts
+
+
+def test_a_test_is_queued_shown_and_refused_while_open(client_as: ClientAs) -> None:
+    """POST answers 202 with the queued test; a second is 409; GET shows it."""
+    engineer = client_as("data_engineer")
+    engineer.post(_BASE, json={**_PG, "secret_values": {"password": _VALUE}})
+
+    queued = engineer.post(f"{_BASE}/crm-db/tests")
+    again = engineer.post(f"{_BASE}/crm-db/tests")
+    shown = engineer.get(f"{_BASE}/crm-db/tests/{queued.json()['id']}")
+
+    assert queued.status_code == 202, queued.text
+    body = queued.json()
+    assert set(body) == {"id", "state", "outcome", "message", "created_at", "finished_at"}
+    assert (body["state"], body["outcome"], body["message"], body["finished_at"]) == (
+        "queued",
+        None,
+        None,
+        None,
+    )
+    assert again.status_code == 409
+    assert again.json()["detail"] == (
+        "a test of `crm-db` is already running; "
+        "see it with lakana connection test crm-db --env prod"
+    )
+    assert shown.status_code == 200 and shown.json() == body
+    assert _VALUE not in queued.text + shown.text
+
+
+def test_a_test_needs_manage_connection(client_as: ClientAs, created: dict[str, Any]) -> None:
+    """An analyst, a viewer and a role of another environment get 403 on both routes."""
+    queued = client_as("data_engineer").post(f"{_BASE}/crm-db/tests").json()
+
+    for who in ("analyst", "viewer", "other"):
+        sender = client_as(who)
+        assert sender.post(f"{_BASE}/crm-db/tests").status_code == 403, who
+        assert sender.get(f"{_BASE}/crm-db/tests/{queued['id']}").status_code == 403, who
+
+
+def test_a_test_of_another_connection_or_a_missing_connection_is_404(
+    client_as: ClientAs, created: dict[str, Any]
+) -> None:
+    """GET answers 404 for a test id of another connection, an odd id, or an unknown name."""
+    engineer = client_as("data_engineer")
+    engineer.post(_BASE, json={**_PG, "name": "other-db"})
+    queued = engineer.post(f"{_BASE}/crm-db/tests").json()
+
+    foreign = engineer.get(f"{_BASE}/other-db/tests/{queued['id']}")
+    odd = engineer.get(f"{_BASE}/crm-db/tests/not-an-id")
+    missing = engineer.post(f"{_BASE}/missing/tests")
+
+    assert [r.status_code for r in (foreign, odd, missing)] == [404, 404, 404]
+    assert foreign.json()["detail"] == (
+        f"connection `other-db` has no test `{queued['id']}`; "
+        "`lakana connection test other-db --env prod` starts one"
+    )
+    assert missing.json()["detail"] == (
+        "environment `prod` has no connection `missing`; `lakana connection list --env prod` "
+        "lists them"
+    )
