@@ -1,0 +1,238 @@
+"""Parse the bytes of one flat file into a polars DataFrame, and combine several.
+
+Used by `lakana.ingest.files` inside a task and, later, by ``lakana load`` for a local file.
+polars (and fastexcel for spreadsheets) are imported when a file is parsed, never when this
+module is imported, so the CLI can import it without the ``assets`` extra.
+"""
+
+from __future__ import annotations
+
+import io
+from collections.abc import Mapping, Sequence
+from typing import TYPE_CHECKING, Any
+
+from lakana.ingest._errors import IngestError, SourceError
+
+if TYPE_CHECKING:
+    import polars as pl
+
+FORMATS = ("csv", "parquet", "json", "ndjson", "xlsx", "xlsm", "xlsb", "xls", "ods")
+"""The formats `parse` reads."""
+SPREADSHEETS = frozenset({"xlsx", "xlsm", "xlsb", "xls", "ods"})
+"""The formats with sheets, read with the calamine engine (fastexcel)."""
+_WITH_HEADER = SPREADSHEETS | {"csv"}
+_ALIASES = {"jsonl": "ndjson"}
+_PROBLEM_CHARS = 500
+
+
+def format_of(name: str, given: str | None) -> str:
+    """Decide a file's format from `format=` or its extension.
+
+    Parameters
+    ----------
+    name
+        The file's name as messages show it (``<connection>/<path>``).
+    given
+        The asset's ``format=``, or `None`.
+
+    Returns
+    -------
+    str
+        One of `FORMATS`.
+
+    Raises
+    ------
+    IngestError
+        For an unknown ``format=`` or, without one, an extension that is not a format.
+    """
+    known = ", ".join(FORMATS)
+    if given is not None:
+        found = _ALIASES.get(given.lower(), given.lower())
+        if found not in FORMATS:
+            raise IngestError(f"format={given!r} is not a format files.read reads ({known})")
+        return found
+    extension = name.rsplit("/", 1)[-1].rpartition(".")[2].lower()
+    found = _ALIASES.get(extension, extension)
+    if "." not in name.rsplit("/", 1)[-1] or found not in FORMATS:
+        raise IngestError(f"cannot tell the format of `{name}`; pass format= ({known})")
+    return found
+
+
+def _problem(exc: BaseException) -> str:
+    """Keep the first line of a reader's message: the problem, not the reader's own advice.
+
+    Parameters
+    ----------
+    exc
+        What polars or fastexcel raised.
+
+    Returns
+    -------
+    str
+        At most 500 characters.
+    """
+    text = str(exc).strip().splitlines()
+    return (text[0] if text else type(exc).__name__)[:_PROBLEM_CHARS]
+
+
+def parse(
+    data: bytes,
+    *,
+    name: str,
+    format: str,
+    sheet: str | None = None,
+    header_row: int = 1,
+    schema: Mapping[str, Any] | None = None,
+) -> pl.DataFrame:
+    """Parse one file.
+
+    Parameters
+    ----------
+    data
+        The file's bytes.
+    name
+        ``<connection>/<path>``, for messages.
+    format
+        One of `FORMATS` (`format_of`).
+    sheet
+        A spreadsheet's sheet by name; the first sheet when `None`.
+    header_row
+        The 1-based row that holds the column names of a CSV file or a sheet; ``0`` for none
+        (the columns are then ``column_1``, ...).
+    schema
+        Column name to polars type for the columns whose type you set; the others are
+        inferred. Every column named must be in the file.
+
+    Returns
+    -------
+    polars.DataFrame
+        The rows.
+
+    Raises
+    ------
+    IngestError
+        For ``sheet=`` on a file without sheets, or ``header_row`` other than 1 on a file
+        without a header row.
+    SourceError
+        When the file cannot be parsed; the message names the file and the problem.
+    """
+    import polars as pl
+
+    if sheet is not None and format not in SPREADSHEETS:
+        raise IngestError(f"sheet= applies to spreadsheets; `{name}` is {format}")
+    if header_row != 1 and format not in _WITH_HEADER:
+        raise IngestError(
+            f"header_row= applies to CSV files and spreadsheets; `{name}` is {format}"
+        )
+    if header_row < 0:
+        raise IngestError("header_row= is the 1-based row of the column names, or 0 for none")
+    overrides = dict(schema) if schema else None
+    errors: tuple[type[BaseException], ...] = (pl.exceptions.PolarsError, ValueError)
+    source = io.BytesIO(data)
+    try:
+        if format == "csv":
+            has_header, skip_rows = header_row > 0, max(header_row - 1, 0)
+            # Polars 1 applies an override whose name is not in the header to a column by
+            # position; the header is read first so a missing name is refused on every version.
+            header = pl.read_csv(
+                io.BytesIO(data), n_rows=0, has_header=has_header, skip_rows=skip_rows
+            ).columns
+            _require_columns(name, overrides, header)
+            frame = pl.read_csv(
+                source,
+                has_header=has_header,
+                skip_rows=skip_rows,
+                schema_overrides=overrides,
+                infer_schema_length=10_000,
+            )
+        elif format == "parquet":
+            frame = pl.read_parquet(source)
+            present = {k: v for k, v in (overrides or {}).items() if k in frame.columns}
+            frame = frame.cast(present, strict=True) if present else frame  # ty: ignore[invalid-argument-type]
+        elif format == "json":
+            frame = pl.read_json(source, schema_overrides=overrides)
+        elif format == "ndjson":
+            frame = pl.read_ndjson(source, schema_overrides=overrides)
+        else:
+            import fastexcel
+
+            errors = (*errors, fastexcel.FastExcelError)
+            frame = pl.read_excel(
+                source,
+                sheet_name=sheet,
+                engine="calamine",
+                has_header=header_row > 0,
+                read_options={"header_row": header_row - 1} if header_row > 0 else {},
+                schema_overrides=overrides,
+            )
+    except errors as exc:
+        raise SourceError(
+            f"`{name}`: {_problem(exc)}; check the file, or pass schema= with the column's type"
+        ) from None
+    _require_columns(name, overrides, frame.columns)
+    return frame
+
+
+def _require_columns(name: str, schema: Mapping[str, Any] | None, columns: Sequence[str]) -> None:
+    """Refuse a column ``schema=`` names that the file does not have.
+
+    Parameters
+    ----------
+    name
+        The file, for the message.
+    schema
+        ``schema=``, or `None`.
+    columns
+        The file's columns.
+
+    Raises
+    ------
+    SourceError
+        Naming the file and the first missing column.
+    """
+    missing = [column for column in schema or {} if column not in columns]
+    if missing:
+        raise SourceError(f"`{name}` has no column {missing[0]!r}, which schema= names")
+
+
+def combine(frames: Sequence[pl.DataFrame], names: Sequence[str]) -> pl.DataFrame:
+    """Combine the files' rows, filling a column a file lacks with nulls.
+
+    Parameters
+    ----------
+    frames
+        One frame per file, in file order.
+    names
+        The files' names, for the message.
+
+    Returns
+    -------
+    polars.DataFrame
+        All rows; a column's type is the common type of its files' types.
+
+    Raises
+    ------
+    SourceError
+        When a column's types in two files have no common type; names the file and the column.
+    """
+    import polars as pl
+
+    try:
+        return pl.concat(frames, how="diagonal_relaxed")
+    except pl.exceptions.PolarsError:
+        pass
+    combined = frames[0]
+    for frame, name in zip(frames[1:], names[1:], strict=True):
+        for column in frame.columns:
+            if column not in combined.columns:
+                continue
+            try:
+                pl.concat([combined.select(column), frame.select(column)], how="vertical_relaxed")
+            except pl.exceptions.PolarsError:
+                raise SourceError(
+                    f"`{name}`: column {column!r} is {frame.schema[column]}, which does not fit "
+                    f"{combined.schema[column]} in the files before it; pass schema= with one "
+                    "type for it, or narrow the pattern"
+                ) from None
+        combined = pl.concat([combined, frame], how="diagonal_relaxed")
+    return combined  # pragma: no cover -- diagonal_relaxed failed, so some pair conflicts

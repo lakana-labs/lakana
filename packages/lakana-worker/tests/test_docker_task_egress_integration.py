@@ -1120,6 +1120,34 @@ def items():
 a database socket through the relay; it prints what it reached and fails on purpose."""
 
 
+_FILES_ASSET = """import json
+
+from lakana import asset
+from lakana.ingest import _directory, files
+
+
+@asset(connections=["exports"])
+def items():
+    ids = files.read("exports", "**/*.csv", since=None).column("id").to_pylist()
+    try:
+        _directory.read("/ingest/shared", "in", "link.csv", max_bytes=10_000)
+        link_refused = False
+    except _directory.DirectoryError:
+        link_refused = True
+    try:
+        open("/ingest/shared/in/new.csv", "w").close()
+        write_refused = False
+    except OSError:
+        write_refused = True
+    print("E2E " + json.dumps(
+        {"ids": ids, "link_refused": link_refused, "write_refused": write_refused}
+    ), flush=True)
+    raise RuntimeError("the probe is done")
+"""
+"""An ingestion asset that reads a mounted directory root with `files.read`; it prints what it
+saw and fails on purpose."""
+
+
 def _wheelhouse() -> Path:
     """Find the wheel directory the real `lakana` is installed from, or skip.
 
@@ -1285,5 +1313,94 @@ def test_an_ingestion_asset_reaches_its_declared_connections_and_nothing_else(
     assert "403" in seen["undeclared"], seen
     assert seen["database"] == "N"
     assert seen["relay"] == "lakana-relay:15001"
+    assert outcome.succeeded is False
+    assert not [name for name in sources.stack.labelled() if "task" in name]
+
+
+def test_files_read_reads_a_mounted_root_and_never_follows_a_link(
+    sources: Sources, worker_side: _Mirrored
+) -> None:
+    """A directory connection under the Docker runner: read-only mount, links skipped.
+
+    The root is a host directory the launcher mounts at ``/ingest/shared``; below it a link to
+    ``/etc/passwd`` and a link to the parent. `files.read` returns the two regular files, lists
+    both links as skipped on stderr, the walker refuses to read the link, and the mount takes no
+    write.
+    """
+    _real_environment(sources.stack, _wheelhouse())
+    host_dir = worker_side.root / f"ingest-{uuid.uuid4().hex[:8]}"
+    (host_dir / "in" / "sub").mkdir(parents=True, mode=0o755)
+    for directory in (host_dir, host_dir / "in", host_dir / "in" / "sub"):
+        directory.chmod(0o755)
+    for relative, text in (("in/a.csv", "id\n1\n"), ("in/sub/b.csv", "id\n2\n")):
+        (host_dir / relative).write_text(text)
+        (host_dir / relative).chmod(0o644)
+    (host_dir / "in" / "link.csv").symlink_to("/etc/passwd")
+    (host_dir / "in" / "up").symlink_to("..")
+    declared = [("exports", ConnectionKind.DIRECTORY, {"root": "shared", "path": "in"}, {})]
+    plan = connection_plan(declared, isolated=True, root_dir=lambda root, name: f"/ingest/{root}")
+    _serve_connections(
+        sources.stack,
+        {
+            "exports": {
+                "name": "exports",
+                "kind": "directory",
+                "address": {"root": "shared", "path": "in"},
+                "settings": {},
+                "endpoints": [],
+                "secret": None,
+            }
+        },
+    )
+    attempt = worker_side.root / f"attempt-{uuid.uuid4().hex[:8]}"
+    attempt.mkdir(mode=0o700)
+    (attempt / "code").mkdir(mode=0o755)
+    (attempt / "code" / "items.py").write_text(_FILES_ASSET)
+    launcher = sources.stack.launcher
+    assert launcher is not None
+    runner = DockerRunner(
+        cast("LauncherClient", worker_side),
+        owner="test",
+        memory_mb=512,
+        cpus=1.0,
+        pids=128,
+        kill_grace=2.0,
+        trust=sources.bundle,
+    )
+    task = PythonTask(
+        code_dir=attempt / "code",
+        asset_path="items.py",
+        inputs={},
+        table="raw.items",
+        environment="dev",
+        server_url=f"http://{launcher.settings.server_alias}:8000",
+        token="t" * 48,
+        timeout_seconds=120,
+        venv=Path("/env"),
+        expected_snapshot_id="none",
+        attempt_dir=attempt,
+        environment_key=_E2E_KEY,
+        python=PYTHON,
+        connections=plan.routing,
+        egress=plan.egress,
+        relay=plan.relay,
+        roots=tuple(plan.root_users),
+        root_users=plan.root_users,
+    )
+    output = bytearray()
+
+    with sources.stack.configured(ingestion_roots={"shared": str(host_dir)}):
+        outcome = runner.run(task, output.extend, StopSignal())
+
+    text = output.decode(errors="replace")
+    reports = [line for line in text.splitlines() if line.startswith("E2E ")]
+    assert reports, text
+    seen = json.loads(reports[-1].removeprefix("E2E "))
+    assert sorted(seen["ids"]) == [1, 2]
+    assert seen["link_refused"] is True
+    assert seen["write_refused"] is True
+    assert "skipped 'link.csv'" in text
+    assert "skipped 'up'" in text
+    assert "root:x:" not in text
     assert outcome.succeeded is False
     assert not [name for name in sources.stack.labelled() if "task" in name]

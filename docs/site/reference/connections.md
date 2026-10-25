@@ -411,6 +411,9 @@ def customers() -> pl.DataFrame:
 `endpoints` (each `host`, `port` and `role`, `service` or `token`), `secret`, and three fields
 that say how this task reaches the source: `proxy_url`, `relay_address` and `root_path`.
 
+A `directory` connection is read with [`files.read`](ingest.md#filesread), which returns the
+files below its path as a table and never follows a symbolic link out of the root.
+
 ### What a task reaches, and how
 
 When an attempt starts, the worker reads the connections the asset declares and gives the task

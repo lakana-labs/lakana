@@ -65,6 +65,7 @@ nav:
       - reference/artifacts.md
       - reference/package-indexes.md
       - reference/connections.md
+      - reference/ingest.md
       - reference/ci-trust-rules.md
       - reference/checks.md
       - reference/descriptions.md

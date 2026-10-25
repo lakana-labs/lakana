@@ -33,5 +33,5 @@ class ServerExtraMetadataHook(MetadataHookInterface):
         version = metadata["version"]
         metadata["optional-dependencies"] = {
             "server": [f"lakana-server=={version}", f"lakana-worker=={version}"],
-            "assets": ["polars>=1.30"],
+            "assets": ["polars>=1.30", "fastexcel>=0.21"],
         }

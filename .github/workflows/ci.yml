@@ -192,6 +192,7 @@ jobs:
             packages/lakana-core/tests/test_projects_python_assets.py \
             packages/lakana-server/tests/sdk/test_sdk_data_plane.py \
             packages/lakana/tests/test_resources_data.py \
+            packages/lakana/tests/test_ingest_files.py \
             packages/lakana/tests/test_runner.py \
             packages/lakana-worker/tests/test_python_tasks.py \
             packages/lakana-worker/tests/test_runners.py \
