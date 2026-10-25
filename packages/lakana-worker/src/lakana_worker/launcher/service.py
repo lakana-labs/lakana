@@ -51,6 +51,7 @@ from lakana_worker.launcher.requests import (
     DEADLINE_MARGIN,
     EGRESS_MISSING,
     LABEL_DEADLINE,
+    LABEL_ID,
     LABEL_KIND,
     LABEL_OWNER,
     LABEL_SHARED,
@@ -58,6 +59,7 @@ from lakana_worker.launcher.requests import (
     BuildRequest,
     CleanupRequest,
     Refused,
+    RelayRoute,
     Request,
     RunRequest,
     StatusRequest,
@@ -70,6 +72,9 @@ from lakana_worker.launcher.requests import (
     ingestion_probe_spec,
     network_spec,
     probe_container_spec,
+    relay_address,
+    relay_container_spec,
+    relay_plan,
     run_container_spec,
     volume_spec,
 )
@@ -188,6 +193,29 @@ class _Live:
     container_id: str | None = None
     stopped: threading.Event = field(default_factory=threading.Event)
     timed_out: threading.Event = field(default_factory=threading.Event)
+
+
+_RELAY_READY_SECONDS = 10.0
+_RELAY_LINE = "lakana-relay: "
+
+
+@dataclass
+class _Relay:
+    """A task's running relay.
+
+    Parameters
+    ----------
+    cid
+        Its container.
+    stream
+        Its attached stream, read by `reader`.
+    reader
+        The thread that copies its lines into the task's log.
+    """
+
+    cid: str
+    stream: socket.socket
+    reader: threading.Thread
 
 
 def _expired(labels: object, moment: float) -> bool:
@@ -895,6 +923,19 @@ class Launcher:
             raise Refused(EGRESS_MISSING)
         if request.egress and self._egress_key is None:
             raise RuntimeError("the egress key is only available after start()")
+        lock = threading.Lock()
+
+        def emit_locked(line: dict[str, object]) -> None:
+            """Send one line; the relay's reader and the task's stream share the caller.
+
+            Parameters
+            ----------
+            line
+                The line.
+            """
+            with lock:
+                emit(line)
+
         name = container_name(self.settings, "task", request.task)
         live = self._register(
             name, request.owner, request.kill_grace_seconds, request.limits.memory_mb
@@ -911,6 +952,7 @@ class Launcher:
             if request.egress:
                 services.append((self.settings.egress_service, "egress"))
             network = self._open_network("task", request.task, request.owner, services, deadline)
+            relay: _Relay | None = None
             try:
                 proxy_url = (
                     self._proxy_url(
@@ -922,6 +964,16 @@ class Launcher:
                     if request.egress
                     else None
                 )
+                if request.relay:
+                    relay = self._start_relay(
+                        "task",
+                        request.task,
+                        request.owner,
+                        request.relay,
+                        network,
+                        emit_locked,
+                        deadline,
+                    )
                 spec = run_container_spec(
                     request,
                     self.settings,
@@ -939,10 +991,12 @@ class Launcher:
                     spec,
                     live,
                     request.limits.timeout_seconds,
-                    emit,
+                    emit_locked,
                     stdin=request.stdin,
                 )
             finally:
+                if relay is not None:
+                    self._stop_relay(relay)
                 self.close_network(network)
         finally:
             self.forget(name, request.owner, live)
@@ -988,6 +1042,185 @@ class Launcher:
         except ValueError as exc:
             raise Refused(f"egress: {exc}") from None
         return f"http://lakana:{token}@egress:{EGRESS_PORT}"
+
+    def _outward_network(self, info: dict[str, Any]) -> str:
+        """Find the network the egress service reaches out through.
+
+        Parameters
+        ----------
+        info
+            ``GET /containers/{egress}/json``.
+
+        Returns
+        -------
+        str
+            The one network of the egress container that the launcher did not create.
+
+        Raises
+        ------
+        EngineError
+            Unless there is exactly one such network.
+        """
+        names = list((info.get("NetworkSettings") or {}).get("Networks") or {})
+        outward = []
+        for network in names:
+            status, body = self.engine.request("GET", f"/networks/{quote(network, safe='')}")
+            if status != 200 or not isinstance(body, dict):
+                raise EngineError(f"Docker could not describe network {network}: {_message(body)}")
+            if LABEL_STACK not in (body.get("Labels") or {}):
+                outward.append(network)
+        if len(outward) != 1:
+            raise EngineError(
+                "a task's relay goes out through the egress service's own network, and the "
+                f"egress service is on {len(outward)} networks the launcher did not create "
+                f"({', '.join(sorted(outward)) or 'none'}); attach it to exactly one "
+                "(the Compose bundle's `default`)"
+            )
+        return outward[0]
+
+    def _start_relay(
+        self,
+        kind: str,
+        ident: str,
+        owner: str,
+        routes: tuple[RelayRoute, ...],
+        network: str,
+        emit: Emit,
+        deadline: int,
+    ) -> _Relay:
+        """Start the relay of a run or a check and wait until it listens.
+
+        Parameters
+        ----------
+        kind
+            ``task`` or ``check``.
+        ident
+            The run's or check's id.
+        owner
+            The worker that asked.
+        routes
+            The routes.
+        network
+            The run's network, open already.
+        emit
+            Receives every line the relay writes after ``ready``, for the run's log.
+        deadline
+            The run's deadline label.
+
+        Returns
+        -------
+        _Relay
+            The running relay; `_stop_relay` removes it.
+
+        Raises
+        ------
+        EngineError
+            If Docker refuses a step, or the relay does not report ready within 10 seconds
+            (the message has its last line); the relay is removed first.
+        """
+        cid = self._service_container(self.settings.egress_service)
+        status, info = self.engine.request("GET", f"/containers/{quote(cid, safe='')}/json")
+        if status != 200 or not isinstance(info, dict) or not info.get("Image"):
+            raise EngineError(f"Docker could not describe the egress service: {_message(info)}")
+        outward = self._outward_network(info)
+        upstream = next(
+            (
+                item.split("=", 1)[1].strip()
+                for item in (info.get("Config") or {}).get("Env") or []
+                if item.startswith("LAKANA_EGRESS__UPSTREAM_PROXY=")
+            ),
+            "",
+        )
+        with self._lock:
+            subnet = self._subnets[network]
+        spec = relay_container_spec(
+            self.settings,
+            kind=kind,
+            ident=ident,
+            owner=owner,
+            image=str(info["Image"]),
+            upstream=upstream or None,
+            address=relay_address(subnet),
+            no_new_privileges=self.no_new_privileges,
+            deadline=deadline,
+        )
+        relay_cid = self._create(container_name(self.settings, "relay", ident), spec)
+        stream: socket.socket | None = None
+        try:
+            status, body = self.engine.request(
+                "POST",
+                f"/networks/{quote(outward, safe='')}/connect",
+                {"Container": relay_cid, "EndpointConfig": {}},
+            )
+            if status != 200:
+                raise EngineError(f"Docker could not attach the relay: {_message(body)}")
+            stream = self.engine.attach(relay_cid, stdin=True)
+            status, body = self.engine.request("POST", f"/containers/{relay_cid}/start")
+            if status != 204:
+                raise EngineError(f"Docker could not start the relay: {_message(body)}")
+            _send_input(stream, relay_plan(routes, self.settings, subnet))
+            ready = threading.Event()
+            last: list[str] = []
+            reader = threading.Thread(
+                target=self._read_relay, args=(stream, ready, last, emit), daemon=True
+            )
+            reader.start()
+            if not ready.wait(_RELAY_READY_SECONDS):
+                said = last[-1] if last else "it wrote nothing"
+                raise EngineError(f"the task's relay did not start: {said}")
+        except BaseException:
+            if stream is not None:
+                stream.close()
+            self._remove_container(relay_cid)
+            raise
+        return _Relay(relay_cid, stream, reader)
+
+    @staticmethod
+    def _read_relay(
+        stream: socket.socket, ready: threading.Event, last: list[str], emit: Emit
+    ) -> None:
+        """Copy a relay's lines: ``ready`` releases the run, every later line goes to its log.
+
+        Parameters
+        ----------
+        stream
+            The relay's attached stream.
+        ready
+            Set at the ``ready`` line.
+        last
+            Receives the lines before ``ready``, for the reason a relay did not start.
+        emit
+            Sends a line to the caller; a caller that has gone is left to the run to notice.
+        """
+        pending = b""
+        try:
+            for payload in read_frames(stream):
+                pending += payload
+                while b"\n" in pending:
+                    raw, pending = pending.split(b"\n", 1)
+                    line = raw.decode("utf-8", "replace")
+                    if not ready.is_set():
+                        if line == f"{_RELAY_LINE}ready":
+                            ready.set()
+                        else:
+                            last.append(line.removeprefix(_RELAY_LINE)[:500])
+                        continue
+                    with contextlib.suppress(Exception):
+                        emit({"log": base64.b64encode(raw + b"\n").decode("ascii")})
+        except OSError:
+            return  # the relay was removed
+
+    def _stop_relay(self, relay: _Relay) -> None:
+        """Remove a task's relay; its stream ends and its reader with it.
+
+        Parameters
+        ----------
+        relay
+            The relay.
+        """
+        self._remove_container(relay.cid)
+        relay.stream.close()
+        relay.reader.join(timeout=5)
 
     @staticmethod
     def _not_built(python: str, environment: str) -> EngineError:
@@ -1582,6 +1815,10 @@ class Launcher:
         removed = 0
         for container in containers:
             names = {str(n).lstrip("/") for n in container.get("Names", [])}
+            found = container.get("Labels") or {}
+            if found.get(LABEL_KIND) == "relay":
+                # A relay belongs to its task: it stays while the task's run is live.
+                names.add(container_name(self.settings, "task", str(found.get(LABEL_ID, ""))))
             if names & live:
                 continue
             self._remove_container(str(container["Id"]))

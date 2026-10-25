@@ -7,6 +7,7 @@ import base64
 import errno
 import io
 import ipaddress
+import json
 import os
 import socket
 import stat
@@ -27,6 +28,7 @@ from lakana_worker.launcher.egress_token import read_key, verify
 from lakana_worker.launcher.engine import EngineError
 from lakana_worker.launcher.requests import (
     INGEST_PROBE_SCRIPT,
+    RELAY_COMMAND,
     BuildRequest,
     CleanupRequest,
     Limits,
@@ -38,6 +40,7 @@ from lakana_worker.launcher.requests import (
     cache_volume,
     container_name,
     environment_volume,
+    relay_address,
 )
 from lakana_worker.launcher.service import Launcher, StartError, read_frames
 
@@ -2701,6 +2704,43 @@ def _subnet_of(launcher: Launcher, engine: FakeEngine) -> list[str]:
     return subnets
 
 
+def _task_running(engine: FakeEngine) -> bool:
+    """Say whether a task container is running (a relay may have started before it).
+
+    Parameters
+    ----------
+    engine
+        The fake engine.
+
+    Returns
+    -------
+    bool
+        Whether a container of kind ``task`` was started and not yet removed.
+    """
+    return any(
+        c["running"] and c["Labels"]["lakana.launcher.kind"] == "task"
+        for c in list(engine.containers.values())
+    )
+
+
+def _paths(engine: FakeEngine, method: str) -> list[str]:
+    """List the paths of every call of one method, in order.
+
+    Parameters
+    ----------
+    engine
+        The fake engine.
+    method
+        ``POST``, ``DELETE`` and so on.
+
+    Returns
+    -------
+    list of str
+        The paths.
+    """
+    return [path for m, path, _ in engine.calls if m == method]
+
+
 def test_a_run_with_egress_gets_the_proxy_and_a_task_token_for_exactly_its_pairs(
     tmp_path: Path,
 ) -> None:
@@ -2774,3 +2814,161 @@ def test_a_run_without_connections_keeps_the_server_only_posture(tmp_path: Path)
     assert not any(item.startswith("LAKANA_EGRESS_PROXY=") for item in spec["Env"])
     assert engine.created("relay") == []
     assert subnets[0] not in launcher._resting
+
+
+def test_a_run_with_relay_routes_starts_its_relay_before_the_task(tmp_path: Path) -> None:
+    """The relay comes from the egress image, fixed fields, its address, then the task."""
+    engine = FakeEngine()
+    launcher = _started(engine, tmp_path)
+    subnets = _subnet_of(launcher, engine)
+
+    launcher.run(_egress_run(relay=(_DB,)), lambda line: None)
+
+    (relay,) = engine.created("relay")
+    address = relay_address(subnets[0])
+    assert address == str(ipaddress.ip_network(subnets[0]).network_address + 6)
+    assert relay["Image"] == "sha256:" + "e" * 64
+    assert relay["Entrypoint"] == list(RELAY_COMMAND)
+    assert relay["User"] == "65534:65534"
+    assert relay["Env"] == ["PATH=/usr/local/bin:/usr/bin:/bin", "PYTHONDONTWRITEBYTECODE=1"]
+    host = relay["HostConfig"]
+    assert host["Memory"] == host["MemorySwap"] == 64 * 1024 * 1024
+    assert (host["NanoCpus"], host["PidsLimit"]) == (250_000_000, 32)
+    assert (host["CapDrop"], host["ReadonlyRootfs"], host["Mounts"]) == (["ALL"], True, [])
+    assert host["NetworkMode"] == "lakana-task-t1"
+    assert relay["NetworkingConfig"] == {
+        "EndpointsConfig": {
+            "lakana-task-t1": {"Aliases": ["lakana-relay"], "IPAMConfig": {"IPv4Address": address}}
+        }
+    }
+    assert relay["Labels"]["lakana.launcher.kind"] == "relay"
+    assert relay["Labels"]["lakana.launcher.deadline"]
+    plan = json.loads(engine.relay_stdin[0])
+    assert plan == {
+        "address": address,
+        "subnet": subnets[0],
+        "internal": launcher.settings.network_range,
+        "routes": [{"listen": 15001, "host": "db.example.com", "port": 5432}],
+    }
+    kinds = [
+        b["Labels"]["lakana.launcher.kind"] for m, p, b in engine.calls if p == "/containers/create"
+    ]
+    assert kinds[-2:] == ["relay", "task"]
+    relay_id = f"c{kinds.index('relay') + 1}"  # the fake numbers containers as they are made
+    posts = _paths(engine, "POST")
+    assert posts.index("/networks/lakana_default/connect") < posts.index(
+        f"/containers/{relay_id}/start"
+    )
+    deletes = _paths(engine, "DELETE")
+    assert deletes.index(f"/containers/{relay_id}") < deletes.index("/networks/lakana-task-t1")
+    assert engine.containers == {} and "lakana-task-t1" not in engine.networks
+
+
+def test_the_relay_gets_the_upstream_proxy_of_the_egress_service(tmp_path: Path) -> None:
+    """`LAKANA_EGRESS__UPSTREAM_PROXY` applies to the relay as to the proxy."""
+    engine = FakeEngine()
+    engine.service_info["c-egress"]["Config"]["Env"] = [
+        "LAKANA_EGRESS__UPSTREAM_PROXY=http://corp:3128"
+    ]
+    launcher = _started(engine, tmp_path)
+
+    launcher.run(_egress_run(relay=(_DB,)), lambda line: None)
+
+    (relay,) = engine.created("relay")
+    assert "LAKANA_EGRESS__UPSTREAM_PROXY=http://corp:3128" in relay["Env"]
+
+
+def test_the_relays_lines_reach_the_tasks_log(tmp_path: Path) -> None:
+    """Review Focus 3: the relay's refusal is in the run's log, prefixed as the relay wrote it."""
+    line = b"lakana-relay: refused postgres:5432: it resolves to an internal address\n"
+    engine = FakeEngine(hold=True, relay_output=[b"lakana-relay: ready\n", line])
+    launcher = _started(engine, tmp_path)
+    emitted: list[dict[str, object]] = []
+    worker = threading.Thread(
+        target=lambda: launcher.run(_egress_run(relay=(_DB,)), emitted.append)
+    )
+    worker.start()
+    _until(lambda: line in _logs(emitted))
+    _until(lambda: _task_running(engine))
+    engine.release(
+        next(
+            c for c, v in engine.containers.items() if v["Labels"]["lakana.launcher.kind"] == "task"
+        )
+    )
+    worker.join(10)
+
+    assert line in _logs(emitted)
+    assert b"lakana-relay: ready" not in _logs(emitted)
+
+
+def test_a_relay_that_does_not_start_fails_the_run_and_leaves_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The run fails with the relay's last line; relay and network are gone, no task started.
+
+    Parameters
+    ----------
+    tmp_path
+        The state directory.
+    monkeypatch
+        Shortens the wait for `ready`.
+    """
+    from lakana_worker.launcher import service
+
+    monkeypatch.setattr(service, "_RELAY_READY_SECONDS", 0.3)
+    engine = FakeEngine(relay_output=[b"lakana-relay: cannot start: Address in use\n"])
+    launcher = _started(engine, tmp_path)
+
+    with pytest.raises(EngineError) as caught:
+        launcher.run(_egress_run(relay=(_DB,)), lambda line: None)
+
+    assert str(caught.value) == "the task's relay did not start: cannot start: Address in use"
+    assert engine.created("task") == []
+    assert engine.containers == {} and "lakana-task-t1" not in engine.networks
+
+
+def test_a_relay_needs_exactly_one_outward_network(tmp_path: Path) -> None:
+    """An egress service on two Compose networks is ambiguous: the run fails naming them."""
+    engine = FakeEngine()
+    engine.compose_networks["lakana_other"] = {"Labels": {}, "Containers": {}}
+    engine.service_info["c-egress"]["NetworkSettings"]["Networks"]["lakana_other"] = {}
+    launcher = _started(engine, tmp_path)
+
+    with pytest.raises(EngineError, match="lakana_default, lakana_other"):
+        launcher.run(_egress_run(relay=(_DB,)), lambda line: None)
+
+    assert engine.containers == {} and "lakana-task-t1" not in engine.networks
+
+
+def test_cleanup_spares_the_relay_of_a_live_run_and_removes_an_orphan(tmp_path: Path) -> None:
+    """A relay belongs to its task: `cleanup(owner)` keeps it while the run lives."""
+    engine = FakeEngine(hold=True)
+    launcher = _started(engine, tmp_path)
+    worker = threading.Thread(
+        target=lambda: launcher.run(_egress_run(relay=(_DB,)), lambda line: None)
+    )
+    worker.start()
+    _until(lambda: _task_running(engine))
+
+    assert launcher.cleanup(CleanupRequest("w1")) == {"removed": 0}
+    assert engine.created("relay") and any(
+        v["Labels"]["lakana.launcher.kind"] == "relay" for v in engine.containers.values()
+    )
+    launcher.stop(StopRequest("t1", "w1"))
+    worker.join(10)
+    engine.containers["c-orphan"] = {
+        "Name": "lakana-relay-t9",
+        "Labels": {
+            "lakana.launcher.stack": "lakana",
+            "lakana.launcher.kind": "relay",
+            "lakana.launcher.id": "t9",
+            "lakana.launcher.owner": "w1",
+        },
+        "spec": {"HostConfig": {"Mounts": []}},
+        "exit": None,
+        "running": True,
+    }
+    engine._released["c-orphan"] = threading.Event()
+
+    assert launcher.cleanup(CleanupRequest("w1")) == {"removed": 1}
+    assert engine.containers == {}

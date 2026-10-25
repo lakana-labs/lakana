@@ -1566,3 +1566,51 @@ def test_an_unlisted_host_is_refused_with_the_purposes_next_step(
         server.server_close()
 
     assert (status, said) == (b"403", reason)
+
+
+@pytest.mark.parametrize(
+    "host", ["127.1", "0x7f.1", "2130706433", "0177.0.0.1", "0251.0376.0251.0376", "localhost"]
+)
+def test_every_spelling_of_loopback_and_metadata_is_refused_for_a_task(
+    tmp_path: Path, host: str
+) -> None:
+    """A resolver reads short, octal and hex numbers as addresses; the proxy checks what it read.
+
+    Parameters
+    ----------
+    tmp_path
+        For the key.
+    host
+        A spelling of 127.0.0.1 or 169.254.169.254 that `valid_host` accepts.
+    """
+    server = _proxy(tmp_path, reachable=frozenset())
+    key = ensure_key(tmp_path / "egress.key")
+    try:
+        token = mint(key, [(host, 5432)], 2**40, purpose="task", network=LOOPBACK)
+        status, said = _refusal(server, f"{host}:5432", token)
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    assert status == b"403"
+    assert said == (
+        f"{host}:5432 is not reachable through this proxy: {egress.INTERNAL}; give the "
+        "connection an address outside the Lakana stack (lakana connection update)"
+    )
+
+
+def test_a_build_refused_for_an_internal_address_gets_no_connection_hint(tmp_path: Path) -> None:
+    """The next step about connections is a task's; a build keeps the plain reason."""
+    server = _proxy(tmp_path, reachable=frozenset())
+    key = ensure_key(tmp_path / "egress.key")
+    try:
+        token = mint(key, [("127.1", 443)], 2**40, purpose="build", network=LOOPBACK)
+        status, said = _refusal(server, "127.1:443", token)
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    assert (status, said) == (
+        b"403",
+        f"127.1:443 is not reachable through this proxy: {egress.INTERNAL}",
+    )

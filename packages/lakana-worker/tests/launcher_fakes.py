@@ -112,6 +112,15 @@ class FakeEngine:
         Images present.
     stdin
         What each container received on stdin.
+    service_info
+        Service container id to what ``GET /containers/{id}/json`` answers for it.
+    compose_networks
+        Networks Compose made (not the launcher's), by name, each with its labels.
+    relay_output
+        What every relay container writes to stderr after reading its plan; it then runs until
+        it is removed.
+    relay_stdin
+        The plan each relay received.
     """
 
     version: str = "29.8.0"
@@ -139,6 +148,25 @@ class FakeEngine:
         default_factory=lambda: {"ghcr.io/lakana-labs/lakana-task:0.14.0-py3.13"}
     )
     stdin: list[bytes] = field(default_factory=list)
+    service_info: dict[str, dict[str, Any]] = field(
+        default_factory=lambda: {
+            "c-egress": {
+                "Image": "sha256:" + "e" * 64,
+                "Config": {"Env": ["PATH=/usr/local/bin", "LAKANA_EGRESS__UPSTREAM_PROXY="]},
+                "NetworkSettings": {"Networks": {"lakana_default": {}}},
+            }
+        }
+    )
+    compose_networks: dict[str, dict[str, Any]] = field(
+        default_factory=lambda: {
+            "lakana_default": {
+                "Labels": {"com.docker.compose.network": "default"},
+                "Containers": {},
+            }
+        }
+    )
+    relay_output: list[bytes] = field(default_factory=lambda: [b"lakana-relay: ready\n"])
+    relay_stdin: list[bytes] = field(default_factory=list)
     _released: dict[str, threading.Event] = field(default_factory=dict)
     _count: int = 0
 
@@ -328,6 +356,8 @@ class FakeEngine:
             Status and body.
         """
         container = self.containers.get(cid)
+        if container is None and action == "json" and cid in self.service_info:
+            return 200, self.service_info[cid]
         if container is None:
             return 404, {"message": "No such container"}
         if action == "start":
@@ -385,20 +415,26 @@ class FakeEngine:
             Status and body.
         """
         network = self.networks.get(name)
+        compose = network is None and name in self.compose_networks
+        if compose:
+            network = self.compose_networks[name]
         if network is None:
             return 404, {"message": "No such network"}
         if action == "connect":
-            network["Containers"][body["Container"]] = body["EndpointConfig"]["Aliases"]
+            network["Containers"][body["Container"]] = body["EndpointConfig"].get("Aliases", [])
             return 200, b""
         if action == "disconnect":
             network["Containers"].pop(body["Container"], None)
             return 200, b""
+        if method == "GET" and compose:
+            return 200, {"Name": name, "Labels": network["Labels"], "Containers": {}}
         if method == "GET":
             options = (
                 {} if self.isolated == "ignored" else network.get("spec", {}).get("Options", {})
             )
             return 200, {
                 "Name": name,
+                "Labels": network["Labels"],
                 "Containers": dict(network["Containers"]),
                 "Options": options,
             }
@@ -422,6 +458,9 @@ class FakeEngine:
         """
         self._hook("attach")
         ours, theirs = socket.socketpair()
+        if self.containers[container_id]["Labels"]["lakana.launcher.kind"] == "relay":
+            threading.Thread(target=self._relay, args=(container_id, theirs), daemon=True).start()
+            return ours
 
         def feed() -> None:
             """Read stdin, wait if holding, write the frames, close."""
@@ -455,3 +494,26 @@ class FakeEngine:
 
         threading.Thread(target=feed, daemon=True).start()
         return ours
+
+    def _relay(self, container_id: str, theirs: socket.socket) -> None:
+        """Play a relay: read the plan, write `relay_output` to stderr, run until removed.
+
+        Parameters
+        ----------
+        container_id
+            The relay's container.
+        theirs
+            The container's end of the stream.
+        """
+        try:
+            received = b""
+            while chunk := theirs.recv(65536):
+                received += chunk
+            self.relay_stdin.append(received)
+            for chunk in self.relay_output:
+                theirs.sendall(struct.pack(">BxxxI", 2, len(chunk)) + chunk)
+            self._released[container_id].wait(30)
+        except OSError:
+            pass  # the launcher closed its end
+        finally:
+            theirs.close()

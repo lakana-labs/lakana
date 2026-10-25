@@ -15,10 +15,13 @@ database and the object store, and every build network). A host is resolved once
 connection goes to an address that passed the check, so a name that resolves elsewhere a moment
 later (DNS rebinding) gains nothing. Private addresses outside those networks stay reachable: a
 company's package index is often one. With `LAKANA_EGRESS__UPSTREAM_PROXY` the proxy tunnels
-through a company proxy instead, which resolves and decides. When a routing table cannot be read
-or has a line the proxy does not understand, it cannot tell internal addresses from others and
-makes no direct connection. The launcher writes a new key at every start; the proxy reads the key
-file again whenever its inode, time or size changes, so it needs no restart.
+through a company proxy instead, which decides after the local check: a numeric host is read the
+way the C library reads it and judged, and a name that resolves here to a forbidden address is
+refused before the company proxy is asked (tasks, connection tests and the relay). When a
+routing table cannot be read or has a line the proxy does not understand, it cannot tell
+internal addresses from others and makes no direct connection. The launcher writes a new key at
+every start; the proxy reads the key file again whenever its
+inode, time or size changes, so it needs no restart.
 
 Limits: a request head must arrive whole within 10 seconds and 16 KiB; at most
 `LAKANA_EGRESS__MAX_CONNECTIONS` connections at once (256), and at most
@@ -90,6 +93,13 @@ _HINTS = {
     "connection-test": "check the connection's address with lakana connection show",
 }
 """What a refused client of each purpose can do about a host its token does not name."""
+_INTERNAL_HINTS = {
+    "task": "give the connection an address outside the Lakana stack (lakana connection update)",
+    "connection-test": (
+        "give the connection an address outside the Lakana stack (lakana connection update)"
+    ),
+}
+"""What a client of each purpose can do about a host that resolves to a forbidden address."""
 _SUBJECTS = {"connection-test": "connection test"}
 """How a refusal names a client whose purpose is not a plain word."""
 _NEVER = (
@@ -437,7 +447,9 @@ def _read_head(connection: socket.socket, deadline: float) -> bytes | int:
     return bytes(head[:-4])
 
 
-def _relay(left: socket.socket, right: socket.socket, until: float) -> None:
+def relay_bytes(
+    left: socket.socket, right: socket.socket, until: float, idle: float | None = None
+) -> None:
     """Copy bytes both ways until a side closes, both idle too long, or the grant expires.
 
     Parameters
@@ -448,17 +460,21 @@ def _relay(left: socket.socket, right: socket.socket, until: float) -> None:
         The index's (or the upstream proxy's).
     until
         `time.monotonic` value at which the tunnel ends.
+    idle
+        Seconds both sides may stay silent; `_IDLE_SECONDS` by default. A relay passes more:
+        a database may think for longer than five minutes before its first row.
     """
+    idle = _IDLE_SECONDS if idle is None else idle
     for side in (left, right):
-        side.settimeout(_IDLE_SECONDS)  # a peer that stops reading cannot hold `sendall`
+        side.settimeout(idle)  # a peer that stops reading cannot hold `sendall`
     selector = selectors.DefaultSelector()
     selector.register(left, selectors.EVENT_READ, right)
     selector.register(right, selectors.EVENT_READ, left)
     try:
         while (remaining := until - time.monotonic()) > 0:
-            ready = selector.select(min(_IDLE_SECONDS, remaining))
+            ready = selector.select(min(idle, remaining))
             if not ready:
-                if remaining > _IDLE_SECONDS:
+                if remaining > idle:
                     return
                 continue
             for key, _ in ready:
@@ -606,12 +622,12 @@ class _Handler(socketserver.BaseRequestHandler):
                 f"{host}:{port} is not a destination this "
                 f"{_SUBJECTS.get(grant.purpose, grant.purpose)} may reach; {hint}",
             )
-        upstream = self.proxy.open(host, port)
+        upstream = self.proxy.open(host, port, grant.purpose)
         with upstream:
             self.request.settimeout(_IDLE_SECONDS)
             self.request.sendall(b"HTTP/1.1 200 Connection established\r\n\r\n")
             until = time.monotonic() + max(0.0, grant.expires - time.time())
-            _relay(self.request, upstream, until)
+            relay_bytes(self.request, upstream, until)
 
     def _grant(self, header: str | None) -> Grant:
         """Check the token in a `Proxy-Authorization` header.
@@ -711,6 +727,236 @@ def _parse(head: bytes) -> tuple[str, int, str | None]:
     if not valid_host(host) or port is None:
         raise _Refused(400, "CONNECT takes host:port: a host name or IPv4 address and a port")
     return host, port, credential
+
+
+class DialRefused(Exception):
+    """A destination the proxy or a relay does not connect to.
+
+    Parameters
+    ----------
+    status
+        The HTTP status the proxy answers with: 403 for a forbidden address, 502 for one that
+        cannot be resolved or reached, 503 when the routing table cannot be read.
+    reason
+        Why, in words; it never holds a secret.
+    """
+
+    def __init__(self, status: int, reason: str) -> None:
+        super().__init__(reason)
+        self.status = status
+        self.reason = reason
+
+
+INTERNAL = (
+    "it resolves to a loopback, link-local, metadata or internal address, which nothing Lakana "
+    "starts may reach"
+)
+"""Why `dial` refuses a forbidden address; the proxy and the relay add their own next step."""
+
+
+def _literal(host: str) -> ipaddress.IPv4Address | None:
+    """Read a host whose last label starts with a digit as the IPv4 address a resolver makes of it.
+
+    Short and octal or hex spellings (``127.1``, ``0x7f.1``, ``2130706433``) are read the way
+    `inet_aton`, and so the C library's resolver, reads them.
+
+    Parameters
+    ----------
+    host
+        A host that `valid_host` accepts.
+
+    Returns
+    -------
+    IPv4Address or None
+        The address; `None` for a name.
+
+    Raises
+    ------
+    DialRefused
+        403 for a numeric host no resolver reads as an address: it cannot be a name either.
+    """
+    if not host.rsplit(".", 1)[-1][:1].isdigit():
+        return None
+    try:
+        return ipaddress.IPv4Address(socket.inet_aton(host))
+    except OSError:
+        raise DialRefused(403, f"{host} is neither a host name nor an IPv4 address") from None
+
+
+def _connected(settings: EgressSettings, host: str, port: int) -> frozenset[Network]:
+    """Read the attached networks, or refuse when they cannot be read.
+
+    Parameters
+    ----------
+    settings
+        For the routing tables.
+    host
+        The destination, for the log.
+    port
+        Its port, for the log.
+
+    Returns
+    -------
+    frozenset
+        The attached networks.
+
+    Raises
+    ------
+    DialRefused
+        503 when a routing table cannot be read.
+    """
+    connected = connected_networks(settings.route, settings.route6)
+    if connected is None:
+        logger.error(
+            "Refused %s:%d: cannot read the attached networks from %s, so internal addresses "
+            "cannot be told apart; no direct connection is made.",
+            host,
+            port,
+            settings.route,
+        )
+        raise DialRefused(
+            503,
+            "the egress proxy cannot read its routing table, so it makes no direct "
+            "connection; see `docker compose logs egress`",
+        )
+    return connected
+
+
+def dial(
+    host: str,
+    port: int,
+    settings: EgressSettings,
+    *,
+    refused: frozenset[Network] = frozenset(),
+    check_names: bool = True,
+) -> socket.socket:
+    """Connect to a destination directly or through the upstream proxy, checking every address.
+
+    A direct connection resolves the host once and goes only to an address `forbidden` lets
+    through, so a name that resolves elsewhere a moment later gains nothing. Through an upstream
+    proxy, which resolves for itself, an IPv4 literal in any spelling is still checked, and with
+    `check_names` so is every address the name resolves to here: a company proxy on the Docker
+    host would otherwise reach the stack's own addresses. A name that does not resolve here goes
+    to the upstream proxy unchecked, as the proxy has always sent builds.
+
+    Parameters
+    ----------
+    host
+        The host, as `valid_host` spells it.
+    port
+        The port.
+    settings
+        The upstream proxy, the routing tables and `reachable`.
+    refused
+        Networks refused besides the built-in ones (the relay passes the launcher's range of
+        task networks).
+    check_names
+        Whether a name is resolved here and checked before it goes to the upstream proxy.
+
+    Returns
+    -------
+    socket.socket
+        The connection, ready to relay.
+
+    Raises
+    ------
+    DialRefused
+        403 for a forbidden address (`INTERNAL`), 502 when the host cannot be resolved or
+        reached or the upstream proxy refuses, 503 when the routing table cannot be read.
+    """
+    literal = _literal(host)
+    if settings.upstream is not None:
+        if literal is not None or check_names:
+            connected = _connected(settings, host, port) | refused
+            if literal is not None:
+                addresses = [literal]
+            else:
+                try:
+                    found = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+                except OSError:
+                    found = []
+                addresses = [ipaddress.ip_address(entry[4][0]) for entry in found]
+            if any(forbidden(a, connected, settings.reachable) for a in addresses):
+                logger.warning("Refused %s:%d: it resolves to a forbidden address.", host, port)
+                raise DialRefused(403, INTERNAL)
+        return _through_upstream(host, port, settings)
+    try:
+        found = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    except OSError as exc:
+        raise DialRefused(502, f"cannot resolve {host} ({exc.strerror or exc})") from None
+    connected = _connected(settings, host, port) | refused
+    allowed = [
+        entry
+        for entry in found
+        if not forbidden(ipaddress.ip_address(entry[4][0]), connected, settings.reachable)
+    ]
+    if not allowed:
+        logger.warning("Refused %s:%d: it resolves only to forbidden addresses.", host, port)
+        raise DialRefused(403, INTERNAL)
+    error: OSError | None = None
+    for family, kind, proto, _, address in allowed:
+        connection = socket.socket(family, kind, proto)
+        try:
+            connection.settimeout(_CONNECT_SECONDS)
+            connection.connect(address)
+        except OSError as exc:
+            connection.close()
+            error = exc
+            continue
+        return connection
+    detail = (error.strerror if error is not None else None) or str(error)
+    raise DialRefused(502, f"cannot reach {host}:{port} ({detail})")
+
+
+def _through_upstream(host: str, port: int, settings: EgressSettings) -> socket.socket:
+    """Open a tunnel through the upstream proxy.
+
+    Parameters
+    ----------
+    host
+        The destination's host, checked by `valid_host`, so it cannot break the request.
+    port
+        Its port.
+    settings
+        For the upstream proxy's URL.
+
+    Returns
+    -------
+    socket.socket
+        The tunnel.
+
+    Raises
+    ------
+    DialRefused
+        502 when the upstream proxy cannot be reached or does not answer 200.
+    """
+    parts = urlsplit(settings.upstream or "")
+    try:
+        connection = socket.create_connection(
+            (parts.hostname or "", parts.port or PORT), timeout=_CONNECT_SECONDS
+        )
+    except OSError as exc:
+        raise DialRefused(
+            502, f"cannot reach the upstream proxy ({exc.strerror or type(exc).__name__})"
+        ) from None
+    auth = ""
+    if parts.username is not None:
+        pair = f"{unquote(parts.username)}:{unquote(parts.password or '')}".encode()
+        auth = f"Proxy-Authorization: Basic {base64.b64encode(pair).decode('ascii')}\r\n"
+    try:
+        connection.sendall(
+            f"CONNECT {host}:{port} HTTP/1.1\r\nHost: {host}:{port}\r\n{auth}\r\n".encode()
+        )
+        head = _read_head(connection, time.monotonic() + _CONNECT_SECONDS)
+    except OSError:
+        head = 400
+    first = head.split(b"\r\n", 1)[0] if isinstance(head, bytes) else b""
+    words = first.split()
+    if len(words) < 2 or not words[0].startswith(b"HTTP/1.") or words[1] != b"200":
+        connection.close()
+        shown = first.decode("latin-1")[:100].strip() or "no answer"
+        raise DialRefused(502, f"the upstream proxy refused {host}:{port}: {shown}")
+    return connection
 
 
 class EgressServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
@@ -946,8 +1192,8 @@ class EgressServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
                 self._key = (stamp, key)
             return self._key[1]
 
-    def open(self, host: str, port: int) -> socket.socket:
-        """Connect to a host, directly or through the upstream proxy.
+    def open(self, host: str, port: int, purpose: str) -> socket.socket:
+        """Connect to a host for a client, directly or through the upstream proxy.
 
         Parameters
         ----------
@@ -955,6 +1201,10 @@ class EgressServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
             The destination's host.
         port
             Its port.
+        purpose
+            The client's token purpose: it picks the next step of a refusal, and a build's name
+            is not resolved here before it goes to an upstream proxy (a build resolves nothing
+            but package indexes, and a slow local resolver would slow every download).
 
         Returns
         -------
@@ -964,102 +1214,18 @@ class EgressServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
         Raises
         ------
         _Refused
-            403 when the host resolves only to forbidden addresses; 502 when it cannot be
-            reached or the upstream proxy refuses.
+            403 when the host resolves to forbidden addresses; 502 when it cannot be reached or
+            the upstream proxy refuses; 503 without a readable routing table.
         """
-        if self.settings.upstream is not None:
-            return self._through_upstream(host, port)
         try:
-            found = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
-        except OSError as exc:
-            raise _Refused(502, f"cannot resolve {host} ({exc.strerror or exc})") from None
-        connected = connected_networks(self.settings.route, self.settings.route6)
-        if connected is None:
-            logger.error(
-                "Refused %s:%d: cannot read the attached networks from %s, so internal addresses "
-                "cannot be told apart; no direct connection is made.",
-                host,
-                port,
-                self.settings.route,
-            )
-            raise _Refused(
-                503,
-                "the egress proxy cannot read its routing table, so it makes no direct "
-                "connection; see `docker compose logs egress`",
-            )
-        allowed = [
-            entry
-            for entry in found
-            if not forbidden(ipaddress.ip_address(entry[4][0]), connected, self.settings.reachable)
-        ]
-        if not allowed:
-            logger.warning("Refused %s:%d: it resolves only to forbidden addresses.", host, port)
-            raise _Refused(
-                403,
-                f"{host}:{port} is not reachable through this proxy: it resolves to a loopback, "
-                "link-local, metadata or internal address",
-            )
-        error: OSError | None = None
-        for family, kind, proto, _, address in allowed:
-            connection = socket.socket(family, kind, proto)
-            try:
-                connection.settimeout(_CONNECT_SECONDS)
-                connection.connect(address)
-            except OSError as exc:
-                connection.close()
-                error = exc
-                continue
-            return connection
-        detail = (error.strerror if error is not None else None) or str(error)
-        raise _Refused(502, f"cannot reach {host}:{port} ({detail})")
-
-    def _through_upstream(self, host: str, port: int) -> socket.socket:
-        """Open a tunnel through the upstream proxy.
-
-        Parameters
-        ----------
-        host
-            The destination's host, checked by `valid_host`, so it cannot break the request.
-        port
-            Its port.
-
-        Returns
-        -------
-        socket.socket
-            The tunnel.
-
-        Raises
-        ------
-        _Refused
-            502 when the upstream proxy cannot be reached or does not answer 200.
-        """
-        parts = urlsplit(self.settings.upstream or "")
-        try:
-            connection = socket.create_connection(
-                (parts.hostname or "", parts.port or PORT), timeout=_CONNECT_SECONDS
-            )
-        except OSError as exc:
-            raise _Refused(
-                502, f"cannot reach the upstream proxy ({exc.strerror or type(exc).__name__})"
-            ) from None
-        auth = ""
-        if parts.username is not None:
-            pair = f"{unquote(parts.username)}:{unquote(parts.password or '')}".encode()
-            auth = f"Proxy-Authorization: Basic {base64.b64encode(pair).decode('ascii')}\r\n"
-        try:
-            connection.sendall(
-                f"CONNECT {host}:{port} HTTP/1.1\r\nHost: {host}:{port}\r\n{auth}\r\n".encode()
-            )
-            head = _read_head(connection, time.monotonic() + _CONNECT_SECONDS)
-        except OSError:
-            head = 400
-        first = head.split(b"\r\n", 1)[0] if isinstance(head, bytes) else b""
-        words = first.split()
-        if len(words) < 2 or not words[0].startswith(b"HTTP/1.") or words[1] != b"200":
-            connection.close()
-            shown = first.decode("latin-1")[:100].strip() or "no answer"
-            raise _Refused(502, f"the upstream proxy refused {host}:{port}: {shown}")
-        return connection
+            return dial(host, port, self.settings, check_names=purpose != "build")
+        except DialRefused as exc:
+            reason = exc.reason
+            if exc.status == 403:
+                reason = f"{host}:{port} is not reachable through this proxy: {reason}"
+                if purpose in _INTERNAL_HINTS:
+                    reason = f"{reason}; {_INTERNAL_HINTS[purpose]}"
+            raise _Refused(exc.status, reason) from None
 
 
 def main() -> None:

@@ -47,6 +47,20 @@ EGRESS_MISSING = (
     "connection from the asset."
 )
 """The refusal of a run with egress while the egress service is not running."""
+RELAY_ALIAS = "lakana-relay"
+"""The name a task resolves to its relay's address."""
+RELAY_USER = "65534:65534"
+"""The relay runs as nobody: it owns no file and mounts nothing."""
+RELAY_COMMAND = (
+    "/usr/local/bin/python",
+    "-I",
+    "-S",
+    "-c",
+    "import sys; sys.path.insert(0, '/opt/lakana-launcher'); "
+    "from lakana_worker.launcher.relay import main; main()",
+)
+"""The relay's entry point in the egress service's image: the base interpreter on the
+launcher's own copy of its package, as the egress proxy runs (no site-packages, no `.pth`)."""
 _EGRESS_RULE = f"egress: a list of at most {MAX_EGRESS} distinct [host, port] pairs"
 _RELAY_RULE = (
     f"relay: at most {MAX_RELAY_ROUTES} routes, each a listen port from {RELAY_PORTS.start} to "
@@ -1494,6 +1508,127 @@ def run_container_spec(
             no_new_privileges=no_new_privileges,
         ),
     }
+
+
+def relay_address(subnet: str) -> str:
+    """Name the address a task's relay takes in the task's /29.
+
+    Parameters
+    ----------
+    subnet
+        The task network's subnet.
+
+    Returns
+    -------
+    str
+        Its last host address, which Docker hands to no other container: the gateway, the
+        server, the egress proxy and the task take the lowest free ones.
+    """
+    return str(list(ipaddress.IPv4Network(subnet).hosts())[-1])
+
+
+def relay_container_spec(
+    settings: LauncherSettings,
+    *,
+    kind: str,
+    ident: str,
+    owner: str,
+    image: str,
+    upstream: str | None,
+    address: str,
+    no_new_privileges: bool,
+    deadline: int,
+) -> dict[str, Any]:
+    """Describe the relay container of one task attempt or connection check.
+
+    Parameters
+    ----------
+    settings
+        For the stack's names.
+    kind
+        ``task`` or ``check``: whose network the relay joins.
+    ident
+        The run's or check's id; the relay's labels carry it.
+    owner
+        The worker that asked.
+    image
+        The egress service's image id, which holds the launcher's package.
+    upstream
+        The egress service's `LAKANA_EGRESS__UPSTREAM_PROXY`, or `None`. Left in the
+        container's environment only, never in a log.
+    address
+        `relay_address` of the network's subnet.
+    no_new_privileges
+        Whether to set the option.
+    deadline
+        The run's deadline label: the reaper removes the relay with it.
+
+    Returns
+    -------
+    dict
+        The body of ``POST /containers/create``; the outward network is connected after.
+    """
+    network = container_name(settings, kind, ident)
+    env = ["PATH=/usr/local/bin:/usr/bin:/bin", "PYTHONDONTWRITEBYTECODE=1"]
+    if upstream:
+        env.append(f"LAKANA_EGRESS__UPSTREAM_PROXY={upstream}")
+    # No timer of its own: the relay is removed with its run, or by the reaper at the deadline.
+    limits = Limits(memory_mb=64, cpus=0.25, pids=32, timeout_seconds=0)
+    return {
+        "Image": image,
+        "Entrypoint": list(RELAY_COMMAND),
+        "Cmd": [],
+        "User": RELAY_USER,
+        "WorkingDir": "/",
+        "Env": env,
+        "AttachStdin": True,
+        "AttachStdout": True,
+        "AttachStderr": True,
+        "OpenStdin": True,
+        "StdinOnce": True,
+        "Tty": False,
+        "NetworkDisabled": False,
+        "Labels": labels(settings, "relay", ident, owner, deadline),
+        "HostConfig": _host_config(
+            limits,
+            network,
+            [],
+            "rw,noexec,nosuid,nodev,size=1m",
+            no_new_privileges=no_new_privileges,
+        ),
+        "NetworkingConfig": {
+            "EndpointsConfig": {
+                network: {"Aliases": [RELAY_ALIAS], "IPAMConfig": {"IPv4Address": address}}
+            }
+        },
+    }
+
+
+def relay_plan(routes: tuple[RelayRoute, ...], settings: LauncherSettings, subnet: str) -> bytes:
+    """Write the plan a relay reads on stdin.
+
+    Parameters
+    ----------
+    routes
+        The run's routes.
+    settings
+        For the launcher's range of task networks, which the relay refuses as a target.
+    subnet
+        The network's subnet.
+
+    Returns
+    -------
+    bytes
+        One JSON object.
+    """
+    return json.dumps(
+        {
+            "address": relay_address(subnet),
+            "subnet": subnet,
+            "internal": settings.network_range,
+            "routes": [{"listen": r.listen, "host": r.host, "port": r.port} for r in routes],
+        }
+    ).encode("utf-8")
 
 
 def uv_index_value(request: BuildRequest) -> str | None:

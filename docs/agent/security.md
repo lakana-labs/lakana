@@ -1207,9 +1207,46 @@ start) authenticates a worker, compared with `hmac.compare_digest`.
   - a launcher bug is host root.
 - **Egress residuals, accepted:** a direct connection may reach private addresses outside the
   networks the proxy is attached to (a company index often is one; operator ranges are #303);
-  with `LAKANA_EGRESS__UPSTREAM_PROXY` the proxy makes no address check of its own, the upstream
-  proxy resolves and decides; a tunnel whose writes block can outlive its token's expiry by up to
+  with `LAKANA_EGRESS__UPSTREAM_PROXY` the upstream proxy decides after the proxy's local check
+  (numeric hosts, and for tasks and connection tests names that resolve here); a tunnel whose writes block can outlive its token's expiry by up to
   the 300 s idle timeout.
+
+### The relay (M6)
+
+A task's database connection does not use the proxy (a database speaks its own protocol): one
+relay container per run listens on one port per connection and forwards to exactly that
+connection's target.
+
+- **Where it runs.** Its own container from the egress container's image id, started between the
+  task network and the task: network, relay, task, and on every path the relay is removed before
+  the network. Entry point is the launcher's copy under `/opt/lakana-launcher` on the base
+  interpreter with `-I -S`; standard library only. It joins the task network at the fixed address
+  `relay_address(subnet)` (the /29's last host, alias `lakana-relay`) and the egress service's one
+  other network (`_outward_network`; the launcher fails naming them unless there is exactly one).
+- **What it listens on.** Only that address, one port per route (plan: `address`, `subnet`,
+  `internal`, 1-16 `routes`). It closes any peer outside the /29 and allows at most 16 connections
+  per port (the 17th is closed with a line naming the limit). A port not in the plan is refused by
+  the kernel.
+- **The checks.** Each connection resolves its target once and dials the address that passed
+  `dial`, the proxy's shared check: loopback in every spelling the C library reads (`127.1`,
+  `0x7f.1`, `2130706433`, octal), link-local and the metadata address, multicast, unspecified,
+  reserved, every network the relay is attached to (so the whole Compose stack: it sits on the
+  outward network), and the launcher's whole task-network range, attached or not. A refusal is
+  one line, `lakana-relay: refused <host>:<port>: <reason>; give the connection an address outside
+  the Lakana stack (lakana connection update)`, which reaches the task's log. An unreadable table
+  fails closed.
+- **Upstream proxy.** The same check now runs before a company proxy is asked: a numeric host is
+  judged (one no resolver reads gets 403), and for tasks, connection tests and the relay a name
+  that resolves here to a forbidden address is refused, since a company proxy on the Docker host
+  would otherwise reach the host's loopback and the stack. A name that does not resolve here goes
+  upstream. Builds keep their own literal rule (`_allowed_host`) and are not name-checked.
+- **Limits.** Idle time is a week (a database may be silent through a long query; the proxy keeps
+  five minutes). Container: user 65534:65534, `CapDrop: ALL`, read-only root, no mounts, 1 MiB
+  `/tmp`, 64 MiB, 0.25 CPU, 32 pids, no-new-privileges as detected, labelled kind `relay` with the
+  run's id, owner and deadline (the reaper removes it like any labelled object; `cleanup` spares
+  the relay of a live run). It must report `lakana-relay: ready` within 10 s or the run fails with
+  `the task's relay did not start: <its last line>` and no task container exists.
+- **Later (Task 18b).** Docker's gateways and the operator's ranges are refused too.
 
 ## The artifact store (M5c2b)
 
