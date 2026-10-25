@@ -106,6 +106,16 @@ class _Echo(socketserver.BaseRequestHandler):
             self.request.sendall(data)
 
 
+class _EchoServer(socketserver.ThreadingTCPServer):
+    """The echo target, with a listen backlog above a relay port's 16 connections.
+
+    `socketserver`'s default backlog of 5 drops the SYNs of a burst of 16 dials, which the
+    kernel retries after 1 s, then 3 s more: under load that crossed the clients' 5 s timeout.
+    """
+
+    request_queue_size = 4 * MAX_PER_PORT
+
+
 @pytest.fixture
 def target() -> Iterator[int]:
     """Run an echo "database" on loopback.
@@ -115,7 +125,7 @@ def target() -> Iterator[int]:
     int
         Its port.
     """
-    server = socketserver.ThreadingTCPServer(("127.0.0.1", 0), _Echo)
+    server = _EchoServer(("127.0.0.1", 0), _Echo)
     server.daemon_threads = True
     threading.Thread(target=server.serve_forever, args=(0.05,), daemon=True).start()
     yield server.server_address[1]

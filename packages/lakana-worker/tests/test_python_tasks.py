@@ -7832,8 +7832,9 @@ def _connection(
     kind: ConnectionKind = ConnectionKind.POSTGRESQL,
     address: dict[str, object] | None = None,
     settings: dict[str, object] | None = None,
+    environment: str = "dev",
 ) -> None:
-    """Add a connection to `dev`; a PostgreSQL one at db.example.com:5432 by default.
+    """Add a connection to an environment; a PostgreSQL one at db.example.com:5432 by default.
 
     Parameters
     ----------
@@ -7847,9 +7848,13 @@ def _connection(
         Its address; the default PostgreSQL one when `None`.
     settings
         Its settings; none when `None`.
+    environment
+        The environment, which must exist.
     """
     with py.world.session() as session:
-        env = session.execute(select(Environment).where(Environment.name == "dev")).scalar_one()
+        env = session.execute(
+            select(Environment).where(Environment.name == environment)
+        ).scalar_one()
         session.add(
             Connection(
                 id=uuid.uuid4(),
@@ -7891,14 +7896,38 @@ def test_a_docker_task_is_routed_to_every_declared_connection(py: PyWorld) -> No
     assert task.connections == {
         "crm-db": {"kind": "postgresql", "grant": [["db.example.com", 5432]], "relay_port": 15001},
         "api": {"kind": "http", "grant": [["api.example.com", 443], ["login.example.com", 443]]},
-        "exports": {"kind": "directory", "root_dir": "/ingest/shared", "path": "in",
-                    "root_path": "/ingest/shared/in"},
+        "exports": {"kind": "directory", "root": "shared", "root_dir": "/ingest/shared",
+                    "path": "in", "root_path": "/ingest/shared/in"},
         "erp": {"kind": "tcp", "grant": [["erp.example.com", 1433]], "relay_port": 15002},
-        "files": {"kind": "sqlite-file", "root_dir": "/ingest/shared", "path": "a.db",
-                  "root_path": "/ingest/shared/a.db"},
+        "files": {"kind": "sqlite-file", "root": "shared", "root_dir": "/ingest/shared",
+                  "path": "a.db", "root_path": "/ingest/shared/a.db"},
         "api2": {"kind": "http", "grant": [["api.example.com", 443]]},
     }  # fmt: skip
     assert _task(py.world, "gold.scores").status is TaskStatus.SUCCEEDED
+
+
+def test_a_connection_of_the_same_name_in_another_environment_grants_nothing(
+    py: PyWorld,
+) -> None:
+    """Only the run's own environment's connection reaches the token, the relay and the grant."""
+    with py.world.session() as session:
+        session.add(Environment(id=uuid.uuid4(), name="prod", storage_root="file:///prod"))
+        session.commit()
+    _connection(py)
+    _connection(py, address={"host": "prod-db.example.com", "port": 6432}, environment="prod")
+    _connection(py, "api", ConnectionKind.HTTP, {"base_url": "https://api.example.com"}, {})
+    _connection(
+        py, "api", ConnectionKind.HTTP, {"base_url": "https://prod.example.com"}, {}, "prod"
+    )
+    py.deploy(connections=["crm-db", "api"])
+    engine = py.engine(_writer(py.world), environments=FakeEnvironments())
+    run_claimed(engine, py.claim_python(engine))
+
+    (task,) = py.runner.tasks
+    assert task.relay == ((15001, "db.example.com", 5432),)
+    assert task.egress == (("api.example.com", 443),)
+    assert task.connections["crm-db"]["grant"] == [["db.example.com", 5432]]
+    assert task.connections["api"]["grant"] == [["api.example.com", 443]]
 
 
 def test_a_task_without_connections_sends_empty_lists(py: PyWorld) -> None:
@@ -7924,8 +7953,8 @@ def test_the_local_runner_routes_directly_and_reads_its_roots(py: PyWorld, tmp_p
     assert (task.roots, dict(task.root_users)) == (("shared",), {"shared": "exports"})
     assert task.connections == {
         "crm-db": {"kind": "postgresql", "grant": [["db.example.com", 5432]]},
-        "exports": {"kind": "directory", "root_dir": str(tmp_path), "path": "in",
-                    "root_path": str(tmp_path / "in")},
+        "exports": {"kind": "directory", "root": "shared", "root_dir": str(tmp_path),
+                    "path": "in", "root_path": str(tmp_path / "in")},
         "api": {"kind": "http", "grant": [["api.example.com", 443]]},
     }  # fmt: skip
 

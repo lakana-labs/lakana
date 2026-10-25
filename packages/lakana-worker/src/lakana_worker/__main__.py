@@ -259,8 +259,9 @@ def _python_runtime(
         If `LAKANA_RUN__CA_BUNDLE` names a file the containers cannot trust (unreadable, over
         1 MiB, no certificate, a private key, a ``TRUSTED CERTIFICATE`` block), or the local
         runner cannot write the bundle to the cache; the message names the setting or the path,
-        and the cause. If `LAKANA_RUN__INGESTION_ROOTS` names a directory the launcher would
-        refuse as a root (its rule and its words, `check_ingestion_roots`).
+        and the cause. If the local runner's `LAKANA_RUN__INGESTION_ROOTS` names a directory the
+        launcher would refuse as a root (its rule and its words, `check_ingestion_roots`); the
+        Docker runner ignores the setting.
     """
     cache = worker_cache_dir()
     if python.reason() is None:
@@ -278,8 +279,12 @@ def _python_runtime(
         trust_file = write_trust_file(trust, cache) if trust is not None and local else None
     except TrustBundleError as exc:
         raise SystemExit(str(exc)) from None
-    roots_refused = check_ingestion_roots(
-        run.ingestion_roots, run.launcher_socket, variable="LAKANA_RUN__INGESTION_ROOTS"
+    roots_refused = (
+        check_ingestion_roots(
+            run.ingestion_roots, run.launcher_socket, variable="LAKANA_RUN__INGESTION_ROOTS"
+        )
+        if local
+        else None
     )
     if roots_refused is not None:
         raise SystemExit(roots_refused)

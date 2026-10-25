@@ -123,7 +123,13 @@ from lakana_worker.index_credentials import (
     IndexCredentialError,
     resolve_index_access,
 )
-from lakana_worker.launcher.requests import MAX_EGRESS, MAX_RELAY_ROUTES, MAX_ROOTS, RELAY_PORTS
+from lakana_worker.launcher.requests import (
+    INGEST_MOUNT,
+    MAX_EGRESS,
+    MAX_RELAY_ROUTES,
+    MAX_ROOTS,
+    RELAY_PORTS,
+)
 from lakana_worker.launcher_client import LogSinkFailed
 from lakana_worker.processes import (
     CappedSink,
@@ -549,8 +555,6 @@ MAX_TASK_ROOTS = MAX_ROOTS
 """The most ingestion roots the launcher mounts into one task."""
 RELAY_FIRST_PORT = RELAY_PORTS.start
 """The relay port of a task's first database endpoint; the next ones count up from it."""
-INGEST_MOUNT = "/ingest"
-"""Where the launcher mounts a task's ingestion roots, one directory per root."""
 
 
 @dataclass(frozen=True)
@@ -572,7 +576,8 @@ class ConnectionPlan:
     routing
         Each declared name to what the task description says about it: ``kind`` and ``grant``
         (the endpoints the attempt was granted) plus ``relay_port`` for a database under the
-        Docker runner, or ``kind``, ``root_dir``, ``path`` and ``root_path`` for a mounted kind.
+        Docker runner, or ``kind``, ``root``, ``root_dir``, ``path`` and ``root_path`` for a
+        mounted kind (``root`` and ``path`` as granted, so the task notices a move).
     """
 
     egress: tuple[tuple[str, int], ...] = ()
@@ -1747,6 +1752,7 @@ class PythonRuntime:
                 root_dir = self._root_dir(root, name)
                 routing[name] = {
                     "kind": kind.value,
+                    "root": root,
                     "root_dir": root_dir,
                     "path": path,
                     "root_path": posixpath.join(root_dir, path),

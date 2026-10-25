@@ -61,7 +61,7 @@ class FetchedConnection:
     routing
         What the task description says about it: its ``kind``, the ``grant`` of host and port
         pairs and, under the Docker runner, its ``relay_port``; for a mounted kind
-        ``root_dir``, ``path`` and ``root_path``.
+        ``root``, ``root_dir``, ``path`` and ``root_path``.
     """
 
     name: str
@@ -160,8 +160,9 @@ def fetch(name: str) -> FetchedConnection:
     ConnectionRefused
         When the server refuses (its text, unchanged).
     ConnectionChanged
-        When its endpoints are no longer those the worker granted this attempt (retryable;
-        nothing is kept, so the next attempt fetches it again).
+        When its endpoints, or a mounted connection's root and path, are no longer those the
+        worker gave this attempt (retryable; nothing is kept, so the next attempt fetches it
+        again).
     """
     state = context.current()
     if name not in state.declared:
@@ -180,7 +181,7 @@ def fetch(name: str) -> FetchedConnection:
                 if isinstance(value, str):
                     context.register_secret(value)
         fetched = FetchedConnection.from_body(name, body, routing=state.connections.get(name, {}))
-        if "grant" in fetched.routing and not _matches_grant(fetched):
+        if not _matches_grant(fetched) or not _matches_mount(fetched):
             raise ConnectionChanged(
                 f"connection `{name}` changed after this attempt started; the next attempt uses "
                 "the new address"
@@ -204,15 +205,36 @@ def _matches_grant(fetched: FetchedConnection) -> bool:
     Returns
     -------
     bool
-        Whether the endpoints and the ``grant`` are the same set of host and port pairs; a
-        malformed ``grant`` never matches.
+        Whether the endpoints and the ``grant`` are the same set of host and port pairs (true
+        without a ``grant``); a malformed ``grant`` never matches.
     """
+    if "grant" not in fetched.routing:
+        return True
     grant = fetched.routing.get("grant")
     if not isinstance(grant, list) or not all(
         isinstance(pair, list) and len(pair) == 2 for pair in grant
     ):
         return False
     return {(e.host, e.port) for e in fetched.endpoints} == {tuple(pair) for pair in grant}
+
+
+def _matches_mount(fetched: FetchedConnection) -> bool:
+    """Say whether a mounted connection still names the root and path the worker mounted.
+
+    Parameters
+    ----------
+    fetched
+        The connection as fetched, with its routing.
+
+    Returns
+    -------
+    bool
+        True for a connection without a mount (no ``root_path`` in its routing); otherwise
+        whether its address's ``root`` and ``path`` are the routing's.
+    """
+    if "root_path" not in fetched.routing:
+        return True
+    return all(fetched.address.get(key) == fetched.routing.get(key) for key in ("root", "path"))
 
 
 def clear() -> None:

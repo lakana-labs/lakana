@@ -218,8 +218,8 @@ class PythonTask:
     connections
         Each connection the asset declares to its routing, as the harness gets it: its ``kind``,
         and the ``grant`` (the ``[host, port]`` pairs the attempt may reach) with a
-        ``relay_port`` under the Docker runner, or a mounted root's ``root_dir``, ``path`` and
-        ``root_path``.
+        ``relay_port`` under the Docker runner, or a mounted root's ``root``, ``root_dir``,
+        ``path`` and ``root_path``.
     table_exists
         Whether the asset's table existed when the worker read it (one created by a first run
         of zero rows has no snapshot and still exists).

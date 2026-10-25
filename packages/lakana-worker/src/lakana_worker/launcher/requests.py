@@ -55,6 +55,8 @@ EGRESS_MISSING = (
     "connection from the asset."
 )
 """The refusal of a run with egress while the egress service is not running."""
+INGEST_MOUNT = "/ingest"
+"""Where a task finds its ingestion roots, one directory per root: ``/ingest/<root>``."""
 ROOTS_REFUSAL = "roots: a list of distinct names from LAKANA_LAUNCHER__INGESTION_ROOTS ("
 """How the refusal of a run's ``roots`` begins; the launcher's root names follow, then ``)``."""
 RELAY_ALIAS = "lakana-relay"
@@ -1398,7 +1400,7 @@ def _ingestion_mount(settings: LauncherSettings, name: str) -> dict[str, Any]:
     return {
         "Type": "bind",
         "Source": settings.ingestion_roots[name],
-        "Target": f"/ingest/{name}",
+        "Target": f"{INGEST_MOUNT}/{name}",
         "ReadOnly": True,
         "BindOptions": {"Propagation": "rprivate", "NonRecursive": True},
     }
@@ -1952,7 +1954,7 @@ def ingestion_probe_spec(
     return {
         "Image": image,
         "Entrypoint": ["/usr/local/bin/python", "-I", "-c", INGEST_PROBE_SCRIPT],
-        "Cmd": [f"/ingest/{name}", "/proc/self/mountinfo", str(settings.probe_max_entries)],
+        "Cmd": [f"{INGEST_MOUNT}/{name}", "/proc/self/mountinfo", str(settings.probe_max_entries)],
         "User": settings.task_user,
         "NetworkDisabled": True,
         "Labels": labels(settings, "probe", f"ingest-{name}", "launcher"),

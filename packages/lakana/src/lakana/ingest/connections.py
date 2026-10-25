@@ -22,7 +22,9 @@ from __future__ import annotations
 import os
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
+from urllib.parse import urlsplit
 
+from lakana import context
 from lakana.ingest._connections import Endpoint, fetch
 
 _PROXY_KINDS = frozenset({"http", "s3", "gcs", "azure"})
@@ -112,12 +114,12 @@ class Connection:
         Its secret's values (``password``, ``token``, ...), or `None` when it has none.
     proxy_url
         The proxy an HTTPS client of the task goes through (``http``, ``s3``, ``gcs`` and
-        ``azure``); `None` unless the task runs isolated, and then the client connects
-        directly.
+        ``azure``). It holds the task's egress token: left out of `repr` and hidden in the
+        task's log. `None` when the task does not run isolated; connect directly then.
     relay_address
         ``lakana-relay:<port>``, which a database client of the task connects to instead of
-        the host (``postgresql``, ``mariadb`` and ``tcp``); `None` unless the task runs
-        isolated: connect to `address` then.
+        the host (``postgresql``, ``mariadb`` and ``tcp``). `None` when the task does not run
+        isolated; connect directly to `address` then.
     root_path
         The directory or file a ``directory`` or ``sqlite-file`` connection reads, under either
         runner; `None` for the other kinds.
@@ -129,7 +131,7 @@ class Connection:
     settings: Mapping[str, object]
     endpoints: tuple[Endpoint, ...]
     secret: MaskedMapping | None = field(repr=False)
-    proxy_url: str | None = None
+    proxy_url: str | None = field(default=None, repr=False)
     relay_address: str | None = None
     root_path: str | None = None
 
@@ -161,6 +163,11 @@ def get(name: str) -> Connection:
         Outside a running task.
     """
     found = fetch(name)
+    proxy_url = os.environ.get("LAKANA_EGRESS_PROXY") if found.kind in _PROXY_KINDS else None
+    if proxy_url:
+        token = urlsplit(proxy_url).password
+        if token:
+            context.register_secret(token)
     relay_port = found.routing.get("relay_port")
     root_path = found.routing.get("root_path")
     return Connection(
@@ -170,7 +177,7 @@ def get(name: str) -> Connection:
         settings=found.settings,
         endpoints=found.endpoints,
         secret=None if found.secret is None else MaskedMapping(found.secret),
-        proxy_url=os.environ.get("LAKANA_EGRESS_PROXY") if found.kind in _PROXY_KINDS else None,
+        proxy_url=proxy_url,
         relay_address=f"{_RELAY_HOST}:{relay_port}" if isinstance(relay_port, int) else None,
         root_path=root_path if isinstance(root_path, str) else None,
     )

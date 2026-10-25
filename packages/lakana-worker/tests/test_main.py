@@ -2178,6 +2178,19 @@ def test_a_run_ingestion_root_the_launcher_would_refuse_stops_the_worker(
     assert str(caught.value).startswith("LAKANA_RUN__INGESTION_ROOTS must be a JSON object")
 
 
+def test_the_docker_runner_ignores_the_run_ingestion_roots(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Its launcher has its own roots: the worker's setting is neither checked nor used."""
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg"))
+    settings = Settings(
+        database={"url": f"sqlite:///{tmp_path}/lakana.db"},  # type: ignore[arg-type]
+        run={"runner": "docker", "ingestion_roots": {"x": "/proc"}},  # type: ignore[arg-type]
+    )
+    runtime = _python_runtime(settings, PythonSupport(server_url="http://s", uv="/bin/uv"))
+    assert dict(runtime.ingestion_roots) == {}
+
+
 def test_the_local_runner_gets_the_run_ingestion_roots(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
