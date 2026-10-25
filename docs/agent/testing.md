@@ -1238,7 +1238,10 @@ server (uvicorn on a loopback port, `python_asset_helpers.serving`) on Postgres 
   directory does not hold yet. CI runs this module in a job of its own, `integration (python
   assets)`, beside the tests that install no packages: it restores the directory from a cache keyed
   on `uv.lock` and `.python-version`, runs the script as its own step, and runs this module with
-  `LAKANA_TEST_WHEELHOUSE` set; the job has `timeout-minutes: 30` and a budget of 15 minutes. Each test project commits
+  `LAKANA_TEST_WHEELHOUSE` set; the job has `timeout-minutes: 30` and a budget of 15 minutes.
+  `integration (docker)` repeats the same cache and build steps and sets the variable too, for the
+  Docker module's end-to-end ingestion asset
+  (`test_an_ingestion_asset_reaches_its_declared_connections_and_nothing_else`). Each test project commits
   a copy as `wheelhouse/` and sets `[tool.uv] no-index = true`, `find-links = ["wheelhouse"]`;
   the worker under test has its proxy pointed at the discard port, so a build that reached for
   an index would fail. The directory is never committed to this repository.

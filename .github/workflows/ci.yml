@@ -526,15 +526,26 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync --all-packages --locked
+      # One Docker case runs an ingestion asset end to end with the real lakana: the same
+      # offline wheel index as the Python-asset tests.
+      - name: Restore the wheel index
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6
+        with:
+          path: ${{ runner.temp }}/wheelhouse
+          key: wheelhouse-${{ runner.os }}-${{ hashFiles('uv.lock', '.python-version') }}
+      - name: Build the wheel index for the Python-asset tests
+        run: bash scripts/build_wheelhouse.sh "$RUNNER_TEMP/wheelhouse"
       - name: Docker isolation tests
         env:
           LAKANA_TEST_DOCKER: "1"
+          LAKANA_TEST_WHEELHOUSE: ${{ runner.temp }}/wheelhouse
         run: uv run pytest -m docker --basetemp "$RUNNER_TEMP/pytest-docker" packages/lakana-worker/tests
 
   # The Python-asset tests install from an offline wheel directory. Building it is the only step
   # that may ask a package index, and only for wheels the cache does not hold: the locked wheels
   # are cached by uv.lock, the lakana wheel is rebuilt from this checkout every time. Its own
-  # step, so its failure is named as such. Only this job needs the index, so it builds it itself.
+  # step, so its failure is named as such. This job and integration (docker) need the index, so
+  # each builds it itself from the same cache.
   integration-assets:
     name: integration (python assets)
     needs: changes
