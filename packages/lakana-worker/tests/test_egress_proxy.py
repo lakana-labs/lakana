@@ -7,10 +7,12 @@ import contextlib
 import ipaddress
 import json
 import logging
+import os
 import select
 import socket
 import socketserver
 import struct
+import sys
 import threading
 import time
 import uuid
@@ -1589,8 +1591,23 @@ def test_an_unlisted_host_is_refused_with_the_purposes_next_step(
     assert (status, said) == (b"403", reason)
 
 
+_OCTAL_ON_MACOS = pytest.mark.skipif(
+    sys.platform == "darwin",
+    reason="macOS's inet_aton does not read 0177.0.0.1 as octal (it dials 177.0.0.1 and times "
+    "out); the proxy runs in the Linux egress container, whose C library does",
+)
+
+
 @pytest.mark.parametrize(
-    "host", ["127.1", "0x7f.1", "2130706433", "0177.0.0.1", "0251.0376.0251.0376", "localhost"]
+    "host",
+    [
+        "127.1",
+        "0x7f.1",
+        "2130706433",
+        pytest.param("0177.0.0.1", marks=_OCTAL_ON_MACOS),
+        "0251.0376.0251.0376",
+        "localhost",
+    ],
 )
 def test_every_spelling_of_loopback_and_metadata_is_refused_for_a_task(
     tmp_path: Path, host: str
@@ -1841,3 +1858,47 @@ def test_the_docker_hosts_name_is_refused_for_every_purpose(tmp_path: Path, purp
     reason = f"host.docker.internal:5432 is not reachable through this proxy: {egress.INTERNAL}"
     assert status == b"403"
     assert said == (reason if purpose == "build" else f"{reason}; {_TASK_NEXT_STEP}")
+
+
+@pytest.mark.parametrize("kind", ["missing", "link", "directory", "fifo", "too-large", "not-utf-8"])
+def test_read_refused_accepts_only_a_small_regular_file(tmp_path: Path, kind: str) -> None:
+    """A link is not followed, a directory or a pipe is not read, more than 1 MiB is refused.
+
+    Parameters
+    ----------
+    tmp_path
+        For the file.
+    kind
+        What lies at the path.
+    """
+    path = tmp_path / "refused.json"
+    good = tmp_path / "good.json"
+    good.write_text('{"refused": ["10.99.0.1/32"]}', encoding="utf-8")
+    if kind == "link":
+        path.symlink_to(good)
+    elif kind == "directory":
+        path.mkdir()
+    elif kind == "fifo":
+        os.mkfifo(path)
+    elif kind == "too-large":
+        path.write_text('{"refused": []}' + " " * (1 << 20), encoding="utf-8")
+    elif kind == "not-utf-8":
+        path.write_bytes(b'{"refused": ["\xff"]}')
+
+    assert egress.read_refused(path) is None
+    assert egress.read_refused(good) == frozenset({ipaddress.ip_network("10.99.0.1/32")})
+
+
+def test_read_refused_survives_a_failing_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An I/O error while reading means no ranges, so the proxy refuses (it never guesses)."""
+    path = tmp_path / "refused.json"
+    path.write_text('{"refused": []}', encoding="utf-8")
+
+    def failing_read(descriptor: int, size: int) -> bytes:
+        raise OSError(5, "Input/output error")
+
+    monkeypatch.setattr(egress.os, "read", failing_read)
+
+    assert egress.read_refused(path) is None

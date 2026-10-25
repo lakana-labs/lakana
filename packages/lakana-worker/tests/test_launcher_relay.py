@@ -25,6 +25,76 @@ _HEADER = "Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\n"
 _ATTACHED = "eth1\t0000090A\t00000000\t0001\t0\t0\t0\t00FFFFFF\n"
 """10.9.0.0/24: the network the relay reaches out through, which holds the stack."""
 _SUBNETS = itertools.count(1)
+_BOUND: dict[tuple[str, int], int] = {}
+"""The relay's address and listen port to the loopback port it really listens on."""
+_PRETENDED: dict[int, str] = {}
+"""A client's loopback port to the address the relay reads as its peer."""
+
+
+class _LoopbackSocket(socket.socket):
+    """A relay's socket that listens on 127.0.0.1, the one loopback address every platform has.
+
+    macOS has no 127.N.M.x beyond 127.0.0.1, so a relay's plan keeps its own /29 while its
+    sockets bind 127.0.0.1 on a free port (recorded in `_BOUND`), and an accepted connection's
+    peer is read as the address the client recorded in `_PRETENDED`. The subnet check, the
+    ports and the limits still run on the plan's addresses.
+    """
+
+    def bind(self, address: tuple[str, int], /) -> None:  # ty: ignore[invalid-method-override]
+        """Bind 127.0.0.1 on a free port instead, and remember which.
+
+        Parameters
+        ----------
+        address
+            The plan's address and listen port.
+        """
+        super().bind(("127.0.0.1", 0))
+        _BOUND[str(address[0]), int(address[1])] = self.getsockname()[1]
+
+    def accept(self) -> tuple[socket.socket, tuple[str, int]]:
+        """Accept, reading the peer as the address its client pretended.
+
+        Returns
+        -------
+        tuple
+            The connection and its pretended peer.
+        """
+        client, peer = super().accept()
+        return client, (_PRETENDED.get(peer[1], peer[0]), peer[1])
+
+
+class _RelaySockets:
+    """The `socket` module as the relay sees it in these tests: `_LoopbackSocket` for sockets."""
+
+    socket = _LoopbackSocket
+
+    def __getattr__(self, name: str) -> object:
+        """Hand out everything else of the real module.
+
+        Parameters
+        ----------
+        name
+            The attribute.
+
+        Returns
+        -------
+        object
+            The real module's attribute.
+        """
+        return getattr(socket, name)
+
+
+def _closed_port() -> int:
+    """Find a loopback port nothing listens on.
+
+    Returns
+    -------
+    int
+        The port.
+    """
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
 
 
 class _Echo(socketserver.BaseRequestHandler):
@@ -85,11 +155,22 @@ class RelayHarness:
         -------
         socket.socket
             The connection.
+
+        Raises
+        ------
+        OSError
+            When the relay does not accept it (a port it does not listen on is refused).
         """
         client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         client.settimeout(5)
-        client.bind((source or str(next(self.plan.subnet.hosts())), 0))
-        client.connect((str(self.plan.address), listen))
+        client.bind(("127.0.0.1", 0))
+        _PRETENDED[client.getsockname()[1]] = source or str(next(self.plan.subnet.hosts()))
+        port = _BOUND.get((str(self.plan.address), listen)) or _closed_port()
+        try:
+            client.connect(("127.0.0.1", port))
+        except OSError:
+            client.close()
+            raise
         return client
 
     def wait_for_log(self, fragment: str) -> str:
@@ -120,19 +201,24 @@ class RelayHarness:
 
 
 @pytest.fixture
-def relay_on(tmp_path: Path) -> Iterator[Callable[..., RelayHarness]]:
+def relay_on(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[Callable[..., RelayHarness]]:
     """Start relays on loopback /29s; each test's relays stop at its end.
 
     Parameters
     ----------
     tmp_path
         For the routing table.
+    monkeypatch
+        Gives the relay `_LoopbackSocket` sockets.
 
     Yields
     ------
     callable
         ``(routes, reachable=LOOPBACK, table=True, refused=(range,)) -> RelayHarness``.
     """
+    monkeypatch.setattr(relay, "socket", _RelaySockets())
     started: list[RelayHarness] = []
     route = tmp_path / "route"
     route.write_text(_HEADER + _ATTACHED, encoding="ascii")
@@ -447,6 +533,12 @@ _GOOD_ROUTE = '{"listen": 15001, "host": "db.example.com", "port": 5432}'
             f'"routes": [{_GOOD_ROUTE}]}}',
             "refused: 1 to 256",
         ),
+        pytest.param(" " * (64 * 1024 + 1), "the plan is larger than 64 KiB", id="too-large"),
+        (
+            '{"address": "10.0.0.6", "subnet": "10.0.0.0/29", "refused": ["10.0.0.0/16"], '
+            '"routes": [[15001, "db", 5432]]}',
+            "routes: each has exactly listen, host and port",
+        ),
         pytest.param(
             '{"address": "10.0.0.6", "subnet": "10.0.0.0/29", "refused": ['
             + ", ".join(f'"10.{n // 256}.{n % 256}.1/32"' for n in range(257))
@@ -635,3 +727,24 @@ def test_the_docker_hosts_name_is_refused_by_the_relay(
         f"refused host.docker.internal:{target}: {egress.INTERNAL}; give the connection an "
         "address outside the Lakana stack (lakana connection update)"
     )
+
+
+def test_main_stops_with_status_2_when_it_cannot_listen(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A plan whose address is not this container's: the port cannot be bound, the line says so."""
+    plan = (
+        '{"address": "10.207.0.6", "subnet": "10.207.0.0/29", "refused": ["10.207.0.0/16"], '
+        f'"routes": [{_GOOD_ROUTE}]}}'
+    )
+    monkeypatch.setattr(relay.sys, "stdin", type("In", (), {"read": staticmethod(lambda: plan)})())
+    for name in [n for n in relay.os.environ if n.startswith("LAKANA_EGRESS__")]:
+        monkeypatch.delenv(name)
+
+    with pytest.raises(SystemExit) as exited:
+        relay.main()
+
+    assert exited.value.code == 2
+    said = capsys.readouterr().err
+    assert said.startswith("lakana-relay: cannot start: ") and said.endswith("\n")
+    assert "ready" not in said
