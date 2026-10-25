@@ -31,6 +31,12 @@ dev = [
     # Test-only here: `packages/lakana/tests/tls_fixture.py` makes certificate authorities with it
     # (the package itself needs none). Apache-2.0 OR BSD-3-Clause.
     "cryptography>=50.0.2",
+    # Test-only: polars' `write_excel` makes the spreadsheets of the files helper's tests.
+    # BSD-2-Clause.
+    "xlsxwriter>=3.2",
+    # Test-only here: the spreadsheet reader `lakana[assets]` brings to a task; the tests of
+    # `lakana.ingest.files` run without that extra installed. MIT.
+    "fastexcel>=0.21",
 ]
 # The documentation site (docs/site). Built in CI; published at the public beta.
 docs = [

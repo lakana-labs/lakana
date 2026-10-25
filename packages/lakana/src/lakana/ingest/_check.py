@@ -614,11 +614,12 @@ def _check_mount(
     )
     if not isinstance(root_dir, str):
         raise unavailable
+    top = root_dir.rstrip("/") or "/"
     try:
-        opened = os.open(root_dir, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        opened = os.open(top, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     except (FileNotFoundError, NotADirectoryError):
         with contextlib.suppress(OSError):
-            if stat.S_ISLNK(os.lstat(root_dir).st_mode):
+            if stat.S_ISLNK(os.lstat(top).st_mode):
                 raise _Found(
                     "failed", f"the root `{root}` is a symbolic link, which Lakana does not follow"
                 ) from None
