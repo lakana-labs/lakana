@@ -46,8 +46,9 @@ every control in the next section is described relative to one of them.
   credentials it holds, not by inspecting what it does.
 - **The task container boundary** (M7b, `DockerRunner`): a Python task or environment build runs
   in a container of its own, without the worker's credentials, on a network shared with the
-  server only (a build: with the egress proxy only). It isolates projects, not hostile code: the
-  kernel is shared.
+  server only (a build: with the egress proxy only; a task whose asset declares connections: also
+  with the egress proxy and its own relay, which reach exactly those connections' endpoints, M6).
+  It isolates projects, not hostile code: the kernel is shared.
 - **The object storage boundary**, where credential scoping applies. This is where the
   query engine's authority is actually cut down to size — see "Bypassing policy by reading
   files directly" below.
@@ -87,7 +88,7 @@ should be read as a roadmap — see "Current posture" below for what has actuall
 | Malicious repository content | Local repositories are fetched into a fresh bare repository, never used in place; the commit is exported with `git archive`, so no checkout, hook or smudge filter runs. `git-upload-pack` does read the *source's* own config (command-scope settings never reach it), but runs no working-tree, fsmonitor or hook code and git refuses a repo-level `uploadpack.packObjectsHook`; canaries for `core.fsmonitor`, `core.hooksPath`, `uploadpack.packObjectsHook` and `core.alternateRefsCommand` never run. The source is trusted by path only: a private global git config marks exactly the resolved source (and its `.git`) as `safe.directory`, because the Compose `./repos` mount is owned by another uid; `LAKANA_REPO_ROOTS` therefore holds *trusted content* (a gitfile, `alternates` or `commondir` inside a root can point outside it). Symlinks under `assets/` or as `lakana.yaml` are refused by name, never followed; 1 MiB per SQL file, 2000 assets, 200 MiB checkout, 120 s per git command, 600 s per deploy; `RecursionError` in sqlglot is a validation error. YAML is loaded with a `SafeLoader` that refuses anchors and aliases (no alias bombs) within 64 KiB per document. | M5b |
 | Discovering tables through a deploy | An external input the deployer cannot read reports "not found", exactly like a missing one; manifests withhold an asset's SQL, references and lineage unless the reader can read every referenced table (`hidden_references`), and drop unreadable external inputs. | M5b |
 | Deploying to a protected environment from a laptop | `DEPLOY` is a per-environment grant; "only CI deploys to prod" means only the CI service principal holds it there — and since the `ADMIN` role holds every action but `READ_QUERY_TEXT`, it also means no human holds `ADMIN` on the instance or on `prod` (the bootstrap admin holds it on the instance). It is re-checked when the worker claims the run. **Scope:** per environment, not per repository — a principal with `DEPLOY` on `prod` can deploy any registered repository there. CI authenticates with a stored PAT, or (#15) exchanges its OIDC ID token for a CI token that the CI trust rule narrows to one repository, one kind and one signed commit; see "CI OIDC exchange (#15)" below. | M5b, #15 |
-| Malicious or compromised task code | A Python task is trusted code from a reviewed repository. `LocalProcessRunner` is **not a sandbox**: the task runs as the worker's operating-system user, can read what the worker can read and can write the shared venv cache; the scrubbed environment and the private attempt directory are hygiene. **One instance is one trust domain**: everyone who may deploy Python code is trusted with everything the worker can read, so run one instance per client. What limits a task is its token: bound to the attempt, `READ_TABLE` on declared inputs only, `CREATE_TABLE`/`WRITE_TABLE` on its own table or artifact only, no drop (and never the deletion of an artifact version), no listing, no administrative action; in a protected environment the lockdown holds it to its own asset. Deploy never executes repository code (`ast` discovery, TOML parsing). With `DockerRunner` (`LAKANA_RUN__RUNNER=docker`, the Compose bundle's default) each task runs in its own container: no worker credential, no other project's environment, a network shared with the server only, runtime-enforced limits, nothing left after it ends (M7b); a protected environment refuses Python tasks on a worker without it. **Residual:** under `LocalProcessRunner` (local mode, or `LAKANA_RUN__RUNNER=local`) a task can poison the venv cache for other tasks that share its lock, and read the worker's credentials; under `DockerRunner` containers share the kernel (see "Task isolation (M7b): residuals") | M5c2a, M7b |
+| Malicious or compromised task code | A Python task is trusted code from a reviewed repository. `LocalProcessRunner` is **not a sandbox**: the task runs as the worker's operating-system user, can read what the worker can read and can write the shared venv cache; the scrubbed environment and the private attempt directory are hygiene. **One instance is one trust domain**: everyone who may deploy Python code is trusted with everything the worker can read, so run one instance per client. What limits a task is its token: bound to the attempt, `READ_TABLE` on declared inputs only, `CREATE_TABLE`/`WRITE_TABLE` on its own table or artifact only, no drop (and never the deletion of an artifact version), no listing, no administrative action; in a protected environment the lockdown holds it to its own asset. Deploy never executes repository code (`ast` discovery, TOML parsing). With `DockerRunner` (`LAKANA_RUN__RUNNER=docker`, the Compose bundle's default) each task runs in its own container: no worker credential, no other project's environment, a network shared with the server only (with connections: their endpoints too, through the egress proxy and a per-task relay, and nothing else; see "Task egress (M6): residuals"), runtime-enforced limits, nothing left after it ends (M7b); a protected environment refuses Python tasks on a worker without it. **Residual:** under `LocalProcessRunner` (local mode, or `LAKANA_RUN__RUNNER=local`) a task can poison the venv cache for other tasks that share its lock, and read the worker's credentials; under `DockerRunner` containers share the kernel (see "Task isolation (M7b): residuals") | M5c2a, M7b |
 | Supply chain of a task's dependencies | Dependencies are user code and run with the task's token. The venv is built from the committed `uv.lock` (`uv sync --frozen`: hashes pinned by the lock) by a subprocess with a from-scratch environment, a time and size limit and no ambient proxy or credentials; local path and workspace dependencies are refused; its output is redacted. A package built from source runs its build backend and sees the index and proxy credentials of the build: under `LocalProcessRunner` as the worker's user with the worker's network access, under `DockerRunner` in a build container (uid 10002) whose only way out is the egress proxy, to the hosts its token names. Registered private indexes and their credentials: see the two M5c2c rows below | M5c2a |
 | A project that sends a package index credential to another host | The worker defines the registered index itself in `UV_INDEX`, with the credential inside the URL, so uv binds it to that index's scheme, host and port: another host, or another port of the same host, never receives it, whatever the project's files say. The build runs `uv sync --frozen --no-config` with a fresh, empty `HOME`. **Read at build time:** the lock, the index definitions in the project's `[[tool.uv.index]]` tables, and, under `LocalProcessRunner`, the operator's proxy and CA settings (`LAKANA_RUN__HTTPS_PROXY`, refused at start under `DockerRunner`; `LAKANA_RUN__CA_BUNDLE`, whose certificates builds of both runners trust through `SSL_CERT_FILE`). **Not read:** the project's `[tool.uv]` settings, any `uv.toml`, a `.netrc`. Proved by unit tests against the real uv (`packages/lakana-worker/tests/test_index_credentials.py`: another host, a redirect, a reused index name, the proxy setting) and, for deploy and run, by `test_python_assets_integration.py`, whose `test_a_project_that_names_another_host_gives_that_host_no_credential` drives a build of a project that names another host and finds no `Authorization` header there. **Real and shipped.** | M5c2c |
 | Dependency confusion for a registered index | `explicit = true` is required at deploy for a registered index declared in `pyproject.toml`, and a lock may name only the public index, `wheelhouse`, the operator's index and registered indexes. **Real and shipped.** | M5c2c |
@@ -355,7 +356,8 @@ not protect against. Each is accepted.
    before the first pull is what runs. Releases attest the images; the launcher does not verify
    an attestation.
 5. **A task's network is the server's too.** A task reaches every port the `server` container
-   listens on, and the REST API with its own token, as under `LocalProcessRunner`.
+   listens on, and the REST API with its own token, as under `LocalProcessRunner`. A task with
+   connections also reaches their endpoints (see "Task egress (M6): residuals").
 6. **`no-new-privileges` is off on Docker installed as a snap**, which refuses it; the launcher
    detects that at start (`LAKANA_LAUNCHER__NO_NEW_PRIVILEGES=on` refuses to start instead).
 7. **Build-time code of a dependency** (a source distribution, built only when no registered
@@ -400,6 +402,54 @@ not protect against. Each is accepted.
     when the environment is protected runs to its end without containers.
 13. **The local runner and local mode keep one trust domain** (row "Malicious or compromised
     task code").
+
+## Task egress (M6): residuals
+
+Under `DockerRunner` a task whose asset declares connections reaches exactly their endpoints:
+HTTPS through the egress proxy with a token of purpose `task` (bound to the task's /29, its
+host:port pairs and its lifetime plus a minute), databases and `tcp` through a relay container of
+its own (one port per endpoint, forwarded to that endpoint only), directories as read-only mounts
+of the operator's ingestion roots. The worker computes the routes from the deployed manifest,
+never from request input. A task without connections keeps the M7b posture. The controls are in
+`docs/agent/security.md`, "Task egress: connections, the proxy and the relay (M6)" and "The relay
+(M6)"; the operator's view in
+[Run Python tasks in containers](../site/how-to/run-python-tasks-in-containers.md#connections-what-a-task-reaches).
+
+**Defended:** another task (a token copied into another task's container is refused; each relay
+serves its own /29 only, and the proxy and every relay refuse the launcher's whole task range);
+the Lakana stack (every network the proxy or a relay is attached to, so the Compose network with
+Postgres and SeaweedFS's port 18333); loopback in every spelling, link-local and the metadata
+address; the gateway of every Docker network, listed at every network open, and the Docker host's
+well-known names; the ranges of `LAKANA_EGRESS_REFUSED`; any host:port the asset does not declare
+(403 naming what to declare). A task with routes refuses to start without the `egress` service.
+Proved on a real engine by `test_docker_task_egress_integration.py`, the attached-network rule on
+its own by a service beside the source on the egress service's network that no refused range
+holds.
+
+What it does not protect against. Each is accepted.
+
+1. **The shared kernel**, as for every task container.
+2. **The token is in the task's environment** (`LAKANA_EGRESS_PROXY`). Any code of the task can
+   use it for the declared pairs while the run lasts; it is useless in another container and
+   after the run.
+3. **A declared host receives what the task sends.** The task can send the declared
+   connections' credentials, and anything it reads, to any endpoint of those connections. The
+   asset's `connections` are reviewed with its code (PR review is the trust boundary).
+4. **The Docker host's other addresses** (LAN, VPN or Tailscale, `virbr0`, Docker Desktop's
+   `192.168.65.0/24`) are reachable when a connection names them, unless the operator lists them
+   in `LAKANA_EGRESS_REFUSED`; the docs say to, and to bind host services to loopback. Docker's
+   gateways and the host's names are refused without it. A network made after the last listing is
+   refused from the next network open on.
+5. **`tcp` traffic is encrypted only if the team's driver encrypts it.** The relay never reads
+   the bytes; TLS, where the protocol has it, stays end to end.
+6. **A company proxy decides after the local check.** With `LAKANA_EGRESS__UPSTREAM_PROXY` the
+   proxy and the relays refuse numeric hosts and names that resolve here to a refused address;
+   the company proxy resolves the name again (residual 11 of "Task isolation (M7b)").
+7. **A task can exhaust its own relay** (64 MiB, 16 connections per route) and its share of the
+   proxy (`LAKANA_EGRESS__MAX_CONNECTIONS_PER_NETWORK`), never another task's relay.
+8. **An ingestion root is mounted whole.** A task whose `directory` or `sqlite-file` connection
+   names a root reads every path under it, other connections' paths included. The how-to tells
+   operators to give each group of data that some tasks must not read a root of its own.
 
 ## CI OIDC exchange (#15)
 
@@ -598,7 +648,7 @@ otherwise would misrepresent what the platform does.
   `internal: true` network only SeaweedFS's containers share; the S3 gateway `seaweedfs` is the
   one service on both that network and the one the server and workers use, and it listens on
   8333 and its gRPC port 18333 (its other HTTP ports are off). A worker's HTTP can reach SeaweedFS only through S3 with the keys. A test asserts the
-  network layout and the CI smoke test checks it from inside the worker. **Residual:** the gateway's gRPC port 18333 (it includes IAM) cannot be turned off and has no authentication. It is reachable from the default network, so from code in the worker: user SQL cannot reach it, because DuckDB's HTTP filesystem cannot speak gRPC, but a Python task under `LocalProcessRunner`, which runs as trusted code in the worker, could remove the storage identity and make storage unavailable until a restart. Under `DockerRunner` a task's network holds only the server and a build's only the egress proxy, which refuses the networks it is attached to, so neither reaches SeaweedFS. The isolation relies on Docker's own network isolation (the default). The S3 keys
+  network layout and the CI smoke test checks it from inside the worker. **Residual:** the gateway's gRPC port 18333 (it includes IAM) cannot be turned off and has no authentication. It is reachable from the default network, so from code in the worker: user SQL cannot reach it, because DuckDB's HTTP filesystem cannot speak gRPC, but a Python task under `LocalProcessRunner`, which runs as trusted code in the worker, could remove the storage identity and make storage unavailable until a restart. Under `DockerRunner` a task's network holds only the server (and, for a task with connections, the egress proxy and the task's relay) and a build's only the egress proxy; the proxy and the relay refuse the networks they are attached to, so neither reaches SeaweedFS. The isolation relies on Docker's own network isolation (the default). The S3 keys
   in the worker's reach give full bucket access, and a host administrator (Docker access) is
   outside the model.
 - **Applying Iceberg row-level deletes.** A table written to by an engine other than Lakana's

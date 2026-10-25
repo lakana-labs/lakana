@@ -106,6 +106,16 @@ class _Echo(socketserver.BaseRequestHandler):
             self.request.sendall(data)
 
 
+class _EchoServer(socketserver.ThreadingTCPServer):
+    """The echo target, with a listen backlog above a relay port's 16 connections.
+
+    `socketserver`'s default backlog of 5 drops the SYNs of a burst of 16 dials, which the
+    kernel retries after 1 s, then 3 s more: under load that crossed the clients' 5 s timeout.
+    """
+
+    request_queue_size = 4 * MAX_PER_PORT
+
+
 @pytest.fixture
 def target() -> Iterator[int]:
     """Run an echo "database" on loopback.
@@ -115,7 +125,7 @@ def target() -> Iterator[int]:
     int
         Its port.
     """
-    server = socketserver.ThreadingTCPServer(("127.0.0.1", 0), _Echo)
+    server = _EchoServer(("127.0.0.1", 0), _Echo)
     server.daemon_threads = True
     threading.Thread(target=server.serve_forever, args=(0.05,), daemon=True).start()
     yield server.server_address[1]
@@ -216,7 +226,8 @@ def relay_on(
     Yields
     ------
     callable
-        ``(routes, reachable=LOOPBACK, table=True, refused=(range,)) -> RelayHarness``.
+        ``(routes, reachable=LOOPBACK, table=True, refused=(range,), plan_reachable=())
+        -> RelayHarness``; ``plan_reachable`` is the plan's own ``reachable``.
     """
     monkeypatch.setattr(relay, "socket", _RelaySockets())
     started: list[RelayHarness] = []
@@ -229,6 +240,7 @@ def relay_on(
         reachable: frozenset[object] = frozenset({LOOPBACK}),
         table: bool = True,
         refused: tuple[str, ...] = ("10.207.0.0/16",),
+        plan_reachable: tuple[str, ...] = (),
     ) -> RelayHarness:
         subnet = ipaddress.IPv4Network(f"127.{next(_SUBNETS)}.{len(started)}.0/29")
         plan = RelayPlan(
@@ -236,6 +248,7 @@ def relay_on(
             subnet=subnet,
             refused=frozenset(ipaddress.ip_network(r) for r in refused),
             routes=tuple(RelayRoute(*r) for r in routes),
+            reachable=frozenset(ipaddress.IPv4Network(r) for r in plan_reachable),
         )
         settings = EgressSettings(
             key=tmp_path / "unused.key",
@@ -483,97 +496,129 @@ _GOOD_ROUTE = '{"listen": 15001, "host": "db.example.com", "port": 5432}'
     ("plan", "message"),
     [
         ("{", "the plan is one JSON object"),
-        ("[]", "exactly address, subnet, refused and routes"),
+        ("[]", "exactly address, subnet, refused, reachable and routes"),
         (
             '{"address": "10.0.0.6", "subnet": "10.0.0.0/29", "refused": ["10.0.0.0/16"], '
-            f'"routes": [{_GOOD_ROUTE}], "extra": 1}}',
-            "exactly address, subnet, refused and routes",
+            f'"reachable": [], "routes": [{_GOOD_ROUTE}], "extra": 1}}',
+            "exactly address, subnet, refused, reachable and routes",
         ),
         (
             '{"address": "10.0.0.9", "subnet": "10.0.0.0/29", "refused": ["10.0.0.0/16"], '
-            f'"routes": [{_GOOD_ROUTE}]}}',
+            f'"reachable": [], "routes": [{_GOOD_ROUTE}]}}',
             "address must be a host address of subnet",
         ),
         (
             '{"address": "10.0.0.7", "subnet": "10.0.0.0/29", "refused": ["10.0.0.0/16"], '
-            f'"routes": [{_GOOD_ROUTE}]}}',
+            f'"reachable": [], "routes": [{_GOOD_ROUTE}]}}',
             "address must be a host address of subnet",
         ),
         (
             '{"address": "10.0.0.6", "subnet": "10.0.0.0/28", "refused": ["10.0.0.0/16"], '
-            f'"routes": [{_GOOD_ROUTE}]}}',
+            f'"reachable": [], "routes": [{_GOOD_ROUTE}]}}',
             "a /29",
         ),
         (
-            '{"address": "x", "subnet": "10.0.0.0/29", "refused": ["10.0.0.0/16"], "routes": []}',
+            '{"address": "x", "subnet": "10.0.0.0/29", "refused": ["10.0.0.0/16"], '
+            '"reachable": [], "routes": []}',
             "address and subnet are IPv4",
         ),
         (
             '{"address": "10.0.0.6", "subnet": "10.0.0.0/29", "refused": ["x"], '
-            f'"routes": [{_GOOD_ROUTE}]}}',
+            f'"reachable": [], "routes": [{_GOOD_ROUTE}]}}',
             "refused: each entry is an IPv4 or IPv6 network in CIDR form",
         ),
         (
             '{"address": "10.0.0.6", "subnet": "10.0.0.0/29", "refused": ["10.0.0.5/16"], '
-            f'"routes": [{_GOOD_ROUTE}]}}',
+            f'"reachable": [], "routes": [{_GOOD_ROUTE}]}}',
             "refused: each entry is an IPv4 or IPv6 network in CIDR form",
         ),
         (
             '{"address": "10.0.0.6", "subnet": "10.0.0.0/29", "refused": [7], '
-            f'"routes": [{_GOOD_ROUTE}]}}',
+            f'"reachable": [], "routes": [{_GOOD_ROUTE}]}}',
             "refused: each entry is an IPv4 or IPv6 network in CIDR form",
         ),
         (
             '{"address": "10.0.0.6", "subnet": "10.0.0.0/29", "refused": [], '
-            f'"routes": [{_GOOD_ROUTE}]}}',
+            f'"reachable": [], "routes": [{_GOOD_ROUTE}]}}',
             "refused: 1 to 256",
         ),
         (
             '{"address": "10.0.0.6", "subnet": "10.0.0.0/29", "refused": "10.0.0.0/16", '
-            f'"routes": [{_GOOD_ROUTE}]}}',
+            f'"reachable": [], "routes": [{_GOOD_ROUTE}]}}',
             "refused: 1 to 256",
+        ),
+        (
+            '{"address": "10.0.0.6", "subnet": "10.0.0.0/29", "refused": ["10.0.0.0/16"], '
+            f'"reachable": "172.30.0.0/16", "routes": [{_GOOD_ROUTE}]}}',
+            "reachable: at most 4 IPv4 networks in CIDR form",
+        ),
+        (
+            '{"address": "10.0.0.6", "subnet": "10.0.0.0/29", "refused": ["10.0.0.0/16"], '
+            '"reachable": ["172.30.0.0/16", "172.31.0.0/16", "172.29.0.0/16", "172.28.0.0/16", '
+            f'"172.27.0.0/16"], "routes": [{_GOOD_ROUTE}]}}',
+            "reachable: at most 4 IPv4 networks in CIDR form",
+        ),
+        (
+            '{"address": "10.0.0.6", "subnet": "10.0.0.0/29", "refused": ["10.0.0.0/16"], '
+            f'"reachable": ["fd00::/8"], "routes": [{_GOOD_ROUTE}]}}',
+            "reachable: at most 4 IPv4 networks in CIDR form",
+        ),
+        (
+            '{"address": "10.0.0.6", "subnet": "10.0.0.0/29", "refused": ["10.0.0.0/16"], '
+            f'"reachable": ["172.30.0.5/16"], "routes": [{_GOOD_ROUTE}]}}',
+            "reachable: at most 4 IPv4 networks in CIDR form",
+        ),
+        (
+            '{"address": "10.0.0.6", "subnet": "10.0.0.0/29", "refused": ["10.0.0.0/16"], '
+            f'"reachable": [7], "routes": [{_GOOD_ROUTE}]}}',
+            "reachable: at most 4 IPv4 networks in CIDR form",
+        ),
+        (
+            '{"address": "10.0.0.6", "subnet": "10.0.0.0/29", "refused": ["10.0.0.0/16"], '
+            f'"routes": [{_GOOD_ROUTE}]}}',
+            "exactly address, subnet, refused, reachable and routes",
         ),
         pytest.param(" " * (64 * 1024 + 1), "the plan is larger than 64 KiB", id="too-large"),
         (
             '{"address": "10.0.0.6", "subnet": "10.0.0.0/29", "refused": ["10.0.0.0/16"], '
-            '"routes": [[15001, "db", 5432]]}',
+            '"reachable": [], "routes": [[15001, "db", 5432]]}',
             "routes: each has exactly listen, host and port",
         ),
         pytest.param(
             '{"address": "10.0.0.6", "subnet": "10.0.0.0/29", "refused": ['
             + ", ".join(f'"10.{n // 256}.{n % 256}.1/32"' for n in range(257))
-            + f'], "routes": [{_GOOD_ROUTE}]}}',
+            + f'], "reachable": [], "routes": [{_GOOD_ROUTE}]}}',
             "refused: 1 to 256",
             id="257-refused",
         ),
         (
             '{"address": "10.0.0.6", "subnet": "10.0.0.0/29", "internal": "10.0.0.0/16", '
-            f'"routes": [{_GOOD_ROUTE}]}}',
-            "exactly address, subnet, refused and routes",
+            f'"reachable": [], "routes": [{_GOOD_ROUTE}]}}',
+            "exactly address, subnet, refused, reachable and routes",
         ),
         (
             '{"address": "10.0.0.6", "subnet": "10.0.0.0/29", "refused": ["10.0.0.0/16"], '
-            '"routes": []}',
+            '"reachable": [], "routes": []}',
             "routes: 1 to 16",
         ),
         (
             '{"address": "10.0.0.6", "subnet": "10.0.0.0/29", "refused": ["10.0.0.0/16"], '
-            '"routes": [{"listen": 99, "host": "db", "port": 5432}]}',
+            '"reachable": [], "routes": [{"listen": 99, "host": "db", "port": 5432}]}',
             "listen ports are 15001 to 15064",
         ),
         (
             '{"address": "10.0.0.6", "subnet": "10.0.0.0/29", "refused": ["10.0.0.0/16"], '
-            '"routes": [{"listen": 15001, "host": "DB", "port": 5432}]}',
+            '"reachable": [], "routes": [{"listen": 15001, "host": "DB", "port": 5432}]}',
             "a lower-case host",
         ),
         (
             '{"address": "10.0.0.6", "subnet": "10.0.0.0/29", "refused": ["10.0.0.0/16"], '
-            '"routes": [{"listen": 15001, "host": "db", "port": 0}]}',
+            '"reachable": [], "routes": [{"listen": 15001, "host": "db", "port": 0}]}',
             "a port from 1 to 65535",
         ),
         (
             '{"address": "10.0.0.6", "subnet": "10.0.0.0/29", "refused": ["10.0.0.0/16"], '
-            f'"routes": [{_GOOD_ROUTE}, {_GOOD_ROUTE}]}}',
+            f'"reachable": [], "routes": [{_GOOD_ROUTE}, {_GOOD_ROUTE}]}}',
             "listen ports are distinct",
         ),
     ],
@@ -597,7 +642,7 @@ def test_a_plan_is_read() -> None:
     plan = parse_plan(
         '{"address": "10.207.0.6", "subnet": "10.207.0.0/29", '
         '"refused": ["10.207.0.0/16", "172.17.0.1/32", "fd12:3456::1/128"], '
-        f'"routes": [{_GOOD_ROUTE}]}}'
+        f'"reachable": ["172.30.0.0/16"], "routes": [{_GOOD_ROUTE}]}}'
     )
 
     assert plan == RelayPlan(
@@ -611,6 +656,7 @@ def test_a_plan_is_read() -> None:
             }
         ),
         routes=(RelayRoute(15001, "db.example.com", 5432),),
+        reachable=frozenset({ipaddress.IPv4Network("172.30.0.0/16")}),
     )
 
 
@@ -681,6 +727,35 @@ def test_a_target_outside_the_refused_ranges_is_forwarded(
         assert _echoes(client, b"ping") == b"ping"
 
 
+def test_a_target_on_a_network_the_plan_makes_reachable_is_dialled(
+    relay_on: Callable[..., RelayHarness], target: int
+) -> None:
+    """The plan's ``reachable`` (a test hook, empty in production) lets the relay dial there."""
+    harness = relay_on(
+        [(15001, "localhost", target)], reachable=frozenset(), plan_reachable=("127.0.0.0/8",)
+    )
+
+    with harness.connect(15001) as client:
+        assert _echoes(client, b"ping") == b"ping"
+
+
+def test_a_refused_range_wins_over_the_plans_reachable_networks(
+    relay_on: Callable[..., RelayHarness], target: int
+) -> None:
+    """A range the launcher refuses stays refused, whatever ``reachable`` lets in."""
+    harness = relay_on(
+        [(15001, "localhost", target)],
+        reachable=frozenset(),
+        plan_reachable=("127.0.0.0/8",),
+        refused=("10.207.0.0/16", "127.0.0.0/8"),
+    )
+
+    with harness.connect(15001) as client:
+        assert client.recv(1) == b""
+
+    assert egress.INTERNAL in harness.wait_for_log(f"refused localhost:{target}")
+
+
 def test_a_handler_thread_that_cannot_start_gives_its_slot_back(
     relay_on: Callable[..., RelayHarness], monkeypatch: pytest.MonkeyPatch, target: int
 ) -> None:
@@ -735,7 +810,7 @@ def test_main_stops_with_status_2_when_it_cannot_listen(
     """A plan whose address is not this container's: the port cannot be bound, the line says so."""
     plan = (
         '{"address": "10.207.0.6", "subnet": "10.207.0.0/29", "refused": ["10.207.0.0/16"], '
-        f'"routes": [{_GOOD_ROUTE}]}}'
+        f'"reachable": [], "routes": [{_GOOD_ROUTE}]}}'
     )
     monkeypatch.setattr(relay.sys, "stdin", type("In", (), {"read": staticmethod(lambda: plan)})())
     for name in [n for n in relay.os.environ if n.startswith("LAKANA_EGRESS__")]:

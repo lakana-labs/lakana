@@ -1208,3 +1208,14 @@ def test_an_http_index_with_the_docker_runner_is_refused_with_the_way_out() -> N
     assert RunConfig(runner="local", index_url=SecretStr("http://mirror.corp/simple")).index_url
     with pytest.raises(pydantic.ValidationError, match="LAKANA_RUN__INDEX_URL"):
         RunConfig(runner="docker", index_url=SecretStr("HTTP://mirror.corp/simple"))
+
+
+def test_run_ingestion_roots_read_from_settings_and_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`LAKANA_RUN__INGESTION_ROOTS` is a JSON object of name to directory; empty by default."""
+    monkeypatch.setenv("LAKANA_DATABASE__URL", "sqlite://")
+    assert Settings().run.ingestion_roots == {}
+    assert Settings(run={"ingestion_roots": {"shared": "/srv/in"}}).run.ingestion_roots == {  # type: ignore[arg-type]
+        "shared": "/srv/in"
+    }
+    monkeypatch.setenv("LAKANA_RUN__INGESTION_ROOTS", '{"shared": "/srv/in"}')
+    assert Settings().run.ingestion_roots == {"shared": "/srv/in"}

@@ -13,7 +13,12 @@ from dataclasses import dataclass, field
 
 from lakana import context
 from lakana.errors import PermissionDenied
-from lakana.ingest._errors import ConnectionNotDeclared, ConnectionRefused, IngestError
+from lakana.ingest._errors import (
+    ConnectionChanged,
+    ConnectionNotDeclared,
+    ConnectionRefused,
+    IngestError,
+)
 
 
 @dataclass(frozen=True)
@@ -54,8 +59,9 @@ class FetchedConnection:
     secret
         Its secret's values, or `None`. Left out of `repr`.
     routing
-        What the task description says about it (its ``kind``; from the Docker runner later
-        its relay port and mount).
+        What the task description says about it: its ``kind``, the ``grant`` of host and port
+        pairs and, under the Docker runner, its ``relay_port``; for a mounted kind
+        ``root``, ``root_dir``, ``path`` and ``root_path``.
     """
 
     name: str
@@ -153,6 +159,10 @@ def fetch(name: str) -> FetchedConnection:
         Before any request, for a name the asset does not declare.
     ConnectionRefused
         When the server refuses (its text, unchanged).
+    ConnectionChanged
+        When its kind, its endpoints, or a mounted connection's root and path, are no longer
+        those the worker gave this attempt (retryable; nothing is kept, so the next attempt
+        fetches it again).
     """
     state = context.current()
     if name not in state.declared:
@@ -170,10 +180,81 @@ def fetch(name: str) -> FetchedConnection:
             for value in secret.values():
                 if isinstance(value, str):
                     context.register_secret(value)
-        _CACHE[name] = FetchedConnection.from_body(
-            name, body, routing=state.connections.get(name, {})
-        )
+        fetched = FetchedConnection.from_body(name, body, routing=state.connections.get(name, {}))
+        if not _matches_kind(fetched) or not _matches_grant(fetched) or not _matches_mount(fetched):
+            raise ConnectionChanged(
+                f"connection `{name}` changed after this attempt started; the next attempt uses "
+                "the new address"
+            )
+        _CACHE[name] = fetched
     return _CACHE[name]
+
+
+def _matches_kind(fetched: FetchedConnection) -> bool:
+    """Say whether a fetched connection still has the kind the worker routed.
+
+    The kind decides the route (proxy, relay or mount): a connection recreated with another
+    kind on the same host and port would get the proxy's or the relay's refusal, which names
+    the wrong next step.
+
+    Parameters
+    ----------
+    fetched
+        The connection as fetched, with its routing.
+
+    Returns
+    -------
+    bool
+        True without a ``kind`` in the routing; otherwise whether the two kinds are equal.
+    """
+    return "kind" not in fetched.routing or fetched.routing["kind"] == fetched.kind
+
+
+def _matches_grant(fetched: FetchedConnection) -> bool:
+    """Say whether a fetched connection reaches exactly the endpoints the worker granted.
+
+    The worker read the connection before the task started and let it reach those endpoints
+    only; a change since (``lakana connection update``) would point the task at a host its
+    proxy, relay or token refuses.
+
+    Parameters
+    ----------
+    fetched
+        The connection as fetched, with its routing.
+
+    Returns
+    -------
+    bool
+        Whether the endpoints and the ``grant`` are the same set of host and port pairs (true
+        without a ``grant``); a malformed ``grant`` never matches.
+    """
+    if "grant" not in fetched.routing:
+        return True
+    grant = fetched.routing.get("grant")
+    if not isinstance(grant, list) or not all(
+        isinstance(pair, list) and len(pair) == 2 for pair in grant
+    ):
+        return False
+    return {(e.host, e.port) for e in fetched.endpoints} == {tuple(pair) for pair in grant}
+
+
+def _matches_mount(fetched: FetchedConnection) -> bool:
+    """Say whether a mounted connection still names the root and path the worker mounted.
+
+    Parameters
+    ----------
+    fetched
+        The connection as fetched, with its routing.
+
+    Returns
+    -------
+    bool
+        True for a connection without a mount (no ``root_path`` in its routing); otherwise
+        whether its address's ``root`` and ``path`` are the routing's.
+    """
+    if "root_path" not in fetched.routing:
+        return True
+    return all(fetched.address.get(key) == fetched.routing.get(key) for key in ("root", "path"))
 
 
 def clear() -> None:

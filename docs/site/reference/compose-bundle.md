@@ -38,7 +38,7 @@ the workers, with its type and default, is in the [settings reference](settings.
 | `migrate` | `${LAKANA_IMAGE}` | One-shot: applies Alembic migrations (`lakana-server migrate`) and exits. | `postgres` healthy |
 | `server` | `${LAKANA_IMAGE}` | The FastAPI control plane and Iceberg REST catalog; publishes `${LAKANA_BIND}:${LAKANA_PORT}:8000`. | `migrate` completed |
 | `launcher` | `${LAKANA_IMAGE}` | The only holder of the Docker socket: starts each Python task and each environment build in a container of its own, on the worker's request over a Unix socket. No network, no capabilities, a read-only filesystem (see [`launcher` and `egress`](../how-to/deploy-with-compose.md#launcher-and-egress)). | — |
-| `egress` | `${LAKANA_IMAGE}` | The environment builds' only way out: a proxy that tunnels to the package index hosts the launcher signed for each build. | `launcher` healthy |
+| `egress` | `${LAKANA_IMAGE}` | The only way out of environment builds and of Python tasks with connections: a proxy that tunnels to the package index hosts the launcher signed for each build, and to the endpoints of the HTTPS connections a task's asset declares. A task with database or `tcp` connections also gets a relay of its own, a container the launcher starts from this service's image and removes with the task (see [Connections: what a task reaches](../how-to/run-python-tasks-in-containers.md#connections-what-a-task-reaches)). A task's `directory` and `sqlite-file` connections read the launcher's `LAKANA_LAUNCHER__INGESTION_ROOTS`, mounted read-only. | `launcher` healthy |
 | `worker` | `${LAKANA_IMAGE}` | The DuckDB query executor and dequeue loop; scaled to `LAKANA_WORKERS` replicas; takes every kind of work. | `migrate` completed, `launcher` healthy |
 | `worker-interactive` | `${LAKANA_IMAGE}` | The same worker with `LAKANA_WORKER__TAKES=interactive`, scaled to `LAKANA_WORKERS_INTERACTIVE` replicas (`0` by default, so no container starts). | `migrate` completed, `launcher` healthy |
 | `worker-pipeline` | `${LAKANA_IMAGE}` | The same worker with `LAKANA_WORKER__TAKES=pipeline`, scaled to `LAKANA_WORKERS_PIPELINE` replicas (`0` by default). | `migrate` completed, `launcher` healthy |
@@ -56,7 +56,7 @@ What `healthy` in `docker compose ps` means for each long-running service. The o
 | `seaweedfs` | The S3 gateway answers HTTP, every 5 s. | The gateway listens; not that the credentials work. |
 | `server` | `GET /healthz` from inside the container, every 10 s. | The server process answers HTTP. |
 | `launcher` | A connection to its Unix socket, every 5 s; the launcher removes an earlier launcher's socket before it starts. | The launcher started: it checked the Docker Engine and listens for the workers. |
-| `egress` | A TCP connection to port 3128, every 10 s. | The proxy listens; not that a build reaches an index. |
+| `egress` | A TCP connection to port 3128, every 10 s. | The proxy listens; not that a build reaches an index or a task its sources. |
 | `worker`, `worker-interactive`, `worker-pipeline` | `lakana-worker healthcheck`, every 10 s, after a start period of 30 s; unhealthy after 3 failures in a row. | The worker of the container wrote its heartbeat to the database within `LAKANA_RUN__LEASE_SECONDS` (60 s), so it reaches the database. |
 
 The server's healthcheck asks `/healthz`, not `/readyz`, on purpose: `setup` waits for a healthy
@@ -75,7 +75,7 @@ environment and a live worker), ask `/readyz`:
 | `task-work` (named `<project>-task-work`) | the workers, at `/home/lakana/.cache/lakana-worker/attempts`; the launcher, only so that it gets its owner | Task directories; the launcher mounts each task's code and scratch directory from here. | The sweep removes leftover task directories. |
 | `launcher-socket` | `launcher`, the workers, at `/run/lakana-launcher` | The launcher's Unix socket and the token the workers send. | Nothing to keep small. |
 | `launcher-state` | `launcher` | One marker per built environment. | Kept with the environments. |
-| `egress-key` | `launcher` (writes), `egress` (reads), at `/run/lakana-egress` | The key that signs each build's egress; a new one at every launcher start. | Nothing to keep small. |
+| `egress-key` | `launcher` (writes), `egress` (reads), at `/run/lakana-egress` | The key that signs each build's and task's egress, a new one at every launcher start, and `refused.json`, the address ranges the proxy refuses. | Nothing to keep small. |
 | `<project>-env-…`, launcher's caches | task and build containers, made by the launcher and labelled `lakana.launcher.stack=<project>` | One built environment each, and the build caches. `docker compose down -v` does not remove them: see [Starting over](../how-to/deploy-with-compose.md#starting-over). | The launcher keeps the 10 most recently used environments. |
 
 See [Disk use](../how-to/instance-health.md#disk-use).

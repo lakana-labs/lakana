@@ -490,6 +490,12 @@ class RunConfig(BaseModel):
     task_pids
         Most processes in each task container and environment build container. Read with
         `LAKANA_RUN__RUNNER=docker` only.
+    ingestion_roots
+        Name to absolute host directory that a `directory` or `sqlite-file` connection may read
+        under the local runner (JSON object; empty by default). The Docker runner ignores it: its
+        launcher has `LAKANA_LAUNCHER__INGESTION_ROOTS`. The worker refuses at start the same
+        directories the launcher refuses (system directories, the Docker socket's, its own
+        socket's).
     """
 
     model_config = ConfigDict(hide_input_in_errors=True)
@@ -516,6 +522,7 @@ class RunConfig(BaseModel):
     task_memory: str = "2GB"
     task_cpus: float = Field(default=1.0, gt=0, le=1024, allow_inf_nan=False)
     task_pids: int = Field(default=256, ge=16, le=4_194_304)
+    ingestion_roots: dict[str, str] = Field(default_factory=dict)
 
     @field_validator("runner", mode="before")
     @classmethod

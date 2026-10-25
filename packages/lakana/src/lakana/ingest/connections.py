@@ -19,10 +19,18 @@ message and its trace. Its `repr` shows ``***`` for each value.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
+from urllib.parse import urlsplit
 
+from lakana import context
 from lakana.ingest._connections import Endpoint, fetch
+
+_PROXY_KINDS = frozenset({"http", "s3", "gcs", "azure"})
+"""Kinds an isolated task reaches through the egress proxy (`LAKANA_EGRESS_PROXY`)."""
+_RELAY_HOST = "lakana-relay"
+"""The name an isolated task resolves to its relay."""
 
 
 class MaskedMapping(Mapping[str, str]):
@@ -105,13 +113,16 @@ class Connection:
     secret
         Its secret's values (``password``, ``token``, ...), or `None` when it has none.
     proxy_url
-        The proxy an HTTPS client of the task goes through; `None` until the task runs
-        isolated.
+        The proxy an HTTPS client of the task goes through (``http``, ``s3``, ``gcs`` and
+        ``azure``). It holds the task's egress token: left out of `repr` and hidden in the
+        task's log. `None` when the task does not run isolated; connect directly then.
     relay_address
-        The local address a database client of the task connects to instead of the host;
-        `None` until the task runs isolated.
+        ``lakana-relay:<port>``, which a database client of the task connects to instead of
+        the host (``postgresql``, ``mariadb`` and ``tcp``). `None` when the task does not run
+        isolated; connect directly to `address` then.
     root_path
-        Where an ingestion root is mounted for the task; `None` until the task runs isolated.
+        The directory or file a ``directory`` or ``sqlite-file`` connection reads, under either
+        runner; `None` for the other kinds.
     """
 
     name: str
@@ -120,7 +131,7 @@ class Connection:
     settings: Mapping[str, object]
     endpoints: tuple[Endpoint, ...]
     secret: MaskedMapping | None = field(repr=False)
-    proxy_url: str | None = None
+    proxy_url: str | None = field(default=None, repr=False)
     relay_address: str | None = None
     root_path: str | None = None
 
@@ -145,10 +156,20 @@ def get(name: str) -> Connection:
         deploy.
     lakana.ingest.ConnectionRefused
         When the server refuses; the message says why.
+    lakana.ingest.ConnectionChanged
+        When the connection changed after the attempt started; the next attempt uses the new
+        address.
     RuntimeError
         Outside a running task.
     """
     found = fetch(name)
+    proxy_url = os.environ.get("LAKANA_EGRESS_PROXY") if found.kind in _PROXY_KINDS else None
+    if proxy_url:
+        token = urlsplit(proxy_url).password
+        if token:
+            context.register_secret(token)
+    relay_port = found.routing.get("relay_port")
+    root_path = found.routing.get("root_path")
     return Connection(
         name=found.name,
         kind=found.kind,
@@ -156,4 +177,7 @@ def get(name: str) -> Connection:
         settings=found.settings,
         endpoints=found.endpoints,
         secret=None if found.secret is None else MaskedMapping(found.secret),
+        proxy_url=proxy_url,
+        relay_address=f"{_RELAY_HOST}:{relay_port}" if isinstance(relay_port, int) else None,
+        root_path=root_path if isinstance(root_path, str) else None,
     )

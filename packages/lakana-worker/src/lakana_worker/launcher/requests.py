@@ -24,7 +24,7 @@ from typing import Any, NoReturn
 from urllib.parse import quote, unquote, urlsplit, urlunsplit
 
 from lakana_worker.launcher.egress_token import MAX_TARGETS as MAX_TOKEN_TARGETS
-from lakana_worker.launcher.egress_token import valid_host
+from lakana_worker.launcher.egress_token import TOKEN_TOO_LONG, valid_host
 from lakana_worker.launcher.settings import LauncherSettings
 
 MAX_REQUEST_BYTES = 512 * 1024
@@ -50,11 +50,17 @@ RELAY_PIDS = MAX_RELAY_ROUTES * (RELAY_MAX_PER_PORT + 1) + 2 + 16
 route at their maximum, the main thread and Docker's init, and 16 to spare."""
 MAX_RELAY_REFUSED = 256
 """The most ranges a relay's plan refuses."""
+EGRESS_TOKEN_TOO_LONG = f"egress: {TOKEN_TOO_LONG}"
+"""How the refusal of a run whose egress pairs do not fit in one token begins."""
 EGRESS_MISSING = (
     "tasks with connections need the `egress` service; start it (Compose bundle) or remove the "
     "connection from the asset."
 )
 """The refusal of a run with egress while the egress service is not running."""
+INGEST_MOUNT = "/ingest"
+"""Where a task finds its ingestion roots, one directory per root: ``/ingest/<root>``."""
+ROOTS_REFUSAL = "roots: a list of distinct names from LAKANA_LAUNCHER__INGESTION_ROOTS ("
+"""How the refusal of a run's ``roots`` begins; the launcher's root names follow, then ``)``."""
 RELAY_ALIAS = "lakana-relay"
 """The name a task resolves to its relay's address."""
 RELAY_USER = "65534:65534"
@@ -873,6 +879,31 @@ def _trust_mount(settings: LauncherSettings, attempt: str) -> dict[str, Any]:
     return _volume(settings.work_volume, TRUST_MOUNT, read_only=True, subpath=f"{attempt}/trust")
 
 
+_NO_ROOTS = "none is set"
+
+
+def allowed_roots(refusal: str) -> frozenset[str] | None:
+    """Read the root names a launcher's refusal of ``roots`` lists.
+
+    The worker uses it to name the one root of a task the launcher does not have, and the
+    connection that wants it.
+
+    Parameters
+    ----------
+    refusal
+        The launcher's refusal text.
+
+    Returns
+    -------
+    frozenset of str or None
+        The roots the launcher has (empty when it has none); `None` for any other refusal.
+    """
+    if not refusal.startswith(ROOTS_REFUSAL) or not refusal.endswith(")"):
+        return None
+    listed = refusal[len(ROOTS_REFUSAL) : -1]
+    return frozenset() if listed == _NO_ROOTS else frozenset(listed.split(", "))
+
+
 def _run(data: dict[str, Any], settings: LauncherSettings) -> RunRequest:
     """Read a ``run`` request.
 
@@ -901,8 +932,8 @@ def _run(data: dict[str, Any], settings: LauncherSettings) -> RunRequest:
     ):
         raise Refused("stdin: a string of at most 256 KiB")
     roots = data["roots"]
-    names = ", ".join(sorted(settings.ingestion_roots)) or "none is set"
-    root_rule = f"roots: a list of distinct names from LAKANA_LAUNCHER__INGESTION_ROOTS ({names})"
+    names = ", ".join(sorted(settings.ingestion_roots)) or _NO_ROOTS
+    root_rule = f"{ROOTS_REFUSAL}{names})"
     if (
         not isinstance(roots, list)
         or len(roots) > MAX_ROOTS
@@ -1371,7 +1402,7 @@ def _ingestion_mount(settings: LauncherSettings, name: str) -> dict[str, Any]:
     return {
         "Type": "bind",
         "Source": settings.ingestion_roots[name],
-        "Target": f"/ingest/{name}",
+        "Target": f"{INGEST_MOUNT}/{name}",
         "ReadOnly": True,
         "BindOptions": {"Propagation": "rprivate", "NonRecursive": True},
     }
@@ -1626,7 +1657,8 @@ def relay_plan(
         The run's routes.
     settings
         For the launcher's range of task networks, which the plan refuses whatever `refused`
-        holds.
+        holds, and the tests' `LauncherSettings.relay_reachable` (the plan's ``reachable``,
+        always present, empty in production).
     subnet
         The network's subnet.
     refused
@@ -1654,6 +1686,7 @@ def relay_plan(
             "address": relay_address(subnet),
             "subnet": subnet,
             "refused": ranges,
+            "reachable": list(settings.relay_reachable),
             "routes": [{"listen": r.listen, "host": r.host, "port": r.port} for r in routes],
         }
     ).encode("utf-8")
@@ -1923,7 +1956,7 @@ def ingestion_probe_spec(
     return {
         "Image": image,
         "Entrypoint": ["/usr/local/bin/python", "-I", "-c", INGEST_PROBE_SCRIPT],
-        "Cmd": [f"/ingest/{name}", "/proc/self/mountinfo", str(settings.probe_max_entries)],
+        "Cmd": [f"{INGEST_MOUNT}/{name}", "/proc/self/mountinfo", str(settings.probe_max_entries)],
         "User": settings.task_user,
         "NetworkDisabled": True,
         "Labels": labels(settings, "probe", f"ingest-{name}", "launcher"),

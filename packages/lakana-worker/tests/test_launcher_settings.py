@@ -14,6 +14,7 @@ from lakana_worker.launcher.settings import (
     KNOWN_SETTINGS,
     LauncherSettings,
     SettingsError,
+    check_ingestion_roots,
     load_settings,
 )
 
@@ -490,6 +491,18 @@ def test_a_blank_former_variable_is_ignored_and_a_set_one_says_to_remove_it() ->
         load_settings({**_BASE, "LAKANA_LAUNCHER__TASK_USER": "0:0"})
 
 
+def test_the_relays_reachable_networks_are_a_test_hook_and_never_loaded() -> None:
+    """`relay_reachable` lets the Docker tests' relay dial a network it is attached to.
+
+    The environment cannot set it: it is empty from `load_settings`, and a variable of that
+    name stops the launcher like any other unknown setting.
+    """
+    assert load_settings(_BASE).relay_reachable == ()
+    assert "RELAY_REACHABLE" not in KNOWN_SETTINGS
+    with pytest.raises(SettingsError, match=r"LAKANA_LAUNCHER__RELAY_REACHABLE is not a setting"):
+        load_settings({**_BASE, "LAKANA_LAUNCHER__RELAY_REACHABLE": "172.30.0.0/16"})
+
+
 _REPO = Path(__file__).resolve().parents[3]
 """The repository root: ``packages/lakana-worker/tests`` is three levels below it."""
 _COMPOSE = _REPO / "packages" / "lakana" / "src" / "lakana" / "cli" / "deploy" / "compose.yaml"
@@ -577,3 +590,29 @@ def test_the_bundle_gives_the_launcher_and_the_proxy_settings_they_accept() -> N
     }
     assert proxy.upstream is None
     assert proxy.key == settings.egress_key
+
+
+def test_the_ingestion_roots_check_is_the_launchers_and_names_the_variable() -> None:
+    """The worker checks its own roots with the launcher's rule and the launcher's words."""
+    launcher = check_ingestion_roots({"shared": "/etc"}, Path("/run/l.sock"))
+    worker = check_ingestion_roots(
+        {"shared": "/etc"}, Path("/run/l.sock"), variable="LAKANA_RUN__INGESTION_ROOTS"
+    )
+    with pytest.raises(SettingsError) as caught:
+        load_settings(
+            {
+                "LAKANA_LAUNCHER__STACK": "lakana",
+                "LAKANA_LAUNCHER__IMAGES": _IMAGES,
+                "LAKANA_LAUNCHER__INGESTION_ROOTS": '{"shared": "/etc"}',
+            }
+        )
+
+    assert launcher == str(caught.value)
+    assert launcher is not None
+    assert launcher.startswith("LAKANA_LAUNCHER__INGESTION_ROOTS must be a JSON object")
+    assert worker == launcher.replace(
+        "LAKANA_LAUNCHER__INGESTION_ROOTS", "LAKANA_RUN__INGESTION_ROOTS"
+    )
+    assert check_ingestion_roots({"ok": "/srv/in"}, Path("/run/l.sock")) is None
+    assert check_ingestion_roots({"x": "/run/l"}, Path("/run/l/l.sock")) is not None
+    assert check_ingestion_roots({"x": 1}, Path("/run/l.sock")) is not None

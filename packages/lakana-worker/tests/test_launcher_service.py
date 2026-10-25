@@ -27,6 +27,7 @@ from launcher_fakes import FakeEngine, settings
 from lakana_worker.launcher.egress_token import read_key, verify
 from lakana_worker.launcher.engine import EngineError
 from lakana_worker.launcher.requests import (
+    EGRESS_TOKEN_TOO_LONG,
     INGEST_PROBE_SCRIPT,
     RELAY_COMMAND,
     RELAY_PIDS,
@@ -2879,6 +2880,7 @@ def test_a_run_with_relay_routes_starts_its_relay_before_the_task(tmp_path: Path
         "address": address,
         "subnet": subnets[0],
         "refused": _refused(tmp_path),
+        "reachable": [],
         "routes": [{"listen": 15001, "host": "db.example.com", "port": 5432}],
     }
     kinds = [
@@ -3136,6 +3138,16 @@ def test_a_failed_listing_at_a_network_open_keeps_the_last_ranges_and_logs(
     assert "cannot list Docker's networks to find their gateways" in caplog.text
 
 
+def test_the_relays_plan_carries_the_test_hooks_reachable_networks(tmp_path: Path) -> None:
+    """`LauncherSettings.relay_reachable` reaches the plan as ``reachable`` (empty otherwise)."""
+    engine = FakeEngine()
+    launcher = _started(engine, tmp_path, relay_reachable=("172.30.0.0/16",))
+
+    launcher.run(_egress_run(relay=(_DB,)), lambda line: None)
+
+    assert json.loads(engine.relay_stdin[0])["reachable"] == ["172.30.0.0/16"]
+
+
 def test_the_relays_plan_refuses_what_the_proxy_refuses(tmp_path: Path) -> None:
     """The relay gets the same list as `refused.json`, current at its start."""
     engine = FakeEngine()
@@ -3358,6 +3370,20 @@ def test_egress_pairs_that_do_not_fit_in_a_token_are_refused_and_leave_nothing(
 
     assert engine.created("task") == []
     assert "lakana-task-t1" not in engine.networks
+
+
+def test_pairs_too_long_for_a_token_are_refused_with_the_fixed_beginning(tmp_path: Path) -> None:
+    """32 pairs of long host names fit the count but not the token: the worker reads the text."""
+    engine = FakeEngine()
+    launcher = _started(engine, tmp_path)
+    label = "h" * 62
+    pairs = tuple((f"{label}.{label}.{label}.n{n:02d}.example.com", 443) for n in range(32))
+
+    with pytest.raises(Refused) as caught:
+        launcher.run(_egress_run(egress=pairs), lambda line: None)
+
+    assert str(caught.value).startswith(EGRESS_TOKEN_TOO_LONG)
+    assert engine.created("task") == []
 
 
 def test_a_relay_fails_the_run_when_docker_cannot_describe_an_egress_network(

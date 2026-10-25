@@ -34,6 +34,8 @@ MAX_TARGETS = 64
 MAX_PAYLOAD = 8192
 """The longest payload `verify` accepts; `mint` refuses a longer one. The proxy's 16 KiB head
 limit holds a token of this size in base64 with room to spare."""
+TOKEN_TOO_LONG = "the token would be too long for the proxy"  # nosec B105 -- a message, not a secret
+"""How `mint`'s refusal of a payload over `MAX_PAYLOAD` begins; the worker recognises it."""
 _TOKEN = re.compile(rf"\Av1\.[A-Za-z0-9_-]{{1,{MAX_PAYLOAD}}}\.[0-9a-f]{{64}}\Z")
 _PURPOSE = re.compile(r"\A[a-z][a-z0-9-]{0,31}\Z")
 _HOST = re.compile(
@@ -149,7 +151,7 @@ def mint(
     payload = base64.urlsafe_b64encode(text.encode("ascii")).decode("ascii").rstrip("=")
     if len(payload) > MAX_PAYLOAD:
         raise ValueError(
-            f"the token would be too long for the proxy ({len(payload)} characters of payload, "
+            f"{TOKEN_TOO_LONG} ({len(payload)} characters of payload, "
             f"at most {MAX_PAYLOAD}); grant fewer or shorter host names"
         )
     body = f"{_VERSION}.{payload}"

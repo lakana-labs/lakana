@@ -159,6 +159,18 @@ every Python task fails until both run this release. Services on the
 Docker host that Lakana's containers should not reach are safest bound to `127.0.0.1`. See
 [Addresses builds and tasks never reach](../reference/network-settings.md#addresses-builds-and-tasks-never-reach).
 
+### Tasks in containers reach the connections their asset declares
+
+Under the docker runner a Python task whose asset declares connections now reaches exactly their
+endpoints: HTTPS through the `egress` service, databases and `tcp` through a relay the launcher
+starts for the task, directories as read-only mounts of `LAKANA_LAUNCHER__INGESTION_ROOTS`. Before,
+such a task reached the server only. A task without connections is unchanged. The `egress` service
+is now needed for tasks with HTTPS or database connections, not only for builds: the bundle's
+`compose.yaml` has it; without it running, those tasks fail with ``tasks with connections need
+the `egress` service ...``. Upgrade the launcher, `egress` and the workers together, as with every
+release (the relay runs in the `egress` service's image). See
+[Connections: what a task reaches](../how-to/run-python-tasks-in-containers.md#connections-what-a-task-reaches).
+
 ### A Python asset's parameter `ctx` is not an input
 
 A parameter named `ctx` now receives the asset's context and is never an input. A project whose

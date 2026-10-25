@@ -868,8 +868,9 @@ code in this area has to know.
   a `/tmp` tmpfs (`noexec,nosuid,nodev`, 64 MiB), memory (no swap), CPU and pids limits, an init
   process, private IPC and cgroup namespaces, no log driver, `no-new-privileges` where Docker
   allows it (off on snap Docker, detected by a probe at start), and a network of its own
-  (internal, no IPv6, `gateway_mode_ipv4/6=isolated`) shared with the `server` service only.
-  The token is on stdin only. A task reaches every port the server's container listens on, and
+  (internal, no IPv6, `gateway_mode_ipv4/6=isolated`) shared with the `server` service only,
+  plus the `egress` service and the task's relay when its asset declares connections (see "Task
+  egress: connections, the proxy and the relay (M6)" below). The token is on stdin only. A task reaches every port the server's container listens on, and
   the REST API with its own token, as before. Containers share the kernel. `Runner.isolated` is
   true for this runner only; `PythonRuntime` refuses a mismatch of runner and environments, and
   `_prepare` refuses a protected environment's task when the runtime is not isolated (read once
@@ -1097,7 +1098,8 @@ access-controlled on the server; `read_only=True` seals it (0400/0500) for a tas
   answers the build with a refusal). With the docker runner an `http://`
   `LAKANA_RUN__INDEX_URL` is refused at worker start (`RunConfig`): the proxy tunnels https
   only. `LAKANA_EGRESS__UPSTREAM_PROXY` chains a company proxy, which then resolves and
-  decides. M6 is meant to give ingestion tasks tokens of another purpose through the same proxy.
+  decides. Tasks with connections get tokens of purpose `task` through the same proxy (see
+  "Task egress: connections, the proxy and the relay (M6)" below).
   In the Compose bundle the proxy runs as uid and gid 10001 with the base interpreter
   (`python -I -S`, standard library only) and reads `/run/lakana-egress/egress.key` (0640,
   root:10001, in a set-group-id directory 2750 root:10001) from the `egress-key` volume, which
@@ -1121,7 +1123,8 @@ access-controlled on the server; `read_only=True` seals it (0400/0500) for a tas
   resolution, for every purpose, direct or upstream: on Docker Desktop they resolve to the host
   outside every gateway. The proxy reads the file like the key (again when its
   inode, time or size change; a failed read is not remembered) and refuses every address in it
-  through `dial` (`connected | refused` into `forbidden`), direct or before an upstream proxy,
+  through `dial` (`forbidden(..., refused=...)`, checked before the test hook `reachable`, so
+  no hook ever opens a refused range), direct or before an upstream proxy,
   for builds, tasks and connection tests alike; a missing or malformed file means no connection
   at all, 503 naming `docker compose logs launcher`. Each relay gets the same list, current at
   its start, in its plan.
@@ -1162,7 +1165,8 @@ start) authenticates a worker, compared with `hmac.compare_digest`.
   timeout). `requests.run_container_spec` and `build_container_spec` fix every field that matters
   (user, capabilities, mounts, network, entrypoint, environment). Image references come only from
   `LAKANA_LAUNCHER__IMAGES`; host paths only from `LAKANA_LAUNCHER__INGESTION_ROOTS`, bind-mounted
-  read-only and non-recursive at `/ingest/<name>` (no worker code asks for one yet). The settings
+  read-only and non-recursive at `/ingest/<name>`, only the roots a run names (the worker names
+  the roots of the task's `directory` and `sqlite-file` connections). The settings
   refuse `/` and anything under or holding a system directory (`settings.FORBIDDEN_ROOTS`), the
   Docker socket's and the launcher's socket's directories; at start a probe container per root
   refuses proc, sysfs and devtmpfs mounts, sockets, pipes and device nodes. Docker resolves a
@@ -1208,7 +1212,8 @@ start) authenticates a worker, compared with `hmac.compare_digest`.
     before the first pull is what runs (the release attests the images; the launcher does not
     verify attestations);
   - a task's network is the server's too: it reaches every port the server container listens on,
-    and the REST API with its own token (as before);
+    and the REST API with its own token (as before). A task with connections reaches their
+    endpoints as well, and nothing else (the residuals of that are under "Task egress" below);
   - a compromised worker holds the launcher token: it can start allowed images with its own code
     as uid 10001, mount any environment volume read-only by key, build into an environment not yet
     complete, stop a run of another worker only if it learns that run's id, and use any
@@ -1244,6 +1249,70 @@ start) authenticates a worker, compared with `hmac.compare_digest`.
     proxies;
   - a tunnel whose writes block can outlive its token's expiry by up to the 300 s idle timeout.
 
+### Task egress: connections, the proxy and the relay (M6)
+
+User documentation: `docs/site/how-to/run-python-tasks-in-containers.md`, "Connections: what a
+task reaches", and `docs/site/reference/connections.md`, "What a task reaches, and how". The
+M7b posture (a task reaches the server only) stays the default for every task without
+connections; a connection opens exactly its endpoints and nothing else.
+
+- **The worker decides the routes, from the deployed manifest.** `python_tasks._connection_plan`
+  reads the connections the bound entry declares (`BoundTask.connections`, never request input)
+  in one select and computes each one's endpoints with core's
+  `lakana_core.connections.endpoints.endpoints` (the same function the server's fetch uses). Only
+  an isolated runner sends routes: `egress` (host:port pairs of `PROXY_KINDS`, at most
+  `MAX_EGRESS` = 64, the token's pair capacity; with the deploy's 16 connections of at most two
+  endpoints the real ceiling is 32 pairs, or the token's 8192-character payload for very long
+  host names, which the launcher refuses with `EGRESS_TOKEN_TOO_LONG` and the worker turns into a
+  permanent failure naming the asset and the split), `relay` (one `RelayRoute` per endpoint of
+  `RELAY_KINDS`, listen ports from 15001, at most 16) and `roots` (the root names of
+  `MOUNT_KINDS`, at most 16). Over a cap the attempt fails permanently naming it, before any
+  process starts. The task gets the routing in its stdin description (`grant`, `relay_port`,
+  `root_path`); the SDK's `fetch` compares the fetched kind with the routing's and the endpoints with the `grant` and raises the
+  retryable `ConnectionChanged` when a connection changed during the attempt, caching nothing.
+- **The launcher enforces them.** A run with `egress` gets the `egress` service on its network
+  and a token of purpose `task` bound to the run's /29 and to its timeout and kill grace plus a
+  minute, in `LAKANA_EGRESS_PROXY` (never `HTTPS_PROXY`, which libraries read unasked); a token
+  copied into another task's container is refused (`this token belongs to another client
+  network`), and a host:port outside it gets 403 naming `@asset(connections=[...])`. A run with
+  `relay` gets its relay (below). A run with either while `egress` is not running is refused
+  before any network or container exists (`EGRESS_MISSING`, a permanent failure with its own
+  text). Every refusal of an address is the same `INTERNAL` reason, with the task's next step
+  (`give the connection an address outside the Lakana stack (lakana connection update)`).
+- **What a task cannot reach, connections or not**: another task's network (each run its own
+  /29; the relay and the proxy refuse the launcher's whole range), the Compose stack (attached
+  networks; the relay sits on the outward network, the stack's `default`, so SeaweedFS's 18333 and
+  Postgres are refused by construction), loopback in every spelling, link-local and metadata, the
+  gateway of every Docker network and the Docker host's well-known names, and the ranges of
+  `LAKANA_LAUNCHER__EGRESS_REFUSED`.
+- **Proved on a real engine** by `test_docker_task_egress_integration.py` (docker tier, see
+  `docs/agent/testing.md`): a declared HTTPS target through the proxy with the trust bundle, a
+  database and a `tcp` route through the relay, an undeclared host, the metadata address, the
+  stack's server, a service on the egress service's network in no refused range (the
+  attached-network rule alone), the default bridge's gateway, a configured range (refused with it, reached
+  without), a borrowed token, a client outside the task's network, and teardown after exit, stop
+  and timeout. The tests reach their source on a network the proxy and relay are attached to
+  through two test hooks that are never settings: `EgressSettings.reachable` and
+  `LauncherSettings.relay_reachable` (carried as the relay plan's `reachable`, at most 4 IPv4
+  networks, always present and empty in production; `load_settings` refuses a variable of that
+  name). A refused range wins over both (`egress.forbidden`'s `refused`), so the hooks cannot
+  open a gateway or an operator's range.
+- **Residuals, accepted:**
+  - containers share the kernel (as for every task);
+  - the egress token is in the task's environment: any code of the task can use it for the
+    declared pairs, until the run ends (bound to the run's network and lifetime, so a copy is
+    useless elsewhere and afterwards);
+  - a declared host can receive the declared credentials and anything the task reads; the
+    asset's `connections` are reviewed with its code;
+  - the Docker host's LAN, VPN and other addresses are reachable unless the operator lists them
+    in `LAKANA_EGRESS_REFUSED` (the docs say to, and to bind host services to loopback);
+  - `tcp` traffic is encrypted only if the team's driver encrypts it; the relay never reads it;
+  - a relay holds 64 MiB and 16 connections per route; a task can exhaust its own relay, never
+    another task's;
+  - an ingestion root is mounted whole (`_ingestion_mount`): a task reads every path under a root
+    its connection names, other connections' paths included; the how-to says to give each group
+    of data that some tasks must not read a root of its own.
+
 ### The relay (M6)
 
 A task's database connection does not use the proxy (a database speaks its own protocol): one
@@ -1257,7 +1326,8 @@ connection's target.
   `relay_address(subnet)` (the /29's last host, alias `lakana-relay`) and the egress service's one
   other network (`_outward_network`; the launcher fails naming them unless there is exactly one).
 - **What it listens on.** Only that address, one port per route (plan: `address`, `subnet`,
-  1-256 `refused` ranges, 1-16 `routes`). It closes any peer outside the /29 and allows at most 16
+  1-256 `refused` ranges, 0-4 `reachable` networks of the tests' hook, empty in production, 1-16
+  `routes`). It closes any peer outside the /29 and allows at most 16
   connections per port (the 17th is closed with a line naming the limit). A port not in the plan
   is refused by the kernel. A connection whose thread cannot start (`RuntimeError` at the
   process limit) is closed with a line naming the cause and gives its slot back, so the port
@@ -5112,7 +5182,7 @@ matter for an operator deciding where to run it:
   JWT signing was not chosen: network isolation needs no key distribution, and a signing key
   would have to stay out of the worker anyway. Asserted by
   `test_seaweedfs_internal_apis_are_unreachable_from_the_worker` (compose structure) and by a
-  check run inside the worker in `scripts/compose_smoke_test.sh` (CI). **Not protected:** the gateway's gRPC port 18333 (it includes IAM) cannot be turned off and has no authentication. It is reachable from the default network, so from code in the worker: user SQL cannot reach it, because DuckDB's HTTP filesystem cannot speak gRPC, but a Python task under `LocalProcessRunner`, which runs as trusted code in the worker, could remove the storage identity and make storage unavailable until a restart. Under `DockerRunner` a task's network holds only the server and a build's only the egress proxy, which refuses the networks it is attached to, so neither reaches SeaweedFS. The isolation relies on Docker's own network isolation (the default); a daemon with `iptables: false`, Podman or rootless setups may not provide it. The S3
+  check run inside the worker in `scripts/compose_smoke_test.sh` (CI). **Not protected:** the gateway's gRPC port 18333 (it includes IAM) cannot be turned off and has no authentication. It is reachable from the default network, so from code in the worker: user SQL cannot reach it, because DuckDB's HTTP filesystem cannot speak gRPC, but a Python task under `LocalProcessRunner`, which runs as trusted code in the worker, could remove the storage identity and make storage unavailable until a restart. Under `DockerRunner` a task's network holds only the server (and, for a task with connections, the egress proxy and the task's relay) and a build's only the egress proxy; the proxy and the relay refuse the networks they are attached to, so neither reaches SeaweedFS's port 18333. The isolation relies on Docker's own network isolation (the default); a daemon with `iptables: false`, Podman or rootless setups may not provide it. The S3
   keys, held by the worker as before, give full bucket access (per-environment scoping is the
   presigned-URL path above); anyone with Docker access to the host reaches everything. Any change
   that joins a worker or server to `seaweed-internal`, or publishes a port of `seaweedfs-core`,
