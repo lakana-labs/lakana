@@ -123,7 +123,11 @@ the worker (without it the test fails and says so). With the Docker runner (the 
 default) the launcher runs it in a container of the task image, from the image's own copy of the check,
 with the network rules a task with that connection gets: through the egress proxy or the task's relay
 to the connection's endpoints only, its ingestion root read-only, the worker's trust bundle
-(`LAKANA_RUN__CA_BUNDLE`), no Lakana server on its network, 30 seconds and 256 MiB. A launcher that
+(`LAKANA_RUN__CA_BUNDLE`), no Lakana server on its network, 30 seconds and 256 MiB. Its token
+for the egress proxy has the purpose `connection-test` and names only the connection's endpoints;
+a database or `tcp` connection goes through a relay of its own, and when the relay cannot reach
+the source the outcome is the relay's (`dns`, `refused`, `timeout` or `not_allowed`, the message
+starting `the relay refused`), so a connection the relay accepted is never `ok` by mistake. A launcher that
 refuses the check or cannot be reached makes the test `failed` with the reason and the launcher's
 log to read (`docker compose logs launcher`). A connection with a secret needs the worker's secrets master
 key (`LAKANA_SECRETS__MASTER_KEY_FILE`, as on the server). The command waits

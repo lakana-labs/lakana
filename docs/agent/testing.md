@@ -1389,6 +1389,15 @@ before the relay sees it on Engine 28; the relay's own outward address answers n
 source network's gateway, made after the launcher started, which the proxy's own copy of
 `refused.json` now holds; and teardown after exit, stop and
 timeout (nothing labelled with the run's id, no token expiry, the subnet resting).
+`test_connection_test_outcomes` (#308, M6 PR 5d) runs the launcher's `check` op against the same
+source, with the routes and routing of `python_tasks.connection_plan` and the answer read as the
+worker's loop reads it (`_relay_refusal`, then `_answer`): `ok` through the proxy with the trust
+bundle; `tls` without it; `dns` for a name the proxy cannot resolve; `refused` for a closed port;
+`not_allowed` for a token that does not name the host; `ok` for a PostgreSQL connection with
+`tls: disable` and `tls` (not offered) without it, both through the relay; `refused` through the
+relay to a closed port (the relay's line outranks the check's `ok`); `ok` for `tcp`; and
+`root_unavailable` for a root the launcher does not mount. After each, nothing is labelled with
+the check's id.
 
 The test's Docker client and the launcher use one socket: `DOCKER_HOST` when it is
 `unix://<path>`, else `/var/run/docker.sock`; another `DOCKER_HOST` skips them (fails with

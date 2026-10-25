@@ -1301,8 +1301,11 @@ connections; a connection opens exactly its endpoints and nothing else.
   roots, read-only. Its network holds no server (the connection and its secret travel on stdin): the
   egress service joins with a token of purpose `connection-test` when it has pairs, minted after the
   image pull, and its relay starts when it has routes; `stop`, the abandon watcher and `cleanup`
-  treat a `check` name and its relay like a run's. The worker keeps at most 64 KiB of output, takes
-  the last answer line and masks it again before storing it; no output reaches a log line. A
+  treat a `check` name and its relay like a run's. The worker keeps at most 64 KiB of output; a
+  `lakana-relay: refused` line decides the outcome first (the relay accepts before it dials, so the
+  check's own `ok` proves only the relay), else the last answer line; it masks the message again
+  before storing it; no output reaches a log line. `test_connection_test_outcomes` proves the
+  outcomes on a real engine. A
   refusal, an unreachable launcher or no answer within `CHECK_WAIT_SECONDS` (60) records `failed`
   naming the launcher's log. `/opt/lakana-check/check.py` is a root-owned copy of
   `lakana/ingest/_check.py`, which imports only the standard library (an AST test in

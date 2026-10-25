@@ -17,6 +17,7 @@ probe is the task; the launcher runs it as the Docker runner would, with ``egres
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import io
 import ipaddress
@@ -30,11 +31,29 @@ from dataclasses import dataclass
 from typing import Any, cast
 
 import pytest
-from docker_stack import APP, Stack, build_task_image, docker_client, stack, start_egress
+from docker_stack import (
+    APP,
+    PYTHON,
+    Stack,
+    build_task_image,
+    docker_client,
+    stack,
+    start_egress,
+)
 from tls_fixture import issue_leaf, make_authority
 
+from lakana_core.connections.endpoints import endpoints
+from lakana_core.connections.kinds import ConnectionKind
+from lakana_worker import connection_tests
 from lakana_worker.launcher import egress
-from lakana_worker.launcher.requests import RelayRoute, StopRequest, container_name
+from lakana_worker.launcher.requests import (
+    TRUST_FILE,
+    CheckRequest,
+    RelayRoute,
+    StopRequest,
+    container_name,
+)
+from lakana_worker.python_tasks import connection_plan
 from lakana_worker.trust import build_trust_bundle
 
 pytestmark = [pytest.mark.integration, pytest.mark.docker, pytest.mark.slow]
@@ -750,3 +769,159 @@ def test_the_source_network_gateway_is_refused_once_the_launcher_lists_it(
 
     assert seen["proxy"] == {"status": "HTTP/1.1 403 Forbidden", "body": _internal(gateway, 8443)}
     assert any(ipaddress.ip_address(gateway) in ipaddress.ip_network(r) for r in copied), copied
+
+
+# --- the connection test (the launcher's check op) --------------------------------------------
+
+
+def _check(
+    sources: Sources,
+    kind: str,
+    address: dict[str, object],
+    settings: dict[str, object],
+    *,
+    trust: bool,
+    egress_pairs: tuple[tuple[str, int], ...] | None = None,
+) -> tuple[str, str, str]:
+    """Run the connection check of one connection as the worker asks for it, and read its answer.
+
+    The routes and the routing come from `connection_plan`, as the worker's test loop builds
+    them; the answer is read as the loop reads it (the relay's refusal first, then the last
+    answer line).
+
+    Parameters
+    ----------
+    sources
+        The module's stack.
+    kind
+        The connection's kind.
+    address
+        Its address.
+    settings
+        Its settings.
+    trust
+        Whether the check gets the trust bundle with the source's authority.
+    egress_pairs
+        Replaces the planned proxy pairs, to send a token that does not name the host.
+
+    Returns
+    -------
+    tuple of str
+        The outcome, the message and the check's id.
+    """
+    launcher = sources.stack.launcher
+    assert launcher is not None
+    connection_kind = ConnectionKind(kind)
+    plan = connection_plan(
+        [("src", connection_kind, address, settings)],
+        isolated=True,
+        root_dir=lambda root, name: f"/ingest/{root}",
+    )
+    body = {
+        "name": "src",
+        "kind": kind,
+        "address": address,
+        "settings": settings,
+        "endpoints": [
+            {"host": e.host, "port": e.port, "role": e.role}
+            for e in endpoints(connection_kind, address, settings)
+        ],
+        "secret": None,
+    }
+    attempt = f"attempt-check_{uuid.uuid4().hex[:8]}"
+    entries: list[Any] = [(attempt, "dir", b"", 0o700, 10001)]
+    if trust:
+        entries += [
+            (f"{attempt}/trust", "dir", b"", 0o755, 10001),
+            (f"{attempt}/trust/{TRUST_FILE}", "file", sources.bundle, 0o644, 10001),
+        ]
+    sources.stack.put(sources.stack.work_volume, entries)
+    ident = uuid.uuid4().hex[:20]
+    output: list[bytes] = []
+    result = launcher.check(
+        CheckRequest(
+            check=ident,
+            owner="test",
+            python=PYTHON,
+            attempt=attempt,
+            stdin=json.dumps({"connection": body, "routing": plan.routing["src"]}).encode(),
+            roots=(),
+            trust=trust,
+            egress=plan.egress if egress_pairs is None else egress_pairs,
+            relay=tuple(RelayRoute(*route) for route in plan.relay),
+        ),
+        lambda line: output.append(base64.b64decode(str(line["log"]))),
+    )
+    text = b"".join(output).decode(errors="replace")
+    assert result["exit"] == 0, (result, text)
+    answer = connection_tests._relay_refusal(text) or connection_tests._answer(text)
+    assert answer is not None, text
+    return answer[0], answer[1], ident
+
+
+_SOURCE_HTTPS = {"base_url": f"https://{_HOST}:8443"}
+_SOURCE_DB = {"host": _HOST, "port": 5432, "database": "crm"}
+
+
+@pytest.mark.parametrize(
+    ("kind", "address", "settings", "trust", "pairs", "outcome", "words"),
+    [
+        ("http", _SOURCE_HTTPS, {}, True, None, "ok", "reachable"),
+        ("http", _SOURCE_HTTPS, {}, False, None, "tls", f"not trusted for `{_HOST}`"),
+        ("http", {"base_url": "https://nowhere.lakana.test:8443"}, {}, True, None, "dns",
+         "cannot resolve nowhere.lakana.test"),
+        ("http", {"base_url": f"https://{_HOST}:9999"}, {}, True, None, "refused",
+         f"cannot reach {_HOST}:9999"),
+        ("http", _SOURCE_HTTPS, {}, True, ((_HOST, 9000),), "not_allowed",
+         "is not a destination this connection test may reach"),
+        ("postgresql", _SOURCE_DB, {"user": "r", "tls": "disable"}, False, None, "ok",
+         "TLS not used"),
+        ("postgresql", _SOURCE_DB, {"user": "r"}, False, None, "tls", "does not offer TLS"),
+        ("postgresql", {**_SOURCE_DB, "port": 5433}, {"user": "r", "tls": "disable"}, False, None,
+         "refused", f"the relay refused {_HOST}:5433: cannot reach"),
+        ("tcp", {"host": _HOST, "port": 9000}, {}, False, None, "ok", "reachable"),
+        ("directory", {"root": "shared", "path": "in"}, {}, False, None, "root_unavailable",
+         "shared"),
+    ],
+    ids=[
+        "ok-proxy", "tls-untrusted", "dns", "refused", "not-allowed", "ok-relay",
+        "tls-not-offered", "refused-relay", "ok-tcp", "root-unavailable",
+    ],
+)  # fmt: skip
+def test_connection_test_outcomes(
+    sources: Sources,
+    kind: str,
+    address: dict[str, object],
+    settings: dict[str, object],
+    trust: bool,
+    pairs: tuple[tuple[str, int], ...] | None,
+    outcome: str,
+    words: str,
+) -> None:
+    """Each outcome on a real engine, the check in the task image under a task's rules.
+
+    Parameters
+    ----------
+    sources
+        The module's stack.
+    kind
+        The connection's kind.
+    address
+        Its address.
+    settings
+        Its settings.
+    trust
+        Whether the check trusts the source's authority.
+    pairs
+        Proxy pairs replacing the planned ones (a token that does not name the host).
+    outcome
+        The expected outcome.
+    words
+        Part of the expected message.
+    """
+    found, message, ident = _check(
+        sources, kind, address, settings, trust=trust, egress_pairs=pairs
+    )
+
+    assert (found, words in message) == (outcome, True), message
+    assert not [name for name in sources.stack.labelled() if ident in name]
