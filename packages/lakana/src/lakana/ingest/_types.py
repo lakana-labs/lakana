@@ -400,10 +400,15 @@ def mariadb_batch(
         except (pa.ArrowInvalid, pa.ArrowTypeError, OverflowError):
             bad = next((v for v in values if v is not None and not _fits(v, field.type)), None)
             shown = safe_name(repr(bad))[:100]
+            column = safe_name(field.name)
+            fix = (
+                f"TIME_TO_SEC({column}) for a time outside one day"
+                if pa.types.is_time(field.type)
+                else f"NULLIF({column}, '0000-00-00') for a zero date"
+            )
             raise UsageError(
-                f"`{connection}`: column `{safe_name(field.name)}` holds {shown}, which "
-                f"{field.type} cannot hold; convert or filter it in the query (for example "
-                f"NULLIF({safe_name(field.name)}, '0000-00-00') for a zero date)"
+                f"`{connection}`: column `{column}` holds {shown}, which {field.type} cannot "
+                f"hold; convert or filter it in the query (for example {fix})"
             ) from None
     return pa.RecordBatch.from_arrays(columns, schema=schema)
 

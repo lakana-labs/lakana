@@ -11,7 +11,8 @@ towards "literal": a placeholder it skips reaches the database unchanged and fai
 it never puts a value where the database reads code. That matters for ``pyformat`` only, where
 PyMySQL writes the escaped value into the text; PostgreSQL and SQLite bind on the server. So
 ``pyformat`` reads the text as MariaDB does: no dollar quotes and no ``E'...'`` strings, ``--``
-starts a comment only before a space or a control character, block comments do not nest, and an
+starts a comment only before a space or a control character (DEL included), block comments do
+not nest, a double quote encloses an identifier without escapes under ``ANSI_QUOTES``, and an
 executable comment (``/*! ... */``, ``/*M! ... */``), whose text MariaDB runs or skips by its
 version, is refused.
 """
@@ -121,7 +122,8 @@ def _line_comment(text: str, start: int, *, mariadb: bool) -> bool:
         The index.
     mariadb
         Whether the text is read as MariaDB reads it: ``#`` starts a comment, and ``--`` only
-        before a space or a control character (``1--1`` is one minus minus one).
+        before a space or a control character, DEL (0x7F) included (``1--1`` is one minus minus
+        one).
 
     Returns
     -------
@@ -133,7 +135,9 @@ def _line_comment(text: str, start: int, *, mariadb: bool) -> bool:
     if text.startswith("#", start):
         return True
     after = start + 2
-    return text.startswith("--", start) and (after >= len(text) or ord(text[after]) <= 32)
+    return text.startswith("--", start) and (
+        after >= len(text) or ord(text[after]) <= 32 or text[after] == "\x7f"
+    )
 
 
 def translate(
@@ -142,6 +146,7 @@ def translate(
     *,
     style: Literal["numeric", "qmark", "pyformat"],
     backslash_escapes: bool = False,
+    ansi_quotes: bool = False,
 ) -> tuple[str, list[object] | dict[str, object]]:
     """Rewrite `:name` placeholders into the driver's form and order the values.
 
@@ -155,7 +160,10 @@ def translate(
         ``numeric`` (`$1`, PostgreSQL), ``qmark`` (`?`, SQLite) or ``pyformat`` (`%(name)s`,
         PyMySQL, which also needs every literal `%` doubled).
     backslash_escapes
-        Whether a backslash escapes inside single quotes (MariaDB's default).
+        Whether a backslash escapes inside quotes (MariaDB's default).
+    ansi_quotes
+        Whether a double quote encloses an identifier, where a backslash escapes nothing
+        (MariaDB's ``ANSI_QUOTES``).
 
     Returns
     -------
@@ -184,7 +192,7 @@ def translate(
     while i < n:
         char = query[i]
         if char in "'\"`":
-            escaped = backslash_escapes and char != "`"
+            escaped = backslash_escapes and char != "`" and not (char == '"' and ansi_quotes)
             if (
                 not mariadb
                 and char == "'"

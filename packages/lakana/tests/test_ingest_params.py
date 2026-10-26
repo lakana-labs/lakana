@@ -193,3 +193,39 @@ def test_pyformat_refuses_an_executable_comment(opener: str) -> None:
     """MariaDB runs the text of `/*! ... */` (or skips it, by version): no telling which."""
     with pytest.raises(UsageError, match=r"executable comment"):
         translate(f"SELECT 1 {opener} ':p' */ , :p", {"p": 1}, style="pyformat")
+
+
+def test_pyformat_reads_dash_dash_before_delete_as_a_comment() -> None:
+    """MariaDB's lexer starts a comment before any control character, 0x7F included."""
+    with pytest.raises(UsageError, match="params has v, which the query does not use"):
+        translate("SELECT 1 --\x7f don't\n, ' :v ' AS c", {"v": 1}, style="pyformat")
+
+
+@pytest.mark.parametrize(
+    ("ansi_quotes", "backslash_escapes", "expected"),
+    [
+        (False, True, 'SELECT "a\\" FROM t WHERE x = "%(v)s"'),
+        (True, True, None),
+        (False, False, None),
+        (True, False, None),
+    ],
+)
+def test_pyformat_reads_double_quotes_by_ansi_quotes(
+    ansi_quotes: bool, backslash_escapes: bool, expected: str | None
+) -> None:
+    """With ANSI_QUOTES a double quote is an identifier, where a backslash escapes nothing."""
+    text = 'SELECT "a\\" FROM t WHERE x = ":v"'
+    if expected is None:
+        with pytest.raises(UsageError, match="params has v"):
+            translate(
+                text,
+                {"v": 1},
+                style="pyformat",
+                backslash_escapes=backslash_escapes,
+                ansi_quotes=ansi_quotes,
+            )
+    else:
+        assert translate(text, {"v": 1}, style="pyformat", backslash_escapes=backslash_escapes) == (
+            expected,
+            {"v": 1},
+        )

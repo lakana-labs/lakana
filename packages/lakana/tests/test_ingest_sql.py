@@ -15,6 +15,7 @@ from typing import Any
 
 import pyarrow as pa
 import pytest
+from pymysql import converters as real_converters
 
 from lakana import context
 from lakana.ingest import (
@@ -1077,19 +1078,62 @@ class _MyError(Exception):
     """PyMySQL's error: ``args`` is ``(code, message)``."""
 
 
+def _literal(value: object, mode: str) -> str:
+    """Escape one value as PyMySQL's `Connection.escape` does.
+
+    Parameters
+    ----------
+    value
+        The value.
+    mode
+        The session's ``sql_mode``; `NO_BACKSLASH_ESCAPES` changes how a str is escaped.
+
+    Returns
+    -------
+    str
+        The text PyMySQL writes into the query.
+    """
+    if isinstance(value, str):
+        if "NO_BACKSLASH_ESCAPES" in mode:
+            return "'" + value.replace("'", "''") + "'"
+        return "'" + real_converters.escape_string(value) + "'"
+    if isinstance(value, (bytes, bytearray)):
+        return f"X'{value.hex()}'"
+    return real_converters.escape_item(value, "utf8mb4")
+
+
+_SQL_MODE = "SELECT @@SESSION.sql_mode"
+
+
 @dataclass
 class _MyCursor:
-    """A fake unbuffered cursor."""
+    """A fake unbuffered cursor that formats its query as PyMySQL does."""
 
     rows: list[tuple[object, ...]]
     fields: list[_Field]
     fail: Exception | None = None
     executed: list[tuple[str, object]] = field(default_factory=list)
+    sent: list[str] = field(default_factory=list)
     _result: _Result | None = None
     fetched: list[int] = field(default_factory=list)
+    mode: str = "STRICT_TRANS_TABLES"
+    no_rows: bool = False
+
+    @property
+    def description(self) -> tuple[object, ...] | None:
+        """Say whether the last statement returned rows.
+
+        Returns
+        -------
+        tuple or None
+            `None` for a statement without a result set.
+        """
+        if self._result is None or self.no_rows:
+            return None
+        return tuple(self._result.fields)
 
     def execute(self, query: str, args: object = None) -> None:
-        """Record a statement.
+        """Record a statement and the text PyMySQL would send (``query % args`` with args).
 
         Parameters
         ----------
@@ -1104,10 +1148,23 @@ class _MyCursor:
             The configured error, for the asset's query.
         """
         self.executed.append((query, args))
-        if query != "START TRANSACTION READ ONLY":
+        if isinstance(args, Mapping):
+            query %= {key: _literal(value, self.mode) for key, value in args.items()}
+        self.sent.append(query)
+        if query not in ("START TRANSACTION READ ONLY", _SQL_MODE):
             if self.fail is not None:
                 raise self.fail
             self._result = _Result(self.fields)
+
+    def fetchone(self) -> tuple[object, ...]:
+        """Answer the ``sql_mode`` probe.
+
+        Returns
+        -------
+        tuple
+            The session's mode.
+        """
+        return (self.mode,)
 
     def fetchmany(self, size: int) -> list[tuple[object, ...]]:
         """Hand out up to `size` rows.
@@ -1134,7 +1191,7 @@ class _MyConnection:
     kwargs: dict[str, Any]
     cursor_: _MyCursor
     refuse: Exception | None = None
-    server_status: int = 0
+    status: int = 0
     socks: list[object] = field(default_factory=list)
 
     def connect(self, sock: object = None) -> None:
@@ -1259,9 +1316,10 @@ def test_mariadb_under_docker_hands_pymysql_a_socket_to_the_relay(mysql: dict[st
     assert kwargs["ssl_disabled"] is False and kwargs["ssl"].check_hostname is True
     assert kwargs["init_command"] == "SET time_zone = '+00:00'"
     assert mysql["dialed"] == [("10.207.0.3", 15002)] and made.socks == ["SOCKET"]
-    assert mysql["cursor"].executed == [
-        ("START TRANSACTION READ ONLY", None),
-        ("SELECT id, name FROM t", None),
+    assert mysql["cursor"].sent == [
+        _SQL_MODE,
+        "START TRANSACTION READ ONLY",
+        "SELECT id, name FROM t",
     ]
     assert table.to_pylist() == [{"id": 1, "name": "x"}]
 
@@ -1291,21 +1349,24 @@ def test_mariadb_binds_an_aware_time_as_utc_and_reads_in_batches(mysql: dict[str
         params={"since": since},
     )
 
-    assert mysql["cursor"].executed[1] == (
+    assert mysql["cursor"].executed[-1] == (
         "SELECT id, name FROM t WHERE u > %(since)s AND n LIKE '5%%'",
         {"since": dt.datetime(2026, 1, 1, 10)},
+    )
+    assert mysql["cursor"].sent[-1] == (
+        "SELECT id, name FROM t WHERE u > '2026-01-01 10:00:00' AND n LIKE '5%'"
     )
     assert mysql["cursor"].fetched[0] == sql.BATCH_ROWS
 
 
 def test_mariadb_follows_the_servers_backslash_mode(mysql: dict[str, Any]) -> None:
     r"""With NO_BACKSLASH_ESCAPES a backslash ends nothing, so `'a\\'` is a whole literal."""
-    mysql["status"] = 512
+    mysql["cursor"].mode = "NO_BACKSLASH_ESCAPES"
     _mariadb(relay=False)
 
-    sql.read("shop-db", "SELECT 'a\\' AS v, :x AS w", params={"x": 1})
+    sql.read("shop-db", "SELECT 'a\\' AS v, :x AS w", params={"x": "it's"})
 
-    assert mysql["cursor"].executed[1] == ("SELECT 'a\\' AS v, %(x)s AS w", {"x": 1})
+    assert mysql["cursor"].sent[-1] == "SELECT 'a\\' AS v, 'it''s' AS w"
 
 
 @pytest.mark.parametrize(
@@ -1519,7 +1580,9 @@ def test_mariadb_a_time_of_day_is_read_and_a_longer_time_is_refused() -> None:
     batch = _types.mariadb_batch(rows, schema, "shop-db")
 
     assert batch.column(0).to_pylist() == [dt.time(13, 0, 0, 5), None]
-    with pytest.raises(UsageError, match=r"column `tm` holds datetime.timedelta"):
+    with pytest.raises(
+        UsageError, match=r"column `tm` holds datetime.timedelta.*TIME_TO_SEC\(tm\)"
+    ):
         _types.mariadb_batch([(dt.timedelta(hours=30),)], schema, "shop-db")
 
 
@@ -1549,3 +1612,162 @@ def test_sqlite_refuses_attach_and_detach(lite: Path, query: str) -> None:
         sql.read("local-db", query.format(dir=lite.parent))
 
     assert sorted(p.name for p in lite.parent.iterdir()) == ["app.db"]
+
+
+def test_mariadb_without_parameters_sends_every_percent_as_written(mysql: dict[str, Any]) -> None:
+    """PyMySQL formats `%%` back to `%` only when it is given values: it always is."""
+    _mariadb(relay=False)
+    query = "SELECT DATE_FORMAT(d, '%Y-%m') AS m, '100%' AS p, a % 2 AS r FROM t"
+
+    sql.read("shop-db", query)
+
+    assert mysql["cursor"].sent[-1] == query
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        ["x' OR 1=1 -- "],
+        ("a", "b"),
+        {"a"},
+        frozenset({"a"}),
+        {"a": 1},
+        Path("x' OR 1=1 #"),
+        object(),
+    ],
+    ids=["list", "tuple", "set", "frozenset", "dict", "path", "object"],
+)
+def test_mariadb_refuses_a_parameter_that_is_not_a_plain_value(
+    mysql: dict[str, Any], value: object
+) -> None:
+    """PyMySQL escapes such values with backslashes whatever the server's mode: refused first."""
+    _mariadb(relay=False)
+
+    with pytest.raises(UsageError, match=r"parameter `v` is a .*str, int, float, bool, Decimal"):
+        sql.read("shop-db", "SELECT 1 FROM t WHERE a IN (:v)", params={"v": value})
+
+    assert mysql["made"] == []
+
+
+@pytest.mark.parametrize(
+    "value", [float("nan"), float("inf"), __import__("decimal").Decimal("NaN")]
+)
+def test_mariadb_refuses_a_value_that_is_not_finite(mysql: dict[str, Any], value: object) -> None:
+    """MariaDB has no NaN or infinity."""
+    _mariadb(relay=False)
+
+    with pytest.raises(UsageError, match=r"parameter `v` is not a finite number"):
+        sql.read("shop-db", "SELECT :v", params={"v": value})
+
+
+def test_mariadb_binds_each_plain_type(mysql: dict[str, Any]) -> None:
+    """str, int, float, bool, Decimal, date, datetime, time and bytes reach PyMySQL as they are."""
+    import datetime as dt
+    import decimal
+
+    mysql["cursor"].mode = "NO_BACKSLASH_ESCAPES"
+    values: dict[str, object] = {
+        "s": "x' OR 1=1 -- ",
+        "i": 7,
+        "f": 1.5,
+        "b": True,
+        "d": decimal.Decimal("1.25"),
+        "day": dt.date(2026, 1, 2),
+        "at": dt.datetime(2026, 1, 2, 3, 4, 5),
+        "tm": dt.time(3, 4, 5),
+        "raw": b"\x00'",
+    }
+    _mariadb(relay=False)
+
+    sql.read("shop-db", "SELECT " + ", ".join(f":{name}" for name in values), params=values)
+
+    assert mysql["cursor"].sent[-1] == (
+        "SELECT 'x'' OR 1=1 -- ', 7, 1.5e0, 1, 1.25, '2026-01-02', '2026-01-02 03:04:05', "
+        "'03:04:05', X'0027'"
+    )
+
+
+_QUOTE_PROBE = 'SELECT "a\\" FROM t WHERE x = ":v"'
+
+
+@pytest.mark.parametrize(
+    ("mode", "sent"),
+    [
+        ("STRICT_TRANS_TABLES", 'SELECT "a\\" FROM t WHERE x = "\'1\'"'),
+        ("ANSI_QUOTES", None),
+        ("NO_BACKSLASH_ESCAPES", None),
+        ("REAL_AS_FLOAT,PIPES_AS_CONCAT,ANSI_QUOTES,IGNORE_SPACE,ANSI,NO_BACKSLASH_ESCAPES", None),
+    ],
+    ids=["default", "ansi-quotes", "no-backslash", "both"],
+)
+def test_mariadb_reads_double_quotes_as_the_sessions_sql_mode_says(
+    mysql: dict[str, Any], mode: str, sent: str | None
+) -> None:
+    r"""``"a\"`` is a string with escapes, else an identifier or a string that ends at the `\`."""
+    mysql["cursor"].mode = mode
+    _mariadb(relay=False)
+
+    if sent is None:
+        with pytest.raises(UsageError, match="params has v, which the query does not use"):
+            sql.read("shop-db", _QUOTE_PROBE, params={"v": "1"})
+    else:
+        sql.read("shop-db", _QUOTE_PROBE, params={"v": "1"})
+        assert mysql["cursor"].sent[-1] == sent
+
+
+@pytest.mark.parametrize(
+    "code", [1037, 1038, 1041, 1053, 1158, 1159, 1160, 1161, 1203, 1226, 1927, 1969]
+)
+def test_mariadb_transient_server_errors_are_retried(mysql: dict[str, Any], code: int) -> None:
+    """Out of memory, shutdown, network, limits, a killed connection, a statement timeout."""
+    mysql["cursor"].fail = _MyError(code, "try again")
+    _mariadb(relay=False)
+
+    with pytest.raises(SourceError) as caught:
+        sql.read("shop-db", "SELECT 1")
+
+    assert type(caught.value) is SourceError
+
+
+def test_mariadb_a_statement_without_rows_is_refused(mysql: dict[str, Any]) -> None:
+    """SET, DO and SELECT ... INTO @v return no result set."""
+    mysql["cursor"].no_rows = True
+    _mariadb(relay=False)
+
+    with pytest.raises(UsageError, match=r"sql\.read needs a statement that returns rows"):
+        sql.read("shop-db", "SET @a = 1")
+
+
+@pytest.mark.parametrize(
+    ("error", "fragment"),
+    [
+        (_MyError(2026, "SSL is required but the server doesn't support it"), "offers no TLS"),
+        (
+            _MyError(
+                3159,
+                "Connections using insecure transport are prohibited while "
+                "--require_secure_transport=ON.",
+            ),
+            "requires TLS",
+        ),
+    ],
+)
+def test_mariadb_a_tls_mismatch_is_refused_with_a_tls_hint(
+    mysql: dict[str, Any], error: Exception, fragment: str
+) -> None:
+    """Every attempt would fail the same way; the message names the `tls` setting."""
+    mysql["refuse"] = error
+    _mariadb(relay=False)
+
+    with pytest.raises(SourceRefused, match=fragment) as caught:
+        sql.read("shop-db", "SELECT 1")
+
+    assert "lakana connection update shop-db --env prod --tls" in str(caught.value)
+
+
+def test_mariadb_a_none_parameter_names_the_default_to_give(mysql: dict[str, Any]) -> None:
+    """The type check lets `None` through to the message every kind gives."""
+    _mariadb(relay=False)
+
+    with pytest.raises(UsageError, match=r"ctx\.watermark\(default=\.\.\.\)"):
+        sql.read("shop-db", "SELECT :since", params={"since": None})

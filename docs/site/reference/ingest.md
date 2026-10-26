@@ -319,14 +319,20 @@ placeholder without a value, and a value the query does not use, are refused bef
 sent. A `:name` inside a string, a quoted name, a comment or a PostgreSQL dollar quote is left as
 it is, and `::` is a PostgreSQL cast, not a placeholder.
 
-For MariaDB, the text is read as MariaDB reads it: `#` starts a comment, `--` only before a space,
-and block comments do not nest. A query with an executable comment (`/*! ... */`), whose text
-MariaDB runs or skips by its version, is refused.
+For MariaDB, the text is read as MariaDB reads it, in the session's `sql_mode`: `#` starts a
+comment, `--` only before a space or a control character, block comments do not nest, a double
+quote encloses a name under `ANSI_QUOTES` and a string otherwise, and a backslash escapes
+nothing under `NO_BACKSLASH_ESCAPES`. A query with an executable comment (`/*! ... */`), whose
+text MariaDB runs or skips by its version, is refused.
 
 PostgreSQL and SQLite bind values on the server. PyMySQL has no server-side binding: it writes
 each value, escaped, into the text it sends. The asset's SQL never holds a value, but the text on
-the wire does; that is why the placeholders are found exactly as MariaDB reads the text, so an
-escaped value always lands where MariaDB reads a value.
+the wire does. So the placeholders are found exactly as MariaDB reads the text, and a MariaDB
+value must be one PyMySQL escapes the way the server reads it: a `str`, `int`, finite `float`,
+`bool`, `Decimal`, `date`, `datetime`, `time` or `bytes`. A list, a tuple, a set, a dict, a path
+or another object is refused (PyMySQL would escape it with backslashes, which a server with
+`NO_BACKSLASH_ESCAPES` does not read as escapes): give each value its own placeholder. `NaN` and
+infinity are refused too.
 
 A `None` value is refused: `updated_at > NULL` matches no row, so a first run would read nothing
 and look like it worked. On a first run `ctx.watermark()` is `None`; give the start with
@@ -416,7 +422,7 @@ the task trusts the workers' trust bundle (`LAKANA_RUN__CA_BUNDLE`) and the conn
 certificate, `tls: disable` does not encrypt. A connection takes at most 10 seconds.
 
 A MariaDB connection with `tls: verify-full` or `require` never falls back to a plain
-connection: a server without TLS fails the read. MySQL 8's default `caching_sha2_password`
+connection: a server without TLS fails the read, and is not retried. MySQL 8's default `caching_sha2_password`
 needs the `cryptography` package over a connection without TLS; use `tls: verify-full`, or add
 `cryptography` to the project's dependencies.
 
@@ -447,8 +453,8 @@ The classes are those of [files.read](#errors):
 | Class | Meaning | Retried |
 |---|---|---|
 | `UsageError` | The call, the query or the setup is wrong: a placeholder without a value, a `None` value, an executable comment in a MariaDB query, a query that fails (syntax, a missing table or column) or writes, a column without a faithful Arrow form, a connection of another kind, a missing password, a trust bundle the task cannot read, the `lakana[assets]` extra missing. | No |
-| `SourceRefused` (a `SourceError`) | The database refused the password, its certificate is not trusted, or the user may not read the table. | No |
-| `SourceError` | The database failed or could not be reached (a timeout, a connection closed, a cancelled statement), which may pass. | Yes |
+| `SourceRefused` (a `SourceError`) | The database refused the password, its certificate is not trusted, the user may not read the table, or the connection's `tls` and the server disagree (no TLS offered, or TLS required). | No |
+| `SourceError` | The database failed or could not be reached (a timeout, a connection closed, a cancelled statement), which may pass. MariaDB's server errors are `UsageError`s, except these, which pass with time and are retried: 1037, 1038 and 1041 (out of memory), 1040 (too many connections), 1053 (shutdown in progress), 1158 to 1161 (network read or write), 1203 and 1226 (a user's connection or resource limit), 1205 (lock wait timeout), 1213 (deadlock), 1317 (interrupted), 1927 (connection killed) and 1969 (statement time limit). | Yes |
 | `DirectoryError` | A SQLite path that is a link, missing or not a regular file. | No |
 | `CapExceeded` | A cap was reached. | No |
 
@@ -473,6 +479,11 @@ The classes are those of [files.read](#errors):
 | `...: the result has more than max_rows (...) rows` (or `is larger than max_bytes`) | The result is larger than the cap. | Narrow the query (a `WHERE` clause or a `LIMIT`), or raise the cap. |
 | ``... has no secret with `password` `` | The connection has no password. | Run the command the message names. |
 | `the query holds an executable comment (/*! ... */)` | MariaDB runs or skips its text by version. | Write the statement without it. |
+| `parameter ... is a list; for MariaDB a value is a str, int, float, bool, Decimal, date, datetime, time or bytes` | A MariaDB value of another type. | Give each value its own placeholder. |
+| `parameter ... is not a finite number` | A `NaN` or infinity for MariaDB. | Filter it out before the call. |
+| `...: sql.read needs a statement that returns rows` | A MariaDB statement without a result set (`SET`, `DO`, `SELECT ... INTO`). | Use a `SELECT` that returns rows. |
+| `...: the server offers no TLS, and the connection's tls is verify-full` | A MariaDB server without TLS. | Enable TLS on the server, or, on a network you trust, set `tls: disable` with the command the message names. |
+| `...: the server requires TLS (MariaDB said: ...)` | `tls: disable` against a server that requires TLS. | Set `tls: verify-full` with the command the message names. |
 | `...: the server asks for caching_sha2_password over a connection without TLS` | MySQL 8 without TLS, and no `cryptography`. | Use `tls: verify-full`, or add `cryptography` to the project's dependencies. |
 | `sql.read needs the assets extra` | The project does not depend on `lakana[assets]`. | Add `lakana[assets]` to the project's dependencies and lock again. |
 | `... names ingestion root ..., which this worker does not have` | The worker has no such root. | Set the root as the message says. |

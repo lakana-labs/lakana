@@ -27,6 +27,8 @@ from __future__ import annotations
 
 import contextlib
 import datetime as dt
+import decimal
+import math
 import os
 import re
 import socket
@@ -592,6 +594,46 @@ def _utc_naive(value: object) -> object:
     return value
 
 
+_PLAIN_TYPES = (str, int, float, bool, decimal.Decimal, dt.date, dt.datetime, dt.time, bytes)
+"""The parameter types PyMySQL escapes by the server's mode (or as digits, dates or hex)."""
+_TRANSIENT = frozenset(
+    {1037, 1038, 1040, 1041, 1053, 1158, 1159, 1160, 1161, 1203, 1205, 1213, 1226, 1317}
+    | {1927, 1969}
+)
+"""MariaDB server errors that may pass: memory, shutdown, network, limits, locks, kills, time."""
+
+
+def _plain_values(params: Mapping[str, object] | None) -> None:
+    """Refuse a MariaDB parameter PyMySQL would not escape by the server's mode.
+
+    PyMySQL escapes a list, a set, a path or another object with backslashes, which a server
+    with ``NO_BACKSLASH_ESCAPES`` does not read as escapes: the value would end its literal.
+
+    Parameters
+    ----------
+    params
+        The values.
+
+    Raises
+    ------
+    UsageError
+        For a value of another type, or a number that is not finite.
+    """
+    for name, value in (params or {}).items():
+        if value is None:
+            continue  # translate names the default to give
+        if type(value) not in _PLAIN_TYPES:
+            raise UsageError(
+                f"parameter `{name}` is a {type(value).__name__}; for MariaDB a value is a str, "
+                "int, float, bool, Decimal, date, datetime, time or bytes: give each value its "
+                "own placeholder"
+            )
+        if isinstance(value, (float, decimal.Decimal)) and not math.isfinite(value):
+            raise UsageError(
+                f"parameter `{name}` is not a finite number; MariaDB has no NaN or infinity"
+            )
+
+
 def _mariadb_error(conn: FetchedConnection, exc: Exception, host: str) -> Exception:
     """Choose the error for what PyMySQL raised.
 
@@ -627,7 +669,19 @@ def _mariadb_error(conn: FetchedConnection, exc: Exception, host: str) -> Except
             f"`{conn.name}`: the connection's user may not read this (MariaDB said: {said}); "
             "grant it SELECT, or read another table"
         )
-    if code is not None and 1000 <= code < 2000 and code not in (1040, 1205, 1213, 1317):
+    if code == 2026:  # the client requires TLS; the server offers none
+        return SourceRefused(
+            f"`{conn.name}`: the server offers no TLS, and the connection's tls is "
+            f"{conn.settings.get('tls', 'verify-full')}. Enable TLS on the server, or, on a "
+            f"network you trust, run `lakana connection update {conn.name} --env "
+            f"{task_environment()} --tls disable`."
+        )
+    if code == 3159 or "insecure transport" in said:
+        return SourceRefused(
+            f"`{conn.name}`: the server requires TLS (MariaDB said: {said}). Run `lakana "
+            f"connection update {conn.name} --env {task_environment()} --tls verify-full`."
+        )
+    if code is not None and 1000 <= code < 2000 and code not in _TRANSIENT:
         return UsageError(f"`{conn.name}`: the query failed (MariaDB said: {said})")
     if code in (2013, 2006) and "relay_port" in conn.routing:
         return SourceError(_RELAY_CLOSED.format(name=conn.name, product="MariaDB"))
@@ -664,18 +718,20 @@ def _read_mariadb(
     Raises
     ------
     UsageError
-        Without the assets extra or a password, or for a query that fails or writes.
+        Without the assets extra or a password, for a parameter that is not a plain value, or
+        for a query that fails, writes or returns no rows.
     SourceRefused
-        When MariaDB refuses the password or its certificate is not trusted.
+        When MariaDB refuses the password, its certificate is not trusted, or the connection's
+        ``tls`` and the server disagree.
     SourceError
         When MariaDB fails or cannot be reached.
     """
     try:
         import pymysql
         import pymysql.cursors
-        from pymysql.constants import SERVER_STATUS
     except ImportError:
         raise UsageError(_NEEDS_ASSETS) from None
+    _plain_values(params)
 
     password = (conn.secret or {}).get("password")
     if not password:
@@ -708,17 +764,33 @@ def _read_mariadb(
         failure = _mariadb_error(conn, exc, host)
         raise failure from None
     try:
-        # How a backslash reads inside a literal is the server's setting (NO_BACKSLASH_ESCAPES),
-        # so the placeholders are translated once connected, before the query runs.
-        backslashes = not database.server_status & SERVER_STATUS.SERVER_STATUS_NO_BACKSLASH_ESCAPES
-        sql, values = translate(query, params, style="pyformat", backslash_escapes=backslashes)
-        assert isinstance(values, dict)  # nosec B101 -- pyformat returns a mapping
-        bound = {key: _utc_naive(value) for key, value in values.items()}
         cursor = database.cursor(pymysql.cursors.SSCursor)
         try:
+            # How quotes and backslashes read is the session's sql_mode (ANSI_QUOTES,
+            # NO_BACKSLASH_ESCAPES), so the placeholders are translated once it is known.
+            probe = database.cursor()
+            probe.execute("SELECT @@SESSION.sql_mode")
+            (mode,) = probe.fetchone() or ("",)
+            flags = set(str(mode).upper().split(","))
+            sql, values = translate(
+                query,
+                params,
+                style="pyformat",
+                backslash_escapes="NO_BACKSLASH_ESCAPES" not in flags,
+                ansi_quotes="ANSI_QUOTES" in flags,
+            )
+            assert isinstance(values, dict)  # nosec B101 -- pyformat returns a mapping
+            bound = {key: _utc_naive(value) for key, value in values.items()}
             cursor.execute("START TRANSACTION READ ONLY")
-            cursor.execute(sql, bound or None)
-            schema = mariadb_schema(cursor._result.fields if cursor._result else [], conn.name)
+            # Always with values, even none: PyMySQL turns the doubled `%%` back into `%` only
+            # when it formats the query.
+            cursor.execute(sql, bound)
+            if cursor.description is None:
+                raise UsageError(
+                    f"`{conn.name}`: sql.read needs a statement that returns rows, such as "
+                    "SELECT; this one returns none (SET, DO, SELECT ... INTO)"
+                )
+            schema = mariadb_schema(cursor._result.fields, conn.name)
 
             def batches() -> Generator[pa.RecordBatch]:
                 while rows := cursor.fetchmany(BATCH_ROWS):

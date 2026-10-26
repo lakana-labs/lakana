@@ -20,7 +20,7 @@ import sqlite3
 import sys
 import threading
 import time
-from collections.abc import Generator, Iterator, Mapping
+from collections.abc import Callable, Generator, Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
@@ -34,7 +34,6 @@ from tls_fixture import Authority, issue_leaf, make_authority
 from lakana import context
 from lakana.ingest import (
     CapExceeded,
-    SourceError,
     SourceRefused,
     UsageError,
     _check,
@@ -58,6 +57,7 @@ MARIADB = "mariadb:11.8.9@sha256:f16d7a344413e519dff518f27bdb221388f84b0d274c97c
 RELAY_ADDRESS = "127.0.0.6"
 RELAY_PORT = 15001
 MARIADB_RELAY_PORT = 15002
+PLAIN_RELAY_PORT = 15003
 _READER_PASSWORD = "reader-pa55-0123456789"
 _ADMIN_PASSWORD = "admin-pa55-0123456789"
 _ROUTE_HEADER = "Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\n"
@@ -599,7 +599,8 @@ def _mariadb_ready(container: DockerContainer) -> None:
         When it does not.
     """
     deadline = time.monotonic() + 60
-    ping = ["mariadb-admin", "ping", "-uroot", f"-p{_MARIADB_ROOT}"]
+    # The 11.x client asks for TLS by default; on the socket it needs none.
+    ping = ["mariadb-admin", "--skip-ssl", "ping", "-uroot", f"-p{_MARIADB_ROOT}"]
     while time.monotonic() < deadline:
         if container.exec(ping).exit_code == 0:
             return
@@ -607,28 +608,19 @@ def _mariadb_ready(container: DockerContainer) -> None:
     raise AssertionError("MariaDB did not answer within 60 seconds")
 
 
-@pytest.fixture(scope="module")
-def mariadb(pki: _Pki) -> Iterator[tuple[str, int]]:
-    """Run MariaDB with TLS required, the reader and the test tables.
-
-    The key must belong to the server's user (uid 999) with mode 0600, as for PostgreSQL.
+def _mariadb_container(start: str) -> DockerContainer:
+    """Configure a MariaDB container with the reader and its database.
 
     Parameters
     ----------
-    pki
-        The certificates.
+    start
+        The entry point's shell command.
 
-    Yields
-    ------
-    tuple of (str, int)
-        The host and port it is published on.
+    Returns
+    -------
+    DockerContainer
+        Not started.
     """
-    start = (
-        "install -d -o 999 -g 999 -m 0700 /etc/my-ssl && "
-        "install -o 999 -g 999 -m 0600 /certs/server.crt /certs/server.key /etc/my-ssl/ && "
-        "exec docker-entrypoint.sh mariadbd --ssl-cert=/etc/my-ssl/server.crt "
-        "--ssl-key=/etc/my-ssl/server.key --require-secure-transport=ON"
-    )
     container = DockerContainer(
         MARIADB,
         # The image's first-run setup starts a server without networking ("port: 0").
@@ -640,15 +632,94 @@ def mariadb(pki: _Pki) -> Iterator[tuple[str, int]]:
     container.with_env("MARIADB_USER", "reader")
     container.with_env("MARIADB_PASSWORD", _READER_PASSWORD)
     container.with_exposed_ports(3306)
+    return container
+
+
+@pytest.fixture(scope="module")
+def mariadb_container(pki: _Pki) -> Iterator[DockerContainer]:
+    """Run MariaDB with TLS required, the reader and the test tables.
+
+    The key must belong to the server's user (uid 999) with mode 0600, as for PostgreSQL.
+
+    Parameters
+    ----------
+    pki
+        The certificates.
+
+    Yields
+    ------
+    DockerContainer
+        The running container.
+    """
+    container = _mariadb_container(
+        "install -d -o 999 -g 999 -m 0700 /etc/my-ssl && "
+        "install -o 999 -g 999 -m 0600 /certs/server.crt /certs/server.key /etc/my-ssl/ && "
+        "exec docker-entrypoint.sh mariadbd --ssl-cert=/etc/my-ssl/server.crt "
+        "--ssl-key=/etc/my-ssl/server.key --require-secure-transport=ON"
+    )
     container.with_copy_into_container(pki.cert, "/certs/server.crt")
     container.with_copy_into_container(pki.key, "/certs/server.key")
     with container:
         _mariadb_ready(container)
-        result = container.exec(
-            ["mariadb", "-uroot", f"-p{_MARIADB_ROOT}", "shop", "-e", _MARIADB_SETUP]
-        )
-        assert result.exit_code == 0, result.output.decode()
-        yield "127.0.0.1", int(container.get_exposed_port(3306))
+        _as_root(container, _MARIADB_SETUP)
+        yield container
+
+
+def _as_root(container: DockerContainer, statements: str) -> None:
+    """Run statements as MariaDB's root on its socket.
+
+    Parameters
+    ----------
+    container
+        The running container.
+    statements
+        SQL.
+    """
+    result = container.exec(["mariadb", "-uroot", f"-p{_MARIADB_ROOT}", "shop", "-e", statements])
+    assert result.exit_code == 0, result.output.decode()
+
+
+@pytest.fixture(scope="module")
+def mariadb(mariadb_container: DockerContainer) -> tuple[str, int]:
+    """Say where the MariaDB container is published.
+
+    Parameters
+    ----------
+    mariadb_container
+        The running container.
+
+    Returns
+    -------
+    tuple of (str, int)
+        Its host and port.
+    """
+    return "127.0.0.1", int(mariadb_container.get_exposed_port(3306))
+
+
+@pytest.fixture
+def server_mode(mariadb_container: DockerContainer) -> Iterator[Callable[[str], None]]:
+    """Set the server's global sql_mode for the next sessions; restore it afterwards.
+
+    Parameters
+    ----------
+    mariadb_container
+        The running container.
+
+    Yields
+    ------
+    callable
+        ``(mode) -> None``.
+    """
+    result = mariadb_container.exec(
+        ["mariadb", "-uroot", f"-p{_MARIADB_ROOT}", "-N", "-e", "SELECT @@GLOBAL.sql_mode"]
+    )
+    original = result.output.decode().strip()
+
+    def change(mode: str) -> None:
+        _as_root(mariadb_container, f"SET GLOBAL sql_mode = '{mode}'")
+
+    yield change
+    change(original)
 
 
 @pytest.fixture(scope="module")
@@ -848,10 +919,136 @@ def test_mariadb_a_certificate_of_another_authority_gives_the_tls_text(
 def test_mariadb_tls_disable_against_a_server_that_requires_tls_names_it(
     pki: _Pki, mariadb_relay: list[str]
 ) -> None:
-    """``require_secure_transport``: the server refuses the plain connection, and says so."""
+    """``require_secure_transport``: the server refuses the plain connection, every time."""
     _shop(pki, tls="disable")
 
-    with pytest.raises(SourceError, match="insecure transport") as caught:
+    with pytest.raises(SourceRefused, match=r"insecure transport.*--tls verify-full") as caught:
         sql.read("shop-db", "SELECT 1")
 
     assert _READER_PASSWORD not in str(caught.value)
+
+
+@pytest.fixture(scope="module")
+def plain_mariadb(tmp_path_factory: pytest.TempPathFactory) -> Iterator[list[str]]:
+    """Run MariaDB without TLS (``--skip-ssl``) behind the relay's port 15003.
+
+    Parameters
+    ----------
+    tmp_path_factory
+        For the relay's routing table.
+
+    Yields
+    ------
+    list of str
+        The relay's log lines.
+    """
+    container = _mariadb_container("exec docker-entrypoint.sh mariadbd --skip-ssl")
+    with container:
+        _mariadb_ready(container)
+        target = ("127.0.0.1", int(container.get_exposed_port(3306)))
+        with _serve_relay(PLAIN_RELAY_PORT, target, tmp_path_factory.mktemp("relay")) as logs:
+            yield logs
+
+
+def test_mariadb_verify_full_against_a_server_without_tls_is_refused(
+    pki: _Pki, plain_mariadb: list[str]
+) -> None:
+    """PyMySQL never falls back to a plain connection: CR 2026, permanent, with the TLS hint."""
+    _declare(
+        "shop-db",
+        "mariadb",
+        {"host": "db.test", "port": 3306, "database": "shop"},
+        {"user": "reader", "tls": "verify-full"},
+        {"password": _READER_PASSWORD},
+        {"relay_port": PLAIN_RELAY_PORT},
+    )
+
+    with pytest.raises(SourceRefused, match="the server offers no TLS"):
+        sql.read("shop-db", "SELECT 1")
+
+
+def test_mariadb_without_parameters_keeps_every_percent(
+    pki: _Pki, mariadb_relay: list[str]
+) -> None:
+    """DATE_FORMAT patterns, a literal `%` and the modulo operator reach the server unchanged."""
+    _shop(pki)
+
+    table = sql.read(
+        "shop-db", "SELECT DATE_FORMAT(day, '%Y-%m') AS m, '100%' AS p, 7 % 3 AS r FROM kinds"
+    )
+
+    assert table.to_pylist() == [{"m": "2026-10", "p": "100%", "r": 1}]
+
+
+def test_mariadb_a_list_parameter_is_refused_before_the_server_under_no_backslash_escapes(
+    pki: _Pki, mariadb_relay: list[str], server_mode: Callable[[str], None]
+) -> None:
+    r"""The reviewer's probe: PyMySQL would write ``IN ('x\' OR 1=1 -- ')``."""
+    server_mode("NO_BACKSLASH_ESCAPES")
+    _shop(pki)
+
+    with pytest.raises(UsageError, match=r"parameter `v` is a list"):
+        sql.read("shop-db", "SELECT v FROM kinds WHERE v IN :v", params={"v": ["x' OR 1=1 -- "]})
+
+
+@pytest.mark.parametrize(
+    ("mode", "fragment"),
+    [
+        ("STRICT_TRANS_TABLES", "the query failed"),
+        ("ANSI_QUOTES", "params has v, which the query does not use"),
+        ("NO_BACKSLASH_ESCAPES", "params has v, which the query does not use"),
+        ("ANSI_QUOTES,NO_BACKSLASH_ESCAPES", "params has v, which the query does not use"),
+    ],
+)
+def test_mariadb_double_quotes_are_read_as_the_servers_sql_mode_says(
+    pki: _Pki,
+    mariadb_relay: list[str],
+    server_mode: Callable[[str], None],
+    mode: str,
+    fragment: str,
+) -> None:
+    r"""``"a\"`` then ``":v"``: a value goes in only where the server reads code.
+
+    With backslash escapes and no ANSI_QUOTES, MariaDB reads the first `"` up to the second as one
+    string, so `:v` is code (and the trailing `"` opens a string the server reports); in every
+    other mode `":v"` is a string or an identifier, so nothing is bound.
+    """
+    server_mode(mode)
+    _shop(pki)
+
+    with pytest.raises(UsageError, match=fragment):
+        sql.read("shop-db", 'SELECT "a\\" FROM kinds WHERE v = ":v"', params={"v": "x"})
+
+
+def test_mariadb_with_ansi_quotes_a_double_quoted_name_is_a_column(
+    pki: _Pki, mariadb_relay: list[str], server_mode: Callable[[str], None]
+) -> None:
+    """Under ANSI_QUOTES `"v"` is the column, and the value is bound after it."""
+    server_mode("ANSI_QUOTES")
+    _shop(pki)
+
+    table = sql.read("shop-db", 'SELECT "v" FROM kinds WHERE "v" = :p', params={"p": "v"})
+
+    assert table.to_pylist() == [{"v": "v"}]
+
+
+def test_mariadb_reads_dash_dash_before_delete_as_a_comment(
+    pki: _Pki, mariadb_relay: list[str]
+) -> None:
+    """The server's lexer agrees with the tokenizer: `--` then 0x7F starts a comment."""
+    _shop(pki)
+
+    table = sql.read("shop-db", "SELECT 1 --\x7f not code\n AS c")
+
+    assert table.to_pylist() == [{"c": 1}]
+
+
+@pytest.mark.parametrize("statement", ["SET @a = 1", "DO 1", "SELECT 1 INTO @v"])
+def test_mariadb_a_statement_without_rows_is_refused(
+    pki: _Pki, mariadb_relay: list[str], statement: str
+) -> None:
+    """No result set: the message says a statement must return rows."""
+    _shop(pki)
+
+    with pytest.raises(UsageError, match=r"sql\.read needs a statement that returns rows"):
+        sql.read("shop-db", statement)
