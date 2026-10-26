@@ -1,17 +1,23 @@
 """The object stores of `lakana.ingest.files`: S3, GCS and Azure Blob Storage, through obstore.
 
 Each store gets the connection's address and credential explicitly and nothing from the task's
-environment: the proxy goes into the store's own client options (`Connection.proxy_url`, which
-holds the task's egress token), never into ``HTTPS_PROXY``; the trust bundle
-(`LAKANA_CA_BUNDLE`) is added to the store's roots. A GCS service-account key is passed on with
-the three fields that sign its requests only, so a key cannot point the store at another host.
+environment: obstore's constructors read every ``AWS_*``, ``GOOGLE_*`` and ``AZURE_*`` variable
+(a token there would replace or join the connection's credential), so a store is built while
+those variables are out of the environment, and put back after. The proxy goes into the store's
+own client options (`Connection.proxy_url`, which holds the task's egress token), never into
+``HTTPS_PROXY``; the trust bundle (`LAKANA_CA_BUNDLE`) is added to the store's roots. A GCS
+service-account key is passed on with the three fields that sign its requests only, so a key
+cannot point the store at another host.
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
-from typing import TYPE_CHECKING, Any
+import threading
+from collections.abc import Callable, Generator
+from typing import TYPE_CHECKING, Any, TypeVar
 from urllib.parse import urlsplit
 
 from lakana import context
@@ -29,6 +35,14 @@ AZURE_ENDPOINT = "https://{account}.blob.core.windows.net"
 _NO_PROXY = "http://127.0.0.1:9"
 """The proxy of a task that has none: no request uses it (see `client_options`)."""
 _GCS_KEY_FIELDS = ("private_key", "private_key_id", "client_email")
+_CLOUD_PREFIXES = ("AWS_", "GOOGLE_", "AZURE_")
+"""The variables obstore's S3, GCS and Azure constructors read, by prefix."""
+_CLOUD_NAMES = frozenset(
+    {"IDENTITY_ENDPOINT", "IDENTITY_HEADER", "MSI_ENDPOINT", "IMDS_ENDPOINT", "SERVICE_ACCOUNT"}
+)
+"""The ones without a prefix: a managed-identity endpoint and a key file's path."""
+_ENVIRONMENT = threading.Lock()
+_Store = TypeVar("_Store")
 _NEEDS_ASSETS = (
     "files.read needs the assets extra on the worker: add lakana[assets] to the project's "
     "dependencies"
@@ -78,7 +92,72 @@ def client_options(conn: Connection, url: str) -> ClientConfig:
                 f"the trust bundle `{bundle}` (LAKANA_CA_BUNDLE) cannot be read "
                 f"({exc.strerror}); check the worker's LAKANA_RUN__CA_BUNDLE"
             ) from None
+        if b"-----BEGIN CERTIFICATE-----" not in options["root_certificate"]:
+            raise UsageError(
+                f"the trust bundle `{bundle}` (LAKANA_CA_BUNDLE) holds no certificate; check the "
+                "worker's LAKANA_RUN__CA_BUNDLE"
+            )
     return options
+
+
+@contextlib.contextmanager
+def _without_cloud_environment() -> Generator[None]:
+    """Take obstore's variables out of the environment while a store is built.
+
+    One store is built at a time (a lock), and every variable is put back afterwards, so the
+    task's own code sees its environment unchanged.
+
+    Yields
+    ------
+    None
+        While the variables are out.
+    """
+    with _ENVIRONMENT:
+        taken = {
+            name: os.environ.pop(name)
+            for name in list(os.environ)
+            if name.startswith(_CLOUD_PREFIXES) or name in _CLOUD_NAMES
+        }
+        try:
+            yield
+        finally:
+            os.environ.update(taken)
+
+
+def _build(conn: Connection, make: Callable[[], _Store], fix: str) -> _Store:
+    """Build a store without the environment, turning obstore's refusal into a next step.
+
+    Parameters
+    ----------
+    conn
+        The connection, for the message.
+    make
+        Calls the store's constructor.
+    fix
+        What to set right, such as ``its secret``.
+
+    Returns
+    -------
+    _Store
+        The store.
+
+    Raises
+    ------
+    UsageError
+        When obstore refuses the values (a key that is no RSA key, an account key that is not
+        base64); the message never shows them.
+    """
+    import obstore
+
+    with _without_cloud_environment():
+        try:
+            return make()
+        except (obstore.exceptions.BaseError, ValueError, TypeError):
+            raise UsageError(
+                f"obstore cannot use the secret of `{conn.name}` ({fix}); store the right one "
+                f"with `lakana connection update {conn.name} --env {task_environment()} "
+                "--values-stdin`"
+            ) from None
 
 
 def _secret(conn: Connection, key: str) -> str:
@@ -197,35 +276,40 @@ def store_for(conn: Connection) -> S3Store | GCSStore | AzureStore:
     if conn.kind == "s3":
         session = conn.secret.get("session_token") if conn.secret else None
         endpoint = str(conn.address["endpoint"])
-        return S3Store(
-            str(conn.address["bucket"]),
-            prefix=prefix,
-            region=str(conn.address["region"]),
-            endpoint=endpoint,
-            access_key_id=str(conn.settings["access_key_id"]),
-            secret_access_key=_secret(conn, "secret_access_key"),
+        s3: dict[str, Any] = {
+            "prefix": prefix,
+            "region": str(conn.address["region"]),
+            "endpoint": endpoint,
+            "access_key_id": str(conn.settings["access_key_id"]),
+            "secret_access_key": _secret(conn, "secret_access_key"),
             **({"session_token": session} if session else {}),
-            virtual_hosted_style_request=False,
-            skip_signature=False,
-            client_options=client_options(conn, endpoint),
-        )
+            "virtual_hosted_style_request": False,
+            "skip_signature": False,
+            "client_options": client_options(conn, endpoint),
+        }
+        return _build(conn, lambda: S3Store(str(conn.address["bucket"]), **s3), "its secret key")
     if conn.kind == "gcs":
-        return GCSStore(
-            str(conn.address["bucket"]),
-            prefix=prefix,
-            service_account_key=_gcs_key(conn),
-            base_url=GCS_BASE_URL,
-            client_options=client_options(conn, GCS_BASE_URL),
+        gcs: dict[str, Any] = {
+            "prefix": prefix,
+            "service_account_key": _gcs_key(conn),
+            "base_url": GCS_BASE_URL,
+            "client_options": client_options(conn, GCS_BASE_URL),
+        }
+        return _build(
+            conn,
+            lambda: GCSStore(str(conn.address["bucket"]), **gcs),
+            "the private key of its service-account key",
         )
     if conn.kind == "azure":
         account = str(conn.address["account"])
         endpoint = AZURE_ENDPOINT.format(account=account)
-        return AzureStore(
-            container_name=str(conn.address["container"]),
-            prefix=prefix,
-            account_name=account,
-            endpoint=endpoint,
-            client_options=client_options(conn, endpoint),
+        azure: dict[str, Any] = {
+            "container_name": str(conn.address["container"]),
+            "prefix": prefix,
+            "account_name": account,
+            "endpoint": endpoint,
+            "client_options": client_options(conn, endpoint),
             **_azure_credential(conn),
-        )
+        }
+        return _build(conn, lambda: AzureStore(**azure), "its account key or SAS token")
     raise UsageError(f"`{conn.name}` is {conn.kind}, which has no object store")

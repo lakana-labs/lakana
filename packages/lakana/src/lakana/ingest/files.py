@@ -24,6 +24,7 @@ import builtins
 import contextlib
 import datetime as dt
 import re
+import ssl
 import sys
 from collections.abc import Generator, Mapping
 from dataclasses import dataclass
@@ -174,7 +175,8 @@ _GLOB = frozenset("*?[")
 _PROBLEM_CHARS = 500
 _URL = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://[^\s<>\"'`]+")
 _SIGNED_ELEMENT = re.compile(
-    r"<(StringToSign(?:Bytes)?|CanonicalRequest(?:Bytes)?|SignatureProvided|Signature)>.*?</\1>",
+    r"<(StringToSign(?:Bytes)?|CanonicalRequest(?:Bytes)?|SignatureProvided|Signature"
+    r"|AuthenticationErrorDetail)>.*?</\1>",
     re.DOTALL,
 )
 _SIGNED_PARAMETER = re.compile(
@@ -182,14 +184,14 @@ _SIGNED_PARAMETER = re.compile(
     r"|x-goog-signature|x-goog-credential|access_token|token|api_key|key|code)=[^&\s\"'<>]+"
 )
 _AUTH_HEADER = re.compile(r"(?i)\b((?:proxy-)?authorization)\s*[:=]\s*[^\n]*")
-_CERTIFICATE = re.compile(
-    r"InvalidCertificate\(\s*\w+,?\s*\)|certificate verify failed[^(\n]*|certificate",
-    re.IGNORECASE,
-)
+_DEBUG = "\n\nDebug source:"
+"""Where obstore's summary ends and its dump of the cause begins."""
+_INVALID_CERTIFICATE = re.compile(r"error: InvalidCertificate\(\s*(\w+),?\s*\)")
+"""rustls's refusal of the server's certificate, as obstore's dump of the cause shows it."""
 _XML_HEAD = re.compile(r":?\s*<\?xml[^>]*\?>\s*$")
 _ERROR_CODE = re.compile(r"<Code>([^<]{1,100})</Code>")
 _ERROR_MESSAGE = re.compile(r"<Message>([^<\n]{1,300})")
-_REFUSED_STATUS = re.compile(r"status code: (?:401|403)\b")
+_STATUS = re.compile(r"Server returned non-2xx status code: (\d{3})\b")
 
 
 def _utc(value: dt.datetime) -> dt.datetime:
@@ -273,12 +275,12 @@ def _scrubbed(text: str) -> str:
     return _AUTH_HEADER.sub(lambda m: f"{m.group(1)}: ***", text)
 
 
-def _problem(error: BaseException | str) -> tuple[str, bool]:
-    """Say what a library or a server reported, safely, and whether it is about a certificate.
+def _problem(error: BaseException | str) -> str:
+    """Say what a library or a server reported, safely.
 
     obstore puts its summary on the first line, the store's XML error body after it and a
-    debug dump of the cause (where a certificate problem is named) at the end; the first line
-    is kept, with the store's error code and message and the certificate problem added.
+    dump of the cause at the end; the first line is kept, with the store's error code and
+    message, and the certificate problem the dump names.
 
     Parameters
     ----------
@@ -287,29 +289,28 @@ def _problem(error: BaseException | str) -> tuple[str, bool]:
 
     Returns
     -------
-    tuple of (str, bool)
-        The text, scrubbed, its control characters escaped, at most 500 characters; and
-        whether the message names a certificate anywhere.
+    str
+        The text, scrubbed, its control characters escaped, at most 500 characters.
     """
     text = _scrubbed(str(error)).strip()
-    summary = text.split("\n\nDebug source:", 1)[0]
+    summary, _, dump = text.partition(_DEBUG)
     lines = summary.splitlines()
     parts = [_XML_HEAD.sub("", lines[0].strip()) if lines else type(error).__name__]
     code, said = _ERROR_CODE.search(summary), _ERROR_MESSAGE.search(summary)
     if code:
         parts.append(code.group(1) + (f": {said.group(1).strip()}" if said else ""))
-    certificate = _CERTIFICATE.search(text)
-    if certificate and not _CERTIFICATE.search(parts[0]):
-        cause = certificate.group().strip()
-        if cause.startswith("InvalidCertificate"):  # obstore's debug dump spreads it over lines
-            cause = re.sub(r"[\s,]", "", cause)
-        if cause.lower() != "certificate":
-            parts.append(cause)
-    return safe_name("; ".join(parts))[:_PROBLEM_CHARS], certificate is not None
+    if certificate := _INVALID_CERTIFICATE.search(dump):
+        parts.append(f"InvalidCertificate({certificate.group(1)})")
+    return safe_name("; ".join(parts))[:_PROBLEM_CHARS]
 
 
 def _refuse(
-    name: str, environment: str, error: BaseException | str, *, credentials: bool = False
+    name: str,
+    environment: str,
+    error: BaseException | str,
+    *,
+    credentials: bool = False,
+    certificate: bool = False,
 ) -> NoReturn:
     """Raise a store's or a server's refusal as the error that names the next step.
 
@@ -324,6 +325,8 @@ def _refuse(
     credentials
         Whether the store or server refused the credential (an authentication or permission
         error, HTTP 401 or 403).
+    certificate
+        Whether the server's certificate was refused (`_store_certificate`, `_tls_refused`).
 
     Raises
     ------
@@ -332,7 +335,7 @@ def _refuse(
     SourceError
         Otherwise (retried: a network failure or a store's own error may pass).
     """
-    problem, certificate = _problem(error)
+    problem = _problem(error)
     if certificate:
         raise SourceRefused(
             f"`{name}`: the server's certificate is not trusted ({problem}). Add your CA to the "
@@ -352,7 +355,9 @@ def _denied(error: BaseException) -> bool:
     """Say whether an obstore error is a refused credential.
 
     obstore raises its authentication and permission classes for some requests only; a list
-    request that the store answers with 401 or 403 is a generic error that names the status.
+    request that the store answers with 401 or 403 is a generic error whose first line ends
+    with the status. The last status on that line is the store's: a key earlier on it is the
+    request's.
 
     Parameters
     ----------
@@ -366,10 +371,55 @@ def _denied(error: BaseException) -> bool:
     """
     import obstore
 
-    return isinstance(
+    if isinstance(
         error,
         obstore.exceptions.PermissionDeniedError | obstore.exceptions.UnauthenticatedError,
-    ) or bool(_REFUSED_STATUS.search(str(error).split("\n\nDebug source:", 1)[0]))
+    ):
+        return True
+    statuses = _STATUS.findall(str(error).split("\n", 1)[0])
+    return bool(statuses) and statuses[-1] in ("401", "403")
+
+
+def _store_certificate(error: BaseException) -> bool:
+    """Say whether obstore failed because the server's certificate is not trusted.
+
+    Only the dump of the cause is read, and only rustls's ``InvalidCertificate``: a bucket,
+    key or host that holds the word "certificate" decides nothing.
+
+    Parameters
+    ----------
+    error
+        What obstore raised.
+
+    Returns
+    -------
+    bool
+        Whether the dump names an invalid certificate.
+    """
+    return bool(_INVALID_CERTIFICATE.search(str(error).partition(_DEBUG)[2]))
+
+
+def _tls_refused(error: BaseException) -> bool:
+    """Say whether httpx failed because the server's certificate did not verify.
+
+    Parameters
+    ----------
+    error
+        What httpx raised.
+
+    Returns
+    -------
+    bool
+        Whether an `ssl.SSLCertVerificationError` is among its causes.
+    """
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while current is not None and id(current) not in seen:
+        if isinstance(current, ssl.SSLCertVerificationError):
+            return True
+        seen.add(id(current))
+        current = current.__cause__ or current.__context__
+    return False
 
 
 @dataclass(frozen=True)
@@ -450,7 +500,13 @@ class _ObjectSource:
                         )
                     )
         except (obstore.exceptions.BaseError, FileNotFoundError, ValueError) as exc:
-            _refuse(self.name, self.environment, exc, credentials=_denied(exc))
+            _refuse(
+                self.name,
+                self.environment,
+                exc,
+                credentials=_denied(exc),
+                certificate=_store_certificate(exc),
+            )
         listing.files.sort(key=lambda entry: entry.path)
         return listing
 
@@ -494,7 +550,13 @@ class _ObjectSource:
                     )
                 chunks.append(bytes(chunk))
         except (obstore.exceptions.BaseError, FileNotFoundError, ValueError) as exc:
-            _refuse(self.name, self.environment, exc, credentials=_denied(exc))
+            _refuse(
+                self.name,
+                self.environment,
+                exc,
+                credentials=_denied(exc),
+                certificate=_store_certificate(exc),
+            )
         return b"".join(chunks)
 
     def close(self) -> None:
@@ -631,7 +693,7 @@ class _HttpSource:
         try:
             response = self.client.head(self._url(path))
         except httpx.HTTPError as exc:
-            _refuse(self.name, self.environment, exc)
+            _refuse(self.name, self.environment, exc, certificate=_tls_refused(exc))
         self._check(response, path)
         stamp = response.headers.get("last-modified")
         try:
@@ -678,7 +740,7 @@ class _HttpSource:
                         )
                     chunks.append(chunk)
         except httpx.HTTPError as exc:
-            _refuse(self.name, self.environment, exc)
+            _refuse(self.name, self.environment, exc, certificate=_tls_refused(exc))
         return b"".join(chunks)
 
     def close(self) -> None:
@@ -991,8 +1053,16 @@ def read(
             raise too_many
         frames, names, total, rows = [], [], 0, 0
         for entry, modified in chosen:
-            with _naming(conn):
-                data = source.read(entry.path, max_file_bytes)
+            # A file can hold more than its listed size (HTTPS without Content-Length, an
+            # object that grew): the read stops at whichever cap is nearer.
+            limit = min(max_file_bytes, max_total_bytes - total)
+            try:
+                with _naming(conn):
+                    data = source.read(entry.path, limit)
+            except CapExceeded:
+                if limit < max_file_bytes:
+                    raise too_many from None
+                raise
             name = safe_name(f"{connection}/{entry.path}")
             kind = _formats.format_of(name, format)
             counted = (

@@ -1201,13 +1201,14 @@ def test_a_store_without_obstore_or_for_another_kind_is_refused(
 def test_a_url_with_a_bad_port_and_a_bare_certificate_word_are_handled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A URL that cannot be parsed keeps only its scheme; a bare later mention is not appended."""
+    """A URL that cannot be parsed keeps only its scheme; the word "certificate" refuses nothing."""
     said = "Error at https://lakana:pw-0123@h:99999/x?sig=s\nthe certificate chain is incomplete"
     _denied_task(monkeypatch, obstore.exceptions.GenericError(said))
 
-    with pytest.raises(SourceRefused) as caught:
+    with pytest.raises(SourceError) as caught:
         files.read("lake", "*.csv")
-    assert "(Error at https://…)." in str(caught.value)
+    assert type(caught.value) is SourceError
+    assert str(caught.value) == "`lake`: Error at https://…"
     assert "pw-0123" not in str(caught.value)
 
 
@@ -1245,3 +1246,348 @@ def test_a_403_in_a_generic_store_error_is_an_authentication_refusal(
         "signature we calculated does not match.). Check the secret with `lakana connection "
         "test lake --env dev`."
     )
+
+
+# --- fix round 1: environment, classification, caps, constructor errors -------------------
+
+
+@dataclass
+class _Recorder:
+    """An HTTPS server on loopback that records each request's headers and answers 403.
+
+    Parameters
+    ----------
+    base
+        ``https://127.0.0.1:<port>``.
+    heads
+        Each request's line and its headers, the headers lower-cased.
+    """
+
+    base: str
+    heads: list[str]
+
+
+@pytest.fixture
+def recorder(
+    authority: Authority, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[_Recorder]:
+    """Serve HTTPS with the test authority, trusted through `LAKANA_CA_BUNDLE`.
+
+    Parameters
+    ----------
+    authority
+        Signs the server.
+    tmp_path
+        Where the certificates go.
+    monkeypatch
+        Sets the bundle.
+
+    Yields
+    ------
+    _Recorder
+        The server.
+    """
+    import http.server
+
+    from tls_fixture import issue_leaf
+
+    heads: list[str] = []
+
+    class _Handler(http.server.BaseHTTPRequestHandler):
+        def _answer(self) -> None:
+            heads.append(f"{self.requestline}\n{str(self.headers).lower()}")
+            self.send_response(403)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        do_GET = do_PUT = do_POST = do_HEAD = _answer
+
+        def log_message(self, format: str, *args: object) -> None:
+            pass
+
+    cert, key = issue_leaf(authority, tmp_path)
+    tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    tls.load_cert_chain(cert, key)
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
+    server.socket = tls.wrap_socket(server.socket, server_side=True)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    monkeypatch.setenv("LAKANA_CA_BUNDLE", str(authority.ca_file))
+    try:
+        yield _Recorder(f"https://127.0.0.1:{server.server_address[1]}", heads)
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+_HOSTILE = "hostile-env-credential-0123"
+
+
+def _hostile(monkeypatch: pytest.MonkeyPatch, base: str) -> None:
+    """Set every credential and endpoint variable obstore would read, pointing elsewhere.
+
+    Parameters
+    ----------
+    monkeypatch
+        Pytest's patcher.
+    base
+        Not used as a value: the variables name other hosts and other credentials.
+    """
+    for name, value in {
+        "AWS_ACCESS_KEY_ID": "AKIDHOSTILE",
+        "AWS_SECRET_ACCESS_KEY": _HOSTILE,
+        "AWS_SESSION_TOKEN": _HOSTILE,
+        "AWS_ENDPOINT": "https://hostile.example",
+        "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI": "/hostile",
+        "AWS_WEB_IDENTITY_TOKEN_FILE": "/hostile",
+        "AWS_REQUEST_PAYER": "true",
+        "GOOGLE_BEARER_TOKEN": _HOSTILE,
+        "GOOGLE_SERVICE_ACCOUNT_KEY": "{}",
+        "GOOGLE_APPLICATION_CREDENTIALS": "/hostile.json",
+        "SERVICE_ACCOUNT": "/hostile.json",
+        "AZURE_STORAGE_TOKEN": _HOSTILE,
+        "AZURE_STORAGE_SAS_KEY": f"sig={_HOSTILE}",
+        "AZURE_STORAGE_USE_EMULATOR": "true",
+        "AZURE_FEDERATED_TOKEN_FILE": "/hostile",
+        "IDENTITY_ENDPOINT": "http://hostile.example/msi",
+    }.items():
+        monkeypatch.setenv(name, value)
+
+
+def _request_heads(store: object) -> None:
+    """Send one list request; the recorder's 403 is expected.
+
+    Parameters
+    ----------
+    store
+        The store.
+    """
+    with pytest.raises(obstore.exceptions.BaseError):
+        next(iter(obstore.list(store, chunk_size=1)))  # ty: ignore[invalid-argument-type]
+
+
+def test_the_environment_never_supplies_an_s3_credential(
+    recorder: _Recorder, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With AWS variables set, the request is signed with the connection's key only."""
+    _hostile(monkeypatch, recorder.base)
+    store = _stores.store_for(
+        _connection(
+            "s3",
+            {**_S3, "endpoint": recorder.base},
+            {"access_key_id": "AKIDCONN"},
+            {"secret_access_key": _KEY},
+        )
+    )
+
+    _request_heads(store)
+
+    (head,) = recorder.heads[:1]
+    assert "credential=akidconn/" in head
+    assert _HOSTILE.lower() not in head
+    assert "x-amz-security-token" not in head
+    assert "x-amz-request-payer" not in head
+    assert head.startswith("GET /landing?")
+
+
+def test_the_environment_never_supplies_a_gcs_credential(
+    recorder: _Recorder, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With GOOGLE variables set, the request carries the key's own signed token."""
+    _hostile(monkeypatch, recorder.base)
+    monkeypatch.setattr(_stores, "GCS_BASE_URL", recorder.base)
+    store = _stores.store_for(
+        _connection("gcs", {"bucket": "landing"}, {}, {"service_account_json": _gcs_key()})
+    )
+
+    _request_heads(store)
+
+    (head,) = recorder.heads[:1]
+    assert "authorization: bearer ey" in head  # a JWT the key signed
+    assert _HOSTILE.lower() not in head
+
+
+@pytest.mark.parametrize("secret", ["account_key", "sas_token"])
+def test_the_environment_never_supplies_an_azure_credential(
+    recorder: _Recorder, monkeypatch: pytest.MonkeyPatch, secret: str
+) -> None:
+    """With AZURE variables set, the request uses the connection's key or SAS token only."""
+    _hostile(monkeypatch, recorder.base)
+    monkeypatch.setattr(_stores, "AZURE_ENDPOINT", f"{recorder.base}/{{account}}")
+    value = "a2V5LW9mLXRoZS1jb25uZWN0aW9u" if secret == "account_key" else "?sv=1&sig=conn9"
+    store = _stores.store_for(
+        _connection("azure", {"account": "acct", "container": "landing"}, {}, {secret: value})
+    )
+
+    _request_heads(store)
+
+    (head,) = recorder.heads[:1]
+    assert _HOSTILE.lower() not in head
+    assert head.startswith("GET /acct/landing?")
+    if secret == "account_key":
+        assert "authorization: sharedkey acct:" in head
+    else:
+        assert "sig=conn9" in head and "authorization" not in head
+
+
+def test_the_environment_is_left_as_it_was() -> None:
+    """Building a store puts every variable back."""
+    before = dict(os.environ)
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv("AWS_SESSION_TOKEN", "kept-0123")
+        _stores.store_for(
+            _connection("s3", _S3, {"access_key_id": "AKID"}, {"secret_access_key": _KEY})
+        )
+        assert os.environ["AWS_SESSION_TOKEN"] == "kept-0123"
+    assert dict(os.environ) == before
+
+
+def test_a_refused_connection_on_a_bucket_named_certificates_is_retried(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only obstore's ``InvalidCertificate(`` in its debug part is a certificate refusal."""
+    said = (
+        "Generic S3 error: Error performing list request: Error performing GET "
+        "http://127.0.0.1:9/certificates?list-type=2 in 1ms, after 10 retries - HTTP error: "
+        "error sending request\n\nDebug source:\nGeneric { uri: http://127.0.0.1:9/certificates, "
+        "kind: Connect, error: ConnectionRefused (certificate-free) }"
+    )
+    _denied_task(monkeypatch, obstore.exceptions.GenericError(said))
+
+    with pytest.raises(SourceError) as caught:
+        files.read("lake", "*.csv")
+    assert type(caught.value) is SourceError
+
+
+def test_a_key_that_names_a_certificate_or_a_status_is_not_misread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A missing object whose key holds "certificate" and "status code: 403" is no refusal."""
+    said = (
+        "Object at location certificates/status code: 403/a.csv not found: Error performing "
+        "GET https://s3.example.com/landing/x in 1ms - Server returned non-2xx status code: "
+        "404 Not Found"
+    )
+    _denied_task(monkeypatch, FileNotFoundError(said))
+
+    with pytest.raises(SourceError) as caught:
+        files.read("lake", "*.csv")
+    assert type(caught.value) is SourceError
+    status = (
+        "Generic S3 error: Error performing GET https://s3.example.com/x - Server returned "
+        "non-2xx status code: 500 Internal\n<Key>status code: 403</Key>"
+    )
+    _connections.clear()
+    _denied_task(monkeypatch, obstore.exceptions.GenericError(status))
+    with pytest.raises(SourceError) as second:
+        files.read("lake", "*.csv")
+    assert type(second.value) is SourceError
+
+
+def test_an_https_403_on_a_path_with_certificate_is_an_authentication_refusal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A path named after certificates keeps the authentication advice."""
+    import httpx
+
+    _mock_site(monkeypatch, lambda request: httpx.Response(403))
+
+    with pytest.raises(SourceRefused, match=r"authentication failed"):
+        files.read("site", "certificates/list.csv")
+
+
+def test_an_https_error_that_only_mentions_a_certificate_is_retried(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An httpx error is a certificate refusal only for an `ssl.SSLCertVerificationError`."""
+    import httpx
+
+    def fail(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("certificate host unreachable", request=request)
+
+    _mock_site(monkeypatch, fail)
+
+    with pytest.raises(SourceError) as caught:
+        files.read("site", "a.csv")
+    assert type(caught.value) is SourceError
+
+
+def test_an_https_file_without_a_length_stops_at_the_total_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Without ``Content-Length`` the stream stops once the total cap is passed, naming it."""
+    import httpx
+
+    served: list[int] = []
+
+    def body() -> Iterator[bytes]:
+        for _ in range(100):
+            served.append(1)
+            yield b"x" * 10
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        if request.method == "HEAD":
+            return httpx.Response(200)
+        return httpx.Response(200, content=body())
+
+    _mock_site(monkeypatch, answer)
+
+    with pytest.raises(CapExceeded, match=r"more than max_total_bytes \(25\)"):
+        files.read("site", "a.csv", max_file_bytes=1000, max_total_bytes=25)
+    assert len(served) < 10
+
+
+def test_a_store_that_cannot_be_built_names_the_connection_and_the_fix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A key obstore cannot use, or a bundle without a certificate, is a `UsageError`."""
+    usage = _usage_error()
+    bad_pem = json.dumps(
+        {
+            "type": "service_account",
+            "private_key_id": "k1",
+            "private_key": "-----BEGIN PRIVATE KEY-----\nbm90IGEga2V5\n-----END PRIVATE KEY-----\n",
+            "client_email": "r@p.iam.gserviceaccount.com",
+        }
+    )
+    with pytest.raises(usage) as gcs:
+        _stores.store_for(
+            _connection("gcs", {"bucket": "b"}, {}, {"service_account_json": bad_pem})
+        )
+    assert "`src`" in str(gcs.value) and "--values-stdin" in str(gcs.value)
+    assert "bm90IGEga2V5" not in str(gcs.value)
+
+    with pytest.raises(usage) as azure:
+        _stores.store_for(
+            _connection(
+                "azure", {"account": "a", "container": "c"}, {}, {"account_key": "not base64!!"}
+            )
+        )
+    assert "`src`" in str(azure.value) and "--values-stdin" in str(azure.value)
+    assert "not base64!!" not in str(azure.value)
+
+    empty = tmp_path / "empty.pem"
+    empty.write_text("# no certificate here\n", encoding="ascii")
+    monkeypatch.setenv("LAKANA_CA_BUNDLE", str(empty))
+    with pytest.raises(usage, match=r"holds no certificate.*LAKANA_RUN__CA_BUNDLE"):
+        _stores.store_for(
+            _connection("s3", _S3, {"access_key_id": "AKID"}, {"secret_access_key": _KEY})
+        )
+
+
+def test_azures_authentication_detail_is_cut_from_a_message(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Azure's detail holds the request's signature and string-to-sign."""
+    said = (
+        "Generic MicrosoftAzure error: 403 Forbidden: <Error><Code>AuthenticationFailed</Code>"
+        "<AuthenticationErrorDetail>The MAC signature found in the HTTP request 'c2lnbmF0dXJl' "
+        "is not the same as any computed signature. String to sign: 'GET\\n\\nx-ms-date'"
+        "</AuthenticationErrorDetail></Error>"
+    )
+    _denied_task(monkeypatch, obstore.exceptions.GenericError(said))
+
+    with pytest.raises(SourceError) as caught:
+        files.read("lake", "*.csv")
+    assert "c2lnbmF0dXJl" not in str(caught.value)
+    assert "String to sign" not in str(caught.value)
+    assert "<AuthenticationErrorDetail>***</AuthenticationErrorDetail>" in str(caught.value)

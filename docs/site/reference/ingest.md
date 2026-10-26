@@ -61,8 +61,13 @@ def stations():
 - **The task's proxy goes to the helper's own client only.** Under the Docker runner each request
   goes through the egress proxy with the task's token, which reaches the connection's host and
   nothing else (see [connections](connections.md#what-a-task-reaches-and-how)). The helper passes
-  the proxy to its client directly; nothing else in the task uses it, and `HTTPS_PROXY`,
-  `AWS_*`, `GOOGLE_*`, `AZURE_*`, `SSL_CERT_FILE` and `.netrc` are never read.
+  the proxy to its client directly; nothing else in the task uses it.
+- **Nothing comes from the task's environment.** A store takes exactly the connection's
+  endpoint and credential: it is built while every `AWS_*`, `GOOGLE_*` and `AZURE_*` variable
+  (and a managed-identity endpoint) is out of the environment, so a token your own code or a
+  library sets there never replaces or joins the connection's credential. The variables are put
+  back right after, for your own code. `HTTPS_PROXY`, `SSL_CERT_FILE` and `.netrc` are not used
+  either.
 - **Certificates.** A store is trusted with the workers' trust bundle: public CAs, plus your own
   CA when the operator sets `LAKANA_RUN__CA_BUNDLE`. An `http` connection also trusts its own
   `ca_certificate` (`lakana connection update NAME --env ENV --ca-file ca.pem`). TLS 1.2 is the
@@ -225,7 +230,8 @@ could end differently (the task is retried only when it could):
 | `the secret of ... is not a service-account key` | A `gcs` secret is not the JSON key Google gives you. | Store the key file's JSON with the command the message names. |
 | `... uses auth oauth2, which files.read does not support yet` | `files.read` cannot fetch an OAuth2 token yet. | Use `auth: bearer`, or `connections.get` with your own client. |
 | `files.read reads one file of an http connection` | An `http` path with a wildcard, `?`, `#` or `%`. | Pass one path relative to the base URL. |
-| `the trust bundle ... (LAKANA_CA_BUNDLE) cannot be read` | The worker's trust bundle is missing in the task. | Check the worker's `LAKANA_RUN__CA_BUNDLE`. |
+| `the trust bundle ... (LAKANA_CA_BUNDLE) cannot be read` (or `holds no certificate`) | The worker's trust bundle is missing in the task, or has no PEM certificate. | Check the worker's `LAKANA_RUN__CA_BUNDLE`. |
+| `obstore cannot use the secret of ...` | The secret is well formed but unusable: a service-account key whose private key is not an RSA key, an account key that is not base64. | Store the right value with the command the message names. |
 | `the listing passed 1000000 objects; narrow the pattern` | The pattern's fixed leading part leaves too many objects to look at. | Start the pattern with more fixed folders (`exports/2026/*.csv` rather than `**/*.csv`). |
 | `the files matching ... hold more than max_rows (...) rows` | The files hold more rows than the cap. | Narrow the pattern, pass `since=` to read fewer files, or raise `max_rows`. |
 | `... names ingestion root ..., which this worker does not have` | The worker has no such root. | Set the root as the message says, or run the asset on a worker that has it. |
