@@ -37,6 +37,9 @@ dev = [
     # Test-only here: the spreadsheet reader `lakana[assets]` brings to a task; the tests of
     # `lakana.ingest.files` run without that extra installed. MIT.
     "fastexcel>=0.21",
+    # Test-only here: the object-store client `lakana[assets]` brings to a task; the tests of
+    # `lakana.ingest.files` run without that extra installed. MIT.
+    "obstore>=0.12,<0.13",
 ]
 # The documentation site (docs/site). Built in CI; published at the public beta.
 docs = [

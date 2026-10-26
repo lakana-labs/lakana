@@ -133,12 +133,13 @@ Each cell is a summary. The page named in the last column has the detail. The ch
 
 ## Notes for the next release
 
-### Read files from a directory connection with `lakana.ingest.files`
+### Read files with `lakana.ingest.files`
 
-`lakana[assets]` gains `fastexcel` (for spreadsheets), so a project locked earlier runs
-`uv lock --upgrade-package lakana` to pick it up. `lakana.ingest.files.read` and `files.list`
-read CSV, Parquet, JSON and spreadsheet files from a `directory` connection; see
-[the ingest helpers](../reference/ingest.md).
+`lakana[assets]` gains `fastexcel` (for spreadsheets) and `obstore` (for S3, GCS and Azure Blob
+Storage), so a project locked earlier runs `uv lock --upgrade-package lakana` to pick them up.
+`lakana.ingest.files.read` and `files.list` read CSV, Parquet, JSON and spreadsheet files from
+`s3`, `gcs`, `azure`, `http` and `directory` connections, through the task's egress proxy under
+the Docker runner; see [the ingest helpers](../reference/ingest.md).
 
 ### Builds and tasks never reach the Docker host's gateways or names; list its other addresses
 

@@ -3985,10 +3985,49 @@ secret's values, and the only way a secret reaches a Python asset (#23). User re
   after the check, or, on a worker without the key, a secret bound mid-attempt) is hidden by the
   harness but may appear in the worker-captured log. The worker's decryption is not audited: no value leaves
   the worker, and only the task's own fetch hands one out.
-- **Not retried.** `ConnectionNotDeclared`, `ConnectionRefused` and `CapExceeded`
-  (`lakana.ingest._errors`) carry `retryable = False`, which `_retryable` honours for
-  `IngestError`s of the `function` phase only (a user exception's own `retryable` attribute is
-  ignored); `ConnectionChanged` is `True`.
+- **Not retried.** `ConnectionNotDeclared`, `ConnectionRefused`, `UsageError`,
+  `FileShapeError`, `SourceRefused` and `CapExceeded` (`lakana.ingest._errors`) carry
+  `retryable = False`, which `_retryable` honours for `IngestError`s of the `function` phase
+  only (a user exception's own `retryable` attribute is ignored); `ConnectionChanged` is `True`.
+- **The files helper's stores and HTTPS client** (`lakana.ingest._stores`, `_http`) take every
+  value from the connection, nothing from the task's environment: the obstore stores get the
+  endpoint, credential and `client_options` explicitly (`virtual_hosted_style_request=False`),
+  the task's proxy as `proxy_url` and the trust bundle as `root_certificate`. obstore's
+  constructors read every `AWS_*`, `GOOGLE_*` and `AZURE_*` variable (measured: an environment
+  `GOOGLE_BEARER_TOKEN` or `AZURE_STORAGE_TOKEN` replaced the connection's key, and
+  `AWS_SESSION_TOKEN` joined every S3 request), and a GCS credential provider can only hand a
+  bearer token. So `_stores._without_cloud_environment` builds each store with those variables
+  and `IDENTITY_ENDPOINT`, `IDENTITY_HEADER`, `MSI_ENDPOINT`, `IMDS_ENDPOINT` and
+  `SERVICE_ACCOUNT` out of `os.environ` (under a lock, restored in a `finally` that also
+  covers an interrupt) and puts them back after; a test per kind sets them and asserts the
+  request carries only the connection's credential. With the connection's explicit key no IMDS
+  or metadata fallback runs. **Residual, accepted:** only what `os.environ` shows is removed (a
+  variable set with `os.putenv` or by a native extension reaches obstore), another Python or
+  native thread reading these variables during a build sees them missing (glibc's `setenv` and
+  `getenv` are not safe against each other), and a value another thread writes then is
+  replaced by the earlier one. Only the task's own code can do any of this, and it is trusted
+  (one instance, one trust domain). obstore's refusal of a value (a bad RSA key, a non-base64
+  account key) is a `UsageError` that names the connection and never echoes the value; a
+  bundle with no certificate that parses is refused before obstore sees it, naming
+  `LAKANA_RUN__CA_BUNDLE`. The error class comes from obstore's structure only: its exception
+  type, or its dump of the cause with every string literal (key, reply body) blanked first
+  (`files._structure`). obstore's client
+  falls back to `HTTPS_PROXY` without a proxy, so a task without the egress proxy gets an unused
+  proxy (`127.0.0.1:9`) with the store's own host in `proxy_excludes`: the store connects
+  directly and any other host fails closed. The httpx client has `trust_env=False` (no
+  `HTTPS_PROXY`, `SSL_CERT_FILE`, `.netrc`), `follow_redirects=False` (a redirect is
+  `SourceRefused`), and the path is percent-encoded per segment below `base_url`. A GCS key is
+  passed on with `private_key`, `private_key_id` and `client_email` only (`gcs_base_url` and
+  `disable_oauth` would redirect or unsign requests). Derived values are registered as secrets
+  (Basic's base64 `user:password`, a SAS token without its `?`). Messages from obstore and
+  httpx are scrubbed before they reach an exception (`files._scrubbed`): every registered secret
+  form becomes `***`, URLs lose user, password and query, S3's `StringToSign`,
+  `CanonicalRequest` and `SignatureProvided`, Azure's `AuthenticationErrorDetail`, signature
+  query parameters and an `Authorization` header are cut; control characters in keys and URLs
+  are escaped (`safe_name`). A certificate refusal is decided by type, never by the word: for
+  obstore, rustls's `error: InvalidCertificate(` in its dump of the cause; for httpx, an
+  `ssl.SSLCertVerificationError` in the exception chain. A 401/403 from obstore's text is the
+  dump's `inner: Status { status: 401|403`, never the summary line or a body.
 - **Residual, accepted.** Deployed code sees the credentials of the connections its asset
   declares and can send them to any host the task can reach (until task egress narrows that to
   the declared endpoints). Reviewing an asset's `connections` is reviewing what it may read. The

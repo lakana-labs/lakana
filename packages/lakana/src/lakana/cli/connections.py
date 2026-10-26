@@ -729,8 +729,13 @@ _NEXT_STEPS: dict[str, str] = {
     ),
     "not_allowed": "The address must be reachable from outside the Lakana stack.",
     "root_unavailable": "Check the root setting.",
-    "not_found": "Check the path under the root (`lakana connection show NAME`).",
-    "credentials": "Check the secret.",
+    "not_found": (
+        "Check the path under the root, or the bucket or container (`lakana connection show NAME`)."
+    ),
+    "credentials": (
+        "Check the secret; give a new one with `lakana connection update NAME --values-stdin` "
+        "(`--password-stdin` for a one-key secret)."
+    ),
     "failed": "See the worker's log.",
 }
 """What to do about each outcome of a connection test that is not `ok`."""

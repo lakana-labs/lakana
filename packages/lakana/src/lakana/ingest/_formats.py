@@ -144,6 +144,7 @@ def parse(
     sheet: str | None = None,
     header_row: int = 1,
     schema: Mapping[str, Any] | None = None,
+    max_rows: int | None = None,
 ) -> pl.DataFrame:
     """Parse one file.
 
@@ -163,11 +164,14 @@ def parse(
     schema
         Column name to polars type for the columns whose type you set; the others are
         inferred. Every column named must be in the file.
+    max_rows
+        The most rows to read: CSV, Parquet, NDJSON and spreadsheet readers stop after them
+        (a Parquet file decodes no further), a JSON array is cut after parsing; `None` for all.
 
     Returns
     -------
     polars.DataFrame
-        The rows.
+        The rows, at most `max_rows`.
 
     Raises
     ------
@@ -208,22 +212,28 @@ def parse(
                 skip_rows=skip_rows,
                 schema_overrides=overrides,
                 infer_schema_length=10_000,
+                n_rows=max_rows,
             )
         elif format == "parquet":
-            frame = pl.read_parquet(source)
+            frame = pl.read_parquet(source, n_rows=max_rows)
             present = {k: v for k, v in (overrides or {}).items() if k in frame.columns}
             frame = frame.cast(present, strict=True) if present else frame  # ty: ignore[invalid-argument-type]
         elif format == "json":
+            # A JSON array is parsed whole (no reader stops early); its bytes are capped.
             frame = pl.read_json(source, schema_overrides=overrides)
+            frame = frame if max_rows is None else frame.head(max_rows)
         elif format == "ndjson":
-            frame = pl.read_ndjson(source, schema_overrides=overrides)
+            frame = pl.read_ndjson(source, schema_overrides=overrides, n_rows=max_rows)
         else:
+            options: dict[str, Any] = {"header_row": header_row - 1} if header_row > 0 else {}
+            if max_rows is not None:
+                options["n_rows"] = max_rows
             frame = pl.read_excel(
                 source,
                 sheet_name=sheet,
                 engine="calamine",
                 has_header=header_row > 0,
-                read_options={"header_row": header_row - 1} if header_row > 0 else {},
+                read_options=options,
                 schema_overrides=overrides,
             )
     except BaseException as exc:  # a reader's own error, a KeyError, or a native panic

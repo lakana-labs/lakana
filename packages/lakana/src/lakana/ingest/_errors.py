@@ -10,6 +10,8 @@ from __future__ import annotations
 import re
 from typing import ClassVar
 
+from lakana import context
+
 
 class IngestError(Exception):
     """An error of a `lakana.ingest` helper; the message names the connection, never a secret."""
@@ -37,7 +39,11 @@ class ConnectionChanged(IngestError):
 
 
 class UsageError(IngestError):
-    """The call's own arguments, or the connection's kind, are wrong; every attempt would fail."""
+    """The call's arguments, or how the connection or the worker is set up, are wrong.
+
+    A connection of another kind, a missing or malformed secret, an auth mode a helper does not
+    support, a trust bundle the worker cannot read: every attempt would fail the same way.
+    """
 
     retryable: ClassVar[bool | None] = False
 
@@ -48,6 +54,17 @@ class SourceError(IngestError):
 
 class FileShapeError(SourceError):
     """The files themselves are wrong (types, columns or content); the same files fail again."""
+
+    retryable: ClassVar[bool | None] = False
+
+
+class SourceRefused(SourceError):
+    """The source refused the connection's credential, its certificate, or the request itself.
+
+    A store or server that answers "authentication failed", a certificate that is not trusted,
+    or a redirect a helper does not follow: every attempt would end the same way, so the
+    message names the next step instead.
+    """
 
     retryable: ClassVar[bool | None] = False
 
@@ -98,3 +115,41 @@ def safe_name(text: str) -> str:
         such as `\x0a`.
     """
     return _UNSAFE.sub(_escaped, text)
+
+
+def missing_secret(name: str, key: str, option: str) -> UsageError:
+    """Make the error of a connection whose secret lacks a value a helper needs.
+
+    Parameters
+    ----------
+    name
+        The connection.
+    key
+        The secret's key, such as ``secret_access_key``.
+    option
+        The `lakana connection update` option that stores it: ``--values-stdin`` for kinds whose
+        secret has several keys, ``--password-stdin`` for one.
+
+    Returns
+    -------
+    UsageError
+        Naming the command, with the task's environment inside a task.
+    """
+    return UsageError(
+        f"`{name}` has no secret with `{key}`; give it one: `lakana connection update {name} "
+        f"--env {task_environment()} {option}` (see `lakana connection update --help`)"
+    )
+
+
+def task_environment() -> str:
+    """Name the running task's environment, for a command in a message.
+
+    Returns
+    -------
+    str
+        The environment, or ``<environment>`` outside a task.
+    """
+    try:
+        return context.current().environment
+    except RuntimeError:
+        return "<environment>"

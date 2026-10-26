@@ -116,8 +116,15 @@ the connection (TCP), the TLS handshake with the connection's CA certificate, an
 For an `http` connection with an OAuth2 `token_url` the token host is checked the same way as the
 base URL, and the test is not `ok` unless both pass; the message names the host that failed. The TLS
 of a `mariadb` connection is not checked yet (the check reads the server's greeting only).
-Credentials are not checked yet: a connection with a secret ends its message with "credentials not
-checked yet", and each kind's credential check arrives with its helper. Any worker runs the check.
+The credentials of `s3` and `azure` connections with a secret are checked last, by listing at most
+one object under the connection's prefix (an `s3` request is signed with SigV4, an `azure` one with the
+account key or the SAS token); a refused key is `credentials`, with the store's own code. The
+credentials of a `gcs` connection are not checked, because the check uses the standard library only
+and cannot sign a service-account key: its message says so, and a refused key shows in the first
+`files.read`. The credentials of `http` (bearer, basic, api_key and oauth2), `postgresql` and
+`mariadb` connections are not checked yet: their test ends with "credentials not checked yet",
+until their helpers arrive. A `tcp` connection is checked for reachability only. Any worker runs
+the check.
 With the local runner it is a subprocess of the worker's Python that needs `lakana` installed next to
 the worker (without it the test fails and says so). With the Docker runner (the Compose bundle's
 default) the launcher runs it in a container of the task image, from the image's own copy of the check,
@@ -166,8 +173,8 @@ worker`, or the `lakana local` terminal), and one a worker took names the worker
 | `tls` | The TLS handshake failed: the server's certificate is not trusted, or the server offers only TLS older than 1.2, which Lakana refuses (the message says which). | Check the CA: `lakana connection update NAME --ca-file ca.pem`. When the message names the TLS version, upgrade the server to TLS 1.2 or newer. |
 | `not_allowed` | The address is one a task may not reach. | The address must be reachable from outside the Lakana stack. |
 | `root_unavailable` | The worker does not have the ingestion root. | Check the root setting. |
-| `not_found` | The path under the root does not exist. | Check the path under the root: `lakana connection show NAME`. |
-| `credentials` | The source refused the secret. | Check the secret. |
+| `not_found` | The path under the root does not exist, or the bucket or container of an `s3` or `azure` connection does not. | Check the path under the root, or the bucket or container: `lakana connection show NAME`. |
+| `credentials` | The source refused the secret. | Check the secret; give a new one with `lakana connection update NAME --values-stdin` (`--password-stdin` for a one-key secret). |
 | `failed` | The check failed in another way, or no worker finished it within 10 minutes. | See the worker's log. |
 
 The message after the outcome is at most 1,000 characters and holds no secret value. The command
@@ -411,8 +418,10 @@ def customers() -> pl.DataFrame:
 `endpoints` (each `host`, `port` and `role`, `service` or `token`), `secret`, and three fields
 that say how this task reaches the source: `proxy_url`, `relay_address` and `root_path`.
 
-A `directory` connection is read with [`files.read`](ingest.md#filesread), which returns the
-files below its path as a table and never follows a symbolic link out of the root.
+Files are read with [`files.read`](ingest.md#filesread), which returns them as a table, from
+`s3`, `gcs`, `azure`, `http` and `directory` connections. It gives `proxy_url` and the trust
+bundle to its own client, and never follows a symbolic link out of a directory connection's
+root.
 
 ### What a task reaches, and how
 
@@ -424,7 +433,7 @@ local runner connects directly.
 
 | Kind | Docker runner | Local runner |
 |---|---|---|
-| `http`, `s3`, `gcs`, `azure` | `proxy_url` is the egress proxy; give it to your HTTPS client. It holds the task's proxy token, so it is left out of the connection's `repr` and shown as `***` in the task's log. `relay_address` and `root_path` are `None`. | Every field is `None`: connect to `address` directly. |
+| `http`, `s3`, `gcs`, `azure` | `proxy_url` is the egress proxy; give it to your HTTPS client (`files.read` does). It holds the task's proxy token, so it is left out of the connection's `repr` and shown as `***` in the task's log. `relay_address` and `root_path` are `None`. | Every field is `None`: connect to `address` directly. |
 | `postgresql`, `mariadb`, `tcp` | `relay_address` is `lakana-relay:<port>` (ports from 15001, in the order the asset declares its connections); connect there instead of `address["host"]`. TLS still checks the real host name. | `relay_address` is `None`: connect to `address` directly. |
 | `directory`, `sqlite-file` | `root_path` is `/ingest/<root>/<path>`, read-only. | `root_path` is `<directory>/<path>`, where `<directory>` is the root's entry in `LAKANA_RUN__INGESTION_ROOTS`. |
 
