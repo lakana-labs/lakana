@@ -149,6 +149,31 @@ the Docker runner; see [the ingest helpers](../reference/ingest.md).
 query on a `postgresql`, `mariadb` or `sqlite-file` connection, with values bound to `:name` placeholders;
 see [the ingest helpers](../reference/ingest.md#sql).
 
+### Connection tests check database and GCS credentials
+
+`lakana connection test` now logs in to a `postgresql` or `mariadb` connection with its secret
+(`SELECT 1` in a read-only transaction; MariaDB over TLS as its `tls` says), opens a `sqlite-file`
+connection's file read-only as a SQLite database, and checks a `gcs` key by signing a token request
+to Google's token endpoint and listing at most one object. A refused login or key is
+`credentials`. A `gcs` key whose `token_uri` names another host than `oauth2.googleapis.com` is
+`credentials` too, and nothing is sent; store the key file Google gave you. See
+[Test a connection](../reference/connections.md#test-a-connection).
+
+**Breaking, for the local runner only.** The check runs on the worker's own Python there, and it
+needs the drivers: a test of a `postgresql`, `mariadb` or `sqlite-file` connection now fails
+unless `lakana[assets]` is installed next to the worker, and of a `gcs` connection with a key
+unless `cryptography` is. The message names the module and what to install. Install both
+packages in the worker's environment, or use the Docker runner.
+
+Under the Docker runner nothing is to install: each task image now holds a check environment,
+`/opt/lakana-check-env`, with exactly the check's drivers (installed by hash from the release's
+lock, owned by root and read-only), so **each task image grows by about 50 MB**. Pull the task
+images of this release together with the launcher and the workers, as every release asks; a test
+on a task image of an earlier release ends `failed` with ``the task image has no connection check
+(/opt/lakana-check/check.py and its environment /opt/lakana-check-env) ...``. A task image you
+build yourself needs `dist/check-requirements.txt`, the check environment's packages exported from
+`uv.lock`, in its build context first; the header of `Dockerfile.task` shows both commands.
+
 ### Builds and tasks never reach the Docker host's gateways or names; list its other addresses
 
 **Breaking.** Under the docker runner, builds, tasks and connection tests no longer reach the
@@ -194,9 +219,10 @@ default: the launcher runs Lakana's own check in a container of the task image, 
 rules a task with that connection gets. Before, a test waited for a worker with the local runner.
 Upgrade the launcher, the task images and the workers together, as the bundle does: a launcher of
 an earlier release refuses the check (`the launcher refused the check: op must be one of ...`),
-and the test ends `failed` naming the upgrade. Each task image now holds the check, a single
-standard-library file at `/opt/lakana-check/check.py`; a task image you build yourself from
-this release's `Dockerfile.task` has it too. See [Test a connection](../reference/connections.md#test-a-connection).
+and the test ends `failed` naming the upgrade. Each task image now holds the check, one file at
+`/opt/lakana-check/check.py`, which the image runs on its check environment
+(`/opt/lakana-check-env`); a task image you build yourself from this release's `Dockerfile.task`
+has both too (see "Connection tests check database and GCS credentials" above). See [Test a connection](../reference/connections.md#test-a-connection).
 
 ### A Python asset's parameter `ctx` is not an input
 

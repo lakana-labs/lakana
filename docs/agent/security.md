@@ -1294,7 +1294,7 @@ connections; a connection opens exactly its endpoints and nothing else.
   other attempt, so a check never mounts a task's. The worker claims a test for
   `LEASE_SECONDS` (`CHECK_WAIT_SECONDS` + 30, 120 s), so no other worker retakes a running check. The launcher (`Launcher.check`,
   `check_container_spec`) runs the check the task image carries, `CHECK_ENTRY` =
-  `/usr/local/bin/python -I -B /opt/lakana-check/check.py`; the request has no image, command,
+  `/opt/lakana-check-env/bin/python -I -B /opt/lakana-check/check.py`; the request has no image, command,
   environment, code or limit field, only `python` from `LAUNCHER__IMAGES`. The container runs as the
   task user with the fixed `CHECK_LIMITS` (256 MiB, 0.5 CPU, 64 pids, 30 s, kill grace 1 s), a
   16 MiB `/tmp`, no `/code`, `/env` or `/work`, only the attempt's `trust` subpath and the allowed
@@ -1313,9 +1313,30 @@ connections; a connection opens exactly its endpoints and nothing else.
   `test_connection_test_outcomes` proves the outcomes per route class on a real engine. A
   refusal, an unreachable launcher or no answer within `CHECK_WAIT_SECONDS` (90) records `failed`
   naming the launcher's log. `/opt/lakana-check/check.py` is a root-owned copy of
-  `lakana/ingest/_check.py`, which imports only the standard library (an AST test in
-  `test_ingest_check.py` keeps it so); the image installs no package for it, and `-I` keeps the
-  script's directory and the environment out of its path, and `-B` writes no bytecode.
+  `lakana/ingest/_check.py`, one file that never imports `lakana` or pyarrow: its module-level
+  imports are the standard library's, and each credential step imports its driver inside itself
+  from a fixed set (`adbc_driver_postgresql`, `adbc_driver_sqlite`, `pymysql`, `cryptography`,
+  `httpx`); the AST guard `test_the_check_imports_only_the_standard_library_and_its_drivers` keeps
+  it so. The check environment `/opt/lakana-check-env` is a venv on the image's own interpreter
+  holding exactly the root `check` dependency group of `uv.lock` (`dist/check-requirements.txt`,
+  exported by each workflow and by `docker_stack.build_task_image` before the build; installed
+  `--require-hashes --no-deps --only-binary :all:`; a test pins the group to those five), owned by
+  root and read-only (`chmod -R a-w`), installed before the setuid strip. `-I` keeps the script's
+  directory, the environment and user site-packages out of its path (the venv's own site-packages
+  stay), and `-B` writes no bytecode. A launcher refusal naming `CHECK_ENTRY[0]` (an image without
+  the environment) is `failed` with `NO_CHECK_IN_IMAGE`. Under the local runner the check runs on
+  the worker's interpreter; a driver that does not import is `failed` with `UNAVAILABLE`, never an
+  `ok`. Credential steps: PostgreSQL logs in through `conninfo` (every value quoted, a NUL refused;
+  `sslrootcert` from `root_certificates`, shared with `sql.read`) and executes `SELECT 1` without
+  reading it; MariaDB logs in through PyMySQL with the check's own TLS context or `ssl_disabled`
+  (never PyMySQL's plaintext fallback), `local_infile=False`, on a socket the check opened (the
+  relay under Docker); SQLite opens `file:<path>?mode=ro`. **A GCS key has one destination:** its
+  `token_uri` must be `https` and its host and port a `token` endpoint of the connection (core
+  gives `oauth2.googleapis.com:443`), else `credentials` and nothing is signed or sent, under either
+  runner; the RS256 assertion (read-only scope, 600 s) goes there through `LAKANA_EGRESS_PROXY`
+  when set (`trust_env=False`, no redirects, verified TLS), and the access token only to the
+  `GCS_URL` listing. The key, the assertion and the token never enter a message; every message is
+  masked and its control characters escaped (`_safe`, a copy of `safe_name` a test keeps equal).
 - **What a task cannot reach, connections or not**: another task's network (each run its own
   /29; the relay and the proxy refuse the launcher's whole range), the Compose stack (attached
   networks; the relay sits on the outward network, the stack's `default`, so SeaweedFS's 18333 and

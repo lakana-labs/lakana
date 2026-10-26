@@ -65,7 +65,11 @@ for version in 3.11 "$python"; do
   if docker image inspect "$reference" >/dev/null 2>&1; then continue; fi
   case "$TASK_IMAGE" in
     */*) docker pull "$reference" ;;
-    *) docker build -f "$here/../Dockerfile.task" --build-arg "PYTHON=$version" -t "$reference" "$here/.." ;;
+    *)
+      # The check environment's packages, by hash from uv.lock, as the workflows export them.
+      mkdir -p "$here/../dist"
+      uv export --frozen --only-group check --no-emit-workspace -o "$here/../dist/check-requirements.txt"
+      docker build -f "$here/../Dockerfile.task" --build-arg "PYTHON=$version" -t "$reference" "$here/.." ;;
   esac
 done
 wheelhouse=${LAKANA_WHEELHOUSE:-}

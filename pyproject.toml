@@ -47,6 +47,17 @@ dev = [
     "adbc-driver-sqlite>=1.13",
     "PyMySQL>=1.2.3",
 ]
+# The connection check's environment in the task image (`/opt/lakana-check-env`): exactly these
+# packages and what they need, exported with hashes from this lock when the image is built
+# (`uv export --frozen --only-group check --no-emit-workspace`). Never `lakana` or pyarrow: the
+# check is one file that imports neither.
+check = [
+    "adbc-driver-postgresql>=1.13",
+    "adbc-driver-sqlite>=1.13",
+    "cryptography>=50.0.2",
+    "httpx>=0.28",
+    "PyMySQL>=1.2.3",
+]
 # The documentation site (docs/site). Built in CI; published at the public beta.
 docs = [
     "zensical>=0.0.71",

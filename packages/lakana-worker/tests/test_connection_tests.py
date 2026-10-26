@@ -1406,3 +1406,31 @@ def test_a_task_image_without_the_check_names_the_image_and_the_next_step(
     assert (row.outcome, row.message) == ("failed", connection_tests.NO_CHECK_IN_IMAGE)
     assert "task image" in connection_tests.NO_CHECK_IN_IMAGE
     assert "pull or rebuild" in connection_tests.NO_CHECK_IN_IMAGE
+
+
+def test_a_task_image_without_the_check_environment_names_the_image(
+    world: World, tmp_path: Path
+) -> None:
+    """An image older than the check environment: Docker cannot start its Python.
+
+    Parameters
+    ----------
+    world
+        The world.
+    tmp_path
+        Pytest's directory.
+    """
+    refusal = (
+        "Docker could not start the container: failed to create task for container: "
+        'exec: "/opt/lakana-check-env/bin/python": stat /opt/lakana-check-env/bin/python: '
+        "no such file or directory: unknown"
+    )
+    launcher = FakeLauncher(scripts={"check": refusing(refusal)})
+    running, _ = docker_loop(world, tmp_path, launcher)
+    test_id = world.connection("svc")
+
+    assert running.step()
+
+    row = world.test(test_id)
+    assert (row.outcome, row.message) == ("failed", connection_tests.NO_CHECK_IN_IMAGE)
+    assert "/opt/lakana-check-env" in connection_tests.NO_CHECK_IN_IMAGE

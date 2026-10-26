@@ -133,7 +133,12 @@ as two statements.
   address the connection names, so a data engineer without the right to deploy can probe which ports and
   ingestion-root paths the worker can reach. With the Docker runner a connection test runs in a
   container under the network rules a task with that connection gets, so it reaches only what such a
-  task could. With the docker runner, the
+  task could, on Lakana's own check and the task image's check environment (its drivers only,
+  owned by root and read-only), never a project's code. A connection test logs in with the
+  connection's secret, so whoever may test a connection makes it send its credentials to the
+  connection's own address. A `gcs` key is the exception that is narrowed further: its signed token
+  request goes only to Google's token endpoint, and a key that names another is refused before
+  anything is sent. With the docker runner, the
   Compose bundle's default, each task runs in a container without the worker's credentials, and
   reaches the server and the endpoints of the connections its asset declares, nothing else;
   containers share the host's kernel, so this is not a sandbox for hostile code

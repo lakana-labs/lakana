@@ -338,6 +338,7 @@ def test_the_task_image_carries_python_uv_and_the_build_entry_and_no_entrypoint(
         "*",
         "!packages/lakana-worker/src/lakana_worker/launcher/task_build.py",
         "!packages/lakana/src/lakana/ingest/_check.py",
+        "!dist/check-requirements.txt",
     ]
 
 
@@ -363,33 +364,59 @@ def _task_run_steps() -> list[str]:
 
 
 def test_the_task_image_holds_lakanas_own_check_and_runs_it_as_the_launcher_will() -> None:
-    """`/opt/lakana-check/check.py`: the standard-library check, copied, never a project's code.
+    """`/opt/lakana-check/check.py` on the check environment's Python, as `CHECK_ENTRY` says.
 
-    The launcher's ``check`` op runs ``/usr/local/bin/python -I -B /opt/lakana-check/check.py``
-    (`CHECK_ENTRY`); the build runs it the same way once, and nothing but that file is added:
-    no wheel, no dependencies.
+    The environment holds the `check` group of uv.lock by hash, wheels only, and nothing else
+    (no lakana, no pyarrow); root's and read-only; installed before the setuid strip. The build
+    imports every driver and runs the check once, the way the launcher's ``check`` op will.
     """
     text = _TASK_DOCKERFILE.read_text(encoding="utf-8")
-    copy = "COPY packages/lakana/src/lakana/ingest/_check.py /opt/lakana-check/check.py"
-    (step,) = [s for s in _task_run_steps() if "/opt/lakana-check" in s]
+    copies = [
+        "COPY dist/check-requirements.txt /opt/lakana-check/requirements.txt",
+        "COPY packages/lakana/src/lakana/ingest/_check.py /opt/lakana-check/check.py",
+    ]
+    (step,) = [s for s in _task_run_steps() if "/opt/lakana-check-env" in s]
 
-    assert copy in text
-    assert "/usr/local/bin/python -I -B /opt/lakana-check/check.py" in step
+    for copy in copies:
+        assert copy in text
+    assert "uv venv --python /usr/local/bin/python /opt/lakana-check-env" in step
+    assert (
+        "uv pip install --python /opt/lakana-check-env/bin/python --require-hashes --no-deps "
+        "--only-binary :all: -r /opt/lakana-check/requirements.txt"
+    ) in step
+    assert "UV_PYTHON_DOWNLOADS=never" in step and "UV_NO_CACHE=1" in step
+    assert "chown -R 0:0 /opt/lakana-check /opt/lakana-check-env" in step
+    assert "chmod -R a-w,a+rX /opt/lakana-check /opt/lakana-check-env" in step
+    assert (
+        "import adbc_driver_postgresql.dbapi, adbc_driver_sqlite.dbapi, cryptography, httpx, "
+        "pymysql" in step
+    )
+    assert "/opt/lakana-check-env/bin/python -I -B /opt/lakana-check/check.py" in step
     assert "does not know the kind" in step
-    # Root's and read-only, whatever owner and mode the file had in the build context.
-    assert step.startswith(
-        "RUN chown 0:0 /opt/lakana-check/check.py && chmod 0444 /opt/lakana-check/check.py && "
-    )
-    assert "dist/" not in text and "pip install" not in text
-    run = next(
-        i
-        for i, line in enumerate(text.splitlines())
-        if line.startswith("RUN ") and ("/opt/lakana-check" in line)
-    )
+    assert "dist/*" not in text and "pip install --no-deps /wheels" not in text
     lines = text.splitlines()
-    assert lines.index(copy) < run
+    run = next(i for i, line in enumerate(lines) if "/opt/lakana-check-env" in line)
+    assert max(lines.index(copy) for copy in copies) < run
     assert run < next(i for i, line in enumerate(lines) if "find / -xdev -perm /6000" in line)
     assert run < lines.index("USER 10001:10003")
+
+
+def test_the_check_environment_is_the_lock_s_check_group_and_nothing_else() -> None:
+    """Exactly the drivers `_check` may import (its guard test's list), never lakana or pyarrow."""
+    import tomllib
+
+    group = tomllib.loads((_TASK_DOCKERFILE.parent / "pyproject.toml").read_text())[
+        "dependency-groups"
+    ]["check"]
+    names = sorted(entry.split(">")[0].split("=")[0].lower() for entry in group)
+
+    assert names == [
+        "adbc-driver-postgresql",
+        "adbc-driver-sqlite",
+        "cryptography",
+        "httpx",
+        "pymysql",
+    ]
 
 
 def test_the_task_image_pins_the_same_uv_as_the_main_image() -> None:

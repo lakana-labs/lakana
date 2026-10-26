@@ -7,9 +7,11 @@ open and records the outcome while the lease is still this worker's
 worker that lost it records nothing and logs at info level).
 
 Under the local runner the check is a subprocess of the worker's own Python
-(``python -I -m lakana.ingest._check``): Lakana's own code, never the project's. Under the
+(``python -I -m lakana.ingest._check``): Lakana's own code, never the project's; a credential
+step whose driver that Python cannot import fails the test, naming what to install. Under the
 Docker runner the launcher's ``check`` op runs it in a container of the task image, from the
-image's copy of the same file (``/opt/lakana-check/check.py``), with the network rules a task
+image's copy of the same file (``/opt/lakana-check/check.py``) on the image's check environment
+(``/opt/lakana-check-env``, the drivers of its credential steps), with the network rules a task
 with this one connection would get (`connection_plan`): its token for the egress proxy, its
 relay and its read-only root, and the worker's trust bundle in a private attempt directory
 (``attempt-check_*``) that is removed afterwards. Either way the connection and its secret
@@ -126,9 +128,9 @@ CHECK_OOM = (
 )
 CHECK_STOPPED = f"the launcher stopped the check before it answered; {LAUNCHER_LOG}"
 NO_CHECK_IN_IMAGE = (
-    "the task image has no connection check (/opt/lakana-check/check.py): it is older than this "
-    "worker or was built without it; pull or rebuild the task image of this Lakana version "
-    "(the images in LAKANA_LAUNCHER__IMAGES)"
+    "the task image has no connection check (/opt/lakana-check/check.py and its environment "
+    "/opt/lakana-check-env): it is older than this worker or was built without them; pull or "
+    "rebuild the task image of this Lakana version (the images in LAKANA_LAUNCHER__IMAGES)"
 )
 NO_ATTEMPT_DIR = (
     "the worker's task directory is not private; an operator must make it a real directory "
@@ -624,6 +626,9 @@ class ConnectionTestLoop:
             try:
                 result, output = docker.client.check(fields, timeout=CHECK_WAIT_SECONDS)
             except LauncherRefused as exc:
+                if CHECK_ENTRY[0] in str(exc):
+                    # Docker could not start the check environment's Python: an older image.
+                    return "failed", NO_CHECK_IN_IMAGE
                 root = _root_refusal(str(exc), connection["name"], roots)
                 if root is not None:
                     return "root_unavailable", root

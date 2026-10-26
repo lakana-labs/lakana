@@ -18,6 +18,7 @@ import pytest
 
 from lakana_worker.launcher.requests import (
     BUILD_DOWNLOADS,
+    CHECK_ENTRY,
     CHECK_GRACE,
     CHECK_LIMITS,
     LABEL_OWNER,
@@ -1462,7 +1463,12 @@ def test_a_check_container_runs_lakanas_check_and_nothing_of_a_task() -> None:
     )
 
     assert spec["Image"] == "ghcr.io/lakana-labs/lakana-task:0.14.0-py3.13"
-    assert spec["Entrypoint"] == ["/usr/local/bin/python", "-I", "-B", "/opt/lakana-check/check.py"]
+    assert spec["Entrypoint"] == [
+        "/opt/lakana-check-env/bin/python",
+        "-I",
+        "-B",
+        "/opt/lakana-check/check.py",
+    ]
     assert spec["User"] == SETTINGS.task_user
     targets = [m["Target"] for m in spec["HostConfig"]["Mounts"]]
     assert targets == ["/ingest/landing", "/trust"]
@@ -1528,3 +1534,16 @@ def test_a_check_container_keeps_a_tasks_hardening_and_its_own_fixed_limits() ->
     assert "server" not in json.dumps(spec)
     assert not any(item.startswith("LAKANA_EGRESS_PROXY=") for item in spec["Env"])
     assert (Limits(256, 0.5, 64, 30), 1) == (CHECK_LIMITS, CHECK_GRACE)
+
+
+def test_the_check_entry_is_the_interpreter_and_file_the_task_image_installs() -> None:
+    """The launcher's entry point and `Dockerfile.task` agree on the interpreter and the file."""
+    dockerfile = Path(__file__).resolve().parents[3] / "Dockerfile.task"
+
+    assert CHECK_ENTRY == (
+        "/opt/lakana-check-env/bin/python",
+        "-I",
+        "-B",
+        "/opt/lakana-check/check.py",
+    )
+    assert " ".join(CHECK_ENTRY) in dockerfile.read_text(encoding="utf-8")

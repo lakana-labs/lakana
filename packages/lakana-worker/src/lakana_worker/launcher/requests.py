@@ -233,8 +233,9 @@ class Limits:
 CHECK_LIMITS = Limits(memory_mb=256, cpus=0.5, pids=64, timeout_seconds=30)
 """A connection check's fixed limits: it opens a few sockets and prints one line.
 
-Measured on Docker 29 with the Python 3.14 task image: a peak of about 23 MiB resident (the check
-imports the standard library only), so 256 MiB leaves ample room for TLS and a slow source.
+Measured with the Python 3.14 check environment (ADBC 1.13): a peak of about 40 MiB resident with
+every driver imported (32 MiB for a SQLite open, 36 MiB for a PostgreSQL login), so 256 MiB leaves
+ample room for TLS and a slow source. The environment adds about 48.5 MB to each task image.
 """
 CHECK_GRACE = 1
 """Seconds between SIGTERM and SIGKILL when a check is stopped."""
@@ -242,8 +243,9 @@ RELAY_VERDICT_SECONDS = 20.0
 """How long a check's relay may take to report its dial after the check ended: the proxy's 15 s
 connect timeout plus resolving and a margin. The launcher waits this long before it removes the
 relay; a check whose relay said nothing within it never reached the source."""
-CHECK_ENTRY = ("/usr/local/bin/python", "-I", "-B", "/opt/lakana-check/check.py")
-"""The check's entry point: the image's Python on Lakana's own standard-library check
+CHECK_ENTRY = ("/opt/lakana-check-env/bin/python", "-I", "-B", "/opt/lakana-check/check.py")
+"""The check's entry point: the check environment's Python (the image's own interpreter, with the
+drivers of the credential steps and nothing else) on Lakana's own check
 (``lakana/ingest/_check.py``, copied into the task image), never a project's code or environment.
 ``-I`` keeps the script's directory, the environment and user site-packages out of the path; ``-B``
 writes no bytecode (the root filesystem is read-only, and the image build runs it the same way)."""

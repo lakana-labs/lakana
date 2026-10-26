@@ -1,19 +1,30 @@
-"""The connection test's check of reachability and TLS.
+"""The connection test's check: reachability, TLS and, where Lakana can, the credentials.
 
-Run as ``python -I -m lakana.ingest._check`` (the local runner), or by path as
-``python -I -B /opt/lakana-check/check.py`` in the task image (the Docker runner). It reads one
-JSON object from standard input, ``{"connection": <TaskConnectionOut-shaped>, "routing":
-{...}}``, and writes one line, ``{"outcome": ..., "message": ...}``, with exit status 0 whatever
-it found. The routing is what a task's description says about the connection (`relay_port`,
-`root_dir`, `path`).
+Run as ``python -I -m lakana.ingest._check`` (the local runner: the worker's own Python), or by
+path as ``/opt/lakana-check-env/bin/python -I -B /opt/lakana-check/check.py`` in the task image
+(the Docker runner). It reads one JSON object from standard input, ``{"connection":
+<TaskConnectionOut-shaped>, "routing": {...}}``, and writes one line, ``{"outcome": ...,
+"message": ...}``, with exit status 0 whatever it found. The routing is what a task's description
+says about the connection (`relay_port`, `root_dir`, `path`).
 
-This step checks reachability only: the name resolves, the port answers, the TLS handshake
-verifies as the connection is configured, a mounted root and path are there. The credential step
-of each kind arrives with its helper; until then a kind with a secret ends its message with
-"; credentials not checked yet". Every secret value is replaced by ``***`` in the message.
+First reachability: the name resolves, the port answers, the TLS handshake verifies as the
+connection is configured, a mounted root and path are there. Then the credentials: a PostgreSQL
+login with ``SELECT 1`` executed in a read-only transaction (not read: fetching a row needs
+pyarrow, which the check environment leaves out), a MariaDB login over the configured TLS with
+``SELECT 1`` in a read-only transaction, a SQLite file opened read-only, a listing of at most one
+object for ``s3``, ``azure`` and ``gcs`` (a gcs key signs a token request to the connection's own
+token endpoint, never another host). ``http`` credentials arrive with their helper; until then an
+``http`` connection with a secret ends its message with "; credentials not checked yet". Every
+secret value is replaced by ``***`` in the message, and every control character of a server's
+words is escaped.
 
-The module uses the standard library only, and imports nothing of `lakana`: the task image runs
-it as a lone file on its bare Python (`test_the_check_imports_only_the_standard_library`).
+The module is one file that imports nothing of `lakana`, so the task image can run it alone:
+its module-level imports are the standard library's, and each credential step imports its
+driver (``adbc_driver_postgresql``, ``adbc_driver_sqlite``, ``pymysql``, ``cryptography``,
+``httpx``) inside the step (`test_the_check_imports_only_the_standard_library_and_its_drivers`).
+The task image installs exactly those in ``/opt/lakana-check-env``; where one does not import
+(the local runner without ``lakana[assets]``), the test fails saying so, rather than passing
+without the check.
 """
 
 from __future__ import annotations
@@ -31,9 +42,11 @@ import ssl
 import stat
 import struct
 import sys
+import tempfile
 import time
-from collections.abc import Mapping
+from collections.abc import Generator, Mapping
 from email.utils import formatdate
+from pathlib import Path
 from typing import Any, NoReturn
 from urllib.parse import quote, unquote, urlsplit
 
@@ -50,7 +63,21 @@ RELAY_HOST = "lakana-relay"
 """The name a task resolves to its relay."""
 
 NOT_YET = "; credentials not checked yet"
-"""What a kind with a secret adds until its credential step exists."""
+"""What an ``http`` connection with a secret adds until its credential step exists."""
+
+UNAVAILABLE = (
+    "the credentials were not checked: this Python cannot import `{module}`; install {package} "
+    "next to the worker (local runner), or use the task image of this Lakana version (Docker "
+    "runner)"
+)
+"""The ``failed`` message of a credential step whose driver is missing."""
+
+GCS_URL = "https://storage.googleapis.com/storage/v1/b/{bucket}/o"
+"""The objects a ``gcs`` credential step lists; only tests point it at another server."""
+GCS_SCOPE = "https://www.googleapis.com/auth/devstorage.read_only"
+"""The scope a ``gcs`` credential step asks a token for."""
+_JWT_SECONDS = 600
+"""How long the signed token request of a ``gcs`` key is valid."""
 
 TCP_OK = "reachable; Lakana does not check the protocol, TLS or credentials of a tcp connection"
 
@@ -67,11 +94,6 @@ _OLD_TLS = frozenset(
 """How OpenSSL says that the peer offers only a protocol older than the floor."""
 _SSL_REQUEST = struct.pack("!ii", 8, 80877103)
 _PROXY_HEAD_LIMIT = 16384
-GCS_NOT_CHECKED = (
-    "; the credentials of a gcs connection are not checked (the check cannot sign its key): a "
-    "refused key shows in the first files.read"
-)
-"""What an ``ok`` of a ``gcs`` connection with a secret ends with."""
 AZURE_URL = "https://{account}.blob.core.windows.net/{container}"
 """The container an ``azure`` credential step lists; only tests point it at an emulator."""
 _AZURE_VERSION = "2021-08-06"
@@ -860,6 +882,524 @@ def _azure_credentials(body: Mapping[str, Any], routing: Mapping[str, Any], t: f
     _store_answer(*_get(full, headers, routing, t), f"container `{container}`")
 
 
+def conninfo(parts: Mapping[str, str]) -> str:
+    r"""Write a libpq connection string, every value quoted.
+
+    The ADBC driver takes only a connection string. Each value is single-quoted with ``\`` and
+    ``'`` escaped, so a database or user name can never add a keyword of its own. `sql.read`
+    uses the same function.
+
+    Parameters
+    ----------
+    parts
+        Keyword to value.
+
+    Returns
+    -------
+    str
+        Such as ``host='db' port='5432'``.
+    """
+
+    def quoted(value: str) -> str:
+        return "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"
+
+    return " ".join(f"{key}={quoted(value)}" for key, value in parts.items())
+
+
+@contextlib.contextmanager
+def root_certificates(ca_pem: str | None) -> Generator[str]:
+    """Name the certificates libpq trusts: the trust bundle plus the connection's own CA.
+
+    CA certificates are not secret; a file of both is written only when the connection has a
+    CA of its own, and removed afterwards. `sql.read` uses the same function.
+
+    Parameters
+    ----------
+    ca_pem
+        The connection's CA certificates (PEM), or `None`.
+
+    Yields
+    ------
+    str
+        A temporary file, the file `LAKANA_CA_BUNDLE` names, or ``system`` when neither is set.
+
+    Raises
+    ------
+    OSError
+        When the file `LAKANA_CA_BUNDLE` names cannot be read, or is not ASCII.
+    """
+    bundle = os.environ.get("LAKANA_CA_BUNDLE")
+    try:
+        trusted = Path(bundle).read_text(encoding="ascii") if bundle else ""
+    except UnicodeDecodeError as exc:
+        raise OSError(errno.EINVAL, "the trust bundle is not ASCII PEM") from exc
+    if not ca_pem:
+        yield bundle or "system"
+        return
+    with tempfile.NamedTemporaryFile("w", suffix=".pem", encoding="ascii") as handle:
+        handle.write(f"{trusted}\n{ca_pem}\n")
+        handle.flush()
+        yield handle.name
+
+
+def _unavailable(module: str, package: str) -> _Found:
+    """Say that a credential step's driver does not import here.
+
+    Parameters
+    ----------
+    module
+        The module that failed to import.
+    package
+        What to install.
+
+    Returns
+    -------
+    _Found
+        ``failed``: a test that could not check the credentials does not pass.
+    """
+    return _Found("failed", UNAVAILABLE.format(module=module, package=package))
+
+
+def _said(text: str) -> str:
+    """Keep a server's own words on one line.
+
+    Parameters
+    ----------
+    text
+        A driver's message.
+
+    Returns
+    -------
+    str
+        Its whitespace collapsed; `check` masks and bounds the whole message.
+    """
+    return " ".join(text.split())
+
+
+def _bundle_unreadable() -> _Found:
+    """Say that the trust bundle cannot be read.
+
+    Returns
+    -------
+    _Found
+        ``failed``, naming the variable.
+    """
+    return _Found(
+        "failed",
+        f"the trust bundle `{os.environ.get('LAKANA_CA_BUNDLE')}` (LAKANA_CA_BUNDLE) cannot be "
+        "read; check that the file exists on this worker",
+    )
+
+
+def _postgresql_credentials(body: Mapping[str, Any], routing: Mapping[str, Any], t: float) -> None:
+    """Log in to PostgreSQL and execute ``SELECT 1`` in a read-only transaction.
+
+    The result is not read: fetching a row needs pyarrow, which the check environment leaves
+    out, and a login that runs a statement has proven the credentials.
+
+    Parameters
+    ----------
+    body
+        A ``postgresql`` connection with a secret.
+    routing
+        The routing entry: a ``relay_port`` sends the login through the relay (libpq's
+        ``hostaddr``) while TLS checks the certificate for the real host.
+    t
+        Seconds per step.
+
+    Raises
+    ------
+    _Found
+        ``credentials`` when PostgreSQL refuses the login, ``tls`` for a certificate it does not
+        trust, ``failed`` for anything else or a driver that does not import.
+    """
+    try:
+        import adbc_driver_postgresql.dbapi as pg
+    except ImportError:
+        missing = _unavailable("adbc_driver_postgresql", "lakana[assets]")
+        raise missing from None
+    address, settings, secret = body["address"], body["settings"], body["secret"]
+    host, mode = str(address["host"]), str(settings.get("tls", "verify-full"))
+    parts = {"host": host, "port": str(address["port"])}
+    relay_port = routing.get("relay_port")
+    if isinstance(relay_port, int):
+        try:
+            parts.update(hostaddr=socket.gethostbyname(RELAY_HOST), port=str(relay_port))
+        except OSError as exc:
+            _raise_network(exc, RELAY_HOST, relay_port, t)
+    parts.update(
+        dbname=str(address["database"]),
+        user=str(settings["user"]),
+        password=str(secret.get("password", "")),
+        sslmode=mode,
+        connect_timeout=str(max(2, int(t))),
+        options="-c default_transaction_read_only=on",
+    )
+    for name, value in parts.items():
+        if "\x00" in value:
+            raise _Found(
+                "credentials",
+                f"the `{name}` holds a NUL character, which a connection string cannot carry; "
+                "set it again",
+            )
+    try:
+        with root_certificates(settings.get("ca_certificate")) as roots:
+            if mode == "verify-full":
+                parts["sslrootcert"] = roots
+            database = pg.connect(conninfo(parts))
+    except OSError:
+        unreadable = _bundle_unreadable()
+        raise unreadable from None
+    except pg.Error as exc:
+        text = str(exc)
+        if "password authentication failed" in text or "no pg_hba.conf entry" in text:
+            raise _Found("credentials", f"PostgreSQL refused the login ({_said(text)})") from None
+        if "certificate verify failed" in text or "does not match host name" in text:
+            raise _Found("tls", _tls_text(host)) from None
+        raise _Found("failed", f"the PostgreSQL login failed ({_said(text)})") from None
+    try:
+        database.cursor().execute("SELECT 1")
+    except pg.Error as exc:
+        raise _Found(
+            "failed", f"PostgreSQL accepted the login but not SELECT 1 ({_said(str(exc))})"
+        ) from None
+    finally:
+        database.close()
+
+
+def _mariadb_credentials(body: Mapping[str, Any], routing: Mapping[str, Any], t: float) -> str:
+    """Log in to MariaDB over the configured TLS and run ``SELECT 1`` in a read-only transaction.
+
+    Parameters
+    ----------
+    body
+        A ``mariadb`` connection with a secret.
+    routing
+        The routing entry: PyMySQL gets a socket opened the way a task's would be (the relay).
+    t
+        Seconds per step.
+
+    Returns
+    -------
+    str
+        What was found of TLS, for the message.
+
+    Raises
+    ------
+    _Found
+        ``credentials`` for a refused login, ``tls`` for a certificate not trusted or a server
+        without TLS, ``failed`` for anything else or a driver that does not import.
+    """
+    try:
+        import pymysql
+    except ImportError:
+        missing = _unavailable("pymysql", "lakana[assets]")
+        raise missing from None
+    address, settings, secret = body["address"], body["settings"], body["secret"]
+    host, port = str(address["host"]), int(address["port"])
+    mode = str(settings.get("tls", "verify-full"))
+    context = None if mode == "disable" else _context(settings.get("ca_certificate"), mode)
+    database = pymysql.connections.Connection(
+        host=host,
+        port=port,
+        user=str(settings["user"]),
+        password=str(secret.get("password", "")),
+        database=str(address["database"]),
+        ssl=context,
+        ssl_disabled=context is None,
+        local_infile=False,
+        connect_timeout=t,
+        read_timeout=t,
+        write_timeout=t,
+        defer_connect=True,
+    )
+    sock = _open(host, port, routing, t)
+    try:
+        database.connect(sock=sock)
+        cursor = database.cursor()
+        cursor.execute("START TRANSACTION READ ONLY")
+        cursor.execute("SELECT 1")
+        cursor.fetchall()
+    except pymysql.MySQLError as exc:
+        code = exc.args[0] if exc.args and isinstance(exc.args[0], int) else None
+        said = _said(str(exc.args[1] if len(exc.args) > 1 else exc))
+        if isinstance(getattr(exc, "original_exception", None), ssl.SSLCertVerificationError):
+            raise _Found("tls", _tls_text(host)) from None
+        if "SSL is required but the server doesn't support it" in said:
+            raise _Found(
+                "tls",
+                f"the server at `{host}:{port}` does not offer TLS; enable TLS on the server or "
+                "set the connection's `tls` to `disable`",
+            ) from None
+        if code in (1044, 1045, 1698):
+            raise _Found("credentials", f"MariaDB refused the login ({said})") from None
+        raise _Found("failed", f"the MariaDB login failed ({said})") from None
+    finally:
+        with contextlib.suppress(Exception):
+            database.close()
+        sock.close()
+    return {
+        "disable": "TLS not used (tls: disable)",
+        "require": "TLS in use, certificate not checked",
+    }.get(mode, "TLS verified")
+
+
+def _sqlite_opens(routing: Mapping[str, Any]) -> None:
+    """Open a ``sqlite-file`` connection's file read-only and run ``SELECT 1``.
+
+    Parameters
+    ----------
+    routing
+        The routing entry, whose ``root_dir`` and ``path`` `_check_mount` has checked.
+
+    Raises
+    ------
+    _Found
+        ``failed`` when the file is no SQLite database or the driver does not import.
+    """
+    try:
+        import adbc_driver_sqlite.dbapi as lite
+    except ImportError:
+        missing = _unavailable("adbc_driver_sqlite", "lakana[assets]")
+        raise missing from None
+    path = f"{str(routing['root_dir']).rstrip('/')}/{str(routing['path']).strip('/')}"
+    try:
+        database = lite.connect(f"file:{quote(path)}?mode=ro")
+        try:
+            database.cursor().execute("SELECT 1")
+        finally:
+            database.close()
+    except lite.Error as exc:
+        raise _Found(
+            "failed",
+            f"`{routing['path']}` cannot be read as a SQLite database ({_said(str(exc))})",
+        ) from None
+
+
+def _b64url(data: bytes) -> str:
+    """Encode as unpadded base64url, as a JWT does.
+
+    Parameters
+    ----------
+    data
+        The bytes.
+
+    Returns
+    -------
+    str
+        The text.
+    """
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
+
+
+def _gcs_key(secret: Mapping[str, Any]) -> dict[str, Any]:
+    """Read a ``gcs`` secret's service-account key.
+
+    Parameters
+    ----------
+    secret
+        The connection's secret.
+
+    Returns
+    -------
+    dict
+        The key's JSON.
+
+    Raises
+    ------
+    _Found
+        ``credentials`` for a secret that is no service-account key.
+    """
+    try:
+        key = json.loads(str(secret.get("service_account_json", "")))
+    except ValueError:
+        key = None
+    fields = ("client_email", "private_key", "token_uri")
+    if not isinstance(key, dict) or not all(isinstance(key.get(f), str) for f in fields):
+        raise _Found(
+            "credentials",
+            "the secret is not a service-account key (JSON with client_email, private_key and "
+            "token_uri); store the key file Google gave you",
+        )
+    return key
+
+
+def _gcs_assertion(key: Mapping[str, Any], now: int) -> str:
+    """Sign the token request of a service-account key (RS256).
+
+    Parameters
+    ----------
+    key
+        The key's JSON.
+    now
+        The time, in seconds since the epoch.
+
+    Returns
+    -------
+    str
+        The signed JWT.
+
+    Raises
+    ------
+    _Found
+        ``credentials`` for a private key that is no RSA key; ``failed`` without cryptography.
+    """
+    try:
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import padding, rsa
+    except ImportError:
+        missing = _unavailable("cryptography", "cryptography")
+        raise missing from None
+    try:
+        private = serialization.load_pem_private_key(key["private_key"].encode(), None)
+    except (ValueError, TypeError):
+        private = None
+    if not isinstance(private, rsa.RSAPrivateKey):
+        raise _Found("credentials", "the key's private_key is not an RSA private key (PEM)")
+    header = {"alg": "RS256", "typ": "JWT"}
+    if isinstance(key.get("private_key_id"), str):
+        header["kid"] = key["private_key_id"]
+    claims = {
+        "iss": key["client_email"],
+        "scope": GCS_SCOPE,
+        "aud": key["token_uri"],
+        "iat": now,
+        "exp": now + _JWT_SECONDS,
+    }
+    signing = f"{_b64url(json.dumps(header).encode())}.{_b64url(json.dumps(claims).encode())}"
+    signature = private.sign(signing.encode("ascii"), padding.PKCS1v15(), hashes.SHA256())
+    return f"{signing}.{_b64url(signature)}"
+
+
+def _gcs_token(token_uri: str, assertion: str, t: float) -> str:
+    """Exchange a signed assertion for an access token, through the egress proxy when set.
+
+    Parameters
+    ----------
+    token_uri
+        The key's token endpoint, already checked against the connection's endpoints.
+    assertion
+        The signed JWT.
+    t
+        Seconds per step.
+
+    Returns
+    -------
+    str
+        The access token (never written into a message).
+
+    Raises
+    ------
+    _Found
+        ``credentials`` when Google refuses the key, ``tls``, ``timeout`` or ``failed`` for the
+        request itself, ``failed`` without httpx.
+    """
+    try:
+        import httpx
+    except ImportError:
+        missing = _unavailable("httpx", "httpx")
+        raise missing from None
+    parts = urlsplit(token_uri)
+    where = f"`{parts.hostname}:{parts.port or 443}`"
+    try:
+        with httpx.Client(
+            proxy=os.environ.get("LAKANA_EGRESS_PROXY") or None,
+            trust_env=False,
+            verify=_context(None, "verify-full"),
+            timeout=t,
+            follow_redirects=False,
+        ) as client:
+            answer = client.post(
+                token_uri,
+                data={
+                    "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+                    "assertion": assertion,
+                },
+            )
+    except httpx.TimeoutException:
+        raise _Found("timeout", f"{where} did not answer within {t:g} s") from None
+    except httpx.HTTPError as exc:
+        cause = exc.__cause__ or exc.__context__
+        if isinstance(cause, ssl.SSLCertVerificationError) or "CERTIFICATE_VERIFY_FAILED" in str(
+            exc
+        ):
+            raise _Found("tls", _tls_text(parts.hostname or "")) from None
+        raise _Found(
+            "failed", f"the token request to {where} failed ({type(exc).__name__})"
+        ) from None
+    try:
+        said = answer.json()
+    except ValueError:
+        said = {}
+    said = said if isinstance(said, dict) else {}
+    if answer.status_code in (400, 401, 403):
+        detail = ": ".join(str(said[k]) for k in ("error", "error_description") if k in said)
+        raise _Found(
+            "credentials", f"Google refused the key ({detail or f'HTTP {answer.status_code}'})"
+        )
+    token = said.get("access_token")
+    if answer.status_code != 200 or not isinstance(token, str):
+        raise _Found("failed", f"the token endpoint {where} answered HTTP {answer.status_code}")
+    return token
+
+
+def _gcs_credentials(body: Mapping[str, Any], routing: Mapping[str, Any], t: float) -> None:
+    """Sign a token request with the key, then list at most one object under the prefix.
+
+    The key's ``token_uri`` must be a token endpoint of the connection (Google's): the signed
+    assertion is sent nowhere else, under either runner.
+
+    Parameters
+    ----------
+    body
+        A ``gcs`` connection with a secret.
+    routing
+        The routing entry.
+    t
+        Seconds per step.
+
+    Raises
+    ------
+    _Found
+        ``credentials`` for a key that is not one, names another token endpoint, or is refused;
+        ``not_found`` for a missing bucket.
+    """
+    key = _gcs_key(body["secret"])
+    token_uri = key["token_uri"]
+    parts = urlsplit(token_uri)
+    declared = {
+        (str(e["host"]), int(e["port"])) for e in body["endpoints"] if e.get("role") == "token"
+    }
+    if parts.scheme != "https" or (parts.hostname, parts.port or 443) not in declared:
+        shown = ", ".join(f"`{h}:{p}`" for h, p in sorted(declared)) or "none"
+        raise _Found(
+            "credentials",
+            f"the key's token_uri `{token_uri[:200]}` is not the connection's token endpoint "
+            f"({shown}); Lakana sends a signed key nowhere else: store the key file Google gave "
+            "you",
+        )
+    token = _gcs_token(token_uri, _gcs_assertion(key, int(time.time())), t)
+    bucket = str(body["address"]["bucket"])
+    params = {"maxResults": "1"}
+    if body["settings"].get("prefix"):
+        params["prefix"] = str(body["settings"]["prefix"])
+    url = f"{GCS_URL.format(bucket=quote(bucket, safe=''))}?{_query(params)}"
+    status, text = _get(url, {"Authorization": f"Bearer {token}"}, routing, t)
+    if status == 200:
+        return
+    try:
+        error = json.loads(text).get("error", {})
+        said = str(error.get("message", ""))[:500] if isinstance(error, dict) else ""
+    except (ValueError, AttributeError):
+        said = ""
+    said = said or f"HTTP {status}"
+    if status in (401, 403):
+        raise _Found("credentials", f"the store refused the credentials ({said})")
+    if status == 404:
+        raise _Found("not_found", f"bucket `{bucket}` does not exist ({said})")
+    raise _Found("failed", f"the store answered HTTP {status} ({said})")
+
+
 def _component_failure(directory: int, name: str, exc: OSError, root: str, path: str) -> _Found:
     """Explain why a path component could not be opened.
 
@@ -978,6 +1518,37 @@ def _check_mount(
             os.close(descriptor)
 
 
+_UNSAFE = re.compile(
+    r"[\x00-\x1f\x7f-\x9f\u061c\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]"
+)
+"""Control and bidirectional control characters: the same set as `lakana`'s `safe_name`."""
+
+
+def _safe(text: str) -> str:
+    r"""Write every control and bidirectional control character as an escape.
+
+    A server's error text ends up in the message; a line feed there could forge a line in a
+    log, an escape sequence could rewrite a terminal. The check cannot import `lakana`, so this
+    mirrors its `safe_name`.
+
+    Parameters
+    ----------
+    text
+        The message.
+
+    Returns
+    -------
+    str
+        `text` with such characters written as ``\x1b`` or ``\u202e``.
+    """
+
+    def escaped(match: re.Match[str]) -> str:
+        code = ord(match.group())
+        return f"\\x{code:02x}" if code < 0x100 else f"\\u{code:04x}"
+
+    return _UNSAFE.sub(escaped, text)
+
+
 def _mask(text: str, secret: Mapping[str, Any] | None) -> str:
     """Replace every secret value with ``***``.
 
@@ -1041,18 +1612,26 @@ def check(
                 "failed",
                 f"this check does not know the kind `{kind}`; upgrade lakana",
             )
-        if outcome == "ok" and secret and kind in ("s3", "azure"):
-            (_s3_credentials if kind == "s3" else _azure_credentials)(connection, route, timeout)
+        if outcome == "ok" and secret and kind in ("s3", "azure", "gcs"):
+            step = {"s3": _s3_credentials, "azure": _azure_credentials, "gcs": _gcs_credentials}
+            step[kind](connection, route, timeout)
             message += ", credentials accepted"
-        elif outcome == "ok" and secret and kind == "gcs":
-            message += GCS_NOT_CHECKED
-        elif outcome == "ok" and secret and kind != "tcp":
+        elif outcome == "ok" and secret and kind == "postgresql":
+            _postgresql_credentials(connection, route, timeout)
+            message += ", credentials accepted"
+        elif outcome == "ok" and secret and kind == "mariadb":
+            tls = _mariadb_credentials(connection, route, timeout)
+            message = message.replace(" (TLS not checked yet)", f", {tls}, credentials accepted")
+        elif outcome == "ok" and kind == "sqlite-file":
+            _sqlite_opens(route)
+            message += "; it opens read-only as a SQLite database"
+        elif outcome == "ok" and secret and kind == "http":
             message += NOT_YET
     except _Found as found:
         outcome, message = found.outcome, found.message
     except Exception as exc:
         outcome, message = "failed", f"the check failed unexpectedly ({type(exc).__name__})"
-    return outcome, _mask(message, secret)[:MAX_MESSAGE]
+    return outcome, _safe(_mask(message, secret))[:MAX_MESSAGE]
 
 
 def main() -> None:

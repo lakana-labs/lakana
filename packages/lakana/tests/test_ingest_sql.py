@@ -580,11 +580,15 @@ def test_bad_arguments_are_refused_before_the_fetch(kwargs: dict[str, Any], frag
         sql.read("crm-db", "SELECT 1", **kwargs)
 
 
+@pytest.mark.parametrize("content", [None, "caf\u00e9"])
 def test_an_unreadable_trust_bundle_names_the_worker_setting(
-    driver: _Driver, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    driver: _Driver, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, content: str | None
 ) -> None:
-    """A bundle the worker named but the task cannot read is a setup error, not retried."""
-    monkeypatch.setenv("LAKANA_CA_BUNDLE", str(tmp_path / "missing.pem"))
+    """A bundle the worker named but the task cannot read (missing, not ASCII) is a setup error."""
+    bundle = tmp_path / "unreadable.pem"
+    if content is not None:
+        bundle.write_text(content, encoding="utf-8")
+    monkeypatch.setenv("LAKANA_CA_BUNDLE", str(bundle))
     _postgres(relay=True)
 
     with pytest.raises(UsageError, match=r"trust bundle .*LAKANA_RUN__CA_BUNDLE") as caught:

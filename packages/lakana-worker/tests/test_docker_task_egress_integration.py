@@ -24,6 +24,7 @@ import ipaddress
 import json
 import os
 import secrets
+import sqlite3
 import tarfile
 import threading
 import time
@@ -949,6 +950,7 @@ def _check(
     *,
     trust: bool,
     egress_pairs: tuple[tuple[str, int], ...] | None = None,
+    secret: dict[str, str] | None = None,
 ) -> tuple[str, str, str]:
     """Run the connection check of one connection through the worker's own Docker path.
 
@@ -972,6 +974,8 @@ def _check(
         Whether the worker has the trust bundle with the source's authority.
     egress_pairs
         Replaces the planned proxy pairs, to send a token that does not name the host.
+    secret
+        The connection's secret, for the credential step.
 
     Returns
     -------
@@ -1006,7 +1010,7 @@ def _check(
             {"host": e.host, "port": e.port, "role": e.role}
             for e in endpoints(connection_kind, address, settings)
         ],
-        "secret": None,
+        "secret": secret,
     }
     outcome, message = loop._run_check(body, plan)
     return outcome, message, (worker.checks[-1] if worker.checks else "")
@@ -1597,3 +1601,118 @@ def test_sql_read_reaches_postgresql_through_the_relay_with_verify_full(
         assert not [name for name in sources.stack.labelled() if "task" in name]
     finally:
         database.remove(force=True)
+
+
+def test_connection_test_checks_credentials_on_the_check_environment(
+    sources: Sources, worker_side: _Mirrored
+) -> None:
+    """The task image's check environment logs in to PostgreSQL and opens a SQLite file.
+
+    PostgreSQL 18 serves TLS for ``db.lakana.test`` from the module's authority, through the
+    relay with ``verify-full``: the right password is ``ok`` with "credentials accepted", a wrong
+    one ``credentials``, and neither password reaches the message. A ``sqlite-file`` under a root
+    the launcher mounts read-only opens as a SQLite database.
+    """
+    client = sources.stack.client
+    directory = sources.material / f"db-{uuid.uuid4().hex[:8]}"
+    directory.mkdir()
+    certificate, key = issue_leaf(sources.authority, directory, names=(_DB_HOST,))
+    client.images.pull(_POSTGRES)
+    database = client.containers.create(
+        _POSTGRES,
+        ["bash", "-c", _POSTGRES_START],
+        entrypoint=[],
+        environment={"POSTGRES_PASSWORD": secrets.token_urlsafe(16)},
+        labels=sources.stack.labels,
+        network=sources.network,
+        networking_config={sources.network: client.api.create_endpoint_config(aliases=[_DB_HOST])},
+    )
+    wrong = secrets.token_urlsafe(16)
+    try:
+        database.put_archive(
+            "/",
+            docker_stack._tar(
+                [
+                    ("certs", "dir", b"", 0o755, 0),
+                    ("certs/server.crt", "file", certificate.read_bytes(), 0o644, 0),
+                    ("certs/server.key", "file", key.read_bytes(), 0o600, 0),
+                ]
+            ),
+        )
+        database.start()
+        _postgres_ready(database)
+        code, out = database.exec_run(
+            [
+                "psql",
+                "-v",
+                "ON_ERROR_STOP=1",
+                "-U",
+                "postgres",
+                "-c",
+                f"CREATE ROLE reader LOGIN PASSWORD '{_READER}'",
+            ]
+        )
+        assert code == 0, out
+        launcher = sources.stack.launcher
+        assert launcher is not None
+        reachable = (
+            *launcher.settings.relay_reachable,
+            f"{_address(database, sources.network)}/32",
+        )
+        address: dict[str, object] = {"host": _DB_HOST, "port": 5432, "database": "postgres"}
+        settings: dict[str, object] = {"user": "reader", "tls": "verify-full"}
+
+        with sources.stack.configured(relay_reachable=reachable):
+            accepted = _check(
+                sources,
+                worker_side,
+                "postgresql",
+                address,
+                settings,
+                trust=True,
+                secret={"password": _READER},
+            )
+            refused = _check(
+                sources,
+                worker_side,
+                "postgresql",
+                address,
+                settings,
+                trust=True,
+                secret={"password": wrong},
+            )
+    finally:
+        database.remove(force=True)
+
+    assert accepted[:2] == (
+        "ok",
+        f"reachable: `{_DB_HOST}:5432`, TLS verified, credentials accepted",
+    ), accepted
+    assert refused[0] == "credentials", refused
+    assert "PostgreSQL refused the login" in refused[1]
+    assert _READER not in accepted[1] + refused[1] and wrong not in refused[1]
+
+    host_dir = worker_side.root / f"ingest-{uuid.uuid4().hex[:8]}"
+    host_dir.mkdir(mode=0o755)
+    host_dir.chmod(0o755)
+    with sqlite3.connect(host_dir / "app.db") as db:
+        db.execute("CREATE TABLE t(a)")
+    (host_dir / "app.db").chmod(0o644)
+
+    with sources.stack.configured(ingestion_roots={"shared": str(host_dir)}):
+        opened = _check(
+            sources,
+            worker_side,
+            "sqlite-file",
+            {"root": "shared", "path": "app.db"},
+            {},
+            trust=False,
+        )
+
+    assert opened[:2] == (
+        "ok",
+        "the file `app.db` exists under root `shared` and is readable; it opens read-only as a "
+        "SQLite database",
+    ), opened
+    assert sorted(p.name for p in host_dir.iterdir()) == ["app.db"]
+    assert not [name for name in sources.stack.labelled() if "check" in name]
