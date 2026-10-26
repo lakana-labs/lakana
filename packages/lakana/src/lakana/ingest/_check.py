@@ -21,16 +21,21 @@ from __future__ import annotations
 import base64
 import contextlib
 import errno
+import hashlib
+import hmac
 import json
 import os
+import re
 import socket
 import ssl
 import stat
 import struct
 import sys
+import time
 from collections.abc import Mapping
+from email.utils import formatdate
 from typing import Any, NoReturn
-from urllib.parse import urlsplit
+from urllib.parse import quote, unquote, urlsplit
 
 STEP_SECONDS = 10.0
 """The time one step (resolve and connect, or one handshake) may take."""
@@ -62,6 +67,16 @@ _OLD_TLS = frozenset(
 """How OpenSSL says that the peer offers only a protocol older than the floor."""
 _SSL_REQUEST = struct.pack("!ii", 8, 80877103)
 _PROXY_HEAD_LIMIT = 16384
+GCS_NOT_CHECKED = (
+    "; the credentials of a gcs connection are not checked (the check cannot sign its key): a "
+    "refused key shows in the first files.read"
+)
+"""What an ``ok`` of a ``gcs`` connection with a secret ends with."""
+AZURE_URL = "https://{account}.blob.core.windows.net/{container}"
+"""The container an ``azure`` credential step lists; only tests point it at an emulator."""
+_AZURE_VERSION = "2021-08-06"
+_ANSWER_LIMIT = 65536
+_EMPTY_SHA256 = hashlib.sha256(b"").hexdigest()
 
 
 class _Found(Exception):
@@ -570,6 +585,281 @@ def _check_tcp(body: Mapping[str, Any], routing: Mapping[str, Any], t: float) ->
     return "ok", TCP_OK
 
 
+def _query(params: Mapping[str, str]) -> str:
+    """Encode query parameters as SigV4 and Azure expect them: sorted, RFC 3986.
+
+    Parameters
+    ----------
+    params
+        Name to value.
+
+    Returns
+    -------
+    str
+        ``a=1&b=2``.
+    """
+    return "&".join(
+        f"{quote(k, safe='-_.~')}={quote(v, safe='-_.~')}" for k, v in sorted(params.items())
+    )
+
+
+def sigv4_headers(
+    *,
+    host: str,
+    path: str,
+    params: Mapping[str, str],
+    region: str,
+    access_key_id: str,
+    secret_access_key: str,
+    session_token: str | None = None,
+    now: time.struct_time | None = None,
+) -> dict[str, str]:
+    """Sign an S3 ``GET`` with AWS Signature Version 4.
+
+    Parameters
+    ----------
+    host
+        The ``Host`` header as sent (``host`` or ``host:port``).
+    path
+        The request path, already encoded.
+    params
+        The query parameters.
+    region
+        The bucket's region.
+    access_key_id
+        The key id.
+    secret_access_key
+        The secret key.
+    session_token
+        A temporary credential's token, or `None`.
+    now
+        The signing time (UTC); now when `None`.
+
+    Returns
+    -------
+    dict
+        The headers to send: ``Authorization``, ``x-amz-date``, ``x-amz-content-sha256`` and,
+        with a session token, ``x-amz-security-token``.
+    """
+    stamp = time.strftime("%Y%m%dT%H%M%SZ", now or time.gmtime())
+    day = stamp[:8]
+    headers = {"host": host, "x-amz-content-sha256": _EMPTY_SHA256, "x-amz-date": stamp}
+    if session_token:
+        headers["x-amz-security-token"] = session_token
+    signed = ";".join(sorted(headers))
+    canonical = "\n".join(
+        [
+            "GET",
+            path,
+            _query(params),
+            "".join(f"{k}:{headers[k]}\n" for k in sorted(headers)),
+            signed,
+            _EMPTY_SHA256,
+        ]
+    )
+    scope = f"{day}/{region}/s3/aws4_request"
+    to_sign = "\n".join(
+        ["AWS4-HMAC-SHA256", stamp, scope, hashlib.sha256(canonical.encode()).hexdigest()]
+    )
+    key = f"AWS4{secret_access_key}".encode()
+    for part in (day, region, "s3", "aws4_request"):
+        key = hmac.new(key, part.encode(), hashlib.sha256).digest()
+    signature = hmac.new(key, to_sign.encode(), hashlib.sha256).hexdigest()
+    del headers["host"]
+    headers["Authorization"] = (
+        f"AWS4-HMAC-SHA256 Credential={access_key_id}/{scope}, SignedHeaders={signed}, "
+        f"Signature={signature}"
+    )
+    return headers
+
+
+def azure_shared_key(
+    *, account: str, account_key: str, path: str, params: Mapping[str, str], date: str
+) -> dict[str, str]:
+    """Sign an Azure Blob Storage ``GET`` with the account's shared key.
+
+    Parameters
+    ----------
+    account
+        The storage account.
+    account_key
+        Its key (base64).
+    path
+        The request path (``/<container>``; an emulator's ``/<account>/<container>``).
+    params
+        The query parameters, unencoded.
+    date
+        The ``x-ms-date`` (RFC 1123, GMT).
+
+    Returns
+    -------
+    dict
+        ``x-ms-date``, ``x-ms-version`` and ``Authorization``.
+
+    Raises
+    ------
+    _Found
+        ``credentials`` when the key is not base64.
+    """
+    headers = {"x-ms-date": date, "x-ms-version": _AZURE_VERSION}
+    resource = f"/{account}{unquote(path)}" + "".join(
+        f"\n{k.lower()}:{v}" for k, v in sorted(params.items())
+    )
+    to_sign = "GET\n" + "\n" * 11 + "".join(f"{k}:{headers[k]}\n" for k in sorted(headers))
+    try:
+        key = base64.b64decode(account_key, validate=True)
+    except ValueError:
+        raise _Found("credentials", "the account_key is not base64") from None
+    digest = hmac.new(key, (to_sign + resource).encode(), hashlib.sha256).digest()
+    headers["Authorization"] = f"SharedKey {account}:{base64.b64encode(digest).decode()}"
+    return headers
+
+
+def _get(
+    url: str, headers: Mapping[str, str], routing: Mapping[str, Any], t: float
+) -> tuple[int, str]:
+    """Send one ``GET`` over TLS (through the proxy or directly) and read the answer's start.
+
+    Parameters
+    ----------
+    url
+        The ``https`` URL, query included.
+    headers
+        Headers besides ``Host`` and ``Connection``.
+    routing
+        The routing entry.
+    t
+        Seconds per step.
+
+    Returns
+    -------
+    tuple
+        The status and up to 64 KiB of the body as text.
+
+    Raises
+    ------
+    _Found
+        For a network or TLS failure, or an answer that is not HTTP.
+    """
+    parts = urlsplit(url)
+    host, port = parts.hostname or "", parts.port or 443
+    target = parts.path + (f"?{parts.query}" if parts.query else "")
+    lines = [f"GET {target} HTTP/1.1", f"Host: {parts.netloc}", "Connection: close"]
+    lines += [f"{k}: {v}" for k, v in headers.items()]
+    try:
+        sock = _open(host, port, routing, t)
+        try:
+            with _tls(sock, host, None, "verify-full") as tls:
+                tls.sendall(("\r\n".join(lines) + "\r\n\r\n").encode())
+                data = b""
+                while len(data) < _ANSWER_LIMIT and (chunk := tls.recv(16384)):
+                    data += chunk
+        finally:
+            sock.close()
+    except OSError as exc:
+        _raise_network(exc, host, port, t)
+    head, _, body = data.partition(b"\r\n\r\n")
+    status = head.split(b" ", 2)
+    if len(status) < 2 or not status[0].startswith(b"HTTP/") or not status[1].isdigit():
+        raise _Found("failed", f"`{host}:{port}` did not answer HTTP")
+    return int(status[1]), body.decode(errors="replace")
+
+
+def _store_answer(status: int, body: str, what: str) -> None:
+    """Read the answer to a credential step's list request.
+
+    Parameters
+    ----------
+    status
+        The HTTP status.
+    body
+        The start of the body (XML for S3 and Azure).
+    what
+        The bucket or container, for the message.
+
+    Raises
+    ------
+    _Found
+        ``credentials`` for 401 and 403, ``not_found`` for 404, ``failed`` for another status
+        than 200; the store's own code and message are kept.
+    """
+    if status == 200:
+        return
+    code = re.search(r"<Code>([^<]{1,200})</Code>", body)
+    text = re.search(r"<Message>([^<]{1,500})</Message>", body)
+    said = ": ".join(m.group(1).strip() for m in (code, text) if m) or f"HTTP {status}"
+    if status in (401, 403):
+        raise _Found("credentials", f"the store refused the credentials ({said})")
+    if status == 404:
+        raise _Found("not_found", f"{what} does not exist ({said})")
+    raise _Found("failed", f"the store answered HTTP {status} ({said})")
+
+
+def _s3_credentials(body: Mapping[str, Any], routing: Mapping[str, Any], t: float) -> None:
+    """List at most one object under the prefix with the connection's key (SigV4).
+
+    Parameters
+    ----------
+    body
+        An ``s3`` connection with a secret.
+    routing
+        The routing entry.
+    t
+        Seconds per step.
+    """
+    address, settings, secret = body["address"], body["settings"], body["secret"]
+    endpoint = urlsplit(str(address["endpoint"]))
+    path = f"{endpoint.path.rstrip('/')}/{quote(str(address['bucket']))}"
+    params = {"list-type": "2", "max-keys": "1"}
+    if settings.get("prefix"):
+        params["prefix"] = str(settings["prefix"])
+    headers = sigv4_headers(
+        host=endpoint.netloc,
+        path=path,
+        params=params,
+        region=str(address["region"]),
+        access_key_id=str(settings["access_key_id"]),
+        secret_access_key=str(secret.get("secret_access_key", "")),
+        session_token=secret.get("session_token"),
+    )
+    url = f"https://{endpoint.netloc}{path}?{_query(params)}"
+    _store_answer(*_get(url, headers, routing, t), f"bucket `{address['bucket']}`")
+
+
+def _azure_credentials(body: Mapping[str, Any], routing: Mapping[str, Any], t: float) -> None:
+    """List at most one blob under the prefix with the SAS token or the shared key.
+
+    Parameters
+    ----------
+    body
+        An ``azure`` connection with a secret.
+    routing
+        The routing entry.
+    t
+        Seconds per step.
+    """
+    address, settings, secret = body["address"], body["settings"], body["secret"]
+    account, container = str(address["account"]), str(address["container"])
+    url = urlsplit(AZURE_URL.format(account=account, container=quote(container)))
+    params = {"restype": "container", "comp": "list", "maxresults": "1"}
+    if settings.get("prefix"):
+        params["prefix"] = str(settings["prefix"])
+    query = _query(params)
+    if secret.get("sas_token"):
+        headers = {"x-ms-version": _AZURE_VERSION}
+        query += "&" + str(secret["sas_token"]).lstrip("?")
+    else:
+        headers = azure_shared_key(
+            account=account,
+            account_key=str(secret.get("account_key", "")),
+            path=url.path,
+            params=params,
+            date=formatdate(usegmt=True),
+        )
+    full = f"https://{url.netloc}{url.path}?{query}"
+    _store_answer(*_get(full, headers, routing, t), f"container `{container}`")
+
+
 def _component_failure(directory: int, name: str, exc: OSError, root: str, path: str) -> _Found:
     """Explain why a path component could not be opened.
 
@@ -751,7 +1041,12 @@ def check(
                 "failed",
                 f"this check does not know the kind `{kind}`; upgrade lakana",
             )
-        if outcome == "ok" and secret and kind != "tcp":
+        if outcome == "ok" and secret and kind in ("s3", "azure"):
+            (_s3_credentials if kind == "s3" else _azure_credentials)(connection, route, timeout)
+            message += ", credentials accepted"
+        elif outcome == "ok" and secret and kind == "gcs":
+            message += GCS_NOT_CHECKED
+        elif outcome == "ok" and secret and kind != "tcp":
             message += NOT_YET
     except _Found as found:
         outcome, message = found.outcome, found.message

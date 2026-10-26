@@ -37,7 +37,15 @@ from testcontainers.core.wait_strategies import LogMessageWaitStrategy
 from tls_fixture import Authority, issue_leaf, make_authority
 
 from lakana import context
-from lakana.ingest import SourceError, SourceRefused, _connections, _stores, connections, files
+from lakana.ingest import (
+    SourceError,
+    SourceRefused,
+    _check,
+    _connections,
+    _stores,
+    connections,
+    files,
+)
 from lakana_worker.launcher.egress import EgressServer, EgressSettings
 from lakana_worker.launcher.egress_token import ensure_key, mint
 from lakana_worker.trust import build_trust_bundle
@@ -703,3 +711,105 @@ def _target(kind: _Kind) -> str:
     if kind.kind == "s3":
         return str(kind.address["endpoint"])
     return _stores.AZURE_ENDPOINT.rsplit("/", 1)[0]
+
+
+def _body(kind: _Kind, **secret: str) -> dict[str, object]:
+    """Build the body of a connection test for one emulator, with secret values replaced.
+
+    Parameters
+    ----------
+    kind
+        The connection.
+    **secret
+        Values to replace in the secret.
+
+    Returns
+    -------
+    dict
+        A ``TaskConnectionOut``-shaped body.
+    """
+    return {
+        "name": "lake",
+        "kind": kind.kind,
+        "address": dict(kind.address),
+        "settings": dict(kind.settings),
+        "endpoints": [],
+        "secret": {**kind.secret, **secret},
+    }
+
+
+def test_the_check_accepts_the_s3_key_and_refuses_a_wrong_one(store_s3: _Kind) -> None:
+    """The credential step signs a real listing: SeaweedFS accepts the key, not a wrong one."""
+    _put(store_s3, {"in/a.csv": b"a\n1\n"})
+
+    outcome, message = _check.check(_body(store_s3), {})
+    assert (outcome, message.endswith(", credentials accepted")) == ("ok", True), message
+
+    outcome, message = _check.check(_body(store_s3, secret_access_key=_WRONG), {})
+    assert outcome == "credentials", message
+    assert _WRONG not in message
+
+
+@pytest.mark.parametrize("how", ["azure-key", "azure-sas"])
+def test_the_check_accepts_the_azure_key_and_sas(
+    how: str, request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The credential step lists a real container with the shared key and with a SAS token."""
+    kind = _azure_kind(request, monkeypatch, how)
+    _put(kind, {"in/a.csv": b"a\n1\n"})
+
+    outcome, message = _check.check(_body(kind), {})
+    assert (outcome, message.endswith(", credentials accepted")) == ("ok", True), message
+
+    if how == "azure-key":
+        wrong = base64.b64encode(b"wrong-account-key-0123456789").decode()
+        outcome, message = _check.check(_body(kind, account_key=wrong), {})
+        assert outcome == "credentials", message
+        assert "d3Jvbmct" not in message
+
+
+def _azure_kind(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch, how: str) -> _Kind:
+    """Start Azurite and point the check's account URL at it.
+
+    Parameters
+    ----------
+    request
+        Starts the emulator.
+    monkeypatch
+        Points the stores' and the check's Azure addresses at it.
+    how
+        ``azure-key`` or ``azure-sas``.
+
+    Returns
+    -------
+    _Kind
+        The Azure connection.
+    """
+    endpoint = request.getfixturevalue("azurite")
+    monkeypatch.setattr(_stores, "AZURE_ENDPOINT", endpoint)
+    base = endpoint.rsplit("/", 1)[0]
+    monkeypatch.setattr(_check, "AZURE_URL", base + "/{account}/{container}")
+    secret = {"account_key": _AZURE_KEY} if how == "azure-key" else {"sas_token": _account_sas()}
+    return _Kind("azure", {"account": _AZURE_ACCOUNT, "container": _BUCKET}, {}, secret)
+
+
+@pytest.fixture
+def store_s3(seaweedfs: str) -> _Kind:
+    """Describe the S3 connection to SeaweedFS.
+
+    Parameters
+    ----------
+    seaweedfs
+        The emulator's endpoint.
+
+    Returns
+    -------
+    _Kind
+        The connection.
+    """
+    return _Kind(
+        "s3",
+        {"bucket": _BUCKET, "region": "us-east-1", "endpoint": seaweedfs},
+        {"access_key_id": _S3_KEY_ID},
+        {"secret_access_key": _S3_SECRET},
+    )

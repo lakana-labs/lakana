@@ -628,8 +628,9 @@ def test_a_refused_test_prints_the_outcome_and_its_next_step_and_exits_1(tmp_pat
         ("tls", "that the server offers TLS 1.2 or newer"),
         ("not_allowed", "reachable from outside the Lakana stack"),
         ("root_unavailable", "Check the root setting."),
-        ("not_found", "lakana connection show NAME"),
-        ("credentials", "Check the secret."),
+        ("not_found", "the bucket or container (`lakana connection show NAME`)"),
+        ("credentials", "lakana connection update NAME --values-stdin"),
+        ("credentials", "`--password-stdin` for a one-key secret"),
         ("failed", "See the worker's log."),
     ],
 )

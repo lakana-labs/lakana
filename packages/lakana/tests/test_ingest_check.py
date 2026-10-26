@@ -6,6 +6,9 @@ import ast
 import base64
 import contextlib
 import errno
+import hashlib
+import hmac
+import http.server
 import io
 import json
 import os
@@ -17,6 +20,7 @@ import threading
 import time
 from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
@@ -976,3 +980,375 @@ def test_the_check_imports_only_the_standard_library() -> None:
     roots = {name.split(".")[0] for name in found}
     assert roots - {"__future__"} <= set(sys.stdlib_module_names), roots
     assert "lakana" not in roots
+
+
+# --- the credential steps of s3 and azure ----------------------------------------------------
+
+
+@dataclass
+class Answering:
+    """A TLS server that records each request and answers with one status and body.
+
+    Attributes
+    ----------
+    port
+        Its port on 127.0.0.1.
+    requests
+        Each request's line and headers (lower-case names), in order.
+    """
+
+    port: int
+    requests: list[tuple[str, dict[str, str]]] = field(default_factory=list)
+
+
+@contextmanager
+def answering(
+    authority: Authority, tmp_path: Path, status: int, body: bytes = b""
+) -> Generator[Answering, None, None]:
+    """Serve one fixed answer over TLS with a certificate for ``localhost``.
+
+    Parameters
+    ----------
+    authority
+        Signs the server's certificate.
+    tmp_path
+        Where its files are written.
+    status
+        The status of every answer.
+    body
+        The body of every answer.
+
+    Yields
+    ------
+    Answering
+        The port and the requests seen.
+    """
+    cert, key = issue_leaf(authority, tmp_path)
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.load_cert_chain(cert, key)
+    seen: list[tuple[str, dict[str, str]]] = []
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        """Records and answers."""
+
+        def do_GET(self) -> None:
+            """Record the request and send the fixed answer."""
+            seen.append((self.path, {k.lower(): v for k, v in self.headers.items()}))
+            self.send_response(status)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format: str, *args: object) -> None:
+            """Log nothing.
+
+            Parameters
+            ----------
+            format
+                Unused.
+            *args
+                Unused.
+            """
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    server.socket = context.wrap_socket(server.socket, server_side=True)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield Answering(server.server_address[1], seen)
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def test_sigv4_matches_the_aws_example() -> None:
+    """The signature of AWS's own "GET Bucket (List Objects)" example."""
+    headers = _check.sigv4_headers(
+        host="examplebucket.s3.amazonaws.com",
+        path="/",
+        params={"max-keys": "2", "prefix": "J"},
+        region="us-east-1",
+        access_key_id="AKIAIOSFODNN7EXAMPLE",
+        secret_access_key="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        now=time.strptime("20130524T000000Z", "%Y%m%dT%H%M%SZ"),
+    )
+
+    assert headers["Authorization"] == (
+        "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20130524/us-east-1/s3/aws4_request, "
+        "SignedHeaders=host;x-amz-content-sha256;x-amz-date, "
+        "Signature=34b48302e7b5fa45bde8084f4b7868a86f0a534bc59db6670ed5711ef69dc6f7"
+    )
+    assert headers["x-amz-date"] == "20130524T000000Z"
+
+
+def test_the_azure_shared_key_signs_the_documented_string() -> None:
+    """VERB, eleven empty standard headers, the x-ms headers, then the canonical resource."""
+    key = base64.b64encode(b"account-key-bytes").decode()
+    params = {"restype": "container", "comp": "list", "maxresults": "1", "prefix": "in/"}
+    date = "Sun, 25 Oct 2026 12:00:00 GMT"
+
+    headers = _check.azure_shared_key(
+        account="acct", account_key=key, path="/landing", params=params, date=date
+    )
+
+    expected = (
+        "GET\n\n\n\n\n\n\n\n\n\n\n\n"
+        f"x-ms-date:{date}\nx-ms-version:2021-08-06\n"
+        "/acct/landing\ncomp:list\nmaxresults:1\nprefix:in/\nrestype:container"
+    )
+    digest = hmac.new(b"account-key-bytes", expected.encode(), hashlib.sha256).digest()
+    assert headers["Authorization"] == f"SharedKey acct:{base64.b64encode(digest).decode()}"
+
+
+def _s3(port: int, secret: dict[str, str] | None) -> dict[str, object]:
+    """Build an `s3` connection on a local server.
+
+    Parameters
+    ----------
+    port
+        The server's port.
+    secret
+        Its secret.
+
+    Returns
+    -------
+    dict
+        The body.
+    """
+    return connection(
+        "s3",
+        {"bucket": "landing", "region": "eu-central-1", "endpoint": f"https://localhost:{port}"},
+        {"access_key_id": "AKID", "prefix": "in/"},
+        secret=secret,
+        endpoints=[("localhost", port)],
+    )
+
+
+def test_s3_credentials_list_one_object_signed_as_sent(
+    authority: Authority, tmp_path: Path
+) -> None:
+    """The step lists at most one object under the prefix; the signature is of that request."""
+    os.environ["LAKANA_CA_BUNDLE"] = str(authority.ca_file)
+    with answering(authority, tmp_path, 200, b"<ListBucketResult/>") as server:
+        outcome, message = _check.check(
+            _s3(server.port, {"secret_access_key": SECRET}), {}, timeout=FAST
+        )
+
+    assert outcome == "ok"
+    assert message.endswith(", credentials accepted")
+    (path, headers) = server.requests[-1]
+    assert path == "/landing?list-type=2&max-keys=1&prefix=in%2F"
+    resigned = _check.sigv4_headers(
+        host=f"localhost:{server.port}",
+        path="/landing",
+        params={"list-type": "2", "max-keys": "1", "prefix": "in/"},
+        region="eu-central-1",
+        access_key_id="AKID",
+        secret_access_key=SECRET,
+        now=time.strptime(headers["x-amz-date"], "%Y%m%dT%H%M%SZ"),
+    )
+    assert headers["authorization"] == resigned["Authorization"]
+    assert SECRET not in message
+
+
+def test_a_refused_s3_key_is_credentials_with_the_stores_code(
+    authority: Authority, tmp_path: Path
+) -> None:
+    """403 with S3's error XML: `credentials`, the store's code and message, no secret."""
+    os.environ["LAKANA_CA_BUNDLE"] = str(authority.ca_file)
+    answer = (
+        b"<Error><Code>SignatureDoesNotMatch</Code><Message>The request signature we "
+        b"calculated does not match</Message></Error>"
+    )
+    with answering(authority, tmp_path, 403, answer) as server:
+        outcome, message = _check.check(
+            _s3(server.port, {"secret_access_key": SECRET}), {}, timeout=FAST
+        )
+
+    assert outcome == "credentials"
+    assert message == (
+        "the store refused the credentials (SignatureDoesNotMatch: The request signature we "
+        "calculated does not match)"
+    )
+
+
+def test_a_missing_bucket_is_not_found(authority: Authority, tmp_path: Path) -> None:
+    os.environ["LAKANA_CA_BUNDLE"] = str(authority.ca_file)
+    answer = b"<Error><Code>NoSuchBucket</Code><Message>gone</Message></Error>"
+    with answering(authority, tmp_path, 404, answer) as server:
+        outcome, message = _check.check(
+            _s3(server.port, {"secret_access_key": SECRET}), {}, timeout=FAST
+        )
+
+    assert (outcome, message) == (
+        "not_found",
+        "bucket `landing` does not exist (NoSuchBucket: gone)",
+    )
+
+
+def test_azure_credentials_with_a_sas_token_or_the_shared_key(
+    authority: Authority, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A SAS token goes into the query; a shared key signs the request it is sent with."""
+    os.environ["LAKANA_CA_BUNDLE"] = str(authority.ca_file)
+    key = base64.b64encode(b"account-key-bytes").decode()
+    with answering(authority, tmp_path, 200, b"<EnumerationResults/>") as server:
+        monkeypatch.setattr(
+            _check, "AZURE_URL", f"https://localhost:{server.port}/{{account}}/{{container}}"
+        )
+        body = connection(
+            "azure",
+            {"account": "acct", "container": "landing"},
+            endpoints=[("localhost", server.port)],
+            secret={"sas_token": "?sv=2022&sig=sas-s3cr3t"},
+        )
+        by_sas = _check.check(body, {}, timeout=FAST)
+        body["secret"] = {"account_key": key}
+        by_key = _check.check(body, {}, timeout=FAST)
+
+    assert by_sas[0] == by_key[0] == "ok"
+    sas_path, _ = server.requests[0]
+    assert sas_path.endswith("&sv=2022&sig=sas-s3cr3t")
+    assert "sas-s3cr3t" not in by_sas[1]
+    key_path, headers = server.requests[1]
+    expected = _check.azure_shared_key(
+        account="acct",
+        account_key=key,
+        path="/acct/landing",
+        params={"restype": "container", "comp": "list", "maxresults": "1"},
+        date=headers["x-ms-date"],
+    )
+    assert key_path == "/acct/landing?comp=list&maxresults=1&restype=container"
+    assert headers["authorization"] == expected["Authorization"]
+
+
+def test_an_azure_key_that_is_not_base64_is_credentials(
+    authority: Authority, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    os.environ["LAKANA_CA_BUNDLE"] = str(authority.ca_file)
+    with answering(authority, tmp_path, 200) as server:
+        monkeypatch.setattr(
+            _check, "AZURE_URL", f"https://localhost:{server.port}/{{account}}/{{container}}"
+        )
+        body = connection(
+            "azure",
+            {"account": "acct", "container": "landing"},
+            endpoints=[("localhost", server.port)],
+            secret={"account_key": "not base64!"},
+        )
+        assert _check.check(body, {}, timeout=FAST) == (
+            "credentials",
+            "the account_key is not base64",
+        )
+
+
+def test_a_gcs_secret_says_its_credentials_are_not_checked(
+    authority: Authority, tmp_path: Path
+) -> None:
+    os.environ["LAKANA_CA_BUNDLE"] = str(authority.ca_file)
+    with answering(authority, tmp_path, 200) as server:
+        body = connection(
+            "gcs",
+            {"bucket": "landing"},
+            endpoints=[("localhost", server.port)],
+            secret={"service_account_json": SECRET},
+        )
+        outcome, message = _check.check(body, {}, timeout=FAST)
+
+    assert outcome == "ok"
+    assert message.endswith(_check.GCS_NOT_CHECKED)
+
+
+def test_a_server_that_does_not_speak_http_is_failed(authority: Authority, tmp_path: Path) -> None:
+    os.environ["LAKANA_CA_BUNDLE"] = str(authority.ca_file)
+
+    def garbage(tls: ssl.SSLSocket) -> None:
+        tls.recv(65536)
+        tls.sendall(b"not http\r\n\r\n")
+
+    cert, key = issue_leaf(authority, tmp_path)
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.load_cert_chain(cert, key)
+
+    def handle(sock: socket.socket) -> None:
+        with contextlib.suppress(OSError), context.wrap_socket(sock, server_side=True) as tls:
+            garbage(tls)
+
+    with listening(handle) as port:
+        outcome, message = _check.check(_s3(port, {"secret_access_key": SECRET}), {}, timeout=FAST)
+
+    assert (outcome, message) == ("failed", f"`localhost:{port}` did not answer HTTP")
+
+
+def test_a_session_token_is_sent_and_signed(authority: Authority, tmp_path: Path) -> None:
+    """A temporary credential's token travels in its header and is part of the signature."""
+    os.environ["LAKANA_CA_BUNDLE"] = str(authority.ca_file)
+    body = _s3(0, {"secret_access_key": SECRET, "session_token": "session-token-0123"})
+    with answering(authority, tmp_path, 200) as server:
+        body["address"] = {**body["address"], "endpoint": f"https://localhost:{server.port}"}  # ty: ignore[invalid-argument-type]
+        body["endpoints"] = [{"host": "localhost", "port": server.port, "role": "service"}]
+        body["settings"] = {"access_key_id": "AKID"}
+        assert _check.check(body, {}, timeout=FAST)[0] == "ok"
+
+    path, headers = server.requests[-1]
+    assert path == "/landing?list-type=2&max-keys=1"
+    assert headers["x-amz-security-token"] == "session-token-0123"
+    assert "x-amz-security-token" in headers["authorization"]
+
+
+def test_another_status_is_failed_with_the_status(authority: Authority, tmp_path: Path) -> None:
+    os.environ["LAKANA_CA_BUNDLE"] = str(authority.ca_file)
+    with answering(authority, tmp_path, 503) as server:
+        outcome, message = _check.check(
+            _s3(server.port, {"secret_access_key": SECRET}), {}, timeout=FAST
+        )
+
+    assert (outcome, message) == ("failed", "the store answered HTTP 503 (HTTP 503)")
+
+
+def test_the_azure_prefix_narrows_the_listing(
+    authority: Authority, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    os.environ["LAKANA_CA_BUNDLE"] = str(authority.ca_file)
+    with answering(authority, tmp_path, 200) as server:
+        monkeypatch.setattr(
+            _check, "AZURE_URL", f"https://localhost:{server.port}/{{account}}/{{container}}"
+        )
+        body = connection(
+            "azure",
+            {"account": "acct", "container": "landing"},
+            {"prefix": "in/"},
+            endpoints=[("localhost", server.port)],
+            secret={"sas_token": "sv=1&sig=x"},
+        )
+        assert _check.check(body, {}, timeout=FAST)[0] == "ok"
+
+    assert server.requests[-1][0] == (
+        "/acct/landing?comp=list&maxresults=1&prefix=in%2F&restype=container&sv=1&sig=x"
+    )
+
+
+def test_a_network_failure_of_the_credential_step_is_its_outcome(
+    authority: Authority, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The store reached once and then refusing the list request: `refused`, naming it."""
+    os.environ["LAKANA_CA_BUNDLE"] = str(authority.ca_file)
+    real_open, calls = _check._open, []
+
+    def second_refused(
+        host: str, port: int, routing: Mapping[str, object], t: float
+    ) -> socket.socket:
+        calls.append(host)
+        if len(calls) > 1:
+            raise ConnectionRefusedError(errno.ECONNREFUSED, "Connection refused")
+        return real_open(host, port, routing, t)
+
+    monkeypatch.setattr(_check, "_open", second_refused)
+    with answering(authority, tmp_path, 200) as server:
+        outcome, message = _check.check(
+            _s3(server.port, {"secret_access_key": SECRET}), {}, timeout=FAST
+        )
+
+    assert outcome == "refused"
+    assert f"localhost:{server.port}" in message

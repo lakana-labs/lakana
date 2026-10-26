@@ -116,8 +116,12 @@ the connection (TCP), the TLS handshake with the connection's CA certificate, an
 For an `http` connection with an OAuth2 `token_url` the token host is checked the same way as the
 base URL, and the test is not `ok` unless both pass; the message names the host that failed. The TLS
 of a `mariadb` connection is not checked yet (the check reads the server's greeting only).
-Credentials are not checked yet: a connection with a secret ends its message with "credentials not
-checked yet", and each kind's credential check arrives with its helper. Any worker runs the check.
+The credentials of `s3` and `azure` connections with a secret are checked last, by listing at most
+one object under the connection's prefix (an `s3` request is signed with SigV4, an `azure` one with the
+account key or the SAS token); a refused key is `credentials`, with the store's own code. The
+credentials of a `gcs` connection are not checked, because the check uses the standard library only
+and cannot sign a service-account key: its message says so, and a refused key shows in the first
+`files.read`. Other kinds end with "credentials not checked yet". Any worker runs the check.
 With the local runner it is a subprocess of the worker's Python that needs `lakana` installed next to
 the worker (without it the test fails and says so). With the Docker runner (the Compose bundle's
 default) the launcher runs it in a container of the task image, from the image's own copy of the check,
@@ -166,8 +170,8 @@ worker`, or the `lakana local` terminal), and one a worker took names the worker
 | `tls` | The TLS handshake failed: the server's certificate is not trusted, or the server offers only TLS older than 1.2, which Lakana refuses (the message says which). | Check the CA: `lakana connection update NAME --ca-file ca.pem`. When the message names the TLS version, upgrade the server to TLS 1.2 or newer. |
 | `not_allowed` | The address is one a task may not reach. | The address must be reachable from outside the Lakana stack. |
 | `root_unavailable` | The worker does not have the ingestion root. | Check the root setting. |
-| `not_found` | The path under the root does not exist. | Check the path under the root: `lakana connection show NAME`. |
-| `credentials` | The source refused the secret. | Check the secret. |
+| `not_found` | The path under the root does not exist, or the bucket or container of an `s3` or `azure` connection does not. | Check the path under the root, or the bucket or container: `lakana connection show NAME`. |
+| `credentials` | The source refused the secret. | Check the secret; give a new one with `lakana connection update NAME --values-stdin` (`--password-stdin` for a one-key secret). |
 | `failed` | The check failed in another way, or no worker finished it within 10 minutes. | See the worker's log. |
 
 The message after the outcome is at most 1,000 characters and holds no secret value. The command
