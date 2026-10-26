@@ -3985,10 +3985,26 @@ secret's values, and the only way a secret reaches a Python asset (#23). User re
   after the check, or, on a worker without the key, a secret bound mid-attempt) is hidden by the
   harness but may appear in the worker-captured log. The worker's decryption is not audited: no value leaves
   the worker, and only the task's own fetch hands one out.
-- **Not retried.** `ConnectionNotDeclared`, `ConnectionRefused` and `CapExceeded`
-  (`lakana.ingest._errors`) carry `retryable = False`, which `_retryable` honours for
-  `IngestError`s of the `function` phase only (a user exception's own `retryable` attribute is
-  ignored); `ConnectionChanged` is `True`.
+- **Not retried.** `ConnectionNotDeclared`, `ConnectionRefused`, `UsageError`,
+  `FileShapeError`, `SourceRefused` and `CapExceeded` (`lakana.ingest._errors`) carry
+  `retryable = False`, which `_retryable` honours for `IngestError`s of the `function` phase
+  only (a user exception's own `retryable` attribute is ignored); `ConnectionChanged` is `True`.
+- **The files helper's stores and HTTPS client** (`lakana.ingest._stores`, `_http`) take every
+  value from the connection, nothing from the task's environment: the obstore stores get the
+  endpoint, credential and `client_options` explicitly (`virtual_hosted_style_request=False`),
+  the task's proxy as `proxy_url` and the trust bundle as `root_certificate`. obstore's client
+  falls back to `HTTPS_PROXY` without a proxy, so a task without the egress proxy gets an unused
+  proxy (`127.0.0.1:9`) with the store's own host in `proxy_excludes`: the store connects
+  directly and any other host fails closed. The httpx client has `trust_env=False` (no
+  `HTTPS_PROXY`, `SSL_CERT_FILE`, `.netrc`), `follow_redirects=False` (a redirect is
+  `SourceRefused`), and the path is percent-encoded per segment below `base_url`. A GCS key is
+  passed on with `private_key`, `private_key_id` and `client_email` only (`gcs_base_url` and
+  `disable_oauth` would redirect or unsign requests). Derived values are registered as secrets
+  (Basic's base64 `user:password`, a SAS token without its `?`). Messages from obstore and
+  httpx are scrubbed before they reach an exception (`files._scrubbed`): every registered secret
+  form becomes `***`, URLs lose user, password and query, S3's `StringToSign`,
+  `CanonicalRequest` and `SignatureProvided`, signature query parameters and an `Authorization`
+  header are cut; control characters in keys and URLs are escaped (`safe_name`).
 - **Residual, accepted.** Deployed code sees the credentials of the connections its asset
   declares and can send them to any host the task can reach (until task egress narrows that to
   the declared endpoints). Reviewing an asset's `connections` is reviewing what it may read. The

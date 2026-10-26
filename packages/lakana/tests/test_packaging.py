@@ -51,7 +51,7 @@ def test_server_extra_is_pinned_to_the_resolved_version() -> None:
 
     assert metadata["optional-dependencies"] == {
         "server": ["lakana-server==1.2.3", "lakana-worker==1.2.3"],
-        "assets": ["polars>=1.30", "fastexcel>=0.21"],
+        "assets": ["polars>=1.30", "fastexcel>=0.21", "obstore>=0.12,<0.13"],
     }
 
 

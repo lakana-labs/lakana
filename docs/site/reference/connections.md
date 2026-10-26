@@ -411,8 +411,10 @@ def customers() -> pl.DataFrame:
 `endpoints` (each `host`, `port` and `role`, `service` or `token`), `secret`, and three fields
 that say how this task reaches the source: `proxy_url`, `relay_address` and `root_path`.
 
-A `directory` connection is read with [`files.read`](ingest.md#filesread), which returns the
-files below its path as a table and never follows a symbolic link out of the root.
+Files are read with [`files.read`](ingest.md#filesread), which returns them as a table, from
+`s3`, `gcs`, `azure`, `http` and `directory` connections. It gives `proxy_url` and the trust
+bundle to its own client, and never follows a symbolic link out of a directory connection's
+root.
 
 ### What a task reaches, and how
 
@@ -424,7 +426,7 @@ local runner connects directly.
 
 | Kind | Docker runner | Local runner |
 |---|---|---|
-| `http`, `s3`, `gcs`, `azure` | `proxy_url` is the egress proxy; give it to your HTTPS client. It holds the task's proxy token, so it is left out of the connection's `repr` and shown as `***` in the task's log. `relay_address` and `root_path` are `None`. | Every field is `None`: connect to `address` directly. |
+| `http`, `s3`, `gcs`, `azure` | `proxy_url` is the egress proxy; give it to your HTTPS client (`files.read` does). It holds the task's proxy token, so it is left out of the connection's `repr` and shown as `***` in the task's log. `relay_address` and `root_path` are `None`. | Every field is `None`: connect to `address` directly. |
 | `postgresql`, `mariadb`, `tcp` | `relay_address` is `lakana-relay:<port>` (ports from 15001, in the order the asset declares its connections); connect there instead of `address["host"]`. TLS still checks the real host name. | `relay_address` is `None`: connect to `address` directly. |
 | `directory`, `sqlite-file` | `root_path` is `/ingest/<root>/<path>`, read-only. | `root_path` is `<directory>/<path>`, where `<directory>` is the root's entry in `LAKANA_RUN__INGESTION_ROOTS`. |
 

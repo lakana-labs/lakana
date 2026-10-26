@@ -15,7 +15,7 @@ import pyarrow as pa
 import pytest
 
 from lakana import context
-from lakana.ingest import CapExceeded, IngestError, SourceError, _connections, files
+from lakana.ingest import CapExceeded, IngestError, SourceError, _connections, _formats, files
 from lakana.ingest._directory import DirectoryError, DirectoryIOError, RootUnavailable
 
 _UTC = dt.UTC
@@ -484,7 +484,8 @@ def test_another_kind_names_the_helper_that_reads_it(root: Path) -> None:
     with pytest.raises(IngestError) as caught:
         files.read("crm-db", "*.csv")
     assert str(caught.value) == (
-        "files.read reads directory connections; `crm-db` is postgresql: use sql.read"
+        "files.read reads http, s3, gcs, azure and directory connections; `crm-db` is "
+        "postgresql: use sql.read"
     )
 
 
@@ -556,6 +557,9 @@ def test_a_source_without_a_time_is_refused_with_since_and_mtime(
 
         def read(self, path: str, max_bytes: int) -> bytes:
             return b"id\n"
+
+        def close(self) -> None:
+            pass
 
     monkeypatch.setattr(files, "_source", lambda conn: _NoTimes())
 
@@ -642,7 +646,7 @@ def test_files_that_cannot_be_combined_are_named_with_their_types() -> None:
     assert "pass schema=" in message
 
 
-@pytest.mark.parametrize("argument", ["max_files", "max_file_bytes", "max_total_bytes"])
+@pytest.mark.parametrize("argument", ["max_files", "max_file_bytes", "max_total_bytes", "max_rows"])
 @pytest.mark.parametrize("value", [0, -1, 1.5, True, "10"])
 def test_a_cap_must_be_a_positive_whole_number(root: Path, argument: str, value: object) -> None:
     """A zero or negative cap would disable or break the check; it is refused."""
@@ -666,20 +670,19 @@ def test_a_schema_value_that_is_no_polars_type_names_the_column(root: Path) -> N
     assert files.read("exports", "a.csv", schema={"id": pl.Int64()}).num_rows == 1
 
 
-@pytest.mark.parametrize("kind", ["http", "s3", "gcs", "azure"])
-def test_a_store_or_web_connection_is_told_to_use_connections_get(
-    root: Path, monkeypatch: pytest.MonkeyPatch, kind: str
+def test_a_tcp_connection_is_told_to_use_connections_get(
+    root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Kinds `files.read` does not read yet point to the connection's own client."""
+    """A kind no helper reads points to the team's own driver."""
     from types import SimpleNamespace
 
-    monkeypatch.setattr(files, "fetch", lambda name: SimpleNamespace(name=name, kind=kind))
+    monkeypatch.setattr(files, "fetch", lambda name: SimpleNamespace(name=name, kind="tcp"))
 
     with pytest.raises(IngestError) as caught:
         files.read("store", "*.csv")
     assert str(caught.value) == (
-        f"files.read reads directory connections; `store` is {kind}: "
-        "use connections.get with the team's own client"
+        "files.read reads http, s3, gcs, azure and directory connections; `store` is tcp: "
+        "use connections.get with the team's own driver"
     )
 
 
@@ -1107,3 +1110,61 @@ def test_an_argument_error_is_not_retried(root: Path) -> None:
         assert isinstance(caught.value, (UsageError, DirectoryError)), caught.value
         assert caught.value.retryable is False
         assert runner._retryable("function", caught.value) is False
+
+
+def test_max_rows_defaults_to_ten_million() -> None:
+    """The default is about the most rows the server's 256 MiB append takes of a narrow table."""
+    import inspect
+
+    assert files.DEFAULT_MAX_ROWS == 10_000_000
+    assert inspect.signature(files.read).parameters["max_rows"].default == files.DEFAULT_MAX_ROWS
+
+
+def test_max_rows_counts_the_rows_of_every_file_and_names_the_cap(root: Path) -> None:
+    """Over the files together: the message names the cap, the pattern and the next step."""
+    _write(root / "a.csv", b"id\n1\n2\n3\n")
+    _write(root / "b.csv", b"id\n4\n5\n6\n")
+
+    assert files.read("exports", "*.csv", max_rows=6).num_rows == 6
+    with pytest.raises(CapExceeded) as caught:
+        files.read("exports", "*.csv", max_rows=5)
+    assert str(caught.value) == (
+        "`exports`: the files matching '*.csv' hold more than max_rows (5) rows; narrow the "
+        "pattern, pass since= to read fewer files, or pass a larger max_rows"
+    )
+    with pytest.raises(CapExceeded) as since_caught:
+        files.read("exports", "*.csv", max_rows=2, since=None)
+    assert str(since_caught.value).endswith(
+        "hold more than max_rows (2) rows; narrow the pattern or pass a larger max_rows"
+    )
+    assert since_caught.value.retryable is False
+
+
+@pytest.mark.parametrize("name", ["a.csv", "a.parquet", "a.json", "a.ndjson", "a.xlsx", "a.ods"])
+def test_max_rows_stops_each_format(root: Path, name: str) -> None:
+    """Each reader stops after the cap: Parquet, CSV, NDJSON and sheets decode no further."""
+    frame = pl.DataFrame({"id": ["1", "2", "3", "4"]})
+    data = {
+        "a.csv": b"id\n1\n2\n3\n4\n",
+        "a.parquet": _pq(frame),
+        "a.json": b'[{"id": "1"}, {"id": "2"}, {"id": "3"}, {"id": "4"}]',
+        "a.ndjson": b'{"id": "1"}\n{"id": "2"}\n{"id": "3"}\n{"id": "4"}\n',
+        "a.xlsx": _xlsx(frame, "S1"),
+        "a.ods": _ods([["id"], ["1"], ["2"], ["3"], ["4"]]),
+    }[name]
+    _write(root / name, data)
+
+    assert files.read("exports", name, max_rows=4).num_rows == 4
+    with pytest.raises(CapExceeded, match=r"more than max_rows \(3\) rows"):
+        files.read("exports", name, max_rows=3)
+
+
+def test_parse_reads_at_most_max_rows() -> None:
+    """`parse` itself returns no more rows than asked for, in every format."""
+    assert _formats.parse(b"id\n1\n2\n3\n", name="x/a.csv", format="csv", max_rows=2).height == 2
+    assert (
+        _formats.parse(b'[{"a": 1}, {"a": 2}]', name="x/a", format="json", max_rows=1).height == 1
+    )
+    assert _formats.parse(b"id\n1\n2\n", name="x/a.csv", format="csv").height == 2
+    sheet = _xlsx(pl.DataFrame({"id": [1, 2, 3]}), "S1")
+    assert _formats.parse(sheet, name="x/a.xlsx", format="xlsx").height == 3

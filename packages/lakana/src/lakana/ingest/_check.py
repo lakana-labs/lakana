@@ -271,8 +271,42 @@ def _open(host: str, port: int, routing: Mapping[str, Any], timeout: float) -> s
         _raise_network(exc, dialed[0], dialed[1], timeout)
 
 
+def trust_context(ca_pem: str | None, *, verify: bool = True) -> ssl.SSLContext:
+    """Build a client TLS context: TLS 1.2 or newer, the trust bundle plus the connection's CA.
+
+    The one TLS policy of the check and of the helpers of `lakana.ingest` (``files.read`` over
+    HTTPS uses it too), so a connection the test passes is trusted the same way by a task.
+
+    Parameters
+    ----------
+    ca_pem
+        The connection's own CA certificates (PEM), trusted in addition to the bundle.
+    verify
+        `False` encrypts without checking the chain or the name (libpq's ``require``).
+
+    Returns
+    -------
+    ssl.SSLContext
+        The context; it trusts `LAKANA_CA_BUNDLE` when set, else the system's roots.
+
+    Raises
+    ------
+    OSError
+        When the file `LAKANA_CA_BUNDLE` names cannot be read (`ssl.SSLError`, an `OSError`
+        too, when it or `ca_pem` holds no certificate).
+    """
+    context = ssl.create_default_context(cafile=os.environ.get("LAKANA_CA_BUNDLE"))
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    if ca_pem:
+        context.load_verify_locations(cadata=ca_pem)
+    if not verify:
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+    return context
+
+
 def _context(ca_pem: str | None, mode: str) -> ssl.SSLContext:
-    """Build the TLS context of a check: TLS 1.2 or newer, verification as configured.
+    """Build the TLS context of a check: `trust_context`, its unreadable bundle as an outcome.
 
     Parameters
     ----------
@@ -291,22 +325,14 @@ def _context(ca_pem: str | None, mode: str) -> ssl.SSLContext:
     _Found
         ``failed`` when the file `LAKANA_CA_BUNDLE` names cannot be read.
     """
-    bundle = os.environ.get("LAKANA_CA_BUNDLE")
     try:
-        context = ssl.create_default_context(cafile=bundle)
+        return trust_context(ca_pem, verify=mode != "require")
     except (FileNotFoundError, PermissionError):
         raise _Found(
             "failed",
-            f"the trust bundle `{bundle}` (LAKANA_CA_BUNDLE) cannot be read; check that the file "
-            "exists on this worker",
+            f"the trust bundle `{os.environ.get('LAKANA_CA_BUNDLE')}` (LAKANA_CA_BUNDLE) cannot "
+            "be read; check that the file exists on this worker",
         ) from None
-    context.minimum_version = ssl.TLSVersion.TLSv1_2
-    if ca_pem:
-        context.load_verify_locations(cadata=ca_pem)
-    if mode == "require":
-        context.check_hostname = False
-        context.verify_mode = ssl.CERT_NONE
-    return context
 
 
 def _tls(sock: socket.socket, host: str, ca_pem: str | None, mode: str) -> socket.socket:

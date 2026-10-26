@@ -1207,6 +1207,54 @@ otherwise. Run the step locally the same way, under the cap in "Memory limit".
   The version they compare is `pl.__version__`: with the overlay two `polars` distributions are
   visible to `importlib.metadata`, and `version("polars")` may name the locked one.
 
+## Object-store emulators
+
+`packages/lakana-worker/tests/test_ingest_stores_integration.py` (`integration`) reads files
+through `lakana.ingest.files` from three emulators, each over TLS, and through the real egress
+proxy. It lives in the worker's tests because it builds the trust bundle with
+`lakana_worker.trust.build_trust_bundle` and runs `EgressServer`, which `packages/lakana` tests
+may not import.
+
+| Store | Image (tag and digest) | Licence | Base image | TLS |
+|---|---|---|---|---|
+| S3 | `chrislusf/seaweedfs:4.47@sha256:ce9e796f1fe6f06968f4c04bdaf8f678dad9c8acdfef3d244133d71bfa6bf882` | Apache-2.0 | Alpine 3.24 | `-s3.cert.file` / `-s3.key.file` |
+| GCS | `fsouza/fake-gcs-server:1.56.0@sha256:4957e37e252c8720cf861eb14e0b5aa671845e833c49285a45465ec7fa24e981` | BSD-2-Clause | Alpine 3.24 | `-scheme https -cert-location -private-key-location` |
+| Azure | `mcr.microsoft.com/azure-storage/azurite:3.37.0@sha256:830430c1da1a2d537e08f3e6764dd1f5ae00cf0346bcaf625b968ec3f0971fd5` | MIT | Alpine 3.23 with Node 22 | `--cert` / `--key` |
+
+The Alpine base images hold BusyBox (GPL-2.0). The images are test containers only: pulled by
+the integration tier, never built into, copied into or shipped with a Lakana artifact, so the
+licence rule for dependencies does not reach them (the same judgement as for the `postgres`
+image of the integration tier). Change a tag only together with its digest.
+
+How the module sets them up:
+
+- **Certificates.** One test authority (`tls_fixture.make_authority`) signs one leaf for
+  `127.0.0.1` and `localhost` (`issue_leaf`); the leaf and its key go into each container with
+  `with_copy_into_container` at `/certs`. The task trusts the authority only through
+  `LAKANA_CA_BUNDLE`, which points at `build_trust_bundle(authority.ca_file)` (Mozilla's roots
+  plus the authority), the way production trusts a private-CA store. Every URL uses
+  `127.0.0.1`, never `localhost` (which may resolve to `::1`).
+- **SeaweedFS** gets one identity (as `SeaweedFsContainer` does) and checks signatures, so the
+  wrong-secret case runs against it. The bucket is made with the `minio` client over TLS.
+- **fake-gcs-server** serves its XML API, where obstore lists and reads, only on its
+  `-public-host`, which must equal the `Host` the client sends: the module picks a free host
+  port first, binds it, and passes `127.0.0.1:<port>`. It refuses obstore's upload of a key
+  holding `/`, so the module uploads through its JSON media upload. It accepts any key, so GCS
+  has no wrong-secret case. `_stores.GCS_BASE_URL` is patched to the emulator.
+- **Azurite** runs the blob service only. obstore cannot create a container, so the module sends
+  one Shared Key request (`PUT ?restype=container`, signed with Azurite's published development
+  key) and makes an account SAS for the SAS case. It checks Shared Key signatures, so the
+  wrong-secret case runs against it too. `_stores.AZURE_ENDPOINT` is patched to
+  `https://127.0.0.1:<port>/devstoreaccount1` (path style).
+- **The egress proxy** is `EgressServer` in the test process, allowed to reach loopback
+  (`reachable`) and given a routing table with one attached network (it refuses every direct
+  connection without one). A token minted for the emulator's port reads; a token for another
+  port is refused.
+
+The module takes about 45 seconds once the images are pulled. obstore retries a failed
+connection ten times within about 2 to 5 seconds before it reports it, which is most of the time
+of the certificate and proxy-refusal cases.
+
 ## Python assets in the two tiers (M5c2a)
 
 **Unit tier.** `uv` is a scripted stand-in (`packages/lakana-worker/tests/test_venvs.py`), the

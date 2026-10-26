@@ -17,6 +17,7 @@ from lakana.ingest._errors import (
     FileShapeError,
     IngestError,
     SourceError,
+    SourceRefused,
     UsageError,
 )
 
@@ -28,6 +29,7 @@ __all__ = [
     "FileShapeError",
     "IngestError",
     "SourceError",
+    "SourceRefused",
     "UsageError",
     "connections",
     "files",
