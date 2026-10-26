@@ -422,8 +422,9 @@ Files are read with [`files.read`](ingest.md#filesread), which returns them as a
 `s3`, `gcs`, `azure`, `http` and `directory` connections. It gives `proxy_url` and the trust
 bundle to its own client, and never follows a symbolic link out of a directory connection's
 root. Databases are read with [`sql.read`](ingest.md#sqlread), from `postgresql`, `mariadb` and
-`sqlite-file` connections: it dials `relay_address` under the Docker runner and runs every query
-read-only. A `tcp` connection has no helper; use `connections.get` with your own client.
+`sqlite-file` connections: it dials `relay_address` under the Docker runner, runs every query
+read-only, and sends MariaDB only a statement that starts with `SELECT`, `WITH`, `VALUES` or
+`TABLE` (MariaDB commits before DDL, which no read-only transaction stops). A `tcp` connection has no helper; use `connections.get` with your own client.
 
 ### What a task reaches, and how
 

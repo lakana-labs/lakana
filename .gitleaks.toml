@@ -60,3 +60,19 @@ regexes = [
   '''_KEY = b"-----BEGIN PRIVATE KEY-----\\nAA==\\n"''',
   '''\(_CERTIFICATE \+ b"-----BEGIN PRIVATE KEY-----\\nAA==\\n", "also holds a private key"\),''',
 ]
+
+[[allowlists]]
+# A made-up wrong password that commits 80b0634 and 483adbf of PR 7a (#27) had in
+# test_ingest_sql_integration.py (now made at run time); the pull request's commit scan still
+# reads those commits.
+description = "A fake wrong password of PR 7a, in the commits that had it"
+condition = "AND"
+commits = [
+  "80b0634155d3546d71fb2c395f8f89b413d722e1",
+  "483adbf6c0b39264bd0ad150864db7f21de5ac06",
+]
+regexTarget = "line"
+regexes = [
+  '''    _crm\(pki, password="wrong-0123456789"\)''',
+  '''    _shop\(pki, password="wrong-0123456789"\)''',
+]

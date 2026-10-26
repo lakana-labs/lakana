@@ -15,6 +15,7 @@ import datetime as dt
 import decimal
 import ipaddress
 import re
+import secrets
 import socket
 import sqlite3
 import sys
@@ -58,8 +59,10 @@ RELAY_ADDRESS = "127.0.0.6"
 RELAY_PORT = 15001
 MARIADB_RELAY_PORT = 15002
 PLAIN_RELAY_PORT = 15003
-_READER_PASSWORD = "reader-pa55-0123456789"
-_ADMIN_PASSWORD = "admin-pa55-0123456789"
+# Made at run time, so no literal in the code looks like a credential.
+_READER_PASSWORD = secrets.token_urlsafe(16)
+_ADMIN_PASSWORD = secrets.token_urlsafe(16)
+_WRONG_PASSWORD = secrets.token_urlsafe(16)
 _ROUTE_HEADER = "Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\n"
 _ROUTE_ATTACHED = "eth1\t0000090A\t00000000\t0001\t0\t0\t0\t00FFFFFF\n"
 """10.9.0.0/24: the network the relay reaches out through; loopback is not attached."""
@@ -397,7 +400,7 @@ def test_a_certificate_for_another_host_gives_the_tls_text(pki: _Pki, relay: lis
 
 def test_a_wrong_password_gives_the_authentication_text(pki: _Pki, relay: list[str]) -> None:
     """PostgreSQL's words are kept; the wrong password is not."""
-    _crm(pki, password="wrong-0123456789")
+    _crm(pki, password=_WRONG_PASSWORD)
 
     with pytest.raises(SourceRefused) as caught:
         sql.read("crm-db", "SELECT 1")
@@ -405,7 +408,7 @@ def test_a_wrong_password_gives_the_authentication_text(pki: _Pki, relay: list[s
     text = str(caught.value)
     assert text.startswith("`crm-db`: authentication failed (PostgreSQL said: ")
     assert 'password authentication failed for user "reader"' in text
-    assert "wrong-0123456789" not in text
+    assert _WRONG_PASSWORD not in text
 
 
 @pytest.mark.parametrize("params", [None, {"id": "00010203-0405-0607-0809-0a0b0c0d0e0f"}])
@@ -514,6 +517,33 @@ def test_text_compared_with_a_timestamptz_names_both_fixes(pki: _Pki, relay: lis
         sql.read("crm-db", "SELECT id FROM kinds WHERE at > :since", params={"since": "1970-01-01"})
 
 
+def test_postgresql_binds_every_plain_value_type(pki: _Pki, relay: list[str]) -> None:
+    """The parameter types sql.read accepts all reach PostgreSQL with their meaning."""
+    _crm(pki)
+    values: dict[str, object] = {
+        "s": "x",
+        "i": 7,
+        "f": 1.5,
+        "b": True,
+        "d": decimal.Decimal("1.25"),
+        "day": dt.date(2026, 1, 2),
+        "at": dt.datetime(2026, 1, 2, 3, 4, 5, tzinfo=dt.UTC),
+        "tm": dt.time(3, 4, 5),
+        "raw": b"\x00'",
+    }
+
+    table = sql.read(
+        "crm-db",
+        "SELECT CAST(:s AS text) AS s, CAST(:i AS bigint) AS i, CAST(:f AS float8) AS f, "
+        "CAST(:b AS boolean) AS b, CAST(:d AS numeric(10, 2)) AS d, CAST(:day AS date) AS day, "
+        "CAST(:at AS timestamptz) AS at, CAST(:tm AS time) AS tm, CAST(:raw AS bytea) AS raw",
+        params=values,
+    )
+
+    row = table.to_pylist()[0]
+    assert row == {**values, "d": decimal.Decimal("1.25")}
+
+
 def test_without_parameters_the_byte_cap_stops_a_streamed_result(
     pki: _Pki, relay: list[str]
 ) -> None:
@@ -563,7 +593,7 @@ def test_sqlite_reads_a_real_file_read_only(tmp_path: Path) -> None:
 
 # --- MariaDB through PyMySQL --------------------------------------------------------------------
 
-_MARIADB_ROOT = "root-pa55-0123456789"
+_MARIADB_ROOT = secrets.token_urlsafe(16)
 _MARIADB_SETUP = """
 SET time_zone = '+02:00';
 CREATE TABLE kinds (
@@ -580,6 +610,11 @@ INSERT INTO kinds VALUES (
     'text', '{"a": 1}', 'b', 'x,y', X'00FF', X'0102', POINT(1, 2), b'101'
 );
 CREATE TABLE zero (day DATE);
+CREATE PROCEDURE wipe() DELETE FROM kinds;
+DELIMITER //
+CREATE FUNCTION scribble() RETURNS INT MODIFIES SQL DATA
+BEGIN INSERT INTO kinds (t) VALUES (9); RETURN 1; END//
+DELIMITER ;
 SET sql_mode = '';
 INSERT INTO zero VALUES ('0000-00-00');
 """
@@ -870,10 +905,10 @@ def test_mariadb_binds_an_aware_value_as_utc_and_keeps_a_literal_percent(
 def test_mariadb_a_write_fails_in_the_read_only_transaction(
     pki: _Pki, mariadb_relay: list[str]
 ) -> None:
-    """The reader may write to its database; the transaction may not."""
+    """The reader may write to its database; an INSERT is refused before it is sent."""
     _shop(pki)
 
-    with pytest.raises(UsageError, match="read-only transaction, and this one writes"):
+    with pytest.raises(UsageError, match="this one starts with INSERT"):
         sql.read("shop-db", "INSERT INTO kinds (t) VALUES (1)")
 
 
@@ -891,14 +926,14 @@ def test_mariadb_a_wrong_password_gives_the_authentication_text(
     pki: _Pki, mariadb_relay: list[str]
 ) -> None:
     """MariaDB's words are kept; the wrong password is not."""
-    _shop(pki, password="wrong-0123456789")
+    _shop(pki, password=_WRONG_PASSWORD)
 
     with pytest.raises(SourceRefused) as caught:
         sql.read("shop-db", "SELECT 1")
 
     text = str(caught.value)
     assert text.startswith("`shop-db`: authentication failed (MariaDB said: Access denied for user")
-    assert "wrong-0123456789" not in text
+    assert _WRONG_PASSWORD not in text
 
 
 def test_mariadb_a_certificate_of_another_authority_gives_the_tls_text(
@@ -1043,12 +1078,86 @@ def test_mariadb_reads_dash_dash_before_delete_as_a_comment(
     assert table.to_pylist() == [{"c": 1}]
 
 
-@pytest.mark.parametrize("statement", ["SET @a = 1", "DO 1", "SELECT 1 INTO @v"])
-def test_mariadb_a_statement_without_rows_is_refused(
-    pki: _Pki, mariadb_relay: list[str], statement: str
-) -> None:
+def test_mariadb_a_select_without_rows_is_refused(pki: _Pki, mariadb_relay: list[str]) -> None:
     """No result set: the message says a statement must return rows."""
     _shop(pki)
 
     with pytest.raises(UsageError, match=r"sql\.read needs a statement that returns rows"):
+        sql.read("shop-db", "SELECT 1 INTO @v")
+
+
+def _kinds_rows(container: DockerContainer) -> str:
+    """Count the rows of `kinds` as root.
+
+    Parameters
+    ----------
+    container
+        The running MariaDB container.
+
+    Returns
+    -------
+    str
+        The count, as the client prints it.
+    """
+    result = container.exec(
+        [
+            "mariadb",
+            "-uroot",
+            f"-p{_MARIADB_ROOT}",
+            "shop",
+            "-N",
+            "-e",
+            "SELECT count(*) FROM kinds",
+        ]
+    )
+    return result.output.decode().strip()
+
+
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "DROP TABLE kinds",
+        "TRUNCATE kinds",
+        "CREATE TABLE made (a INT)",
+        "SET STATEMENT transaction_read_only=0 FOR DROP TABLE kinds",
+        "CALL wipe()",
+        "SET @a = 1",
+        "DO 1",
+        "WITH x AS (SELECT 1) DELETE FROM kinds",
+        "WITH x AS (SELECT 1) CREATE TABLE made (a INT)",
+        "SELECT t INTO OUTFILE '/tmp/out.txt' FROM kinds",
+    ],
+)
+def test_mariadb_refuses_every_statement_that_could_write(
+    pki: _Pki,
+    mariadb_relay: list[str],
+    mariadb_container: DockerContainer,
+    statement: str,
+) -> None:
+    """DDL commits before a read-only transaction can stop it: refused, and nothing changed."""
+    _shop(pki)
+
+    with pytest.raises(UsageError):
         sql.read("shop-db", statement)
+
+    assert _kinds_rows(mariadb_container) == "1"
+    tables = mariadb_container.exec(
+        ["mariadb", "-uroot", f"-p{_MARIADB_ROOT}", "shop", "-N", "-e", "SHOW TABLES LIKE 'made'"]
+    )
+    assert tables.output.decode().strip() == ""
+
+
+def test_mariadb_dml_after_with_is_stopped_by_the_read_only_transaction(
+    pki: _Pki, mariadb_relay: list[str], mariadb_container: DockerContainer
+) -> None:
+    """A write inside a statement that starts with WITH: the read-only transaction stops it.
+
+    MariaDB has no WITH ... UPDATE or DELETE (a syntax error, see the case above); the write
+    that gets past the keyword check is a function with side effects.
+    """
+    _shop(pki)
+
+    with pytest.raises(UsageError, match="read-only transaction, and this one writes"):
+        sql.read("shop-db", "WITH x AS (SELECT scribble() AS n) SELECT n FROM x")
+
+    assert _kinds_rows(mariadb_container) == "1"

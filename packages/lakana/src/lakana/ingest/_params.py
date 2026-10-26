@@ -2,9 +2,9 @@
 
 Values never enter the query text: the driver binds them. The tokenizer skips single-quoted
 strings (with `''`, and backslash escapes for `E'...'` or where the database uses them),
-double-quoted identifiers or strings, backtick identifiers, dollar quotes (`$$...$$`,
-`$tag$...$tag$`), `--` and nested `/* */` comments, MariaDB's `#` comments (``pyformat``), and
-`::` casts.
+double-quoted identifiers or strings, backtick identifiers, PostgreSQL's dollar quotes
+(`$$...$$`, `$tag$...$tag$`), `--` and `/* */` comments (nested for PostgreSQL only), MariaDB's
+`#` comments (``pyformat``), and `::` casts. `code_text` keeps only what is left: the code.
 
 Where the tokenizer and the database could read a quote or a comment differently, it errs
 towards "literal": a placeholder it skips reaches the database unchanged and fails there, but
@@ -129,15 +129,32 @@ def _line_comment(text: str, start: int, *, mariadb: bool) -> bool:
     -------
     bool
         Whether the rest of the line is a comment.
+
+    Raises
+    ------
+    UsageError
+        For ``--`` right after a number's exponent, where MySQL reads no comment.
     """
     if not mariadb:
         return text.startswith("--", start)
     if text.startswith("#", start):
         return True
     after = start + 2
-    return text.startswith("--", start) and (
+    if not text.startswith("--", start) or not (
         after >= len(text) or ord(text[after]) <= 32 or text[after] == "\x7f"
-    )
+    ):
+        return False
+    if (
+        start >= 2
+        and text[start - 1] in "eE"
+        and (text[start - 2].isdigit() or text[start - 2] == ".")
+    ):
+        # MySQL reads `1.5e--` as the exponent sign and a minus sign, not as a comment.
+        raise UsageError(
+            "the query has `--` right after a number's exponent (such as 1.5e--), which MySQL "
+            "and MariaDB read differently; write a space between the number and --"
+        )
+    return True
 
 
 def translate(
@@ -170,11 +187,92 @@ def translate(
     tuple
         The rewritten query and the values: a list for ``numeric`` and ``qmark``, a dict for
         ``pyformat``.
+    """
+    sql, values, _ = _scan(
+        query,
+        params,
+        style=style,
+        backslash_escapes=backslash_escapes,
+        ansi_quotes=ansi_quotes,
+        bind=True,
+    )
+    return sql, values
+
+
+def code_text(
+    query: str,
+    *,
+    style: Literal["numeric", "qmark", "pyformat"],
+    backslash_escapes: bool = False,
+    ansi_quotes: bool = False,
+) -> str:
+    """Blank out a query's literals, quoted names, comments and placeholders.
+
+    What is left is what the database reads as code, read with the same rules as `translate`,
+    so a check of keywords (the first statement's, ``INTO OUTFILE``) sees what runs.
+
+    Parameters
+    ----------
+    query
+        The asset's SQL.
+    style
+        As for `translate`.
+    backslash_escapes
+        As for `translate`.
+    ansi_quotes
+        As for `translate`.
+
+    Returns
+    -------
+    str
+        The code, each blanked part a single space.
+    """
+    return _scan(
+        query,
+        None,
+        style=style,
+        backslash_escapes=backslash_escapes,
+        ansi_quotes=ansi_quotes,
+        bind=False,
+    )[2]
+
+
+def _scan(
+    query: str,
+    params: Mapping[str, object] | None,
+    *,
+    style: Literal["numeric", "qmark", "pyformat"],
+    backslash_escapes: bool,
+    ansi_quotes: bool,
+    bind: bool,
+) -> tuple[str, list[object] | dict[str, object], str]:
+    """Read a query once: rewrite its placeholders and keep its code.
+
+    Parameters
+    ----------
+    query
+        The asset's SQL.
+    params
+        Name → value; `None` for none.
+    style
+        As for `translate`.
+    backslash_escapes
+        As for `translate`.
+    ansi_quotes
+        As for `translate`.
+    bind
+        Whether placeholders are matched with `params` (else only blanked in the code).
+
+    Returns
+    -------
+    tuple
+        The rewritten query, the values, and the code (`code_text`).
 
     Raises
     ------
     UsageError
-        For a placeholder without a value, a value without a placeholder, or a `None` value.
+        For a placeholder without a value, a value without a placeholder, a `None` value, or
+        text this tokenizer cannot read the way MariaDB does.
     """
     given = dict(params or {})
     for name, value in given.items():
@@ -184,17 +282,19 @@ def translate(
                 "ctx.watermark() is None: give the start value with ctx.watermark(default=...)"
             )
     out: list[str] = []
+    code: list[str] = []
     numbers: dict[str, int] = {}
     ordered: list[object] = []
     used: set[str] = set()
-    mariadb = style == "pyformat"
+    mariadb, postgres = style == "pyformat", style == "numeric"
     i, n = 0, len(query)
     while i < n:
         char = query[i]
+        kept = " "
         if char in "'\"`":
             escaped = backslash_escapes and char != "`" and not (char == '"' and ansi_quotes)
             if (
-                not mariadb
+                postgres
                 and char == "'"
                 and i > 0
                 and query[i - 1] in "eE"
@@ -212,9 +312,9 @@ def translate(
                     "runs or skips by its version; sql.read cannot tell which, so write the "
                     "statement without it"
                 )
-            end = _comment_end(query, i, nested=not mariadb)
+            end = _comment_end(query, i, nested=postgres)
         elif (
-            not mariadb
+            postgres
             and char == "$"
             and (i == 0 or not _word(query[i - 1]))
             and (match := _DOLLAR.match(query, i))
@@ -222,9 +322,13 @@ def translate(
             close = query.find(match.group(0), match.end())
             end = n if close < 0 else close + len(match.group(0))
         elif query.startswith("::", i):
-            end = i + 2
+            end, kept = i + 2, "::"
         elif char == ":" and (match := _NAME.match(query, i + 1)):
             name = match.group(0)
+            code.append(" ")
+            i = match.end()
+            if not bind:
+                continue
             if name not in given:
                 raise UsageError(f"placeholder :{name} has no value in params")
             used.add(name)
@@ -238,21 +342,22 @@ def translate(
                 out.append("?")
             else:
                 out.append(f"%({name})s")
-            i = match.end()
             continue
         elif char == "%" and style == "pyformat":
             out.append("%%")
+            code.append("%")
             i += 1
             continue
         else:
-            end = i + 1
+            end, kept = i + 1, char
         chunk = query[i:end]
         out.append(chunk.replace("%", "%%") if style == "pyformat" else chunk)
+        code.append(kept)
         i = end
-    unused = sorted(set(given) - used)
+    unused = sorted(set(given) - used) if bind else []
     if unused:
         raise UsageError(f"params has {', '.join(unused)}, which the query does not use")
     values: list[object] | dict[str, object] = (
         {name: given[name] for name in sorted(used)} if style == "pyformat" else ordered
     )
-    return "".join(out), values
+    return "".join(out), values, "".join(code)

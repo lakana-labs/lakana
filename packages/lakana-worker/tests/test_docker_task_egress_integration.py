@@ -23,6 +23,7 @@ import io
 import ipaddress
 import json
 import os
+import secrets
 import tarfile
 import threading
 import time
@@ -1416,7 +1417,7 @@ def test_files_read_reads_a_mounted_root_and_never_follows_a_link(
 
 _DB_HOST = "db.lakana.test"
 _POSTGRES = "postgres:18.6@sha256:edb0c08dc33befd0262ab3b5cf1c4f3f8cfd8b09e88c05b45adee29d6761ddb6"
-_READER = "reader-pa55-0123456789"
+_READER = secrets.token_urlsafe(16)
 _POSTGRES_START = (
     "install -d -o 999 -g 999 -m 0700 /etc/pg-ssl && "
     "install -o 999 -g 999 -m 0600 /certs/server.crt /certs/server.key /etc/pg-ssl/ && "
@@ -1489,7 +1490,7 @@ def test_sql_read_reaches_postgresql_through_the_relay_with_verify_full(
         _POSTGRES,
         ["bash", "-c", _POSTGRES_START],
         entrypoint=[],
-        environment={"POSTGRES_PASSWORD": "admin-pa55-0123456789"},
+        environment={"POSTGRES_PASSWORD": secrets.token_urlsafe(16)},
         labels=sources.stack.labels,
         network=sources.network,
         networking_config={sources.network: client.api.create_endpoint_config(aliases=[_DB_HOST])},

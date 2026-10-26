@@ -229,3 +229,23 @@ def test_pyformat_reads_double_quotes_by_ansi_quotes(
             expected,
             {"v": 1},
         )
+
+
+def test_pyformat_refuses_dash_dash_right_after_a_number_exponent() -> None:
+    """MySQL reads `1.5e--` as `1.5e-` then `-`: no comment, unlike MariaDB and this tokenizer."""
+    with pytest.raises(UsageError, match=r"a space between the number and --"):
+        translate("SELECT 1.5e-- '\n AS a, :v AS b -- '", {"v": 1}, style="pyformat")
+
+
+def test_qmark_block_comments_do_not_nest() -> None:
+    """SQLite ends a comment at the first `*/`, as MariaDB does."""
+    assert translate("SELECT /* /* */ :p", {"p": 1}, style="qmark") == ("SELECT /* /* */ ?", [1])
+
+
+def test_code_text_blanks_literals_comments_and_placeholders() -> None:
+    """What is left is what the server runs as code."""
+    from lakana.ingest._params import code_text
+
+    text = "/* DROP */ SELECT 'DROP', `DROP`, :v -- DROP\nFROM t"
+
+    assert code_text(text, style="pyformat").split() == ["SELECT", ",", ",", "FROM", "t"]

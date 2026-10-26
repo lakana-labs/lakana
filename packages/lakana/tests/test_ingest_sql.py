@@ -1151,7 +1151,11 @@ class _MyCursor:
         if isinstance(args, Mapping):
             query %= {key: _literal(value, self.mode) for key, value in args.items()}
         self.sent.append(query)
-        if query not in ("START TRANSACTION READ ONLY", _SQL_MODE):
+        if query not in (
+            "SET SESSION TRANSACTION READ ONLY",
+            "START TRANSACTION READ ONLY",
+            _SQL_MODE,
+        ):
             if self.fail is not None:
                 raise self.fail
             self._result = _Result(self.fields)
@@ -1191,8 +1195,21 @@ class _MyConnection:
     kwargs: dict[str, Any]
     cursor_: _MyCursor
     refuse: Exception | None = None
-    status: int = 0
+    status: int | None = None
     socks: list[object] = field(default_factory=list)
+
+    @property
+    def server_status(self) -> int:
+        """Answer PyMySQL's status: NO_BACKSLASH_ESCAPES (512) as the session's mode says.
+
+        Returns
+        -------
+        int
+            The status, or the one a test set.
+        """
+        if self.status is not None:
+            return self.status
+        return 512 if "NO_BACKSLASH_ESCAPES" in self.cursor_.mode else 0
 
     def connect(self, sock: object = None) -> None:
         """Record the socket handed over, or refuse.
@@ -1250,7 +1267,7 @@ def mysql(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         "made": [],
         "dialed": [],
         "refuse": None,
-        "status": 0,
+        "status": None,
     }
 
     def make(**kwargs: object) -> _MyConnection:
@@ -1317,8 +1334,9 @@ def test_mariadb_under_docker_hands_pymysql_a_socket_to_the_relay(mysql: dict[st
     assert kwargs["init_command"] == "SET time_zone = '+00:00'"
     assert mysql["dialed"] == [("10.207.0.3", 15002)] and made.socks == ["SOCKET"]
     assert mysql["cursor"].sent == [
-        _SQL_MODE,
+        "SET SESSION TRANSACTION READ ONLY",
         "START TRANSACTION READ ONLY",
+        _SQL_MODE,
         "SELECT id, name FROM t",
     ]
     assert table.to_pylist() == [{"id": 1, "name": "x"}]
@@ -1602,6 +1620,10 @@ def test_mariadb_the_value_named_is_the_first_that_does_not_fit() -> None:
         "ATTACH DATABASE '{dir}/x.db' AS o",
         "  -- a comment\n/* another */ attach 'file:{dir}/x.db?mode=rwc' AS o; SELECT 1",
         "DETACH DATABASE o",
+        ";ATTACH DATABASE '{dir}/semi.db' AS o",
+        ";;  ATTACH DATABASE '{dir}/semi.db' AS o",
+        "/*x*/; -- y\n ATTACH DATABASE '{dir}/semi.db' AS o",
+        "/* /* */ ATTACH DATABASE '{dir}/nest.db' AS o; */",
     ],
 )
 def test_sqlite_refuses_attach_and_detach(lite: Path, query: str) -> None:
@@ -1735,7 +1757,7 @@ def test_mariadb_a_statement_without_rows_is_refused(mysql: dict[str, Any]) -> N
     _mariadb(relay=False)
 
     with pytest.raises(UsageError, match=r"sql\.read needs a statement that returns rows"):
-        sql.read("shop-db", "SET @a = 1")
+        sql.read("shop-db", "SELECT 1 INTO @a")
 
 
 @pytest.mark.parametrize(
@@ -1771,3 +1793,185 @@ def test_mariadb_a_none_parameter_names_the_default_to_give(mysql: dict[str, Any
 
     with pytest.raises(UsageError, match=r"ctx\.watermark\(default=\.\.\.\)"):
         sql.read("shop-db", "SELECT :since", params={"since": None})
+
+
+def test_sqlite_a_column_name_in_a_message_cannot_forge_a_log_line(lite: Path) -> None:
+    """The name comes from the file: a newline in it is shown escaped."""
+    rows = ", ".join(["(1)"] * 2000)
+    _sqlite(
+        lite,
+        [
+            'CREATE TABLE t("a\nlakana: forged")',
+            f"INSERT INTO t VALUES {rows}",
+            "INSERT INTO t VALUES ('x')",
+        ],
+    )
+
+    with pytest.raises(UsageError) as caught:
+        sql.read("local-db", "SELECT * FROM t")
+
+    assert "\n" not in str(caught.value)
+
+
+_NOT_PLAIN: list[object] = [
+    [1],
+    {"a": 1},
+    object(),
+    float("nan"),
+    float("inf"),
+    __import__("decimal").Decimal("sNaN"),
+    __import__("decimal").Decimal("Infinity"),
+]
+
+
+@pytest.mark.parametrize(
+    "value", _NOT_PLAIN, ids=["list", "dict", "object", "nan", "inf", "snan", "dinf"]
+)
+def test_postgresql_refuses_a_value_that_is_not_a_plain_finite_scalar(
+    driver: _Driver, value: object
+) -> None:
+    """The same rule as for MariaDB, before any connection."""
+    _postgres(relay=False)
+
+    with pytest.raises(UsageError, match=r"parameter `v` "):
+        sql.read("crm-db", "SELECT :v", params={"v": value})
+
+    assert driver.seen == []
+
+
+@pytest.mark.parametrize(
+    "value",
+    [*_NOT_PLAIN, __import__("decimal").Decimal("1.5"), __import__("datetime").time(1, 2)],
+    ids=["list", "dict", "object", "nan", "inf", "snan", "dinf", "decimal", "time"],
+)
+def test_sqlite_refuses_a_value_it_cannot_bind_faithfully(lite: Path, value: object) -> None:
+    """SQLite binds NaN as NULL and cannot bind a Decimal or a time: refused, never retried."""
+    _sqlite(lite, ["CREATE TABLE t(a)"])
+
+    with pytest.raises(UsageError, match=r"parameter `v` "):
+        sql.read("local-db", "SELECT a FROM t WHERE a > :v", params={"v": value})
+
+
+@pytest.mark.parametrize("value", [float("nan"), __import__("decimal").Decimal("sNaN")])
+def test_mariadb_refuses_a_signalling_or_quiet_nan(mysql: dict[str, Any], value: object) -> None:
+    """`math.isfinite` raises on a signalling NaN; the check must not."""
+    _mariadb(relay=False)
+
+    with pytest.raises(UsageError, match=r"parameter `v` is not a finite number"):
+        sql.read("shop-db", "SELECT :v", params={"v": value})
+
+
+def test_a_parameter_name_that_is_not_text_is_refused(driver: _Driver) -> None:
+    """A placeholder is a name: an int key cannot match one."""
+    _postgres(relay=False)
+
+    with pytest.raises(UsageError, match=r"params= keys are placeholder names"):
+        sql.read("crm-db", "SELECT 1", params={1: 2})  # ty: ignore[invalid-argument-type]
+
+
+@pytest.mark.parametrize(
+    ("query", "keyword"),
+    [
+        ("DROP TABLE t", "DROP"),
+        ("truncate t", "TRUNCATE"),
+        ("CREATE TABLE x (a INT)", "CREATE"),
+        ("SET STATEMENT transaction_read_only=0 FOR DROP TABLE t", "SET"),
+        ("CALL p()", "CALL"),
+        ("  /* c */ # c\n -- c\n ; ( DROP TABLE t", "DROP"),
+        ("'x' DROP TABLE t", "DROP"),
+    ],
+)
+def test_mariadb_runs_only_a_statement_that_reads(
+    mysql: dict[str, Any], query: str, keyword: str
+) -> None:
+    """DDL commits before a READ ONLY transaction can stop it: refused before it is sent."""
+    _mariadb(relay=False)
+
+    with pytest.raises(UsageError, match=rf"starts with {keyword}") as caught:
+        sql.read("shop-db", query)
+
+    assert caught.value.retryable is False
+    assert query not in mysql["cursor"].sent
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "SELECT 1",
+        "(SELECT 1)",
+        "WITH x AS (SELECT 1) SELECT * FROM x",
+        "VALUES (1)",
+        "TABLE t",
+        "/* DROP */ select 'DROP TABLE t'",
+    ],
+)
+def test_mariadb_a_statement_that_reads_is_sent(mysql: dict[str, Any], query: str) -> None:
+    """SELECT, WITH, VALUES and TABLE; a keyword inside a comment or a literal does not count."""
+    _mariadb(relay=False)
+
+    sql.read("shop-db", query)
+
+    assert mysql["cursor"].sent[-1] == query
+
+
+@pytest.mark.parametrize(
+    "query",
+    ["SELECT a INTO OUTFILE '/tmp/x' FROM t", "SELECT a FROM t INTO  dumpfile '/tmp/x'"],
+)
+def test_mariadb_refuses_select_into_a_file(mysql: dict[str, Any], query: str) -> None:
+    """A file on the server is a write the read-only transaction does not stop."""
+    _mariadb(relay=False)
+
+    with pytest.raises(UsageError, match=r"INTO OUTFILE"):
+        sql.read("shop-db", query)
+
+    assert mysql["cursor"].sent[-1] != query
+
+
+def test_mariadb_sets_the_session_read_only_before_the_transaction(mysql: dict[str, Any]) -> None:
+    """Both, and the sql_mode is read inside the transaction (a proxy pins it there)."""
+    _mariadb(relay=False)
+
+    sql.read("shop-db", "SELECT 1")
+
+    assert mysql["cursor"].sent == [
+        "SET SESSION TRANSACTION READ ONLY",
+        "START TRANSACTION READ ONLY",
+        _SQL_MODE,
+        "SELECT 1",
+    ]
+
+
+@pytest.mark.parametrize("mode", ["MSSQL", "STRICT_TRANS_TABLES,ORACLE", "DB2"])
+def test_mariadb_refuses_a_sql_mode_it_does_not_model(mysql: dict[str, Any], mode: str) -> None:
+    """MSSQL reads `[...]` as a name, ORACLE has its own parser: no telling where a value lands."""
+    mysql["cursor"].mode = mode
+    _mariadb(relay=False)
+
+    with pytest.raises(UsageError, match=r"sql_mode .*which sql\.read does not know"):
+        sql.read("shop-db", "SELECT 1")
+
+
+def test_mariadb_a_session_whose_status_and_mode_disagree_is_refused(
+    mysql: dict[str, Any],
+) -> None:
+    """PyMySQL escapes by the status flag, the tokenizer by sql_mode: they must agree."""
+    mysql["cursor"].mode = "NO_BACKSLASH_ESCAPES"
+    mysql["status"] = 0
+    _mariadb(relay=False)
+
+    with pytest.raises(SourceError, match="disagree"):
+        sql.read("shop-db", "SELECT :v", params={"v": "x"})
+
+    assert mysql["cursor"].sent[-1] == _SQL_MODE
+
+
+def test_mariadb_insecure_transport_in_a_syntax_error_is_not_a_tls_error(
+    mysql: dict[str, Any],
+) -> None:
+    """Only the server's code 3159 means the server requires TLS."""
+    mysql["cursor"].fail = _MyError(1064, "syntax error near 'insecure transport'")
+    _mariadb(relay=False)
+
+    with pytest.raises(UsageError, match="the query failed"):
+        sql.read("shop-db", "SELECT 'insecure transport' x y")

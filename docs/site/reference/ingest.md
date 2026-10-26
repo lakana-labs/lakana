@@ -323,16 +323,21 @@ For MariaDB, the text is read as MariaDB reads it, in the session's `sql_mode`: 
 comment, `--` only before a space or a control character, block comments do not nest, a double
 quote encloses a name under `ANSI_QUOTES` and a string otherwise, and a backslash escapes
 nothing under `NO_BACKSLASH_ESCAPES`. A query with an executable comment (`/*! ... */`), whose
-text MariaDB runs or skips by its version, is refused.
+text MariaDB runs or skips by its version, is refused, and so is `--` right after a number's
+exponent (`1.5e--`, which MySQL reads as two minus signs). A session whose `sql_mode` holds a
+mode that changes quoting in another way (such as `MSSQL`, which reads `[...]` as a name, or
+`ORACLE`) is refused, naming the mode.
 
 PostgreSQL and SQLite bind values on the server. PyMySQL has no server-side binding: it writes
 each value, escaped, into the text it sends. The asset's SQL never holds a value, but the text on
-the wire does. So the placeholders are found exactly as MariaDB reads the text, and a MariaDB
-value must be one PyMySQL escapes the way the server reads it: a `str`, `int`, finite `float`,
-`bool`, `Decimal`, `date`, `datetime`, `time` or `bytes`. A list, a tuple, a set, a dict, a path
-or another object is refused (PyMySQL would escape it with backslashes, which a server with
-`NO_BACKSLASH_ESCAPES` does not read as escapes): give each value its own placeholder. `NaN` and
-infinity are refused too.
+the wire does. So the placeholders are found exactly as MariaDB reads the text.
+
+For every kind, a value is a `str`, `int`, finite `float`, `bool`, `Decimal`, `date`,
+`datetime`, `time` or `bytes`, and `params` keys are names (text). A list, a tuple, a set, a
+dict, a path or another object is refused: give each value its own placeholder (PyMySQL would
+escape such a value with backslashes, which a MariaDB server with `NO_BACKSLASH_ESCAPES` does not
+read as escapes). `NaN` and infinity (also a `Decimal`'s) are refused: SQLite would bind a `NaN`
+as NULL. SQLite cannot bind a `Decimal` or a `time`: pass a `str` or a `float`.
 
 A `None` value is refused: `updated_at > NULL` matches no row, so a first run would read nothing
 and look like it worked. On a first run `ctx.watermark()` is `None`; give the start with
@@ -344,12 +349,22 @@ fails, with a `datetime` it works. To pass text, cast the placeholder: `:since::
 
 ### Read-only
 
-Every read runs in a read-only transaction (PostgreSQL's `default_transaction_read_only`,
-MariaDB's `START TRANSACTION READ ONLY`), and a SQLite file is opened read-only: a query that
-writes to the database fails. SQLite's `ATTACH` and `DETACH` are refused, because SQLite creates
-the file an `ATTACH` names even on a read-only connection; only the first statement of a query
-runs. Still, give the connection a database user that can only read: a function with side
-effects still runs inside a `SELECT`.
+- **PostgreSQL** runs every query in a read-only transaction (`default_transaction_read_only`):
+  a query that writes to the database fails.
+- **MariaDB and MySQL** commit before DDL (`DROP`, `TRUNCATE`, `CREATE`, ...) and run it outside
+  any transaction, so a read-only transaction cannot stop it. `sql.read` therefore sends only a
+  statement whose first keyword, after comments, is `SELECT`, `WITH`, `VALUES` or `TABLE`;
+  anything else (`DROP`, `SET STATEMENT ... FOR`, `CALL`, `INSERT`, ...) is refused before it is
+  sent, naming the keyword. `SELECT ... INTO OUTFILE` (or `DUMPFILE`), which writes a file on the
+  server, is refused too. The statement then runs in a read-only session and transaction, which
+  stops a write from inside it, such as a function with side effects.
+- **SQLite** opens the file read-only: a query that writes to the database fails. `ATTACH` and
+  `DETACH` are refused (after any comments, spaces and semicolons), because SQLite creates the
+  file an `ATTACH` names even on a read-only connection; only the first statement of a query
+  runs.
+
+Give the connection a database user that can only read, as defence in depth: what a function
+does, and what server-file functions can reach, is bounded only by that user's privileges.
 
 ### Types
 
@@ -452,7 +467,7 @@ The classes are those of [files.read](#errors):
 
 | Class | Meaning | Retried |
 |---|---|---|
-| `UsageError` | The call, the query or the setup is wrong: a placeholder without a value, a `None` value, an executable comment in a MariaDB query, a query that fails (syntax, a missing table or column) or writes, a column without a faithful Arrow form, a connection of another kind, a missing password, a trust bundle the task cannot read, the `lakana[assets]` extra missing. | No |
+| `UsageError` | The call, the query or the setup is wrong: a placeholder without a value, a `None` value, a value that is not a plain finite scalar, an executable comment in a MariaDB query, a MariaDB statement that does not start with a reading keyword, a `sql_mode` sql.read does not know, a query that fails (syntax, a missing table or column) or writes, a column without a faithful Arrow form, a connection of another kind, a missing password, a trust bundle the task cannot read, the `lakana[assets]` extra missing. | No |
 | `SourceRefused` (a `SourceError`) | The database refused the password, its certificate is not trusted, the user may not read the table, or the connection's `tls` and the server disagree (no TLS offered, or TLS required). | No |
 | `SourceError` | The database failed or could not be reached (a timeout, a connection closed, a cancelled statement), which may pass. MariaDB's server errors are `UsageError`s, except these, which pass with time and are retried: 1037, 1038 and 1041 (out of memory), 1040 (too many connections), 1053 (shutdown in progress), 1158 to 1161 (network read or write), 1203 and 1226 (a user's connection or resource limit), 1205 (lock wait timeout), 1213 (deadlock), 1317 (interrupted), 1927 (connection killed) and 1969 (statement time limit). | Yes |
 | `DirectoryError` | A SQLite path that is a link, missing or not a regular file. | No |
@@ -479,8 +494,15 @@ The classes are those of [files.read](#errors):
 | `...: the result has more than max_rows (...) rows` (or `is larger than max_bytes`) | The result is larger than the cap. | Narrow the query (a `WHERE` clause or a `LIMIT`), or raise the cap. |
 | ``... has no secret with `password` `` | The connection has no password. | Run the command the message names. |
 | `the query holds an executable comment (/*! ... */)` | MariaDB runs or skips its text by version. | Write the statement without it. |
-| `parameter ... is a list; for MariaDB a value is a str, int, float, bool, Decimal, date, datetime, time or bytes` | A MariaDB value of another type. | Give each value its own placeholder. |
-| `parameter ... is not a finite number` | A `NaN` or infinity for MariaDB. | Filter it out before the call. |
+| `parameter ... is a list; a value is a str, int, float, bool, Decimal, date, datetime, time or bytes` | A value of another type. | Give each value its own placeholder. |
+| `parameter ... is not a finite number` | A `NaN` or infinity. | Filter it out before the call. |
+| `parameter ... is a Decimal, which SQLite cannot bind` (or `time`) | A SQLite value the driver cannot bind. | Pass a `str` or a `float`. |
+| `params= keys are placeholder names` | A key of `params` that is not text. | Use the placeholder's name. |
+| `...: sql.read runs one statement that reads, starting with SELECT, WITH, VALUES or TABLE; this one starts with DROP` | A MariaDB statement that does not only read; DDL would commit. | Read with a `SELECT`; change the database with your migration tool. |
+| `...: sql.read refuses SELECT ... INTO OUTFILE` | It writes a file on the server. | Return the rows instead. |
+| `...: the session's sql_mode has MSSQL, which sql.read does not know` | A mode that changes how MariaDB reads quotes or names. | Remove it from the server's or the user's `sql_mode`. |
+| `...: the session's sql_mode and the server's status disagree about backslash escapes` | A proxy between the worker and MariaDB gave two answers. | Connect to the server directly; the task is retried. |
+| `the query has -- right after a number's exponent` | `1.5e--` reads differently in MySQL and MariaDB. | Write a space between the number and `--`. |
 | `...: sql.read needs a statement that returns rows` | A MariaDB statement without a result set (`SET`, `DO`, `SELECT ... INTO`). | Use a `SELECT` that returns rows. |
 | `...: the server offers no TLS, and the connection's tls is verify-full` | A MariaDB server without TLS. | Enable TLS on the server, or, on a network you trust, set `tls: disable` with the command the message names. |
 | `...: the server requires TLS (MariaDB said: ...)` | `tls: disable` against a server that requires TLS. | Set `tls: verify-full` with the command the message names. |

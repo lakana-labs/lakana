@@ -18,9 +18,11 @@ Example::
 
 `sql.read` returns a `pyarrow.Table`. It reads ``postgresql`` and ``sqlite-file`` connections
 through the ADBC drivers and ``mariadb`` connections (MariaDB and MySQL) through PyMySQL. Values
-are bound to ``:name`` placeholders, never written into the asset's SQL; every read runs in a
-read-only transaction. Under the Docker runner a database is reached through the task's relay,
-while TLS checks the certificate for the connection's real host name.
+are bound to ``:name`` placeholders, never written into the asset's SQL. Every read runs in a
+read-only transaction or on a read-only file; MariaDB commits before DDL, so it gets only a
+statement that starts with ``SELECT``, ``WITH``, ``VALUES`` or ``TABLE``. Under the Docker
+runner a database is reached through the task's relay, while TLS checks the certificate for the
+connection's real host name.
 """
 
 from __future__ import annotations
@@ -47,9 +49,10 @@ from lakana.ingest._errors import (
     SourceRefused,
     UsageError,
     missing_secret,
+    safe_name,
     task_environment,
 )
-from lakana.ingest._params import translate
+from lakana.ingest._params import code_text, translate
 from lakana.ingest._types import mariadb_batch, mariadb_schema, normalize_postgres, postgres_schema
 from lakana.ingest.files import DEFAULT_MAX_BYTES, DEFAULT_MAX_ROWS, _positive
 
@@ -74,8 +77,47 @@ _OTHER_HELPER = {
     "directory": "files.read",
     "tcp": "connections.get with the team's own driver",
 }
-_ATTACH = re.compile(r"(?:\s+|--[^\n]*(?:\n|$)|/\*.*?(?:\*/|$))*(?:ATTACH|DETACH)\b", re.I | re.S)
-"""A statement that starts with ATTACH or DETACH, after any whitespace and comments."""
+_READING = ("SELECT", "WITH", "VALUES", "TABLE")
+"""The first keywords of a MariaDB statement `read` sends: each one only reads."""
+_KNOWN_MODES = frozenset(
+    {
+        "",
+        "ALLOW_INVALID_DATES",
+        "ANSI",
+        "ANSI_QUOTES",
+        "EMPTY_STRING_IS_NULL",
+        "ERROR_FOR_DIVISION_BY_ZERO",
+        "HIGH_NOT_PRECEDENCE",
+        "IGNORE_BAD_TABLE_OPTIONS",
+        "IGNORE_SPACE",
+        "MYSQL323",
+        "MYSQL40",
+        "NO_AUTO_CREATE_USER",
+        "NO_AUTO_VALUE_ON_ZERO",
+        "NO_BACKSLASH_ESCAPES",
+        "NO_DIR_IN_CREATE",
+        "NO_ENGINE_SUBSTITUTION",
+        "NO_FIELD_OPTIONS",
+        "NO_KEY_OPTIONS",
+        "NO_TABLE_OPTIONS",
+        "NO_UNSIGNED_SUBTRACTION",
+        "NO_ZERO_DATE",
+        "NO_ZERO_IN_DATE",
+        "ONLY_FULL_GROUP_BY",
+        "PAD_CHAR_TO_FULL_LENGTH",
+        "PIPES_AS_CONCAT",
+        "REAL_AS_FLOAT",
+        "SIMULTANEOUS_ASSIGNMENT",
+        "STRICT_ALL_TABLES",
+        "STRICT_TRANS_TABLES",
+        "TIME_ROUND_FRACTIONAL",
+        "TIME_TRUNCATE_FRACTIONAL",
+        "TRADITIONAL",
+    }
+)
+"""The sql_mode flags whose effect on how quotes and comments read the tokenizer knows: none, or
+ANSI_QUOTES and NO_BACKSLASH_ESCAPES, which it follows. Any other (MSSQL's `[...]` names,
+ORACLE's own parser) is refused."""
 _NEEDS_ASSETS = "sql.read needs the assets extra: add lakana[assets] to the project's dependencies"
 _NARROW = "narrow the query (add a WHERE clause or a LIMIT)"
 _RELAY_CLOSED = (
@@ -100,8 +142,6 @@ def _said(text: str, secret: Mapping[str, str] | None) -> str:
     str
         One line of at most 1,000 characters.
     """
-    from lakana.ingest._errors import safe_name
-
     for value in sorted((v for v in (secret or {}).values() if v), key=len, reverse=True):
         text = text.replace(value, "***")
     return safe_name(" ".join(text.split()))[:_MESSAGE]
@@ -212,6 +252,23 @@ def _conninfo(parts: Mapping[str, str]) -> str:
         return "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"
 
     return " ".join(f"{key}={quoted(value)}" for key, value in parts.items())
+
+
+def _first_keyword(code: str) -> str:
+    """Name the first keyword of a statement's code, after semicolons and parentheses.
+
+    Parameters
+    ----------
+    code
+        `code_text` of the query: its literals and comments are blanks.
+
+    Returns
+    -------
+    str
+        The keyword in capitals, or ``""`` when the code starts with none.
+    """
+    found = re.match(r"[\s;(]*([A-Za-z_]+)", code)
+    return found.group(1).upper() if found else ""
 
 
 def _relay_ip(name: str) -> str:
@@ -458,8 +515,9 @@ def _read_sqlite(
     SourceError
         When the driver cannot open the file.
     """
+    _plain_values(params, conn.kind)
     sql, values = translate(query, params, style="qmark")
-    if _ATTACH.match(sql):
+    if _first_keyword(code_text(query, style="qmark")) in ("ATTACH", "DETACH"):
         raise UsageError(
             f"`{conn.name}`: sql.read refuses ATTACH and DETACH: SQLite creates the file an "
             "ATTACH names even on a read-only connection; read one database per connection"
@@ -527,7 +585,7 @@ def _sqlite_error(conn: FetchedConnection, exc: Exception, schema: pa.Schema | N
     said = _said(text, None)
     found = re.search(r"Type mismatch in column (\d+)", text)
     if found and schema is not None and int(found.group(1)) < len(schema):
-        column = schema.names[int(found.group(1))]
+        column = safe_name(schema.names[int(found.group(1))])
         return UsageError(
             f"`{conn.name}`: column `{column}` changes type within the result (SQLite keeps any "
             f"type in any column); cast it in the query, for example CAST({column} AS TEXT)"
@@ -603,34 +661,49 @@ _TRANSIENT = frozenset(
 """MariaDB server errors that may pass: memory, shutdown, network, limits, locks, kills, time."""
 
 
-def _plain_values(params: Mapping[str, object] | None) -> None:
-    """Refuse a MariaDB parameter PyMySQL would not escape by the server's mode.
+def _plain_values(params: Mapping[str, object] | None, kind: str | None = None) -> None:
+    """Refuse a parameter that is not a plain, finite value the driver binds faithfully.
 
-    PyMySQL escapes a list, a set, a path or another object with backslashes, which a server
-    with ``NO_BACKSLASH_ESCAPES`` does not read as escapes: the value would end its literal.
+    PyMySQL escapes a list, a set, a path or another object with backslashes, which a MariaDB
+    server with ``NO_BACKSLASH_ESCAPES`` does not read as escapes: the value would end its
+    literal. The ADBC drivers fail on such values, and SQLite binds a NaN as NULL and cannot bind
+    a Decimal or a time at all. One rule for every kind keeps a value's meaning the same.
 
     Parameters
     ----------
     params
         The values.
+    kind
+        The connection's kind, once known: ``sqlite-file`` refuses Decimal and time too.
 
     Raises
     ------
     UsageError
-        For a value of another type, or a number that is not finite.
+        For a name that is not text, a value of another type, or a number that is not finite.
     """
     for name, value in (params or {}).items():
+        if not isinstance(name, str):
+            raise UsageError(
+                f"params= keys are placeholder names (text), such as 'since'; not {name!r}"
+            )
         if value is None:
             continue  # translate names the default to give
         if type(value) not in _PLAIN_TYPES:
             raise UsageError(
-                f"parameter `{name}` is a {type(value).__name__}; for MariaDB a value is a str, "
-                "int, float, bool, Decimal, date, datetime, time or bytes: give each value its "
-                "own placeholder"
+                f"parameter `{name}` is a {type(value).__name__}; a value is a str, int, float, "
+                "bool, Decimal, date, datetime, time or bytes: give each value its own "
+                "placeholder"
             )
-        if isinstance(value, (float, decimal.Decimal)) and not math.isfinite(value):
+        finite = value.is_finite() if isinstance(value, decimal.Decimal) else True
+        if not finite or (isinstance(value, float) and not math.isfinite(value)):
             raise UsageError(
-                f"parameter `{name}` is not a finite number; MariaDB has no NaN or infinity"
+                f"parameter `{name}` is not a finite number; a database compares no NaN or "
+                "infinity the way Python does"
+            )
+        if kind == "sqlite-file" and isinstance(value, (decimal.Decimal, dt.time)):
+            raise UsageError(
+                f"parameter `{name}` is a {type(value).__name__}, which SQLite cannot bind; "
+                "pass a str or a float"
             )
 
 
@@ -676,7 +749,7 @@ def _mariadb_error(conn: FetchedConnection, exc: Exception, host: str) -> Except
             f"network you trust, run `lakana connection update {conn.name} --env "
             f"{task_environment()} --tls disable`."
         )
-    if code == 3159 or "insecure transport" in said:
+    if code == 3159:  # ER_SECURE_TRANSPORT_REQUIRED, the same number on MariaDB and MySQL
         return SourceRefused(
             f"`{conn.name}`: the server requires TLS (MariaDB said: {said}). Run `lakana "
             f"connection update {conn.name} --env {task_environment()} --tls verify-full`."
@@ -692,6 +765,83 @@ def _mariadb_error(conn: FetchedConnection, exc: Exception, host: str) -> Except
             "cryptography to the project's dependencies"
         )
     return SourceError(f"`{conn.name}`: {said}")
+
+
+def _mariadb_statement(
+    conn: FetchedConnection,
+    query: str,
+    params: Mapping[str, object] | None,
+    mode: str,
+    status: int,
+) -> tuple[str, dict[str, object]]:
+    """Check a MariaDB query against the session's sql_mode and rewrite its placeholders.
+
+    ``START TRANSACTION READ ONLY`` does not stop DDL: MariaDB and MySQL commit before a
+    ``DROP``, ``TRUNCATE`` or ``CREATE`` and run it outside the transaction. So only a statement
+    that starts with a reading keyword is sent, and ``INTO OUTFILE`` (a file on the server) is
+    refused.
+
+    Parameters
+    ----------
+    conn
+        The connection.
+    query
+        The asset's SQL.
+    params
+        The values of its placeholders.
+    mode
+        The session's ``@@sql_mode``.
+    status
+        PyMySQL's server status, whose ``NO_BACKSLASH_ESCAPES`` bit (512) decides how it escapes
+        a str.
+
+    Returns
+    -------
+    tuple
+        The rewritten query and its values, an aware datetime as its UTC wall time.
+
+    Raises
+    ------
+    UsageError
+        For a sql_mode the tokenizer does not know, a statement that does not only read, or
+        ``INTO OUTFILE``.
+    SourceError
+        When the sql_mode and the status disagree about backslashes.
+    """
+    flags = {flag.strip() for flag in mode.upper().split(",")}
+    unknown = sorted(flags - _KNOWN_MODES)
+    if unknown:
+        raise UsageError(
+            f"`{conn.name}`: the session's sql_mode has {', '.join(unknown)}, which sql.read does "
+            "not know: it changes how MariaDB reads quotes or names, so a value could land "
+            "where MariaDB reads code. Remove it from the server's or the user's sql_mode."
+        )
+    backslashes = "NO_BACKSLASH_ESCAPES" not in flags
+    if backslashes == bool(status & 512):
+        raise SourceError(
+            f"`{conn.name}`: the session's sql_mode and the server's status disagree about "
+            "backslash escapes (a proxy between the worker and MariaDB?); nothing was sent"
+        )
+    style: dict[str, bool] = {
+        "backslash_escapes": backslashes,
+        "ansi_quotes": "ANSI_QUOTES" in flags,
+    }
+    sql, values = translate(query, params, style="pyformat", **style)
+    code = code_text(query, style="pyformat", **style)
+    first = _first_keyword(code)
+    if first not in _READING:
+        raise UsageError(
+            f"`{conn.name}`: sql.read runs one statement that reads, starting with SELECT, WITH, "
+            f"VALUES or TABLE; this one starts with {first or 'no keyword'}. MariaDB commits "
+            "before DDL, so a read-only transaction cannot stop it."
+        )
+    if re.search(r"\bINTO\s+(OUTFILE|DUMPFILE)\b", code, re.I):
+        raise UsageError(
+            f"`{conn.name}`: sql.read refuses SELECT ... INTO OUTFILE (or DUMPFILE): it writes a "
+            "file on the server"
+        )
+    assert isinstance(values, dict)  # nosec B101 -- pyformat returns a mapping
+    return sql, {key: _utc_naive(value) for key, value in values.items()}
 
 
 def _read_mariadb(
@@ -731,7 +881,6 @@ def _read_mariadb(
         import pymysql.cursors
     except ImportError:
         raise UsageError(_NEEDS_ASSETS) from None
-    _plain_values(params)
 
     password = (conn.secret or {}).get("password")
     if not password:
@@ -766,22 +915,15 @@ def _read_mariadb(
     try:
         cursor = database.cursor(pymysql.cursors.SSCursor)
         try:
-            # How quotes and backslashes read is the session's sql_mode (ANSI_QUOTES,
-            # NO_BACKSLASH_ESCAPES), so the placeholders are translated once it is known.
             probe = database.cursor()
+            probe.execute("SET SESSION TRANSACTION READ ONLY")
+            probe.execute("START TRANSACTION READ ONLY")
+            # How quotes and backslashes read is the session's sql_mode (ANSI_QUOTES,
+            # NO_BACKSLASH_ESCAPES), so the placeholders are translated once it is known. Read
+            # inside the transaction: a proxy pins the server there.
             probe.execute("SELECT @@SESSION.sql_mode")
             (mode,) = probe.fetchone() or ("",)
-            flags = set(str(mode).upper().split(","))
-            sql, values = translate(
-                query,
-                params,
-                style="pyformat",
-                backslash_escapes="NO_BACKSLASH_ESCAPES" not in flags,
-                ansi_quotes="ANSI_QUOTES" in flags,
-            )
-            assert isinstance(values, dict)  # nosec B101 -- pyformat returns a mapping
-            bound = {key: _utc_naive(value) for key, value in values.items()}
-            cursor.execute("START TRANSACTION READ ONLY")
+            sql, bound = _mariadb_statement(conn, query, params, str(mode), database.server_status)
             # Always with values, even none: PyMySQL turns the doubled `%%` back into `%` only
             # when it formats the query.
             cursor.execute(sql, bound)
@@ -859,6 +1001,7 @@ def read(
             "params= takes a mapping of placeholder name to value, such as {'since': ...}, not "
             f"{type(params).__name__}"
         )
+    _plain_values(params)
     conn = fetch(connection)
     if conn.kind not in KINDS:
         helper = _OTHER_HELPER.get(conn.kind)
