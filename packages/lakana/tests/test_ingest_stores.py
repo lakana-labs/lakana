@@ -177,7 +177,20 @@ def _listening() -> tuple[int, list[bytes]]:
 def test_a_store_without_a_task_proxy_ignores_https_proxy(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The store's client would use ``HTTPS_PROXY``; without a task proxy it goes direct."""
+    """The store's client would use ``HTTPS_PROXY``; without a task proxy it goes direct.
+
+    The store is built by `store_for` with every option it sets; only obstore's retries are
+    switched off, so the one failed request ends the test at once instead of after its backoff.
+    """
+    import obstore.store
+
+    real = obstore.store.S3Store
+
+    def without_retries(*args: object, **kwargs: object) -> obstore.store.S3Store:
+        kwargs["retry_config"] = {"max_retries": 0, "retry_timeout": dt.timedelta(seconds=1)}
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(obstore.store, "S3Store", without_retries)
     proxy_port, proxy_saw = _listening()
     store_port, store_saw = _listening()
     for name in ("HTTPS_PROXY", "https_proxy"):
