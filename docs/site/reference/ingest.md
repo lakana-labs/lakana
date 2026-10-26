@@ -198,9 +198,12 @@ The worker's memory limit is the last backstop and ends the task when it is pass
 
 Symbolic links below the root are never followed. A link, a pipe, a socket, a device, or a
 directory deeper than 32 levels that the pattern needs is skipped, and the task's log says so with a line such as
-``files.read: `exports`: skipped 'b.csv' (a symbolic link, not a regular file, too deep, or a key with an empty, . or .. segment)``.
-In a bucket, an object whose key has an empty, `.` or `..` part (`a//b.csv`, `x/../b.csv`) is
-skipped with the same line: no file system or URL reads it as the same object.
+``files.read: `exports`: skipped 'b.csv' (a symbolic link, not a regular file, or too deep)``.
+
+In a bucket, an object whose key has an empty, `.` or `..` part (`a//b.csv`, `x/../b.csv`) stops
+the whole listing: obstore cannot read past it, so `files.read` and `files.list` fail with a
+`FileShapeError` that names the key, and every attempt would. Rename or remove the object, or
+narrow the pattern or the connection's `prefix` so the listing does not reach it.
 
 A directory the pattern needs that the worker cannot open or list fails the read, naming it. It
 is never skipped silently: an incremental read would advance its watermark past files it never
@@ -221,7 +224,7 @@ could end differently (the task is retried only when it could):
 | Class | Meaning | Retried |
 |---|---|---|
 | `UsageError` | The call or the setup is wrong: a connection of another kind, an unknown extension or `format=`, `sheet=` or `header_row=` where they mean nothing, a cap that is not a positive whole number, `since=` of the wrong type, `modified_from=` without `since=`, a wildcard in an `http` path; a missing secret or one that is no service-account key, `auth: oauth2`, a CA certificate that is not PEM, a trust bundle the worker cannot read. Every attempt fails the same way. | No |
-| `FileShapeError` (a `SourceError`) | The files are wrong: types that do not fit across files, a `schema=` column a file lacks, a `schema=` value that is no Polars type, a file that cannot be parsed. The same files fail every attempt. | No |
+| `FileShapeError` (a `SourceError`) | The files are wrong: types that do not fit across files, a `schema=` column a file lacks, a `schema=` value that is no Polars type, a file that cannot be parsed, a bucket key with an empty, `.` or `..` segment. The same files fail every attempt. | No |
 | `SourceRefused` (a `SourceError`) | The store or server refused the credential (HTTP 401 or 403), its certificate is not trusted, or it answered with a redirect. Every attempt would; the message names the next step. | No |
 | `SourceError` | The store or server failed or could not be reached (a network error, a timeout, HTTP 404, 429 or 5xx, the egress proxy's refusal), which may pass. | Yes |
 | `DirectoryError` | A directory or file is missing, a link, not a directory, or denied; or the pattern is refused. The same path fails every attempt. | No |
@@ -243,6 +246,7 @@ could end differently (the task is retried only when it could):
 | `the trust bundle ... (LAKANA_CA_BUNDLE) cannot be read` (or `holds no certificate that can be read`) | The worker's trust bundle is missing in the task, or holds no PEM certificate that parses. | Check the worker's `LAKANA_RUN__CA_BUNDLE`. |
 | `obstore cannot use the secret of ...` | The secret is well formed but unusable: a service-account key whose private key is not an RSA key, an account key that is not base64. | Store the right value with the command the message names. |
 | `the listing passed 1000000 objects; narrow the pattern` | The pattern's fixed leading part leaves too many objects to look at. | Start the pattern with more fixed folders (`exports/2026/*.csv` rather than `**/*.csv`). |
+| `the object key ... has an empty, '.' or '..' segment, which stops the listing` | A key in the bucket that obstore cannot parse (`a//b.csv`). | Rename or remove the object, or narrow the pattern or the `prefix`. |
 | `the files matching ... hold more than max_rows (...) rows` | The files hold more rows than the cap. | Narrow the pattern, pass `since=` to read fewer files, or raise `max_rows`. |
 | `... names ingestion root ..., which this worker does not have` | The worker has no such root. | Set the root as the message says, or run the asset on a worker that has it. |
 | `cannot tell the format of ...; pass format=` | The extension is none of the formats. | Pass `format=`. |

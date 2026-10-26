@@ -34,7 +34,14 @@ from urllib.parse import quote, urlsplit
 from lakana import context
 from lakana.ingest import _check, _directory, _formats, _http, _stores, connections
 from lakana.ingest._connections import FetchedConnection, fetch
-from lakana.ingest._errors import CapExceeded, SourceError, SourceRefused, UsageError, safe_name
+from lakana.ingest._errors import (
+    CapExceeded,
+    FileShapeError,
+    SourceError,
+    SourceRefused,
+    UsageError,
+    safe_name,
+)
 
 if TYPE_CHECKING:
     import httpx
@@ -403,6 +410,36 @@ def _denied(error: BaseException) -> bool:
     ) or bool(_REFUSED_STATUS.search(_structure(error)))
 
 
+_UNPARSABLE = re.compile(r'Path "(.{0,300}?)"', re.DOTALL)
+
+
+def _unparsable_key(name: str, error: BaseException) -> str:
+    """Say which object key obstore could not parse, and what to do about it.
+
+    obstore stops the whole listing at a key with an empty, ``.`` or ``..`` segment (such as
+    ``a//b.csv``); it cannot skip it, so the read fails, and every attempt would.
+
+    Parameters
+    ----------
+    name
+        The connection.
+    error
+        obstore's `InvalidPathError`.
+
+    Returns
+    -------
+    str
+        The message, the key's control characters escaped.
+    """
+    found = _UNPARSABLE.search(str(error))
+    key = f"'{safe_name(found.group(1))}'" if found else "a key"
+    return (
+        f"`{name}`: the object key {key} has an empty, '.' or '..' segment, which stops the "
+        "listing; rename or remove the object, or narrow the pattern or the prefix so the "
+        "listing does not reach it"
+    )
+
+
 def _store_certificate(error: BaseException) -> bool:
     """Say whether obstore failed because the server's certificate is not trusted.
 
@@ -476,8 +513,7 @@ class _ObjectSource:
         Returns
         -------
         Listing
-            The matching objects, sorted by key; a matching key with an empty, ``.`` or ``..``
-            segment is skipped (no file system or URL would read it as the same object).
+            The matching objects, sorted by key.
 
         Raises
         ------
@@ -485,6 +521,8 @@ class _ObjectSource:
             For more matches than `max_files`.
         DirectoryError
             For a refused pattern, or more than `MAX_ENTRIES` objects listed.
+        FileShapeError
+            For a key obstore cannot parse (an empty, ``.`` or ``..`` segment), naming it.
         SourceError
             When the store fails (`SourceRefused` for a refused credential or certificate).
         """
@@ -509,9 +547,6 @@ class _ObjectSource:
                     key = meta["path"].split("/")
                     if not _directory.matches(wanted, key):
                         continue
-                    if any(part in ("", ".", "..") for part in key):
-                        listing.skipped.append(meta["path"])
-                        continue
                     if len(listing.files) == max_files:
                         raise CapExceeded(
                             f"the pattern {pattern!r} matches more than max_files ({max_files}) "
@@ -522,6 +557,8 @@ class _ObjectSource:
                             meta["path"], meta["size"], _utc(meta["last_modified"])
                         )
                     )
+        except obstore.exceptions.InvalidPathError as exc:
+            raise FileShapeError(_unparsable_key(self.name, exc)) from None
         except (obstore.exceptions.BaseError, FileNotFoundError, ValueError) as exc:
             _refuse(
                 self.name,
@@ -1033,7 +1070,7 @@ def read(
         for skipped in listing.skipped:
             print(
                 f"files.read: `{connection}`: skipped {skipped!r} (a symbolic link, not a regular "
-                "file, too deep, or a key with an empty, . or .. segment)",
+                "file, or too deep)",
                 file=sys.stderr,
             )
         with_since = not isinstance(since, _Unset)

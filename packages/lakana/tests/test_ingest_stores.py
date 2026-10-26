@@ -881,32 +881,6 @@ def test_an_object_key_with_control_characters_is_escaped(
     assert "a\\x0a[ERROR] forged\\u202e.csv" in str(caught.value)
 
 
-def test_a_key_with_an_empty_or_a_dot_segment_is_skipped_and_said(
-    memory: MemoryStore, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """Such a key is not the path it looks like on another system; it is listed as skipped."""
-    now = dt.datetime.now(dt.UTC)
-    keys = ["x/../a.csv", "x//b.csv", "./c.csv", "d.csv"]
-    monkeypatch.setattr(
-        obstore,
-        "list",
-        lambda store, prefix=None, **kwargs: iter(
-            [[{"path": k, "size": 1, "last_modified": now} for k in keys]]
-        ),
-    )
-
-    obstore.put(memory, "d.csv", b"id\n1\n")
-
-    listed = files.list("lake", "**/*.csv")
-    table = files.read("lake", "**/*.csv")
-
-    assert listed.column("name").to_pylist() == ["d.csv"]
-    assert table.column("id").to_pylist() == [1]
-    err = capsys.readouterr().err
-    assert "skipped 'x/../a.csv'" in err
-    assert "a key with an empty, . or .. segment" in err
-
-
 def test_an_object_store_reads_only_below_the_patterns_literal_head(memory: MemoryStore) -> None:
     """The listing asks for the pattern's leading literal segments only."""
     obstore.put(memory, "orders/2026/a.csv", b"id\n1\n")
@@ -1309,6 +1283,7 @@ def recorder(
 
     cert, key = issue_leaf(authority, tmp_path)
     tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    tls.minimum_version = ssl.TLSVersion.TLSv1_2
     tls.load_cert_chain(cert, key)
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
     server.socket = tls.wrap_socket(server.socket, server_side=True)
@@ -1675,3 +1650,87 @@ def test_a_garbled_trust_bundle_names_the_bundle_not_the_secret(
         )
     assert "LAKANA_RUN__CA_BUNDLE" in str(caught.value)
     assert "secret" not in str(caught.value)
+
+
+@pytest.fixture
+def fake_s3(
+    authority: Authority, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[tuple[str, list[str]]]:
+    """Serve one S3 ListObjectsV2 page over HTTPS whose keys the test sets.
+
+    Parameters
+    ----------
+    authority
+        Signs the server; trusted through `LAKANA_CA_BUNDLE`.
+    tmp_path
+        Where the certificates go.
+    monkeypatch
+        Sets the bundle.
+
+    Yields
+    ------
+    tuple of (str, list)
+        The endpoint, and the keys the listing answers with (fill it before the read).
+    """
+    import http.server
+    from xml.sax.saxutils import escape
+
+    from tls_fixture import issue_leaf
+
+    keys: list[str] = []
+
+    class _Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            contents = "".join(
+                f"<Contents><Key>{escape(k)}</Key><LastModified>2026-10-01T00:00:00.000Z"
+                '</LastModified><ETag>"e"</ETag><Size>6</Size></Contents>'
+                for k in keys
+            )
+            body = (
+                '<?xml version="1.0" encoding="UTF-8"?><ListBucketResult><Name>landing</Name>'
+                f"<KeyCount>{len(keys)}</KeyCount><IsTruncated>false</IsTruncated>{contents}"
+                "</ListBucketResult>"
+            ).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/xml")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format: str, *args: object) -> None:
+            pass
+
+    cert, key = issue_leaf(authority, tmp_path)
+    tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    tls.minimum_version = ssl.TLSVersion.TLSv1_2
+    tls.load_cert_chain(cert, key)
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
+    server.socket = tls.wrap_socket(server.socket, server_side=True)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    monkeypatch.setenv("LAKANA_CA_BUNDLE", str(authority.ca_file))
+    try:
+        yield f"https://127.0.0.1:{server.server_address[1]}", keys
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+@pytest.mark.parametrize("bad", ["a//b.csv", "a/./b.csv", "a/\nforged/../b.csv"])
+def test_a_key_obstore_cannot_parse_fails_the_read_naming_it(
+    fake_s3: tuple[str, list[str]], bad: str
+) -> None:
+    """The store's parser stops the whole listing at such a key: a permanent error with a fix."""
+    from lakana import runner
+    from lakana.ingest import FileShapeError
+
+    endpoint, keys = fake_s3
+    keys.extend(["a/x.csv", bad])
+    _task("lake", "s3", {**_S3, "endpoint": endpoint}, {"access_key_id": "AKID"})
+
+    with pytest.raises(FileShapeError) as caught:
+        files.read("lake", "a/*.csv")
+    message = str(caught.value)
+    assert message.startswith("`lake`: the object key '")
+    assert "rename or remove the object, or narrow the pattern or the prefix" in message
+    assert "\n" not in message
+    assert runner._retryable("function", caught.value) is False

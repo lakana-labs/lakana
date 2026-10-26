@@ -190,6 +190,7 @@ def tls_server(
     """
     cert, key = issue_leaf(authority, tmp_path)
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
     context.load_cert_chain(cert, key)
 
     def handle(sock: socket.socket) -> None:
@@ -262,6 +263,7 @@ def test_the_right_authority_makes_a_reachable_connection_ok(
 def test_the_name_must_match_under_verify_full(authority: Authority, tmp_path: Path) -> None:
     cert, key = issue_leaf(authority, tmp_path, ("other.example.com",))
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
     context.load_cert_chain(cert, key)
 
     def handle(sock: socket.socket) -> None:
@@ -901,6 +903,7 @@ def test_a_proxy_that_opens_the_tunnel_carries_the_handshake(
 ) -> None:
     cert, key = issue_leaf(authority, tmp_path, ("api.example.com",))
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
     context.load_cert_chain(cert, key)
 
     def tunnel(sock: socket.socket) -> None:
@@ -1025,6 +1028,7 @@ def answering(
     """
     cert, key = issue_leaf(authority, tmp_path)
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
     context.load_cert_chain(cert, key)
     seen: list[tuple[str, dict[str, str]]] = []
 
@@ -1269,6 +1273,7 @@ def test_a_server_that_does_not_speak_http_is_failed(authority: Authority, tmp_p
 
     cert, key = issue_leaf(authority, tmp_path)
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
     context.load_cert_chain(cert, key)
 
     def handle(sock: socket.socket) -> None:
