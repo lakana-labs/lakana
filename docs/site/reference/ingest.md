@@ -282,6 +282,8 @@ could end differently (the task is retried only when it could):
 | `sqlite-file` | ADBC (`adbc-driver-sqlite`) | the file below an ingestion root, opened read-only |
 
 ```python
+import datetime as dt
+
 from lakana import asset
 from lakana.ingest import sql
 
@@ -291,7 +293,7 @@ def customers(ctx):
     return sql.read(
         "crm-db",
         "SELECT id, name, updated_at FROM customers WHERE updated_at > :since",
-        params={"since": ctx.watermark(default="1970-01-01")},
+        params={"since": ctx.watermark(default=dt.datetime(1970, 1, 1, tzinfo=dt.UTC))},
     )
 ```
 
@@ -330,11 +332,18 @@ A `None` value is refused: `updated_at > NULL` matches no row, so a first run wo
 and look like it worked. On a first run `ctx.watermark()` is `None`; give the start with
 `ctx.watermark(default=...)`.
 
+Pass a value of the column's type. PostgreSQL receives a `str` as `text`, which it does not
+compare with a `timestamp`, a `date` or a number: `updated_at > :since` with `"1970-01-01"`
+fails, with a `datetime` it works. To pass text, cast the placeholder: `:since::timestamptz`.
+
 ### Read-only
 
 Every read runs in a read-only transaction (PostgreSQL's `default_transaction_read_only`,
-MariaDB's `START TRANSACTION READ ONLY`), and a SQLite file is opened read-only: a query that writes fails. Still, give the connection a database
-user that can only read: a function with side effects still runs inside a `SELECT`.
+MariaDB's `START TRANSACTION READ ONLY`), and a SQLite file is opened read-only: a query that
+writes to the database fails. SQLite's `ATTACH` and `DETACH` are refused, because SQLite creates
+the file an `ATTACH` names even on a read-only connection; only the first statement of a query
+runs. Still, give the connection a database user that can only read: a function with side
+effects still runs inside a `SELECT`.
 
 ### Types
 
@@ -454,6 +463,9 @@ The classes are those of [files.read](#errors):
 | `...: sql.read runs every query in a read-only transaction, and this one writes` | The query writes. | Read only; write with the asset's return value. |
 | `...: the connection's user may not read this (PostgreSQL said: ...); grant it SELECT` | The user lacks `SELECT` on a table. | Grant it `SELECT`, or read another table. |
 | `...: the query failed (PostgreSQL said: ...)` (or `MariaDB said:`, `SQLite said:`) | Syntax, a missing table or column, a bad cast. | Fix the query. |
+| `... A value of params is compared with a column of another type` | A `str` value compared with a `timestamp` (or another non-text column) on PostgreSQL. | Pass a value of the column's type (a `datetime`), or cast the placeholder: `:since::timestamptz`. |
+| `...: sql.read refuses ATTACH and DETACH` | A SQLite query that attaches another database. | Read one database per connection. |
+| ``the `...` of `...` holds a NUL character`` | A database, user or password value with a NUL. | Set it again with `lakana connection update`. |
 | ``...: column `...` is ..., which sql.read cannot read as it is; cast it in the query`` | A column without a faithful Arrow form. | Use the cast the message names. |
 | ``...: column `...` holds a value that decimal128(...) cannot hold`` | A `NaN` or `Infinity` in a `numeric` column. | Filter it out, or cast to `double precision`. |
 | ``...: column `...` changes type within the result`` | A SQLite column holds values of different types. | Use the `CAST` the message names. |

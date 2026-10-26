@@ -487,6 +487,33 @@ def test_the_advised_cast_reads_as_a_decimal(pki: _Pki, relay: list[str]) -> Non
     assert str(table.column("n")[0]) == "1.500000000"
 
 
+@pytest.mark.parametrize(
+    ("query", "since"),
+    [
+        ("SELECT id FROM kinds WHERE at > :since", dt.datetime(1970, 1, 1, tzinfo=dt.UTC)),
+        ("SELECT id FROM kinds WHERE at > :since::timestamptz", "1970-01-01"),
+    ],
+    ids=["datetime", "cast-text"],
+)
+def test_a_first_run_watermark_compares_with_a_timestamptz(
+    pki: _Pki, relay: list[str], query: str, since: object
+) -> None:
+    """The reference page's example: a datetime default, or text with a cast."""
+    _crm(pki)
+
+    table = sql.read("crm-db", query, params={"since": since})
+
+    assert table.num_rows == 1
+
+
+def test_text_compared_with_a_timestamptz_names_both_fixes(pki: _Pki, relay: list[str]) -> None:
+    """ADBC binds a str as text, which PostgreSQL does not compare with a timestamp."""
+    _crm(pki)
+
+    with pytest.raises(UsageError, match=r"a datetime for a timestamp.*:since::timestamptz"):
+        sql.read("crm-db", "SELECT id FROM kinds WHERE at > :since", params={"since": "1970-01-01"})
+
+
 def test_without_parameters_the_byte_cap_stops_a_streamed_result(
     pki: _Pki, relay: list[str]
 ) -> None:

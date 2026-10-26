@@ -2,6 +2,8 @@
 
 Example::
 
+    import datetime as dt
+
     from lakana import asset
     from lakana.ingest import sql
 
@@ -11,7 +13,7 @@ Example::
         return sql.read(
             "crm-db",
             "SELECT id, name, updated_at FROM customers WHERE updated_at > :since",
-            params={"since": ctx.watermark(default="1970-01-01")},
+            params={"since": ctx.watermark(default=dt.datetime(1970, 1, 1, tzinfo=dt.UTC))},
         )
 
 `sql.read` returns a `pyarrow.Table`. It reads ``postgresql`` and ``sqlite-file`` connections
@@ -26,6 +28,7 @@ from __future__ import annotations
 import contextlib
 import datetime as dt
 import os
+import re
 import socket
 import ssl
 import tempfile
@@ -69,6 +72,8 @@ _OTHER_HELPER = {
     "directory": "files.read",
     "tcp": "connections.get with the team's own driver",
 }
+_ATTACH = re.compile(r"(?:\s+|--[^\n]*(?:\n|$)|/\*.*?(?:\*/|$))*(?:ATTACH|DETACH)\b", re.I | re.S)
+"""A statement that starts with ATTACH or DETACH, after any whitespace and comments."""
 _NEEDS_ASSETS = "sql.read needs the assets extra: add lakana[assets] to the project's dependencies"
 _NARROW = "narrow the query (add a WHERE clause or a LIMIT)"
 _RELAY_CLOSED = (
@@ -274,6 +279,13 @@ def _postgres_error(conn: FetchedConnection, exc: Exception, host: str) -> Excep
             f"`{conn.name}`: the connection's user may not read this (PostgreSQL said: {said}); "
             "grant it SELECT, or read another table"
         )
+    if state == "42883" and "operator does not exist" in text:
+        return UsageError(
+            f"`{conn.name}`: the query failed (PostgreSQL said: {said}). A value of params is "
+            "compared with a column of another type (PostgreSQL receives a str as text): pass "
+            "a value of the column's type, such as a datetime for a timestamp, or cast the "
+            "placeholder, such as :since::timestamptz"
+        )
     if state.startswith(("42", "0A", "22", "21")) or "does not exist" in text:
         return UsageError(f"`{conn.name}`: the query failed (PostgreSQL said: {said})")
     return SourceError(f"`{conn.name}`: {said}")
@@ -332,6 +344,12 @@ def _read_postgres(
         connect_timeout=str(CONNECT_SECONDS),
         options="-c default_transaction_read_only=on",
     )
+    for key, value in parts.items():
+        if "\x00" in value:
+            raise UsageError(
+                f"the `{key}` of `{conn.name}` holds a NUL character, which a connection string "
+                f"cannot carry; set it again with `lakana connection update {conn.name}`"
+            )
     with _root_certificates(conn) as roots:
         if tls == "verify-full":
             parts["sslrootcert"] = roots
@@ -439,6 +457,11 @@ def _read_sqlite(
         When the driver cannot open the file.
     """
     sql, values = translate(query, params, style="qmark")
+    if _ATTACH.match(sql):
+        raise UsageError(
+            f"`{conn.name}`: sql.read refuses ATTACH and DETACH: SQLite creates the file an "
+            "ATTACH names even on a read-only connection; read one database per connection"
+        )
     root_dir, path = conn.routing.get("root_dir"), conn.routing.get("path")
     if not isinstance(root_dir, str) or not isinstance(path, str):
         raise UsageError(
@@ -498,8 +521,6 @@ def _sqlite_error(conn: FetchedConnection, exc: Exception, schema: pa.Schema | N
     Exception
         The error to raise.
     """
-    import re
-
     text = str(exc)
     said = _said(text, None)
     found = re.search(r"Type mismatch in column (\d+)", text)
@@ -512,9 +533,9 @@ def _sqlite_error(conn: FetchedConnection, exc: Exception, schema: pa.Schema | N
     if "readonly database" in text:
         return UsageError(
             f"`{conn.name}`: SQLite could not read the file read-only ({said}). sql.read never "
-            "writes: a query that writes fails, and so does a database in WAL mode or with a "
-            "hot journal in a directory the worker cannot write; give the connection a copy "
-            "made with `PRAGMA journal_mode=DELETE`"
+            "writes to the database: a query that writes fails, and so does a database in WAL "
+            "mode or with a hot journal in a directory the worker cannot write; give the "
+            "connection a copy made with `PRAGMA journal_mode=DELETE`"
         )
     if "syntax error" in text or "no such" in text:
         return UsageError(f"`{conn.name}`: the query failed (SQLite said: {said})")

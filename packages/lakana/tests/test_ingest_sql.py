@@ -509,6 +509,28 @@ def test_a_query_error_is_classed_by_its_sqlstate(
     assert type(caught.value) is kind
 
 
+def test_a_value_of_another_type_than_its_column_names_both_fixes(driver: _Driver) -> None:
+    """42883: ADBC binds a str as text; the message says to pass a datetime or cast."""
+    driver.cursor.fail = _Error(
+        "ERROR: operator does not exist: timestamp with time zone > text", "42883"
+    )
+    _postgres(relay=False)
+
+    with pytest.raises(UsageError, match=r"a datetime for a timestamp.*:since::timestamptz"):
+        sql.read("crm-db", "SELECT 1 WHERE now() > :since", params={"since": "1970-01-01"})
+
+
+def test_a_nul_in_the_connection_string_is_a_setup_error(driver: _Driver) -> None:
+    """Libpq would cut the string at the NUL and fail on every attempt."""
+    _postgres(relay=False, settings={"user": "read\x00er"})
+
+    with pytest.raises(UsageError, match=r"`user` of `crm-db` holds a NUL character") as caught:
+        sql.read("crm-db", "SELECT 1")
+
+    assert caught.value.retryable is False
+    assert driver.seen == []
+
+
 def test_a_connection_of_another_kind_names_the_helper(driver: _Driver) -> None:
     """An ``s3`` connection is for files.read."""
     _task(
@@ -1509,3 +1531,21 @@ def test_mariadb_the_value_named_is_the_first_that_does_not_fit() -> None:
 
     with pytest.raises(UsageError, match=r"holds '0000-00-00'"):
         _types.mariadb_batch([(dt.date(2026, 1, 1),), ("0000-00-00",)], schema, "shop-db")
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "ATTACH DATABASE '{dir}/x.db' AS o",
+        "  -- a comment\n/* another */ attach 'file:{dir}/x.db?mode=rwc' AS o; SELECT 1",
+        "DETACH DATABASE o",
+    ],
+)
+def test_sqlite_refuses_attach_and_detach(lite: Path, query: str) -> None:
+    """ATTACH creates an empty file even read-only; only the first statement runs."""
+    _sqlite(lite, ["CREATE TABLE t(a)"])
+
+    with pytest.raises(UsageError, match=r"ATTACH and DETACH"):
+        sql.read("local-db", query.format(dir=lite.parent))
+
+    assert sorted(p.name for p in lite.parent.iterdir()) == ["app.db"]
