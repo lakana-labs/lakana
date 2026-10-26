@@ -40,6 +40,12 @@ dev = [
     # Test-only here: the object-store client `lakana[assets]` brings to a task; the tests of
     # `lakana.ingest.files` run without that extra installed. MIT.
     "obstore>=0.12,<0.13",
+    # Test-only here: the database drivers `lakana[assets]` brings to a task; the tests of
+    # `lakana.ingest.sql` run without that extra installed. Apache-2.0 (ADBC), MIT (PyMySQL).
+    "adbc-driver-manager>=1.13",
+    "adbc-driver-postgresql>=1.13",
+    "adbc-driver-sqlite>=1.13",
+    "PyMySQL>=1.2.3",
 ]
 # The documentation site (docs/site). Built in CI; published at the public beta.
 docs = [

@@ -1255,6 +1255,42 @@ The module takes about 45 seconds once the images are pulled. obstore retries a 
 connection ten times within about 2 to 5 seconds before it reports it, which is most of the time
 of the certificate and proxy-refusal cases.
 
+## Database images
+
+`packages/lakana-worker/tests/test_ingest_sql_integration.py` (`integration`, Linux only) reads
+databases through `lakana.ingest.sql` over TLS and through the real relay
+(`lakana_worker.launcher.relay.serve` in the test process, on `127.0.0.6` inside its plan's
+`127.0.0.0/29`, so libpq's `hostaddr` dial from `127.0.0.1` is on the task's network). It lives in
+the worker's tests because it runs the relay and builds the trust bundle, which `packages/lakana`
+tests may not import.
+
+| Database | Image (tag and digest) | Licence | Base image | TLS |
+|---|---|---|---|---|
+| PostgreSQL | `postgres:18.6@sha256:edb0c08dc33befd0262ab3b5cf1c4f3f8cfd8b09e88c05b45adee29d6761ddb6` | PostgreSQL Licence | Debian 13 | `-c ssl=on -c ssl_cert_file=... -c ssl_key_file=...` |
+| MariaDB (11.8, an LTS release) | `mariadb:11.8.9@sha256:f16d7a344413e519dff518f27bdb221388f84b0d274c97c4fb5f2cb0dc1b34fa` | GPL-2.0 (the server) | Ubuntu 24.04 | `--ssl-cert=... --ssl-key=... --require-secure-transport=ON` |
+
+The images are test containers only, never built into, copied into or shipped with a Lakana
+artifact (the judgement of "Object-store emulators" above); that is why the GPL-2.0 MariaDB
+server may be one. The client Lakana ships for it is PyMySQL (MIT). Change a tag only together with its
+digest.
+
+- **Certificates.** One test authority signs a leaf for `db.test`; the entry point installs it
+  with the key as uid 999, mode 0600 (PostgreSQL refuses a key it does not own or others may
+  read, and a file copied in is root's), then starts the image's own entry point.
+- **Readiness.** Each image's first-run setup starts a server without TCP; the module waits for
+  the log line of the TCP listener, then for `pg_isready` over TCP (PostgreSQL) or
+  `mariadb-admin ping` on the socket (MariaDB, whose `require_secure_transport` refuses a plain
+  TCP client).
+- **MariaDB** requires TLS, so `tls: disable` is refused by the server; its relay port is
+  15002 on the same `127.0.0.6`.
+- **The relay** gets a routing table that lists only `10.9.0.0/24` as attached (loopback is not
+  attached, so it is not refused) and `reachable={127.0.0.0/8}`; `lakana-relay` resolves to
+  `127.0.0.6` through a patched `socket.gethostbyname`.
+
+The Docker E2E case `test_sql_read_reaches_postgresql_through_the_relay_with_verify_full` in
+`test_docker_task_egress_integration.py` runs the same image on the sources' network (alias
+`db.lakana.test`) and adds its address to `relay_reachable` for that case only.
+
 ## Python assets in the two tiers (M5c2a)
 
 **Unit tier.** `uv` is a scripted stand-in (`packages/lakana-worker/tests/test_venvs.py`), the

@@ -51,7 +51,15 @@ def test_server_extra_is_pinned_to_the_resolved_version() -> None:
 
     assert metadata["optional-dependencies"] == {
         "server": ["lakana-server==1.2.3", "lakana-worker==1.2.3"],
-        "assets": ["polars>=1.30", "fastexcel>=0.21", "obstore>=0.12,<0.13"],
+        "assets": [
+            "polars>=1.30",
+            "fastexcel>=0.21",
+            "obstore>=0.12,<0.13",
+            "adbc-driver-manager>=1.13",
+            "adbc-driver-postgresql>=1.13",
+            "adbc-driver-sqlite>=1.13",
+            "PyMySQL>=1.2.3",
+        ],
     }
 
 

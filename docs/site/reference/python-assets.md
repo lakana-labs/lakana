@@ -342,9 +342,11 @@ gives you both. It must be one of the project's own `[project] dependencies`: a 
 dependency group and no extra, so `lakana` in `[dependency-groups]` is refused at deploy. `requires-python` must admit the worker's Python. Your repository's own code is
 not installed: it is imported from the checkout.
 
-`lakana[assets]` holds `polars` and, for `lakana.ingest.files`, `fastexcel` (spreadsheets) and
-`obstore` (S3, GCS and Azure Blob Storage). A project locked before they joined it runs
-`uv lock --upgrade-package lakana` to add them; see [the ingest helpers](ingest.md).
+`lakana[assets]` holds `polars`; for `lakana.ingest.files`, `fastexcel` (spreadsheets) and
+`obstore` (S3, GCS and Azure Blob Storage); and for `lakana.ingest.sql`, the ADBC drivers
+`adbc-driver-manager`, `adbc-driver-postgresql` and `adbc-driver-sqlite`, and `PyMySQL`. A project locked
+before they joined it runs `uv lock --upgrade-package lakana` to add them; see
+[the ingest helpers](ingest.md).
 
 The first task that needs an environment builds it from the lock (`uv sync --frozen`) and caches
 it, keyed by the hash of the lock together with your `pyproject.toml`, the Python version and the

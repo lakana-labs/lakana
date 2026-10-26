@@ -33,5 +33,13 @@ class ServerExtraMetadataHook(MetadataHookInterface):
         version = metadata["version"]
         metadata["optional-dependencies"] = {
             "server": [f"lakana-server=={version}", f"lakana-worker=={version}"],
-            "assets": ["polars>=1.30", "fastexcel>=0.21", "obstore>=0.12,<0.13"],
+            "assets": [
+                "polars>=1.30",
+                "fastexcel>=0.21",
+                "obstore>=0.12,<0.13",
+                "adbc-driver-manager>=1.13",
+                "adbc-driver-postgresql>=1.13",
+                "adbc-driver-sqlite>=1.13",
+                "PyMySQL>=1.2.3",
+            ],
         }
