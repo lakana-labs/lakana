@@ -1,0 +1,1029 @@
+"""`lakana.ingest.sql`: PostgreSQL through a fake ADBC driver, SQLite through the real one."""
+
+from __future__ import annotations
+
+import contextlib
+import os
+import socket
+import sqlite3
+import sys
+import types
+from collections.abc import Callable, Iterator, Mapping
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+import pyarrow as pa
+import pytest
+
+from lakana import context
+from lakana.ingest import (
+    CapExceeded,
+    SourceError,
+    SourceRefused,
+    UsageError,
+    _connections,
+    _types,
+    sql,
+)
+from lakana.ingest._directory import DirectoryError, RootUnavailable
+
+_PASSWORD = "pa55-word"
+
+
+class _TaskConnections:
+    """A fake `client.task_connections` answering from a dict of bodies.
+
+    Parameters
+    ----------
+    bodies
+        Name to the server's answer.
+    """
+
+    def __init__(self, bodies: Mapping[str, Mapping[str, object]]) -> None:
+        self.bodies = bodies
+
+    def get(self, name: str) -> Mapping[str, object]:
+        """Answer one fetch.
+
+        Parameters
+        ----------
+        name
+            The connection's name.
+
+        Returns
+        -------
+        dict
+            Its body.
+        """
+        return self.bodies[name]
+
+
+@dataclass(frozen=True)
+class _Client:
+    """A fake SDK client with only `task_connections`.
+
+    Parameters
+    ----------
+    task_connections
+        The fake resource.
+    """
+
+    task_connections: _TaskConnections
+
+
+def _task(
+    bodies: Mapping[str, Mapping[str, object]], routing: Mapping[str, Mapping[str, object]]
+) -> None:
+    """Set the state of a running task.
+
+    Parameters
+    ----------
+    bodies
+        Name to the server's answer.
+    routing
+        Name to the task description's routing.
+    """
+    _connections.clear()
+    context._set(
+        context._TaskState(
+            client=_Client(_TaskConnections(bodies)),  # ty: ignore[invalid-argument-type]
+            environment="prod",
+            asset="bronze.customers",
+            declared=frozenset(bodies),
+            connections=routing,
+        )
+    )
+
+
+@pytest.fixture(autouse=True)
+def _clean(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Start without the variables the helper reads; clear the task state after each test.
+
+    Parameters
+    ----------
+    monkeypatch
+        Removes `LAKANA_CA_BUNDLE` and `LAKANA_EGRESS_PROXY` (other modules' tests set them).
+
+    Yields
+    ------
+    None
+        While the test runs.
+    """
+    monkeypatch.delenv("LAKANA_CA_BUNDLE", raising=False)
+    monkeypatch.delenv("LAKANA_EGRESS_PROXY", raising=False)
+    yield
+    context._set(None)
+    _connections.clear()
+
+
+def _postgres(
+    *,
+    relay: bool,
+    settings: Mapping[str, object] | None = None,
+    database: str = "crm",
+    password: str | None = _PASSWORD,
+) -> None:
+    """Declare `crm-db`, a PostgreSQL connection, under the Docker runner or locally.
+
+    Parameters
+    ----------
+    relay
+        Whether the task runs isolated (a relay port in its routing).
+    settings
+        The connection's settings; ``user: reader`` when `None`.
+    database
+        Its database.
+    password
+        The secret's password; no secret at all when `None`.
+    """
+    body = {
+        "name": "crm-db",
+        "kind": "postgresql",
+        "address": {"host": "db.example.com", "port": 5432, "database": database},
+        "settings": dict(settings or {"user": "reader"}),
+        "endpoints": [{"host": "db.example.com", "port": 5432, "role": "service"}],
+        "secret": None if password is None else {"password": password},
+    }
+    routing: dict[str, object] = {"kind": "postgresql", "grant": [["db.example.com", 5432]]}
+    if relay:
+        routing["relay_port"] = 15001
+    _task({"crm-db": body}, {"crm-db": routing})
+
+
+class _Error(Exception):
+    """The fake driver's error, with an optional SQLSTATE."""
+
+    def __init__(self, text: str, sqlstate: str | None = None) -> None:
+        super().__init__(text)
+        self.sqlstate = sqlstate
+
+
+@dataclass
+class _Statement:
+    """A fake ADBC statement that records its options."""
+
+    options: dict[str, str] = field(default_factory=dict)
+
+    def set_options(self, **options: str) -> None:
+        """Record options.
+
+        Parameters
+        ----------
+        **options
+            The options.
+        """
+        self.options.update(options)
+
+
+@dataclass
+class _Cursor:
+    """A fake ADBC cursor: records what was executed, hands out the given batches."""
+
+    batches: list[pa.RecordBatch]
+    fail: Exception | None = None
+    executed: list[tuple[object, ...]] = field(default_factory=list)
+    adbc_statement: _Statement = field(default_factory=_Statement)
+
+    def execute(self, *args: object) -> None:
+        """Record a statement, or raise the configured error.
+
+        Parameters
+        ----------
+        *args
+            The SQL and, if given, its values.
+
+        Raises
+        ------
+        Exception
+            The configured error.
+        """
+        self.executed.append(args)
+        if self.fail is not None:
+            raise self.fail
+
+    def fetch_record_batch(self) -> pa.RecordBatchReader:
+        """Hand out the batches.
+
+        Returns
+        -------
+        pyarrow.RecordBatchReader
+            A reader of them.
+        """
+        return pa.RecordBatchReader.from_batches(self.batches[0].schema, self.batches)
+
+
+@dataclass
+class _Database:
+    """A fake ADBC connection."""
+
+    cursor_: _Cursor
+    closed: bool = False
+
+    def cursor(self) -> _Cursor:
+        """Return the cursor.
+
+        Returns
+        -------
+        _Cursor
+            It.
+        """
+        return self.cursor_
+
+    def close(self) -> None:
+        """Note the close."""
+        self.closed = True
+
+
+@dataclass
+class _Driver:
+    """A fake ``adbc_driver_postgresql.dbapi``: records the connection string."""
+
+    cursor: _Cursor
+    refuse: Exception | None = None
+    seen: list[str] = field(default_factory=list)
+    roots: list[str] = field(default_factory=list)
+    Error: type[Exception] = _Error
+    database: _Database | None = None
+
+    def connect(self, conninfo: str) -> _Database:
+        """Record the connection string and the root file's content, or refuse.
+
+        Parameters
+        ----------
+        conninfo
+            The libpq connection string.
+
+        Returns
+        -------
+        _Database
+            The connection.
+
+        Raises
+        ------
+        Exception
+            The configured refusal.
+        """
+        self.seen.append(conninfo)
+        for part in conninfo.split("' "):
+            if part.startswith("sslrootcert='"):
+                path = part.removeprefix("sslrootcert='").rstrip("'")
+                self.roots.append(Path(path).read_text() if path.startswith("/") else path)
+        if self.refuse is not None:
+            raise self.refuse
+        self.database = _Database(self.cursor)
+        return self.database
+
+
+def _batch(**columns: list[object]) -> pa.RecordBatch:
+    """Build a batch of plain columns.
+
+    Parameters
+    ----------
+    **columns
+        Name to values.
+
+    Returns
+    -------
+    pyarrow.RecordBatch
+        The batch.
+    """
+    return pa.RecordBatch.from_pydict(columns)
+
+
+@pytest.fixture
+def driver(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> _Driver:
+    """Put a fake PostgreSQL driver where `sql.read` imports it; the relay resolves.
+
+    Parameters
+    ----------
+    monkeypatch
+        Installs the module and the resolver.
+    tmp_path
+        For the trust bundle.
+
+    Returns
+    -------
+    _Driver
+        The fake, with one batch of two rows.
+    """
+    fake = _Driver(_Cursor([_batch(id=[1, 2])]))
+    module = types.ModuleType("adbc_driver_postgresql.dbapi")
+    module.connect = fake.connect  # ty: ignore[unresolved-attribute]
+    module.Error = _Error  # ty: ignore[unresolved-attribute]
+    monkeypatch.setitem(sys.modules, "adbc_driver_postgresql.dbapi", module)
+    monkeypatch.setattr(sql.socket, "gethostbyname", lambda name: "10.207.0.3")
+    bundle = tmp_path / "bundle.pem"
+    bundle.write_text("BUNDLE\n")
+    monkeypatch.setenv("LAKANA_CA_BUNDLE", str(bundle))
+    return fake
+
+
+def test_under_docker_libpq_dials_the_relay_and_verifies_the_real_host(driver: _Driver) -> None:
+    """``hostaddr`` is the relay, ``host`` the real name TLS checks; the transaction reads only."""
+    _postgres(relay=True)
+
+    table = sql.read("crm-db", "SELECT id FROM customers")
+
+    assert table.column("id").to_pylist() == [1, 2]
+    bundle = os.environ["LAKANA_CA_BUNDLE"]
+    assert driver.seen == [
+        "host='db.example.com' port='15001' hostaddr='10.207.0.3' dbname='crm' user='reader' "
+        f"password='{_PASSWORD}' sslmode='verify-full' connect_timeout='10' "
+        f"options='-c default_transaction_read_only=on' sslrootcert='{bundle}'"
+    ]
+    assert driver.cursor.executed == [("SELECT id FROM customers",)]
+    assert driver.database is not None and driver.database.closed
+
+
+def test_locally_libpq_dials_the_host_itself(driver: _Driver) -> None:
+    """Without a relay port the connection string has no ``hostaddr``."""
+    _postgres(relay=False)
+
+    sql.read("crm-db", "SELECT id FROM customers")
+
+    assert "hostaddr" not in driver.seen[0]
+    assert "host='db.example.com' port='5432'" in driver.seen[0]
+
+
+def test_a_connection_ca_is_trusted_next_to_the_bundle_and_its_file_removed(
+    driver: _Driver,
+) -> None:
+    """The file libpq reads holds the bundle and the connection's CA, and is gone afterwards."""
+    _postgres(relay=True, settings={"user": "reader", "ca_certificate": "OWN CA"})
+
+    sql.read("crm-db", "SELECT 1")
+
+    assert driver.roots == ["BUNDLE\n\nOWN CA\n"]
+    path = driver.seen[0].split("sslrootcert='")[1].rstrip("'")
+    assert not Path(path).exists()
+
+
+@pytest.mark.parametrize(("tls", "mode"), [("require", "require"), ("disable", "disable")])
+def test_require_and_disable_name_no_root_certificates(
+    driver: _Driver, tls: str, mode: str
+) -> None:
+    """The ``require`` of libpq would verify the chain if it got a root file; ours must not."""
+    _postgres(relay=False, settings={"user": "reader", "tls": tls})
+
+    sql.read("crm-db", "SELECT 1")
+
+    assert f"sslmode='{mode}'" in driver.seen[0]
+    assert "sslrootcert" not in driver.seen[0]
+
+
+def test_a_database_name_cannot_add_a_keyword(driver: _Driver) -> None:
+    """Every value is quoted: a quote in a name stays inside it."""
+    _postgres(relay=False, database="crm' host='evil.example")
+
+    sql.read("crm-db", "SELECT 1")
+
+    assert "dbname='crm\\' host=\\'evil.example'" in driver.seen[0]
+
+
+def test_parameters_are_bound_and_checked_before_any_connection(driver: _Driver) -> None:
+    """`:name` becomes `$1`; a missing value fails without a connection."""
+    _postgres(relay=False)
+
+    sql.read("crm-db", "SELECT id FROM t WHERE u > :since", params={"since": 5})
+    with pytest.raises(UsageError, match="placeholder :x has no value"):
+        sql.read("crm-db", "SELECT :x")
+
+    assert driver.cursor.executed == [("SELECT id FROM t WHERE u > $1", [5])]
+    assert len(driver.seen) == 1
+
+
+def test_a_none_parameter_is_refused_before_the_query_runs(driver: _Driver) -> None:
+    """Review Focus 1, end to end: the first run's watermark is `None`."""
+    _postgres(relay=False)
+
+    with pytest.raises(UsageError, match=r"ctx\.watermark\(default=\.\.\.\)"):
+        sql.read("crm-db", "SELECT * FROM t WHERE u > :since", params={"since": None})
+
+    assert driver.seen == []
+
+
+@pytest.mark.parametrize(
+    ("max_rows", "max_bytes", "cap"), [(3, 1 << 30, "max_rows"), (10**9, 20, "max_bytes")]
+)
+def test_a_cap_stops_the_read_naming_how_to_narrow_it(
+    driver: _Driver, max_rows: int, max_bytes: int, cap: str
+) -> None:
+    """Each cap is checked batch by batch."""
+    driver.cursor.batches = [_batch(id=[1, 2]), _batch(id=[3, 4])]
+    _postgres(relay=False)
+
+    with pytest.raises(
+        CapExceeded, match=rf"{cap}.*narrow the query \(add a WHERE clause or a LIMIT\)"
+    ):
+        sql.read("crm-db", "SELECT id FROM t", max_rows=max_rows, max_bytes=max_bytes)
+
+
+def test_a_relay_reset_points_to_the_relay_line(driver: _Driver) -> None:
+    """Review Focus 3: under Docker a reset means the relay refused; its log line says why."""
+    driver.refuse = _Error(
+        'IO: [libpq] Failed to connect: connection to server at "10.207.0.3", port 15001 failed: '
+        "server closed the connection unexpectedly"
+    )
+    _postgres(relay=True)
+
+    with pytest.raises(SourceError) as caught:
+        sql.read("crm-db", "SELECT 1")
+
+    assert str(caught.value) == (
+        "`crm-db`: the connection through the task's relay closed before PostgreSQL answered; "
+        "the task's log has a `lakana-relay:` line that says why (an address inside the Lakana "
+        "stack or on the Docker host is never reachable)"
+    )
+
+
+def test_the_same_reset_without_a_relay_keeps_the_drivers_words(driver: _Driver) -> None:
+    """Locally there is no relay to blame."""
+    driver.refuse = _Error("server closed the connection unexpectedly")
+    _postgres(relay=False)
+
+    with pytest.raises(SourceError, match="server closed the connection unexpectedly"):
+        sql.read("crm-db", "SELECT 1")
+
+
+def test_an_authentication_failure_names_the_test_command_and_masks_the_password(
+    driver: _Driver,
+) -> None:
+    """The fixed text, PostgreSQL's own words kept (at most 1,000 characters), never the secret."""
+    driver.refuse = _Error(
+        f'FATAL:  password authentication failed for user "reader" {_PASSWORD} ' + "x" * 2000
+    )
+    _postgres(relay=False)
+
+    with pytest.raises(SourceRefused) as caught:
+        sql.read("crm-db", "SELECT 1")
+
+    text = str(caught.value)
+    assert text.startswith("`crm-db`: authentication failed (PostgreSQL said: FATAL: password")
+    assert text.endswith("Check the secret with `lakana connection test crm-db --env prod`.")
+    assert _PASSWORD not in text and "***" in text
+    assert len(text) < 1200
+    assert caught.value.retryable is False
+
+
+@pytest.mark.parametrize(
+    "said",
+    [
+        "SSL error: certificate verify failed",
+        'server certificate for "db.example.com" does not match host name "db.example.com"',
+    ],
+)
+def test_a_certificate_failure_gives_the_tls_text(driver: _Driver, said: str) -> None:
+    """The fixed TLS text names the real host and the command that adds the CA."""
+    driver.refuse = _Error(said)
+    _postgres(relay=True)
+
+    with pytest.raises(SourceRefused) as caught:
+        sql.read("crm-db", "SELECT 1")
+
+    assert str(caught.value) == (
+        "`crm-db`: the server's certificate is not trusted for `db.example.com`. Give the "
+        "connection your CA: `lakana connection update crm-db --env prod --ca-file ca.pem`."
+    )
+
+
+@pytest.mark.parametrize(
+    ("sqlstate", "kind", "fragment"),
+    [
+        ("25006", UsageError, "read-only transaction, and this one writes"),
+        ("42601", UsageError, "the query failed"),
+        ("42501", SourceRefused, "may not read this"),
+        ("57014", SourceError, "canceling statement"),
+    ],
+)
+def test_a_query_error_is_classed_by_its_sqlstate(
+    driver: _Driver, sqlstate: str, kind: type[Exception], fragment: str
+) -> None:
+    """A write or a syntax error repeats; a cancelled statement may pass."""
+    driver.cursor.fail = _Error(f"ERROR: canceling statement {sqlstate}", sqlstate)
+    _postgres(relay=False)
+
+    with pytest.raises(kind, match=fragment) as caught:
+        sql.read("crm-db", "SELECT 1")
+
+    assert type(caught.value) is kind
+
+
+def test_a_connection_of_another_kind_names_the_helper(driver: _Driver) -> None:
+    """An ``s3`` connection is for files.read."""
+    _task(
+        {
+            "landing": {
+                "name": "landing",
+                "kind": "s3",
+                "address": {},
+                "settings": {},
+                "endpoints": [],
+                "secret": None,
+            }
+        },
+        {"landing": {}},
+    )
+
+    with pytest.raises(
+        UsageError,
+        match=r"sql.read reads postgresql and sqlite-file connections; `landing` is s3: use files",
+    ):
+        sql.read("landing", "SELECT 1")
+
+
+def test_without_the_assets_extra_the_error_says_what_to_add(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A project without `lakana[assets]` cannot import the driver."""
+    monkeypatch.setitem(sys.modules, "adbc_driver_postgresql.dbapi", None)
+    _postgres(relay=False)
+
+    with pytest.raises(UsageError, match=r"add lakana\[assets\] to the project's dependencies"):
+        sql.read("crm-db", "SELECT 1")
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "fragment"),
+    [
+        ({"max_rows": 0}, "max_rows= must be a positive whole number"),
+        ({"max_bytes": True}, "max_bytes= must be a positive whole number"),
+        ({"params": [1]}, "params= takes a mapping"),
+    ],
+)
+def test_bad_arguments_are_refused_before_the_fetch(kwargs: dict[str, Any], fragment: str) -> None:
+    """No task state is needed to refuse them."""
+    with pytest.raises(UsageError, match=fragment):
+        sql.read("crm-db", "SELECT 1", **kwargs)
+
+
+def test_an_unreadable_trust_bundle_names_the_worker_setting(
+    driver: _Driver, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A bundle the worker named but the task cannot read is a setup error, not retried."""
+    monkeypatch.setenv("LAKANA_CA_BUNDLE", str(tmp_path / "missing.pem"))
+    _postgres(relay=True)
+
+    with pytest.raises(UsageError, match=r"trust bundle .*LAKANA_RUN__CA_BUNDLE") as caught:
+        sql.read("crm-db", "SELECT 1")
+
+    assert caught.value.retryable is False
+    assert driver.seen == []
+
+
+def test_without_a_trust_bundle_libpq_uses_the_system_roots(
+    driver: _Driver, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``sslrootcert=system``: libpq's own name for the operating system's store."""
+    monkeypatch.delenv("LAKANA_CA_BUNDLE")
+    _postgres(relay=False)
+
+    sql.read("crm-db", "SELECT 1")
+
+    assert driver.seen[0].endswith("sslrootcert='system'")
+
+
+def test_a_relay_that_does_not_resolve_is_retried(
+    driver: _Driver, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The relay may still be starting; the task's log says why it is not there."""
+
+    def unresolved(name: str) -> str:
+        raise socket.gaierror(name)
+
+    monkeypatch.setattr(sql.socket, "gethostbyname", unresolved)
+    _postgres(relay=True)
+
+    with pytest.raises(SourceError, match=r"relay \(lakana-relay\) does not resolve") as caught:
+        sql.read("crm-db", "SELECT 1")
+
+    assert caught.value.retryable is None  # the harness's retry policy decides
+    assert driver.seen == []
+
+
+def test_a_connection_without_a_password_names_the_command_that_stores_it(
+    driver: _Driver,
+) -> None:
+    """Nothing is dialled without a password."""
+    _postgres(relay=False, password=None)
+
+    with pytest.raises(
+        UsageError,
+        match=r"`crm-db` has no secret with `password`.*--env prod --password-stdin",
+    ):
+        sql.read("crm-db", "SELECT 1")
+
+    assert driver.seen == []
+
+
+def test_an_empty_query_is_refused() -> None:
+    """Whitespace is not a statement."""
+    with pytest.raises(UsageError, match=r"sql\.read needs a query"):
+        sql.read("crm-db", "  \n")
+
+
+# --- PostgreSQL types ---------------------------------------------------------------------------
+
+
+def _pg_field(name: str, kind: pa.DataType, pg: str, typmod: int = -1) -> pa.Field:
+    """Build a field as ADBC 1.13 reports it.
+
+    Parameters
+    ----------
+    name
+        The column.
+    kind
+        Its Arrow type.
+    pg
+        PostgreSQL's type name.
+    typmod
+        Its type modifier.
+
+    Returns
+    -------
+    pyarrow.Field
+        The field with ADBC's metadata.
+    """
+    return pa.field(
+        name, kind, metadata={_types.PG_TYPE: pg.encode(), _types.PG_TYPMOD: str(typmod).encode()}
+    )
+
+
+def test_numeric_with_precision_becomes_a_decimal_and_uuid_and_json_strings() -> None:
+    """``numeric(12,2)`` (typmod 786438) → ``decimal128(12, 2)``; metadata is dropped."""
+    opaque = pa.string()
+    schema = pa.schema(
+        [
+            _pg_field("amount", opaque, "numeric", 786438),
+            _pg_field("id", pa.uuid(), "uuid"),
+            _pg_field("doc", pa.json_(), "jsonb"),
+            _pg_field("at", pa.timestamp("us", "UTC"), "timestamptz"),
+            _pg_field("tags", pa.list_(pa.int32()), "_int4"),
+        ]
+    )
+    target = _types.postgres_schema(schema, "crm-db")
+    batch = pa.RecordBatch.from_arrays(
+        [
+            pa.array(["1.50", None]),
+            pa.array([bytes(range(16)), None], pa.uuid()),
+            pa.array(['{"a": 1}', None], pa.json_()),
+            pa.array([0, None], pa.timestamp("us", "UTC")),
+            pa.array([[1, 2], None], pa.list_(pa.int32())),
+        ],
+        schema=schema,
+    )
+
+    out = _types.normalize_postgres(batch, target, "crm-db")
+
+    assert target == pa.schema(
+        [
+            ("amount", pa.decimal128(12, 2)),
+            ("id", pa.string()),
+            ("doc", pa.string()),
+            ("at", pa.timestamp("us", "UTC")),
+            ("tags", pa.list_(pa.int32())),
+        ]
+    )
+    assert out.schema.metadata is None and all(f.metadata is None for f in out.schema)
+    assert out.column("id").to_pylist() == ["00010203-0405-0607-0809-0a0b0c0d0e0f", None]
+    assert str(out.column("amount")[0]) == "1.50"
+
+
+@pytest.mark.parametrize(
+    ("field", "cast"),
+    [
+        (_pg_field("n", pa.string(), "numeric"), "CAST(n AS numeric(38, 9))"),
+        (_pg_field("n", pa.string(), "numeric", ((40 << 16) | 2) + 4), "CAST(n AS numeric(38, 2))"),
+        (_pg_field("m", pa.int64(), "money"), "CAST(m AS numeric(19, 2))"),
+        (_pg_field("i", pa.month_day_nano_interval(), "interval"), "EXTRACT(EPOCH FROM i)"),
+        (
+            _pg_field("ip", pa.binary(), "inet").with_type(
+                pa.opaque(pa.binary(), "inet", "PostgreSQL")
+            ),
+            "CAST(ip AS text)",
+        ),
+        (_pg_field("ids", pa.list_(pa.uuid()), "_uuid"), "CAST(ids AS text)"),
+    ],
+)
+def test_a_column_without_a_faithful_arrow_form_names_the_cast(field: pa.Field, cast: str) -> None:
+    """Refused before any row is read; money would otherwise arrive as an integer of cents."""
+    with pytest.raises(UsageError, match=r"cast it in the query, for example ") as caught:
+        _types.postgres_schema(pa.schema([field]), "crm-db")
+
+    assert cast in str(caught.value)
+    assert caught.value.retryable is False
+
+
+def test_a_negative_scale_is_refused_naming_the_cast() -> None:
+    """PostgreSQL 15 allows ``numeric(5, -2)``, which no Arrow decimal can hold."""
+    field = _pg_field("n", pa.string(), "numeric", ((5 << 16) | (-2 & 0x7FF)) + 4)
+
+    with pytest.raises(UsageError, match=r"CAST\(n AS numeric\(38, 9\)\)"):
+        _types.postgres_schema(pa.schema([field]), "crm-db")
+
+
+def _meta(name: str, kind: pa.DataType) -> pa.Field:
+    """Build a child field carrying metadata, as ADBC does inside nested types.
+
+    Parameters
+    ----------
+    name
+        The child's name.
+    kind
+        Its type.
+
+    Returns
+    -------
+    pyarrow.Field
+        The field with ``POSTGRESQL:type`` metadata.
+    """
+    return pa.field(name, kind, metadata={_types.PG_TYPE: b"int4"})
+
+
+def test_nested_types_lose_their_childrens_metadata_at_every_depth() -> None:
+    """Lists, large lists and structs keep their shape; no child keeps ADBC's metadata."""
+    item = pa.struct([_meta("x", pa.int32()), pa.field("y", pa.list_(_meta("item", pa.int64())))])
+    schema = pa.schema(
+        [
+            _pg_field("rows", pa.list_(_meta("item", item)), "_record"),
+            _pg_field("big", pa.large_list(_meta("item", pa.int32())), "_int4"),
+        ]
+    )
+    batch = pa.RecordBatch.from_arrays(
+        [
+            pa.array([[{"x": 1, "y": [2]}], None], schema.field("rows").type),
+            pa.array([[1, 2], None], schema.field("big").type),
+        ],
+        schema=schema,
+    )
+
+    target = _types.postgres_schema(schema, "crm-db")
+    out = _types.normalize_postgres(batch, target, "crm-db")
+
+    bare = pa.struct([("x", pa.int32()), ("y", pa.list_(pa.int64()))])
+    assert target == pa.schema([("rows", pa.list_(bare)), ("big", pa.large_list(pa.int32()))])
+    assert out.schema.field("rows").type.value_field.metadata is None
+    assert out.schema.field("rows").type.value_type.field("x").metadata is None
+    assert out.column("rows").to_pylist() == [[{"x": 1, "y": [2]}], None]
+    assert out.column("big").to_pylist() == [[1, 2], None]
+
+
+def test_a_struct_holding_a_converted_type_is_refused() -> None:
+    """A uuid inside a composite has no plain form; the whole column is cast to text."""
+    field = _pg_field("r", pa.struct([pa.field("id", pa.uuid())]), "record")
+
+    with pytest.raises(UsageError, match=r"CAST\(r AS text\)"):
+        _types.postgres_schema(pa.schema([field]), "crm-db")
+
+
+def test_a_nan_in_a_decimal_column_is_named() -> None:
+    """``numeric(12,2)`` may hold NaN, which no decimal holds."""
+    schema = pa.schema([_pg_field("amount", pa.string(), "numeric", 786438)])
+    batch = pa.RecordBatch.from_arrays([pa.array(["NaN"])], schema=schema)
+
+    with pytest.raises(UsageError, match="column `amount` holds a value"):
+        _types.normalize_postgres(batch, _types.postgres_schema(schema, "crm-db"), "crm-db")
+
+
+# --- SQLite through the real driver -------------------------------------------------------------
+
+
+@pytest.fixture
+def lite(tmp_path: Path) -> Path:
+    """Declare `local-db`, a ``sqlite-file`` connection on ``<root>/data/app.db``.
+
+    Parameters
+    ----------
+    tmp_path
+        pytest's directory.
+
+    Returns
+    -------
+    Path
+        The database file (not yet created).
+    """
+    root = tmp_path / "shared"
+    (root / "data").mkdir(parents=True)
+    body = {
+        "name": "local-db",
+        "kind": "sqlite-file",
+        "address": {"root": "shared", "path": "data/app.db"},
+        "settings": {},
+        "endpoints": [],
+        "secret": None,
+    }
+    routing = {
+        "kind": "sqlite-file",
+        "root": "shared",
+        "root_dir": str(root),
+        "path": "data/app.db",
+        "root_path": str(root / "data" / "app.db"),
+    }
+    _task({"local-db": body}, {"local-db": routing})
+    return root / "data" / "app.db"
+
+
+def _sqlite(path: Path, statements: list[str]) -> None:
+    """Make a SQLite database.
+
+    Parameters
+    ----------
+    path
+        The file.
+    statements
+        SQL to run.
+    """
+    with contextlib.closing(sqlite3.connect(path)) as db, db:
+        for statement in statements:
+            db.execute(statement)
+
+
+def test_sqlite_reads_read_only_with_bound_parameters(lite: Path) -> None:
+    """``file:...?mode=ro``: a read works, a write fails and the file is unchanged."""
+    _sqlite(lite, ["CREATE TABLE t(a INTEGER, b TEXT)", "INSERT INTO t VALUES (1, 'x'), (2, 'y')"])
+
+    table = sql.read("local-db", "SELECT a, b FROM t WHERE a > :low", params={"low": 1})
+    with pytest.raises(UsageError, match="read-only"):
+        sql.read("local-db", "INSERT INTO t VALUES (3, 'z')")
+
+    assert table.to_pylist() == [{"a": 2, "b": "y"}]
+    with contextlib.closing(sqlite3.connect(lite)) as db:
+        assert db.execute("SELECT count(*) FROM t").fetchone() == (2,)
+
+
+def test_sqlite_refuses_a_link_at_the_file_path(lite: Path, tmp_path: Path) -> None:
+    """The walker's rule: no symbolic link is followed, before the driver opens anything."""
+    elsewhere = tmp_path / "elsewhere.db"
+    _sqlite(elsewhere, ["CREATE TABLE t(a)"])
+    lite.symlink_to(elsewhere)
+
+    with pytest.raises(DirectoryError, match="symbolic link"):
+        sql.read("local-db", "SELECT * FROM t")
+
+
+def test_sqlite_names_a_column_that_changes_type_within_the_result(lite: Path) -> None:
+    """ADBC fixes a column's type from its first rows; a later text in an integer column fails."""
+    rows = ", ".join(["(1)"] * 2000)
+    _sqlite(
+        lite, ["CREATE TABLE t(a)", f"INSERT INTO t VALUES {rows}", "INSERT INTO t VALUES ('x')"]
+    )
+
+    with pytest.raises(UsageError, match=r"column `a` changes type.*CAST\(a AS TEXT\)"):
+        sql.read("local-db", "SELECT a FROM t")
+
+
+def test_sqlite_never_creates_a_missing_file(lite: Path) -> None:
+    """A plain path would be created read-write; the walker refuses first."""
+    with pytest.raises(DirectoryError, match="does not exist"):
+        sql.read("local-db", "SELECT 1")
+
+    assert not lite.exists()
+    assert sorted(p.name for p in lite.parent.iterdir()) == []
+
+
+def test_sqlite_without_an_ingestion_root_in_the_task_description(lite: Path) -> None:
+    """An older worker sends no root; the message says to align the versions."""
+    _task({"local-db": _lite_body()}, {"local-db": {"kind": "sqlite-file"}})
+
+    with pytest.raises(UsageError, match="no ingestion root for `local-db`"):
+        sql.read("local-db", "SELECT 1")
+
+
+def _lite_body() -> dict[str, object]:
+    """Return the server's answer for `local-db`.
+
+    Returns
+    -------
+    dict
+        The body.
+    """
+    return {
+        "name": "local-db",
+        "kind": "sqlite-file",
+        "address": {"root": "shared", "path": "data/app.db"},
+        "settings": {},
+        "endpoints": [],
+        "secret": None,
+    }
+
+
+def test_sqlite_without_the_assets_extra_says_what_to_add(
+    lite: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The SQLite driver comes with `lakana[assets]` too."""
+    monkeypatch.setitem(sys.modules, "adbc_driver_sqlite.dbapi", None)
+
+    with pytest.raises(UsageError, match=r"add lakana\[assets\]"):
+        sql.read("local-db", "SELECT 1")
+
+
+def test_sqlite_on_a_root_this_worker_does_not_have_names_the_setting(
+    lite: Path, tmp_path: Path
+) -> None:
+    """The worker's own text: which root, and which variable sets it."""
+    _task(
+        {"local-db": _lite_body()},
+        {
+            "local-db": {
+                "kind": "sqlite-file",
+                "root": "shared",
+                "root_dir": str(tmp_path / "gone"),
+                "path": "data/app.db",
+            }
+        },
+    )
+
+    with pytest.raises(RootUnavailable) as caught:
+        sql.read("local-db", "SELECT 1")
+
+    assert str(caught.value).startswith(
+        "`local-db` names ingestion root `shared`, which this worker does not have."
+    )
+
+
+@pytest.mark.parametrize(
+    ("make", "fragment"),
+    [
+        (lambda p: p.mkdir(), "is not a regular file"),
+        (lambda p: os.mkfifo(p), "is not a regular file"),
+    ],
+)
+def test_sqlite_refuses_a_path_that_is_not_a_regular_file(
+    lite: Path, make: Callable[[Path], None], fragment: str
+) -> None:
+    """A directory or a pipe is refused before the driver opens it."""
+    make(lite)
+
+    with pytest.raises(DirectoryError, match=fragment) as caught:
+        sql.read("local-db", "SELECT 1")
+
+    assert str(caught.value).startswith("`local-db`: ")
+
+
+def test_sqlite_needs_a_file_path(lite: Path) -> None:
+    """A connection whose path names only the root has no file to open."""
+    _task(
+        {"local-db": _lite_body()},
+        {
+            "local-db": {
+                "kind": "sqlite-file",
+                "root": "shared",
+                "root_dir": str(lite.parent.parent),
+                "path": ".",
+            }
+        },
+    )
+
+    with pytest.raises(DirectoryError, match="a file path is needed"):
+        sql.read("local-db", "SELECT 1")
+
+
+def test_sqlite_a_driver_that_cannot_open_the_file_may_pass_next_time(
+    lite: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An error at open is the source's, retried."""
+    import adbc_driver_sqlite.dbapi as lite_driver
+    from adbc_driver_manager import AdbcStatusCode
+
+    _sqlite(lite, ["CREATE TABLE t(a)"])
+
+    def refuse(uri: str) -> None:
+        raise lite_driver.OperationalError(
+            f"unable to open database file {uri}", status_code=AdbcStatusCode.IO
+        )
+
+    monkeypatch.setattr(lite_driver, "connect", refuse)
+
+    with pytest.raises(SourceError, match="unable to open database file") as caught:
+        sql.read("local-db", "SELECT 1")
+
+    assert type(caught.value) is SourceError
+
+
+@pytest.mark.parametrize(
+    ("query", "kind", "fragment"),
+    [
+        ("SELEC 1", UsageError, "the query failed \\(SQLite said: .*syntax error"),
+        ("SELECT * FROM missing", UsageError, "the query failed \\(SQLite said: .*no such table"),
+    ],
+)
+def test_sqlite_a_query_error_is_classed(
+    lite: Path, query: str, kind: type[Exception], fragment: str
+) -> None:
+    """Syntax and missing names repeat on every attempt."""
+    _sqlite(lite, ["CREATE TABLE t(a)"])
+
+    with pytest.raises(kind, match=fragment) as caught:
+        sql.read("local-db", query)
+
+    assert type(caught.value) is kind
+
+
+def test_sqlite_a_file_that_is_not_a_database_is_the_sources_error(lite: Path) -> None:
+    """SQLite says so only when it reads; the message keeps its words."""
+    lite.write_bytes(b"not a database, just text" * 100)
+
+    with pytest.raises(SourceError, match="not a database") as caught:
+        sql.read("local-db", "SELECT 1")
+
+    assert type(caught.value) is SourceError

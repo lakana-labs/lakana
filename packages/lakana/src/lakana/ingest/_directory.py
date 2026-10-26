@@ -484,6 +484,42 @@ def walk(root_dir: str, base: str, pattern: str, *, max_files: int) -> Listing:
     return listing
 
 
+def regular_file(root_dir: str, path: str) -> None:
+    """Check that a path below the root is a regular file, opening no link on the way.
+
+    Parameters
+    ----------
+    root_dir
+        The ingestion root.
+    path
+        The file's path below it (a ``sqlite-file`` connection's path).
+
+    Raises
+    ------
+    RootUnavailable
+        If the root is missing, not a directory, or a symbolic link.
+    DirectoryError
+        If a component is a link or missing, or the file is not a regular file.
+    """
+    parts = _segments(path, "file")
+    if not parts:
+        raise DirectoryError("a file path is needed")
+    fd = _open_dir(root_dir, parts[:-1])
+    try:
+        try:
+            handle = os.open(parts[-1], _FILE, dir_fd=fd)
+        except OSError as exc:
+            failure = _failure(exc, f"{path!r} cannot be read: {_why(fd, parts[-1], exc)}")
+            raise failure from None
+    finally:
+        os.close(fd)
+    try:
+        if not stat.S_ISREG(os.fstat(handle).st_mode):
+            raise DirectoryError(f"{path!r} is not a regular file")
+    finally:
+        os.close(handle)
+
+
 def read(root_dir: str, base: str, relative: str, *, max_bytes: int) -> bytes:
     """Read one regular file below the base, opening every component without following links.
 

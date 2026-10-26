@@ -44,7 +44,7 @@ from docker_stack import (
     stack,
     start_egress,
 )
-from tls_fixture import issue_leaf, make_authority
+from tls_fixture import Authority, issue_leaf, make_authority
 
 from lakana_core.connections.endpoints import endpoints
 from lakana_core.connections.kinds import ConnectionKind
@@ -204,6 +204,10 @@ class Sources:
         on the Compose bundle's.
     egress
         The egress container, whose copy of the refused ranges a test reads.
+    authority
+        The private authority of the source's certificate, for a second server's.
+    material
+        A directory for that server's certificate files.
     """
 
     stack: Stack
@@ -213,6 +217,8 @@ class Sources:
     bridge_gateway: str
     neighbour: str
     egress: Any
+    authority: Authority
+    material: Path
 
 
 def _files(entries: dict[str, bytes]) -> bytes:
@@ -324,6 +330,8 @@ def sources(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Sources]:
                     str(bridge),
                     _address(neighbour, network.name),
                     egress,
+                    authority,
+                    material,
                 )
     finally:
         client.close()
@@ -1404,3 +1412,185 @@ def test_files_read_reads_a_mounted_root_and_never_follows_a_link(
     assert "root:x:" not in text
     assert outcome.succeeded is False
     assert not [name for name in sources.stack.labelled() if "task" in name]
+
+
+_DB_HOST = "db.lakana.test"
+_POSTGRES = "postgres:18.6@sha256:edb0c08dc33befd0262ab3b5cf1c4f3f8cfd8b09e88c05b45adee29d6761ddb6"
+_READER = "reader-pa55-0123456789"
+_POSTGRES_START = (
+    "install -d -o 999 -g 999 -m 0700 /etc/pg-ssl && "
+    "install -o 999 -g 999 -m 0600 /certs/server.crt /certs/server.key /etc/pg-ssl/ && "
+    "exec docker-entrypoint.sh postgres -c ssl=on "
+    "-c ssl_cert_file=/etc/pg-ssl/server.crt -c ssl_key_file=/etc/pg-ssl/server.key"
+)
+"""The key must belong to the server's user (uid 999) with mode 0600: copied before the start."""
+
+_SQL_ASSET = """import json
+
+from lakana import asset
+from lakana.ingest import sql
+
+
+@asset(connections=["crm"])
+def items():
+    try:
+        seen = sql.read(
+            "crm",
+            "SELECT s.ssl, current_setting('transaction_read_only') AS read_only, :n AS n "
+            "FROM pg_stat_ssl s WHERE s.pid = pg_backend_pid()",
+            params={"n": 7},
+        ).to_pylist()
+    except Exception as exc:
+        seen = {"error": f"{type(exc).__name__}: {exc}"}
+    print("E2E " + json.dumps(seen), flush=True)
+    raise RuntimeError("the probe is done")
+"""
+"""An ingestion asset that reads PostgreSQL with `sql.read`; it prints what it read and fails on
+purpose (the stand-in server takes no table)."""
+
+
+def _postgres_ready(container: Any) -> None:  # ruff: ignore[any-type] (Docker SDK)
+    """Wait up to 60 seconds for PostgreSQL to accept TCP connections inside its container.
+
+    Parameters
+    ----------
+    container
+        The running container.
+
+    Raises
+    ------
+    AssertionError
+        When it does not.
+    """
+    deadline = time.monotonic() + 60
+    while time.monotonic() < deadline:
+        code, _ = container.exec_run(["pg_isready", "-h", "127.0.0.1", "-U", "postgres"])
+        if code == 0:
+            return
+        time.sleep(0.5)
+    raise AssertionError(container.logs().decode(errors="replace")[-2000:])
+
+
+def test_sql_read_reaches_postgresql_through_the_relay_with_verify_full(
+    sources: Sources, worker_side: _Mirrored
+) -> None:
+    """A real `sql.read` under the Docker runner: libpq dials the relay, TLS checks the name.
+
+    PostgreSQL 18 on the sources' network serves a certificate for ``db.lakana.test`` from the
+    module's authority, which the task trusts through the trust bundle only. The asset reads one
+    row with a bound value; PostgreSQL reports the session's TLS and its read-only transaction.
+    """
+    _real_environment(sources.stack, _wheelhouse())
+    client = sources.stack.client
+    directory = sources.material / f"db-{uuid.uuid4().hex[:8]}"
+    directory.mkdir()
+    certificate, key = issue_leaf(sources.authority, directory, names=(_DB_HOST,))
+    database = client.containers.create(
+        _POSTGRES,
+        ["bash", "-c", _POSTGRES_START],
+        entrypoint=[],
+        environment={"POSTGRES_PASSWORD": "admin-pa55-0123456789"},
+        labels=sources.stack.labels,
+        network=sources.network,
+        networking_config={sources.network: client.api.create_endpoint_config(aliases=[_DB_HOST])},
+    )
+    try:
+        database.put_archive(
+            "/",
+            docker_stack._tar(
+                [
+                    ("certs", "dir", b"", 0o755, 0),
+                    ("certs/server.crt", "file", certificate.read_bytes(), 0o644, 0),
+                    ("certs/server.key", "file", key.read_bytes(), 0o600, 0),
+                ]
+            ),
+        )
+        database.start()
+        _postgres_ready(database)
+        code, out = database.exec_run(
+            [
+                "psql",
+                "-v",
+                "ON_ERROR_STOP=1",
+                "-U",
+                "postgres",
+                "-c",
+                f"CREATE ROLE reader LOGIN PASSWORD '{_READER}'",
+            ]
+        )
+        assert code == 0, out
+        address = {"host": _DB_HOST, "port": 5432, "database": "postgres"}
+        settings = {"user": "reader", "tls": "verify-full"}
+        declared = [("crm", ConnectionKind.POSTGRESQL, address, settings)]
+        plan = connection_plan(
+            declared, isolated=True, root_dir=lambda root, name: f"/ingest/{root}"
+        )
+        _serve_connections(
+            sources.stack,
+            {
+                "crm": {
+                    "name": "crm",
+                    "kind": "postgresql",
+                    "address": address,
+                    "settings": settings,
+                    "endpoints": [
+                        {"host": e.host, "port": e.port, "role": e.role}
+                        for e in endpoints(ConnectionKind.POSTGRESQL, address, settings)
+                    ],
+                    "secret": {"password": _READER},
+                }
+            },
+        )
+        attempt = worker_side.root / f"attempt-{uuid.uuid4().hex[:8]}"
+        attempt.mkdir(mode=0o700)
+        (attempt / "code").mkdir(mode=0o755)
+        (attempt / "code" / "items.py").write_text(_SQL_ASSET)
+        launcher = sources.stack.launcher
+        assert launcher is not None
+        runner = DockerRunner(
+            cast("LauncherClient", worker_side),
+            owner="test",
+            memory_mb=512,
+            cpus=1.0,
+            pids=128,
+            kill_grace=2.0,
+            trust=sources.bundle,
+        )
+        task = PythonTask(
+            code_dir=attempt / "code",
+            asset_path="items.py",
+            inputs={},
+            table="raw.items",
+            environment="dev",
+            server_url=f"http://{launcher.settings.server_alias}:8000",
+            token="t" * 48,
+            timeout_seconds=120,
+            venv=Path("/env"),
+            expected_snapshot_id="none",
+            attempt_dir=attempt,
+            environment_key=_E2E_KEY,
+            python=PYTHON,
+            connections=plan.routing,
+            egress=plan.egress,
+            relay=plan.relay,
+        )
+        output = bytearray()
+        # The source stays reachable for the other cases; the database is added for this one.
+        reachable = (
+            *launcher.settings.relay_reachable,
+            f"{_address(database, sources.network)}/32",
+        )
+
+        with sources.stack.configured(relay_reachable=reachable):
+            outcome = runner.run(task, output.extend, StopSignal())
+
+        text = output.decode(errors="replace")
+        reports = [line for line in text.splitlines() if line.startswith("E2E ")]
+        assert reports, text
+        seen = json.loads(reports[-1].removeprefix("E2E "))
+        assert seen == [{"ssl": True, "read_only": "on", "n": 7}], text
+        assert _READER not in text
+        assert outcome.succeeded is False
+        assert not [name for name in sources.stack.labelled() if "task" in name]
+    finally:
+        database.remove(force=True)

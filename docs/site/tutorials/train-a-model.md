@@ -189,7 +189,7 @@ index:
 <!-- output: train-and-predict#lock -->
 ```text
 Using CPython 3.14.4 interpreter at: /home/you/lakana/.venv/bin/python3
-Resolved 36 packages in 327ms
+Resolved 39 packages in 327ms
 ```
 
 `uv.lock` names every package, `lakana` among them, with the public index as its source. You

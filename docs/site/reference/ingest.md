@@ -5,7 +5,8 @@ declares and give the asset a table. They run inside a task, so a helper reads o
 connections the asset lists in `@asset(connections=[...])`, with the task's own credential and
 the network rules of [connections](connections.md#how-a-task-gets-its-credential). They need
 the `lakana[assets]` extra, which a project that runs assets already depends on; it now includes
-`fastexcel`, the spreadsheet reader, and `obstore`, the client of S3, GCS and Azure Blob Storage.
+`fastexcel`, the spreadsheet reader, `obstore`, the client of S3, GCS and Azure Blob Storage, and
+the ADBC drivers of PostgreSQL and SQLite.
 
 ## files
 
@@ -267,3 +268,152 @@ could end differently (the task is retried only when it could):
 | `... cannot be searched (Permission denied); give this worker read and search access to it` | A directory the pattern needs can be listed but not searched. | Give the worker search (execute) access, or narrow the pattern. |
 | `... has a modification time past the year 9999` | A file is dated beyond what a timestamp holds. | Set a sane time on the file. |
 | `since= takes a datetime or None` | `since` has another type. | Pass `ctx.watermark()` of an asset with `watermark="_source_modified"`. |
+
+## sql
+
+`lakana.ingest.sql` runs one query on a database connection and returns the result as a
+`pyarrow.Table`, with column types taken from the database. It reads these kinds of
+[connection](connections.md):
+
+| Kind | Driver | How the task reaches it |
+|---|---|---|
+| `postgresql` | ADBC (`adbc-driver-postgresql`) | under the Docker runner through the task's relay, TLS checked for the connection's real host |
+| `sqlite-file` | ADBC (`adbc-driver-sqlite`) | the file below an ingestion root, opened read-only |
+
+```python
+from lakana import asset
+from lakana.ingest import sql
+
+
+@asset(connections=["crm-db"], write="append", watermark="updated_at")
+def customers(ctx):
+    return sql.read(
+        "crm-db",
+        "SELECT id, name, updated_at FROM customers WHERE updated_at > :since",
+        params={"since": ctx.watermark(default="1970-01-01")},
+    )
+```
+
+### sql.read
+
+`sql.read(connection, query, *, params=None, max_rows=10_000_000, max_bytes=268_435_456)`
+
+| Parameter | Default | Meaning |
+|---|---|---|
+| `connection` | required | A connection the asset declares, of kind `postgresql` or `sqlite-file`. |
+| `query` | required | One SQL statement. Values go in `:name` placeholders, never into the text. |
+| `params` | none | The value of each placeholder, such as `{"since": ctx.watermark(default=...)}`. |
+| `max_rows` | `10_000_000` | The most rows read, as for `files.read`. |
+| `max_bytes` | 256 MiB | The most bytes of Arrow data read. |
+
+Each cap must be a positive whole number.
+
+### Values never in the text
+
+Write `:name` where a value goes and pass the value in `params`. The driver binds it: the value
+never becomes part of the SQL, so a watermark that holds a quote cannot change the query. A
+placeholder without a value, and a value the query does not use, are refused before anything is
+sent. A `:name` inside a string, a quoted name, a comment or a PostgreSQL dollar quote is left as
+it is, and `::` is a PostgreSQL cast, not a placeholder.
+
+A `None` value is refused: `updated_at > NULL` matches no row, so a first run would read nothing
+and look like it worked. On a first run `ctx.watermark()` is `None`; give the start with
+`ctx.watermark(default=...)`.
+
+### Read-only
+
+Every read runs in a read-only transaction (PostgreSQL's `default_transaction_read_only`), and a
+SQLite file is opened read-only: a query that writes fails. Still, give the connection a database
+user that can only read: a function with side effects still runs inside a `SELECT`.
+
+### Types
+
+PostgreSQL's types become these Arrow types; the type of every column is decided before the
+first row is read.
+
+| PostgreSQL | Arrow |
+|---|---|
+| `smallint`, `integer`, `bigint` | `int16`, `int32`, `int64` |
+| `real`, `double precision` | `float32`, `float64` |
+| `numeric(p, s)` (p up to 38) | `decimal128(p, s)` |
+| `text`, `varchar`, `char` | `string` |
+| `uuid` | `string` (`0b8e...-...`) |
+| `json`, `jsonb` | `string` (the JSON text) |
+| `boolean` | `bool` |
+| `date` | `date32` |
+| `timestamp` | `timestamp[us]` |
+| `timestamptz` | `timestamp[us, tz=UTC]` |
+| `bytea` | `binary` |
+| an array, such as `int[]` | `list` of the element's type |
+
+A column without a faithful Arrow form is refused, naming the column and a cast that fixes it:
+
+| PostgreSQL | Why | Cast in the query |
+|---|---|---|
+| `numeric` without a precision | its values may need any precision | `CAST(col AS numeric(38, 9))` |
+| `numeric` wider than 38 digits | no Arrow decimal holds it | `CAST(col AS numeric(38, s))` |
+| `money` | the driver hands over cents | `CAST(col AS numeric(19, 2))` |
+| `interval` | months, days and time do not add up to one number | `EXTRACT(EPOCH FROM col)` |
+| any other type (`inet`, `point`, `tsvector`, ...), or an array of `uuid`, `json` or `numeric` | the driver hands over raw bytes | `CAST(col AS text)` |
+
+A `NaN` or `Infinity` in a `numeric` column is refused too, naming the column: filter it out,
+or cast the column to `double precision`.
+
+### TLS and the relay
+
+Under the Docker runner a PostgreSQL connection goes through the task's relay
+(`lakana-relay:15001`, see [connections](connections.md#what-a-task-reaches-and-how)), while TLS
+checks the certificate for the connection's real `host`. With `tls: verify-full` (the default)
+the task trusts the workers' trust bundle (`LAKANA_RUN__CA_BUNDLE`) and the connection's own
+`ca_certificate`; without either, the system's CAs. `tls: require` encrypts without checking the
+certificate, `tls: disable` does not encrypt. A connection takes at most 10 seconds.
+
+### Memory
+
+- **Without parameters** PostgreSQL streams the result in batches of about 16 MiB, and the caps
+  stop the read as soon as one is passed.
+- **With parameters** PostgreSQL's driver returns the whole result as one batch, so the caps
+  count it only once it is in memory. Narrow the `WHERE` clause so that the result is small; the
+  worker's memory limit is the backstop and ends the task when it is passed.
+
+### SQLite
+
+- The file is opened read-only (a `file:` URI with `mode=ro`), only after the walker checked
+  that it is a regular file below the root: a symbolic link, a missing file or a directory is
+  refused, and a missing file is never created.
+- A database in WAL mode, or one with a hot journal, needs a directory the worker can write. On a
+  read-only share, give the connection a copy made with `PRAGMA journal_mode=DELETE`.
+- SQLite keeps any type in any column. The driver fixes each column's type from the first 1,024
+  rows; a later value of another type fails, naming the column and `CAST(col AS TEXT)`.
+
+### Errors of sql.read
+
+The classes are those of [files.read](#errors):
+
+| Class | Meaning | Retried |
+|---|---|---|
+| `UsageError` | The call, the query or the setup is wrong: a placeholder without a value, a `None` value, a query that fails (syntax, a missing table or column) or writes, a column without a faithful Arrow form, a connection of another kind, a missing password, a trust bundle the task cannot read, the `lakana[assets]` extra missing. | No |
+| `SourceRefused` (a `SourceError`) | The database refused the password, its certificate is not trusted, or the user may not read the table. | No |
+| `SourceError` | The database failed or could not be reached (a timeout, a connection closed, a cancelled statement), which may pass. | Yes |
+| `DirectoryError` | A SQLite path that is a link, missing or not a regular file. | No |
+| `CapExceeded` | A cap was reached. | No |
+
+| Message starts or contains | Cause | Next step |
+|---|---|---|
+| `sql.read reads postgresql and sqlite-file connections; ... is s3: use files.read` | The connection is of another kind. | Use the helper the message names. |
+| `parameter since is None, so the comparison would match no row` | A `None` value, usually the first run's watermark. | Pass `ctx.watermark(default=...)`. |
+| `placeholder :x has no value in params` (or `params has x, which the query does not use`) | A placeholder and `params` do not match. | Give every placeholder one value. |
+| ``...: authentication failed (PostgreSQL said: ...). Check the secret with `lakana connection test ...` `` | The database refused the user or the password. | Check the secret with `lakana connection test`, and set it again with `lakana connection update`. |
+| ``...: the server's certificate is not trusted for `...`. Give the connection your CA: ...`` | No CA the task trusts signed the server's certificate, or it is for another name. | Run the `lakana connection update ... --ca-file ca.pem` the message names. |
+| `...: the connection through the task's relay closed before PostgreSQL answered` | Under the Docker runner the relay refused the target. | Read the task log's `lakana-relay:` line; an address inside the Lakana stack or on the Docker host is never reachable. |
+| `...: sql.read runs every query in a read-only transaction, and this one writes` | The query writes. | Read only; write with the asset's return value. |
+| `...: the connection's user may not read this (PostgreSQL said: ...); grant it SELECT` | The user lacks `SELECT` on a table. | Grant it `SELECT`, or read another table. |
+| `...: the query failed (PostgreSQL said: ...)` (or `SQLite said:`) | Syntax, a missing table or column, a bad cast. | Fix the query. |
+| ``...: column `...` is ..., which sql.read cannot read as it is; cast it in the query`` | A column without a faithful Arrow form. | Use the cast the message names. |
+| ``...: column `...` holds a value that decimal128(...) cannot hold`` | A `NaN` or `Infinity` in a `numeric` column. | Filter it out, or cast to `double precision`. |
+| ``...: column `...` changes type within the result`` | A SQLite column holds values of different types. | Use the `CAST` the message names. |
+| `...: SQLite could not read the file read-only` | A query that writes, or a WAL database or hot journal in a directory the worker cannot write. | Read only; or give the connection a copy made with `PRAGMA journal_mode=DELETE`. |
+| `...: the result has more than max_rows (...) rows` (or `is larger than max_bytes`) | The result is larger than the cap. | Narrow the query (a `WHERE` clause or a `LIMIT`), or raise the cap. |
+| ``... has no secret with `password` `` | The connection has no password. | Run the command the message names. |
+| `sql.read needs the assets extra` | The project does not depend on `lakana[assets]`. | Add `lakana[assets]` to the project's dependencies and lock again. |
+| `... names ingestion root ..., which this worker does not have` | The worker has no such root. | Set the root as the message says. |
