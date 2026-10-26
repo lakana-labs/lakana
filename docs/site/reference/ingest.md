@@ -337,7 +337,12 @@ For every kind, a value is a `str`, `int`, finite `float`, `bool`, `Decimal`, `d
 dict, a path or another object is refused: give each value its own placeholder (PyMySQL would
 escape such a value with backslashes, which a MariaDB server with `NO_BACKSLASH_ESCAPES` does not
 read as escapes). `NaN` and infinity (also a `Decimal`'s) are refused: SQLite would bind a `NaN`
-as NULL. SQLite cannot bind a `Decimal` or a `time`: pass a `str` or a `float`.
+as NULL. SQLite cannot bind a `Decimal` or a `time`: pass a `str` or a `float`. SQLite also
+refuses a `datetime`: the driver sends it as `2026-01-01T06:00:00.000000`, SQLite's own timestamps
+read `2026-01-01 06:00:00`, and the two compare as text, so rows would be skipped without a word.
+Pass a `str` in the column's own format, such as `"2026-01-01 06:00:00"`
+(`since.isoformat(sep=" ")`), or compare with `datetime(:since)` in the SQL. A `date` binds as
+`2026-01-01`, which is SQLite's own format.
 
 A `None` value is refused: `updated_at > NULL` matches no row, so a first run would read nothing
 and look like it worked. On a first run `ctx.watermark()` is `None`; give the start with
@@ -497,6 +502,7 @@ The classes are those of [files.read](#errors):
 | `parameter ... is a list; a value is a str, int, float, bool, Decimal, date, datetime, time or bytes` | A value of another type. | Give each value its own placeholder. |
 | `parameter ... is not a finite number` | A `NaN` or infinity. | Filter it out before the call. |
 | `parameter ... is a Decimal, which SQLite cannot bind` (or `time`) | A SQLite value the driver cannot bind. | Pass a `str` or a `float`. |
+| `parameter ... is a datetime, which SQLite receives as text such as 2026-01-01T06:00:00.000000` | A SQLite comparison that would skip rows. | Pass a `str` in the column's format, or compare with `datetime(:x)`. |
 | `params= keys are placeholder names` | A key of `params` that is not text. | Use the placeholder's name. |
 | `...: sql.read runs one statement that reads, starting with SELECT, WITH, VALUES or TABLE; this one starts with DROP` | A MariaDB statement that does not only read; DDL would commit. | Read with a `SELECT`; change the database with your migration tool. |
 | `...: sql.read refuses SELECT ... INTO OUTFILE` | It writes a file on the server. | Return the rows instead. |

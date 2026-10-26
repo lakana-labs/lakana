@@ -674,7 +674,8 @@ def _plain_values(params: Mapping[str, object] | None, kind: str | None = None) 
     params
         The values.
     kind
-        The connection's kind, once known: ``sqlite-file`` refuses Decimal and time too.
+        The connection's kind, once known: ``sqlite-file`` refuses Decimal, time and datetime
+        too.
 
     Raises
     ------
@@ -704,6 +705,14 @@ def _plain_values(params: Mapping[str, object] | None, kind: str | None = None) 
             raise UsageError(
                 f"parameter `{name}` is a {type(value).__name__}, which SQLite cannot bind; "
                 "pass a str or a float"
+            )
+        if kind == "sqlite-file" and type(value) is dt.datetime:
+            raise UsageError(
+                f"parameter `{name}` is a datetime, which SQLite receives as text such as "
+                "2026-01-01T06:00:00.000000 and compares as text, while its own timestamps read "
+                "2026-01-01 06:00:00: rows would be skipped. Pass a str in the column's own "
+                f"format, such as \"2026-01-01 06:00:00\" (value.isoformat(sep=' ')), or compare "
+                f"with datetime(:{name}) in the SQL"
             )
 
 

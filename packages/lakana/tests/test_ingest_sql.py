@@ -1975,3 +1975,41 @@ def test_mariadb_insecure_transport_in_a_syntax_error_is_not_a_tls_error(
 
     with pytest.raises(UsageError, match="the query failed"):
         sql.read("shop-db", "SELECT 'insecure transport' x y")
+
+
+def test_sqlite_refuses_a_datetime_that_would_compare_as_other_text(lite: Path) -> None:
+    """ADBC binds `2026-01-01T06:00:00`; SQLite stores `2026-01-01 07:00:00`, which sorts lower."""
+    import datetime as dt
+
+    _sqlite(
+        lite,
+        [
+            "CREATE TABLE t(a INTEGER, at TEXT)",
+            "INSERT INTO t VALUES (1, '2026-01-01 05:00:00'), (2, '2026-01-02 00:00:00'), "
+            "(3, '2026-01-01 07:00:00')",
+        ],
+    )
+    query = "SELECT a FROM t WHERE at > :x ORDER BY a"
+
+    with pytest.raises(UsageError, match=r"Pass a str in the column's own format.*datetime\(:x\)"):
+        sql.read("local-db", query, params={"x": dt.datetime(2026, 1, 1, 6)})
+    as_text = sql.read("local-db", query, params={"x": "2026-01-01 06:00:00"})
+    with_function = sql.read(
+        "local-db",
+        "SELECT a FROM t WHERE datetime(at) > datetime(:x) ORDER BY a",
+        params={"x": "2026-01-01T06:00:00"},
+    )
+
+    assert as_text.column("a").to_pylist() == [2, 3]
+    assert with_function.column("a").to_pylist() == [2, 3]
+
+
+def test_sqlite_binds_a_date_as_its_own_stored_text(lite: Path) -> None:
+    """A date binds as `2026-01-02`, the format SQLite's date() writes: no mismatch."""
+    import datetime as dt
+
+    _sqlite(lite, ["CREATE TABLE t(a INTEGER, d TEXT)", "INSERT INTO t VALUES (1, '2026-01-02')"])
+
+    table = sql.read("local-db", "SELECT a FROM t WHERE d = :d", params={"d": dt.date(2026, 1, 2)})
+
+    assert table.column("a").to_pylist() == [1]

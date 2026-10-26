@@ -1486,6 +1486,8 @@ def test_sql_read_reaches_postgresql_through_the_relay_with_verify_full(
     directory = sources.material / f"db-{uuid.uuid4().hex[:8]}"
     directory.mkdir()
     certificate, key = issue_leaf(sources.authority, directory, names=(_DB_HOST,))
+    # `create` never pulls: a fresh runner has no copy of the image (by digest) yet.
+    client.images.pull(_POSTGRES)
     database = client.containers.create(
         _POSTGRES,
         ["bash", "-c", _POSTGRES_START],
