@@ -814,7 +814,8 @@ def test_a_certificate_problem_deeper_in_a_store_error_is_a_refusal(
     """The store names the certificate in the error's cause, after its first line."""
     said = (
         "Generic S3 error: Error performing list request\n\nDebug source:\n"
-        "Custom { kind: InvalidData, error: InvalidCertificate(UnknownIssuer) }"
+        "Custom {\n    kind: InvalidData,\n    error: InvalidCertificate(\n        UnknownIssuer,\n"
+        "    ),\n}"
     )
     _denied_task(monkeypatch, obstore.exceptions.GenericError(said))
 
@@ -1233,7 +1234,8 @@ def test_a_403_in_a_generic_store_error_is_an_authentication_refusal(
         "https://s3.example.com/landing?list-type=2 in 3ms - Server returned non-2xx status "
         'code: 403 Forbidden: <?xml version="1.0" encoding="UTF-8"?>\n<Error><Code>'
         "SignatureDoesNotMatch</Code><Message>The request signature we calculated does not "
-        "match.</Message></Error>\n\nDebug source:\nGeneric { status: 403 }"
+        "match.</Message></Error>\n\nDebug source:\nGeneric {\n    inner: Status {\n"
+        '        status: 403,\n        body: Some("<Error/>"),\n    },\n}'
     )
     _denied_task(monkeypatch, obstore.exceptions.GenericError(said))
 
@@ -1591,3 +1593,85 @@ def test_azures_authentication_detail_is_cut_from_a_message(
     assert "c2lnbmF0dXJl" not in str(caught.value)
     assert "String to sign" not in str(caught.value)
     assert "<AuthenticationErrorDetail>***</AuthenticationErrorDetail>" in str(caught.value)
+
+
+# --- fix round 2: the class comes from obstore's structure, never from key or reply text ----
+
+
+def test_a_key_that_spells_a_certificate_refusal_stays_a_retried_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A 404 on a key named like rustls's refusal (deleted between list and get) is retried."""
+    key = "error: InvalidCertificate(UnknownIssuer).csv"
+    said = (
+        f"Object at location {key} not found: Error performing GET https://s3.example.com/landing/"
+        "error%3A%20InvalidCertificate%28UnknownIssuer%29.csv in 2ms - Server returned non-2xx "
+        "status code: 404 Not Found: <Error><Code>NoSuchKey</Code></Error>\n\nDebug source:\n"
+        f'NotFound {{\n    path: "{key}",\n    source: RetryError {{\n        inner: Status {{\n'
+        f'            status: 404,\n            body: Some(\n                "<Error><Key>{key}'
+        '</Key></Error>",\n            ),\n        },\n    },\n}'
+    )
+    _denied_task(monkeypatch, obstore.exceptions.GenericError(said))
+
+    with pytest.raises(SourceError) as caught:
+        files.read("lake", "*.csv")
+    assert type(caught.value) is SourceError
+
+
+def test_a_reply_body_that_echoes_a_403_is_not_an_authentication_refusal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A one-line 404 body (GCS style) that echoes a key with a status phrase is retried."""
+    said = (
+        "Generic GCS error: Error performing GET https://storage.googleapis.com/landing/x in 3ms "
+        "- Server returned non-2xx status code: 404 Not Found: No such object: landing/x Server "
+        "returned non-2xx status code: 403.csv\n\nDebug source:\nGeneric {\n    inner: Status {\n"
+        '        status: 404,\n        body: Some(\n            "No such object: landing/x '
+        'Server returned non-2xx status code: 403.csv",\n        ),\n    },\n}'
+    )
+    _denied_task(monkeypatch, obstore.exceptions.GenericError(said))
+
+    with pytest.raises(SourceError) as caught:
+        files.read("lake", "*.csv")
+    assert type(caught.value) is SourceError
+
+
+def test_the_environment_is_put_back_even_when_the_build_is_interrupted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An interrupt while the variables are out still restores every one of them."""
+    import obstore.store
+
+    monkeypatch.setenv("AWS_SESSION_TOKEN", "kept-0123")
+    monkeypatch.setenv("AZURE_STORAGE_TOKEN", "kept-4567")
+
+    def interrupted(*args: object, **kwargs: object) -> object:
+        assert "AWS_SESSION_TOKEN" not in os.environ
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(obstore.store, "S3Store", interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        _stores.store_for(
+            _connection("s3", _S3, {"access_key_id": "AKID"}, {"secret_access_key": _KEY})
+        )
+    assert os.environ["AWS_SESSION_TOKEN"] == "kept-0123"
+    assert os.environ["AZURE_STORAGE_TOKEN"] == "kept-4567"
+
+
+def test_a_garbled_trust_bundle_names_the_bundle_not_the_secret(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A bundle whose certificate block does not parse is the bundle's fault."""
+    garbled = tmp_path / "garbled.pem"
+    garbled.write_text(
+        "-----BEGIN CERTIFICATE-----\nbm90IGEgY2VydGlmaWNhdGU=\n-----END CERTIFICATE-----\n",
+        encoding="ascii",
+    )
+    monkeypatch.setenv("LAKANA_CA_BUNDLE", str(garbled))
+
+    with pytest.raises(_usage_error()) as caught:
+        _stores.store_for(
+            _connection("s3", _S3, {"access_key_id": "AKID"}, {"secret_access_key": _KEY})
+        )
+    assert "LAKANA_RUN__CA_BUNDLE" in str(caught.value)
+    assert "secret" not in str(caught.value)

@@ -186,12 +186,15 @@ _SIGNED_PARAMETER = re.compile(
 _AUTH_HEADER = re.compile(r"(?i)\b((?:proxy-)?authorization)\s*[:=]\s*[^\n]*")
 _DEBUG = "\n\nDebug source:"
 """Where obstore's summary ends and its dump of the cause begins."""
-_INVALID_CERTIFICATE = re.compile(r"error: InvalidCertificate\(\s*(\w+),?\s*\)")
-"""rustls's refusal of the server's certificate, as obstore's dump of the cause shows it."""
+_INVALID_CERTIFICATE = re.compile(r"error: InvalidCertificate\(\n\s*(\w+),\n\s*\)")
+"""rustls's refusal of the server's certificate, as obstore's dump of the cause prints it."""
+_REFUSED_STATUS = re.compile(r"inner: Status \{\n\s*status: (?:401|403),\n")
+"""A store's 401 or 403 answer, as obstore's dump of the cause prints it."""
+_LITERAL = re.compile(r'"(?:[^"\\]|\\.)*"')
+"""A string literal in obstore's dump: a key, a reply body. Never read for the class."""
 _XML_HEAD = re.compile(r":?\s*<\?xml[^>]*\?>\s*$")
 _ERROR_CODE = re.compile(r"<Code>([^<]{1,100})</Code>")
 _ERROR_MESSAGE = re.compile(r"<Message>([^<\n]{1,300})")
-_STATUS = re.compile(r"Server returned non-2xx status code: (\d{3})\b")
 
 
 def _utc(value: dt.datetime) -> dt.datetime:
@@ -293,13 +296,15 @@ def _problem(error: BaseException | str) -> str:
         The text, scrubbed, its control characters escaped, at most 500 characters.
     """
     text = _scrubbed(str(error)).strip()
-    summary, _, dump = text.partition(_DEBUG)
+    summary, _, _ = text.partition(_DEBUG)
     lines = summary.splitlines()
     parts = [_XML_HEAD.sub("", lines[0].strip()) if lines else type(error).__name__]
     code, said = _ERROR_CODE.search(summary), _ERROR_MESSAGE.search(summary)
     if code:
         parts.append(code.group(1) + (f": {said.group(1).strip()}" if said else ""))
-    if certificate := _INVALID_CERTIFICATE.search(dump):
+    if isinstance(error, BaseException) and (
+        certificate := _INVALID_CERTIFICATE.search(_structure(error))
+    ):
         parts.append(f"InvalidCertificate({certificate.group(1)})")
     return safe_name("; ".join(parts))[:_PROBLEM_CHARS]
 
@@ -351,13 +356,34 @@ def _refuse(
     raise SourceError(f"`{name}`: {problem}") from None
 
 
+def _structure(error: BaseException) -> str:
+    r"""Return obstore's dump of an error's cause without its string literals.
+
+    The dump is Rust's pretty-printed debug form; its literals hold the object's key and the
+    store's reply body, which anyone who can write a key or answer a request controls, so they
+    are blanked before anything is matched. A literal cannot forge the rest: inside it a line
+    break is the two characters ``\n``.
+
+    Parameters
+    ----------
+    error
+        What obstore raised.
+
+    Returns
+    -------
+    str
+        The part after ``Debug source:``, each literal replaced by ``""``.
+    """
+    return _LITERAL.sub('""', str(error).partition(_DEBUG)[2])
+
+
 def _denied(error: BaseException) -> bool:
     """Say whether an obstore error is a refused credential.
 
     obstore raises its authentication and permission classes for some requests only; a list
-    request that the store answers with 401 or 403 is a generic error whose first line ends
-    with the status. The last status on that line is the store's: a key earlier on it is the
-    request's.
+    request that the store answers with 401 or 403 is a generic error whose dump holds the
+    status. The summary line and the reply body are never read for it: a key or a body can
+    spell any status.
 
     Parameters
     ----------
@@ -371,20 +397,17 @@ def _denied(error: BaseException) -> bool:
     """
     import obstore
 
-    if isinstance(
+    return isinstance(
         error,
         obstore.exceptions.PermissionDeniedError | obstore.exceptions.UnauthenticatedError,
-    ):
-        return True
-    statuses = _STATUS.findall(str(error).split("\n", 1)[0])
-    return bool(statuses) and statuses[-1] in ("401", "403")
+    ) or bool(_REFUSED_STATUS.search(_structure(error)))
 
 
 def _store_certificate(error: BaseException) -> bool:
     """Say whether obstore failed because the server's certificate is not trusted.
 
-    Only the dump of the cause is read, and only rustls's ``InvalidCertificate``: a bucket,
-    key or host that holds the word "certificate" decides nothing.
+    Only the dump's structure is read (`_structure`), and only rustls's ``InvalidCertificate``
+    as Rust prints it: a bucket, key, host or reply that holds the word decides nothing.
 
     Parameters
     ----------
@@ -396,7 +419,7 @@ def _store_certificate(error: BaseException) -> bool:
     bool
         Whether the dump names an invalid certificate.
     """
-    return bool(_INVALID_CERTIFICATE.search(str(error).partition(_DEBUG)[2]))
+    return bool(_INVALID_CERTIFICATE.search(_structure(error)))
 
 
 def _tls_refused(error: BaseException) -> bool:

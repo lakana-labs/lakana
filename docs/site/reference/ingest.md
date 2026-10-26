@@ -62,11 +62,13 @@ def stations():
   goes through the egress proxy with the task's token, which reaches the connection's host and
   nothing else (see [connections](connections.md#what-a-task-reaches-and-how)). The helper passes
   the proxy to its client directly; nothing else in the task uses it.
-- **Nothing comes from the task's environment.** A store takes exactly the connection's
-  endpoint and credential: it is built while every `AWS_*`, `GOOGLE_*` and `AZURE_*` variable
-  (and a managed-identity endpoint) is out of the environment, so a token your own code or a
-  library sets there never replaces or joins the connection's credential. The variables are put
-  back right after, for your own code. `HTTPS_PROXY`, `SSL_CERT_FILE` and `.netrc` are not used
+- **No credential from the task's environment.** A store takes the connection's endpoint and
+  credential: it is built while every `AWS_*`, `GOOGLE_*` and `AZURE_*` variable in `os.environ`
+  (and a managed-identity endpoint) is taken out, so a token your own code or a library sets
+  there does not replace or join the connection's credential. The variables are put back right
+  after, for your own code. This covers what `os.environ` shows: a variable set with
+  `os.putenv` or by native code is not seen, and another thread of your asset does not see the
+  variables while a store is built. `HTTPS_PROXY`, `SSL_CERT_FILE` and `.netrc` are not used
   either.
 - **Certificates.** A store is trusted with the workers' trust bundle: public CAs, plus your own
   CA when the operator sets `LAKANA_RUN__CA_BUNDLE`. An `http` connection also trusts its own
@@ -155,7 +157,15 @@ one already read. That happens when:
 - one file is dated in the future, which moves the watermark ahead of every file that follows;
 - a file is moved into the folder with `mv` or a rename: it keeps the time it was written, so if
   a read has already moved the watermark past that time, the file is never read. Copy the file in
-  instead of moving it, or `touch` it after the move.
+  instead of moving it, or `touch` it after the move;
+- **in an S3 bucket**, a large file is uploaded in parts (the AWS CLI and SDKs do this above
+  8 MiB), and S3 dates the object by the time the upload **started**, not when it finished. If a
+  read runs while the upload is still going and reads a newer file, the watermark moves past the
+  upload's start, and the finished object is never read. Upload to a staging prefix and copy the
+  finished object into the prefix you read (a copy is dated when it is made), or read by name
+  with `modified_from=`. GCS dates an object when its upload completes, and Azure Blob Storage
+  when its blocks are committed, so a finished upload there is newer than any read that ran
+  before it.
 
 If your source can do any of these, read by name instead: `modified_from="export-%Y-%m-%d.csv"`
 takes the time from a `strptime` pattern applied to the file's name (the part after the last
@@ -230,7 +240,7 @@ could end differently (the task is retried only when it could):
 | `the secret of ... is not a service-account key` | A `gcs` secret is not the JSON key Google gives you. | Store the key file's JSON with the command the message names. |
 | `... uses auth oauth2, which files.read does not support yet` | `files.read` cannot fetch an OAuth2 token yet. | Use `auth: bearer`, or `connections.get` with your own client. |
 | `files.read reads one file of an http connection` | An `http` path with a wildcard, `?`, `#` or `%`. | Pass one path relative to the base URL. |
-| `the trust bundle ... (LAKANA_CA_BUNDLE) cannot be read` (or `holds no certificate`) | The worker's trust bundle is missing in the task, or has no PEM certificate. | Check the worker's `LAKANA_RUN__CA_BUNDLE`. |
+| `the trust bundle ... (LAKANA_CA_BUNDLE) cannot be read` (or `holds no certificate that can be read`) | The worker's trust bundle is missing in the task, or holds no PEM certificate that parses. | Check the worker's `LAKANA_RUN__CA_BUNDLE`. |
 | `obstore cannot use the secret of ...` | The secret is well formed but unusable: a service-account key whose private key is not an RSA key, an account key that is not base64. | Store the right value with the command the message names. |
 | `the listing passed 1000000 objects; narrow the pattern` | The pattern's fixed leading part leaves too many objects to look at. | Start the pattern with more fixed folders (`exports/2026/*.csv` rather than `**/*.csv`). |
 | `the files matching ... hold more than max_rows (...) rows` | The files hold more rows than the cap. | Narrow the pattern, pass `since=` to read fewer files, or raise `max_rows`. |

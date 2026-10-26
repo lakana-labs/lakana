@@ -121,7 +121,10 @@ one object under the connection's prefix (an `s3` request is signed with SigV4, 
 account key or the SAS token); a refused key is `credentials`, with the store's own code. The
 credentials of a `gcs` connection are not checked, because the check uses the standard library only
 and cannot sign a service-account key: its message says so, and a refused key shows in the first
-`files.read`. Other kinds end with "credentials not checked yet". Any worker runs the check.
+`files.read`. The credentials of `http` (bearer, basic, api_key and oauth2), `postgresql` and
+`mariadb` connections are not checked yet: their test ends with "credentials not checked yet",
+until their helpers arrive. A `tcp` connection is checked for reachability only. Any worker runs
+the check.
 With the local runner it is a subprocess of the worker's Python that needs `lakana` installed next to
 the worker (without it the test fails and says so). With the Docker runner (the Compose bundle's
 default) the launcher runs it in a container of the task image, from the image's own copy of the check,

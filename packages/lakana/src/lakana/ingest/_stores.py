@@ -15,6 +15,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import ssl
 import threading
 from collections.abc import Callable, Generator
 from typing import TYPE_CHECKING, Any, TypeVar
@@ -92,10 +93,17 @@ def client_options(conn: Connection, url: str) -> ClientConfig:
                 f"the trust bundle `{bundle}` (LAKANA_CA_BUNDLE) cannot be read "
                 f"({exc.strerror}); check the worker's LAKANA_RUN__CA_BUNDLE"
             ) from None
-        if b"-----BEGIN CERTIFICATE-----" not in options["root_certificate"]:
+        try:
+            # The certificates must parse here: obstore's own refusal could not tell them from
+            # the connection's secret.
+            ssl.create_default_context(cafile=bundle)
+            certificate = b"-----BEGIN CERTIFICATE-----" in options["root_certificate"]
+        except ssl.SSLError:
+            certificate = False
+        if not certificate:
             raise UsageError(
-                f"the trust bundle `{bundle}` (LAKANA_CA_BUNDLE) holds no certificate; check the "
-                "worker's LAKANA_RUN__CA_BUNDLE"
+                f"the trust bundle `{bundle}` (LAKANA_CA_BUNDLE) holds no certificate that can "
+                "be read; check the worker's LAKANA_RUN__CA_BUNDLE"
             )
     return options
 
@@ -104,8 +112,13 @@ def client_options(conn: Connection, url: str) -> ClientConfig:
 def _without_cloud_environment() -> Generator[None]:
     """Take obstore's variables out of the environment while a store is built.
 
-    One store is built at a time (a lock), and every variable is put back afterwards, so the
-    task's own code sees its environment unchanged.
+    One store is built at a time (a lock), and every variable is put back afterwards, even
+    after an interrupt, so the task's own code sees its environment unchanged.
+
+    Limits, accepted (only the task's own code could exploit them, and it is trusted): what is
+    removed is what `os.environ` shows, so a variable set with `os.putenv` or by native code
+    stays; another thread that reads one of these variables while a store is built does not
+    see it, and one that writes one then has its value replaced by the earlier one.
 
     Yields
     ------
@@ -113,15 +126,17 @@ def _without_cloud_environment() -> Generator[None]:
         While the variables are out.
     """
     with _ENVIRONMENT:
-        taken = {
-            name: os.environ.pop(name)
-            for name in list(os.environ)
-            if name.startswith(_CLOUD_PREFIXES) or name in _CLOUD_NAMES
-        }
+        taken: dict[str, str] = {}
         try:
+            for name in [n for n in os.environ if n.startswith(_CLOUD_PREFIXES)] + [
+                n for n in _CLOUD_NAMES if n in os.environ
+            ]:
+                taken[name] = os.environ[name]
+                del os.environ[name]
             yield
         finally:
-            os.environ.update(taken)
+            for name, value in taken.items():
+                os.environ[name] = value
 
 
 def _build(conn: Connection, make: Callable[[], _Store], fix: str) -> _Store:
