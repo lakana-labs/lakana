@@ -1,15 +1,20 @@
-"""Arrow types of a SQL result: PostgreSQL's as ADBC hands them over.
+"""Arrow types of a SQL result: PostgreSQL's as ADBC hands them over, MariaDB's from the result.
 
 PostgreSQL (ADBC 1.13 and newer) gives every field its type name and type modifier in the
 field's metadata (``POSTGRESQL:type``, ``POSTGRESQL:typmod``). `postgres_schema` turns that into
 the table's schema once, before a row is read, and refuses a column with no faithful Arrow form,
 naming the column and the cast that fixes it; `normalize_postgres` converts each batch to it.
+
+MariaDB's schema comes from the result's field descriptions (`mariadb_schema`), never from the
+values; `mariadb_batch` converts rows to it.
 """
 
 from __future__ import annotations
 
+import datetime as dt
 import uuid
-from typing import TYPE_CHECKING
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Any
 
 from lakana.ingest._errors import UsageError, safe_name
 
@@ -255,3 +260,173 @@ def normalize_postgres(batch: pa.RecordBatch, schema: pa.Schema, connection: str
         columns.append(array)
     # A nested column's children keep ADBC's metadata in the array; the schema drops it.
     return pa.RecordBatch.from_arrays(columns, schema=schema)
+
+
+# --- MariaDB and MySQL ------------------------------------------------------------------------
+
+_UNSIGNED = 32
+"""`pymysql.constants.FLAG.UNSIGNED`."""
+_BINARY_CHARSET = 63
+"""The character set number of binary strings and BLOBs."""
+
+
+def mariadb_schema(fields: Sequence[Any], connection: str) -> pa.Schema:
+    """Decide the table's schema from the result's field descriptions, never from the values.
+
+    Parameters
+    ----------
+    fields
+        PyMySQL's field descriptions (``cursor._result.fields``): ``name``, ``type_code``,
+        ``flags``, ``scale``, ``length`` and ``charsetnr`` of each column.
+    connection
+        The connection, for messages.
+
+    Returns
+    -------
+    pyarrow.Schema
+        The schema.
+
+    Raises
+    ------
+    UsageError
+        For ``GEOMETRY``, ``BIT`` or a type this helper does not know, naming the column and a
+        cast.
+    """
+    import pyarrow as pa
+
+    out = []
+    for field in fields:
+        code, unsigned = field.type_code, bool(field.flags & _UNSIGNED)
+        name = field.name
+        if code in (1, 13):  # TINY, YEAR
+            kind = pa.int16()
+        elif code in (2, 9):  # SHORT, INT24
+            kind = pa.int32()
+        elif code == 3:  # LONG
+            kind = pa.int64()
+        elif code == 8:  # LONGLONG
+            kind = pa.decimal128(20, 0) if unsigned else pa.int64()
+        elif code in (0, 246):  # DECIMAL, NEWDECIMAL
+            scale = field.scale
+            precision = field.length - (1 if scale > 0 else 0) - (0 if unsigned else 1)
+            if precision > MAX_PRECISION:
+                error = _refuse(
+                    connection, name, f"DECIMAL({precision}, {scale})", "CAST({col} AS DOUBLE)"
+                )
+                raise error
+            kind = pa.decimal128(precision, scale)
+        elif code == 4:  # FLOAT
+            kind = pa.float32()
+        elif code == 5:  # DOUBLE
+            kind = pa.float64()
+        elif code in (10, 14):  # DATE, NEWDATE
+            kind = pa.date32()
+        elif code == 12:  # DATETIME
+            kind = pa.timestamp("us")
+        elif code == 7:  # TIMESTAMP: the session's time zone is UTC
+            kind = pa.timestamp("us", "UTC")
+        elif code == 11:  # TIME
+            kind = pa.time64("us")
+        elif code in (15, 245, 247, 248, 253, 254, 249, 250, 251, 252, 6):
+            # VARCHAR, JSON, ENUM, SET, VAR_STRING, STRING, the BLOBs, NULL. MySQL describes
+            # JSON with the binary character set, and PyMySQL decodes it as text.
+            binary = field.charsetnr == _BINARY_CHARSET and code not in (6, 245)
+            kind = pa.binary() if binary else pa.string()
+        elif code == 255:
+            error = _refuse(connection, name, "GEOMETRY", "ST_AsText({col})")
+            raise error
+        elif code == 16:
+            error = _refuse(connection, name, "BIT", "CAST({col} AS UNSIGNED)")
+            raise error
+        else:
+            error = _refuse(connection, name, f"of type code {code}", "CAST({col} AS CHAR)")
+            raise error
+        out.append(pa.field(name, kind))
+    return pa.schema(out)
+
+
+def _time(value: object) -> object:
+    """Turn PyMySQL's `timedelta` for a ``TIME`` into a time of day.
+
+    Parameters
+    ----------
+    value
+        The value.
+
+    Returns
+    -------
+    object
+        A `datetime.time`, `None`, or the value unchanged (refused by the caller).
+    """
+    if isinstance(value, dt.timedelta) and dt.timedelta(0) <= value < dt.timedelta(days=1):
+        return (dt.datetime.min + value).time()
+    return value
+
+
+def mariadb_batch(
+    rows: Sequence[Sequence[object]], schema: pa.Schema, connection: str
+) -> pa.RecordBatch:
+    """Convert rows as PyMySQL returns them to a batch of `schema`.
+
+    Parameters
+    ----------
+    rows
+        The rows.
+    schema
+        The schema `mariadb_schema` decided.
+    connection
+        The connection, for messages.
+
+    Returns
+    -------
+    pyarrow.RecordBatch
+        The batch.
+
+    Raises
+    ------
+    UsageError
+        For a value its column's type cannot hold (a zero date such as ``0000-00-00``, a
+        ``TIME`` outside one day), naming the column.
+    """
+    import pyarrow as pa
+
+    columns = []
+    for index, field in enumerate(schema):
+        values = [row[index] for row in rows]
+        if pa.types.is_time(field.type):
+            values = [_time(v) for v in values]
+        try:
+            columns.append(pa.array(values, type=field.type))
+        except (pa.ArrowInvalid, pa.ArrowTypeError, OverflowError):
+            bad = next((v for v in values if v is not None and not _fits(v, field.type)), None)
+            shown = safe_name(repr(bad))[:100]
+            raise UsageError(
+                f"`{connection}`: column `{safe_name(field.name)}` holds {shown}, which "
+                f"{field.type} cannot hold; convert or filter it in the query (for example "
+                f"NULLIF({safe_name(field.name)}, '0000-00-00') for a zero date)"
+            ) from None
+    return pa.RecordBatch.from_arrays(columns, schema=schema)
+
+
+def _fits(value: object, kind: pa.DataType) -> bool:
+    """Say whether one value converts to an Arrow type.
+
+    Parameters
+    ----------
+    value
+        The value.
+    kind
+        The type.
+
+    Returns
+    -------
+    bool
+        Whether `pyarrow.array` takes it.
+    """
+    import pyarrow as pa
+
+    try:
+        pa.array([value], type=kind)
+    except (pa.ArrowInvalid, pa.ArrowTypeError, OverflowError):
+        return False
+    return True

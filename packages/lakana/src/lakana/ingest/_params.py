@@ -9,7 +9,11 @@ double-quoted identifiers or strings, backtick identifiers, dollar quotes (`$$..
 Where the tokenizer and the database could read a quote or a comment differently, it errs
 towards "literal": a placeholder it skips reaches the database unchanged and fails there, but
 it never puts a value where the database reads code. That matters for ``pyformat`` only, where
-PyMySQL writes the escaped value into the text; PostgreSQL and SQLite bind on the server.
+PyMySQL writes the escaped value into the text; PostgreSQL and SQLite bind on the server. So
+``pyformat`` reads the text as MariaDB does: no dollar quotes and no ``E'...'`` strings, ``--``
+starts a comment only before a space or a control character, block comments do not nest, and an
+executable comment (``/*! ... */``, ``/*M! ... */``), whose text MariaDB runs or skips by its
+version, is refused.
 """
 
 from __future__ import annotations
@@ -73,8 +77,8 @@ def _quoted_end(text: str, start: int, quote: str, backslash: bool) -> int:
     return len(text)
 
 
-def _comment_end(text: str, start: int) -> int:
-    """Find the end of a (possibly nested) block comment.
+def _comment_end(text: str, start: int, *, nested: bool) -> int:
+    """Find the end of a block comment.
 
     Parameters
     ----------
@@ -82,12 +86,17 @@ def _comment_end(text: str, start: int) -> int:
         The query.
     start
         The index of its `/*`.
+    nested
+        Whether a `/*` inside opens a nested comment (PostgreSQL), or not (MariaDB).
 
     Returns
     -------
     int
         The index after its `*/` (the text's end when unterminated).
     """
+    if not nested:
+        close = text.find("*/", start + 2)
+        return len(text) if close < 0 else close + 2
     depth, i = 0, start
     while i < len(text):
         if text.startswith("/*", i):
@@ -99,6 +108,32 @@ def _comment_end(text: str, start: int) -> int:
         else:
             i += 1
     return len(text)
+
+
+def _line_comment(text: str, start: int, *, mariadb: bool) -> bool:
+    """Say whether a line comment starts at an index.
+
+    Parameters
+    ----------
+    text
+        The query.
+    start
+        The index.
+    mariadb
+        Whether the text is read as MariaDB reads it: ``#`` starts a comment, and ``--`` only
+        before a space or a control character (``1--1`` is one minus minus one).
+
+    Returns
+    -------
+    bool
+        Whether the rest of the line is a comment.
+    """
+    if not mariadb:
+        return text.startswith("--", start)
+    if text.startswith("#", start):
+        return True
+    after = start + 2
+    return text.startswith("--", start) and (after >= len(text) or ord(text[after]) <= 32)
 
 
 def translate(
@@ -144,26 +179,35 @@ def translate(
     numbers: dict[str, int] = {}
     ordered: list[object] = []
     used: set[str] = set()
+    mariadb = style == "pyformat"
     i, n = 0, len(query)
     while i < n:
         char = query[i]
         if char in "'\"`":
             escaped = backslash_escapes and char != "`"
             if (
-                char == "'"
+                not mariadb
+                and char == "'"
                 and i > 0
                 and query[i - 1] in "eE"
                 and (i < 2 or not _word(query[i - 2]))
             ):
                 escaped = True
             end = _quoted_end(query, i, char, escaped)
-        elif query.startswith("--", i) or (char == "#" and style == "pyformat"):
+        elif _line_comment(query, i, mariadb=mariadb):
             newline = query.find("\n", i)
             end = n if newline < 0 else newline
         elif query.startswith("/*", i):
-            end = _comment_end(query, i)
+            if mariadb and query.startswith(("/*!", "/*M!"), i):
+                raise UsageError(
+                    "the query holds an executable comment (/*! ... */), whose text MariaDB "
+                    "runs or skips by its version; sql.read cannot tell which, so write the "
+                    "statement without it"
+                )
+            end = _comment_end(query, i, nested=not mariadb)
         elif (
-            char == "$"
+            not mariadb
+            and char == "$"
             and (i == 0 or not _word(query[i - 1]))
             and (match := _DOLLAR.match(query, i))
         ):

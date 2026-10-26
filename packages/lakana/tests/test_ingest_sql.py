@@ -527,7 +527,7 @@ def test_a_connection_of_another_kind_names_the_helper(driver: _Driver) -> None:
 
     with pytest.raises(
         UsageError,
-        match=r"sql.read reads postgresql and sqlite-file connections; `landing` is s3: use files",
+        match=r"sql.read reads postgresql, mariadb and sqlite-file connections; `landing` is s3",
     ):
         sql.read("landing", "SELECT 1")
 
@@ -1027,3 +1027,485 @@ def test_sqlite_a_file_that_is_not_a_database_is_the_sources_error(lite: Path) -
         sql.read("local-db", "SELECT 1")
 
     assert type(caught.value) is SourceError
+
+
+# --- MariaDB through a fake PyMySQL -------------------------------------------------------------
+
+
+@dataclass
+class _Field:
+    """A PyMySQL field description."""
+
+    name: str
+    type_code: int
+    flags: int = 0
+    scale: int = 0
+    length: int = 0
+    charsetnr: int = 45
+
+
+@dataclass
+class _Result:
+    """PyMySQL's result, as far as `sql.read` reads it."""
+
+    fields: list[_Field]
+
+
+class _MyError(Exception):
+    """PyMySQL's error: ``args`` is ``(code, message)``."""
+
+
+@dataclass
+class _MyCursor:
+    """A fake unbuffered cursor."""
+
+    rows: list[tuple[object, ...]]
+    fields: list[_Field]
+    fail: Exception | None = None
+    executed: list[tuple[str, object]] = field(default_factory=list)
+    _result: _Result | None = None
+    fetched: list[int] = field(default_factory=list)
+
+    def execute(self, query: str, args: object = None) -> None:
+        """Record a statement.
+
+        Parameters
+        ----------
+        query
+            The SQL.
+        args
+            Its values.
+
+        Raises
+        ------
+        Exception
+            The configured error, for the asset's query.
+        """
+        self.executed.append((query, args))
+        if query != "START TRANSACTION READ ONLY":
+            if self.fail is not None:
+                raise self.fail
+            self._result = _Result(self.fields)
+
+    def fetchmany(self, size: int) -> list[tuple[object, ...]]:
+        """Hand out up to `size` rows.
+
+        Parameters
+        ----------
+        size
+            The batch size.
+
+        Returns
+        -------
+        list
+            The rows.
+        """
+        self.fetched.append(size)
+        out, self.rows = self.rows[:size], self.rows[size:]
+        return out
+
+
+@dataclass
+class _MyConnection:
+    """A fake `pymysql.connections.Connection`."""
+
+    kwargs: dict[str, Any]
+    cursor_: _MyCursor
+    refuse: Exception | None = None
+    server_status: int = 0
+    socks: list[object] = field(default_factory=list)
+
+    def connect(self, sock: object = None) -> None:
+        """Record the socket handed over, or refuse.
+
+        Parameters
+        ----------
+        sock
+            The connected socket under the Docker runner.
+
+        Raises
+        ------
+        Exception
+            The configured refusal.
+        """
+        self.socks.append(sock)
+        if self.refuse is not None:
+            raise self.refuse
+
+    def cursor(self, kind: object = None) -> _MyCursor:
+        """Return the cursor.
+
+        Parameters
+        ----------
+        kind
+            The cursor class.
+
+        Returns
+        -------
+        _MyCursor
+            It.
+        """
+        return self.cursor_
+
+    def close(self) -> None:
+        """Close nothing."""
+
+
+@pytest.fixture
+def mysql(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    """Put a fake PyMySQL where `sql.read` imports it; the relay resolves and accepts.
+
+    Parameters
+    ----------
+    monkeypatch
+        Installs the modules.
+
+    Returns
+    -------
+    dict
+        ``cursor`` (rows and fields to hand out), ``made`` (each connection made), ``dialed``
+        (each address a socket was opened to), ``refuse`` and ``status`` to set.
+    """
+    state: dict[str, Any] = {
+        "cursor": _MyCursor([(1, "x")], [_Field("id", 3), _Field("name", 253)]),
+        "made": [],
+        "dialed": [],
+        "refuse": None,
+        "status": 0,
+    }
+
+    def make(**kwargs: object) -> _MyConnection:
+        made = _MyConnection(kwargs, state["cursor"], state["refuse"], state["status"])
+        state["made"].append(made)
+        return made
+
+    module = types.ModuleType("pymysql")
+    module.connections = types.SimpleNamespace(Connection=make)  # ty: ignore[unresolved-attribute]
+    module.cursors = types.SimpleNamespace(SSCursor=object)  # ty: ignore[unresolved-attribute]
+    module.MySQLError = _MyError  # ty: ignore[unresolved-attribute]
+    constants = types.ModuleType("pymysql.constants")
+    constants.SERVER_STATUS = types.SimpleNamespace(  # ty: ignore[unresolved-attribute]
+        SERVER_STATUS_NO_BACKSLASH_ESCAPES=512
+    )
+    monkeypatch.setitem(sys.modules, "pymysql", module)
+    monkeypatch.setitem(sys.modules, "pymysql.constants", constants)
+    monkeypatch.setitem(sys.modules, "pymysql.cursors", module.cursors)
+    monkeypatch.setattr(sql.socket, "gethostbyname", lambda name: "10.207.0.3")
+    monkeypatch.setattr(
+        sql.socket,
+        "create_connection",
+        lambda address, timeout: state["dialed"].append(address) or "SOCKET",
+    )
+    return state
+
+
+def _mariadb(*, relay: bool, tls: str = "verify-full") -> None:
+    """Declare `shop-db`, a MariaDB connection.
+
+    Parameters
+    ----------
+    relay
+        Whether the task runs isolated.
+    tls
+        The connection's ``tls``.
+    """
+    body = {
+        "name": "shop-db",
+        "kind": "mariadb",
+        "address": {"host": "db.example.com", "port": 3306, "database": "shop"},
+        "settings": {"user": "reader", "tls": tls},
+        "endpoints": [{"host": "db.example.com", "port": 3306, "role": "service"}],
+        "secret": {"password": _PASSWORD},
+    }
+    routing: dict[str, object] = {"kind": "mariadb", "grant": [["db.example.com", 3306]]}
+    if relay:
+        routing["relay_port"] = 15002
+    _task({"shop-db": body}, {"shop-db": routing})
+
+
+def test_mariadb_under_docker_hands_pymysql_a_socket_to_the_relay(mysql: dict[str, Any]) -> None:
+    """The real host for TLS; the relay's socket for the bytes; read-only, UTC, no LOCAL INFILE."""
+    _mariadb(relay=True)
+
+    table = sql.read("shop-db", "SELECT id, name FROM t")
+
+    (made,) = mysql["made"]
+    kwargs = made.kwargs
+    assert kwargs["host"] == "db.example.com" and kwargs["port"] == 3306
+    assert kwargs["user"] == "reader" and kwargs["database"] == "shop"
+    assert kwargs["defer_connect"] is True and kwargs["local_infile"] is False
+    assert kwargs["ssl_disabled"] is False and kwargs["ssl"].check_hostname is True
+    assert kwargs["init_command"] == "SET time_zone = '+00:00'"
+    assert mysql["dialed"] == [("10.207.0.3", 15002)] and made.socks == ["SOCKET"]
+    assert mysql["cursor"].executed == [
+        ("START TRANSACTION READ ONLY", None),
+        ("SELECT id, name FROM t", None),
+    ]
+    assert table.to_pylist() == [{"id": 1, "name": "x"}]
+
+
+def test_mariadb_locally_connects_itself_and_disable_turns_tls_off(mysql: dict[str, Any]) -> None:
+    """PyMySQL would try TLS without verifying it unless told `ssl_disabled`."""
+    _mariadb(relay=False, tls="disable")
+
+    sql.read("shop-db", "SELECT id, name FROM t")
+
+    (made,) = mysql["made"]
+    assert made.socks == [None] and mysql["dialed"] == []
+    assert made.kwargs["ssl"] is None and made.kwargs["ssl_disabled"] is True
+
+
+def test_mariadb_binds_an_aware_time_as_utc_and_reads_in_batches(mysql: dict[str, Any]) -> None:
+    """A DATETIME has no zone: 12:00+02:00 is bound as 10:00. Rows come `BATCH_ROWS` at a time."""
+    import datetime as dt
+
+    mysql["cursor"].rows = [(i, "x") for i in range(3)]
+    _mariadb(relay=False)
+    since = dt.datetime(2026, 1, 1, 12, tzinfo=dt.timezone(dt.timedelta(hours=2)))
+
+    sql.read(
+        "shop-db",
+        "SELECT id, name FROM t WHERE u > :since AND n LIKE '5%'",
+        params={"since": since},
+    )
+
+    assert mysql["cursor"].executed[1] == (
+        "SELECT id, name FROM t WHERE u > %(since)s AND n LIKE '5%%'",
+        {"since": dt.datetime(2026, 1, 1, 10)},
+    )
+    assert mysql["cursor"].fetched[0] == sql.BATCH_ROWS
+
+
+def test_mariadb_follows_the_servers_backslash_mode(mysql: dict[str, Any]) -> None:
+    r"""With NO_BACKSLASH_ESCAPES a backslash ends nothing, so `'a\\'` is a whole literal."""
+    mysql["status"] = 512
+    _mariadb(relay=False)
+
+    sql.read("shop-db", "SELECT 'a\\' AS v, :x AS w", params={"x": 1})
+
+    assert mysql["cursor"].executed[1] == ("SELECT 'a\\' AS v, %(x)s AS w", {"x": 1})
+
+
+@pytest.mark.parametrize(
+    ("error", "kind", "fragment"),
+    [
+        (
+            _MyError(1045, "Access denied for user 'reader'"),
+            SourceRefused,
+            r"authentication failed \(MariaDB said: Access denied",
+        ),
+        (
+            _MyError(1792, "Cannot execute statement in a READ ONLY transaction"),
+            UsageError,
+            "read-only transaction",
+        ),
+        (_MyError(1064, "You have an error in your SQL syntax"), UsageError, "the query failed"),
+        (_MyError(1142, "SELECT command denied"), SourceRefused, "may not read this"),
+        (_MyError(2003, "Can't connect to MySQL server"), SourceError, "Can't connect"),
+    ],
+)
+def test_mariadb_errors_are_classed_by_their_code(
+    mysql: dict[str, Any], error: Exception, kind: type[Exception], fragment: str
+) -> None:
+    """Access denied and syntax repeat; a connection failure may pass."""
+    mysql["refuse"] = error if error.args[0] in (1045, 2003) else None
+    mysql["cursor"].fail = None if error.args[0] in (1045, 2003) else error
+    _mariadb(relay=False)
+
+    with pytest.raises(kind, match=fragment) as caught:
+        sql.read("shop-db", "SELECT 1")
+
+    assert type(caught.value) is kind
+
+
+def test_mariadb_a_certificate_failure_gives_the_tls_text(mysql: dict[str, Any]) -> None:
+    """PyMySQL wraps the TLS error and keeps it as `original_exception`."""
+    import ssl
+
+    refused = _MyError(2003, "Can't connect to MySQL server on 'db.example.com'")
+    refused.original_exception = ssl.SSLCertVerificationError("certificate verify failed")  # ty: ignore[unresolved-attribute]
+    mysql["refuse"] = refused
+    _mariadb(relay=True)
+
+    with pytest.raises(SourceRefused, match=r"not trusted for `db\.example\.com`"):
+        sql.read("shop-db", "SELECT 1")
+
+
+def test_mariadb_a_lost_connection_under_docker_points_to_the_relay(mysql: dict[str, Any]) -> None:
+    """Review Focus 3 for MariaDB."""
+    mysql["refuse"] = _MyError(2013, "Lost connection to MySQL server during query")
+    _mariadb(relay=True)
+
+    with pytest.raises(SourceError, match="relay closed before MariaDB answered"):
+        sql.read("shop-db", "SELECT 1")
+
+
+def test_mariadb_schema_comes_from_the_field_descriptions() -> None:
+    """Types from the description, never from the values (the integration test runs a server)."""
+    fields = [
+        _Field("t", 1),
+        _Field("i", 3),
+        _Field("u", 8, flags=32),
+        _Field("d", 246, scale=2, length=12),
+        _Field("f", 5),
+        _Field("day", 10),
+        _Field("at", 12),
+        _Field("ts", 7),
+        _Field("v", 253),
+        _Field("j", 245),
+        _Field("b", 252, charsetnr=63),
+        _Field("tm", 11),
+    ]
+
+    schema = _types.mariadb_schema(fields, "shop-db")
+
+    assert schema.types == [
+        pa.int16(),
+        pa.int64(),
+        pa.decimal128(20, 0),
+        pa.decimal128(10, 2),
+        pa.float64(),
+        pa.date32(),
+        pa.timestamp("us"),
+        pa.timestamp("us", "UTC"),
+        pa.string(),
+        pa.string(),
+        pa.binary(),
+        pa.time64("us"),
+    ]
+
+
+def test_mariadb_geometry_and_a_zero_date_are_named() -> None:
+    """A GEOMETRY needs ST_AsText; `0000-00-00` arrives as text, which no date holds."""
+    with pytest.raises(UsageError, match=r"ST_AsText\(g\)"):
+        _types.mariadb_schema([_Field("g", 255)], "shop-db")
+    schema = _types.mariadb_schema([_Field("at", 12)], "shop-db")
+    with pytest.raises(UsageError, match=r"column `at` holds '0000-00-00 00:00:00'.*NULLIF"):
+        _types.mariadb_batch([("0000-00-00 00:00:00",)], schema, "shop-db")
+
+
+def test_mysqls_json_is_text_although_its_character_set_is_binary() -> None:
+    """MySQL 8 describes a JSON column with the binary character set; PyMySQL decodes it."""
+    schema = _types.mariadb_schema([_Field("j", 245, charsetnr=63)], "shop-db")
+
+    assert schema.types == [pa.string()]
+    assert _types.mariadb_batch([('{"a": 1}',)], schema, "shop-db").to_pylist() == [
+        {"j": '{"a": 1}'}
+    ]
+
+
+def _shop_body(secret: Mapping[str, str] | None) -> None:
+    """Declare `shop-db` locally with a given secret.
+
+    Parameters
+    ----------
+    secret
+        The secret's values, or `None` for no secret.
+    """
+    body = {
+        "name": "shop-db",
+        "kind": "mariadb",
+        "address": {"host": "db.example.com", "port": 3306, "database": "shop"},
+        "settings": {"user": "reader"},
+        "endpoints": [],
+        "secret": secret,
+    }
+    _task({"shop-db": body}, {"shop-db": {"kind": "mariadb"}})
+
+
+def test_mariadb_without_a_password_names_the_command_that_stores_it(
+    mysql: dict[str, Any],
+) -> None:
+    """Nothing is dialled without a password."""
+    _shop_body(None)
+
+    with pytest.raises(UsageError, match=r"`shop-db` has no secret with `password`"):
+        sql.read("shop-db", "SELECT 1")
+
+    assert mysql["made"] == []
+
+
+def test_mariadb_without_the_assets_extra_says_what_to_add(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """PyMySQL comes with `lakana[assets]`."""
+    monkeypatch.setitem(sys.modules, "pymysql", None)
+    _shop_body({"password": _PASSWORD})
+
+    with pytest.raises(UsageError, match=r"add lakana\[assets\]"):
+        sql.read("shop-db", "SELECT 1")
+
+
+def test_mariadb_an_unreadable_trust_bundle_names_the_worker_setting(
+    mysql: dict[str, Any], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The bundle is read for the TLS context, before any connection."""
+    monkeypatch.setenv("LAKANA_CA_BUNDLE", str(tmp_path / "missing.pem"))
+    _shop_body({"password": _PASSWORD})
+
+    with pytest.raises(UsageError, match=r"trust bundle .*LAKANA_RUN__CA_BUNDLE"):
+        sql.read("shop-db", "SELECT 1")
+
+    assert mysql["made"] == []
+
+
+def test_mariadb_caching_sha2_without_tls_names_both_ways_out(mysql: dict[str, Any]) -> None:
+    """MySQL 8's default plugin without TLS needs `cryptography`, which PyMySQL lacks."""
+    mysql["refuse"] = RuntimeError(
+        "'cryptography' package is required for sha256_password or caching_sha2_password auth"
+    )
+    _mariadb(relay=False, tls="disable")
+
+    with pytest.raises(UsageError, match=r"use tls: verify-full, or add cryptography"):
+        sql.read("shop-db", "SELECT 1")
+
+
+@pytest.mark.parametrize(
+    ("field", "kind"),
+    [(_Field("s", 2), pa.int32()), (_Field("m", 9), pa.int32()), (_Field("f", 4), pa.float32())],
+)
+def test_mariadb_narrow_types_widen_to_what_iceberg_holds(field: _Field, kind: pa.DataType) -> None:
+    """SMALLINT and MEDIUMINT as int32, FLOAT as float32."""
+    assert _types.mariadb_schema([field], "shop-db").types == [kind]
+
+
+@pytest.mark.parametrize(
+    ("field", "cast"),
+    [
+        (_Field("d", 246, scale=2, length=67), "CAST(d AS DOUBLE)"),
+        (_Field("b", 16), "CAST(b AS UNSIGNED)"),
+        (_Field("x", 242), "CAST(x AS CHAR)"),
+    ],
+)
+def test_mariadb_a_wide_decimal_a_bit_and_an_unknown_type_are_refused(
+    field: _Field, cast: str
+) -> None:
+    """Each names the column and a cast."""
+    with pytest.raises(UsageError) as caught:
+        _types.mariadb_schema([field], "shop-db")
+
+    assert cast in str(caught.value)
+
+
+def test_mariadb_a_time_of_day_is_read_and_a_longer_time_is_refused() -> None:
+    """PyMySQL hands over a TIME as a timedelta, which may pass a day (`'30:00:00'`)."""
+    import datetime as dt
+
+    schema = _types.mariadb_schema([_Field("tm", 11)], "shop-db")
+    rows: list[tuple[object, ...]] = [(dt.timedelta(hours=13, microseconds=5),), (None,)]
+
+    batch = _types.mariadb_batch(rows, schema, "shop-db")
+
+    assert batch.column(0).to_pylist() == [dt.time(13, 0, 0, 5), None]
+    with pytest.raises(UsageError, match=r"column `tm` holds datetime.timedelta"):
+        _types.mariadb_batch([(dt.timedelta(hours=30),)], schema, "shop-db")
+
+
+def test_mariadb_the_value_named_is_the_first_that_does_not_fit() -> None:
+    """A good date before the zero date is not the one named."""
+    import datetime as dt
+
+    schema = _types.mariadb_schema([_Field("day", 10)], "shop-db")
+
+    with pytest.raises(UsageError, match=r"holds '0000-00-00'"):
+        _types.mariadb_batch([(dt.date(2026, 1, 1),), ("0000-00-00",)], schema, "shop-db")

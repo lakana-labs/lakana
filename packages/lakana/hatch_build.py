@@ -40,5 +40,6 @@ class ServerExtraMetadataHook(MetadataHookInterface):
                 "adbc-driver-manager>=1.13",
                 "adbc-driver-postgresql>=1.13",
                 "adbc-driver-sqlite>=1.13",
+                "PyMySQL>=1.2.3",
             ],
         }

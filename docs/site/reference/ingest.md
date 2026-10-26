@@ -5,8 +5,8 @@ declares and give the asset a table. They run inside a task, so a helper reads o
 connections the asset lists in `@asset(connections=[...])`, with the task's own credential and
 the network rules of [connections](connections.md#how-a-task-gets-its-credential). They need
 the `lakana[assets]` extra, which a project that runs assets already depends on; it now includes
-`fastexcel`, the spreadsheet reader, `obstore`, the client of S3, GCS and Azure Blob Storage, and
-the ADBC drivers of PostgreSQL and SQLite.
+`fastexcel`, the spreadsheet reader, `obstore`, the client of S3, GCS and Azure Blob Storage,
+the ADBC drivers of PostgreSQL and SQLite, and PyMySQL, the client of MariaDB and MySQL.
 
 ## files
 
@@ -278,6 +278,7 @@ could end differently (the task is retried only when it could):
 | Kind | Driver | How the task reaches it |
 |---|---|---|
 | `postgresql` | ADBC (`adbc-driver-postgresql`) | under the Docker runner through the task's relay, TLS checked for the connection's real host |
+| `mariadb` (MariaDB and MySQL) | PyMySQL | the same |
 | `sqlite-file` | ADBC (`adbc-driver-sqlite`) | the file below an ingestion root, opened read-only |
 
 ```python
@@ -300,7 +301,7 @@ def customers(ctx):
 
 | Parameter | Default | Meaning |
 |---|---|---|
-| `connection` | required | A connection the asset declares, of kind `postgresql` or `sqlite-file`. |
+| `connection` | required | A connection the asset declares, of kind `postgresql`, `mariadb` or `sqlite-file`. |
 | `query` | required | One SQL statement. Values go in `:name` placeholders, never into the text. |
 | `params` | none | The value of each placeholder, such as `{"since": ctx.watermark(default=...)}`. |
 | `max_rows` | `10_000_000` | The most rows read, as for `files.read`. |
@@ -316,14 +317,23 @@ placeholder without a value, and a value the query does not use, are refused bef
 sent. A `:name` inside a string, a quoted name, a comment or a PostgreSQL dollar quote is left as
 it is, and `::` is a PostgreSQL cast, not a placeholder.
 
+For MariaDB, the text is read as MariaDB reads it: `#` starts a comment, `--` only before a space,
+and block comments do not nest. A query with an executable comment (`/*! ... */`), whose text
+MariaDB runs or skips by its version, is refused.
+
+PostgreSQL and SQLite bind values on the server. PyMySQL has no server-side binding: it writes
+each value, escaped, into the text it sends. The asset's SQL never holds a value, but the text on
+the wire does; that is why the placeholders are found exactly as MariaDB reads the text, so an
+escaped value always lands where MariaDB reads a value.
+
 A `None` value is refused: `updated_at > NULL` matches no row, so a first run would read nothing
 and look like it worked. On a first run `ctx.watermark()` is `None`; give the start with
 `ctx.watermark(default=...)`.
 
 ### Read-only
 
-Every read runs in a read-only transaction (PostgreSQL's `default_transaction_read_only`), and a
-SQLite file is opened read-only: a query that writes fails. Still, give the connection a database
+Every read runs in a read-only transaction (PostgreSQL's `default_transaction_read_only`,
+MariaDB's `START TRANSACTION READ ONLY`), and a SQLite file is opened read-only: a query that writes fails. Still, give the connection a database
 user that can only read: a function with side effects still runs inside a `SELECT`.
 
 ### Types
@@ -359,6 +369,34 @@ A column without a faithful Arrow form is refused, naming the column and a cast 
 A `NaN` or `Infinity` in a `numeric` column is refused too, naming the column: filter it out,
 or cast the column to `double precision`.
 
+MariaDB and MySQL types are read from the result's description, never from the values:
+
+| MariaDB | Arrow |
+|---|---|
+| `TINYINT`, `YEAR` | `int16` |
+| `SMALLINT`, `MEDIUMINT` | `int32` |
+| `INT`, `BIGINT` | `int64` |
+| `BIGINT UNSIGNED` | `decimal128(20, 0)` |
+| `DECIMAL(p, s)` (p up to 38) | `decimal128(p, s)` |
+| `FLOAT`, `DOUBLE` | `float32`, `float64` |
+| `DATE` | `date32` |
+| `DATETIME` | `timestamp[us]`, as written |
+| `TIMESTAMP` | `timestamp[us, tz=UTC]` (the session's zone is UTC) |
+| `TIME` | `time64[us]` |
+| `CHAR`, `VARCHAR`, `TEXT`, `JSON`, `ENUM`, `SET` | `string` |
+| `BINARY`, `VARBINARY`, `BLOB` | `binary` |
+
+| MariaDB | Why | Fix in the query |
+|---|---|---|
+| `GEOMETRY` | no Arrow form | `ST_AsText(col)` |
+| `BIT` | no Arrow form | `CAST(col AS UNSIGNED)` |
+| `DECIMAL` wider than 38 digits | no Arrow decimal holds it | `CAST(col AS DOUBLE)` |
+| a zero date (`0000-00-00`) | no date holds it | `NULLIF(col, '0000-00-00')` |
+| a `TIME` outside one day (`'30:00:00'`) | no time of day holds it | `TIME_TO_SEC(col)` |
+
+A `datetime` value with a time zone is bound as its UTC time, because `DATETIME` has no zone:
+compare it with a column written in UTC.
+
 ### TLS and the relay
 
 Under the Docker runner a PostgreSQL connection goes through the task's relay
@@ -368,10 +406,17 @@ the task trusts the workers' trust bundle (`LAKANA_RUN__CA_BUNDLE`) and the conn
 `ca_certificate`; without either, the system's CAs. `tls: require` encrypts without checking the
 certificate, `tls: disable` does not encrypt. A connection takes at most 10 seconds.
 
+A MariaDB connection with `tls: verify-full` or `require` never falls back to a plain
+connection: a server without TLS fails the read. MySQL 8's default `caching_sha2_password`
+needs the `cryptography` package over a connection without TLS; use `tls: verify-full`, or add
+`cryptography` to the project's dependencies.
+
 ### Memory
 
 - **Without parameters** PostgreSQL streams the result in batches of about 16 MiB, and the caps
   stop the read as soon as one is passed.
+- **MariaDB** reads 10,000 rows at a time, with or without parameters, and the caps stop it
+  after the batch that passes them.
 - **With parameters** PostgreSQL's driver returns the whole result as one batch, so the caps
   count it only once it is in memory. Narrow the `WHERE` clause so that the result is small; the
   worker's memory limit is the backstop and ends the task when it is passed.
@@ -392,7 +437,7 @@ The classes are those of [files.read](#errors):
 
 | Class | Meaning | Retried |
 |---|---|---|
-| `UsageError` | The call, the query or the setup is wrong: a placeholder without a value, a `None` value, a query that fails (syntax, a missing table or column) or writes, a column without a faithful Arrow form, a connection of another kind, a missing password, a trust bundle the task cannot read, the `lakana[assets]` extra missing. | No |
+| `UsageError` | The call, the query or the setup is wrong: a placeholder without a value, a `None` value, an executable comment in a MariaDB query, a query that fails (syntax, a missing table or column) or writes, a column without a faithful Arrow form, a connection of another kind, a missing password, a trust bundle the task cannot read, the `lakana[assets]` extra missing. | No |
 | `SourceRefused` (a `SourceError`) | The database refused the password, its certificate is not trusted, or the user may not read the table. | No |
 | `SourceError` | The database failed or could not be reached (a timeout, a connection closed, a cancelled statement), which may pass. | Yes |
 | `DirectoryError` | A SQLite path that is a link, missing or not a regular file. | No |
@@ -400,20 +445,22 @@ The classes are those of [files.read](#errors):
 
 | Message starts or contains | Cause | Next step |
 |---|---|---|
-| `sql.read reads postgresql and sqlite-file connections; ... is s3: use files.read` | The connection is of another kind. | Use the helper the message names. |
+| `sql.read reads postgresql, mariadb and sqlite-file connections; ... is s3: use files.read` | The connection is of another kind. | Use the helper the message names. |
 | `parameter since is None, so the comparison would match no row` | A `None` value, usually the first run's watermark. | Pass `ctx.watermark(default=...)`. |
 | `placeholder :x has no value in params` (or `params has x, which the query does not use`) | A placeholder and `params` do not match. | Give every placeholder one value. |
-| ``...: authentication failed (PostgreSQL said: ...). Check the secret with `lakana connection test ...` `` | The database refused the user or the password. | Check the secret with `lakana connection test`, and set it again with `lakana connection update`. |
+| ``...: authentication failed (PostgreSQL said: ...). Check the secret with `lakana connection test ...` `` (or `MariaDB said:`) | The database refused the user or the password. | Check the secret with `lakana connection test`, and set it again with `lakana connection update`. |
 | ``...: the server's certificate is not trusted for `...`. Give the connection your CA: ...`` | No CA the task trusts signed the server's certificate, or it is for another name. | Run the `lakana connection update ... --ca-file ca.pem` the message names. |
-| `...: the connection through the task's relay closed before PostgreSQL answered` | Under the Docker runner the relay refused the target. | Read the task log's `lakana-relay:` line; an address inside the Lakana stack or on the Docker host is never reachable. |
+| `...: the connection through the task's relay closed before PostgreSQL answered` (or `MariaDB`) | Under the Docker runner the relay refused the target. | Read the task log's `lakana-relay:` line; an address inside the Lakana stack or on the Docker host is never reachable. |
 | `...: sql.read runs every query in a read-only transaction, and this one writes` | The query writes. | Read only; write with the asset's return value. |
 | `...: the connection's user may not read this (PostgreSQL said: ...); grant it SELECT` | The user lacks `SELECT` on a table. | Grant it `SELECT`, or read another table. |
-| `...: the query failed (PostgreSQL said: ...)` (or `SQLite said:`) | Syntax, a missing table or column, a bad cast. | Fix the query. |
+| `...: the query failed (PostgreSQL said: ...)` (or `MariaDB said:`, `SQLite said:`) | Syntax, a missing table or column, a bad cast. | Fix the query. |
 | ``...: column `...` is ..., which sql.read cannot read as it is; cast it in the query`` | A column without a faithful Arrow form. | Use the cast the message names. |
 | ``...: column `...` holds a value that decimal128(...) cannot hold`` | A `NaN` or `Infinity` in a `numeric` column. | Filter it out, or cast to `double precision`. |
 | ``...: column `...` changes type within the result`` | A SQLite column holds values of different types. | Use the `CAST` the message names. |
 | `...: SQLite could not read the file read-only` | A query that writes, or a WAL database or hot journal in a directory the worker cannot write. | Read only; or give the connection a copy made with `PRAGMA journal_mode=DELETE`. |
 | `...: the result has more than max_rows (...) rows` (or `is larger than max_bytes`) | The result is larger than the cap. | Narrow the query (a `WHERE` clause or a `LIMIT`), or raise the cap. |
 | ``... has no secret with `password` `` | The connection has no password. | Run the command the message names. |
+| `the query holds an executable comment (/*! ... */)` | MariaDB runs or skips its text by version. | Write the statement without it. |
+| `...: the server asks for caching_sha2_password over a connection without TLS` | MySQL 8 without TLS, and no `cryptography`. | Use `tls: verify-full`, or add `cryptography` to the project's dependencies. |
 | `sql.read needs the assets extra` | The project does not depend on `lakana[assets]`. | Add `lakana[assets]` to the project's dependencies and lock again. |
 | `... names ingestion root ..., which this worker does not have` | The worker has no such root. | Set the root as the message says. |

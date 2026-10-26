@@ -15,7 +15,7 @@ Example::
         )
 
 `sql.read` returns a `pyarrow.Table`. It reads ``postgresql`` and ``sqlite-file`` connections
-through the ADBC drivers. Values
+through the ADBC drivers and ``mariadb`` connections (MariaDB and MySQL) through PyMySQL. Values
 are bound to ``:name`` placeholders, never written into the asset's SQL; every read runs in a
 read-only transaction. Under the Docker runner a database is reached through the task's relay,
 while TLS checks the certificate for the connection's real host name.
@@ -24,8 +24,10 @@ while TLS checks the certificate for the connection's real host name.
 from __future__ import annotations
 
 import contextlib
+import datetime as dt
 import os
 import socket
+import ssl
 import tempfile
 from collections.abc import Generator, Iterable, Mapping
 from pathlib import Path
@@ -43,16 +45,18 @@ from lakana.ingest._errors import (
     task_environment,
 )
 from lakana.ingest._params import translate
-from lakana.ingest._types import normalize_postgres, postgres_schema
+from lakana.ingest._types import mariadb_batch, mariadb_schema, normalize_postgres, postgres_schema
 from lakana.ingest.files import DEFAULT_MAX_BYTES, DEFAULT_MAX_ROWS, _positive
 
 if TYPE_CHECKING:
     import pyarrow as pa
 
-KINDS = ("postgresql", "sqlite-file")
+KINDS = ("postgresql", "mariadb", "sqlite-file")
 """The connection kinds `read` reads."""
 CONNECT_SECONDS = 10
 """How long a connection to the database may take."""
+BATCH_ROWS = 10_000
+"""Rows fetched at a time from MariaDB."""
 BATCH_BYTES = 16 * 1024 * 1024
 """The size ADBC aims at for one batch of a PostgreSQL result read without parameters."""
 _MESSAGE = 1000
@@ -517,6 +521,201 @@ def _sqlite_error(conn: FetchedConnection, exc: Exception, schema: pa.Schema | N
     return SourceError(f"`{conn.name}`: {said}")
 
 
+def _mariadb_context(conn: FetchedConnection) -> ssl.SSLContext | None:
+    """Build the TLS context of a MariaDB connection as its ``tls`` setting says.
+
+    Parameters
+    ----------
+    conn
+        The connection.
+
+    Returns
+    -------
+    ssl.SSLContext or None
+        `_check.trust_context` for ``verify-full`` and ``require`` (``require`` checks neither
+        chain nor name), `None` for ``disable``.
+
+    Raises
+    ------
+    UsageError
+        When the trust bundle cannot be read.
+    """
+    tls = str(conn.settings.get("tls", "verify-full"))
+    if tls == "disable":
+        return None
+    own = conn.settings.get("ca_certificate")
+    try:
+        return _check.trust_context(own if isinstance(own, str) else None, verify=tls != "require")
+    except (OSError, ssl.SSLError):
+        raise UsageError(
+            f"the trust bundle `{os.environ.get('LAKANA_CA_BUNDLE')}` (LAKANA_CA_BUNDLE) cannot "
+            "be read; check the worker's LAKANA_RUN__CA_BUNDLE"
+        ) from None
+
+
+def _utc_naive(value: object) -> object:
+    """Bind an aware datetime as its UTC wall time: MariaDB's DATETIME has no zone.
+
+    Parameters
+    ----------
+    value
+        A parameter value.
+
+    Returns
+    -------
+    object
+        A naive UTC datetime for an aware one; the value otherwise.
+    """
+    if isinstance(value, dt.datetime) and value.tzinfo is not None:
+        return value.astimezone(dt.UTC).replace(tzinfo=None)
+    return value
+
+
+def _mariadb_error(conn: FetchedConnection, exc: Exception, host: str) -> Exception:
+    """Choose the error for what PyMySQL raised.
+
+    Parameters
+    ----------
+    conn
+        The connection.
+    exc
+        PyMySQL's error (``args`` is ``(code, message)`` for a server error).
+    host
+        The name the certificate is checked for.
+
+    Returns
+    -------
+    Exception
+        The error to raise.
+    """
+    code = exc.args[0] if exc.args and isinstance(exc.args[0], int) else None
+    said = _said(str(exc.args[1] if len(exc.args) > 1 else exc), conn.secret)
+    if isinstance(exc, ssl.SSLCertVerificationError) or isinstance(
+        getattr(exc, "original_exception", None), ssl.SSLCertVerificationError
+    ):
+        return _untrusted(conn.name, host)
+    if code in (1045, 1044, 1698):  # access denied (user, database)
+        return _authentication(conn.name, "MariaDB", said)
+    if code == 1792:  # cannot execute statement in a READ ONLY transaction
+        return UsageError(
+            f"`{conn.name}`: sql.read runs every query in a read-only transaction, and this one "
+            f"writes (MariaDB said: {said})"
+        )
+    if code == 1142 or code == 1143:  # command or column denied
+        return SourceRefused(
+            f"`{conn.name}`: the connection's user may not read this (MariaDB said: {said}); "
+            "grant it SELECT, or read another table"
+        )
+    if code is not None and 1000 <= code < 2000 and code not in (1040, 1205, 1213, 1317):
+        return UsageError(f"`{conn.name}`: the query failed (MariaDB said: {said})")
+    if code in (2013, 2006) and "relay_port" in conn.routing:
+        return SourceError(_RELAY_CLOSED.format(name=conn.name, product="MariaDB"))
+    if isinstance(exc, RuntimeError) and "cryptography" in str(exc):
+        return UsageError(
+            f"`{conn.name}`: the server asks for caching_sha2_password over a connection without "
+            "TLS, which needs the cryptography package; use tls: verify-full, or add "
+            "cryptography to the project's dependencies"
+        )
+    return SourceError(f"`{conn.name}`: {said}")
+
+
+def _read_mariadb(
+    conn: FetchedConnection, query: str, params: Mapping[str, object] | None, caps: tuple[int, int]
+) -> pa.Table:
+    """Read a ``mariadb`` connection through PyMySQL, in a read-only transaction.
+
+    Parameters
+    ----------
+    conn
+        The connection.
+    query
+        The asset's SQL.
+    params
+        The values of its placeholders.
+    caps
+        ``max_rows`` and ``max_bytes``.
+
+    Returns
+    -------
+    pyarrow.Table
+        The result.
+
+    Raises
+    ------
+    UsageError
+        Without the assets extra or a password, or for a query that fails or writes.
+    SourceRefused
+        When MariaDB refuses the password or its certificate is not trusted.
+    SourceError
+        When MariaDB fails or cannot be reached.
+    """
+    try:
+        import pymysql
+        import pymysql.cursors
+        from pymysql.constants import SERVER_STATUS
+    except ImportError:
+        raise UsageError(_NEEDS_ASSETS) from None
+
+    password = (conn.secret or {}).get("password")
+    if not password:
+        error = missing_secret(conn.name, "password", "--password-stdin")
+        raise error
+    host, port = str(conn.address["host"]), int(str(conn.address["port"]))
+    context = _mariadb_context(conn)
+    database = pymysql.connections.Connection(
+        host=host,
+        port=port,
+        user=str(conn.settings["user"]),
+        password=password,
+        database=str(conn.address["database"]),
+        ssl=context,
+        ssl_disabled=context is None,
+        local_infile=False,
+        connect_timeout=CONNECT_SECONDS,
+        init_command="SET time_zone = '+00:00'",
+        charset="utf8mb4",
+        defer_connect=True,
+    )
+    relay_port = conn.routing.get("relay_port")
+    try:
+        if isinstance(relay_port, int):
+            sock = socket.create_connection((_relay_ip(conn.name), relay_port), CONNECT_SECONDS)
+            database.connect(sock=sock)
+        else:
+            database.connect()
+    except (pymysql.MySQLError, OSError, RuntimeError) as exc:
+        failure = _mariadb_error(conn, exc, host)
+        raise failure from None
+    try:
+        # How a backslash reads inside a literal is the server's setting (NO_BACKSLASH_ESCAPES),
+        # so the placeholders are translated once connected, before the query runs.
+        backslashes = not database.server_status & SERVER_STATUS.SERVER_STATUS_NO_BACKSLASH_ESCAPES
+        sql, values = translate(query, params, style="pyformat", backslash_escapes=backslashes)
+        assert isinstance(values, dict)  # nosec B101 -- pyformat returns a mapping
+        bound = {key: _utc_naive(value) for key, value in values.items()}
+        cursor = database.cursor(pymysql.cursors.SSCursor)
+        try:
+            cursor.execute("START TRANSACTION READ ONLY")
+            cursor.execute(sql, bound or None)
+            schema = mariadb_schema(cursor._result.fields if cursor._result else [], conn.name)
+
+            def batches() -> Generator[pa.RecordBatch]:
+                while rows := cursor.fetchmany(BATCH_ROWS):
+                    yield mariadb_batch(rows, schema, conn.name)
+
+            return _collect(batches(), schema, conn, caps)
+        except (pymysql.MySQLError, OSError) as exc:
+            failure = _mariadb_error(conn, exc, host)
+            raise failure from None
+    finally:
+        # A result left unread (a cap, a refused type) would otherwise try to read its rest from
+        # the closed connection when it is collected, and print a traceback to the task's log.
+        with contextlib.suppress(AttributeError):  # no result yet: `_result` is None
+            database._result.unbuffered_active = False  # ty: ignore[invalid-assignment]
+        with contextlib.suppress(Exception):
+            database.close()
+
+
 def read(
     connection: str,
     query: str,
@@ -530,7 +729,8 @@ def read(
     Parameters
     ----------
     connection
-        A connection the asset declares, of kind ``postgresql`` or ``sqlite-file``.
+        A connection the asset declares, of kind ``postgresql``, ``mariadb`` or
+        ``sqlite-file``.
     query
         One SQL statement. Values go in ``:name`` placeholders, never into the text.
     params
@@ -571,11 +771,12 @@ def read(
         helper = _OTHER_HELPER.get(conn.kind)
         hint = f": use {helper}" if helper else ""
         raise UsageError(
-            f"sql.read reads postgresql and sqlite-file connections; `{conn.name}` is "
+            f"sql.read reads postgresql, mariadb and sqlite-file connections; `{conn.name}` is "
             f"{conn.kind}{hint}"
         )
     reader = {
         "postgresql": _read_postgres,
+        "mariadb": _read_mariadb,
         "sqlite-file": _read_sqlite,
     }[conn.kind]
     return reader(conn, query, params, (max_rows, max_bytes))

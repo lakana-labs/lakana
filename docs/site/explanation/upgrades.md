@@ -144,9 +144,9 @@ the Docker runner; see [the ingest helpers](../reference/ingest.md).
 ### Read databases with `lakana.ingest.sql`
 
 `lakana[assets]` gains the ADBC drivers of PostgreSQL and SQLite (`adbc-driver-manager`,
-`adbc-driver-postgresql`, `adbc-driver-sqlite`), so a project locked earlier runs
+`adbc-driver-postgresql`, `adbc-driver-sqlite`) and `PyMySQL`, so a project locked earlier runs
 `uv lock --upgrade-package lakana` to pick them up. `lakana.ingest.sql.read` runs one read-only
-query on a `postgresql` or `sqlite-file` connection, with values bound to `:name` placeholders;
+query on a `postgresql`, `mariadb` or `sqlite-file` connection, with values bound to `:name` placeholders;
 see [the ingest helpers](../reference/ingest.md#sql).
 
 ### Builds and tasks never reach the Docker host's gateways or names; list its other addresses

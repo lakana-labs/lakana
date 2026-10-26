@@ -58,6 +58,7 @@ def test_server_extra_is_pinned_to_the_resolved_version() -> None:
             "adbc-driver-manager>=1.13",
             "adbc-driver-postgresql>=1.13",
             "adbc-driver-sqlite>=1.13",
+            "PyMySQL>=1.2.3",
         ],
     }
 

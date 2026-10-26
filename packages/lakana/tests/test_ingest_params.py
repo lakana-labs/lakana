@@ -155,3 +155,41 @@ def test_pyformat_doubles_a_percent_outside_a_literal_too() -> None:
         "SELECT a %% 2 FROM t WHERE b = %(p)s",
         {"p": 1},
     )
+
+
+# --- pyformat reads quotes and comments as MariaDB does -----------------------------------------
+# PyMySQL writes each value, escaped for a string literal, into the text. Wherever this tokenizer
+# and MariaDB disagree about where a literal or comment starts or ends, a later placeholder could
+# land inside what MariaDB reads as a literal, and the value's own quotes would end it there.
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        # `--x` is two minus signs in MariaDB, not a comment: the quote after it opens a literal.
+        ("SELECT 1 --x, :p", "SELECT 1 --x, %(p)s"),
+        # PostgreSQL's dollar quote is no quote in MariaDB.
+        ("SELECT $$, :p, $$", "SELECT $$, %(p)s, $$"),
+        # MariaDB does not nest block comments: the first `*/` ends it.
+        ("SELECT /* /* */ :p", "SELECT /* /* */ %(p)s"),
+        # `e'...'` is PostgreSQL's escape string; MariaDB reads e as a name and backslashes by
+        # the server's mode alone.
+        ("SELECT e'\\', :p", "SELECT e'\\', %(p)s"),
+    ],
+)
+def test_pyformat_reads_comments_and_quotes_as_mariadb_does(text: str, expected: str) -> None:
+    """Each placeholder MariaDB reads as code is bound, and nothing else is."""
+    assert translate(text, {"p": 1}, style="pyformat") == (expected, {"p": 1})
+
+
+def test_pyformat_still_reads_a_dash_dash_space_comment() -> None:
+    """``-- `` with a space, a tab or a newline after it is MariaDB's line comment."""
+    for text in ("SELECT 1 -- :no\n", "SELECT 1 --\t:no\n", "SELECT 1 --"):
+        assert translate(text, None, style="pyformat") == (text, {})
+
+
+@pytest.mark.parametrize("opener", ["/*!", "/*!50110 ", "/*M!", "/*M!100100 "])
+def test_pyformat_refuses_an_executable_comment(opener: str) -> None:
+    """MariaDB runs the text of `/*! ... */` (or skips it, by version): no telling which."""
+    with pytest.raises(UsageError, match=r"executable comment"):
+        translate(f"SELECT 1 {opener} ':p' */ , :p", {"p": 1}, style="pyformat")

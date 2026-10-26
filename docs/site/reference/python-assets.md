@@ -344,7 +344,7 @@ not installed: it is imported from the checkout.
 
 `lakana[assets]` holds `polars`; for `lakana.ingest.files`, `fastexcel` (spreadsheets) and
 `obstore` (S3, GCS and Azure Blob Storage); and for `lakana.ingest.sql`, the ADBC drivers
-`adbc-driver-manager`, `adbc-driver-postgresql` and `adbc-driver-sqlite`. A project locked
+`adbc-driver-manager`, `adbc-driver-postgresql` and `adbc-driver-sqlite`, and `PyMySQL`. A project locked
 before they joined it runs `uv lock --upgrade-package lakana` to add them; see
 [the ingest helpers](ingest.md).
 

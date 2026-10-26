@@ -1,22 +1,26 @@
 """`sql.read` against a real PostgreSQL over TLS through the real relay, and a real SQLite file.
 
-PostgreSQL 18 serves TLS with a leaf certificate for ``db.test`` from a test authority. The
-task reaches it the way it does under the Docker runner: libpq dials ``hostaddr`` (the relay,
-an in-process `lakana_worker.launcher.relay.serve` on ``127.0.0.6``, inside its plan's /29)
-while TLS verifies the connection's real host name. The images, their digests and licences are
+PostgreSQL 18 and MariaDB 11.8 serve TLS with a leaf certificate for ``db.test`` from a test
+authority. The task reaches them the way it does under the Docker runner: libpq dials
+``hostaddr`` and PyMySQL a socket to the relay (an in-process
+`lakana_worker.launcher.relay.serve` on ``127.0.0.6``, inside its plan's /29), while TLS
+verifies the connection's real host name. The images, their digests and licences are
 recorded in `docs/agent/testing.md` ("Database images").
 """
 
 from __future__ import annotations
 
 import contextlib
+import datetime as dt
+import decimal
 import ipaddress
+import re
 import socket
 import sqlite3
 import sys
 import threading
 import time
-from collections.abc import Iterator, Mapping
+from collections.abc import Generator, Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
@@ -28,7 +32,15 @@ from testcontainers.core.wait_strategies import LogMessageWaitStrategy
 from tls_fixture import Authority, issue_leaf, make_authority
 
 from lakana import context
-from lakana.ingest import CapExceeded, SourceRefused, UsageError, _check, _connections, sql
+from lakana.ingest import (
+    CapExceeded,
+    SourceError,
+    SourceRefused,
+    UsageError,
+    _check,
+    _connections,
+    sql,
+)
 from lakana_worker.launcher.egress import EgressSettings
 from lakana_worker.launcher.relay import RelayPlan, serve
 from lakana_worker.launcher.requests import RelayRoute
@@ -42,8 +54,10 @@ pytestmark = [
 ]
 
 POSTGRES = "postgres:18.6@sha256:edb0c08dc33befd0262ab3b5cf1c4f3f8cfd8b09e88c05b45adee29d6761ddb6"
+MARIADB = "mariadb:11.8.9@sha256:f16d7a344413e519dff518f27bdb221388f84b0d274c97c4fb5f2cb0dc1b34fa"
 RELAY_ADDRESS = "127.0.0.6"
 RELAY_PORT = 15001
+MARIADB_RELAY_PORT = 15002
 _READER_PASSWORD = "reader-pa55-0123456789"
 _ADMIN_PASSWORD = "admin-pa55-0123456789"
 _ROUTE_HEADER = "Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\n"
@@ -180,17 +194,17 @@ def _wait_until_ready(container: DockerContainer) -> None:
     raise AssertionError("PostgreSQL did not accept connections within 30 seconds")
 
 
-@pytest.fixture(scope="module")
-def relay(
-    postgres: tuple[str, int], tmp_path_factory: pytest.TempPathFactory
-) -> Iterator[list[str]]:
-    """Serve the task's relay in-process: ``127.0.0.6:15001`` to the PostgreSQL container.
+@contextlib.contextmanager
+def _serve_relay(port: int, target: tuple[str, int], directory: Path) -> Generator[list[str]]:
+    """Serve one port of the task's relay in-process, on ``127.0.0.6``, to a container.
 
     Parameters
     ----------
-    postgres
+    port
+        The relay's port.
+    target
         Where the container is published.
-    tmp_path_factory
+    directory
         For the routing table the relay reads.
 
     Yields
@@ -198,14 +212,13 @@ def relay(
     list of str
         The relay's log lines.
     """
-    directory = tmp_path_factory.mktemp("relay")
     route = directory / "route"
     route.write_text(_ROUTE_HEADER + _ROUTE_ATTACHED, encoding="ascii")
     plan = RelayPlan(
         address=ipaddress.IPv4Address(RELAY_ADDRESS),
         subnet=ipaddress.IPv4Network("127.0.0.0/29"),
         refused=frozenset(),
-        routes=(RelayRoute(RELAY_PORT, *postgres),),
+        routes=(RelayRoute(port, *target),),
     )
     settings = EgressSettings(
         key=directory / "unused.key",
@@ -222,8 +235,32 @@ def relay(
         daemon=True,
     ).start()
     assert ready.wait(5)
-    yield logs
-    stop.set()
+    try:
+        yield logs
+    finally:
+        stop.set()
+
+
+@pytest.fixture(scope="module")
+def relay(
+    postgres: tuple[str, int], tmp_path_factory: pytest.TempPathFactory
+) -> Iterator[list[str]]:
+    """Serve the task's relay to the PostgreSQL container: ``127.0.0.6:15001``.
+
+    Parameters
+    ----------
+    postgres
+        Where the container is published.
+    tmp_path_factory
+        For the routing table the relay reads.
+
+    Yields
+    ------
+    list of str
+        The relay's log lines.
+    """
+    with _serve_relay(RELAY_PORT, postgres, tmp_path_factory.mktemp("relay")) as logs:
+        yield logs
 
 
 @pytest.fixture(autouse=True)
@@ -495,3 +532,299 @@ def test_sqlite_reads_a_real_file_read_only(tmp_path: Path) -> None:
     assert table.to_pylist() == [{"a": 2, "b": "y"}]
     with contextlib.closing(sqlite3.connect(path)) as db:
         assert db.execute("SELECT count(*) FROM t").fetchone() == (2,)
+
+
+# --- MariaDB through PyMySQL --------------------------------------------------------------------
+
+_MARIADB_ROOT = "root-pa55-0123456789"
+_MARIADB_SETUP = """
+SET time_zone = '+02:00';
+CREATE TABLE kinds (
+    t TINYINT, y YEAR, s SMALLINT, m MEDIUMINT, i INT, b BIGINT, ub BIGINT UNSIGNED,
+    d DECIMAL(10, 2), ud DECIMAL(10, 2) UNSIGNED, d0 DECIMAL(12, 0), f FLOAT, db DOUBLE,
+    day DATE, at DATETIME(6), ts TIMESTAMP(6) NULL, tm TIME(6), v VARCHAR(20), c CHAR(3),
+    tx TEXT, j JSON, e ENUM('a', 'b'), st SET('x', 'y'), bin VARBINARY(4), bl BLOB,
+    g GEOMETRY NULL, bt BIT(3)
+);
+INSERT INTO kinds VALUES (
+    -5, 2026, -300, 70000, -2000000000, -9000000000000000000, 18000000000000000000,
+    -1234.56, 1234.56, 123456789012, 1.5, 2.25,
+    '2026-10-26', '2026-10-26 12:00:00.5', '2026-10-26 12:00:00', '13:14:15.5', 'v', 'abc',
+    'text', '{"a": 1}', 'b', 'x,y', X'00FF', X'0102', POINT(1, 2), b'101'
+);
+CREATE TABLE zero (day DATE);
+SET sql_mode = '';
+INSERT INTO zero VALUES ('0000-00-00');
+"""
+
+
+def _mariadb_ready(container: DockerContainer) -> None:
+    """Wait up to 60 seconds for MariaDB to answer on its socket inside its container.
+
+    Parameters
+    ----------
+    container
+        The running MariaDB container.
+
+    Raises
+    ------
+    AssertionError
+        When it does not.
+    """
+    deadline = time.monotonic() + 60
+    ping = ["mariadb-admin", "ping", "-uroot", f"-p{_MARIADB_ROOT}"]
+    while time.monotonic() < deadline:
+        if container.exec(ping).exit_code == 0:
+            return
+        time.sleep(0.2)
+    raise AssertionError("MariaDB did not answer within 60 seconds")
+
+
+@pytest.fixture(scope="module")
+def mariadb(pki: _Pki) -> Iterator[tuple[str, int]]:
+    """Run MariaDB with TLS required, the reader and the test tables.
+
+    The key must belong to the server's user (uid 999) with mode 0600, as for PostgreSQL.
+
+    Parameters
+    ----------
+    pki
+        The certificates.
+
+    Yields
+    ------
+    tuple of (str, int)
+        The host and port it is published on.
+    """
+    start = (
+        "install -d -o 999 -g 999 -m 0700 /etc/my-ssl && "
+        "install -o 999 -g 999 -m 0600 /certs/server.crt /certs/server.key /etc/my-ssl/ && "
+        "exec docker-entrypoint.sh mariadbd --ssl-cert=/etc/my-ssl/server.crt "
+        "--ssl-key=/etc/my-ssl/server.key --require-secure-transport=ON"
+    )
+    container = DockerContainer(
+        MARIADB,
+        # The image's first-run setup starts a server without networking ("port: 0").
+        _wait_strategy=LogMessageWaitStrategy(re.compile(r"port: 3306\b")),
+        entrypoint=["bash", "-c", start],
+    )
+    container.with_env("MARIADB_ROOT_PASSWORD", _MARIADB_ROOT)
+    container.with_env("MARIADB_DATABASE", "shop")
+    container.with_env("MARIADB_USER", "reader")
+    container.with_env("MARIADB_PASSWORD", _READER_PASSWORD)
+    container.with_exposed_ports(3306)
+    container.with_copy_into_container(pki.cert, "/certs/server.crt")
+    container.with_copy_into_container(pki.key, "/certs/server.key")
+    with container:
+        _mariadb_ready(container)
+        result = container.exec(
+            ["mariadb", "-uroot", f"-p{_MARIADB_ROOT}", "shop", "-e", _MARIADB_SETUP]
+        )
+        assert result.exit_code == 0, result.output.decode()
+        yield "127.0.0.1", int(container.get_exposed_port(3306))
+
+
+@pytest.fixture(scope="module")
+def mariadb_relay(
+    mariadb: tuple[str, int], tmp_path_factory: pytest.TempPathFactory
+) -> Iterator[list[str]]:
+    """Serve the task's relay to the MariaDB container: ``127.0.0.6:15002``.
+
+    Parameters
+    ----------
+    mariadb
+        Where the container is published.
+    tmp_path_factory
+        For the routing table the relay reads.
+
+    Yields
+    ------
+    list of str
+        The relay's log lines.
+    """
+    with _serve_relay(MARIADB_RELAY_PORT, mariadb, tmp_path_factory.mktemp("relay")) as logs:
+        yield logs
+
+
+def _shop(
+    pki: _Pki,
+    *,
+    host: str = "db.test",
+    password: str = _READER_PASSWORD,
+    tls: str = "verify-full",
+    ca: str | None = None,
+) -> None:
+    """Declare `shop-db`: the MariaDB container through the relay.
+
+    Parameters
+    ----------
+    pki
+        The authority, given as the connection's CA unless `ca` is.
+    host
+        The host name TLS verifies.
+    password
+        The secret's password.
+    tls
+        The connection's ``tls``.
+    ca
+        Another CA (PEM) for the connection.
+    """
+    _declare(
+        "shop-db",
+        "mariadb",
+        {"host": host, "port": 3306, "database": "shop"},
+        {
+            "user": "reader",
+            "tls": tls,
+            "ca_certificate": ca or pki.authority.ca_file.read_text(),
+        },
+        {"password": password},
+        {"relay_port": MARIADB_RELAY_PORT},
+    )
+
+
+def test_mariadb_types_come_from_the_result_description(
+    pki: _Pki, mariadb_relay: list[str]
+) -> None:
+    """Every type of the table, read through the relay with TLS verified for ``db.test``."""
+    _shop(pki)
+    columns = "t, y, s, m, i, b, ub, d, ud, d0, f, db, day, at, ts, tm, v, c, tx, j, e, st, bin, bl"
+
+    table = sql.read("shop-db", f"SELECT {columns} FROM kinds")
+
+    assert dict(zip(table.schema.names, table.schema.types, strict=True)) == {
+        "t": pa.int16(),
+        "y": pa.int16(),
+        "s": pa.int32(),
+        "m": pa.int32(),
+        "i": pa.int64(),
+        "b": pa.int64(),
+        "ub": pa.decimal128(20, 0),
+        "d": pa.decimal128(10, 2),
+        "ud": pa.decimal128(10, 2),
+        "d0": pa.decimal128(12, 0),
+        "f": pa.float32(),
+        "db": pa.float64(),
+        "day": pa.date32(),
+        "at": pa.timestamp("us"),
+        "ts": pa.timestamp("us", "UTC"),
+        "tm": pa.time64("us"),
+        "v": pa.string(),
+        "c": pa.string(),
+        "tx": pa.string(),
+        "j": pa.string(),
+        "e": pa.string(),
+        "st": pa.string(),
+        "bin": pa.binary(),
+        "bl": pa.binary(),
+    }
+    row = table.to_pylist()[0]
+    assert row["ub"] == decimal.Decimal("18000000000000000000")
+    assert row["d"] == decimal.Decimal("-1234.56")
+    assert row["at"] == dt.datetime(2026, 10, 26, 12, 0, 0, 500000)
+    assert row["ts"] == dt.datetime(2026, 10, 26, 10, 0, tzinfo=dt.UTC)
+    assert row["tm"] == dt.time(13, 14, 15, 500000)
+    assert row["j"] == '{"a": 1}'
+    assert row["st"] == "x,y"
+    assert row["bin"] == b"\x00\xff"
+    assert not [line for line in mariadb_relay if line.startswith("refused")]
+
+
+@pytest.mark.parametrize(
+    ("column", "cast"), [("g", "ST_AsText(g)"), ("bt", "CAST(bt AS UNSIGNED)")]
+)
+def test_mariadb_geometry_and_bit_are_refused_naming_their_casts(
+    pki: _Pki, mariadb_relay: list[str], column: str, cast: str
+) -> None:
+    """Refused from the description, before a row is read."""
+    _shop(pki)
+
+    with pytest.raises(UsageError) as caught:
+        sql.read("shop-db", f"SELECT {column} FROM kinds")
+
+    assert cast in str(caught.value)
+
+
+def test_mariadb_a_zero_date_is_refused_naming_nullif(pki: _Pki, mariadb_relay: list[str]) -> None:
+    """PyMySQL hands `0000-00-00` over as text, which no date holds."""
+    _shop(pki)
+
+    with pytest.raises(UsageError, match=r"NULLIF\(day, '0000-00-00'\)"):
+        sql.read("shop-db", "SELECT day FROM zero")
+
+
+def test_mariadb_binds_an_aware_value_as_utc_and_keeps_a_literal_percent(
+    pki: _Pki, mariadb_relay: list[str]
+) -> None:
+    """14:00 at +02:00 is the DATETIME 12:00 written in UTC; `%` in a literal survives."""
+    _shop(pki)
+    when = dt.datetime(2026, 10, 26, 14, 0, 0, 500000, tzinfo=dt.timezone(dt.timedelta(hours=2)))
+
+    table = sql.read(
+        "shop-db",
+        "SELECT v, '5%' AS p FROM kinds WHERE at = :when AND v LIKE :pattern",
+        params={"when": when, "pattern": "v%"},
+    )
+
+    assert table.to_pylist() == [{"v": "v", "p": "5%"}]
+
+
+def test_mariadb_a_write_fails_in_the_read_only_transaction(
+    pki: _Pki, mariadb_relay: list[str]
+) -> None:
+    """The reader may write to its database; the transaction may not."""
+    _shop(pki)
+
+    with pytest.raises(UsageError, match="read-only transaction, and this one writes"):
+        sql.read("shop-db", "INSERT INTO kinds (t) VALUES (1)")
+
+
+def test_mariadb_reads_in_batches_and_the_row_cap_stops_them(
+    pki: _Pki, mariadb_relay: list[str]
+) -> None:
+    """An unbuffered cursor: the cap stops the read after the batch that passes it."""
+    _shop(pki)
+
+    with pytest.raises(CapExceeded, match=r"max_rows \(15000\)"):
+        sql.read("shop-db", "SELECT seq FROM seq_1_to_25000", max_rows=15_000)
+
+
+def test_mariadb_a_wrong_password_gives_the_authentication_text(
+    pki: _Pki, mariadb_relay: list[str]
+) -> None:
+    """MariaDB's words are kept; the wrong password is not."""
+    _shop(pki, password="wrong-0123456789")
+
+    with pytest.raises(SourceRefused) as caught:
+        sql.read("shop-db", "SELECT 1")
+
+    text = str(caught.value)
+    assert text.startswith("`shop-db`: authentication failed (MariaDB said: Access denied for user")
+    assert "wrong-0123456789" not in text
+
+
+def test_mariadb_a_certificate_of_another_authority_gives_the_tls_text(
+    pki: _Pki, mariadb_relay: list[str], tmp_path: Path
+) -> None:
+    """The connection's CA did not sign the server's certificate."""
+    other = make_authority(tmp_path, "Other CA")
+    _shop(pki, ca=other.ca_file.read_text())
+
+    with pytest.raises(SourceRefused) as caught:
+        sql.read("shop-db", "SELECT 1")
+
+    assert str(caught.value).startswith(
+        "`shop-db`: the server's certificate is not trusted for `db.test`."
+    )
+
+
+def test_mariadb_tls_disable_against_a_server_that_requires_tls_names_it(
+    pki: _Pki, mariadb_relay: list[str]
+) -> None:
+    """``require_secure_transport``: the server refuses the plain connection, and says so."""
+    _shop(pki, tls="disable")
+
+    with pytest.raises(SourceError, match="insecure transport") as caught:
+        sql.read("shop-db", "SELECT 1")
+
+    assert _READER_PASSWORD not in str(caught.value)
