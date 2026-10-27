@@ -124,6 +124,16 @@ def google(connection):
             elif method == "GET" and target.startswith("/storage/v1/b/landing/o?"):
                 good = headers.get("authorization") == "Bearer tok-right"
                 status, answer = (200, {{"items": []}}) if good else (401, {{}})
+            elif method == "GET" and target == "/api":
+                good = headers.get("authorization") == "Bearer api-right"
+                status, answer = (200, {{}}) if good else (401, {{}})
+            elif method == "POST" and target == "/api-token":
+                form = dict(urllib.parse.parse_qsl(body.decode()))
+                if (form.get("grant_type") == "client_credentials"
+                        and form.get("client_id") == "lakana"):
+                    status, answer = 200, {{"access_token": "api-right"}}
+                else:
+                    status, answer = 401, {{}}
             else:
                 status, answer = 404, {{}}
             out = json.dumps(answer).encode()
@@ -1905,4 +1915,75 @@ def test_a_gcs_key_is_checked_through_the_egress_proxy(
 
     assert (found, words in message) == (outcome, True), message
     assert "tok-right" not in message and "PRIVATE KEY" not in message
+    assert not [name for name in sources.stack.labelled() if ident in name]
+
+
+_API: dict[str, object] = {"base_url": f"https://{_HOST}/api"}
+_API_OAUTH2 = {
+    "auth": "oauth2",
+    "client_id": "lakana",
+    "token_url": "https://oauth2.googleapis.com/api-token",
+}
+"""The token host differs from the base URL's: `endpoints` merges a token URL on the base URL's
+own host and port into the ``service`` endpoint, which the check does not accept as a token
+endpoint."""
+
+
+@pytest.mark.parametrize(
+    ("settings", "secret", "pairs", "outcome", "words"),
+    [
+        ({"auth": "bearer"}, "api-right", None, "ok", "credentials accepted"),
+        ({"auth": "bearer"}, "api-wrong", None, "credentials", "the API refused the credentials"),
+        (_API_OAUTH2, "any-secret", None, "ok", "credentials accepted"),
+        (_API_OAUTH2, "any-secret", ((_HOST, 443),), "not_allowed", "oauth2.googleapis.com:443"),
+    ],
+    ids=["bearer-right", "bearer-wrong", "oauth2-ok", "proxy-refuses-token-host"],
+)
+def test_an_http_secret_is_checked_through_the_egress_proxy(
+    sources: Sources,
+    worker_side: _Mirrored,
+    settings: dict[str, object],
+    secret: str,
+    pairs: tuple[tuple[str, int], ...] | None,
+    outcome: str,
+    words: str,
+) -> None:
+    """The GET of the base URL, after OAuth2's token request, tunnels through the egress service.
+
+    The source's 443 serves ``/api`` (200 for ``Bearer api-right``, else 401) and
+    ``/api-token`` (``client_credentials`` of ``client_id=lakana``), both under the names
+    its leaf carries (the base URL's host and Google's token host). A proxy token that does not
+    name the token host is refused by the proxy (``not_allowed``).
+
+    Parameters
+    ----------
+    sources
+        The module's stack.
+    worker_side
+        The worker's launcher client.
+    settings
+        The connection's settings (its auth).
+    secret
+        The bearer token, or the OAuth2 client secret.
+    pairs
+        Proxy pairs replacing the planned ones.
+    outcome
+        The expected outcome.
+    words
+        Part of the expected message.
+    """
+    key = "client_secret" if settings["auth"] == "oauth2" else "token"
+    found, message, ident = _check(
+        sources,
+        worker_side,
+        "http",
+        _API,
+        settings,
+        trust=True,
+        egress_pairs=pairs,
+        secret={key: secret},
+    )
+
+    assert (found, words in message) == (outcome, True), message
+    assert "api-right" not in message and secret not in message
     assert not [name for name in sources.stack.labelled() if ident in name]

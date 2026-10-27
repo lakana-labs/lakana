@@ -127,8 +127,15 @@ Then, for a connection with a secret, the credentials:
   request is signed with SigV4, an `azure` one with the account key or the SAS token). A `gcs` key
   signs a token request that goes to Google's token endpoint (`oauth2.googleapis.com`) only: a key
   whose `token_uri` names another host is `credentials`, and nothing is sent.
-- `http` (bearer, basic, api_key and oauth2): not checked yet; the test ends with "credentials not
-  checked yet".
+- `http`: one `GET` of the base URL with the connection's auth (bearer, basic or the API key, in
+  its header or query); `oauth2` first asks the connection's `token_url` for a token with the
+  client credentials (the client secret goes in the form body, to that URL only) and then sends
+  the token. A 2xx answer is "credentials accepted"; 401 or 403, or a token endpoint that refuses
+  the client (400 or 401), is `credentials`; a redirect, 429 or 5xx is `failed`. Any other answer
+  (a 404 from a base URL that has no page of its own, say) is `ok` with "credentials not refused":
+  the server did not refuse them, but did not prove them either. A secret value with a line
+  break, another control character or a character outside ASCII is `credentials`, and nothing is
+  sent.
 
 A `sqlite-file` connection has no secret: its file is opened read-only as a SQLite database, and a
 file that is none fails naming the path. A refused login or key is `credentials`, with the server's
@@ -405,7 +412,8 @@ def customers() -> pl.DataFrame:
   `{'password': '***'}`. What is not hidden: a value or form shorter than 4 characters, any
   other transformation of a value (such as base64 or a part of it), and a value your code
   derives from the secret (such as an OAuth2 access token), unless a `lakana.ingest` helper
-  registers it.
+  registers it. `files.read` and `rest.read` register what they derive: the basic-auth header,
+  each OAuth2 access token and the egress proxy's credential.
 - **A worker hides only what it can decrypt.** When an attempt starts, the worker reads the
   secrets of the connections the asset declares. A worker without the instance's secrets master
   key (`LAKANA_SECRETS__MASTER_KEY`, the server's value) cannot hide them in the task's log, so

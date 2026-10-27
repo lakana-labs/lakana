@@ -20,13 +20,14 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.parse
 from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
-from tls_fixture import Authority, issue_leaf, make_authority, serving
+from tls_fixture import Answer, Authority, Exchange, issue_leaf, make_authority, scripted, serving
 
 from lakana.ingest import _check
 
@@ -395,25 +396,6 @@ def test_a_message_never_holds_the_secret(monkeypatch: pytest.MonkeyPatch) -> No
     assert outcome == "not_allowed"
     assert SECRET not in message
     assert message == "refused for token ***"
-
-
-def test_a_kind_with_a_secret_says_credentials_are_not_checked_yet(
-    authority: Authority, tmp_path: Path
-) -> None:
-    served = tmp_path / "served"
-    served.mkdir()
-    with serving(served, authority, tmp_path) as server:
-        port = int(server.base.rsplit(":", 1)[1])
-        body = connection(
-            "http",
-            {"base_url": f"https://localhost:{port}"},
-            {"auth": "bearer", "ca_certificate": authority.ca_file.read_text()},
-            secret={"token": SECRET},
-        )
-        outcome, message = _check.check(body, {}, timeout=FAST)
-    assert outcome == "ok"
-    assert message.endswith("; credentials not checked yet")
-    assert SECRET not in message
 
 
 def test_a_directory_root_that_is_missing_is_root_unavailable(tmp_path: Path) -> None:
@@ -2533,3 +2515,333 @@ def test_no_constant_of_the_check_is_named_like_a_credential() -> None:
 def test_a_chunked_body_is_joined_as_far_as_it_goes(raw: bytes, data: bytes) -> None:
     """At most 64 KiB is read: a body cut short keeps what arrived; nonsense gives nothing."""
     assert _check._dechunk(raw) == data
+
+
+# --- the credential step of http ---------------------------------------------------------------
+
+
+def _api(
+    base: str,
+    authority: Authority,
+    settings: Mapping[str, object],
+    secret: dict[str, str],
+    token_port: int | None = None,
+) -> dict[str, object]:
+    """Build an ``http`` connection on a scripted server, its token endpoint declared.
+
+    Parameters
+    ----------
+    base
+        The base URL.
+    authority
+        Whose CA the connection trusts.
+    settings
+        Its settings besides ``ca_certificate``.
+    secret
+        Its secret.
+    token_port
+        The port of a declared token endpoint on 127.0.0.1, or `None`.
+
+    Returns
+    -------
+    dict
+        The body.
+    """
+    port = int(base.rsplit(":", 1)[1].split("/", 1)[0])
+    body = connection(
+        "http",
+        {"base_url": base},
+        {**settings, "ca_certificate": authority.ca_file.read_text()},
+        secret=secret,
+        endpoints=[("127.0.0.1", port)],
+    )
+    if token_port is not None:
+        endpoints = body["endpoints"]
+        assert isinstance(endpoints, list)
+        endpoints.append({"host": "127.0.0.1", "port": token_port, "role": "token"})
+    return body
+
+
+def _status(status: int) -> Callable[[Exchange], Answer]:
+    """Answer every request with one status.
+
+    Parameters
+    ----------
+    status
+        The status.
+
+    Returns
+    -------
+    Callable
+        The answer.
+    """
+    return lambda exchange: (status, {}, b"{}")
+
+
+@pytest.mark.parametrize(
+    ("settings", "secret", "header", "value"),
+    [
+        ({"auth": "bearer"}, {"token": SECRET}, "authorization", f"Bearer {SECRET}"),
+        (
+            {"auth": "basic", "username": "reader"},
+            {"password": SECRET},
+            "authorization",
+            "Basic " + base64.b64encode(f"reader:{SECRET}".encode()).decode(),
+        ),
+        (
+            {"auth": "api_key", "api_key_name": "X-Key", "api_key_in": "header"},
+            {"api_key": SECRET},
+            "x-key",
+            SECRET,
+        ),
+    ],
+    ids=["bearer", "basic", "api-key-header"],
+)
+def test_http_credentials_are_sent_with_one_get_of_the_base_url(
+    authority: Authority,
+    tmp_path: Path,
+    settings: dict[str, object],
+    secret: dict[str, str],
+    header: str,
+    value: str,
+) -> None:
+    with scripted(authority, tmp_path, _status(200)) as server:
+        outcome, message = _check.check(
+            _api(f"{server.base}/v1", authority, settings, secret), {}, timeout=FAST
+        )
+
+    assert (outcome, message.endswith(", credentials accepted")) == ("ok", True)
+    (seen,) = server.seen
+    assert (seen.method, seen.target, seen.headers[header]) == ("GET", "/v1", value)
+    assert SECRET not in message
+
+
+def test_an_api_key_in_the_query_goes_in_the_query_of_a_base_url_without_a_path(
+    authority: Authority, tmp_path: Path
+) -> None:
+    settings = {"auth": "api_key", "api_key_name": "key", "api_key_in": "query"}
+    with scripted(authority, tmp_path, _status(200)) as server:
+        outcome, _ = _check.check(
+            _api(server.base, authority, settings, {"api_key": SECRET}), {}, timeout=FAST
+        )
+
+    assert outcome == "ok"
+    assert [s.target for s in server.seen] == [f"/?key={SECRET}"]
+
+
+@pytest.mark.parametrize(
+    ("status", "outcome", "text"),
+    [
+        (401, "credentials", "the API refused the credentials (HTTP 401)"),
+        (403, "credentials", "the API refused the credentials (HTTP 403)"),
+        (301, "failed", "answers with a redirect (HTTP 301), which is not followed"),
+        (429, "failed", "the API answered HTTP 429; test again later"),
+        (503, "failed", "the API answered HTTP 503; test again later"),
+        (404, "ok", "credentials not refused (the base URL answered HTTP 404"),
+        (405, "ok", "credentials not refused (the base URL answered HTTP 405"),
+    ],
+)
+def test_the_base_urls_status_decides_the_outcome(
+    authority: Authority, tmp_path: Path, status: int, outcome: str, text: str
+) -> None:
+    with scripted(authority, tmp_path, _status(status)) as server:
+        found = _check.check(
+            _api(server.base, authority, {"auth": "bearer"}, {"token": SECRET}), {}, timeout=FAST
+        )
+
+    assert found[0] == outcome
+    assert text in found[1]
+
+
+@pytest.mark.parametrize("bad", ["a\r\nX-Evil: 1", "naïve"])
+def test_a_token_no_header_can_carry_is_credentials_and_nothing_is_sent(
+    authority: Authority, tmp_path: Path, bad: str
+) -> None:
+    with scripted(authority, tmp_path, _status(200)) as server:
+        outcome, message = _check.check(
+            _api(server.base, authority, {"auth": "bearer"}, {"token": bad}), {}, timeout=FAST
+        )
+
+    assert outcome == "credentials"
+    assert "holds a line break" in message
+    assert server.seen == []
+
+
+_OAUTH = {"auth": "oauth2", "client_id": "lakana-reader", "scope": "read"}
+ACCESS = "access-token-of-the-test-0123"
+
+
+def _provider(token_status: int, token_body: bytes) -> Callable[[Exchange], Answer]:
+    """Answer the token request with a status and body, and an API request with its token.
+
+    Parameters
+    ----------
+    token_status
+        The token endpoint's status.
+    token_body
+        Its body.
+
+    Returns
+    -------
+    Callable
+        The answer.
+    """
+
+    def answer(exchange: Exchange) -> Answer:
+        if exchange.method == "POST":
+            return token_status, {"Content-Type": "application/json"}, token_body
+        good = exchange.headers.get("authorization") == f"Bearer {ACCESS}"
+        return (200 if good else 401), {}, b"{}"
+
+    return answer
+
+
+def _oauth_body(base: str, authority: Authority, **settings: object) -> dict[str, object]:
+    """Build an OAuth2 connection whose token endpoint is ``/token`` on the scripted server.
+
+    Parameters
+    ----------
+    base
+        The server's base URL.
+    authority
+        Whose CA the connection trusts.
+    **settings
+        Settings that replace the defaults.
+
+    Returns
+    -------
+    dict
+        The body.
+    """
+    port = int(base.rsplit(":", 1)[1])
+    merged = {**_OAUTH, "token_url": f"{base}/token", **settings}
+    return _api(f"{base}/v1", authority, merged, {"client_secret": SECRET}, token_port=port)
+
+
+def test_oauth2_asks_the_token_url_then_gets_the_base_url_with_the_token(
+    authority: Authority, tmp_path: Path
+) -> None:
+    token = json.dumps({"access_token": ACCESS, "token_type": "Bearer"}).encode()
+    with scripted(authority, tmp_path, _provider(200, token)) as server:
+        outcome, message = _check.check(_oauth_body(server.base, authority), {}, timeout=FAST)
+
+    assert (outcome, message.endswith(", credentials accepted")) == ("ok", True)
+    post, get = server.seen
+    assert (post.method, post.target) == ("POST", "/token")
+    assert urllib.parse.parse_qs(post.body.decode()) == {
+        "grant_type": ["client_credentials"],
+        "client_id": ["lakana-reader"],
+        "client_secret": [SECRET],
+        "scope": ["read"],
+    }
+    assert (get.target, get.headers["authorization"]) == ("/v1", f"Bearer {ACCESS}")
+    assert SECRET not in get.target + json.dumps(get.headers)
+
+
+@pytest.mark.parametrize(
+    ("status", "body", "outcome", "text"),
+    [
+        (
+            401,
+            b'{"error": "invalid_client"}',
+            "credentials",
+            "refused the client credentials (invalid_client)",
+        ),
+        (400, b"{}", "credentials", "refused the client credentials (HTTP 400)"),
+        (302, b"", "failed", "answered with a redirect (HTTP 302)"),
+        (500, b"", "failed", "answered HTTP 500"),
+        (200, b'{"token": "x"}', "failed", "answered without an access_token"),
+        (200, b'{"access_token": "abcd", "token_type": "mac"}', "failed", "of type 'mac'"),
+    ],
+)
+def test_the_token_endpoints_answer_decides_the_outcome(
+    authority: Authority, tmp_path: Path, status: int, body: bytes, outcome: str, text: str
+) -> None:
+    with scripted(authority, tmp_path, _provider(status, body)) as server:
+        found = _check.check(_oauth_body(server.base, authority), {}, timeout=FAST)
+
+    assert found[0] == outcome
+    assert text in found[1]
+    assert [s.method for s in server.seen] == ["POST"]
+
+
+def test_a_token_endpoints_words_never_show_the_client_secret_or_a_derived_value(
+    authority: Authority, tmp_path: Path
+) -> None:
+    said = json.dumps({"error": "invalid_client", "error_description": f"bad {SECRET}"})
+    with scripted(authority, tmp_path, _provider(401, said.encode())) as server:
+        outcome, message = _check.check(_oauth_body(server.base, authority), {}, timeout=FAST)
+
+    assert outcome == "credentials"
+    assert SECRET not in message
+    assert "bad ***" in message
+
+
+def test_a_token_url_that_is_not_a_token_endpoint_sends_nothing(
+    authority: Authority, tmp_path: Path
+) -> None:
+    with scripted(authority, tmp_path, _provider(200, b"{}")) as server:
+        body = _oauth_body(server.base, authority)
+        body["endpoints"] = [e for e in body["endpoints"] if e["role"] != "token"]  # ty: ignore[not-iterable]
+        outcome, message = _check.check(body, {}, timeout=FAST)
+
+    assert outcome == "failed"
+    assert "token_url is not among its token endpoints" in message
+    assert server.seen == []
+
+
+def test_an_access_token_echoed_by_the_api_is_masked(
+    authority: Authority, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A derived value is masked like the secret itself, whatever text carries it."""
+    monkeypatch.setattr(
+        _check, "HTTP_NOT_PROVEN", ", not refused (HTTP {status}) for Bearer " + ACCESS
+    )
+    token = json.dumps({"access_token": ACCESS}).encode()
+
+    def answer(exchange: Exchange) -> Answer:
+        return (200, {}, token) if exchange.method == "POST" else (404, {}, b"")
+
+    with scripted(authority, tmp_path, answer) as server:
+        outcome, message = _check.check(_oauth_body(server.base, authority), {}, timeout=FAST)
+
+    assert outcome == "ok"
+    assert ACCESS not in message
+    assert message.endswith("for Bearer ***")
+
+
+def test_oauth2_without_a_scope_sends_none(authority: Authority, tmp_path: Path) -> None:
+    token = json.dumps({"access_token": ACCESS}).encode()
+    with scripted(authority, tmp_path, _provider(200, token)) as server:
+        body = _oauth_body(server.base, authority)
+        settings = body["settings"]
+        assert isinstance(settings, dict)
+        del settings["scope"]
+        outcome, _ = _check.check(body, {}, timeout=FAST)
+
+    assert outcome == "ok"
+    assert "scope" not in urllib.parse.parse_qs(server.seen[0].body.decode())
+
+
+def test_a_secret_without_the_key_its_auth_needs_is_credentials(
+    authority: Authority, tmp_path: Path
+) -> None:
+    with scripted(authority, tmp_path, _status(200)) as server:
+        outcome, message = _check.check(
+            _api(server.base, authority, {"auth": "bearer"}, {"password": SECRET}), {}, timeout=FAST
+        )
+
+    assert (outcome, server.seen) == ("credentials", [])
+    assert "the secret has no `token`, which auth bearer needs" in message
+
+
+def test_an_http_connection_whose_auth_sends_nothing_is_not_sent_a_get(
+    authority: Authority, tmp_path: Path
+) -> None:
+    with scripted(authority, tmp_path, _status(200)) as server:
+        outcome, message = _check.check(
+            _api(server.base, authority, {"auth": "none"}, {"token": SECRET}), {}, timeout=FAST
+        )
+
+    assert (outcome, server.seen) == ("ok", [])
+    assert message.endswith("TLS verified")

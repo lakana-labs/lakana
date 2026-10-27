@@ -1341,7 +1341,13 @@ connections; a connection opens exactly its endpoints and nothing else.
   there over the check's own `_exchange` (the CONNECT tunnel of `LAKANA_EGRESS_PROXY` when set,
   verified TLS, no redirect followed, 64 KiB read), as the access token goes only to the
   `GCS_URL` listing. The key, the assertion and the token never enter a message, nor does the
-  key's `token_uri` (a refusal names at most its host, and a port other than 443); every message is
+  key's `token_uri` (a refusal names at most its host, and a port other than 443). **An `http`
+  secret** is checked with one `GET` of the base URL over the same `_exchange`, with the
+  connection's `ca_certificate`; a header value outside printable ASCII is `credentials` before
+  anything is sent (a line break would add a header); `oauth2` posts the client credentials
+  (`client_secret_post`) only to a `token_url` whose host and port are a `token` endpoint of the
+  connection, else `failed` and nothing is sent; the basic header and the access token are
+  masked like the secret. Every message is
   masked and its control characters escaped (`_safe`, a copy of `safe_name` a test keeps equal). No
   module constant of `_check` is named like a credential (a test): CodeQL's
   `py/clear-text-logging-sensitive-data` reads such a name as a secret (alert #66 was a message
@@ -3996,7 +4002,10 @@ secret's values, and the only way a secret reaches a Python asset (#23). User re
   `secrets.forms.require_text` refuses it at every create and rotate (and in
   `check_secret_values`), 422 naming the key only, and the worker fails a task whose stored row
   holds one, permanent, naming `lakana connection update`. Not covered: shorter values, other transformations
-  (base64, slices), and derived values (an OAuth2 access token) unless a helper registers them.
+  (base64, slices), and derived values (an OAuth2 access token) unless a helper registers them:
+  `lakana.ingest._http` registers the basic-auth header value, each OAuth2 access token when it
+  arrives, and `base64("user:token")` of the egress proxy URL that httpx sends as
+  `Proxy-Authorization`.
   The harness (`lakana.ingest._connections.fetch`) registers every value with
   `lakana.context.register_secret`; `lakana.runner._mask` replaces
   them (longest first) with the token in the failure record's `message` and `error_type`, in the
