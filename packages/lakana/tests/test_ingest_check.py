@@ -2777,17 +2777,30 @@ def test_a_token_endpoints_words_never_show_the_client_secret_or_a_derived_value
     assert "bad ***" in message
 
 
-def test_a_token_url_that_is_not_a_token_endpoint_sends_nothing(
+def test_a_token_url_on_no_endpoint_of_the_connection_sends_nothing(
     authority: Authority, tmp_path: Path
 ) -> None:
     with scripted(authority, tmp_path, _provider(200, b"{}")) as server:
+        body = _oauth_body(server.base, authority, token_url="https://127.0.0.1:1/token")
+        outcome, message = _check.check(body, {}, timeout=FAST)
+
+    assert outcome == "failed"
+    assert "token_url is not on an endpoint of the connection" in message
+    assert server.seen == []
+
+
+def test_a_token_url_on_the_base_urls_host_and_port_is_accepted(
+    authority: Authority, tmp_path: Path
+) -> None:
+    """The common setup: core declares one ``service`` endpoint for both, as the server sends."""
+    token = json.dumps({"access_token": ACCESS}).encode()
+    with scripted(authority, tmp_path, _provider(200, token)) as server:
         body = _oauth_body(server.base, authority)
         body["endpoints"] = [e for e in body["endpoints"] if e["role"] != "token"]  # ty: ignore[not-iterable]
         outcome, message = _check.check(body, {}, timeout=FAST)
 
-    assert outcome == "failed"
-    assert "token_url is not among its token endpoints" in message
-    assert server.seen == []
+    assert (outcome, message.endswith(", credentials accepted")) == ("ok", True), message
+    assert [s.method for s in server.seen] == ["POST", "GET"]
 
 
 def test_an_access_token_echoed_by_the_api_is_masked(

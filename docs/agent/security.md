@@ -1345,9 +1345,10 @@ connections; a connection opens exactly its endpoints and nothing else.
   secret** is checked with one `GET` of the base URL over the same `_exchange`, with the
   connection's `ca_certificate`; a header value outside printable ASCII is `credentials` before
   anything is sent (a line break would add a header); `oauth2` posts the client credentials
-  (`client_secret_post`) only to a `token_url` whose host and port are a `token` endpoint of the
-  connection, else `failed` and nothing is sent; the basic header and the access token are
-  masked like the secret. Every message is
+  (`client_secret_post`) only to an `https` `token_url` whose host and port are an endpoint of
+  the connection (`token`, or `service` for a token URL on the base URL's host and port, which
+  core's `endpoints` declares once), else `failed` and nothing is sent; the basic header and the
+  access token are masked like the secret. Every message is
   masked and its control characters escaped (`_safe`, a copy of `safe_name` a test keeps equal). No
   module constant of `_check` is named like a credential (a test): CodeQL's
   `py/clear-text-logging-sensitive-data` reads such a name as a secret (alert #66 was a message

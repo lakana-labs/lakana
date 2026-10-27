@@ -1591,7 +1591,9 @@ def _oauth2_token(body: Mapping[str, Any], routing: Mapping[str, Any], t: float)
     """Ask the connection's ``token_url`` for a token with the client credentials.
 
     The client secret goes in the form body (``client_secret_post``, as `rest.read` sends it),
-    only to the connection's own ``token_url``, which must be one of its ``token`` endpoints.
+    only to the connection's own ``token_url``, whose host and port must be one of its endpoints
+    (``token``, or the ``service`` one when the token URL is on the base URL's host and port:
+    core declares each host and port once, and the proxy grants it either way).
 
     Parameters
     ----------
@@ -1611,21 +1613,19 @@ def _oauth2_token(body: Mapping[str, Any], routing: Mapping[str, Any], t: float)
     ------
     _Found
         ``credentials`` when the endpoint refuses the client (HTTP 400 or 401); ``failed`` for
-        a ``token_url`` that is not a token endpoint of the connection, a redirect, another
+        a ``token_url`` on no endpoint of the connection, a redirect, another
         status, or an answer without a bearer token; the network outcomes of `_exchange`.
     """
     settings, secret = body["settings"], body["secret"]
     token_url = str(settings.get("token_url", ""))
     parts = urlsplit(token_url)
     where = f"`{parts.hostname}:{parts.port or 443}`"
-    declared = {
-        (str(e["host"]), int(e["port"])) for e in body["endpoints"] if e.get("role") == "token"
-    }
+    declared = {(str(e["host"]), int(e["port"])) for e in body["endpoints"]}
     if parts.scheme != "https" or (parts.hostname, parts.port or 443) not in declared:
         raise _Found(
             "failed",
-            "the connection's token_url is not among its token endpoints; upgrade the worker "
-            "to the server's version of Lakana",
+            "the connection's token_url is not on an endpoint of the connection; upgrade the "
+            "worker to the server's version of Lakana",
         )
     form = {
         "grant_type": "client_credentials",

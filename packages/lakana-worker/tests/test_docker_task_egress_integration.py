@@ -1919,14 +1919,10 @@ def test_a_gcs_key_is_checked_through_the_egress_proxy(
 
 
 _API: dict[str, object] = {"base_url": f"https://{_HOST}/api"}
-_API_OAUTH2 = {
-    "auth": "oauth2",
-    "client_id": "lakana",
-    "token_url": "https://oauth2.googleapis.com/api-token",
-}
-"""The token host differs from the base URL's: `endpoints` merges a token URL on the base URL's
-own host and port into the ``service`` endpoint, which the check does not accept as a token
-endpoint."""
+_API_OAUTH2 = {"auth": "oauth2", "client_id": "lakana", "token_url": f"https://{_HOST}/api-token"}
+"""The common setup: the token URL on the base URL's host and port (one ``service`` endpoint)."""
+_API_OAUTH2_HOST = {**_API_OAUTH2, "token_url": "https://oauth2.googleapis.com/api-token"}
+"""A token URL on a host of its own (a ``token`` endpoint)."""
 
 
 @pytest.mark.parametrize(
@@ -1935,9 +1931,22 @@ endpoint."""
         ({"auth": "bearer"}, "api-right", None, "ok", "credentials accepted"),
         ({"auth": "bearer"}, "api-wrong", None, "credentials", "the API refused the credentials"),
         (_API_OAUTH2, "any-secret", None, "ok", "credentials accepted"),
-        (_API_OAUTH2, "any-secret", ((_HOST, 443),), "not_allowed", "oauth2.googleapis.com:443"),
+        (_API_OAUTH2_HOST, "any-secret", None, "ok", "credentials accepted"),
+        (
+            _API_OAUTH2_HOST,
+            "any-secret",
+            ((_HOST, 443),),
+            "not_allowed",
+            "oauth2.googleapis.com:443",
+        ),
     ],
-    ids=["bearer-right", "bearer-wrong", "oauth2-ok", "proxy-refuses-token-host"],
+    ids=[
+        "bearer-right",
+        "bearer-wrong",
+        "oauth2-base-host",
+        "oauth2-token-host",
+        "proxy-refuses-token-host",
+    ],
 )
 def test_an_http_secret_is_checked_through_the_egress_proxy(
     sources: Sources,
