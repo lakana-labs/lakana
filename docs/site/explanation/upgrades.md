@@ -174,6 +174,13 @@ on a task image of an earlier release ends `failed` with ``the task image has no
 build yourself needs `dist/check-requirements.txt`, the check environment's packages exported from
 `uv.lock`, in its build context first; the header of `Dockerfile.task` shows both commands.
 
+### Read REST APIs with `lakana.ingest.rest`
+
+`lakana.ingest.rest.read` reads a JSON REST API through an `http` connection, by page number,
+cursor or next link (OData's `@odata.nextLink` included), with the connection's auth and retries
+within a time budget; see [the ingest helpers](../reference/ingest.md#rest). It needs no new
+package.
+
 ### Connection tests check http credentials; `files.read` reads `oauth2` connections
 
 `lakana connection test` now sends one `GET` of an `http` connection's base URL with its auth;

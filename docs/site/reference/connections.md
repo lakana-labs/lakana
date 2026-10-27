@@ -412,7 +412,7 @@ def customers() -> pl.DataFrame:
   `{'password': '***'}`. What is not hidden: a value or form shorter than 4 characters, any
   other transformation of a value (such as base64 or a part of it), and a value your code
   derives from the secret (such as an OAuth2 access token), unless a `lakana.ingest` helper
-  registers it. `files.read` registers what it derives: the basic-auth header,
+  registers it. `files.read` and `rest.read` register what they derive: the basic-auth header,
   each OAuth2 access token and the egress proxy's credential.
 - **A worker hides only what it can decrypt.** When an attempt starts, the worker reads the
   secrets of the connections the asset declares. A worker without the instance's secrets master
@@ -449,7 +449,9 @@ bundle to its own client, and never follows a symbolic link out of a directory c
 root. Databases are read with [`sql.read`](ingest.md#sqlread), from `postgresql`, `mariadb` and
 `sqlite-file` connections: it dials `relay_address` under the Docker runner, runs every query
 read-only, and sends MariaDB only a statement that starts with `SELECT`, `WITH`, `VALUES` or
-`TABLE` (MariaDB commits before DDL, which no read-only transaction stops). A `tcp` connection has no helper; use `connections.get` with your own client.
+`TABLE` (MariaDB commits before DDL, which no read-only transaction stops). JSON REST APIs are
+read with [`rest.read`](ingest.md#restread), from `http` connections, page by page, never
+sending the credential to another host than the base URL's. A `tcp` connection has no helper; use `connections.get` with your own client.
 
 ### What a task reaches, and how
 

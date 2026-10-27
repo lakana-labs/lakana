@@ -4071,6 +4071,22 @@ secret's values, and the only way a secret reaches a Python asset (#23). User re
   obstore, rustls's `error: InvalidCertificate(` in its dump of the cause; for httpx, an
   `ssl.SSLCertVerificationError` in the exception chain. A 401/403 from obstore's text is the
   dump's `inner: Status { status: 401|403`, never the summary line or a body.
+- **The REST helper** (`lakana.ingest.rest`, over `_http.send`) uses the same client, so the
+  credential stays on the base URL's origin (`ConnectionAuth` and `OwnOrigin`). `path` is
+  relative only (an absolute URL, `//host`, `?`, `#`, a backslash, a control character, an
+  empty, `.` or `..` segment or a stray `%` is a `UsageError` before anything is sent) and
+  encoded per segment below the base path. A next link is resolved against the page's URL and
+  must pass `same_origin` with the base URL (no userinfo), else `SourceRefused` before it is
+  requested; a cursor, link or records hash an earlier page gave stops the read (`UsageError`),
+  and `max_pages`, `max_bytes` (counted as bytes arrive, chunked bodies included) and `max_rows`
+  bound it. Retries are classified by type and status only (408/429/500/502/503/504, httpx's
+  timeout, network, remote-protocol and decoding errors, the egress proxy's 502/503/504; never a
+  certificate refusal), within `retries` attempts and `retry_budget_seconds`, honouring
+  `Retry-After`; a non-2xx body is never read. An OAuth2 401 calls
+  `ClientCredentials.invalidate()` and sends once more with a new token; a second 401 is
+  `SourceRefused` naming `lakana connection test`. Messages show URLs through `shown_url`
+  (escaped first, then userinfo, fragment and query values dropped). Each OAuth2 token, also a
+  refreshed one, is registered as a secret when it arrives.
 - **Residual, accepted.** Deployed code sees the credentials of the connections its asset
   declares and can send them to any host the task can reach (until task egress narrows that to
   the declared endpoints). Reviewing an asset's `connections` is reviewing what it may read. The

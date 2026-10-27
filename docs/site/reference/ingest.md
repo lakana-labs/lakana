@@ -7,6 +7,7 @@ the network rules of [connections](connections.md#how-a-task-gets-its-credential
 the `lakana[assets]` extra, which a project that runs assets already depends on; it now includes
 `fastexcel`, the spreadsheet reader, `obstore`, the client of S3, GCS and Azure Blob Storage,
 the ADBC drivers of PostgreSQL and SQLite, and PyMySQL, the client of MariaDB and MySQL.
+`rest` needs nothing more: it uses `httpx`, which `lakana` itself depends on.
 
 ## files
 
@@ -278,6 +279,126 @@ could end differently (the task is retried only when it could):
 | `... cannot be searched (Permission denied); give this worker read and search access to it` | A directory the pattern needs can be listed but not searched. | Give the worker search (execute) access, or narrow the pattern. |
 | `... has a modification time past the year 9999` | A file is dated beyond what a timestamp holds. | Set a sane time on the file. |
 | `since= takes a datetime or None` | `since` has another type. | Pass `ctx.watermark()` of an asset with `watermark="_source_modified"`. |
+
+## rest
+
+`lakana.ingest.rest` reads a JSON REST API through an `http` connection and returns its records as
+a `pyarrow.Table`: one row per record, a column for every key of any record (null where a record
+lacks it), nested objects as structs and lists as lists. It uses the connection's `auth`
+(`bearer`, `basic`, `api_key` in a header or the query, or `oauth2` client credentials) and, under
+the Docker runner, the task's egress proxy.
+
+```python
+from lakana import asset
+from lakana.ingest import rest
+
+
+@asset(connections=["crm-api"])
+def customers():
+    return rest.read(
+        "crm-api",
+        "customers",
+        paginate=rest.PageNumber(size_param="per_page", size=100),
+        params={"status": "active"},
+    )
+```
+
+### rest.read
+
+`rest.read(connection, path, *, ...)` sends `GET` requests below the connection's `base_url` and
+stacks the records of every page into one table.
+
+| Parameter | Default | Meaning |
+|---|---|---|
+| `connection` | required | A connection the asset declares, of kind `http`. |
+| `path` | required | The path below the base URL, such as `customers` or `v2/orders` (`""` for the base URL itself). Each part is sent percent-encoded; an absolute URL, `//host`, `?`, `#`, a backslash, a control character, an empty, `.` or `..` part, and a `%` that is no escape are refused. |
+| `paginate` | `None` (one page) | `rest.PageNumber(...)`, `rest.Cursor(...)` or `rest.NextLink(...)`, below. |
+| `params` | none | Query parameters. A value is a `str`, `int`, `float`, `bool` (`true`/`false`), `Decimal`, `date` or `datetime` (sent in ISO 8601, such as `2026-01-02T03:04:05+00:00`). `None` is refused: pass `ctx.watermark(default=...)`. Sent with every request, except with `NextLink`, whose links carry their own. |
+| `records` | `"data"` | Where a page holds its list of records: a key (`"value"` for OData) or a dotted path (`"result.items"`); `""` for a page that is itself a list. `null` there is a page without records. |
+| `max_pages` | `10_000` | The most pages read. |
+| `max_bytes` | 256 MiB | The most bytes read in all pages, counted after decompression. |
+| `max_rows` | `10_000_000` | The most records read in all. |
+| `retries` | `5` | How many times one request may be sent again. |
+| `retry_budget_seconds` | `300` | No attempt of a request starts later than this many seconds after its first. |
+
+A key that holds dots (`@odata.nextLink`) is looked up whole first, then as a dotted path. No
+records at all is a table without columns, which an `append` or `merge` asset may return.
+
+### Pages
+
+- **`rest.PageNumber(param="page", start=1, size_param=None, size=None)`** sends `page=1`,
+  `page=2`, … (and `size_param=size` when you give both) until a page has no records. A page
+  with fewer records than `size` does not end the read: an API that caps the size below what you
+  asked would otherwise lose records.
+- **`rest.Cursor(param, cursor_field)`** sends no cursor first, then the cursor each answer holds
+  at `cursor_field` (such as `"meta.next_cursor"`), until the field is missing, `null` or empty.
+  A cursor is text or a whole number.
+- **`rest.NextLink(field="@odata.nextLink")`** follows the URL each answer holds at `field`,
+  absolute or relative to the page, until there is none. A link to another scheme, host or port,
+  or with a user name or password, is not followed: the read fails, so the credential never
+  leaves the connection's host.
+
+```python
+from lakana import asset
+from lakana.ingest import rest
+
+
+@asset(connections=["erp"])
+def invoices():
+    return rest.read("erp", "Invoices", paginate=rest.NextLink(), records="value")
+```
+
+**A page that repeats stops the read.** A cursor or a next link that an earlier page gave, or
+records equal to an earlier page's (a page-number API that serves its last page for every
+number), fails naming both pages, before another request: the API does not advance, and the
+read would otherwise loop until `max_pages`.
+
+### Retries
+
+A timeout, a network error, and the answers 408, 429, 500, 502, 503 and 504 are retried, after
+0.25 to 0.5 seconds, then twice as long each time (at most 60 seconds), or after the time the
+server's `Retry-After` names (seconds or a date). A request is not sent again after `retries`
+times, or when the next wait would end past `retry_budget_seconds` from its first attempt; the
+read then fails naming the URL (without query values), the attempts and the time, and the task
+is retried as a whole. An `oauth2` connection answered 401 fetches a new token and sends the
+request once more; a second 401 fails as a refused credential. Nothing else is retried: 401 and 403, another 4xx, a redirect (never
+followed), and a certificate that is not trusted fail at once.
+
+### Memory
+
+Each page is turned into Arrow before the next is read, so the records of one page are in
+memory as Python objects at a time. The caps count the bytes and the records as they arrive; an
+answer without `Content-Length` is read only up to `max_bytes`. A compressed answer counts what it
+decodes to, and one network chunk can decode to a few MiB more before the cap stops it.
+
+### Errors of rest.read
+
+The classes are those of [files.read](#errors):
+
+| Class | Meaning | Retried |
+|---|---|---|
+| `UsageError` | The call or the setup is wrong: a path that could leave the base URL, a `None` or unsupported `params` value, a `params` key the paginator or the connection's API key sets, `records=` that does not lead to a list of objects, a cursor or link of the wrong type, a page that repeats an earlier one, a connection of another kind, a missing secret or one no header can carry, a token endpoint that answers without a bearer token. | No |
+| `SourceRefused` (a `SourceError`) | The API refused the credential (401, 403) or the request (another 4xx), answered with a redirect, a next link names another host, a certificate is not trusted, an OAuth2 token endpoint refused the client, or the task's egress proxy refused the host (403) or the task's token (407). | No |
+| `FileShapeError` (a `SourceError`) | A field holds values of different types (a number and a text), or a value Arrow cannot hold (an integer beyond 64 bits). | No |
+| `SourceError` | The API kept failing past the retries or the budget, answered another 5xx, could not be reached, or a page is not JSON (a maintenance page, say). | Yes |
+| `CapExceeded` | A cap was reached. | No |
+
+| Message starts or contains | Cause | Next step |
+|---|---|---|
+| `rest.read reads http connections; ... is s3: use files.read` | The connection is of another kind. | Use the helper the message names. |
+| `path= is relative to the connection's base URL` | `path` is an absolute URL or `//host`. | Pass the part below the base URL. |
+| `params= since is None, which would send an empty value` | A `None` value, usually the first run's watermark. | Pass `ctx.watermark(default=...)`. |
+| ``...: GET ... answered 503 after 6 attempts in 31 s; the API is unavailable`` | The API kept failing. | Try again later, or raise `retries=` or `retry_budget_seconds=`. |
+| ``...: the API refused the credential (HTTP 401 for GET ...). Check the secret with `lakana connection test ...` `` | The API refused the token, password or key. | Check the secret with `lakana connection test`, and set it again with `lakana connection update`. |
+| `...: the API refused the request (HTTP 404 for GET ...); check path= and params=` | A wrong path or parameter. | Check them against the API's documentation. |
+| `... answers with a redirect (HTTP 301), which rest.read does not follow` | The path moved. | Use the path it names, or the address as the connection's `base_url`. |
+| `...: the next link of page 1 points to ..., not to ...` | A next link names another host, port or scheme. | Read that host through its own connection, if you trust it. |
+| `...: page 3 repeats the cursor of page 2; the API does not advance — check paginate=` (or `records`, `next link`) | The paginator does not fit the API. | Check `paginate=` against the API's documentation. |
+| ``...: page 1 has no `data`; pass records=`` | The records are elsewhere. | Pass `records=` with the key or dotted path of the list. |
+| `...: field 'id' of page 2 holds values of different types` (or `the pages of ... cannot be combined`) | The API mixes types in a field. | Read it with `connections.get` and your own client to convert it. |
+| `...: page 1 of GET ... is not JSON (text/html)` | The API answered something else. | Check `path=`; the task is retried in case it was a maintenance page. |
+| `... is not a connection of this asset: declare it in @asset(connections=[...])` | Under the Docker runner the egress proxy refused the host: it is not one of the asset's connections, or it is inside the Lakana stack or on the Docker host. | Declare the connection; give it an address outside the Lakana stack. |
+| `...: 'items' has more than max_pages (10000) pages` (or `max_bytes`, `max_rows`) | The read is larger than the cap. | Narrow with `params=` (such as a date filter), or raise the cap. |
 
 ## sql
 

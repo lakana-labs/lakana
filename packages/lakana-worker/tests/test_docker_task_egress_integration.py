@@ -76,8 +76,12 @@ _HINT = "give the connection an address outside the Lakana stack (lakana connect
 _SSL_REQUEST = b"\x00\x00\x00\x08\x04\xd2\x16\x2f"
 """The first message of a PostgreSQL client that asks for TLS; a server without it says ``N``."""
 
+_NEIGHBOUR_HOST = "postgres.lakana.test"
+"""A service of the stack beside the source (`_NEIGHBOUR`), by the name a next link may give."""
+
 _SOURCE = f"""import base64, json, socket, ssl, threading, urllib.parse
 context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+context.minimum_version = ssl.TLSVersion.TLSv1_2
 context.load_cert_chain({APP!r} + "/leaf.pem", {APP!r} + "/leaf.key")
 def https(connection):
     try:
@@ -127,6 +131,23 @@ def google(connection):
             elif method == "GET" and target == "/api":
                 good = headers.get("authorization") == "Bearer api-right"
                 status, answer = (200, {{}}) if good else (401, {{}})
+            elif method == "GET" and target.startswith("/api/"):
+                # rest.read's pages: every request is kept, and /api/seen lists them.
+                seen.append({{"host": headers.get("host", ""), "target": target}})
+                good = headers.get("authorization") == "Bearer api-right"
+                page = dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(target).query))
+                if not good:
+                    status, answer = 401, {{}}
+                elif target.startswith("/api/items?"):
+                    rows = {{"1": [{{"id": 1}}, {{"id": 2}}], "2": [{{"id": 3}}]}}
+                    status, answer = 200, {{"data": rows.get(page.get("page", ""), [])}}
+                elif target == "/api/leak":
+                    status, answer = 200, {{"data": [{{"id": 9}}],
+                                           "next": "https://{_NEIGHBOUR_HOST}/api/stolen"}}
+                elif target == "/api/seen":
+                    status, answer = 200, list(seen)
+                else:
+                    status, answer = 404, {{}}
             elif method == "POST" and target == "/api-token":
                 form = dict(urllib.parse.parse_qsl(body.decode()))
                 if (form.get("grant_type") == "client_credentials"
@@ -141,6 +162,7 @@ def google(connection):
                         % (status, len(out)) + out)
     except (OSError, ssl.SSLError, ValueError):
         pass
+seen = []
 def serve(port, handler):
     server = socket.create_server(("0.0.0.0", port))
     while True:
@@ -162,7 +184,6 @@ serve(8443, https)
 listener whose one-place queue its own connections fill and that never accepts, so the kernel
 drops every later SYN: a blackholed port."""
 
-_NEIGHBOUR_HOST = "postgres.lakana.test"
 _NEIGHBOUR = """import socket
 server = socket.create_server(("0.0.0.0", 5432))
 while True:
@@ -1653,6 +1674,120 @@ def test_sql_read_reaches_postgresql_through_the_relay_with_verify_full(
         assert not [name for name in sources.stack.labelled() if "task" in name]
     finally:
         database.remove(force=True)
+
+
+_REST_ASSET = """import json
+
+from lakana import asset
+from lakana.ingest import rest
+
+
+@asset(connections=["api"])
+def items():
+    ids = rest.read("api", "items", paginate=rest.PageNumber()).column("id").to_pylist()
+    try:
+        rest.read("api", "leak", paginate=rest.NextLink(field="next"))
+        leak = "followed"
+    except Exception as exc:
+        leak = f"{type(exc).__name__}: {exc}"
+    seen = rest.read("api", "seen", records="").to_pylist()
+    print("E2E " + json.dumps({"ids": ids, "leak": leak, "seen": seen}), flush=True)
+    raise RuntimeError("the probe is done")
+"""
+"""An ingestion asset that reads a REST API with `rest.read`: three pages, then a next link to
+another host, then what the source saw; it prints that and fails on purpose (the stand-in server
+takes no table)."""
+
+
+def test_rest_read_reaches_an_api_through_the_egress_proxy(
+    sources: Sources, worker_side: _Mirrored
+) -> None:
+    """A real `rest.read` under the Docker runner: pages through the proxy, no hop off the host.
+
+    The source's 443 serves ``/api/items?page=N`` (two pages of records, then an empty one) and
+    ``/api/leak``, whose ``next`` names ``postgres.lakana.test``, for ``Bearer api-right`` only.
+    The connection trusts the module's authority. `rest.read` returns the three records, refuses
+    the next link before any request to the other host, and the token is not in the task's log.
+    """
+    _real_environment(sources.stack, _wheelhouse())
+    token = "api-right"
+    address: dict[str, object] = dict(_API)
+    settings = {"auth": "bearer", "ca_certificate": sources.authority.ca_file.read_text()}
+    declared = [("api", ConnectionKind.HTTP, address, settings)]
+    plan = connection_plan(declared, isolated=True, root_dir=lambda root, name: f"/ingest/{root}")
+    _serve_connections(
+        sources.stack,
+        {
+            "api": {
+                "name": "api",
+                "kind": "http",
+                "address": address,
+                "settings": settings,
+                "endpoints": [
+                    {"host": e.host, "port": e.port, "role": e.role}
+                    for e in endpoints(ConnectionKind.HTTP, address, settings)
+                ],
+                "secret": {"token": token},
+            }
+        },
+    )
+    attempt = worker_side.root / f"attempt-{uuid.uuid4().hex[:8]}"
+    attempt.mkdir(mode=0o700)
+    (attempt / "code").mkdir(mode=0o755)
+    (attempt / "code" / "items.py").write_text(_REST_ASSET)
+    launcher = sources.stack.launcher
+    assert launcher is not None
+    runner = DockerRunner(
+        cast("LauncherClient", worker_side),
+        owner="test",
+        memory_mb=512,
+        cpus=1.0,
+        pids=128,
+        kill_grace=2.0,
+        trust=sources.bundle,
+    )
+    task = PythonTask(
+        code_dir=attempt / "code",
+        asset_path="items.py",
+        inputs={},
+        table="raw.items",
+        environment="dev",
+        server_url=f"http://{launcher.settings.server_alias}:8000",
+        token="t" * 48,
+        timeout_seconds=120,
+        venv=Path("/env"),
+        expected_snapshot_id="none",
+        attempt_dir=attempt,
+        environment_key=_E2E_KEY,
+        python=PYTHON,
+        connections=plan.routing,
+        egress=plan.egress,
+        relay=plan.relay,
+    )
+    output = bytearray()
+
+    outcome = runner.run(task, output.extend, StopSignal())
+
+    text = output.decode(errors="replace")
+    reports = [line for line in text.splitlines() if line.startswith("E2E ")]
+    assert reports, text
+    seen = json.loads(reports[-1].removeprefix("E2E "))
+    assert seen["ids"] == [1, 2, 3], text
+    assert seen["leak"].startswith("SourceRefused: "), seen["leak"]
+    assert f"points to {_NEIGHBOUR_HOST}" in seen["leak"], seen["leak"]
+    assert "it is not followed" in seen["leak"], seen["leak"]
+    targets = [(entry["host"], entry["target"]) for entry in seen["seen"]]
+    assert {host for host, _ in targets} == {_HOST}, targets
+    assert [target for _, target in targets] == [
+        "/api/items?page=1",
+        "/api/items?page=2",
+        "/api/items?page=3",
+        "/api/leak",
+        "/api/seen",
+    ], targets
+    assert token not in text
+    assert outcome.succeeded is False
+    assert not [name for name in sources.stack.labelled() if "task" in name]
 
 
 def test_connection_test_checks_credentials_on_the_check_environment(
