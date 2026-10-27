@@ -13,10 +13,10 @@ login with ``SELECT 1`` executed in a read-only transaction (not read: fetching 
 pyarrow, which the check environment leaves out), a MariaDB login over the configured TLS with
 ``SELECT 1`` in a read-only transaction, a SQLite file opened read-only, a listing of at most one
 object for ``s3``, ``azure`` and ``gcs`` (a gcs key signs a token request to the connection's own
-token endpoint, never another host). ``http`` credentials arrive with their helper; until then an
-``http`` connection with a secret ends its message with "; credentials not checked yet". Every
-secret value is replaced by ``***`` in the message, and every control character of a server's
-words is escaped.
+token endpoint, never another host), one ``GET`` of the base URL for ``http`` with the configured
+auth (OAuth2 asks the connection's own ``token_url`` for a token first). Every secret value,
+and every value derived from one (a basic-auth header, an access token), is replaced by ``***``
+in the message, and every control character of a server's words is escaped.
 
 The module is one file that imports nothing of `lakana`, so the task image can run it alone:
 its module-level imports are the standard library's, and each credential step imports its
@@ -71,10 +71,14 @@ DRIVERS = {
 }
 """Each package a credential step may import (inside the step), to the distribution that brings
 it: the root ``check`` dependency group of uv.lock and the task image's import smoke are exactly
-these (tests compare all three). The ``http`` credential step adds ``httpx`` with its code."""
+these (tests compare all three). The ``http`` credential step needs none: it uses `_exchange`."""
 
-NOT_YET = "; credentials not checked yet"
-"""What an ``http`` connection with a secret adds until its credential step exists."""
+HTTP_NOT_PROVEN = (
+    ", credentials not refused (the base URL answered HTTP {status}; only 401 or 403 would "
+    "refuse them, so a GET of a path that needs them proves more)"
+)
+"""What an ``http`` test adds when the base URL answers neither 2xx nor a refusal."""
+_HEADER_SAFE = re.compile(r"[\x20-\x7e]+")
 
 UNAVAILABLE = (
     "the credentials were not checked: this Python cannot import `{module}`; install {package} "
@@ -805,6 +809,8 @@ def _exchange(
     routing: Mapping[str, Any],
     t: float,
     body: bytes = b"",
+    *,
+    ca_pem: str | None = None,
 ) -> tuple[int, str]:
     """Send one request over TLS (through the proxy or directly) and read the answer's start.
 
@@ -825,6 +831,8 @@ def _exchange(
         Seconds per step.
     body
         What a ``POST`` sends.
+    ca_pem
+        The connection's own CA certificates (PEM), trusted in addition to the bundle.
 
     Returns
     -------
@@ -839,7 +847,7 @@ def _exchange(
     """
     parts = urlsplit(url)
     host, port = parts.hostname or "", parts.port or 443
-    target = parts.path + (f"?{parts.query}" if parts.query else "")
+    target = (parts.path or "/") + (f"?{parts.query}" if parts.query else "")
     lines = [f"{method} {target} HTTP/1.1", f"Host: {parts.netloc}", "Connection: close"]
     lines += [f"{k}: {v}" for k, v in headers.items()]
     if method == "POST":
@@ -847,7 +855,7 @@ def _exchange(
     try:
         sock = _open(host, port, routing, t)
         try:
-            with _tls(sock, host, None, "verify-full") as tls:
+            with _tls(sock, host, ca_pem, "verify-full") as tls:
                 tls.sendall(("\r\n".join(lines) + "\r\n\r\n").encode() + body)
                 data = b""
                 while len(data) < _ANSWER_LIMIT and (chunk := tls.recv(16384)):
@@ -1548,6 +1556,204 @@ def _gcs_credentials(body: Mapping[str, Any], routing: Mapping[str, Any], t: flo
     raise _Found("failed", f"the store answered HTTP {status} ({said})")
 
 
+def _header_safe(key: str, value: str) -> str:
+    """Refuse a secret value that an HTTP header cannot carry unchanged.
+
+    Parameters
+    ----------
+    key
+        The secret's key, for the message.
+    value
+        The value.
+
+    Returns
+    -------
+    str
+        `value`.
+
+    Raises
+    ------
+    _Found
+        ``credentials`` for a line break, another control character or a character outside
+        ASCII (a line break would add a header of its own); the value is never shown.
+    """
+    if _HEADER_SAFE.fullmatch(value) is None:
+        raise _Found(
+            "credentials",
+            f"the secret's `{key}` holds a line break, another control character or a character "
+            "outside ASCII, which an HTTP header cannot carry; store it again with "
+            "`lakana connection update`",
+        )
+    return value
+
+
+def _oauth2_token(body: Mapping[str, Any], routing: Mapping[str, Any], t: float) -> str:
+    """Ask the connection's ``token_url`` for a token with the client credentials.
+
+    The client secret goes in the form body (``client_secret_post``, as `rest.read` sends it),
+    only to the connection's own ``token_url``, whose host and port must be one of its endpoints
+    (``token``, or the ``service`` one when the token URL is on the base URL's host and port:
+    core declares each host and port once, and the proxy grants it either way).
+
+    Parameters
+    ----------
+    body
+        An ``http`` connection with auth ``oauth2`` and a secret.
+    routing
+        The routing entry.
+    t
+        Seconds per step.
+
+    Returns
+    -------
+    str
+        The access token (never written into a message).
+
+    Raises
+    ------
+    _Found
+        ``credentials`` when the endpoint refuses the client (HTTP 400 or 401); ``failed`` for
+        a ``token_url`` on no endpoint of the connection, a redirect, another
+        status, or an answer without a bearer token; the network outcomes of `_exchange`.
+    """
+    settings, secret = body["settings"], body["secret"]
+    token_url = str(settings.get("token_url", ""))
+    parts = urlsplit(token_url)
+    where = f"`{parts.hostname}:{parts.port or 443}`"
+    declared = {(str(e["host"]), int(e["port"])) for e in body["endpoints"]}
+    if parts.scheme != "https" or (parts.hostname, parts.port or 443) not in declared:
+        raise _Found(
+            "failed",
+            "the connection's token_url is not on an endpoint of the connection; upgrade the "
+            "worker to the server's version of Lakana",
+        )
+    form = {
+        "grant_type": "client_credentials",
+        "client_id": str(settings.get("client_id", "")),
+        "client_secret": str(secret["client_secret"]),
+    }
+    if settings.get("scope"):
+        form["scope"] = str(settings["scope"])
+    status, text = _exchange(
+        "POST",
+        token_url,
+        {"Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json"},
+        routing,
+        t,
+        _query(form).encode("ascii"),
+        ca_pem=settings.get("ca_certificate"),
+    )
+    try:
+        said = json.loads(text)
+    except (ValueError, RecursionError):
+        said = {}
+    said = said if isinstance(said, dict) else {}
+    if status in (400, 401):
+        # Masked before the cut: a cut inside an echoed secret would leave its start unmasked.
+        detail = ": ".join(
+            _mask(str(said[k]), secret)[:300] for k in ("error", "error_description") if k in said
+        )
+        raise _Found(
+            "credentials",
+            f"the token endpoint {where} refused the client credentials "
+            f"({detail or f'HTTP {status}'})",
+        )
+    if 300 <= status < 400:
+        raise _Found(
+            "failed",
+            f"the token endpoint {where} answered with a redirect (HTTP {status}), which is not "
+            "followed; set token_url to the address it names",
+        )
+    token, kind = said.get("access_token"), said.get("token_type", "bearer")
+    if status != 200:
+        raise _Found("failed", f"the token endpoint {where} answered HTTP {status}")
+    if not isinstance(token, str) or _HEADER_SAFE.fullmatch(token) is None:
+        raise _Found(
+            "failed",
+            f"the token endpoint {where} answered without an access_token a request can carry; "
+            "check the connection's token_url",
+        )
+    if not isinstance(kind, str) or kind.lower() != "bearer":
+        raise _Found(
+            "failed",
+            f"the token endpoint {where} gave a token of type {str(kind)[:40]!r}; Lakana sends "
+            "bearer tokens only",
+        )
+    return token
+
+
+def _http_credentials(body: Mapping[str, Any], routing: Mapping[str, Any], t: float) -> str:
+    """Send one ``GET`` of the base URL with the connection's auth, the way `rest.read` does.
+
+    Parameters
+    ----------
+    body
+        An ``http`` connection with a secret.
+    routing
+        The routing entry.
+    t
+        Seconds per step.
+
+    Returns
+    -------
+    str
+        What the message adds: ``", credentials accepted"`` for 2xx, `HTTP_NOT_PROVEN` for an
+        answer that neither accepts nor refuses them.
+
+    Raises
+    ------
+    _Found
+        ``credentials`` for 401 and 403 (and a refused OAuth2 client or a secret no header can
+        carry); ``failed`` for a redirect, 429 or 5xx; the network outcomes of `_exchange`.
+        Every derived value (a basic-auth header, an access token) is masked in its message.
+    """
+    settings, secret = body["settings"], body["secret"]
+    auth = str(settings.get("auth", "none"))
+    url = str(body["address"]["base_url"])
+    headers: dict[str, str] = {"Accept": "application/json"}
+    derived: dict[str, str] = {}
+    if auth not in ("bearer", "basic", "api_key", "oauth2"):
+        return ""
+    try:
+        if auth == "bearer":
+            headers["Authorization"] = f"Bearer {_header_safe('token', str(secret['token']))}"
+        elif auth == "basic":
+            pair = f"{settings.get('username', '')}:{secret['password']}"
+            derived["basic"] = base64.b64encode(pair.encode()).decode()
+            headers["Authorization"] = f"Basic {derived['basic']}"
+        elif auth == "api_key" and settings.get("api_key_in") == "query":
+            url += "?" + _query({str(settings["api_key_name"]): str(secret["api_key"])})
+        elif auth == "api_key":
+            headers[str(settings["api_key_name"])] = _header_safe("api_key", str(secret["api_key"]))
+        else:
+            derived["token"] = _oauth2_token(body, routing, t)
+            headers["Authorization"] = f"Bearer {derived['token']}"
+        status, _ = _exchange(
+            "GET", url, headers, routing, t, ca_pem=settings.get("ca_certificate")
+        )
+        if 200 <= status < 300:
+            return _mask(", credentials accepted", derived)
+        if status in (401, 403):
+            raise _Found("credentials", f"the API refused the credentials (HTTP {status})")
+        if 300 <= status < 400:
+            raise _Found(
+                "failed",
+                f"the base URL answers with a redirect (HTTP {status}), which is not followed; "
+                "use the address it names as the connection's base_url",
+            )
+        if status == 429 or status >= 500:
+            raise _Found("failed", f"the API answered HTTP {status}; test again later")
+        return _mask(HTTP_NOT_PROVEN.format(status=status), derived)
+    except _Found as found:
+        raise _Found(found.outcome, _mask(found.message, derived)) from None
+    except KeyError as missing:
+        raise _Found(
+            "credentials",
+            f"the secret has no `{missing.args[0]}`, which auth {auth} needs; store it with "
+            "`lakana connection update`",
+        ) from None
+
+
 def _component_failure(directory: int, name: str, exc: OSError, root: str, path: str) -> _Found:
     """Explain why a path component could not be opened.
 
@@ -1776,7 +1982,7 @@ def check(
             _sqlite_opens(route)
             message += "; it opens read-only as a SQLite database"
         elif outcome == "ok" and secret and kind == "http":
-            message += NOT_YET
+            message += _http_credentials(connection, route, timeout)
     except _Found as found:
         outcome, message = found.outcome, found.message
     except Exception as exc:

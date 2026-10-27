@@ -49,8 +49,9 @@ connection of that name exists. The task keeps the credential in memory for the 
 an environment variable or a file, and each value is shown as `***` in the task's log, its
 failure message and its trace, also in its common encodings (a `repr`, JSON, a URL); a value
 shorter than 4 characters, another transformation of it, or a value derived from it (such as an
-OAuth2 access token) is not hidden unless a Lakana helper registers it. A worker that cannot
-decrypt a declared connection's secret when the attempt starts does not start it; a secret
+OAuth2 access token) is not hidden unless a Lakana helper registers it (`files.read` registers
+the values it derives). A worker that cannot decrypt a declared connection's secret when the
+attempt starts does not start it; a secret
 added, bound or rotated while an attempt runs may appear in the log the worker captures, so
 change secrets between runs. Every fetch is in the audit log; refusals are recorded
 at a limited rate per principal and the rest counted. The code you

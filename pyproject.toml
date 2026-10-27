@@ -28,7 +28,7 @@ dev = [
     # lakana-core declares its own runtime dependency on it. MIT.
     "pyyaml>=6",
     "pytest-xdist>=3.8.0",
-    # Test-only here: `packages/lakana/tests/tls_fixture.py` makes certificate authorities with it
+    # Test-only here: `packages/lakana/tests/sdk_tls_fixture.py` makes certificate authorities with it
     # (the package itself needs none). Apache-2.0 OR BSD-3-Clause.
     "cryptography>=50.0.2",
     # Test-only: polars' `write_excel` makes the spreadsheets of the files helper's tests.

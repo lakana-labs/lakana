@@ -15,10 +15,11 @@ from collections.abc import Generator, Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+import httpx
 import obstore
 import pytest
 from obstore.store import MemoryStore
-from tls_fixture import Authority, make_authority, serving
+from sdk_tls_fixture import Authority, make_authority, serving
 
 from lakana import context
 from lakana.ingest import (
@@ -320,8 +321,27 @@ def test_the_http_client_trusts_nothing_from_the_environment(
     with _http.client_for(conn) as client:
         assert client.trust_env is False
         assert client.follow_redirects is False
-        assert client.headers["Authorization"] == f"Bearer {_BEARER}"
+        assert "Authorization" not in client.headers
+        assert _sent(client).headers["Authorization"] == f"Bearer {_BEARER}"
         assert str(client.base_url) == "https://api.example.com/v1/"
+
+
+def _sent(client: httpx.Client) -> httpx.Request:
+    """Run a request for ``x`` below the base URL through the client's auth, without sending it.
+
+    Parameters
+    ----------
+    client
+        The client.
+
+    Returns
+    -------
+    httpx.Request
+        The request as the auth hands it to the transport.
+    """
+    auth = client.auth
+    assert auth is not None
+    return next(auth.sync_auth_flow(client.build_request("GET", "x")))
 
 
 def test_basic_auth_registers_its_header_value_as_a_secret() -> None:
@@ -360,17 +380,9 @@ def test_api_key_goes_to_the_header_or_the_query() -> None:
     )
 
     with _http.client_for(header) as by_header, _http.client_for(query) as by_query:
-        assert by_header.headers["X-Key"] == _SAMPLE
-        assert by_query.params["key"] == _SAMPLE
-
-
-def test_oauth2_is_refused_with_what_to_do_instead() -> None:
-    conn = _connection(
-        "http", {"base_url": "https://api.example.com"}, {"auth": "oauth2"}, {"client_secret": "s"}
-    )
-
-    with pytest.raises(IngestError, match=r"auth oauth2, which files\.read does not support yet"):
-        _http.client_for(conn)
+        assert _sent(by_header).headers["X-Key"] == _SAMPLE
+        assert _sent(by_query).url.params["key"] == _SAMPLE
+        assert "key" not in by_query.params
 
 
 # --- files.read through the sources -------------------------------------------------------
@@ -620,7 +632,8 @@ def test_the_http_tls_floor_is_1_2(authority: Authority) -> None:
 
     with _http.client_for(conn) as client:
         transport = client._transport
-        context = transport._pool._ssl_context  # ty: ignore[unresolved-attribute]
+        assert isinstance(transport, _http.OwnOrigin)
+        context = transport._inner._pool._ssl_context  # ty: ignore[unresolved-attribute]
         assert isinstance(context, ssl.SSLContext)
         assert context.minimum_version == ssl.TLSVersion.TLSv1_2
 
@@ -712,7 +725,7 @@ def _usage_error() -> type[IngestError]:
 
 
 def test_a_connection_that_is_set_up_wrong_is_a_usage_error_that_is_not_retried() -> None:
-    """oauth2, a missing secret and a secret that is no key fail every attempt alike."""
+    """A missing secret and a secret that is no key fail every attempt alike."""
     from lakana import runner
 
     cases = [
@@ -1278,7 +1291,7 @@ def recorder(
     """
     import http.server
 
-    from tls_fixture import issue_leaf
+    from sdk_tls_fixture import issue_leaf
 
     heads: list[str] = []
 
@@ -1688,7 +1701,7 @@ def fake_s3(
     import http.server
     from xml.sax.saxutils import escape
 
-    from tls_fixture import issue_leaf
+    from sdk_tls_fixture import issue_leaf
 
     keys: list[str] = []
 

@@ -23,7 +23,7 @@ import socket
 import socketserver
 import ssl
 import threading
-from collections.abc import Generator, Mapping
+from collections.abc import Callable, Generator, Iterable, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -342,6 +342,152 @@ def serving(
     thread.start()
     try:
         yield Serving(f"https://127.0.0.1:{server.server_address[1]}", seen)
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+class _Quiet(_Server):
+    """A throwaway HTTPS server that prints nothing when a client hangs up early.
+
+    A reachability check closes right after the handshake.
+    """
+
+    def handle_error(self, request: object, client_address: object) -> None:
+        """Print nothing.
+
+        Parameters
+        ----------
+        request
+            Unused.
+        client_address
+            Unused.
+        """
+
+
+@dataclass(frozen=True)
+class Exchange:
+    """One request a scripted server received.
+
+    Attributes
+    ----------
+    method
+        ``GET``, ``POST`` or ``HEAD``.
+    target
+        The request target: path and query, as sent.
+    headers
+        The headers, names in lower case.
+    body
+        The request body.
+    """
+
+    method: str
+    target: str
+    headers: dict[str, str]
+    body: bytes
+
+
+Answer = tuple[int, Mapping[str, str], bytes | Iterable[bytes]]
+"""A scripted answer: status, headers, and a body (bytes, or chunks written until done or the
+client hangs up; without ``Content-Length`` the body ends when the connection closes)."""
+
+
+@dataclass(frozen=True)
+class Scripted:
+    """A running scripted HTTPS server.
+
+    Attributes
+    ----------
+    base
+        ``https://<host>:<port>``, without a trailing slash.
+    seen
+        Every request it received, in order.
+    """
+
+    base: str
+    seen: list[Exchange]
+
+
+@contextmanager
+def scripted(
+    authority: Authority,
+    certificates: Path,
+    answer: Callable[[Exchange], Answer],
+    host: str = "127.0.0.1",
+) -> Generator[Scripted, None, None]:
+    """Serve HTTPS on loopback, answering each request with what `answer` returns.
+
+    The server speaks HTTP/1.0 (one request per connection), its TLS floor is 1.2, and its
+    certificate, of `authority`, names ``127.0.0.1`` and ``localhost``.
+
+    Parameters
+    ----------
+    authority
+        Signs the server's certificate.
+    certificates
+        Where the leaf certificate and key are written.
+    answer
+        Called with each request; returns the status, headers and body.
+    host
+        The host the base URL names: ``127.0.0.1`` or ``localhost``.
+
+    Yields
+    ------
+    Scripted
+        The base URL and the requests seen.
+    """
+    cert_file, key_file = _leaf(authority, certificates)
+    tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    tls.minimum_version = ssl.TLSVersion.TLSv1_2
+    tls.load_cert_chain(cert_file, key_file)
+    seen: list[Exchange] = []
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        """Records each request and writes the scripted answer."""
+
+        def _serve(self) -> None:
+            """Record the request, then write the answer."""
+            length = int(self.headers.get("Content-Length") or 0)
+            body = self.rfile.read(length) if length else b""
+            exchange = Exchange(
+                self.command, self.path, {k.lower(): v for k, v in self.headers.items()}, body
+            )
+            seen.append(exchange)
+            status, headers, content = answer(exchange)
+            self.send_response(status)
+            for name, value in headers.items():
+                self.send_header(name, value)
+            if isinstance(content, bytes) and "Content-Length" not in headers:
+                self.send_header("Content-Length", str(len(content)))
+            self.end_headers()
+            if self.command == "HEAD":
+                return
+            try:
+                for chunk in [content] if isinstance(content, bytes) else content:
+                    self.wfile.write(chunk)
+            except (BrokenPipeError, ConnectionResetError, ssl.SSLError):
+                return
+
+        do_GET = do_POST = do_HEAD = _serve
+
+        def log_message(self, format: str, *args: object) -> None:
+            """Log nothing.
+
+            Parameters
+            ----------
+            format
+                Unused.
+            *args
+                Unused.
+            """
+
+    server = _Quiet(("127.0.0.1", 0), Handler)
+    server.socket = tls.wrap_socket(server.socket, server_side=True)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield Scripted(f"https://{host}:{server.server_address[1]}", seen)
     finally:
         server.shutdown()
         server.server_close()

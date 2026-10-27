@@ -24,7 +24,6 @@ import builtins
 import contextlib
 import datetime as dt
 import re
-import ssl
 import sys
 from collections.abc import Generator, Mapping
 from dataclasses import dataclass
@@ -338,7 +337,8 @@ def _refuse(
         Whether the store or server refused the credential (an authentication or permission
         error, HTTP 401 or 403).
     certificate
-        Whether the server's certificate was refused (`_store_certificate`, `_tls_refused`).
+        Whether the server's certificate was refused (`_store_certificate`,
+        `_http.certificate_refused`).
 
     Raises
     ------
@@ -457,29 +457,6 @@ def _store_certificate(error: BaseException) -> bool:
         Whether the dump names an invalid certificate.
     """
     return bool(_INVALID_CERTIFICATE.search(_structure(error)))
-
-
-def _tls_refused(error: BaseException) -> bool:
-    """Say whether httpx failed because the server's certificate did not verify.
-
-    Parameters
-    ----------
-    error
-        What httpx raised.
-
-    Returns
-    -------
-    bool
-        Whether an `ssl.SSLCertVerificationError` is among its causes.
-    """
-    seen: set[int] = set()
-    current: BaseException | None = error
-    while current is not None and id(current) not in seen:
-        if isinstance(current, ssl.SSLCertVerificationError):
-            return True
-        seen.add(id(current))
-        current = current.__cause__ or current.__context__
-    return False
 
 
 @dataclass(frozen=True)
@@ -753,7 +730,7 @@ class _HttpSource:
         try:
             response = self.client.head(self._url(path))
         except httpx.HTTPError as exc:
-            _refuse(self.name, self.environment, exc, certificate=_tls_refused(exc))
+            _refuse(self.name, self.environment, exc, certificate=_http.certificate_refused(exc))
         self._check(response, path)
         stamp = response.headers.get("last-modified")
         try:
@@ -800,7 +777,7 @@ class _HttpSource:
                         )
                     chunks.append(chunk)
         except httpx.HTTPError as exc:
-            _refuse(self.name, self.environment, exc, certificate=_tls_refused(exc))
+            _refuse(self.name, self.environment, exc, certificate=_http.certificate_refused(exc))
         return b"".join(chunks)
 
     def close(self) -> None:

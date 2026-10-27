@@ -174,6 +174,18 @@ on a task image of an earlier release ends `failed` with ``the task image has no
 build yourself needs `dist/check-requirements.txt`, the check environment's packages exported from
 `uv.lock`, in its build context first; the header of `Dockerfile.task` shows both commands.
 
+### Connection tests check http credentials; `files.read` reads `oauth2` connections
+
+`lakana connection test` now sends one `GET` of an `http` connection's base URL with its auth;
+an `oauth2` connection first gets a token from its `token_url`. A refused credential (401 or 403,
+or a token endpoint that refuses the client) is `credentials`, where the test said "credentials
+not checked yet" before; a base URL that answers neither 2xx nor a refusal (a 404, say) stays
+`ok`, with "credentials not refused". A base URL that answers 5xx (or 429) is now `failed`
+("test again later"), where it was `ok` before. Nothing is to install, under either runner, and the task
+image does not grow. `files.read` now reads an `http` connection with `auth: oauth2`, and sends a
+connection's credential only to the scheme, host and port of its `base_url`. See
+[Test a connection](../reference/connections.md#test-a-connection).
+
 ### Builds and tasks never reach the Docker host's gateways or names; list its other addresses
 
 **Breaking.** Under the docker runner, builds, tasks and connection tests no longer reach the
