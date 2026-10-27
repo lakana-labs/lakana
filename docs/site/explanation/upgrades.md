@@ -167,7 +167,7 @@ A `gcs` key needs nothing more: the worker already has what signs it.
 
 Under the Docker runner nothing is to install: each task image now holds a check environment,
 `/opt/lakana-check-env`, with exactly the check's drivers (installed by hash from the release's
-lock, owned by root and read-only), so **each task image grows by about 50 MB**. Pull the task
+lock, owned by root and read-only), so **each task image grows by about 47 MB**. Pull the task
 images of this release together with the launcher and the workers, as every release asks; a test
 on a task image of an earlier release ends `failed` with ``the task image has no connection check
 (/opt/lakana-check/check.py and its environment /opt/lakana-check-env) ...``. A task image you

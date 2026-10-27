@@ -55,7 +55,6 @@ check = [
     "adbc-driver-postgresql>=1.13",
     "adbc-driver-sqlite>=1.13",
     "cryptography>=50.0.2",
-    "httpx>=0.28",
     "PyMySQL>=1.2.3",
 ]
 # The documentation site (docs/site). Built in CI; published at the public beta.

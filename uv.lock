@@ -20,7 +20,6 @@ check = [
     { name = "adbc-driver-postgresql", specifier = ">=1.13" },
     { name = "adbc-driver-sqlite", specifier = ">=1.13" },
     { name = "cryptography", specifier = ">=50.0.2" },
-    { name = "httpx", specifier = ">=0.28" },
     { name = "pymysql", specifier = ">=1.2.3" },
 ]
 dev = [

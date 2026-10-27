@@ -67,12 +67,11 @@ DRIVERS = {
     "adbc_driver_postgresql": "adbc-driver-postgresql",
     "adbc_driver_sqlite": "adbc-driver-sqlite",
     "cryptography": "cryptography",
-    "httpx": "httpx",
     "pymysql": "PyMySQL",
 }
 """Each package a credential step may import (inside the step), to the distribution that brings
 it: the root ``check`` dependency group of uv.lock and the task image's import smoke are exactly
-these (tests compare all three). ``httpx`` is kept for the ``http`` credential step to come."""
+these (tests compare all three). The ``http`` credential step adds ``httpx`` with its code."""
 
 NOT_YET = "; credentials not checked yet"
 """What an ``http`` connection with a secret adds until its credential step exists."""
@@ -90,9 +89,9 @@ GCS_SCOPE = "https://www.googleapis.com/auth/devstorage.read_only"
 """The scope a ``gcs`` credential step asks a token for."""
 _JWT_SECONDS = 600
 """How long the signed token request of a ``gcs`` key is valid."""
-GCS_KEY_HINT = "store the key file Google gave you"
+GCS_NEXT_STEP = "store the key file Google gave you"
 """The next step of a ``gcs`` secret that is no usable service-account key."""
-MARIADB_NO_SECRET = (  # nosec B105 -- a message about a password, not a credential
+MARIADB_GREETING_ONLY = (
     "; TLS and credentials are checked only with a password: store one with "
     "`lakana connection update`"
 )
@@ -1335,7 +1334,7 @@ def _gcs_key(secret: Mapping[str, Any]) -> dict[str, Any]:
         raise _Found(
             "credentials",
             "the secret is not a service-account key (JSON with client_email, private_key and "
-            f"token_uri); {GCS_KEY_HINT}",
+            f"token_uri); {GCS_NEXT_STEP}",
         )
     return key
 
@@ -1409,7 +1408,8 @@ def _token_target(token_uri: str, declared: set[tuple[str, int]]) -> None:
     Raises
     ------
     _Found
-        ``credentials``, naming the field and the declared endpoints; nothing is sent.
+        ``credentials``, naming the field, the declared endpoints and at most the URL's host
+        (and a port other than 443), never the URL itself; nothing is sent.
     """
     shown = ", ".join(f"`{h}:{p}`" for h, p in sorted(declared)) or "none"
     if any(c.isspace() or not c.isprintable() for c in token_uri):
@@ -1426,18 +1426,21 @@ def _token_target(token_uri: str, declared: set[tuple[str, int]]) -> None:
                 or not host
                 or parts.username is not None
                 or parts.password is not None
+                or explicit == 0
             )
     if malformed:
         raise _Found(
             "credentials",
-            f"the key's token_uri `{token_uri[:200]}` is not an https URL of a token endpoint "
-            f"({shown}); {GCS_KEY_HINT}",
+            "the key's token_uri is not an https URL of a token endpoint of the connection "
+            f"({shown}); {GCS_NEXT_STEP}",
         )
-    if (host, 443 if explicit is None else explicit) not in declared:
+    port = 443 if explicit is None else explicit
+    if (host, port) not in declared:
+        named = str(host)[:100] + ("" if port == 443 else f":{port}")
         raise _Found(
             "credentials",
-            f"the key's token_uri `{token_uri[:200]}` is not the connection's token endpoint "
-            f"({shown}); Lakana sends a signed key nowhere else: {GCS_KEY_HINT}",
+            f"the key's token_uri names `{named}`, which is not the connection's token endpoint "
+            f"({shown}); Lakana sends a signed key nowhere else: {GCS_NEXT_STEP}",
         )
 
 
@@ -1768,7 +1771,7 @@ def check(
             tls = _mariadb_credentials(connection, route, timeout)
             message += f", {tls}, credentials accepted"
         elif outcome == "ok" and kind == "mariadb":
-            message += MARIADB_NO_SECRET
+            message += MARIADB_GREETING_ONLY
         elif outcome == "ok" and kind == "sqlite-file":
             _sqlite_opens(route)
             message += "; it opens read-only as a SQLite database"

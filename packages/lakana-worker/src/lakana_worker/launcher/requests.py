@@ -235,7 +235,7 @@ CHECK_LIMITS = Limits(memory_mb=256, cpus=0.5, pids=64, timeout_seconds=30)
 
 Measured with the Python 3.14 check environment (ADBC 1.13): a peak of about 40 MiB resident with
 every driver imported (32 MiB for a SQLite open, 36 MiB for a PostgreSQL login), so 256 MiB leaves
-ample room for TLS and a slow source. The environment adds about 48.5 MB to each task image.
+ample room for TLS and a slow source. The environment adds about 46.7 MB to each task image.
 """
 CHECK_GRACE = 1
 """Seconds between SIGTERM and SIGKILL when a check is stopped."""

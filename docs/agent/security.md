@@ -1316,7 +1316,7 @@ connections; a connection opens exactly its endpoints and nothing else.
   `lakana/ingest/_check.py`, one file that never imports `lakana` or pyarrow: its module-level
   imports are the standard library's, and each credential step imports its driver inside itself
   from `_check.DRIVERS` (`adbc_driver_postgresql`, `adbc_driver_sqlite`, `pymysql`,
-  `cryptography`, and `httpx` for the `http` step to come); the AST guard `test_the_check_imports_only_the_standard_library_and_its_drivers` keeps
+  `cryptography`; the `http` step adds `httpx` with its code); the AST guard `test_the_check_imports_only_the_standard_library_and_its_drivers` keeps
   it so. The check environment `/opt/lakana-check-env` is a venv on the image's own interpreter
   holding exactly the root `check` dependency group of `uv.lock` (`dist/check-requirements.txt`,
   exported by each workflow and by `docker_stack.build_task_image` before the build; installed
@@ -1340,8 +1340,12 @@ connections; a connection opens exactly its endpoints and nothing else.
   port that parses and is declared, never 0); the RS256 assertion (read-only scope, 600 s) goes
   there over the check's own `_exchange` (the CONNECT tunnel of `LAKANA_EGRESS_PROXY` when set,
   verified TLS, no redirect followed, 64 KiB read), as the access token goes only to the
-  `GCS_URL` listing. The key, the assertion and the token never enter a message; every message is
-  masked and its control characters escaped (`_safe`, a copy of `safe_name` a test keeps equal).
+  `GCS_URL` listing. The key, the assertion and the token never enter a message, nor does the
+  key's `token_uri` (a refusal names at most its host, and a port other than 443); every message is
+  masked and its control characters escaped (`_safe`, a copy of `safe_name` a test keeps equal). No
+  module constant of `_check` is named like a credential (a test): CodeQL's
+  `py/clear-text-logging-sensitive-data` reads such a name as a secret (alert #66 was a message
+  constant named `MARIADB_NO_SECRET`).
 - **What a task cannot reach, connections or not**: another task's network (each run its own
   /29; the relay and the proxy refuse the launcher's whole range), the Compose stack (attached
   networks; the relay sits on the outward network, the stack's `default`, so SeaweedFS's 18333 and

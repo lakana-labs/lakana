@@ -44,7 +44,7 @@ RUN UV_NO_CACHE=1 UV_PYTHON_DOWNLOADS=never uv venv --python /usr/local/bin/pyth
     --only-binary :all: -r /opt/lakana-check/requirements.txt \
  && chown -R 0:0 /opt/lakana-check /opt/lakana-check-env \
  && chmod -R a-w,a+rX /opt/lakana-check /opt/lakana-check-env \
- && /opt/lakana-check-env/bin/python -I -B -c 'import adbc_driver_postgresql.dbapi, adbc_driver_sqlite.dbapi, cryptography, httpx, pymysql' \
+ && /opt/lakana-check-env/bin/python -I -B -c 'import adbc_driver_postgresql.dbapi, adbc_driver_sqlite.dbapi, cryptography, pymysql' \
  && echo '{"connection": {"kind": "none"}}' | /opt/lakana-check-env/bin/python -I -B /opt/lakana-check/check.py \
   | grep -q 'does not know the kind'
 # No file keeps a setuid or setgid bit: where Docker refuses no-new-privileges (snap), `su` or

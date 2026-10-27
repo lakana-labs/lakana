@@ -12,6 +12,7 @@ import http.server
 import io
 import json
 import os
+import re
 import socket
 import sqlite3
 import ssl
@@ -1598,14 +1599,22 @@ def test_a_gcs_key_naming_another_token_endpoint_sends_nothing(
 ) -> None:
     """The signed key goes only to a token endpoint of the connection, under either runner."""
     server, key_json = gcs_server
-    elsewhere = json.dumps({**json.loads(key_json), "token_uri": "https://evil.example/token"})
+    key = json.loads(key_json)
 
-    outcome, message = _check.check(_gcs(server.port, elsewhere), {}, timeout=FAST)
+    for uri, shown in (
+        ("https://evil.example/token?k=v#x", "`evil.example`"),
+        ("https://evil.example:8443/path", "`evil.example:8443`"),
+    ):
+        elsewhere = json.dumps({**key, "token_uri": uri})
+        outcome, message = _check.check(_gcs(server.port, elsewhere), {}, timeout=FAST)
 
-    assert outcome == "credentials"
-    assert (
-        "token_uri `https://evil.example/token` is not the connection's token endpoint" in message
-    )
+        assert (outcome, message) == (
+            "credentials",
+            f"the key's token_uri names {shown}, which is not the connection's token endpoint "
+            f"(`localhost:{server.port}`); Lakana sends a signed key nowhere else: store the key "
+            "file Google gave you",
+        )
+        assert "/token" not in message and "/path" not in message and "k=v" not in message
     assert server.seen == []
 
 
@@ -2395,8 +2404,11 @@ def test_a_malformed_token_uri_is_named_and_never_sent(
 
     outcome, message = _check.check(_gcs(server.port, bad), {}, timeout=FAST)
 
-    assert outcome == "credentials"
-    assert "the key's token_uri" in message and "the key file Google gave you" in message
+    assert (outcome, message) == (
+        "credentials",
+        "the key's token_uri is not an https URL of a token endpoint of the connection "
+        f"(`localhost:{server.port}`); store the key file Google gave you",
+    )
     assert server.seen == []
 
 
@@ -2484,9 +2496,28 @@ def test_the_drivers_are_named_once() -> None:
         "adbc-driver-postgresql",
         "adbc-driver-sqlite",
         "cryptography",
-        "httpx",
         "PyMySQL",
     }
+
+
+def test_no_constant_of_the_check_is_named_like_a_credential() -> None:
+    """Name messages for what they say, never like a credential.
+
+    CodeQL reads a string named like a credential as one, and its value reaching the output line
+    as a secret written out in clear text (alert #66: a message constant named ``..._NO_SECRET``).
+    """
+    tree = ast.parse(Path(_check.__file__).read_text(encoding="utf-8"))
+    names = [
+        target.id
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        for target in node.targets
+        if isinstance(target, ast.Name)
+    ]
+
+    assert names, "the walk found no constant"
+    flagged = [n for n in names if re.search(r"SECRET|PASS(WORD|WD)?|TOKEN|KEY|CREDENTIAL", n)]
+    assert flagged == []
 
 
 @pytest.mark.parametrize(
