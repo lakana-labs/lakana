@@ -4074,7 +4074,7 @@ secret's values, and the only way a secret reaches a Python asset (#23). User re
 - **The REST helper** (`lakana.ingest.rest`, over `_http.send`) uses the same client, so the
   credential stays on the base URL's origin (`ConnectionAuth` and `OwnOrigin`). `path` is
   relative only (an absolute URL, `//host`, `?`, `#`, a backslash, a control character, an
-  empty, `.` or `..` segment or a stray `%` is a `UsageError` before anything is sent) and
+  empty, `.` or `..` segment, also percent-encoded, or a stray `%` is a `UsageError` before anything is sent) and
   encoded per segment below the base path. A next link is resolved against the page's URL and
   must pass `same_origin` with the base URL (no userinfo), else `SourceRefused` before it is
   requested; a cursor, link or records hash an earlier page gave stops the read (`UsageError`),
@@ -4084,7 +4084,7 @@ secret's values, and the only way a secret reaches a Python asset (#23). User re
   certificate refusal), within `retries` attempts and `retry_budget_seconds`, honouring
   `Retry-After`; a non-2xx body is never read. An OAuth2 401 calls
   `ClientCredentials.invalidate()` and sends once more with a new token; a second 401 is
-  `SourceRefused` naming `lakana connection test`. Messages show URLs through `shown_url`
+  `SourceRefused` naming `lakana connection test`. A page or a JSON/NDJSON file nested more than `_formats.MAX_NESTING` (100) arrays and objects deep is a `FileShapeError` before it is parsed (`nested_deeper`, strings dropped, a running sum in pyarrow): pyarrow and polars recurse on the C stack and segfault the task at about 10,000 levels. A number no column holds (more than 20 digits, a float overflow, `NaN`/`Infinity`) becomes a stand-in through `json.loads`' hooks and a `FileShapeError` naming the field, never a retried "not JSON" or an `inf`. Field names and hosts in messages are cut to 100 characters. Messages show URLs through `shown_url`
   (escaped first, then userinfo, fragment and query values dropped). Each OAuth2 token, also a
   refreshed one, is registered as a secret when it arrives.
 - **Residual, accepted.** Deployed code sees the credentials of the connections its asset

@@ -1168,3 +1168,58 @@ def test_parse_reads_at_most_max_rows() -> None:
     assert _formats.parse(b"id\n1\n2\n", name="x/a.csv", format="csv").height == 2
     sheet = _xlsx(pl.DataFrame({"id": [1, 2, 3]}), "S1")
     assert _formats.parse(sheet, name="x/a.xlsx", format="xlsx").height == 3
+
+
+@pytest.mark.parametrize(
+    ("data", "deeper"),
+    [
+        (b"[" * 100 + b"]" * 100, False),
+        (b"[" * 101 + b"]" * 101, True),
+        (b'{"a": "' + b"[" * 500 + b'"}', False),
+        (b'{"a": "\\"' + b"[" * 500 + b'"}', False),
+        (b'["\\\\", ' + b"[" * 101 + b"]" * 101 + b"]", True),
+        (b'["' + b"[" * 500, False),
+        (b'["' + b"[" * 500 + b"\\", False),
+        (b"[]" * 1_000, False),
+        (b'{"a": 1}\n' * 200, False),
+        (b"", False),
+    ],
+    ids=[
+        "at-the-limit",
+        "past-the-limit",
+        "brackets-in-a-string",
+        "escaped-quote-in-a-string",
+        "escaped-backslash-ends-the-string",
+        "unterminated-string",
+        "trailing-backslash",
+        "wide-not-deep",
+        "ndjson-lines",
+        "empty",
+    ],
+)
+def test_nested_deeper_counts_arrays_and_objects_outside_strings(data: bytes, deeper: bool) -> None:
+    assert _formats.nested_deeper(data) is deeper
+
+
+@pytest.mark.parametrize("format", ["json", "ndjson"])
+def test_json_nested_deeper_than_the_limit_is_refused_before_polars(
+    monkeypatch: pytest.MonkeyPatch, format: str
+) -> None:
+    """10,000 levels crash polars (a segfault): refused before it is called."""
+
+    def never(*args: object, **kwargs: object) -> None:
+        raise AssertionError("reached polars")
+
+    monkeypatch.setattr(pl, "read_json", never)
+    monkeypatch.setattr(pl, "read_ndjson", never)
+    record = b'{"a": ' + b"[" * 10_000 + b"1" + b"]" * 10_000 + b"}"
+    data = b"[" + record + b"]" if format == "json" else record + b"\n"
+
+    with pytest.raises(_formats.FileShapeError) as caught:
+        _formats.parse(data, name="exports/deep.json", format=format)
+
+    assert str(caught.value) == (
+        "`exports/deep.json`: nests arrays and objects deeper than 100 levels, which Lakana "
+        "does not read; flatten the file at the source, or read it with connections.get and "
+        "your own parser"
+    )

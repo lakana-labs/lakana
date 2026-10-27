@@ -29,8 +29,8 @@ import math
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, NoReturn
-from urllib.parse import quote, urlsplit
+from typing import TYPE_CHECKING
+from urllib.parse import quote, unquote, urlsplit
 
 from lakana.ingest import _http, connections
 from lakana.ingest._errors import (
@@ -42,6 +42,7 @@ from lakana.ingest._errors import (
     safe_name,
     task_environment,
 )
+from lakana.ingest._formats import MAX_NESTING, nested_deeper
 from lakana.ingest.files import DEFAULT_MAX_BYTES, DEFAULT_MAX_ROWS, _positive
 
 if TYPE_CHECKING:
@@ -68,6 +69,112 @@ _OTHER_HELPER = {
 _BAD_PERCENT = re.compile(r"%(?![0-9A-Fa-f]{2})")
 _SEGMENT_SAFE = "!$&'()*+,;=:@-._~%"
 _MISSING = object()
+_SHOWN_FIELD = 100
+"""The most characters of a field name a message shows."""
+_INT_DIGITS = 20
+"""The most digits of an integer parsed: 20 hold every unsigned 64-bit number."""
+
+
+@dataclass(frozen=True)
+class _Unheld:
+    """A number JSON allows that no Arrow column holds; it stands in for the value.
+
+    Parameters
+    ----------
+    text
+        What it was, for messages: ``an integer of 5000 digits``.
+    """
+
+    text: str
+
+    def __str__(self) -> str:
+        """Show what it was.
+
+        Returns
+        -------
+        str
+            `text`.
+        """
+        return self.text
+
+
+def _parse_int(text: str) -> int | _Unheld:
+    """Parse a JSON integer, or stand in for one no 64-bit column holds.
+
+    Parameters
+    ----------
+    text
+        Its digits, with a sign.
+
+    Returns
+    -------
+    int or _Unheld
+        The integer; `_Unheld` past `_INT_DIGITS` digits (Python refuses more than 4,300).
+    """
+    digits = len(text) - text.startswith("-")
+    if digits > _INT_DIGITS:
+        return _Unheld(f"an integer of {digits} digits")
+    return int(text)
+
+
+def _parse_float(text: str) -> float | _Unheld:
+    """Parse a JSON number with a fraction or an exponent, or stand in for an overflow.
+
+    Parameters
+    ----------
+    text
+        The number.
+
+    Returns
+    -------
+    float or _Unheld
+        The float; `_Unheld` when it is beyond a 64-bit float (``1e400``).
+    """
+    value = float(text)
+    if math.isfinite(value):
+        return value
+    return _Unheld(f"{text[:40]}, beyond a 64-bit float")
+
+
+def _parse_constant(text: str) -> _Unheld:
+    """Stand in for ``NaN``, ``Infinity`` and ``-Infinity``, which are not JSON.
+
+    Parameters
+    ----------
+    text
+        The constant.
+
+    Returns
+    -------
+    _Unheld
+        Its stand-in.
+    """
+    return _Unheld(f"{text}, which JSON does not allow")
+
+
+def _first_unheld(values: list[object]) -> _Unheld | None:
+    """Find a stand-in for a number among values, at any depth.
+
+    Parameters
+    ----------
+    values
+        A column's values.
+
+    Returns
+    -------
+    _Unheld or None
+        The first found.
+    """
+    pending: list[object] = list(values)
+    while pending:
+        value = pending.pop()
+        if isinstance(value, _Unheld):
+            return value
+        if isinstance(value, dict):
+            pending.extend(value.values())
+        elif isinstance(value, list):
+            pending.extend(value)
+    return None
 
 
 def _name(value: object, argument: str) -> str:
@@ -276,8 +383,8 @@ def _first_url(base_url: str, path: str) -> str:
     ------
     UsageError
         For a path that is not text, an absolute URL, a network path (``//host``), a query, a
-        fragment, a backslash, a control character, an empty, ``.`` or ``..`` segment, or a
-        ``%`` that is no escape.
+        fragment, a backslash, a control character, an empty, ``.`` or ``..`` segment (also
+        percent-encoded, such as ``%2e%2e``), or a ``%`` that is no escape.
     """
     if not isinstance(path, str):
         raise UsageError(f"path= is the path below the base URL, a str, not {type(path).__name__}")
@@ -297,7 +404,7 @@ def _first_url(base_url: str, path: str) -> str:
             "fragment, or a % that is no escape; pass query values with params="
         )
     segments = path.removeprefix("/").split("/") if path not in ("", "/") else []
-    if any(segment in ("", ".", "..") for segment in segments):
+    if any(unquote(segment) in ("", ".", "..") for segment in segments):
         raise UsageError(
             f"path= {safe_name(path)!r} has an empty, '.' or '..' segment; pass the path below "
             "the base URL as it is"
@@ -365,18 +472,26 @@ def _page_table(name: str, page: int, records: list[dict[str, object]]) -> pa.Ta
     ------
     FileShapeError
         For a field whose values have no common Arrow type (a number and a text) or that do not
-        fit one (an integer beyond 64 bits).
+        fit one (an integer beyond 64 bits, a float beyond 64 bits, ``NaN``).
     """
     import pyarrow as pa
 
     keys = list(dict.fromkeys(key for record in records for key in record))
     columns = {}
     for key in keys:
+        values = [record.get(key) for record in records]
         try:
-            columns[key] = pa.array([record.get(key) for record in records])
+            columns[key] = pa.array(values)
         except (pa.ArrowInvalid, pa.ArrowTypeError, OverflowError) as exc:
+            field = safe_name(key)[:_SHOWN_FIELD]
+            unheld = _first_unheld(values)
+            if unheld is not None:
+                raise FileShapeError(
+                    f"`{name}`: field {field!r} of page {page} holds {unheld}, which Arrow cannot "
+                    "hold; read it with connections.get and your own client to convert it"
+                ) from None
             raise FileShapeError(
-                f"`{name}`: field {safe_name(key)!r} of page {page} holds values of different "
+                f"`{name}`: field {field!r} of page {page} holds values of different "
                 f"types or a value Arrow cannot hold ({safe_name(str(exc))[:200]}); read it with "
                 "connections.get and your own client to convert it"
             ) from None
@@ -461,22 +576,6 @@ def _refusal(name: str, answer: _http.Answer) -> SourceError:
     return SourceError(f"`{name}`: the API answered HTTP {status} for {shown}")
 
 
-def _not_json(constant: str) -> NoReturn:
-    """Refuse ``NaN`` and ``Infinity``, which are not JSON.
-
-    Parameters
-    ----------
-    constant
-        The constant.
-
-    Raises
-    ------
-    ValueError
-        Always.
-    """
-    raise ValueError(constant)
-
-
 def _parse(name: str, page: int, answer: _http.Answer) -> object:
     """Parse a page's JSON.
 
@@ -498,11 +597,24 @@ def _parse(name: str, page: int, answer: _http.Answer) -> object:
     ------
     SourceError
         When the body is no JSON (retried: an API may answer a maintenance page for a while).
+    FileShapeError
+        When it nests arrays and objects deeper than `MAX_NESTING` (pyarrow would crash on it).
     """
     if answer.status == 204 or not answer.body.strip():
         return None
+    if nested_deeper(answer.body):
+        raise FileShapeError(
+            f"`{name}`: page {page} of GET {_http.shown_url(answer.url)} nests arrays and objects "
+            f"deeper than {MAX_NESTING} levels, which Lakana does not read; read it with "
+            "connections.get and your own client, and flatten it"
+        )
     try:
-        return json.loads(answer.body, parse_constant=_not_json)
+        return json.loads(
+            answer.body,
+            parse_int=_parse_int,
+            parse_float=_parse_float,
+            parse_constant=_parse_constant,
+        )
     except (ValueError, RecursionError):
         kind = safe_name(answer.headers.get("content-type", "no content type"))[:80]
         raise SourceError(
@@ -634,11 +746,18 @@ def _next_link(
     except Exception:
         url = None
     if url is None or not _http.same_origin(url, base):
-        target = safe_name(url.host if url is not None else "a URL that cannot be read")
+        if url is None:
+            there, note, here = (
+                "a URL that cannot be read",
+                "",
+                _http.shown_origins(answer.url, base)[2],
+            )
+        else:
+            there, note, here = _http.shown_origins(url, base)
         raise SourceRefused(
-            f"`{name}`: the next link of page {page} points to {target}, not to "
-            f"{safe_name(answer.url.host)} with the base URL's scheme and port; it is not "
-            "followed, so credentials never leave the connection's host"
+            f"`{name}`: the next link of page {page} points to {there}{note}, not to {here}, the "
+            "base URL's origin; it is not followed, so credentials never leave the connection's "
+            "host"
         )
     return url
 

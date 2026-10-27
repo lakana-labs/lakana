@@ -233,7 +233,7 @@ could end differently (the task is retried only when it could):
 | Class | Meaning | Retried |
 |---|---|---|
 | `UsageError` | The call or the setup is wrong: a connection of another kind, an unknown extension or `format=`, `sheet=` or `header_row=` where they mean nothing, a cap that is not a positive whole number, `since=` of the wrong type, `modified_from=` without `since=`, a wildcard in an `http` path; a missing secret or one that is no service-account key, a secret value no HTTP header can carry, a token endpoint that answers without a bearer token, a CA certificate that is not PEM, a trust bundle the worker cannot read. Every attempt fails the same way. | No |
-| `FileShapeError` (a `SourceError`) | The files are wrong: types that do not fit across files, a `schema=` column a file lacks, a `schema=` value that is no Polars type, a file that cannot be parsed, a bucket key with an empty, `.` or `..` segment. The same files fail every attempt. | No |
+| `FileShapeError` (a `SourceError`) | The files are wrong: types that do not fit across files, a `schema=` column a file lacks, a `schema=` value that is no Polars type, a file that cannot be parsed, a JSON file that nests arrays and objects more than 100 levels deep, a bucket key with an empty, `.` or `..` segment. The same files fail every attempt. | No |
 | `SourceRefused` (a `SourceError`) | The store or server refused the credential (HTTP 401 or 403), an OAuth2 token endpoint refused the client (400 or 401) or answered with a redirect, another 4xx, a 1xx or a 2xx other than 200, its certificate is not trusted, it answered with a redirect, or a request would go to another host than the `base_url`'s. Every attempt would; the message names the next step. | No |
 | `SourceError` | The store or server failed or could not be reached (a network error, a timeout, HTTP 404, 429 or 5xx, the egress proxy's refusal), which may pass. | Yes |
 | `DirectoryError` | A directory or file is missing, a link, not a directory, or denied; or the pattern is refused. The same path fails every attempt. | No |
@@ -259,6 +259,7 @@ could end differently (the task is retried only when it could):
 | `obstore cannot use the secret of ...` | The secret is well formed but unusable: a service-account key whose private key is not an RSA key, an account key that is not base64. | Store the right value with the command the message names. |
 | `the listing passed 1000000 objects; narrow the pattern` | The pattern's fixed leading part leaves too many objects to look at. | Start the pattern with more fixed folders (`exports/2026/*.csv` rather than `**/*.csv`). |
 | `the object key ... has an empty, '.' or '..' segment, which stops the listing` | A key in the bucket that obstore cannot parse (`a//b.csv`). | Rename or remove the object, or narrow the pattern or the `prefix`. |
+| `...: nests arrays and objects deeper than 100 levels, which Lakana does not read` | A JSON or NDJSON file nested deeper than any table needs (the readers would crash on it). | Flatten the file where it is written, or read it with `connections.get` and your own parser. |
 | `the files matching ... hold more than max_rows (...) rows` | The files hold more rows than the cap. | Narrow the pattern, pass `since=` to read fewer files, or raise `max_rows`. |
 | `... names ingestion root ..., which this worker does not have` | The worker has no such root. | Set the root as the message says, or run the asset on a worker that has it. |
 | `cannot tell the format of ...; pass format=` | The extension is none of the formats. | Pass `format=`. |
@@ -311,7 +312,7 @@ stacks the records of every page into one table.
 | Parameter | Default | Meaning |
 |---|---|---|
 | `connection` | required | A connection the asset declares, of kind `http`. |
-| `path` | required | The path below the base URL, such as `customers` or `v2/orders` (`""` for the base URL itself). Each part is sent percent-encoded; an absolute URL, `//host`, `?`, `#`, a backslash, a control character, an empty, `.` or `..` part, and a `%` that is no escape are refused. |
+| `path` | required | The path below the base URL, such as `customers` or `v2/orders` (`""` for the base URL itself). Each part is sent percent-encoded; an absolute URL, `//host`, `?`, `#`, a backslash, a control character, an empty, `.` or `..` part (also percent-encoded, such as `%2e%2e`), and a `%` that is no escape are refused. |
 | `paginate` | `None` (one page) | `rest.PageNumber(...)`, `rest.Cursor(...)` or `rest.NextLink(...)`, below. |
 | `params` | none | Query parameters. A value is a `str`, `int`, `float`, `bool` (`true`/`false`), `Decimal`, `date` or `datetime` (sent in ISO 8601, such as `2026-01-02T03:04:05+00:00`). `None` is refused: pass `ctx.watermark(default=...)`. Sent with every request, except with `NextLink`, whose links carry their own. |
 | `records` | `"data"` | Where a page holds its list of records: a key (`"value"` for OData) or a dotted path (`"result.items"`); `""` for a page that is itself a list. `null` there is a page without records. |
@@ -379,7 +380,7 @@ The classes are those of [files.read](#errors):
 |---|---|---|
 | `UsageError` | The call or the setup is wrong: a path that could leave the base URL, a `None` or unsupported `params` value, a `params` key the paginator or the connection's API key sets, `records=` that does not lead to a list of objects, a cursor or link of the wrong type, a page that repeats an earlier one, a connection of another kind, a missing secret or one no header can carry, a token endpoint that answers without a bearer token. | No |
 | `SourceRefused` (a `SourceError`) | The API refused the credential (401, 403) or the request (another 4xx), answered with a redirect, a next link names another host, a certificate is not trusted, an OAuth2 token endpoint refused the client, or the task's egress proxy refused the host (403) or the task's token (407). | No |
-| `FileShapeError` (a `SourceError`) | A field holds values of different types (a number and a text), or a value Arrow cannot hold (an integer beyond 64 bits). | No |
+| `FileShapeError` (a `SourceError`) | A field holds values of different types (a number and a text), or a value Arrow cannot hold (an integer beyond 64 bits, a number beyond a 64-bit float such as `1e400`, `NaN` or `Infinity`), or a page nests arrays and objects more than 100 levels deep. | No |
 | `SourceError` | The API kept failing past the retries or the budget, answered another 5xx, could not be reached, or a page is not JSON (a maintenance page, say). | Yes |
 | `CapExceeded` | A cap was reached. | No |
 
@@ -396,6 +397,8 @@ The classes are those of [files.read](#errors):
 | `...: page 3 repeats the cursor of page 2; the API does not advance — check paginate=` (or `records`, `next link`) | The paginator does not fit the API. | Check `paginate=` against the API's documentation. |
 | ``...: page 1 has no `data`; pass records=`` | The records are elsewhere. | Pass `records=` with the key or dotted path of the list. |
 | `...: field 'id' of page 2 holds values of different types` (or `the pages of ... cannot be combined`) | The API mixes types in a field. | Read it with `connections.get` and your own client to convert it. |
+| `...: field 'amount' of page 1 holds an integer of 5000 digits, which Arrow cannot hold` (or `1e400, beyond a 64-bit float`, `NaN, which JSON does not allow`) | A number no table column holds. | Read it with `connections.get` and your own client to convert it. |
+| `...: page 1 of GET ... nests arrays and objects deeper than 100 levels` | A page nested deeper than any table needs (Arrow would crash on it). | Read it with `connections.get` and your own client, and flatten it. |
 | `...: page 1 of GET ... is not JSON (text/html)` | The API answered something else. | Check `path=`; the task is retried in case it was a maintenance page. |
 | `... is not a connection of this asset: declare it in @asset(connections=[...])` | Under the Docker runner the egress proxy refused the host: it is not one of the asset's connections, or it is inside the Lakana stack or on the Docker host. | Declare the connection; give it an address outside the Lakana stack. |
 | `...: 'items' has more than max_pages (10000) pages` (or `max_bytes`, `max_rows`) | The read is larger than the cap. | Narrow with `params=` (such as a date filter), or raise the cap. |

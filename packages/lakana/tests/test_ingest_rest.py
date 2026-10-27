@@ -268,6 +268,8 @@ def _query(exchange: Exchange) -> dict[str, str]:
         (0, "Thu, 22 Oct 2026 07:00:00 GMT", (0.0, 0.0)),
         (0, "garbage", (0.25, 0.5)),
         (0, "-5", (0.25, 0.5)),
+        (0, "\u00b2", (0.25, 0.5)),
+        (0, "\u0661\u0662", (0.25, 0.5)),
     ],
 )
 def test_retry_delay(attempt: int, retry_after: str | None, expected: tuple[float, float]) -> None:
@@ -341,6 +343,18 @@ def test_retry_after_is_honoured_in_seconds_or_as_a_date(
         rest.read("api", "items")
 
     assert clock.slept == [slept]
+
+
+def test_a_retry_after_of_other_digits_falls_back_to_the_backoff(
+    authority: Authority, tmp_path: Path, clock: Clock
+) -> None:
+    """A superscript two (byte 0xB2, which httpx reads as Latin-1) is no number of seconds."""
+    with scripted(authority, tmp_path, _flaky(1, 503, Retry_After="\u00b2")) as server:
+        _task(server.base, authority)
+        table = rest.read("api", "items")
+
+    assert table.column("id").to_pylist() == [1]
+    assert clock.slept == [0.25]
 
 
 def test_the_retries_end_naming_the_attempts_and_the_time(
@@ -611,18 +625,25 @@ def test_odata_next_links_absolute_and_relative(authority: Authority, tmp_path: 
 
 
 @pytest.mark.parametrize(
-    "link",
+    ("link", "shown"),
     [
-        "https://evil.test/items?page=2",
-        "//evil.test/items",
-        "https://127.0.0.1:1/items",
-        "https://user:pw@127.0.0.1:{port}/items",
-        "http://127.0.0.1:{port}/items",
+        ("https://evil.test/items?page=2", "evil.test, not to 127.0.0.1"),
+        ("//evil.test/items", "evil.test, not to 127.0.0.1"),
+        ("https://127.0.0.1:1/items", "https://127.0.0.1:1, not to https://127.0.0.1:{port}"),
+        (
+            "https://user:pw@127.0.0.1:{port}/items",
+            "https://127.0.0.1:{port} with a user or a password in its URL, not to "
+            "https://127.0.0.1:{port}",
+        ),
+        (
+            "http://127.0.0.1:{port}/items",
+            "http://127.0.0.1:{port}, not to https://127.0.0.1:{port}",
+        ),
     ],
     ids=["other-host", "network-path", "other-port", "userinfo", "plain-http"],
 )
 def test_a_next_link_off_the_connections_origin_is_not_followed(
-    authority: Authority, tmp_path: Path, link: str
+    authority: Authority, tmp_path: Path, link: str, shown: str
 ) -> None:
     def answer(exchange: Exchange) -> Answer:
         port = exchange.headers["host"].rsplit(":", 1)[1]
@@ -633,11 +654,29 @@ def test_a_next_link_off_the_connections_origin_is_not_followed(
         with pytest.raises(SourceRefused) as caught:
             rest.read("api", "items", paginate=rest.NextLink(field="next"))
 
-    assert "the next link of page 1 points to" in str(caught.value)
+    port = server.base.rsplit(":", 1)[1]
+    assert f"the next link of page 1 points to {shown.format(port=port)}, the base URL's" in str(
+        caught.value
+    )
     assert "it is not followed, so credentials never leave the connection's host" in str(
         caught.value
     )
     assert len(server.seen) == 1
+
+
+def test_a_long_host_in_a_next_link_is_cut_in_the_message(
+    authority: Authority, tmp_path: Path
+) -> None:
+    host = "a" * 5_000 + ".test"
+    with scripted(
+        authority, tmp_path, lambda e: _json({"data": [{"id": 1}], "next": f"https://{host}/x"})
+    ) as server:
+        _task(server.base, authority)
+        with pytest.raises(SourceRefused) as caught:
+            rest.read("api", "items", paginate=rest.NextLink(field="next"))
+
+    assert len(str(caught.value)) < 500
+    assert "a" * 100 in str(caught.value)
 
 
 def test_a_repeated_cursor_stops_the_read(authority: Authority, tmp_path: Path) -> None:
@@ -822,7 +861,7 @@ def test_no_records_is_a_table_without_columns(authority: Authority, tmp_path: P
         assert rest.read("api", "empty").num_columns == 0
 
 
-@pytest.mark.parametrize("body", [b"<html>maintenance</html>", b'{"data": [{"x": NaN}]}'])
+@pytest.mark.parametrize("body", [b"<html>maintenance</html>", b'{"data": [{"x": 1}'])
 def test_a_page_that_is_not_json_is_retried_by_the_harness(
     authority: Authority, tmp_path: Path, body: bytes
 ) -> None:
@@ -835,6 +874,122 @@ def test_a_page_that_is_not_json_is_retried_by_the_harness(
 
     assert type(caught.value) is SourceError
     assert "page 1 of GET" in str(caught.value) and "is not JSON (text/html)" in str(caught.value)
+
+
+@pytest.mark.parametrize(
+    ("value", "shown"),
+    [
+        (b"1" * 5_000, "an integer of 5000 digits"),
+        (b"-" + b"9" * 21, "an integer of 21 digits"),
+        (b"1e400", "1e400, beyond a 64-bit float"),
+        (b"-1e400", "-1e400, beyond a 64-bit float"),
+        (b"NaN", "NaN, which JSON does not allow"),
+        (b"Infinity", "Infinity, which JSON does not allow"),
+        (b"-Infinity", "-Infinity, which JSON does not allow"),
+    ],
+    ids=["int-limit", "beyond-uint64", "float-overflow", "negative-overflow", "nan", "inf", "-inf"],
+)
+def test_a_number_arrow_cannot_hold_is_a_shape_error_naming_the_field(
+    authority: Authority, tmp_path: Path, value: bytes, shown: str
+) -> None:
+    """Not "not JSON" (retried), never ``inf`` in the table: refused for good, naming the field."""
+    body = b'{"data": [{"id": 1, "amount": {"n": ' + value + b"}}]}"
+    with scripted(
+        authority, tmp_path, lambda e: (200, {"Content-Type": "application/json"}, body)
+    ) as server:
+        _task(server.base, authority)
+        with pytest.raises(FileShapeError) as caught:
+            rest.read("api", "items")
+
+    assert str(caught.value) == (
+        f"`api`: field 'amount' of page 1 holds {shown}, which Arrow cannot hold; read it with "
+        "connections.get and your own client to convert it"
+    )
+    assert caught.value.retryable is False
+
+
+def test_a_number_arrow_cannot_hold_inside_a_list_is_named(
+    authority: Authority, tmp_path: Path
+) -> None:
+    body = b'{"data": [{"scores": [1.5, [2.5, NaN]]}]}'
+    with scripted(authority, tmp_path, lambda e: (200, {}, body)) as server:
+        _task(server.base, authority)
+        with pytest.raises(
+            FileShapeError, match="field 'scores' of page 1 holds NaN, which JSON does not allow"
+        ):
+            rest.read("api", "items")
+
+
+def test_a_number_of_20_digits_is_left_to_arrow(authority: Authority, tmp_path: Path) -> None:
+    """20 digits parse (a uint64 may hold them); Arrow then refuses what int64 cannot hold."""
+    body = b'{"data": [{"n": 18446744073709551615}, {"n": 1}]}'
+    with scripted(authority, tmp_path, lambda e: (200, {}, body)) as server:
+        _task(server.base, authority)
+        with pytest.raises(FileShapeError, match="field 'n' of page 1 holds values of different"):
+            rest.read("api", "items")
+
+
+def test_a_long_field_name_is_cut_in_the_message(authority: Authority, tmp_path: Path) -> None:
+    key = "k" * 100_000
+    with scripted(authority, tmp_path, lambda e: _json({"data": [{key: 1}, {key: "a"}]})) as server:
+        _task(server.base, authority)
+        with pytest.raises(FileShapeError) as caught:
+            rest.read("api", "items")
+
+    assert len(str(caught.value)) < 600
+    assert "k" * 100 in str(caught.value)
+
+
+def _deep(depth: int) -> bytes:
+    """Write a page whose one record nests arrays `depth` levels below the page.
+
+    Parameters
+    ----------
+    depth
+        The nesting of the whole page, counting its object, the list and the record.
+
+    Returns
+    -------
+    bytes
+        The body.
+    """
+    inner = depth - 3
+    return b'{"data": [{"a": ' + b"[" * inner + b"1" + b"]" * inner + b"}]}"
+
+
+def test_json_nested_deeper_than_the_limit_is_refused_before_arrow(
+    authority: Authority, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """10,000 levels crash pyarrow (a segfault on 3.14): refused before it or the hash runs."""
+
+    def never(*args: object, **kwargs: object) -> None:
+        raise AssertionError("reached past the nesting check")
+
+    monkeypatch.setattr(pa, "array", never)
+    monkeypatch.setattr(rest, "_fingerprint", never)
+    body = _deep(10_000)
+    with scripted(
+        authority, tmp_path, lambda e: (200, {"Content-Type": "application/json"}, body)
+    ) as server:
+        _task(server.base, authority)
+        with pytest.raises(FileShapeError) as caught:
+            rest.read("api", "items")
+
+    assert str(caught.value) == (
+        f"`api`: page 1 of GET {server.base}/items nests arrays and objects deeper than "
+        "100 levels, which Lakana does not read; read it with connections.get and your own "
+        "client, and flatten it"
+    )
+    assert caught.value.retryable is False
+
+
+def test_json_nested_to_the_limit_is_read(authority: Authority, tmp_path: Path) -> None:
+    body = _deep(100)
+    with scripted(authority, tmp_path, lambda e: (200, {}, body)) as server:
+        _task(server.base, authority)
+        table = rest.read("api", "items")
+
+    assert table.num_rows == 1
 
 
 # --- arguments, paths and parameters ------------------------------------------------------------
@@ -854,6 +1009,11 @@ def test_a_page_that_is_not_json_is_retried_by_the_harness(
         "a\\b",
         "a\nb",
         "a%zz",
+        "%2e%2e/admin",
+        "%2E./admin",
+        ".%2e/admin",
+        "a/%2e",
+        "a/%2E%2E",
     ],
 )
 def test_a_path_that_could_leave_the_base_url_is_refused_before_any_request(

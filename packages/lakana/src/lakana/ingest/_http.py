@@ -57,6 +57,8 @@ number of seconds."""
 MAX_TOKEN_ANSWER = 64 * 1024
 """The most bytes of a token endpoint's answer read; a larger one is refused."""
 
+SHOWN_HOST = 100
+"""The most characters of a host a message shows."""
 RETRIED_STATUSES = frozenset({408, 429, 500, 502, 503, 504})
 """Statuses `send` retries: a timeout, too many requests, and a server that may recover."""
 MAX_DELAY_SECONDS = 60.0
@@ -526,16 +528,37 @@ def _elsewhere(name: str, url: httpx.URL, base_url: str) -> SourceRefused:
         Naming both hosts, never a credential or a path; as ``scheme://host:port`` when only
         the scheme, the port or the URL's user and password differ.
     """
-    scheme, host, port = origin(base_url)
-    there, here = safe_name(url.host), host.decode("ascii")
-    userinfo = ""
-    if origin(url)[1] == host:
-        there, here = _full(url.scheme, there, url.port), _full(scheme, here, port)
-        userinfo = " with a user or a password in its URL" if url.userinfo else ""
+    there, userinfo, here = shown_origins(url, base_url)
     return SourceRefused(
         f"`{name}`: a request to `{there}`{userinfo} would carry the credential of "
         f"`{here}`; Lakana sends it to the connection's own host only"
     )
+
+
+def shown_origins(url: httpx.URL, base_url: str) -> tuple[str, str, str]:
+    """Show where a refused request would go and the connection's origin, as far as they differ.
+
+    Parameters
+    ----------
+    url
+        Where the request would go.
+    base_url
+        The connection's base URL.
+
+    Returns
+    -------
+    tuple
+        Its host, a note (``" with a user or a password in its URL"`` or ``""``) and the base
+        URL's host; both as ``scheme://host:port`` when the hosts are the same. Hosts are
+        escaped and cut to `SHOWN_HOST` characters.
+    """
+    scheme, host, port = origin(base_url)
+    there, here = safe_name(url.host)[:SHOWN_HOST], host.decode("ascii")[:SHOWN_HOST]
+    note = ""
+    if origin(url)[1] == host:
+        there, here = _full(url.scheme, there, url.port), _full(scheme, here, port)
+        note = " with a user or a password in its URL" if url.userinfo else ""
+    return there, note, here
 
 
 def _full(scheme: str, host: str, port: int | None) -> str:
@@ -862,7 +885,7 @@ def retry_delay(
     """
     if retry_after is not None:
         text = retry_after.strip()
-        if text.isdigit():
+        if text.isascii() and text.isdigit():
             return float(text)
         try:
             when = email.utils.parsedate_to_datetime(text)
