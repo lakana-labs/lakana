@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import base64
 import json
+import math
 import re
 import ssl
 import time
@@ -471,13 +472,17 @@ def _seconds(value: object) -> float | None:
     Returns
     -------
     float or None
-        The seconds; `None` for anything else (a fraction, a sign, words, a bool, NaN).
+        The seconds; `None` for anything else (a fraction, a sign, words, a bool, NaN, a number
+        no float holds).
     """
-    if isinstance(value, str) and value.isascii() and value.isdigit():
-        return float(value)
-    if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
-        return float(value)
-    return None
+    whole = isinstance(value, int) and not isinstance(value, bool) and value >= 0
+    if not whole and not (isinstance(value, str) and value.isascii() and value.isdigit()):
+        return None
+    try:
+        seconds = float(value)
+    except OverflowError:
+        return None
+    return seconds if math.isfinite(seconds) else None
 
 
 def _elsewhere(name: str, url: httpx.URL, base_url: str) -> SourceRefused:

@@ -19,7 +19,7 @@ import httpx
 import obstore
 import pytest
 from obstore.store import MemoryStore
-from tls_fixture import Authority, make_authority, serving
+from sdk_tls_fixture import Authority, make_authority, serving
 
 from lakana import context
 from lakana.ingest import (
@@ -1291,7 +1291,7 @@ def recorder(
     """
     import http.server
 
-    from tls_fixture import issue_leaf
+    from sdk_tls_fixture import issue_leaf
 
     heads: list[str] = []
 
@@ -1701,7 +1701,7 @@ def fake_s3(
     import http.server
     from xml.sax.saxutils import escape
 
-    from tls_fixture import issue_leaf
+    from sdk_tls_fixture import issue_leaf
 
     keys: list[str] = []
 

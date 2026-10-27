@@ -13,6 +13,7 @@ import io
 import json
 import os
 import re
+import secrets
 import socket
 import sqlite3
 import ssl
@@ -27,7 +28,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
-from tls_fixture import Answer, Authority, Exchange, issue_leaf, make_authority, scripted, serving
+from sdk_tls_fixture import (
+    Answer,
+    Authority,
+    Exchange,
+    issue_leaf,
+    make_authority,
+    scripted,
+    serving,
+)
 
 from lakana.ingest import _check
 
@@ -2834,6 +2843,34 @@ def test_oauth2_without_a_scope_sends_none(authority: Authority, tmp_path: Path)
 
     assert outcome == "ok"
     assert "scope" not in urllib.parse.parse_qs(server.seen[0].body.decode())
+
+
+def test_a_client_secret_echoed_across_the_cut_of_the_error_text_is_masked(
+    authority: Authority, tmp_path: Path
+) -> None:
+    """The endpoint's words are masked before they are cut, so no part of the secret is left."""
+    secret = secrets.token_urlsafe(24)
+    said = json.dumps({"error_description": "x" * 290 + secret})
+    with scripted(authority, tmp_path, _provider(401, said.encode())) as server:
+        body = _oauth_body(server.base, authority)
+        body["secret"] = {"client_secret": secret}
+        outcome, message = _check.check(body, {}, timeout=FAST)
+
+    assert outcome == "credentials"
+    assert "x" * 290 + "***" in message
+    assert secret[:8] not in message
+
+
+def test_an_oauth2_secret_without_client_secret_is_credentials_and_sends_nothing(
+    authority: Authority, tmp_path: Path
+) -> None:
+    with scripted(authority, tmp_path, _provider(200, b"{}")) as server:
+        body = _oauth_body(server.base, authority)
+        body["secret"] = {"password": SECRET}
+        outcome, message = _check.check(body, {}, timeout=FAST)
+
+    assert (outcome, server.seen) == ("credentials", [])
+    assert "the secret has no `client_secret`, which auth oauth2 needs" in message
 
 
 def test_a_secret_without_the_key_its_auth_needs_is_credentials(

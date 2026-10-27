@@ -763,6 +763,11 @@ child by a mock to win it back.
   the unit tier under coverage with no container and no network, and plays what a store cannot: a
   second host, another authority, a redirect. The integration tier keeps plain-HTTP SeaweedFS for
   the presigned path, and `compose-smoke` the image.
+- **The SDK's copy: `packages/lakana/tests/sdk_tls_fixture.py`.** The same authority and
+  `serving`, plus `scripted` (an answer function per request, an endless body without
+  `Content-Length`) for the `lakana.ingest` tests. Its name differs on purpose: test directories
+  are not packages, so two modules named `tls_fixture` in one pytest session would shadow each
+  other (the first imported wins).
 
 **Integration tier.** `packages/lakana-server/tests/test_query_process_integration.py` runs real
 children against Postgres and SeaweedFS, over a real HTTP server (`python_asset_helpers.serving`)

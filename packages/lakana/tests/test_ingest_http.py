@@ -14,7 +14,7 @@ from urllib.parse import parse_qs
 
 import httpx
 import pytest
-from tls_fixture import Answer, Authority, Exchange, make_authority, scripted
+from sdk_tls_fixture import Answer, Authority, Exchange, make_authority, scripted
 
 from lakana import context
 from lakana.ingest import (
@@ -540,7 +540,19 @@ def test_a_token_endpoint_answering_neither_200_nor_a_retried_status_is_refused(
 
 @pytest.mark.parametrize(
     "expires",
-    [None, "3599.5", 3599.5, -1, "-1", "abc", True, float("nan"), float("inf")],
+    [
+        None,
+        "3599.5",
+        3599.5,
+        -1,
+        "-1",
+        "abc",
+        True,
+        float("nan"),
+        float("inf"),
+        10**400,
+        "1" + "0" * 400,
+    ],
     ids=[
         "missing",
         "decimal-text",
@@ -551,6 +563,8 @@ def test_a_token_endpoint_answering_neither_200_nor_a_retried_status_is_refused(
         "bool",
         "nan",
         "infinity",
+        "beyond-a-float",
+        "beyond-a-float-text",
     ],
 )
 def test_a_token_without_a_usable_expires_in_is_kept_a_short_while(expires: object) -> None:

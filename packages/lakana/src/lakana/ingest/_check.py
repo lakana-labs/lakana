@@ -1630,7 +1630,7 @@ def _oauth2_token(body: Mapping[str, Any], routing: Mapping[str, Any], t: float)
     form = {
         "grant_type": "client_credentials",
         "client_id": str(settings.get("client_id", "")),
-        "client_secret": str(secret.get("client_secret", "")),
+        "client_secret": str(secret["client_secret"]),
     }
     if settings.get("scope"):
         form["scope"] = str(settings["scope"])
@@ -1649,7 +1649,10 @@ def _oauth2_token(body: Mapping[str, Any], routing: Mapping[str, Any], t: float)
         said = {}
     said = said if isinstance(said, dict) else {}
     if status in (400, 401):
-        detail = ": ".join(str(said[k])[:300] for k in ("error", "error_description") if k in said)
+        # Masked before the cut: a cut inside an echoed secret would leave its start unmasked.
+        detail = ": ".join(
+            _mask(str(said[k]), secret)[:300] for k in ("error", "error_description") if k in said
+        )
         raise _Found(
             "credentials",
             f"the token endpoint {where} refused the client credentials "
