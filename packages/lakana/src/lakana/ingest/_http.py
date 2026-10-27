@@ -5,7 +5,9 @@ One client per connection: the task's proxy as the transport's own proxy (never
 ``SSL_CERT_FILE``), the trust bundle plus the connection's CA through
 `lakana.ingest._check.trust_context` (TLS 1.2 or newer), and no redirects. The connection's
 credential is added by `ConnectionAuth` to requests for the base URL's scheme, host and port
-only, so a credential never leaves the connection's host, whatever URL a caller builds.
+only, and the client's transport (`OwnOrigin`) refuses every request it would send anywhere else,
+a redirect a caller lets httpx follow included: a credential never leaves the connection's host,
+whatever URL a caller or a server names.
 
 Every value derived from a secret that a request carries (a basic-auth header, an OAuth2 access
 token, the egress proxy's ``Proxy-Authorization``) is registered with the harness, which hides it
@@ -44,6 +46,9 @@ TIMEOUT_SECONDS = 60.0
 """Seconds per connect, read and write of one request."""
 TOKEN_LEEWAY_SECONDS = 30.0
 """An OAuth2 access token is fetched again this long before its ``expires_in`` ends."""
+TOKEN_LIFETIME_SECONDS = 300.0
+"""How long a token is kept when its answer has no ``expires_in`` that is a whole, non-negative
+number of seconds."""
 MAX_TOKEN_ANSWER = 64 * 1024
 """The most bytes of a token endpoint's answer read; a larger one is refused."""
 
@@ -271,8 +276,9 @@ class ClientCredentials:
 
     The client secret goes to the connection's ``token_url`` only, in the form body
     (``client_secret_post``); the token is kept until ``expires_in`` minus
-    `TOKEN_LEEWAY_SECONDS` (for the attempt when the answer has no ``expires_in``) and fetched
-    again after `invalidate`.
+    `TOKEN_LEEWAY_SECONDS` (so a token valid for 30 seconds or less is fetched for every request),
+    for `TOKEN_LIFETIME_SECONDS` when the answer has no usable ``expires_in``, and fetched again
+    after `invalidate`.
 
     Parameters
     ----------
@@ -359,12 +365,13 @@ class ClientCredentials:
         ------
         SourceRefused
             When the endpoint refuses the client credentials (HTTP 400 or 401), answers with a
-            redirect or another 4xx, or its certificate is not trusted.
+            redirect, another 4xx, a 1xx or a 2xx other than 200, or its certificate is not
+            trusted.
         UsageError
             When it answers 200 without a usable bearer token: the connection's ``token_url``
             is not a token endpoint.
         SourceError
-            When it cannot be reached or answers 5xx or 429, which may pass.
+            When it cannot be reached or answers 5xx, 408 or 429, which may pass.
         """
         where = self._where()
         environment = task_environment()
@@ -387,7 +394,7 @@ class ClientCredentials:
                     f"(HTTP {status}). Check client_id and the secret with `lakana connection "
                     f"test {self.name} --env {environment}`."
                 )
-            if 300 <= status < 400 or (400 <= status < 500 and status not in (408, 429)):
+            if status != 200 and status < 500 and status not in (408, 429):
                 raise SourceRefused(
                     f"`{self.name}`: the token endpoint `{where}` answered HTTP {status}, which "
                     "Lakana does not follow or retry; check the connection's token_url"
@@ -430,8 +437,10 @@ class ClientCredentials:
             said = json.loads(body)
         except (ValueError, RecursionError):
             said = None
-        token = said.get("access_token") if isinstance(said, dict) else None
-        kind = said.get("token_type", "bearer") if isinstance(said, dict) else "bearer"
+        if not isinstance(said, dict):
+            said = {}
+        token = said.get("access_token")
+        kind = said.get("token_type", "bearer")
         if not isinstance(token, str) or not token or _HEADER_SAFE.fullmatch(token) is None:
             raise UsageError(
                 f"`{self.name}`: the token endpoint `{where}` answered without an access_token "
@@ -443,14 +452,107 @@ class ClientCredentials:
                 f"{safe_name(str(kind))[:40]!r}; Lakana sends bearer tokens only"
             )
         context.register_secret(token)
-        expires = said.get("expires_in") if isinstance(said, dict) else None
-        if isinstance(expires, str) and expires.isdigit():
-            expires = int(expires)
-        if isinstance(expires, int | float) and not isinstance(expires, bool):
-            self._until = self._now() + float(expires) - TOKEN_LEEWAY_SECONDS
+        expires = _seconds(said.get("expires_in"))
+        if expires is None:
+            self._until = self._now() + TOKEN_LIFETIME_SECONDS
         else:
-            self._until = float("inf")
+            self._until = self._now() + expires - TOKEN_LEEWAY_SECONDS
         self._token = token
+
+
+def _seconds(value: object) -> float | None:
+    """Read an ``expires_in``: a whole, non-negative number of seconds, or its digits as text.
+
+    Parameters
+    ----------
+    value
+        What the token answer gave.
+
+    Returns
+    -------
+    float or None
+        The seconds; `None` for anything else (a fraction, a sign, words, a bool, NaN).
+    """
+    if isinstance(value, str) and value.isascii() and value.isdigit():
+        return float(value)
+    if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+        return float(value)
+    return None
+
+
+def _elsewhere(name: str, url: httpx.URL, base_url: str) -> SourceRefused:
+    """Build the refusal of a request to another origin than the connection's.
+
+    Parameters
+    ----------
+    name
+        The connection.
+    url
+        Where the request would go.
+    base_url
+        The connection's base URL.
+
+    Returns
+    -------
+    SourceRefused
+        Naming both hosts, never a credential or a path.
+    """
+    _, host, _ = origin(base_url)
+    return SourceRefused(
+        f"`{name}`: a request to `{safe_name(url.host)}` would carry the credential of "
+        f"`{host.decode('ascii')}`; Lakana sends it to the connection's own host only"
+    )
+
+
+class OwnOrigin(httpx.BaseTransport):
+    """The transport of a connection's client: refuses every request to another origin.
+
+    httpx runs an `httpx.Auth` once per ``send``, and a redirect it follows inside that ``send``
+    keeps every header but ``Authorization`` (an API key header would go along). This transport
+    sees each request httpx sends, so a hop to another origin is refused before it is sent,
+    whether or not a caller lets httpx follow redirects.
+
+    Parameters
+    ----------
+    name
+        The connection, for messages.
+    base_url
+        The connection's base URL.
+    inner
+        The transport that sends (the task's proxy, the trust context).
+    """
+
+    def __init__(self, name: str, base_url: str, inner: httpx.BaseTransport) -> None:
+        self.name = name
+        self.base_url = base_url
+        self._inner = inner
+
+    def handle_request(self, request: httpx.Request) -> httpx.Response:
+        """Send a request for the base URL's origin; refuse any other.
+
+        Parameters
+        ----------
+        request
+            The request httpx is about to send.
+
+        Returns
+        -------
+        httpx.Response
+            The inner transport's response.
+
+        Raises
+        ------
+        SourceRefused
+            For a request to another origin than the base URL's.
+        """
+        if not same_origin(request.url, self.base_url):
+            refusal = _elsewhere(self.name, request.url, self.base_url)
+            raise refusal
+        return self._inner.handle_request(request)
+
+    def close(self) -> None:
+        """Close the inner transport."""
+        self._inner.close()
 
 
 class ConnectionAuth(httpx.Auth):
@@ -517,12 +619,8 @@ class ConnectionAuth(httpx.Auth):
             For a request to another origin than the base URL's.
         """
         if not same_origin(request.url, self.base_url):
-            _, host, _ = origin(self.base_url)
-            raise SourceRefused(
-                f"`{self.name}`: a request to `{safe_name(request.url.host)}` would carry the "
-                f"credential of `{host.decode('ascii')}`; Lakana sends it to the connection's own "
-                "host only"
-            )
+            refusal = _elsewhere(self.name, request.url, self.base_url)
+            raise refusal
         for key, value in self._headers.items():
             request.headers[key] = value
         if self.params:
@@ -543,8 +641,8 @@ def client_for(conn: Connection) -> httpx.Client:
     Returns
     -------
     httpx.Client
-        A client whose ``base_url`` is the connection's and whose ``auth`` is a
-        `ConnectionAuth`; the caller closes it.
+        A client whose ``base_url`` is the connection's, whose ``auth`` is a `ConnectionAuth`
+        and whose transport is an `OwnOrigin`; the caller closes it.
 
     Raises
     ------
@@ -609,7 +707,7 @@ def client_for(conn: Connection) -> httpx.Client:
         )
     return httpx.Client(
         base_url=base_url,
-        transport=transport,
+        transport=OwnOrigin(conn.name, base_url, transport),
         trust_env=False,
         auth=ConnectionAuth(conn.name, base_url, headers, params, oauth),
         follow_redirects=False,

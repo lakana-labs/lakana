@@ -4005,7 +4005,10 @@ secret's values, and the only way a secret reaches a Python asset (#23). User re
   (base64, slices), and derived values (an OAuth2 access token) unless a helper registers them:
   `lakana.ingest._http` registers the basic-auth header value, each OAuth2 access token when it
   arrives, and `base64("user:token")` of the egress proxy URL that httpx sends as
-  `Proxy-Authorization`.
+  `Proxy-Authorization`. It binds the credential to the base URL's origin twice: `ConnectionAuth`
+  refuses another origin once per `send`, before an OAuth2 token is fetched, and `OwnOrigin`, the
+  client's transport, refuses every request httpx sends there, a followed redirect included
+  (httpx strips only `Authorization` on such a hop; an API key header would go along).
   The harness (`lakana.ingest._connections.fetch`) registers every value with
   `lakana.context.register_secret`; `lakana.runner._mask` replaces
   them (longest first) with the token in the failure record's `message` and `error_type`, in the

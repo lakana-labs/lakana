@@ -85,11 +85,14 @@ def stations():
   server without `Last-Modified` cannot be read with `since=` unless you pass `modified_from=`.
 - **The credential goes to the connection's own host only.** The helper adds the connection's
   auth to a request only when its scheme, host and port are those of the `base_url`; any other
-  request is refused before it is sent. `auth: oauth2` asks the connection's `token_url` for a
-  token with the client credentials (the client secret goes in the form body, to that URL only),
-  keeps it until 30 seconds before its `expires_in` ends, and sends it as `Bearer`. A secret value
-  with a line break, another control character or a character outside ASCII is refused, never
-  sent.
+  request, a redirect to another host included, is refused before it is sent. `auth: oauth2` asks
+  the connection's `token_url` for a token with the client credentials (the client secret goes in
+  the form body, to that URL only), keeps it until 30 seconds before its `expires_in` ends, and
+  sends it as `Bearer`. A token valid for 30 seconds or less is fetched again for every request;
+  an answer without `expires_in`, or with one that is not a whole number of seconds, is kept for 5
+  minutes. A token endpoint that answers anything but 200 with a token fails the read; only 408,
+  429 and 5xx are retried. A secret value with a line break, another control character or a
+  character outside ASCII is refused, never sent.
 
 ### files.read
 
@@ -230,7 +233,7 @@ could end differently (the task is retried only when it could):
 |---|---|---|
 | `UsageError` | The call or the setup is wrong: a connection of another kind, an unknown extension or `format=`, `sheet=` or `header_row=` where they mean nothing, a cap that is not a positive whole number, `since=` of the wrong type, `modified_from=` without `since=`, a wildcard in an `http` path; a missing secret or one that is no service-account key, a secret value no HTTP header can carry, a token endpoint that answers without a bearer token, a CA certificate that is not PEM, a trust bundle the worker cannot read. Every attempt fails the same way. | No |
 | `FileShapeError` (a `SourceError`) | The files are wrong: types that do not fit across files, a `schema=` column a file lacks, a `schema=` value that is no Polars type, a file that cannot be parsed, a bucket key with an empty, `.` or `..` segment. The same files fail every attempt. | No |
-| `SourceRefused` (a `SourceError`) | The store or server refused the credential (HTTP 401 or 403), an OAuth2 token endpoint refused the client (400 or 401) or answered with a redirect or another 4xx, its certificate is not trusted, or it answered with a redirect. Every attempt would; the message names the next step. | No |
+| `SourceRefused` (a `SourceError`) | The store or server refused the credential (HTTP 401 or 403), an OAuth2 token endpoint refused the client (400 or 401) or answered with a redirect, another 4xx, a 1xx or a 2xx other than 200, its certificate is not trusted, it answered with a redirect, or a request would go to another host than the `base_url`'s. Every attempt would; the message names the next step. | No |
 | `SourceError` | The store or server failed or could not be reached (a network error, a timeout, HTTP 404, 429 or 5xx, the egress proxy's refusal), which may pass. | Yes |
 | `DirectoryError` | A directory or file is missing, a link, not a directory, or denied; or the pattern is refused. The same path fails every attempt. | No |
 | `DirectoryError` from an I/O error (`EIO` and the like) on a path that is there | The disk or share failed this time. | Yes |
@@ -248,6 +251,7 @@ could end differently (the task is retried only when it could):
 | `the secret of ... is not a service-account key` | A `gcs` secret is not the JSON key Google gives you. | Store the key file's JSON with the command the message names. |
 | ``...: the token endpoint `...` refused the client credentials (HTTP 401)`` | The token endpoint refused `client_id` or the client secret. | Check them with `lakana connection test`, and set them again with `lakana connection update`. |
 | ``...: the token endpoint `...` answered without an access_token a request can carry`` (or `answered HTTP 404, which Lakana does not follow or retry`) | `token_url` is not the API's token endpoint. | Set `token_url` to the endpoint the API's documentation names. |
+| ``...: a request to `...` would carry the credential of `...`; Lakana sends it to the connection's own host only`` | A request, or a redirect the server answered, names another scheme, host or port than the `base_url`. Nothing was sent. | Read from that host with a connection of its own (`lakana connection create`). |
 | ``the secret's `token` of ... holds a line break, another control character or a character outside ASCII`` | A token or API key that no HTTP header can carry, often a line break stored with it. | Store the value again with the command the message names. |
 | `files.read reads one file of an http connection` | An `http` path with a wildcard, `?`, `#` or `%`. | Pass one path relative to the base URL. |
 | `the trust bundle ... (LAKANA_CA_BUNDLE) cannot be read` (or `holds no certificate that can be read`) | The worker's trust bundle is missing in the task, or holds no PEM certificate that parses. | Check the worker's `LAKANA_RUN__CA_BUNDLE`. |

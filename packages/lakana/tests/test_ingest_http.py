@@ -207,27 +207,88 @@ def test_an_api_key_in_the_query_reaches_the_server_and_nothing_else(
     ],
     ids=["host", "another-loopback", "port", "scheme", "userinfo"],
 )
-@pytest.mark.parametrize("auth", ["none", "bearer", "api_key"])
+@pytest.mark.parametrize("auth", ["none", "bearer", "api_key", "oauth2"])
 def test_no_request_leaves_the_base_urls_origin(
     authority: Authority, tmp_path: Path, url: str, auth: str
 ) -> None:
-    """Whatever URL a caller builds, the credential is not sent to another origin: nothing is."""
-    settings: dict[str, object] = {"auth": auth}
-    secret: dict[str, str] | None = None
-    if auth == "bearer":
-        secret = {"token": TOKEN}
-    elif auth == "api_key":
-        settings.update(api_key_name="key", api_key_in="query")
-        secret = {"api_key": TOKEN}
-    with (
-        scripted(authority, tmp_path, _ok) as server,
-        _http.client_for(_conn(server.base, authority, settings, secret)) as client,
-    ):
-        port = server.base.rsplit(":", 1)[1]
-        with pytest.raises(SourceRefused, match=r"would carry the credential of `127\.0\.0\.1`"):
-            client.get(url.format(port=port))
+    """Whatever URL a caller builds, the credential is not sent to another origin: nothing is.
+
+    For ``oauth2`` the token endpoint is on the same server: a refused request fetches no token.
+    """
+    _state()
+    with scripted(authority, tmp_path, Provider()) as server:
+        settings, secret = _auth(auth, server.base)
+        with _http.client_for(_conn(server.base, authority, settings, secret)) as client:
+            port = server.base.rsplit(":", 1)[1]
+            with pytest.raises(
+                SourceRefused, match=r"would carry the credential of `127\.0\.0\.1`"
+            ):
+                client.get(url.format(port=port))
 
     assert server.seen == []
+
+
+def _auth(kind: str, base: str) -> tuple[dict[str, object], dict[str, str] | None]:
+    """Build the settings and secret of one auth kind.
+
+    Parameters
+    ----------
+    kind
+        ``none``, ``bearer``, ``basic``, ``api_key`` (in the query), ``api_key_header`` or
+        ``oauth2`` (its token endpoint ``/token`` on `base`).
+    base
+        The server's base URL.
+
+    Returns
+    -------
+    tuple
+        The settings and the secret (`None` for ``none``).
+    """
+    if kind == "bearer":
+        return {"auth": "bearer"}, {"token": TOKEN}
+    if kind == "basic":
+        return {"auth": "basic", "username": "reader"}, {"password": TOKEN}
+    if kind == "api_key":
+        return {"auth": "api_key", "api_key_name": "key", "api_key_in": "query"}, {"api_key": TOKEN}
+    if kind == "api_key_header":
+        settings = {"auth": "api_key", "api_key_name": "X-Key", "api_key_in": "header"}
+        return settings, {"api_key": TOKEN}
+    if kind == "oauth2":
+        return {**_OAUTH, "token_url": f"{base}/token"}, {"client_secret": CLIENT_SECRET}
+    return {"auth": "none"}, None
+
+
+@pytest.mark.parametrize("auth", ["basic", "bearer", "api_key_header", "api_key", "oauth2"])
+def test_a_followed_redirect_to_another_origin_is_refused_before_it_is_sent(
+    authority: Authority, tmp_path: Path, auth: str
+) -> None:
+    """The origin is checked on every request sent, also a redirect a caller lets httpx follow.
+
+    httpx strips only ``Authorization`` from a redirect to another origin; an API key header
+    would go with it. The client refuses the hop instead: the server, also ``localhost`` (another
+    origin), never sees ``/stolen``.
+    """
+    _state()
+
+    def answer(exchange: Exchange) -> Answer:
+        if exchange.method == "POST":
+            return 200, {}, json.dumps({"access_token": ACCESS}).encode()
+        if exchange.target == "/stolen":
+            return 200, {}, b"{}"
+        port = exchange.headers["host"].rsplit(":", 1)[1]
+        return 302, {"Location": f"https://localhost:{port}/stolen"}, b""
+
+    with scripted(authority, tmp_path, answer) as server:
+        settings, secret = _auth(auth, server.base)
+        with (
+            _http.client_for(_conn(server.base, authority, settings, secret)) as client,
+            pytest.raises(
+                SourceRefused, match=r"a request to `localhost` would carry the credential"
+            ),
+        ):
+            client.get("items", follow_redirects=True)
+
+    assert [s.target.split("?")[0] for s in server.seen if s.method == "GET"] == ["/items"]
 
 
 @pytest.mark.parametrize(
@@ -290,8 +351,8 @@ def test_the_client_ignores_proxy_variables(
         _http.client_for(_conn("https://api.test", authority, {}, None, proxy)) as proxied,
     ):
         assert direct._mounts == {} and proxied._mounts == {}
-        assert type(direct._transport._pool).__name__ == "ConnectionPool"  # ty: ignore[unresolved-attribute]
-        assert type(proxied._transport._pool).__name__ == "HTTPProxy"  # ty: ignore[unresolved-attribute]
+        assert type(direct._transport._inner._pool).__name__ == "ConnectionPool"  # ty: ignore[unresolved-attribute]
+        assert type(proxied._transport._inner._pool).__name__ == "HTTPProxy"  # ty: ignore[unresolved-attribute]
 
 
 # --- OAuth2 client credentials -----------------------------------------------------------------
@@ -396,6 +457,128 @@ def test_oauth2_fetches_one_token_for_several_requests(
         if seen.method == "GET":
             assert CLIENT_SECRET not in seen.target + json.dumps(seen.headers)
     assert f"{ACCESS}1" in state.secrets
+
+
+def test_the_token_host_and_the_api_host_each_get_only_their_own_credential(
+    authority: Authority, tmp_path: Path
+) -> None:
+    """The common shape: ``token_url`` on another host (``localhost``) than the API's."""
+    state = _state()
+    provider = Provider()
+    with scripted(authority, tmp_path, provider) as server:
+        port = server.base.rsplit(":", 1)[1]
+        settings = {**_OAUTH, "token_url": f"https://localhost:{port}/token"}
+        conn = _conn(f"{server.base}/v1", authority, settings, {"client_secret": CLIENT_SECRET})
+        with _http.client_for(conn) as client:
+            statuses = [client.get(f"items/{n}").status_code for n in range(2)]
+
+    assert statuses == [200, 200]
+    login = [s for s in server.seen if s.headers["host"].startswith("localhost:")]
+    api = [s for s in server.seen if s.headers["host"].startswith("127.0.0.1:")]
+    assert [(s.method, s.target) for s in login] == [("POST", "/token")]
+    assert "authorization" not in login[0].headers
+    assert [s.method for s in api] == ["GET", "GET"]
+    for seen in api:
+        assert CLIENT_SECRET not in seen.target + json.dumps(seen.headers) + seen.body.decode()
+    assert f"{ACCESS}1" in state.secrets
+
+
+def _grant(
+    answer: dict[str, object] | bytes, now: list[float], status: int = 200
+) -> tuple[_http.ClientCredentials, list[httpx.Request]]:
+    """Build a grant whose token endpoint is an in-process transport answering `answer`.
+
+    Parameters
+    ----------
+    answer
+        The token endpoint's JSON answer, or its raw body.
+    now
+        The fake clock: its last value is the time, 0 while empty.
+    status
+        The token endpoint's status.
+
+    Returns
+    -------
+    tuple
+        The grant and the token requests it sent.
+    """
+    sent: list[httpx.Request] = []
+    body = answer if isinstance(answer, bytes) else json.dumps(answer).encode()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent.append(request)
+        return httpx.Response(status, content=body)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    grant = _http.ClientCredentials(
+        "api",
+        "https://login.test/token",
+        "c",
+        CLIENT_SECRET,
+        None,
+        client,
+        now=lambda: now[-1] if now else 0.0,
+    )
+    return grant, sent
+
+
+@pytest.mark.parametrize("status", [101, 201, 202, 204])
+def test_a_token_endpoint_answering_neither_200_nor_a_retried_status_is_refused(
+    status: int,
+) -> None:
+    """A 1xx or a 2xx other than 200 is no token answer; another attempt would get the same."""
+    _state()
+    grant, _ = _grant({"access_token": ACCESS}, [], status)
+
+    with pytest.raises(SourceRefused) as caught:
+        grant.header()
+
+    assert f"the token endpoint `login.test:443` answered HTTP {status}" in str(caught.value)
+    assert "check the connection's token_url" in str(caught.value)
+    assert caught.value.retryable is False
+
+
+@pytest.mark.parametrize(
+    "expires",
+    [None, "3599.5", 3599.5, -1, "-1", "abc", True, float("nan"), float("inf")],
+    ids=[
+        "missing",
+        "decimal-text",
+        "decimal",
+        "negative",
+        "negative-text",
+        "words",
+        "bool",
+        "nan",
+        "infinity",
+    ],
+)
+def test_a_token_without_a_usable_expires_in_is_kept_a_short_while(expires: object) -> None:
+    """An unusable ``expires_in`` counts as missing: the token is kept TOKEN_LIFETIME_SECONDS."""
+    _state()
+    said: dict[str, object] = {"access_token": ACCESS}
+    if expires is not None:
+        said["expires_in"] = expires
+    now: list[float] = []
+    grant, sent = _grant(said, now)
+
+    grant.header()
+    now.append(_http.TOKEN_LIFETIME_SECONDS - 1)
+    grant.header()
+    assert len(sent) == 1
+    now.append(_http.TOKEN_LIFETIME_SECONDS)
+    grant.header()
+    assert len(sent) == 2
+
+
+def test_a_token_that_expires_within_the_leeway_is_fetched_for_each_request() -> None:
+    _state()
+    grant, sent = _grant({"access_token": ACCESS, "expires_in": 20}, [])
+
+    grant.header()
+    grant.header()
+
+    assert len(sent) == 2
 
 
 def test_oauth2_fetches_again_before_expiry_and_after_invalidate(

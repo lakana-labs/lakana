@@ -632,7 +632,8 @@ def test_the_http_tls_floor_is_1_2(authority: Authority) -> None:
 
     with _http.client_for(conn) as client:
         transport = client._transport
-        context = transport._pool._ssl_context  # ty: ignore[unresolved-attribute]
+        assert isinstance(transport, _http.OwnOrigin)
+        context = transport._inner._pool._ssl_context  # ty: ignore[unresolved-attribute]
         assert isinstance(context, ssl.SSLContext)
         assert context.minimum_version == ssl.TLSVersion.TLSv1_2
 
