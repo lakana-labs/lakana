@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import importlib
 import io
+import re
 import struct
 import zipfile
 import zlib
@@ -29,6 +30,14 @@ ZIPPED = frozenset({"xlsx", "xlsm", "xlsb", "ods"})
 _WITH_HEADER = SPREADSHEETS | {"csv"}
 _ALIASES = {"jsonl": "ndjson"}
 _PROBLEM_CHARS = 500
+MAX_NESTING = 100
+"""The deepest nesting of arrays and objects a JSON document may have. A deeper one is refused
+before it is parsed into columns: polars and pyarrow recurse on the C stack and crash the task at
+about 10,000 levels, and no table gains anything from more than a hundred."""
+_JSON_STRING = re.compile(rb'"(?:[^"\\]++|\\.?)*+(?:"|\Z)', re.DOTALL)
+"""A JSON string, or an unterminated one to the end: possessive, so it never backtracks."""
+_NOT_BRACKET = bytes(b for b in range(256) if b not in b"[]{}")
+_STEPS = bytes.maketrans(b"[{]}", b"\x01\x01\xff\xff")
 
 
 def format_of(name: str, given: str | None) -> str:
@@ -119,6 +128,37 @@ def unpacked_size(data: bytes, limit: int) -> tuple[int, bool] | None:
         return None
 
 
+def nested_deeper(data: bytes, limit: int = MAX_NESTING) -> bool:
+    """Say whether JSON nests arrays and objects deeper than a limit, without parsing it.
+
+    Strings are dropped first (a bracket inside one does not count); what is left is one step
+    per bracket, whose running sum is the depth. Every step runs in C, so a large file costs
+    little more than a copy of it.
+
+    Parameters
+    ----------
+    data
+        JSON or NDJSON, valid or not.
+    limit
+        The deepest nesting allowed.
+
+    Returns
+    -------
+    bool
+        True when some point lies more than `limit` arrays and objects deep.
+    """
+    import pyarrow as pa
+    import pyarrow.compute as pc
+
+    if data.count(b"[") + data.count(b"{") <= limit:
+        return False
+    steps = _JSON_STRING.sub(b"", data).translate(_STEPS, _NOT_BRACKET)
+    signed = pa.Array.from_buffers(pa.int8(), len(steps), [None, pa.py_buffer(steps)])
+    depths = pc.cumulative_sum(signed.cast(pa.int64()))  # ty: ignore[unresolved-attribute]
+    deepest = pc.max(depths).as_py()  # ty: ignore[unresolved-attribute]
+    return deepest is not None and deepest > limit
+
+
 def _problem(exc: BaseException) -> str:
     """Keep the first line of a reader's message: the problem, not the reader's own advice.
 
@@ -179,7 +219,8 @@ def parse(
         For ``sheet=`` on a file without sheets, or ``header_row`` other than 1 on a file
         without a header row.
     FileShapeError
-        When the file cannot be parsed; the message names the file and the problem.
+        When the file cannot be parsed, or a JSON file nests deeper than `MAX_NESTING`; the
+        message names the file and the problem.
     """
     import polars as pl
 
@@ -196,6 +237,12 @@ def parse(
         # A missing engine is the worker's fault, not the file's: let the ImportError out.
         importlib.import_module("fastexcel")
 
+    if format in ("json", "ndjson") and nested_deeper(data):
+        raise FileShapeError(
+            f"`{name}`: nests arrays and objects deeper than {MAX_NESTING} levels, which Lakana "
+            "does not read; flatten the file at the source, or read it with connections.get and "
+            "your own parser"
+        )
     source = io.BytesIO(data)
     try:
         if format == "csv":

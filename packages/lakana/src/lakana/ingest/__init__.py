@@ -8,7 +8,7 @@ optional dependency when it is imported; each helper imports its own library.
 
 from __future__ import annotations
 
-from lakana.ingest import connections, files, sql
+from lakana.ingest import connections, files, rest, sql
 from lakana.ingest._errors import (
     CapExceeded,
     ConnectionChanged,
@@ -33,5 +33,6 @@ __all__ = [
     "UsageError",
     "connections",
     "files",
+    "rest",
     "sql",
 ]

@@ -221,11 +221,75 @@ def test_no_request_leaves_the_base_urls_origin(
         with _http.client_for(_conn(server.base, authority, settings, secret)) as client:
             port = server.base.rsplit(":", 1)[1]
             with pytest.raises(
-                SourceRefused, match=r"would carry the credential of `127\.0\.0\.1`"
+                SourceRefused,
+                match=r"would carry the credential of `(https://)?127\.0\.0\.1(:\d+)?`",
             ):
                 client.get(url.format(port=port))
 
     assert server.seen == []
+
+
+@pytest.mark.parametrize(
+    ("url", "shown"),
+    [
+        ("http://127.0.0.1:{port}/items", "`http://127.0.0.1:{port}`"),
+        ("https://127.0.0.1:1/items", "`https://127.0.0.1:1`"),
+        (
+            "https://user:pw@127.0.0.1:{port}/items",
+            "`https://127.0.0.1:{port}` with a user or a password in its URL",
+        ),
+    ],
+    ids=["scheme", "port", "userinfo"],
+)
+def test_a_refusal_on_the_same_host_names_scheme_and_port(
+    authority: Authority, tmp_path: Path, url: str, shown: str
+) -> None:
+    """When only the scheme, the port or the userinfo differs, the refusal shows both in full.
+
+    Naming the host twice (``127.0.0.1`` would carry the credential of ``127.0.0.1``) says
+    nothing; ``scheme://host:port`` says what differs.
+    """
+    _state()
+    with scripted(authority, tmp_path, Provider()) as server:
+        settings, secret = _auth("bearer", server.base)
+        port = server.base.rsplit(":", 1)[1]
+        with (
+            _http.client_for(_conn(server.base, authority, settings, secret)) as client,
+            pytest.raises(SourceRefused) as caught,
+        ):
+            client.get(url.format(port=port))
+
+    assert str(caught.value) == (
+        f"`api`: a request to {shown.format(port=port)} would carry the credential of "
+        f"`https://127.0.0.1:{port}`; Lakana sends it to the connection's own host only"
+    )
+    assert server.seen == []
+
+
+@pytest.mark.parametrize(
+    ("url", "base", "there", "here"),
+    [
+        ("http://[::1]/x", "https://[::1]:8443/", "http://[::1]:80", "https://[::1]:8443"),
+        (
+            "https://api.test:8443/x",
+            "https://API.test",
+            "https://api.test:8443",
+            "https://api.test:443",
+        ),
+        ("https://evil.test/x", "https://api.test", "evil.test", "api.test"),
+    ],
+    ids=["ipv6-default-port", "default-port", "another-host"],
+)
+def test_a_refusal_writes_each_origin_as_far_as_it_tells_them_apart(
+    url: str, base: str, there: str, here: str
+) -> None:
+    """Another host is named by its host; on the same host, scheme and port are written out."""
+    refusal = _http._elsewhere("api", httpx.URL(url), base)
+
+    assert str(refusal) == (
+        f"`api`: a request to `{there}` would carry the credential of `{here}`; Lakana sends it "
+        "to the connection's own host only"
+    )
 
 
 def _auth(kind: str, base: str) -> tuple[dict[str, object], dict[str, str] | None]:
@@ -654,6 +718,12 @@ def _trust(authority: Authority) -> ssl.SSLContext:
         (503, b"", SourceError, "answered HTTP 503"),
         (200, b'{"token": "x"}', UsageError, "answered without an access_token"),
         (200, b"<html>", UsageError, "answered without an access_token"),
+        (
+            200,
+            json.dumps({"access_token": "utf-16-token"}).encode("utf-16"),
+            UsageError,
+            "answered without an access_token",
+        ),
         (200, json.dumps({"access_token": "a\r\nb"}).encode(), UsageError, "without an access"),
         (200, b'{"access_token": "abcd", "token_type": "mac"}', UsageError, "of type 'mac'"),
     ],

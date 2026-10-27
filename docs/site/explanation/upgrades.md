@@ -174,6 +174,17 @@ on a task image of an earlier release ends `failed` with ``the task image has no
 build yourself needs `dist/check-requirements.txt`, the check environment's packages exported from
 `uv.lock`, in its build context first; the header of `Dockerfile.task` shows both commands.
 
+### Read REST APIs with `lakana.ingest.rest`
+
+`lakana.ingest.rest.read` reads a JSON REST API through an `http` connection, by page number,
+cursor or next link (OData's `@odata.nextLink` included), with the connection's auth and retries
+within a time budget; see [the ingest helpers](../reference/ingest.md#rest). It needs no new
+package.
+
+`files.read` now refuses a JSON or NDJSON file that nests arrays and objects more than 100 levels
+deep, with a `FileShapeError` naming the file: such a file could crash the task at about 10,000
+levels, and no table needs more than 100.
+
 ### Connection tests check http credentials; `files.read` reads `oauth2` connections
 
 `lakana connection test` now sends one `GET` of an `http` connection's base URL with its auth;

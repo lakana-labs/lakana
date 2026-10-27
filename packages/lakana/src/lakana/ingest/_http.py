@@ -1,4 +1,4 @@
-"""The HTTPS client of an ``http`` connection, for ``files.read`` (and later ``rest.read``).
+"""The HTTPS client of an ``http`` connection and its retries, for ``files.read`` and ``rest.read``.
 
 One client per connection: the task's proxy as the transport's own proxy (never
 ``HTTPS_PROXY``: ``trust_env=False`` also ignores ``NO_PROXY``, ``.netrc`` and
@@ -17,14 +17,18 @@ in the task's log: the worker knows the connection's secret, not what is derived
 from __future__ import annotations
 
 import base64
+import datetime as dt
+import email.utils
 import json
 import math
+import random
 import re
 import ssl
 import time
 from collections.abc import Callable, Generator
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
-from urllib.parse import unquote, urlsplit
+from urllib.parse import parse_qsl, unquote, urlsplit
 
 import httpx
 
@@ -53,8 +57,29 @@ number of seconds."""
 MAX_TOKEN_ANSWER = 64 * 1024
 """The most bytes of a token endpoint's answer read; a larger one is refused."""
 
+SHOWN_HOST = 100
+"""The most characters of a host a message shows."""
+RETRIED_STATUSES = frozenset({408, 429, 500, 502, 503, 504})
+"""Statuses `send` retries: a timeout, too many requests, and a server that may recover."""
+MAX_DELAY_SECONDS = 60.0
+"""The longest backoff between two attempts (a server's ``Retry-After`` may ask for more)."""
+
 _HEADER_SAFE = re.compile(r"[\x20-\x7e]+")
 _PROXY_STATUS = re.compile(r"\A(\d{3})\b")
+_sleep: Callable[[float], None] = time.sleep
+_clock: Callable[[], float] = time.monotonic
+_rand: Callable[[], float] = random.random
+
+
+def _wall() -> dt.datetime:
+    """Read the wall clock, for a ``Retry-After`` that is an HTTP date.
+
+    Returns
+    -------
+    datetime
+        Now, in UTC.
+    """
+    return dt.datetime.now(dt.UTC)
 
 
 def origin(url: httpx.URL | str) -> tuple[str, bytes, int]:
@@ -435,7 +460,8 @@ class ClientCredentials:
             can carry.
         """
         try:
-            said = json.loads(body)
+            # Decoded here: json.loads would guess UTF-16 or UTF-32 from bytes; JSON is UTF-8.
+            said = json.loads(body.decode("utf-8"))
         except (ValueError, RecursionError):
             said = None
         if not isinstance(said, dict):
@@ -500,13 +526,62 @@ def _elsewhere(name: str, url: httpx.URL, base_url: str) -> SourceRefused:
     Returns
     -------
     SourceRefused
-        Naming both hosts, never a credential or a path.
+        Naming both hosts, never a credential or a path; as ``scheme://host:port`` when only
+        the scheme, the port or the URL's user and password differ.
     """
-    _, host, _ = origin(base_url)
+    there, userinfo, here = shown_origins(url, base_url)
     return SourceRefused(
-        f"`{name}`: a request to `{safe_name(url.host)}` would carry the credential of "
-        f"`{host.decode('ascii')}`; Lakana sends it to the connection's own host only"
+        f"`{name}`: a request to `{there}`{userinfo} would carry the credential of "
+        f"`{here}`; Lakana sends it to the connection's own host only"
     )
+
+
+def shown_origins(url: httpx.URL, base_url: str) -> tuple[str, str, str]:
+    """Show where a refused request would go and the connection's origin, as far as they differ.
+
+    Parameters
+    ----------
+    url
+        Where the request would go.
+    base_url
+        The connection's base URL.
+
+    Returns
+    -------
+    tuple
+        Its host, a note (``" with a user or a password in its URL"`` or ``""``) and the base
+        URL's host; both as ``scheme://host:port`` when the hosts are the same. Hosts are
+        escaped and cut to `SHOWN_HOST` characters.
+    """
+    scheme, host, port = origin(base_url)
+    there, here = safe_name(url.host)[:SHOWN_HOST], host.decode("ascii")[:SHOWN_HOST]
+    note = ""
+    if origin(url)[1] == host:
+        there, here = _full(url.scheme, there, url.port), _full(scheme, here, port)
+        note = " with a user or a password in its URL" if url.userinfo else ""
+    return there, note, here
+
+
+def _full(scheme: str, host: str, port: int | None) -> str:
+    """Write an origin as ``scheme://host:port``.
+
+    Parameters
+    ----------
+    scheme
+        The scheme, escaped by the caller where it came from a URL.
+    host
+        The host, escaped by the caller where it came from a URL.
+    port
+        The port; `None` for the scheme's default.
+
+    Returns
+    -------
+    str
+        Such as ``https://api.test:443`` (an IPv6 host in brackets).
+    """
+    default = 443 if scheme == "https" else 80
+    shown = f"[{host}]" if ":" in host else host
+    return f"{safe_name(scheme)}://{shown}:{port or default}"
 
 
 class OwnOrigin(httpx.BaseTransport):
@@ -761,3 +836,202 @@ def _secret(conn: Connection, key: str) -> str:
         error = missing_secret(conn.name, key, "--password-stdin")
         raise error
     return conn.secret[key]
+
+
+def shown_url(url: httpx.URL | str) -> str:
+    """Show a URL in a message: its user, password, fragment and query values removed.
+
+    Parameters
+    ----------
+    url
+        The URL.
+
+    Returns
+    -------
+    str
+        Such as ``https://api.test/v1/items?page=…&key=…``, control characters escaped.
+    """
+    try:
+        # Escaped first: urlsplit drops line feeds and tabs, which would hide them.
+        parts = urlsplit(safe_name(str(url)))
+        host = parts.hostname or ""
+        port = f":{parts.port}" if parts.port is not None else ""
+    except ValueError:
+        return "<a URL that cannot be read>"
+    query = "&".join(f"{key}=…" for key, _ in parse_qsl(parts.query, keep_blank_values=True))
+    return f"{parts.scheme}://{host}{port}{parts.path}" + (f"?{query}" if query else "")
+
+
+def retry_delay(
+    attempt: int, retry_after: str | None, *, rand: Callable[[], float], wall: dt.datetime
+) -> float:
+    """How long to wait before the next attempt.
+
+    Parameters
+    ----------
+    attempt
+        How many attempts failed so far, less one: 0 after the first.
+    retry_after
+        The server's ``Retry-After``, if any: seconds or an HTTP date.
+    rand
+        A number in [0, 1) (jitter); `random.random` outside tests.
+    wall
+        The current time, UTC, for an HTTP date.
+
+    Returns
+    -------
+    float
+        Seconds: the server's own value when it sent a valid one (0 for a date in the past),
+        else 0.5 * 2**attempt capped at `MAX_DELAY_SECONDS`, in the upper half of that range.
+    """
+    if retry_after is not None:
+        text = retry_after.strip()
+        if text.isascii() and text.isdigit():
+            return float(text)
+        try:
+            when = email.utils.parsedate_to_datetime(text)
+        except (TypeError, ValueError, IndexError):
+            when = None
+        if when is not None and when.tzinfo is not None:
+            return max(0.0, (when - wall).total_seconds())
+    ceiling = min(MAX_DELAY_SECONDS, 0.5 * 2 ** min(attempt, 16))
+    return ceiling / 2 + rand() * ceiling / 2
+
+
+@dataclass(frozen=True)
+class Answer:
+    """An answer `send` read.
+
+    Parameters
+    ----------
+    status
+        The status.
+    headers
+        The headers.
+    body
+        The body, decoded; empty for a status other than 2xx (never read).
+    url
+        The URL the request went to.
+    """
+
+    status: int
+    headers: httpx.Headers
+    body: bytes
+    url: httpx.URL
+
+
+def _transient(error: httpx.HTTPError) -> bool:
+    """Say whether another attempt of a failed request could succeed.
+
+    Parameters
+    ----------
+    error
+        What httpx raised.
+
+    Returns
+    -------
+    bool
+        True for a timeout, a network or protocol error, an answer that does not decode, and
+        the egress proxy's 502, 503 or 504; never for a certificate that does not verify.
+    """
+    if certificate_refused(error):
+        return False
+    if isinstance(error, httpx.ProxyError):
+        return proxy_status(error) in (502, 503, 504)
+    return isinstance(
+        error,
+        httpx.TimeoutException
+        | httpx.NetworkError
+        | httpx.RemoteProtocolError
+        | httpx.DecodingError,
+    )
+
+
+def send(
+    client: httpx.Client,
+    request: httpx.Request,
+    *,
+    name: str,
+    limit: int,
+    retries: int,
+    budget: float,
+) -> Answer:
+    """Send a request, retrying what may pass within a number of attempts and a time budget.
+
+    Retried: a transient error (`_transient`) and the statuses of `RETRIED_STATUSES`, after a
+    backoff with jitter, or after the server's ``Retry-After``. A request is not retried when
+    the next wait would end past `budget` seconds from the first attempt. An OAuth2 connection
+    answered 401 fetches a new token and sends the request once more (not counted as a retry).
+    A 2xx answer's body is read up to `limit` bytes; another status is returned without its
+    body, which is never read.
+
+    Parameters
+    ----------
+    client
+        The connection's client (`client_for`).
+    request
+        The request, for the base URL's origin.
+    name
+        The connection, for messages.
+    limit
+        The most bytes of the body read.
+    retries
+        How many times a request may be sent again.
+    budget
+        Seconds from the first attempt within which another attempt may start.
+
+    Returns
+    -------
+    Answer
+        The answer.
+
+    Raises
+    ------
+    SourceError
+        When the retries or the budget are spent (retried by the harness), or for an error of
+        `transport_failure` that is not transient (`SourceRefused`, `UsageError`).
+    OverflowError
+        When a 2xx body is larger than `limit`.
+    """
+    start, attempt, refreshed = _clock(), 0, False
+    host = request.url.host
+    auth = client.auth
+    oauth = auth.oauth if isinstance(auth, ConnectionAuth) else None
+    while True:
+        retry_after: str | None = None
+        try:
+            response = client.send(request, stream=True)
+        except httpx.HTTPError as exc:
+            if not _transient(exc):
+                failure = transport_failure(name, host, exc)
+                raise failure from None
+            happened = f"failed ({type(exc).__name__})"
+        else:
+            try:
+                status = response.status_code
+                if status == 401 and oauth is not None and not refreshed:
+                    oauth.invalidate()
+                    refreshed = True
+                    continue
+                if status not in RETRIED_STATUSES:
+                    body = read_capped(response, limit) if 200 <= status < 300 else b""
+                    return Answer(status, response.headers, body, request.url)
+                happened = f"answered {status}"
+                retry_after = response.headers.get("retry-after")
+            except httpx.HTTPError as exc:
+                if not _transient(exc):
+                    failure = transport_failure(name, host, exc)
+                    raise failure from None
+                happened = f"failed while answering ({type(exc).__name__})"
+            finally:
+                response.close()
+        attempt += 1
+        delay = retry_delay(attempt - 1, retry_after, rand=_rand, wall=_wall())
+        spent = _clock() - start
+        if attempt > retries or spent + delay > budget:
+            raise SourceError(
+                f"`{name}`: {request.method} {shown_url(request.url)} {happened} after {attempt} "
+                f"attempt{'' if attempt == 1 else 's'} in {round(spent)} s; the API is unavailable "
+                "— try again later, or raise retries= or retry_budget_seconds="
+            )
+        _sleep(delay)
