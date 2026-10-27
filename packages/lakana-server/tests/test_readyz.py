@@ -59,7 +59,7 @@ def _add_environment(client: TestClient, root: str, secret: str | None = None) -
         session.commit()
 
 
-async def _nothing_failed() -> tuple[str, ...]:
+async def _nothing_failed() -> tuple[str, ...]:  # ruff: ignore[unused-async] -- stands in for an async check
     """Stand in for the readiness checks when all of them pass.
 
     Returns
