@@ -20,16 +20,17 @@ The tutorial [Getting started](../tutorials/getting-started.md#load-a-file) show
 | `--format` | The file's format, when its extension does not say: `csv`, `parquet`, `arrow`, `json`, `ndjson`, `xlsx`, `xlsm`, `xlsb`, `xls` or `ods`. |
 | `--sheet` | A spreadsheet's sheet (default: the first). Spreadsheets only. |
 | `--header-row` | The row of the column names in a CSV file or a sheet, counted from 1 (the default); `0` for none, and the columns are named `column_1`, `column_2`, and so on. |
-| `--yes` | Do not ask. Required without a terminal, and in a protected environment. |
-| `--break-glass`, `--reason` | Write to an environment whose writes are locked, as `lakana table append` does. |
+| `--yes` | Do not ask. Required without a terminal, and in a protected environment (with `--break-glass`). |
+| `--break-glass`, `--reason` | Write to a protected environment outside a run, as `lakana table append` does: needs `MANAGE_ENVIRONMENT`, audited. |
 
 What the command does, in order:
 
-1. It refuses a protected environment without `--yes`, before it reads the file: recurring
-   loads into production belong in an asset.
+1. It refuses a protected environment without `--yes`, `--break-glass` and `--reason`, before it
+   reads the file: recurring loads into production belong in an asset.
 2. It asks the server how large one upload may be (`LAKANA_APPEND__MAX_BYTES`, 256 MiB by
-   default) and refuses a larger file before it reads it, and again before it sends the rows when
-   they take more room than the file (a compressed Parquet file can).
+   default) and refuses a larger file before it reads it. A Parquet file is also measured from
+   its metadata, before its rows are read, since a small compressed file can hold far more; and
+   the rows are measured again before they are sent.
 3. It reads the file and checks with the server, without sending a row, that the load would
    succeed: the layer, your rights, the namespace, and the columns of a table that exists.
 4. It shows the columns and the row count and asks.
@@ -73,8 +74,8 @@ expected_snapshot_id=None, break_glass_reason=None, dry_run=False)` returns a `L
 | Argument | Meaning |
 |---|---|
 | `data` | A `pyarrow.Table`, a `RecordBatch`, or anything `pyarrow.table()` accepts. For a dry run, an empty table of the columns to check. |
-| `write` | `"replace"` or `"append"`. A first load creates the table either way. |
-| `expected_snapshot_id` | The table's current snapshot as you read it (`Table.snapshot_id`), or `"none"` for a table that does not exist yet. The load commits only while that still holds, and raises `Conflict` otherwise; it is never sent again. |
+| `write` | `"replace"` or `"append"`. A first load (`expected_snapshot_id="none"`) creates the table whichever is given. |
+| `expected_snapshot_id` | The table's current snapshot as you read it (`Table.snapshot_id`), or `"none"` for a table that does not exist yet, which the load then creates. The load commits only while that still holds, and raises `Conflict` otherwise; it is never sent again. Without it, a missing table raises `NotFound`, which says to pass `"none"`. |
 | `break_glass_reason` | Write to a protected environment outside a run: 10 to 500 characters, needs `MANAGE_ENVIRONMENT`, audited. |
 | `dry_run` | Run every check, the columns against an existing table included, and write nothing. |
 
@@ -101,9 +102,11 @@ the limits of an append: `LAKANA_APPEND__MAX_BYTES`, `LAKANA_APPEND__MAX_ARRAYS`
 
 ## Who may load
 
-`WRITE_TABLE` on the table; a load that creates the table needs `CREATE_TABLE` as well. A
-protected environment needs `--yes`, and an environment whose writes are locked needs
-`--break-glass --reason` with `MANAGE_ENVIRONMENT`.
+`WRITE_TABLE` on the table; a load that creates the table needs `CREATE_TABLE` as well. The
+command also needs `READ_TABLE`: it reads the table's current snapshot to pin the write to it.
+In a protected environment, a load outside a run always needs break glass (`--break-glass
+--reason`, `break_glass_reason` in the SDK and the route), which needs `MANAGE_ENVIRONMENT` and
+is audited; the dry run checks this too, so nothing is uploaded before the refusal.
 
 ## Errors
 
@@ -111,14 +114,20 @@ protected environment needs `--yes`, and an environment whose writes are locked 
 |---|---|---|
 | `422`, exit 8 | a table outside bronze | `` `lakana load` loads into bronze only: load into `bronze.customers` and transform it into `silver.customers` with an asset. `` |
 | `404`, exit 6 | the namespace does not exist | ``Namespace `bronze.raw` does not exist in 'dev': create it with `lakana ns create bronze.raw --env dev`, then load again.`` |
-| `403`, exit 5 | no `WRITE_TABLE`, or no `CREATE_TABLE` for a first load | the permission |
+| `404` | the table does not exist and no `expected_snapshot_id` was sent (the SDK and the route; the command always sends one) | ``Table `bronze.customers` does not exist in 'dev': a first load passes expected_snapshot_id=none, which creates it.`` |
+| `403`, exit 5 | no `WRITE_TABLE` (or `READ_TABLE` for the command), or no `CREATE_TABLE` for a first load | the permission |
+| `403`, exit 5 | a protected environment without break glass | ``Environment 'prod' is protected: only runs of the deployed project version may write. See `lakana run`.`` |
+| `403`, exit 5 | break glass without `MANAGE_ENVIRONMENT` | the permission |
 | `409`, exit 7 | the table changed since the command looked at it | ``bronze.customers changed during the write; retry.`` |
 | `422`, exit 8 | the file's columns do not fit the existing table | the column that differs, as for an append |
-| exit 2 | a protected environment without `--yes` | `` `prod` is protected: recurring loads belong in an asset; pass --yes to load once (and --break-glass --reason REASON if writes are locked) `` |
+| exit 2 | a protected environment without `--yes`, `--break-glass` and `--reason` | `` `prod` is protected: a load there needs --yes --break-glass --reason REASON (MANAGE_ENVIRONMENT, audited); recurring loads belong in an asset `` |
 | exit 2 | a file larger than one upload may be | `big.parquet (300000000 bytes) is larger than one upload may be (256 MiB); load it with a Python asset and a directory or object-store connection` |
 | exit 2 | a JSON array or spreadsheet without the `assets` extra | `reading .xlsx needs the assets extra: pip install 'lakana[assets]'` |
 | exit 2 | you answer no | `Aborted.` |
-| exit 8 | the file is missing, cannot be read in its format, is not UTF-8, nests deeper than the helpers read, or has a column a table cannot store | the file and the cause |
+| exit 8 | a CSV or NDJSON file that is not UTF-8 | `data.csv is not UTF-8 (byte 0xfc at position 6); save it as UTF-8 and load it again` |
+| exit 8 | a file without columns (such as a JSON file `[]`) | `empty.json has no columns; a load needs at least one column and one row: add them and load it again` |
+| exit 8 | a CSV, JSON or spreadsheet without rows (only a header) | `hdr.csv has no rows, so there is nothing to load and no column types to infer; add rows and load it again` |
+| exit 8 | the file is missing, cannot be read in its format, nests deeper than the helpers read, or has a column a table cannot store | the file and the cause |
 
 ## Audit
 

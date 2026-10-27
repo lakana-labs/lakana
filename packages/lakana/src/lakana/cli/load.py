@@ -101,13 +101,46 @@ def _format(path: Path, given: str | None) -> str:
     return found
 
 
+def _utf8(path: Path, data: bytes) -> bytes:
+    """Hold text to the helpers' strict UTF-8 rule, dropping a byte order mark.
+
+    Parameters
+    ----------
+    path
+        The file, for messages.
+    data
+        Its bytes.
+
+    Returns
+    -------
+    bytes
+        The bytes without a byte order mark.
+
+    Raises
+    ------
+    CliError
+        For bytes that are not UTF-8 (exit 8).
+    """
+    data = data.removeprefix(b"\xef\xbb\xbf")
+    try:
+        data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise CliError(
+            f"{_output.inline(path.name)} is not UTF-8 (byte {data[exc.start]:#04x} at position "
+            f"{exc.start}); save it as UTF-8 and load it again",
+            8,
+            kind="FileError",
+        ) from None
+    return data
+
+
 def _csv(path: Path, header_row: int) -> pa.Table:
     """Read a CSV file with pyarrow, inferring each column's type.
 
     Parameters
     ----------
     path
-        The file.
+        The file; its size is bounded by the upload limit before it is read.
     header_row
         The 1-based row of the column names; ``0`` for none (columns ``column_1``, ...).
 
@@ -116,11 +149,12 @@ def _csv(path: Path, header_row: int) -> pa.Table:
     pa.Table
         The rows.
     """
+    data = _utf8(path, path.read_bytes())
     read = pacsv.ReadOptions(
         skip_rows=max(header_row - 1, 0), autogenerate_column_names=not header_row
     )
     convert = pacsv.ConvertOptions(strings_can_be_null=True, null_values=[""])
-    table = pacsv.read_csv(path, read_options=read, convert_options=convert)
+    table = pacsv.read_csv(pa.BufferReader(data), read_options=read, convert_options=convert)
     if not header_row:
         table = table.rename_columns([f"column_{i + 1}" for i in range(table.num_columns)])
     return table
@@ -148,16 +182,7 @@ def _ndjson(path: Path, data: bytes) -> pa.Table:
     """
     from lakana.ingest._formats import MAX_NESTING, nested_deeper
 
-    data = data.removeprefix(b"\xef\xbb\xbf")
-    try:
-        data.decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise CliError(
-            f"{_output.inline(path.name)} is not UTF-8 (byte {data[exc.start]:#04x} at position "
-            f"{exc.start}); save it as UTF-8 and load it again",
-            8,
-            kind="FileError",
-        ) from None
+    data = _utf8(path, data)
     if nested_deeper(data):
         raise CliError(
             f"{_output.inline(path.name)} nests arrays and objects deeper than {MAX_NESTING} "
@@ -222,7 +247,43 @@ def _with_extra(path: Path, data: bytes, fmt: str, sheet: str | None, header_row
     return frame.to_arrow()
 
 
-def read_file(path: Path, fmt: str, *, sheet: str | None, header_row: int) -> pa.Table:
+def _parquet_size(path: Path) -> int:
+    """Estimate, from a Parquet file's metadata, how many bytes its rows take once read.
+
+    A small file can hold many rows of repeated values, which its encoding and compression
+    shrink to almost nothing; reading it would build the whole table in memory. The estimate is
+    the larger of the column chunks' uncompressed sizes and the rows times the columns' widths
+    (a column without a fixed width counted at 4 bytes a row, its offsets).
+
+    Parameters
+    ----------
+    path
+        The file.
+
+    Returns
+    -------
+    int
+        The estimated size in bytes.
+    """
+    metadata = pq.read_metadata(path)
+    schema = metadata.schema.to_arrow_schema()
+    width = 0
+    for field in schema:
+        try:
+            width += max(field.type.bit_width // 8, 1)
+        except ValueError:
+            width += 4
+    chunks = sum(
+        group.column(index).total_uncompressed_size
+        for group in (metadata.row_group(i) for i in range(metadata.num_row_groups))
+        for index in range(group.num_columns)
+    )
+    return max(chunks, metadata.num_rows * width)
+
+
+def read_file(
+    path: Path, fmt: str, *, sheet: str | None, header_row: int, limit: int | None = None
+) -> pa.Table:
     """Read a local file into an Arrow table the platform can store.
 
     Parameters
@@ -235,6 +296,9 @@ def read_file(path: Path, fmt: str, *, sheet: str | None, header_row: int) -> pa
         `--sheet` (spreadsheets only).
     header_row
         `--header-row` (CSV and spreadsheets only).
+    limit
+        The server's upload limit: a Parquet file whose rows would take more is refused from
+        its metadata, before they are read.
 
     Returns
     -------
@@ -244,8 +308,8 @@ def read_file(path: Path, fmt: str, *, sheet: str | None, header_row: int) -> pa
     Raises
     ------
     CliError
-        For an option the format does not take, an unreadable file, or a column type a table
-        cannot store.
+        For an option the format does not take, an unreadable or empty file, a Parquet file
+        over the limit, or a column type a table cannot store.
     """
     if sheet is not None and fmt not in _SPREADSHEETS:
         raise CliError(f"--sheet applies to spreadsheets; {_output.inline(path.name)} is {fmt}")
@@ -260,6 +324,7 @@ def read_file(path: Path, fmt: str, *, sheet: str | None, header_row: int) -> pa
         if fmt == "csv":
             table = _csv(path, header_row)
         elif fmt == "parquet":
+            _check_size(path, _parquet_size(path), limit)
             table = pq.read_table(path)
         elif fmt == "arrow":
             with pa.memory_map(str(path)) as source:
@@ -278,12 +343,27 @@ def read_file(path: Path, fmt: str, *, sheet: str | None, header_row: int) -> pa
             8,
             kind="FileError",
         ) from None
+    if not table.num_columns:
+        raise CliError(
+            f"{_output.inline(path.name)} has no columns; a load needs at least one column and "
+            "one row: add them and load it again",
+            8,
+            kind="FileError",
+        )
+    if not table.num_rows and fmt not in ("parquet", "arrow"):
+        raise CliError(
+            f"{_output.inline(path.name)} has no rows, so there is nothing to load and no column "
+            "types to infer; add rows and load it again",
+            8,
+            kind="FileError",
+        )
     table = normalize_view_columns(cast_timestamp_ns_columns_to_us(table))
     try:
         schema_to_columns(table.schema)
     except ValidationError as exc:
         raise CliError(
-            f"{_output.inline(path.name)}: {exc}; convert the column before loading",
+            f"{_output.inline(path.name)}: {str(exc).rstrip('.')}; convert the column before "
+            "loading",
             8,
             kind="FileError",
         ) from None
@@ -395,7 +475,7 @@ def load(
     header_row
         `--header-row`.
     yes
-        `--yes`: skip the question; required in a protected environment.
+        `--yes`: skip the question; required, with break glass, in a protected environment.
     break_glass
         `--break-glass`.
     reason
@@ -405,7 +485,7 @@ def load(
     ------
     CliError
         For a bad option, an unreadable file, a file over the upload limit, a protected
-        environment without --yes, or a declined confirmation.
+        environment without --yes and break glass, or a declined confirmation.
     """
     if write not in ("replace", "append"):
         raise CliError(f"--write must be replace or append; got {write!r}")
@@ -416,16 +496,17 @@ def load(
     if not file.is_file():
         raise CliError(f"No such file: {_output.inline(str(file))}", 8, kind="FileError")
     client = state.client()
-    if client.environments.get(environment).is_protected and not yes:
+    if client.environments.get(environment).is_protected and not (yes and break_glass):
         raise CliError(
-            f"`{_output.inline(environment)}` is protected: recurring loads belong in an asset; "
-            "pass --yes to load once (and --break-glass --reason REASON if writes are locked)"
+            f"`{_output.inline(environment)}` is protected: a load there needs --yes "
+            "--break-glass --reason REASON (MANAGE_ENVIRONMENT, audited); recurring loads belong "
+            "in an asset"
         )
     glass = break_glass_reason(break_glass, reason, environment)
     limit = client.tables.upload_limit()
     size = file.stat().st_size
     _check_size(file, size, limit)
-    data = read_file(file, fmt, sheet=sheet, header_row=header_row)
+    data = read_file(file, fmt, sheet=sheet, header_row=header_row, limit=limit)
     if limit is not None:
         _check_size(file, _ipc_size(data), limit)
     try:

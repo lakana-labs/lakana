@@ -2062,8 +2062,11 @@ async def load_table_data(
     creates a missing table (`CREATE_TABLE` as well as `WRITE_TABLE`); otherwise `write`
     replaces or appends (`WRITE_TABLE`), committing only while the table's snapshot is still
     `expected_snapshot_id`. `dry_run=true` runs every check, the schema of the (usually empty)
-    stream against an existing table included, and writes nothing. Answers 404 when the
-    namespace does not exist (naming the command that creates it), 409 when the snapshot moved,
+    stream against an existing table included, and writes nothing. In a protected environment
+    a load, its dry run included, needs `break_glass_reason` and `MANAGE_ENVIRONMENT` (403
+    before the body otherwise). Answers 404 when the namespace does not exist (naming the
+    command that creates it) or the table does not and no pin was sent (naming `none`), 409 when
+    the snapshot moved,
     413 for a body over the server's limit, 408 when it arrives too slowly and 503 when the
     server is busy with other uploads.
 

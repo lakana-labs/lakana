@@ -135,7 +135,35 @@ def test_a_missing_namespace_names_the_command_that_creates_it(
         catalog.check_can_load(
             principal, _ref("bronze.raw.customers"), write="replace", expected_snapshot_id="none"
         )
-    assert "`lakana ns create bronze.raw --env dev`" in str(caught.value)
+    assert str(caught.value) == (
+        "Namespace `bronze.raw` does not exist in 'dev': create it with "
+        "`lakana ns create bronze.raw --env dev`, then load again."
+    )
+
+
+def test_a_missing_table_without_a_pin_names_none_as_the_next_step(
+    catalog: CatalogService, principal: PrincipalRef
+) -> None:
+    """Without `none`, a first load is a 404 that says how to create the table."""
+    for write in ("replace", "append"):
+        with pytest.raises(NotFoundError) as caught:
+            catalog.check_can_load(
+                principal, _ref("bronze.customers"), write=write, expected_snapshot_id=None
+            )
+        assert str(caught.value) == (
+            "Table `bronze.customers` does not exist in 'dev': a first load passes "
+            "expected_snapshot_id=none, which creates it."
+        )
+
+
+def test_a_missing_namespace_without_a_pin_names_the_namespace_command(
+    catalog: CatalogService, principal: PrincipalRef
+) -> None:
+    """The namespace is the first thing missing, so its command is the next step."""
+    with pytest.raises(NotFoundError, match=r"`lakana ns create bronze.raw --env dev`"):
+        catalog.check_can_load(
+            principal, _ref("bronze.raw.customers"), write="replace", expected_snapshot_id=None
+        )
 
 
 def test_a_missing_bronze_namespace_names_lakana_namespace_create_bronze(
@@ -226,3 +254,14 @@ def test_a_stale_pin_is_a_conflict_before_the_body(
     assert snapshot is not None
     with pytest.raises(ConflictError):
         catalog.check_can_load(principal, ref, write="append", expected_snapshot_id=snapshot + 1)
+
+
+def test_an_append_pinned_to_a_snapshot_of_a_missing_table_is_not_found(
+    catalog: CatalogService, principal: PrincipalRef
+) -> None:
+    """A pin names a table that is there; the 404 is the append's own, not the `none` hint."""
+    with pytest.raises(NotFoundError) as caught:
+        catalog.check_can_load(
+            principal, _ref("bronze.customers"), write="append", expected_snapshot_id=41
+        )
+    assert "expected_snapshot_id=none" not in str(caught.value)

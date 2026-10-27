@@ -1193,10 +1193,12 @@ class Tables:
             The rows: a `pa.Table`, a `pa.RecordBatch`, or anything `pyarrow.table()`
             accepts. For a dry run, an empty table of the schema to check.
         write
-            ``replace`` (the default) or ``append``. A first load creates the table either way.
+            ``replace`` (the default) or ``append``. A first load (``expected_snapshot_id=
+            "none"``) creates the table whichever is given.
         expected_snapshot_id
             The table's current snapshot as you read it (`Table.snapshot_id`), or ``"none"``
-            for a table that does not exist yet, which the load then creates.
+            for a table that does not exist yet, which the load then creates. Without it, a
+            missing table is a `NotFound` that says to pass ``"none"``.
         break_glass_reason
             Write to a protected environment outside a run: 10-500 characters, needs
             `MANAGE_ENVIRONMENT`, audited.
@@ -1214,9 +1216,12 @@ class Tables:
             For a target outside bronze, or rows the table refuses.
         lakana.errors.NotFound
             If the namespace does not exist (the message names the command that creates it),
-            or the table does not and `expected_snapshot_id` is not ``"none"``.
+            or the table does not and `expected_snapshot_id` is not ``"none"`` (the message
+            says to pass it).
         lakana.errors.PermissionDenied
-            Without `WRITE_TABLE`, or without `CREATE_TABLE` for a first load.
+            Without `WRITE_TABLE`, without `CREATE_TABLE` for a first load, or in a protected
+            environment without `break_glass_reason` and `MANAGE_ENVIRONMENT`; a dry run is
+            refused the same way.
         lakana.errors.Conflict
             If the table's snapshot is no longer `expected_snapshot_id`.
         """

@@ -225,8 +225,17 @@ def test_without_yes_it_asks_and_a_no_sends_nothing_after_the_dry_run(tmp_path: 
     assert [r.url.params["dry_run"] for r in _loads(api)] == ["true"]
 
 
-def test_a_protected_environment_needs_yes(tmp_path: Path) -> None:
-    """Recurring loads belong in an asset: without --yes nothing is read or sent."""
+_PROTECTED = (
+    "`dev` is protected: a load there needs --yes --break-glass --reason REASON "
+    "(MANAGE_ENVIRONMENT, audited); recurring loads belong in an asset"
+)
+
+
+@pytest.mark.parametrize("options", [(), ("--yes",)])
+def test_a_protected_environment_needs_yes_and_break_glass(
+    tmp_path: Path, options: tuple[str, ...]
+) -> None:
+    """Without both, nothing is read or sent: the server would refuse the write anyway."""
     api = _api(protected=True)
 
     result = invoke(
@@ -236,14 +245,37 @@ def test_a_protected_environment_needs_yes(tmp_path: Path) -> None:
         "customers",
         "--env",
         "dev",
+        *options,
     )
 
     assert result.exit_code == 2, result.output
-    assert (
-        "`dev` is protected: recurring loads belong in an asset; pass --yes to load once (and "
-        "--break-glass --reason REASON if writes are locked)"
-    ) in " ".join(result.output.split())
+    assert _PROTECTED in " ".join(result.output.split())
     assert _loads(api) == []
+
+
+def test_a_protected_environment_loads_with_yes_and_break_glass(tmp_path: Path) -> None:
+    """Both requests carry the reason; the server checks the right and audits the write."""
+    api = _api(protected=True)
+
+    result = invoke(
+        make_state(tmp_path, api),
+        "load",
+        str(_csv(tmp_path)),
+        "customers",
+        "--env",
+        "dev",
+        "--yes",
+        "--break-glass",
+        "--reason",
+        "INC-7: load the corrected export once",
+    )
+
+    assert result.exit_code == 0, result.output
+    loads = _loads(api)
+    assert [r.url.params["dry_run"] for r in loads] == ["true", "false"]
+    assert {r.url.params["break_glass_reason"] for r in loads} == {
+        "INC-7: load the corrected export once"
+    }
 
 
 def test_a_target_outside_bronze_shows_the_servers_text_and_uploads_no_rows(
@@ -468,8 +500,48 @@ def test_a_column_type_a_table_cannot_store_is_named(tmp_path: Path) -> None:
     result = invoke(make_state(tmp_path, api), "load", str(path), "nulls", "--env", "dev", "--yes")
 
     assert result.exit_code == 8, result.output
-    assert "nothing" in result.output
+    assert (
+        "nulls.ndjson: Column 'nothing' has an unsupported Arrow type: null; convert the column "
+        "before loading"
+    ) in " ".join(result.output.split())
     assert _loads(api) == []
+
+
+def test_a_parquet_file_that_expands_past_the_limit_is_refused_before_it_is_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The file's metadata says how large its rows are; the rows are never decoded."""
+    path = tmp_path / "zeros.parquet"
+    pq.write_table(pa.table({"v": pa.array([0] * 1_000_000, pa.int64())}), path)
+    assert path.stat().st_size < 100_000
+
+    def never(*args: object, **kwargs: object) -> pa.Table:
+        raise AssertionError("the rows were read")
+
+    monkeypatch.setattr(pq, "read_table", never)
+    api = _api(limit=1024 * 1024)
+
+    result = invoke(make_state(tmp_path, api), "load", str(path), "zeros", "--env", "dev", "--yes")
+
+    assert result.exit_code == 2, result.output
+    assert "zeros.parquet (8000000 bytes) is larger than one upload may be (1 MiB)" in (
+        " ".join(result.output.split())
+    )
+    assert _loads(api) == []
+
+
+def test_a_parquet_file_within_the_limit_is_read(tmp_path: Path) -> None:
+    """Strings count by their uncompressed size; a small file passes the estimate."""
+    path = tmp_path / "names.parquet"
+    pq.write_table(pa.table({"id": [1, 2], "name": ["a", None], "ok": [True, False]}), path)
+    api = _api()
+
+    result = invoke(
+        make_state(tmp_path, api), "load", str(path), "customers", "--env", "dev", "--yes"
+    )
+
+    assert result.exit_code == 0, result.output
+    assert _rows_sent(_loads(api)[-1]).num_rows == 2
 
 
 def _fail(tmp_path: Path, name: str, content: bytes, *options: str) -> tuple[int, str, FakeApi]:
@@ -505,6 +577,29 @@ def _fail(tmp_path: Path, name: str, content: bytes, *options: str) -> tuple[int
     [
         ("data.txt", b"x", (), 2, "Can't tell the format of data.txt; pass --format"),
         ("data.ndjson", b'{"a": "\xff"}\n', (), 8, "is not UTF-8 (byte 0xff at position 7)"),
+        (
+            "data.csv",
+            b"name\nM\xfcnchen\n",
+            (),
+            8,
+            "data.csv is not UTF-8 (byte 0xfc at position 6); save it as UTF-8 and load it again",
+        ),
+        (
+            "hdr.csv",
+            b"a,b\n",
+            (),
+            8,
+            "hdr.csv has no rows, so there is nothing to load and no column types to infer; "
+            "add rows and load it again",
+        ),
+        (
+            "empty.json",
+            b"[]",
+            (),
+            8,
+            "empty.json has no columns; a load needs at least one column and one row: add them "
+            "and load it again",
+        ),
         ("data.parquet", b"not parquet", (), 8, "Could not read data.parquet as parquet"),
         ("data.json", b"[{]", (), 8, "data.json"),
         ("data.parquet", b"x", ("--header-row", "2"), 2, "--header-row applies to CSV files"),

@@ -5134,10 +5134,12 @@ class CatalogService:
 
         In this order: the target is in the bronze layer (`require_bronze`); the caller may
         write it (`check_can_append`, or `check_can_replace`, which also asks `CREATE_TABLE`
-        when `expected_snapshot_id` is ``none`` and the table is missing); the namespace of a
-        table the load would create exists. With `schema`, an existing table is checked
-        against it as the write would check the rows: column for column for an append, by the
-        schema rules of a replace without evolving it.
+        when `expected_snapshot_id` is ``none`` and the table is missing); the environment's
+        write guard allows it (a protected environment needs break glass with
+        `MANAGE_ENVIRONMENT`; recorded by the write, not here); the namespace of a table the
+        load would create exists, and a missing table has the pin ``none``. With `schema`, an
+        existing table is checked against it as the write would check the rows: column for
+        column for an append, by the schema rules of a replace without evolving it.
 
         Parameters
         ----------
@@ -5163,30 +5165,52 @@ class CatalogService:
             For a target outside bronze, a table that is not managed, or a schema the write
             would refuse (the message shows the difference).
         PermissionDenied
-            As `check_can_append` and `check_can_replace`.
+            As `check_can_append` and `check_can_replace`, and as the write guard refuses a
+            write to a protected environment.
         NotFoundError
-            For a missing table without ``none``, or a missing namespace (naming the command
-            that creates it).
+            For a missing namespace (naming the command that creates it), or a missing table
+            without ``none`` (naming the pin that creates it).
         ConflictError
             When the table's current snapshot is not `expected_snapshot_id` (``none`` on a
             table that exists included), as the write would find.
         """
         require_bronze(ref)
-        if write == "append" and expected_snapshot_id != "none":
-            self.check_can_append(p, ref)
-        else:
-            self.check_can_replace(p, ref, expected_snapshot_id=expected_snapshot_id)
+        missing_without_pin = False
+        try:
+            if write == "append" and expected_snapshot_id != "none":
+                self.check_can_append(p, ref)
+            else:
+                self.check_can_replace(p, ref, expected_snapshot_id=expected_snapshot_id)
+        except NotFoundError:
+            # Only a missing table without a pin gets here, after `WRITE_TABLE` was granted:
+            # name the namespace if that is missing too, else the pin that creates the table.
+            if expected_snapshot_id is not None or self._existing_table(ref) is not None:
+                raise
+            missing_without_pin = True
         row = self._existing_table(ref)
+        appends = row is not None and write == "append" and expected_snapshot_id != "none"
+        self._guard.check(
+            p,
+            ref.environment,
+            WriteOperation.APPEND if appends else WriteOperation.WRITE,
+            table_target(ref),
+            record_break_glass=False,
+        )
         if row is None:
             namespace = ".".join(ref.namespace.parts)
             try:
                 self._find_namespace(self._find_environment(ref.environment), ref.namespace)
             except NotFoundError:
                 raise NotFoundError(
-                    f"Namespace {shown(namespace)} does not exist in {shown(ref.environment)!r}: "
-                    f"create it with `lakana ns create {shown(namespace)} --env "
-                    f"{shown(ref.environment)}`, then load again."
+                    f"Namespace `{shown(namespace)}` does not exist in "
+                    f"{shown(ref.environment)!r}: create it with `lakana ns create "
+                    f"{shown(namespace)} --env {shown(ref.environment)}`, then load again."
                 ) from None
+            if missing_without_pin:
+                raise NotFoundError(
+                    f"Table `{shown(ref.dotted())}` does not exist in {shown(ref.environment)!r}: "
+                    "a first load passes expected_snapshot_id=none, which creates it."
+                )
             return True
         current = self._to_loaded_table(ref, row).metadata
         if (
