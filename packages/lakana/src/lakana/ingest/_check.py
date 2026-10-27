@@ -20,9 +20,10 @@ words is escaped.
 
 The module is one file that imports nothing of `lakana`, so the task image can run it alone:
 its module-level imports are the standard library's, and each credential step imports its
-driver (``adbc_driver_postgresql``, ``adbc_driver_sqlite``, ``pymysql``, ``cryptography``,
-``httpx``) inside the step (`test_the_check_imports_only_the_standard_library_and_its_drivers`).
-The task image installs exactly those in ``/opt/lakana-check-env``; where one does not import
+driver inside the step, from `DRIVERS` only
+(`test_the_check_imports_only_the_standard_library_and_its_drivers`); its HTTP requests, the gcs
+token request included, go over its own sockets (`_exchange`). The task image installs exactly
+`DRIVERS` in ``/opt/lakana-check-env``; where one does not import
 (the local runner without ``lakana[assets]``), the test fails saying so, rather than passing
 without the check.
 """
@@ -62,6 +63,17 @@ PROXY_KINDS = frozenset({"http", "s3", "gcs", "azure"})
 RELAY_HOST = "lakana-relay"
 """The name a task resolves to its relay."""
 
+DRIVERS = {
+    "adbc_driver_postgresql": "adbc-driver-postgresql",
+    "adbc_driver_sqlite": "adbc-driver-sqlite",
+    "cryptography": "cryptography",
+    "httpx": "httpx",
+    "pymysql": "PyMySQL",
+}
+"""Each package a credential step may import (inside the step), to the distribution that brings
+it: the root ``check`` dependency group of uv.lock and the task image's import smoke are exactly
+these (tests compare all three). ``httpx`` is kept for the ``http`` credential step to come."""
+
 NOT_YET = "; credentials not checked yet"
 """What an ``http`` connection with a secret adds until its credential step exists."""
 
@@ -78,6 +90,13 @@ GCS_SCOPE = "https://www.googleapis.com/auth/devstorage.read_only"
 """The scope a ``gcs`` credential step asks a token for."""
 _JWT_SECONDS = 600
 """How long the signed token request of a ``gcs`` key is valid."""
+GCS_KEY_HINT = "store the key file Google gave you"
+"""The next step of a ``gcs`` secret that is no usable service-account key."""
+MARIADB_NO_SECRET = (  # nosec B105 -- a message about a password, not a credential
+    "; TLS and credentials are checked only with a password: store one with "
+    "`lakana connection update`"
+)
+"""What a ``mariadb`` test without a secret adds: the greeting alone proves neither."""
 
 TCP_OK = "reachable; Lakana does not check the protocol, TLS or credentials of a tcp connection"
 
@@ -360,7 +379,8 @@ def _context(ca_pem: str | None, mode: str) -> ssl.SSLContext:
     Raises
     ------
     _Found
-        ``failed`` when the file `LAKANA_CA_BUNDLE` names cannot be read.
+        ``failed`` when the file `LAKANA_CA_BUNDLE` names cannot be read or holds no certificate,
+        or the connection's CA holds none.
     """
     try:
         return trust_context(ca_pem, verify=mode != "require")
@@ -370,6 +390,21 @@ def _context(ca_pem: str | None, mode: str) -> ssl.SSLContext:
             f"the trust bundle `{os.environ.get('LAKANA_CA_BUNDLE')}` (LAKANA_CA_BUNDLE) cannot "
             "be read; check that the file exists on this worker",
         ) from None
+    except ssl.SSLError:
+        pass
+    try:
+        trust_context(None)
+    except ssl.SSLError:
+        raise _Found(
+            "failed",
+            f"the trust bundle `{os.environ.get('LAKANA_CA_BUNDLE')}` (LAKANA_CA_BUNDLE) cannot "
+            "be read or holds no certificate; check the file on this worker",
+        ) from None
+    raise _Found(
+        "failed",
+        "the connection's ca_certificate holds no usable certificate; set it again with "
+        "`lakana connection update NAME --ca-file ca.pem`",
+    )
 
 
 def _tls(sock: socket.socket, host: str, ca_pem: str | None, mode: str) -> socket.socket:
@@ -576,7 +611,7 @@ def _check_mariadb(
     if len(head) == 5 and head[4] == 0x0A:
         return (
             "ok",
-            f"reachable: `{host}:{port}` greeted like MariaDB or MySQL (TLS not checked yet)",
+            f"reachable: `{host}:{port}` greeted like MariaDB or MySQL",
         )
     raise _Found(
         "failed",
@@ -737,10 +772,104 @@ def azure_shared_key(
     return headers
 
 
+def _dechunk(body: bytes) -> bytes:
+    """Join the chunks of a body sent with ``Transfer-Encoding: chunked``.
+
+    Parameters
+    ----------
+    body
+        The raw body, possibly cut short at the read limit.
+
+    Returns
+    -------
+    bytes
+        The data of every complete chunk; what follows a malformed size is dropped.
+    """
+    data = b""
+    while body:
+        size, _, rest = body.partition(b"\r\n")
+        try:
+            length = int(size.split(b";", 1)[0], 16)
+        except ValueError:
+            break
+        if length == 0:
+            break
+        data += rest[:length]
+        body = rest[length + 2 :]
+    return data
+
+
+def _exchange(
+    method: str,
+    url: str,
+    headers: Mapping[str, str],
+    routing: Mapping[str, Any],
+    t: float,
+    body: bytes = b"",
+) -> tuple[int, str]:
+    """Send one request over TLS (through the proxy or directly) and read the answer's start.
+
+    The check's only HTTP client: it follows no redirect (a 3xx is the answer) and reads at most
+    64 KiB.
+
+    Parameters
+    ----------
+    method
+        ``GET`` or ``POST``.
+    url
+        The ``https`` URL, query included.
+    headers
+        Headers besides ``Host``, ``Connection`` and ``Content-Length``.
+    routing
+        The routing entry.
+    t
+        Seconds per step.
+    body
+        What a ``POST`` sends.
+
+    Returns
+    -------
+    tuple
+        The status and up to 64 KiB of the body as text, chunks joined.
+
+    Raises
+    ------
+    _Found
+        For a network or TLS failure, a refusal of the egress proxy, or an answer that is not
+        HTTP.
+    """
+    parts = urlsplit(url)
+    host, port = parts.hostname or "", parts.port or 443
+    target = parts.path + (f"?{parts.query}" if parts.query else "")
+    lines = [f"{method} {target} HTTP/1.1", f"Host: {parts.netloc}", "Connection: close"]
+    lines += [f"{k}: {v}" for k, v in headers.items()]
+    if method == "POST":
+        lines.append(f"Content-Length: {len(body)}")
+    try:
+        sock = _open(host, port, routing, t)
+        try:
+            with _tls(sock, host, None, "verify-full") as tls:
+                tls.sendall(("\r\n".join(lines) + "\r\n\r\n").encode() + body)
+                data = b""
+                while len(data) < _ANSWER_LIMIT and (chunk := tls.recv(16384)):
+                    data += chunk
+        finally:
+            sock.close()
+    except OSError as exc:
+        _raise_network(exc, host, port, t)
+    head, _, answer = data.partition(b"\r\n\r\n")
+    status = head.split(b" ", 2)
+    if len(status) < 2 or not status[0].startswith(b"HTTP/") or not status[1].isdigit():
+        raise _Found("failed", f"`{host}:{port}` did not answer HTTP")
+    if re.search(rb"(?im)^transfer-encoding:[ \t]*chunked[ \t]*$", head):
+        answer = _dechunk(answer)
+    return int(status[1]), answer.decode(errors="replace")
+
+
 def _get(
     url: str, headers: Mapping[str, str], routing: Mapping[str, Any], t: float
 ) -> tuple[int, str]:
-    """Send one ``GET`` over TLS (through the proxy or directly) and read the answer's start.
+    """Send one ``GET`` with `_exchange`.
 
     Parameters
     ----------
@@ -757,34 +886,8 @@ def _get(
     -------
     tuple
         The status and up to 64 KiB of the body as text.
-
-    Raises
-    ------
-    _Found
-        For a network or TLS failure, or an answer that is not HTTP.
     """
-    parts = urlsplit(url)
-    host, port = parts.hostname or "", parts.port or 443
-    target = parts.path + (f"?{parts.query}" if parts.query else "")
-    lines = [f"GET {target} HTTP/1.1", f"Host: {parts.netloc}", "Connection: close"]
-    lines += [f"{k}: {v}" for k, v in headers.items()]
-    try:
-        sock = _open(host, port, routing, t)
-        try:
-            with _tls(sock, host, None, "verify-full") as tls:
-                tls.sendall(("\r\n".join(lines) + "\r\n\r\n").encode())
-                data = b""
-                while len(data) < _ANSWER_LIMIT and (chunk := tls.recv(16384)):
-                    data += chunk
-        finally:
-            sock.close()
-    except OSError as exc:
-        _raise_network(exc, host, port, t)
-    head, _, body = data.partition(b"\r\n\r\n")
-    status = head.split(b" ", 2)
-    if len(status) < 2 or not status[0].startswith(b"HTTP/") or not status[1].isdigit():
-        raise _Found("failed", f"`{host}:{port}` did not answer HTTP")
-    return int(status[1]), body.decode(errors="replace")
+    return _exchange("GET", url, headers, routing, t)
 
 
 def _store_answer(status: int, body: str, what: str) -> None:
@@ -882,6 +985,10 @@ def _azure_credentials(body: Mapping[str, Any], routing: Mapping[str, Any], t: f
     _store_answer(*_get(full, headers, routing, t), f"container `{container}`")
 
 
+class BundleUnreadable(OSError):
+    """The file `LAKANA_CA_BUNDLE` names cannot be read, or is not ASCII."""
+
+
 def conninfo(parts: Mapping[str, str]) -> str:
     r"""Write a libpq connection string, every value quoted.
 
@@ -925,14 +1032,17 @@ def root_certificates(ca_pem: str | None) -> Generator[str]:
 
     Raises
     ------
-    OSError
-        When the file `LAKANA_CA_BUNDLE` names cannot be read, or is not ASCII.
+    BundleUnreadable
+        When the file `LAKANA_CA_BUNDLE` names cannot be read, or is not ASCII; only then (a
+        failure to write the temporary file is an `OSError` of its own).
     """
     bundle = os.environ.get("LAKANA_CA_BUNDLE")
     try:
         trusted = Path(bundle).read_text(encoding="ascii") if bundle else ""
     except UnicodeDecodeError as exc:
-        raise OSError(errno.EINVAL, "the trust bundle is not ASCII PEM") from exc
+        raise BundleUnreadable(errno.EINVAL, "the trust bundle is not ASCII PEM") from exc
+    except OSError as exc:
+        raise BundleUnreadable(exc.errno, exc.strerror) from exc
     if not ca_pem:
         yield bundle or "system"
         return
@@ -1047,9 +1157,15 @@ def _postgresql_credentials(body: Mapping[str, Any], routing: Mapping[str, Any],
             if mode == "verify-full":
                 parts["sslrootcert"] = roots
             database = pg.connect(conninfo(parts))
-    except OSError:
+    except BundleUnreadable:
         unreadable = _bundle_unreadable()
         raise unreadable from None
+    except OSError as exc:
+        raise _Found(
+            "failed",
+            "could not write the connection's CA certificate for libpq "
+            f"({exc.strerror or type(exc).__name__})",
+        ) from None
     except pg.Error as exc:
         text = str(exc)
         if "password authentication failed" in text or "no pg_hba.conf entry" in text:
@@ -1219,7 +1335,7 @@ def _gcs_key(secret: Mapping[str, Any]) -> dict[str, Any]:
         raise _Found(
             "credentials",
             "the secret is not a service-account key (JSON with client_email, private_key and "
-            "token_uri); store the key file Google gave you",
+            f"token_uri); {GCS_KEY_HINT}",
         )
     return key
 
@@ -1245,6 +1361,7 @@ def _gcs_assertion(key: Mapping[str, Any], now: int) -> str:
         ``credentials`` for a private key that is no RSA key; ``failed`` without cryptography.
     """
     try:
+        from cryptography.exceptions import UnsupportedAlgorithm
         from cryptography.hazmat.primitives import hashes, serialization
         from cryptography.hazmat.primitives.asymmetric import padding, rsa
     except ImportError:
@@ -1252,10 +1369,14 @@ def _gcs_assertion(key: Mapping[str, Any], now: int) -> str:
         raise missing from None
     try:
         private = serialization.load_pem_private_key(key["private_key"].encode(), None)
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, UnsupportedAlgorithm):
         private = None
     if not isinstance(private, rsa.RSAPrivateKey):
-        raise _Found("credentials", "the key's private_key is not an RSA private key (PEM)")
+        raise _Found(
+            "credentials",
+            "the key's private_key is not an RSA private key (PEM); use a service-account JSON "
+            "key with an RSA private key: the key file Google gave you",
+        )
     header = {"alg": "RS256", "typ": "JWT"}
     if isinstance(key.get("private_key_id"), str):
         header["kid"] = key["private_key_id"]
@@ -1271,15 +1392,69 @@ def _gcs_assertion(key: Mapping[str, Any], now: int) -> str:
     return f"{signing}.{_b64url(signature)}"
 
 
-def _gcs_token(token_uri: str, assertion: str, t: float) -> str:
-    """Exchange a signed assertion for an access token, through the egress proxy when set.
+def _token_target(token_uri: str, declared: set[tuple[str, int]]) -> None:
+    """Accept a key's ``token_uri`` only as an ``https`` URL of a declared token endpoint.
+
+    Parsed once, strictly, before anything is signed: no whitespace or control character, no
+    user, a port that parses (and is declared: never 0), a host and port among the connection's
+    ``token`` endpoints.
 
     Parameters
     ----------
     token_uri
-        The key's token endpoint, already checked against the connection's endpoints.
+        The key's ``token_uri``.
+    declared
+        The connection's token endpoints, as host and port.
+
+    Raises
+    ------
+    _Found
+        ``credentials``, naming the field and the declared endpoints; nothing is sent.
+    """
+    shown = ", ".join(f"`{h}:{p}`" for h, p in sorted(declared)) or "none"
+    if any(c.isspace() or not c.isprintable() for c in token_uri):
+        malformed = True
+    else:
+        try:
+            parts = urlsplit(token_uri)
+            host, explicit = parts.hostname, parts.port
+        except ValueError:
+            malformed = True
+        else:
+            malformed = (
+                parts.scheme != "https"
+                or not host
+                or parts.username is not None
+                or parts.password is not None
+            )
+    if malformed:
+        raise _Found(
+            "credentials",
+            f"the key's token_uri `{token_uri[:200]}` is not an https URL of a token endpoint "
+            f"({shown}); {GCS_KEY_HINT}",
+        )
+    if (host, 443 if explicit is None else explicit) not in declared:
+        raise _Found(
+            "credentials",
+            f"the key's token_uri `{token_uri[:200]}` is not the connection's token endpoint "
+            f"({shown}); Lakana sends a signed key nowhere else: {GCS_KEY_HINT}",
+        )
+
+
+def _gcs_token(token_uri: str, assertion: str, routing: Mapping[str, Any], t: float) -> str:
+    """Exchange a signed assertion for an access token, the way the listing is sent.
+
+    The request goes over `_exchange`: through the egress proxy when the task has one, no
+    redirect followed.
+
+    Parameters
+    ----------
+    token_uri
+        The key's token endpoint, already checked by `_token_target`.
     assertion
         The signed JWT.
+    routing
+        The routing entry.
     t
         Seconds per step.
 
@@ -1291,55 +1466,33 @@ def _gcs_token(token_uri: str, assertion: str, t: float) -> str:
     Raises
     ------
     _Found
-        ``credentials`` when Google refuses the key, ``tls``, ``timeout`` or ``failed`` for the
-        request itself, ``failed`` without httpx.
+        ``credentials`` when Google refuses the key; the network outcomes of `_exchange`;
+        ``failed`` for another answer.
     """
-    try:
-        import httpx
-    except ImportError:
-        missing = _unavailable("httpx", "httpx")
-        raise missing from None
     parts = urlsplit(token_uri)
     where = f"`{parts.hostname}:{parts.port or 443}`"
+    form = _query(
+        {"grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer", "assertion": assertion}
+    )
+    status, text = _exchange(
+        "POST",
+        token_uri,
+        {"Content-Type": "application/x-www-form-urlencoded"},
+        routing,
+        t,
+        form.encode("ascii"),
+    )
     try:
-        with httpx.Client(
-            proxy=os.environ.get("LAKANA_EGRESS_PROXY") or None,
-            trust_env=False,
-            verify=_context(None, "verify-full"),
-            timeout=t,
-            follow_redirects=False,
-        ) as client:
-            answer = client.post(
-                token_uri,
-                data={
-                    "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
-                    "assertion": assertion,
-                },
-            )
-    except httpx.TimeoutException:
-        raise _Found("timeout", f"{where} did not answer within {t:g} s") from None
-    except httpx.HTTPError as exc:
-        cause = exc.__cause__ or exc.__context__
-        if isinstance(cause, ssl.SSLCertVerificationError) or "CERTIFICATE_VERIFY_FAILED" in str(
-            exc
-        ):
-            raise _Found("tls", _tls_text(parts.hostname or "")) from None
-        raise _Found(
-            "failed", f"the token request to {where} failed ({type(exc).__name__})"
-        ) from None
-    try:
-        said = answer.json()
+        said = json.loads(text)
     except ValueError:
         said = {}
     said = said if isinstance(said, dict) else {}
-    if answer.status_code in (400, 401, 403):
-        detail = ": ".join(str(said[k]) for k in ("error", "error_description") if k in said)
-        raise _Found(
-            "credentials", f"Google refused the key ({detail or f'HTTP {answer.status_code}'})"
-        )
+    if status in (400, 401, 403):
+        detail = ": ".join(str(said[k])[:300] for k in ("error", "error_description") if k in said)
+        raise _Found("credentials", f"Google refused the key ({detail or f'HTTP {status}'})")
     token = said.get("access_token")
-    if answer.status_code != 200 or not isinstance(token, str):
-        raise _Found("failed", f"the token endpoint {where} answered HTTP {answer.status_code}")
+    if status != 200 or not isinstance(token, str):
+        raise _Found("failed", f"the token endpoint {where} answered HTTP {status}")
     return token
 
 
@@ -1366,19 +1519,11 @@ def _gcs_credentials(body: Mapping[str, Any], routing: Mapping[str, Any], t: flo
     """
     key = _gcs_key(body["secret"])
     token_uri = key["token_uri"]
-    parts = urlsplit(token_uri)
     declared = {
         (str(e["host"]), int(e["port"])) for e in body["endpoints"] if e.get("role") == "token"
     }
-    if parts.scheme != "https" or (parts.hostname, parts.port or 443) not in declared:
-        shown = ", ".join(f"`{h}:{p}`" for h, p in sorted(declared)) or "none"
-        raise _Found(
-            "credentials",
-            f"the key's token_uri `{token_uri[:200]}` is not the connection's token endpoint "
-            f"({shown}); Lakana sends a signed key nowhere else: store the key file Google gave "
-            "you",
-        )
-    token = _gcs_token(token_uri, _gcs_assertion(key, int(time.time())), t)
+    _token_target(token_uri, declared)
+    token = _gcs_token(token_uri, _gcs_assertion(key, int(time.time())), routing, t)
     bucket = str(body["address"]["bucket"])
     params = {"maxResults": "1"}
     if body["settings"].get("prefix"):
@@ -1621,7 +1766,9 @@ def check(
             message += ", credentials accepted"
         elif outcome == "ok" and secret and kind == "mariadb":
             tls = _mariadb_credentials(connection, route, timeout)
-            message = message.replace(" (TLS not checked yet)", f", {tls}, credentials accepted")
+            message += f", {tls}, credentials accepted"
+        elif outcome == "ok" and kind == "mariadb":
+            message += MARIADB_NO_SECRET
         elif outcome == "ok" and kind == "sqlite-file":
             _sqlite_opens(route)
             message += "; it opens read-only as a SQLite database"

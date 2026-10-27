@@ -23,6 +23,7 @@ import io
 import ipaddress
 import json
 import os
+import re
 import secrets
 import sqlite3
 import tarfile
@@ -68,11 +69,14 @@ pytestmark = [pytest.mark.integration, pytest.mark.docker, pytest.mark.slow]
 shards' reports, which never hold an integration test, so the marker does not count there."""
 
 _HOST = "target.lakana.test"
+_GOOGLE = ("oauth2.googleapis.com", "storage.googleapis.com")
+"""The source answers for Google's two hosts too (port 443), under their real names, which the
+egress proxy resolves on the source's network: a gcs connection's endpoints, unchanged."""
 _HINT = "give the connection an address outside the Lakana stack (lakana connection update)"
 _SSL_REQUEST = b"\x00\x00\x00\x08\x04\xd2\x16\x2f"
 """The first message of a PostgreSQL client that asks for TLS; a server without it says ``N``."""
 
-_SOURCE = f"""import socket, ssl, threading
+_SOURCE = f"""import base64, json, socket, ssl, threading, urllib.parse
 context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
 context.load_cert_chain({APP!r} + "/leaf.pem", {APP!r} + "/leaf.key")
 def https(connection):
@@ -90,6 +94,43 @@ def echo(connection):
     with connection:
         while data := connection.recv(65536):
             connection.sendall(data)
+def google(connection):
+    # Google's token endpoint and the GCS listing, by their real names: the token is given
+    # to an assertion whose key id is "right"; the listing wants that token.
+    try:
+        with context.wrap_socket(connection, server_side=True) as tls:
+            data = b""
+            while b"\\r\\n\\r\\n" not in data:
+                chunk = tls.recv(4096)
+                if not chunk:
+                    return
+                data += chunk
+            head, _, body = data.partition(b"\\r\\n\\r\\n")
+            lines = head.decode("latin-1").split("\\r\\n")
+            headers = {{k.strip().lower(): v.strip() for k, _, v in
+                       (line.partition(":") for line in lines[1:])}}
+            while len(body) < int(headers.get("content-length", "0")):
+                body += tls.recv(4096)
+            method, target = lines[0].split(" ")[:2]
+            if method == "POST" and target == "/token":
+                form = dict(urllib.parse.parse_qsl(body.decode()))
+                part = form.get("assertion", "").split(".")[0]
+                header = json.loads(base64.urlsafe_b64decode(part + "=" * (-len(part) % 4)))
+                if header.get("kid") == "right":
+                    status, answer = 200, {{"access_token": "tok-right", "expires_in": 3599}}
+                else:
+                    status, answer = 400, {{"error": "invalid_grant",
+                                           "error_description": "Invalid JWT Signature."}}
+            elif method == "GET" and target.startswith("/storage/v1/b/landing/o?"):
+                good = headers.get("authorization") == "Bearer tok-right"
+                status, answer = (200, {{"items": []}}) if good else (401, {{}})
+            else:
+                status, answer = 404, {{}}
+            out = json.dumps(answer).encode()
+            tls.sendall(b"HTTP/1.1 %d X\\r\\nContent-Length: %d\\r\\nConnection: close\\r\\n\\r\\n"
+                        % (status, len(out)) + out)
+    except (OSError, ssl.SSLError, ValueError):
+        pass
 def serve(port, handler):
     server = socket.create_server(("0.0.0.0", port))
     while True:
@@ -104,6 +145,7 @@ for _ in range(2):
     fillers.append(filler)
 threading.Thread(target=serve, args=(5432, postgres), daemon=True).start()
 threading.Thread(target=serve, args=(9000, echo), daemon=True).start()
+threading.Thread(target=serve, args=(443, google), daemon=True).start()
 serve(8443, https)
 """
 """The source: TLS on 8443, the first PostgreSQL answer on 5432, an echo on 9000, and on 7000 a
@@ -280,7 +322,7 @@ def sources(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Sources]:
     """
     material = tmp_path_factory.mktemp("authority")
     authority = make_authority(material)
-    certificate, key = issue_leaf(authority, material, names=(_HOST,))
+    certificate, key = issue_leaf(authority, material, names=(_HOST, *_GOOGLE))
     bundle = build_trust_bundle(authority.ca_file)
     assert bundle is not None
     client = docker_client()
@@ -299,7 +341,7 @@ def sources(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Sources]:
                 labels=current.labels,
                 network=network.name,
                 networking_config={
-                    network.name: client.api.create_endpoint_config(aliases=[_HOST])
+                    network.name: client.api.create_endpoint_config(aliases=[_HOST, *_GOOGLE])
                 },
             )
             source.put_archive(
@@ -1716,3 +1758,151 @@ def test_connection_test_checks_credentials_on_the_check_environment(
     ), opened
     assert sorted(p.name for p in host_dir.iterdir()) == ["app.db"]
     assert not [name for name in sources.stack.labelled() if "check" in name]
+
+
+def _python_base(version: str) -> str:
+    """Read `Dockerfile.task`'s base image of one Python, by digest.
+
+    Parameters
+    ----------
+    version
+        Such as ``3.14``.
+
+    Returns
+    -------
+    str
+        ``python:<version>-slim@sha256:...``.
+    """
+    text = (docker_stack.REPO / "Dockerfile.task").read_text()
+    found = re.search(
+        rf"^FROM (python:{re.escape(version)}-slim@sha256:[0-9a-f]{{64}}) ", text, re.M
+    )
+    assert found is not None
+    return found.group(1)
+
+
+def test_a_task_image_without_the_check_environment_is_named(
+    sources: Sources, worker_side: _Mirrored
+) -> None:
+    """An image of an earlier release: Docker cannot start the check's Python.
+
+    The task image's own base, which has `/usr/local/bin/python` but no `/opt/lakana-check-env`,
+    stands in for it. The launcher reports Docker's start failure; the worker says the image is
+    older than the worker, not that the launcher is down.
+    """
+    client = sources.stack.client
+    base = _python_base(PYTHON)
+    client.images.pull(base)
+    launcher = sources.stack.launcher
+    assert launcher is not None
+
+    with sources.stack.configured(images={**launcher.settings.images, PYTHON: base}):
+        found = _check(sources, worker_side, "tcp", {"host": _HOST, "port": 9000}, {}, trust=False)
+
+    assert found[:2] == ("failed", connection_tests.NO_CHECK_IN_IMAGE), found
+    assert not [name for name in sources.stack.labelled() if found[2] in name]
+
+
+def _gcs_key(kid: str, token_uri: str = "https://oauth2.googleapis.com/token") -> str:
+    """Make a service-account key the source's token endpoint accepts by its key id.
+
+    Parameters
+    ----------
+    kid
+        ``right`` gets a token; anything else is refused as Google refuses a bad signature.
+    token_uri
+        The key's token endpoint.
+
+    Returns
+    -------
+    str
+        The key's JSON.
+    """
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+
+    pem = (
+        rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        .private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+        .decode()
+    )
+    return json.dumps(
+        {
+            "type": "service_account",
+            "client_email": "reader@project.iam.gserviceaccount.com",
+            "private_key_id": kid,
+            "private_key": pem,
+            "token_uri": token_uri,
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    ("key", "pairs", "outcome", "words"),
+    [
+        ("right", None, "ok", "credentials accepted"),
+        ("wrong", None, "credentials", "Google refused the key (invalid_grant: Invalid JWT"),
+        ("elsewhere", None, "credentials", "is not the connection's token endpoint"),
+        (
+            "right",
+            (("storage.googleapis.com", 443),),
+            "not_allowed",
+            "oauth2.googleapis.com:443",
+        ),
+    ],
+    ids=["ok", "refused-key", "undeclared-token-uri", "proxy-refuses-token-host"],
+)
+def test_a_gcs_key_is_checked_through_the_egress_proxy(
+    sources: Sources,
+    worker_side: _Mirrored,
+    key: str,
+    pairs: tuple[tuple[str, int], ...] | None,
+    outcome: str,
+    words: str,
+) -> None:
+    """The signed token request and the listing tunnel through the real egress service.
+
+    The source answers for ``oauth2.googleapis.com`` and ``storage.googleapis.com`` on the
+    source network, so the connection's endpoints are a real gcs connection's. A key whose
+    ``token_uri`` names another host is refused by the check before anything is sent; a proxy
+    token that does not name the token host is refused by the proxy (``not_allowed``).
+
+    Parameters
+    ----------
+    sources
+        The module's stack.
+    worker_side
+        The worker's launcher client.
+    key
+        ``right``, ``wrong`` (the token endpoint refuses it) or ``elsewhere`` (its
+        ``token_uri`` is the source's own host).
+    pairs
+        Proxy pairs replacing the planned ones.
+    outcome
+        The expected outcome.
+    words
+        Part of the expected message.
+    """
+    if key == "elsewhere":
+        secret = _gcs_key("right", f"https://{_HOST}:8443/token")
+    else:
+        secret = _gcs_key(key)
+
+    found, message, ident = _check(
+        sources,
+        worker_side,
+        "gcs",
+        {"bucket": "landing"},
+        {"prefix": "in/"},
+        trust=True,
+        egress_pairs=pairs,
+        secret={"service_account_json": secret},
+    )
+
+    assert (found, words in message) == (outcome, True), message
+    assert "tok-right" not in message and "PRIVATE KEY" not in message
+    assert not [name for name in sources.stack.labelled() if ident in name]

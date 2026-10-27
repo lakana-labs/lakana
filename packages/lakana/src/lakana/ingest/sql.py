@@ -350,7 +350,7 @@ def _read_postgres(
             if tls == "verify-full":
                 parts["sslrootcert"] = roots
             database = pg.connect(_check.conninfo(parts))
-    except OSError:
+    except _check.BundleUnreadable:
         raise UsageError(
             f"the trust bundle `{os.environ.get('LAKANA_CA_BUNDLE')}` (LAKANA_CA_BUNDLE) cannot "
             "be read; check the worker's LAKANA_RUN__CA_BUNDLE"

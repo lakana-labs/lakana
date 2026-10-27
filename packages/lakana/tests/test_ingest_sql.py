@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import errno
 import os
 import socket
 import sqlite3
@@ -23,6 +24,7 @@ from lakana.ingest import (
     SourceError,
     SourceRefused,
     UsageError,
+    _check,
     _connections,
     _types,
     sql,
@@ -595,6 +597,24 @@ def test_an_unreadable_trust_bundle_names_the_worker_setting(
         sql.read("crm-db", "SELECT 1")
 
     assert caught.value.retryable is False
+    assert driver.seen == []
+
+
+def test_a_ca_file_that_cannot_be_written_keeps_its_own_words(
+    driver: _Driver, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only the bundle's read is an unreadable bundle; a full /tmp is said as such."""
+
+    def full(*args: object, **kwargs: object) -> object:
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr(_check.tempfile, "NamedTemporaryFile", full)
+    _postgres(relay=True, settings={"user": "reader", "ca_certificate": "-----BEGIN"})
+
+    with pytest.raises(OSError, match="No space left on device") as caught:
+        sql.read("crm-db", "SELECT 1")
+
+    assert "trust bundle" not in str(caught.value)
     assert driver.seen == []
 
 

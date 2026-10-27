@@ -104,6 +104,8 @@ class FakeEngine:
         Whether ``GET /containers/{id}/json`` reports an out-of-memory kill.
     no_new_privileges_works
         Whether a container with that option starts.
+    start_failures
+        Container kind (``check``, ``task``) to the message Docker answers its start with (400).
     write_first
         Whether a container writes its output before it reads stdin.
     hold
@@ -160,6 +162,7 @@ class FakeEngine:
     exit_code: int = 0
     oom: bool = False
     no_new_privileges_works: bool = True
+    start_failures: dict[str, str] = field(default_factory=dict)
     write_first: bool = False
     hold: bool = False
     services: dict[str, str] = field(
@@ -411,6 +414,9 @@ class FakeEngine:
             options = container["spec"]["HostConfig"]["SecurityOpt"]
             if "no-new-privileges" in options and not self.no_new_privileges_works:
                 return 400, {"message": "exec /usr/local/bin/python: operation not permitted"}
+            failure = self.start_failures.get(container["Labels"]["lakana.launcher.kind"])
+            if failure is not None:
+                return 400, {"message": failure}
             if container["Labels"]["lakana.launcher.kind"] == "task":
                 self._hook("start")
             container["running"] = True

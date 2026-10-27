@@ -120,7 +120,9 @@ Then, for a connection with a secret, the credentials:
 - `postgresql`: a login, with `SELECT 1` run in a read-only transaction.
 - `mariadb`: a login over TLS as the connection's `tls` says (`verify-full` checks the certificate,
   `require` uses TLS without checking it, `disable` uses none; a server without TLS is `tls`, never
-  a quiet fallback to plain text), with `SELECT 1` in a read-only transaction.
+  a quiet fallback to plain text), with `SELECT 1` in a read-only transaction. A `mariadb`
+  connection without a secret is checked by the server's greeting only: its TLS and credentials
+  are not checked, and the message says so.
 - `s3`, `azure` and `gcs`: a listing of at most one object under the connection's prefix (an `s3`
   request is signed with SigV4, an `azure` one with the account key or the SAS token). A `gcs` key
   signs a token request that goes to Google's token endpoint (`oauth2.googleapis.com`) only: a key
@@ -134,9 +136,9 @@ or the store's own words; the password, the key and any token never appear in th
 connection is checked for reachability only. Any worker runs the check.
 
 With the local runner it is a subprocess of the worker's Python, which needs `lakana` installed next
-to the worker (without it the test fails and says so), `lakana[assets]` for `postgresql`, `mariadb`
-and `sqlite-file` connections, and `cryptography` as well for a `gcs` connection with a key.
-Without them the test is `failed`, and its message names the module the worker's Python cannot import and what to install
+to the worker (without it the test fails and says so), and `lakana[assets]` for `postgresql`,
+`mariadb` and `sqlite-file` connections (a `gcs` key needs nothing more: the worker brings
+`cryptography`). Without the drivers the test is `failed`, and its message names the module the worker's Python cannot import and what to install
 (``... cannot import `adbc_driver_postgresql`; install lakana[assets] next to the worker ...``);
 it never passes without checking.
 

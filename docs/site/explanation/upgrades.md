@@ -160,10 +160,10 @@ to Google's token endpoint and listing at most one object. A refused login or ke
 [Test a connection](../reference/connections.md#test-a-connection).
 
 **Breaking, for the local runner only.** The check runs on the worker's own Python there, and it
-needs the drivers: a test of a `postgresql`, `mariadb` or `sqlite-file` connection now fails
-unless `lakana[assets]` is installed next to the worker, and of a `gcs` connection with a key
-unless `cryptography` is. The message names the module and what to install. Install both
-packages in the worker's environment, or use the Docker runner.
+needs the database drivers: a test of a `postgresql`, `mariadb` or `sqlite-file` connection now
+fails unless `lakana[assets]` is installed next to the worker. The message names the module and
+what to install. Install `lakana[assets]` in the worker's environment, or use the Docker runner.
+A `gcs` key needs nothing more: the worker already has what signs it.
 
 Under the Docker runner nothing is to install: each task image now holds a check environment,
 `/opt/lakana-check-env`, with exactly the check's drivers (installed by hash from the release's

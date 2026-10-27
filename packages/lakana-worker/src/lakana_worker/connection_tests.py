@@ -626,15 +626,15 @@ class ConnectionTestLoop:
             try:
                 result, output = docker.client.check(fields, timeout=CHECK_WAIT_SECONDS)
             except LauncherRefused as exc:
-                if CHECK_ENTRY[0] in str(exc):
-                    # Docker could not start the check environment's Python: an older image.
-                    return "failed", NO_CHECK_IN_IMAGE
                 root = _root_refusal(str(exc), connection["name"], roots)
                 if root is not None:
                     return "root_unavailable", root
                 next_step = RELEASE_SKEW if _skew(str(exc)) else LAUNCHER_LOG
                 return "failed", f"the launcher refused the check: {exc}; {next_step}"
             except (LauncherUnavailable, LauncherTimedOut) as exc:
+                if isinstance(exc, LauncherUnavailable) and CHECK_ENTRY[0] in str(exc):
+                    # Docker could not start the check environment's Python: an older image.
+                    return "failed", NO_CHECK_IN_IMAGE
                 return "failed", f"{exc}; {LAUNCHER_LOG}"
         finally:
             if not remove_private_tree(attempt):
@@ -667,8 +667,9 @@ class ConnectionTestLoop:
             logger.warning(
                 "A connection check ended without an answer (exit %s).", result.get("exit")
             )
-            # Python's own exit status for a script it cannot open: an image without the check.
-            if result.get("exit") == 2 or f"can't open file '{CHECK_ENTRY[-1]}'" in text:
+            # Python's own exit status for a script it cannot open, and Docker's init's for an
+            # entry point it cannot start (127): an image without the check or its environment.
+            if result.get("exit") in (2, 127) or f"can't open file '{CHECK_ENTRY[-1]}'" in text:
                 return "failed", NO_CHECK_IN_IMAGE
             return "failed", CHECK_BROKEN
         return answer

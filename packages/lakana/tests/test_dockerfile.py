@@ -10,6 +10,8 @@ from pathlib import Path
 
 import yaml
 
+from lakana.ingest import _check
+
 _DOCKERFILE = Path(__file__).resolve().parents[3] / "Dockerfile"
 _COMPOSE = (
     Path(__file__).resolve().parents[1] / "src" / "lakana" / "cli" / "deploy" / "compose.yaml"
@@ -387,10 +389,10 @@ def test_the_task_image_holds_lakanas_own_check_and_runs_it_as_the_launcher_will
     assert "UV_PYTHON_DOWNLOADS=never" in step and "UV_NO_CACHE=1" in step
     assert "chown -R 0:0 /opt/lakana-check /opt/lakana-check-env" in step
     assert "chmod -R a-w,a+rX /opt/lakana-check /opt/lakana-check-env" in step
-    assert (
-        "import adbc_driver_postgresql.dbapi, adbc_driver_sqlite.dbapi, cryptography, httpx, "
-        "pymysql" in step
-    )
+    smoke = re.search(r"-c 'import ([^']+)'", step)
+    assert smoke is not None
+    imported = {name.strip().split(".")[0] for name in smoke.group(1).split(",")}
+    assert imported == set(_check.DRIVERS)
     assert "/opt/lakana-check-env/bin/python -I -B /opt/lakana-check/check.py" in step
     assert "does not know the kind" in step
     assert "dist/*" not in text and "pip install --no-deps /wheels" not in text
@@ -408,15 +410,9 @@ def test_the_check_environment_is_the_lock_s_check_group_and_nothing_else() -> N
     group = tomllib.loads((_TASK_DOCKERFILE.parent / "pyproject.toml").read_text())[
         "dependency-groups"
     ]["check"]
-    names = sorted(entry.split(">")[0].split("=")[0].lower() for entry in group)
+    names = {entry.split(">")[0].split("=")[0].lower() for entry in group}
 
-    assert names == [
-        "adbc-driver-postgresql",
-        "adbc-driver-sqlite",
-        "cryptography",
-        "httpx",
-        "pymysql",
-    ]
+    assert names == {name.lower() for name in _check.DRIVERS.values()}
 
 
 def test_the_task_image_pins_the_same_uv_as_the_main_image() -> None:

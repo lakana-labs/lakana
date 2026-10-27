@@ -964,7 +964,7 @@ def test_every_context_the_check_makes_refuses_tls_older_than_1_2(mode: str) -> 
     assert context.minimum_version == ssl.TLSVersion.TLSv1_2
 
 
-DRIVERS = {"adbc_driver_postgresql", "adbc_driver_sqlite", "pymysql", "cryptography", "httpx"}
+DRIVERS = set(_check.DRIVERS)
 """What the check environment installs, and the only packages `_check` may import besides the
 standard library: inside a credential step, never at module level."""
 
@@ -1378,6 +1378,10 @@ class Google:
         A body that replaces the token answer's, or `None`.
     list_raw
         A body that replaces the listing's, or `None`.
+    token_headers
+        Extra headers of the token answer (a redirect's ``Location``).
+    chunked
+        Whether every answer is sent with ``Transfer-Encoding: chunked``, as Google may.
     """
 
     port: int
@@ -1387,6 +1391,8 @@ class Google:
     list_status: int = 200
     token_raw: bytes | None = None
     list_raw: bytes | None = None
+    token_headers: dict[str, str] = field(default_factory=dict)
+    chunked: bool = False
 
 
 @contextmanager
@@ -1425,9 +1431,24 @@ def google(authority: Authority, tmp_path: Path) -> Generator[tuple[Google, str]
     class Handler(http.server.BaseHTTPRequestHandler):
         """Answers as configured and records."""
 
-        def _answer(self, status: int, body: Mapping[str, object], raw: bytes | None) -> None:
+        def _answer(
+            self,
+            status: int,
+            body: Mapping[str, object],
+            raw: bytes | None,
+            headers: Mapping[str, str] | None = None,
+        ) -> None:
             data = json.dumps(body).encode() if raw is None else raw
             self.send_response(status)
+            for name, value in (headers or {}).items():
+                self.send_header(name, value)
+            if state.chunked:
+                self.send_header("Transfer-Encoding", "chunked")
+                self.end_headers()
+                half = len(data) // 2
+                for part in (data[:half], data[half:], b""):
+                    self.wfile.write(f"{len(part):x}\r\n".encode() + part + b"\r\n")
+                return
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
             self.wfile.write(data)
@@ -1441,7 +1462,7 @@ def google(authority: Authority, tmp_path: Path) -> Generator[tuple[Google, str]
                 self._answer(200, {"access_token": "tok", "expires_in": 3599}, state.token_raw)
             else:
                 body = {"error": "invalid_grant", "error_description": "Invalid JWT Signature."}
-                self._answer(state.token_status, body, state.token_raw)
+                self._answer(state.token_status, body, state.token_raw, state.token_headers)
 
         def do_GET(self) -> None:
             """Record a listing and answer it."""
@@ -2155,10 +2176,30 @@ def test_a_gcs_key_without_an_rsa_private_key_is_credentials(
 
     outcome, message = _check.check(_gcs(server.port, bad), {}, timeout=FAST)
 
-    assert (outcome, message) == (
-        "credentials",
-        "the key's private_key is not an RSA private key (PEM)",
-    )
+    assert (outcome, message) == ("credentials", NOT_RSA)
+    assert server.seen == []
+
+
+NOT_RSA = (
+    "the key's private_key is not an RSA private key (PEM); use a service-account JSON key with "
+    "an RSA private key: the key file Google gave you"
+)
+
+
+def test_a_gcs_key_of_an_algorithm_cryptography_cannot_load_is_credentials(
+    gcs_server: tuple[Google, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`UnsupportedAlgorithm` is not a `ValueError`: it gets the same outcome and next step."""
+    from cryptography.exceptions import UnsupportedAlgorithm
+    from cryptography.hazmat.primitives import serialization
+
+    def unsupported(data: bytes, password: object) -> object:
+        raise UnsupportedAlgorithm("no such curve")
+
+    monkeypatch.setattr(serialization, "load_pem_private_key", unsupported)
+    server, key_json = gcs_server
+
+    assert _check.check(_gcs(server.port, key_json), {}, timeout=FAST) == ("credentials", NOT_RSA)
     assert server.seen == []
 
 
@@ -2184,20 +2225,62 @@ def test_a_gcs_key_without_an_id_signs_without_kid_and_lists_the_whole_bucket(
     assert list_path == "/storage/v1/b/landing/o?maxResults=1"
 
 
-def test_without_httpx_a_gcs_test_fails_saying_what_to_install(
+def test_the_token_request_needs_no_httpx_and_reads_a_chunked_answer(
     gcs_server: tuple[Google, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Strict, as for cryptography."""
+    """It goes out on the check's own socket path, as the listing does; Google may chunk."""
     server, key_json = gcs_server
+    server.chunked = True
     monkeypatch.setitem(sys.modules, "httpx", None)
 
     outcome, message = _check.check(_gcs(server.port, key_json), {}, timeout=FAST)
 
-    assert (outcome, message) == (
-        "failed",
-        _check.UNAVAILABLE.format(module="httpx", package="httpx"),
-    )
-    assert server.seen == []
+    assert (outcome, message.endswith(", credentials accepted")) == ("ok", True), message
+    (method, path, headers, form), _ = server.seen
+    assert (method, path) == ("POST", "/token")
+    assert headers["content-type"] == "application/x-www-form-urlencoded"
+    assert headers["host"] == f"localhost:{server.port}"
+    assert set(form) == {"grant_type", "assertion"}
+
+
+def test_a_token_endpoint_that_redirects_is_not_followed(
+    gcs_server: tuple[Google, str], authority: Authority, tmp_path: Path
+) -> None:
+    """A 3xx is the answer: the assertion is never sent to the place it names."""
+    server, key_json = gcs_server
+    (tmp_path / "other").mkdir()
+    with answering(authority, tmp_path / "other", 200) as other:
+        server.token_status = 302
+        server.token_headers = {"Location": f"https://localhost:{other.port}/token"}
+
+        outcome, message = _check.check(_gcs(server.port, key_json), {}, timeout=FAST)
+
+    assert outcome == "failed"
+    assert f"the token endpoint `localhost:{server.port}` answered HTTP 302" in message
+    assert [method for method, *_ in server.seen] == ["POST"]
+    assert other.requests == []
+
+
+def test_an_egress_proxy_refusal_of_the_token_request_keeps_its_outcome_and_reason(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The token request tunnels through the proxy as every other request of the check does."""
+    reason = b"lakana-egress: oauth2.googleapis.com:443 is not a destination of this token\n"
+
+    def refuses(sock: socket.socket) -> None:
+        sock.recv(4096)
+        sock.sendall(
+            b"HTTP/1.1 403 Forbidden\r\nContent-Length: "
+            + str(len(reason)).encode()
+            + b"\r\n\r\n"
+            + reason
+        )
+        sock.close()
+
+    with proxy_says(monkeypatch, refuses), pytest.raises(_check._Found) as found:
+        _check._gcs_token("https://oauth2.googleapis.com/token", "a.b.c", {"_kind": "gcs"}, FAST)
+
+    assert (found.value.outcome, found.value.message) == ("not_allowed", reason.decode().strip())
 
 
 @pytest.mark.parametrize(
@@ -2245,7 +2328,7 @@ def test_a_token_endpoint_with_an_untrusted_certificate_is_tls(
     monkeypatch.delenv("LAKANA_CA_BUNDLE")
 
     with pytest.raises(_check._Found) as found:
-        _check._gcs_token(f"https://localhost:{server.port}/token", "a.b.c", FAST)
+        _check._gcs_token(f"https://localhost:{server.port}/token", "a.b.c", {}, FAST)
 
     assert (found.value.outcome, found.value.message) == (
         "tls",
@@ -2257,7 +2340,7 @@ def test_a_token_endpoint_with_an_untrusted_certificate_is_tls(
 def test_a_token_endpoint_that_does_not_answer_is_timeout() -> None:
     """A step's seconds bound the token request."""
     with listening() as port, pytest.raises(_check._Found) as found:
-        _check._gcs_token(f"https://localhost:{port}/token", "a.b.c", 0.2)
+        _check._gcs_token(f"https://localhost:{port}/token", "a.b.c", {}, 0.2)
 
     assert (found.value.outcome, found.value.message) == (
         "timeout",
@@ -2265,16 +2348,16 @@ def test_a_token_endpoint_that_does_not_answer_is_timeout() -> None:
     )
 
 
-def test_a_token_endpoint_that_refuses_the_connection_fails() -> None:
-    """Named by host, port and the error's kind; never the assertion."""
+def test_a_token_endpoint_that_refuses_the_connection_is_refused() -> None:
+    """Named by host and port, as every network failure of the check; never the assertion."""
     port = closed_port()
 
     with pytest.raises(_check._Found) as found:
-        _check._gcs_token(f"https://localhost:{port}/token", "a.b.c", FAST)
+        _check._gcs_token(f"https://localhost:{port}/token", "a.b.c", {}, FAST)
 
     assert (found.value.outcome, found.value.message) == (
-        "failed",
-        f"the token request to `localhost:{port}` failed (ConnectError)",
+        "refused",
+        f"`localhost:{port}` refused the connection",
     )
 
 
@@ -2285,3 +2368,137 @@ def test_the_check_escapes_exactly_what_safe_name_escapes() -> None:
     text = "".join(chr(code) for code in range(0x2100))
 
     assert _check._safe(text) == safe_name(text)
+
+
+@pytest.mark.parametrize(
+    "template",
+    [
+        "https://[localhost]/token",
+        "https://localhost:{port}:80/token",
+        "https://localhost:99999/token",
+        "https://localhost:0/token",
+        "https://local\thost:{port}/token",
+        "https://localhost:{port}/to\rken",
+        "https://localhost:{port}/token\n",
+        "https://user:pw@localhost:{port}/token",
+        "http://localhost:{port}/token",
+        "https:///token",
+    ],
+)
+def test_a_malformed_token_uri_is_named_and_never_sent(
+    gcs_server: tuple[Google, str], template: str
+) -> None:
+    """Parsed once, strictly: no port 0, no second port, no whitespace, no user."""
+    server, key_json = gcs_server
+    uri = template.format(port=server.port)
+    bad = json.dumps({**json.loads(key_json), "token_uri": uri})
+
+    outcome, message = _check.check(_gcs(server.port, bad), {}, timeout=FAST)
+
+    assert outcome == "credentials"
+    assert "the key's token_uri" in message and "the key file Google gave you" in message
+    assert server.seen == []
+
+
+def test_a_mariadb_trust_bundle_that_holds_no_certificate_is_named(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A file that is there but no PEM: the variable is named, not an `SSLError`."""
+    _fake_pymysql(monkeypatch)
+    bundle = tmp_path / "bundle.pem"
+    bundle.write_text("not a pem")
+    monkeypatch.setenv("LAKANA_CA_BUNDLE", str(bundle))
+
+    with pytest.raises(_check._Found) as found:
+        _check._mariadb_credentials(_maria_body(5), {}, FAST)
+
+    assert (found.value.outcome, found.value.message) == (
+        "failed",
+        f"the trust bundle `{bundle}` (LAKANA_CA_BUNDLE) cannot be read or holds no "
+        "certificate; check the file on this worker",
+    )
+
+
+def test_a_connection_ca_that_holds_no_certificate_is_named(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The bundle is fine; the connection's own CA is not."""
+    _fake_pymysql(monkeypatch)
+    body = _maria_body(5)
+    body["settings"] = {"user": "reader", "ca_certificate": "not a pem"}
+
+    with pytest.raises(_check._Found) as found:
+        _check._mariadb_credentials(body, {}, FAST)
+
+    assert (found.value.outcome, found.value.message) == (
+        "failed",
+        "the connection's ca_certificate holds no usable certificate; set it again with "
+        "`lakana connection update NAME --ca-file ca.pem`",
+    )
+
+
+def test_a_ca_file_that_cannot_be_written_is_not_called_an_unreadable_bundle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only the bundle's read says the bundle cannot be read; a full /tmp keeps its own words."""
+    seen = _fake_postgres(monkeypatch)
+
+    def full(*args: object, **kwargs: object) -> object:
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr(_check.tempfile, "NamedTemporaryFile", full)
+    body = connection(
+        "postgresql",
+        {"host": "db.example.com", "port": 5432, "database": "crm"},
+        {"user": "reader", "ca_certificate": "-----BEGIN CERTIFICATE-----"},
+        secret={"password": SECRET},
+    )
+
+    with pytest.raises(_check._Found) as found:
+        _check._postgresql_credentials(body, {}, FAST)
+
+    assert (found.value.outcome, found.value.message) == (
+        "failed",
+        "could not write the connection's CA certificate for libpq (No space left on device)",
+    )
+    assert seen == []
+
+
+def test_a_mariadb_test_without_a_secret_says_what_it_did_not_check() -> None:
+    """The greeting only: no TLS, no login, said so."""
+    with listening(_greeting_server) as port:
+        body = _maria_body(port)
+        body["secret"] = None
+        outcome, message = _check.check(body, {}, timeout=FAST)
+
+    assert (outcome, message) == (
+        "ok",
+        f"reachable: `127.0.0.1:{port}` greeted like MariaDB or MySQL; TLS and credentials are "
+        "checked only with a password: store one with `lakana connection update`",
+    )
+
+
+def test_the_drivers_are_named_once() -> None:
+    """`DRIVERS` maps each import the check may make to the distribution that brings it."""
+    assert set(_check.DRIVERS.values()) == {
+        "adbc-driver-postgresql",
+        "adbc-driver-sqlite",
+        "cryptography",
+        "httpx",
+        "PyMySQL",
+    }
+
+
+@pytest.mark.parametrize(
+    ("raw", "data"),
+    [
+        (b"5\r\nhello\r\n0\r\n\r\n", b"hello"),
+        (b"3;name=x\r\nabc\r\n2\r\nde\r\n", b"abcde"),
+        (b"5\r\nhel", b"hel"),
+        (b"zz\r\nhello\r\n", b""),
+    ],
+    ids=["terminated", "extension-and-cut-after-a-chunk", "cut-inside-a-chunk", "not-chunks"],
+)
+def test_a_chunked_body_is_joined_as_far_as_it_goes(raw: bytes, data: bytes) -> None:
+    """At most 64 KiB is read: a body cut short keeps what arrived; nonsense gives nothing."""
+    assert _check._dechunk(raw) == data
