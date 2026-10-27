@@ -35,9 +35,7 @@ import os
 import re
 import socket
 import ssl
-import tempfile
 from collections.abc import Generator, Iterable, Mapping
-from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import quote
 
@@ -189,69 +187,6 @@ def _untrusted(name: str, host: str) -> SourceRefused:
         f"`{name}`: the server's certificate is not trusted for `{host}`. Give the connection "
         f"your CA: `lakana connection update {name} --env {task_environment()} --ca-file ca.pem`."
     )
-
-
-@contextlib.contextmanager
-def _root_certificates(conn: FetchedConnection) -> Generator[str]:
-    """Hand libpq the certificates to trust: the trust bundle plus the connection's CA.
-
-    CA certificates are not secret; a file of both is written only when the connection has a
-    CA of its own, and removed once the connection is made.
-
-    Parameters
-    ----------
-    conn
-        The connection.
-
-    Yields
-    ------
-    str
-        A file, `LAKANA_CA_BUNDLE` itself, or ``system`` when neither is set.
-
-    Raises
-    ------
-    UsageError
-        When the file `LAKANA_CA_BUNDLE` names cannot be read.
-    """
-    bundle = os.environ.get("LAKANA_CA_BUNDLE")
-    own = conn.settings.get("ca_certificate")
-    try:
-        trusted = Path(bundle).read_text(encoding="ascii") if bundle else ""
-    except (OSError, UnicodeDecodeError):
-        raise UsageError(
-            f"the trust bundle `{bundle}` (LAKANA_CA_BUNDLE) cannot be read; check the "
-            "worker's LAKANA_RUN__CA_BUNDLE"
-        ) from None
-    if not isinstance(own, str) or not own:
-        yield bundle or "system"
-        return
-    with tempfile.NamedTemporaryFile("w", suffix=".pem", encoding="ascii") as handle:
-        handle.write(trusted + "\n" + own + "\n")
-        handle.flush()
-        yield handle.name
-
-
-def _conninfo(parts: Mapping[str, str]) -> str:
-    r"""Write a libpq connection string, every value quoted.
-
-    The ADBC driver takes only a connection string. Each value is single-quoted with ``\\`` and
-    ``'`` escaped, so a database or user name can never add a keyword of its own.
-
-    Parameters
-    ----------
-    parts
-        Keyword to value.
-
-    Returns
-    -------
-    str
-        Such as ``host='db' port='5432'``.
-    """
-
-    def quoted(value: str) -> str:
-        return "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"
-
-    return " ".join(f"{key}={quoted(value)}" for key, value in parts.items())
 
 
 def _first_keyword(code: str) -> str:
@@ -409,14 +344,20 @@ def _read_postgres(
                 f"the `{key}` of `{conn.name}` holds a NUL character, which a connection string "
                 f"cannot carry; set it again with `lakana connection update {conn.name}`"
             )
-    with _root_certificates(conn) as roots:
-        if tls == "verify-full":
-            parts["sslrootcert"] = roots
-        try:
-            database = pg.connect(_conninfo(parts))
-        except pg.Error as exc:
-            failure = _postgres_error(conn, exc, host)
-            raise failure from None
+    own = conn.settings.get("ca_certificate")
+    try:
+        with _check.root_certificates(own if isinstance(own, str) else None) as roots:
+            if tls == "verify-full":
+                parts["sslrootcert"] = roots
+            database = pg.connect(_check.conninfo(parts))
+    except _check.BundleUnreadable:
+        raise UsageError(
+            f"the trust bundle `{os.environ.get('LAKANA_CA_BUNDLE')}` (LAKANA_CA_BUNDLE) cannot "
+            "be read; check the worker's LAKANA_RUN__CA_BUNDLE"
+        ) from None
+    except pg.Error as exc:
+        failure = _postgres_error(conn, exc, host)
+        raise failure from None
     try:
         cursor = database.cursor()
         try:

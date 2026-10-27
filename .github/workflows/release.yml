@@ -235,6 +235,9 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with: {ref: "${{ needs.release-please.outputs.tag }}"}
+      - uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa  # v10.3.1
+      - name: Generate the check environment's pinned requirements (with hashes) for the image build
+        run: uv export --frozen --only-group check --no-emit-workspace -o dist/check-requirements.txt
       - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1  # v4
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069  # v4
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f  # v4

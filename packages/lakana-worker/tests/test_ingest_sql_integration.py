@@ -1161,3 +1161,83 @@ def test_mariadb_dml_after_with_is_stopped_by_the_read_only_transaction(
         sql.read("shop-db", "WITH x AS (SELECT scribble() AS n) SELECT n FROM x")
 
     assert _kinds_rows(mariadb_container) == "1"
+
+
+def _mariadb_check(
+    pki: _Pki, port: int, password: str, monkeypatch: pytest.MonkeyPatch
+) -> tuple[str, str]:
+    """Run the connection test's check of `shop-db` through the relay, as a task would.
+
+    Parameters
+    ----------
+    pki
+        The authority, given as the connection's CA.
+    port
+        The relay's port.
+    password
+        The secret's password.
+    monkeypatch
+        Points the check's dial of ``lakana-relay`` at the in-process relay.
+
+    Returns
+    -------
+    tuple of str
+        The outcome and the message.
+    """
+    real = socket.create_connection
+
+    def dial(address: tuple[str, int], *args: object, **kwargs: object) -> socket.socket:
+        host, target = address
+        return real((RELAY_ADDRESS if host == _check.RELAY_HOST else host, target), *args, **kwargs)  # ty: ignore[invalid-argument-type]
+
+    monkeypatch.setattr(_check.socket, "create_connection", dial)
+    body = {
+        "name": "shop-db",
+        "kind": "mariadb",
+        "address": {"host": "db.test", "port": 3306, "database": "shop"},
+        "settings": {
+            "user": "reader",
+            "tls": "verify-full",
+            "ca_certificate": pki.authority.ca_file.read_text(),
+        },
+        "endpoints": [{"host": "db.test", "port": 3306, "role": "service"}],
+        "secret": {"password": password},
+    }
+    return _check.check(body, {"relay_port": port}, timeout=10)
+
+
+def test_the_check_logs_in_to_mariadb_over_verified_tls(
+    pki: _Pki, mariadb_relay: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The connection test's credential step against the real server, through the relay."""
+    found = _mariadb_check(pki, MARIADB_RELAY_PORT, _READER_PASSWORD, monkeypatch)
+
+    assert found == (
+        "ok",
+        "reachable: `db.test:3306` greeted like MariaDB or MySQL, TLS verified, credentials "
+        "accepted",
+    )
+
+
+def test_the_check_names_a_refused_mariadb_login_without_the_password(
+    pki: _Pki, mariadb_relay: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """MariaDB's 1045 is `credentials`, with its words and without the password."""
+    outcome, message = _mariadb_check(pki, MARIADB_RELAY_PORT, _WRONG_PASSWORD, monkeypatch)
+
+    assert outcome == "credentials"
+    assert message.startswith("MariaDB refused the login (Access denied for user 'reader'")
+    assert _WRONG_PASSWORD not in message
+
+
+def test_the_check_refuses_mariadb_without_tls_when_tls_is_required(
+    pki: _Pki, plain_mariadb: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``verify-full`` against ``--skip-ssl``: the permanent TLS outcome, never plain text."""
+    outcome, message = _mariadb_check(pki, PLAIN_RELAY_PORT, _READER_PASSWORD, monkeypatch)
+
+    assert (outcome, message) == (
+        "tls",
+        "the server at `db.test:3306` does not offer TLS; enable TLS on the server or set the "
+        "connection's `tls` to `disable`",
+    )

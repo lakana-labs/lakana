@@ -1,9 +1,10 @@
 # syntax=docker/dockerfile:1
 # A Lakana task image: the Python a project's Python tasks run on, uv, the build entry the
-# launcher runs and the connection check. One image per supported Python, built by the release
-# workflow with
+# launcher runs and the connection check with its drivers. One image per supported Python, built
+# by the release workflow from the repository root with
+#   uv export --frozen --only-group check --no-emit-workspace -o dist/check-requirements.txt
 #   docker build -f Dockerfile.task --build-arg PYTHON=3.14 -t ghcr.io/lakana-labs/lakana-task:<version>-py3.14 .
-# from the repository root.
+# (the first writes the check environment's packages with their hashes from uv.lock).
 # The image has no entry point: the launcher sets every container's command.
 ARG PYTHON=3.14
 
@@ -31,11 +32,20 @@ RUN groupadd --system --gid 10003 lakana-task \
  && install -d -m 0755 /code /work /src /opt/lakana-task /ingest /trust
 COPY --from=uv /uv /usr/local/bin/uv
 COPY packages/lakana-worker/src/lakana_worker/launcher/task_build.py /opt/lakana-task/build.py
-# The connection check: Lakana's own module, standard library only, never a project's code;
-# `lakana connection test` runs it as the launcher's check op does. The build runs it once.
+# The connection check: Lakana's own module, one file, never a project's code; `lakana connection
+# test` runs it as the launcher's check op does, on the check environment's Python. The
+# environment holds exactly the drivers its credential steps import (the `check` group of
+# uv.lock, by hash, wheels only): no lakana, no pyarrow. Root's and read-only, so a task cannot
+# change it; installed before the setuid strip below. The build runs the check once.
+COPY dist/check-requirements.txt /opt/lakana-check/requirements.txt
 COPY packages/lakana/src/lakana/ingest/_check.py /opt/lakana-check/check.py
-RUN chown 0:0 /opt/lakana-check/check.py && chmod 0444 /opt/lakana-check/check.py \
- && echo '{"connection": {"kind": "none"}}' | /usr/local/bin/python -I -B /opt/lakana-check/check.py \
+RUN UV_NO_CACHE=1 UV_PYTHON_DOWNLOADS=never uv venv --python /usr/local/bin/python /opt/lakana-check-env \
+ && UV_NO_CACHE=1 uv pip install --python /opt/lakana-check-env/bin/python --require-hashes --no-deps \
+    --only-binary :all: -r /opt/lakana-check/requirements.txt \
+ && chown -R 0:0 /opt/lakana-check /opt/lakana-check-env \
+ && chmod -R a-w,a+rX /opt/lakana-check /opt/lakana-check-env \
+ && /opt/lakana-check-env/bin/python -I -B -c 'import adbc_driver_postgresql.dbapi, adbc_driver_sqlite.dbapi, cryptography, pymysql' \
+ && echo '{"connection": {"kind": "none"}}' | /opt/lakana-check-env/bin/python -I -B /opt/lakana-check/check.py \
   | grep -q 'does not know the kind'
 # No file keeps a setuid or setgid bit: where Docker refuses no-new-privileges (snap), `su` or
 # `mount` would make a task's process uid 0 again. Last, so nothing installed above keeps one.

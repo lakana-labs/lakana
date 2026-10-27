@@ -19,6 +19,8 @@ from typing import Any
 
 import pytest
 from fake_launcher import FakeLauncher, Script, refusing
+from launcher_fakes import FakeEngine
+from launcher_fakes import settings as launcher_settings
 from sqlalchemy import Engine, select, update
 from sqlalchemy.orm import Session
 
@@ -39,7 +41,9 @@ from lakana_core.secrets.keys import EnvKeyProvider
 from lakana_worker import connection_tests
 from lakana_worker.connection_tests import ConnectionTestLoop, DockerCheck
 from lakana_worker.launcher.requests import CHECK_GRACE, CHECK_LIMITS, RELAY_VERDICT_SECONDS
-from lakana_worker.launcher_client import LauncherTimedOut, LauncherUnavailable
+from lakana_worker.launcher.server import LauncherServer, write_token
+from lakana_worker.launcher.service import Launcher
+from lakana_worker.launcher_client import LauncherClient, LauncherTimedOut, LauncherUnavailable
 
 SECRET = "hunter2-s3cr3t"
 KEYS = EnvKeyProvider(base64.b64encode(b"k" * 32).decode())
@@ -1406,3 +1410,99 @@ def test_a_task_image_without_the_check_names_the_image_and_the_next_step(
     assert (row.outcome, row.message) == ("failed", connection_tests.NO_CHECK_IN_IMAGE)
     assert "task image" in connection_tests.NO_CHECK_IN_IMAGE
     assert "pull or rebuild" in connection_tests.NO_CHECK_IN_IMAGE
+
+
+TINI_CANNOT_EXEC = (
+    b"[FATAL tini (7)] exec /opt/lakana-check-env/bin/python failed: No such file or directory\n"
+)
+"""What a check container of an image without the check environment writes, and exits 127 with:
+Docker's init (the launcher sets ``Init``) cannot start the entry point (measured on Docker 29)."""
+
+DOCKER_CANNOT_START = (
+    "failed to create task for container: failed to create shim task: OCI runtime create failed: "
+    'runc create failed: unable to start container process: exec: "/opt/lakana-check-env/bin/'
+    'python": stat /opt/lakana-check-env/bin/python: no such file or directory: unknown'
+)
+"""Docker's answer when it cannot start the entry point itself (an engine that runs it directly)."""
+
+
+@contextmanager
+def real_launcher(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, engine: FakeEngine
+) -> Generator[LauncherClient, None, None]:
+    """Serve a real launcher over its socket, Docker faked, and give the worker's real client.
+
+    Parameters
+    ----------
+    tmp_path
+        The launcher's state and the socket's directory.
+    monkeypatch
+        Changes the working directory (a socket path is limited to 108 bytes).
+    engine
+        The fake Docker engine.
+
+    Yields
+    ------
+    LauncherClient
+        The client the worker uses in production.
+    """
+    state = tmp_path / "launcher"
+    state.mkdir()
+    monkeypatch.chdir(state)
+    image = f"ghcr.io/lakana-labs/lakana-task:0.14.0-py{OWN_PYTHON}"
+    engine.images.add(image)
+    launcher = Launcher(launcher_settings(state, images={OWN_PYTHON: image}), engine)
+    launcher.start()
+    token = write_token(Path("."))
+    server = LauncherServer("l.sock", launcher=launcher, token=token)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield LauncherClient(Path("l.sock"))
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+@pytest.mark.parametrize(
+    "engine",
+    [
+        FakeEngine(output=[TINI_CANNOT_EXEC], exit_code=127),
+        FakeEngine(start_failures={"check": DOCKER_CANNOT_START}),
+    ],
+    ids=["init-cannot-exec", "docker-cannot-start"],
+)
+def test_a_task_image_without_the_check_environment_names_the_image(
+    world: World, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, engine: FakeEngine
+) -> None:
+    """An image older than the check environment, through the real launcher and client.
+
+    Docker's init exits 127 naming the entry point; an engine that starts it directly fails
+    the start, which the launcher answers as an error and the client raises as
+    `LauncherUnavailable`. Both are the image, never "runner unavailable".
+
+    Parameters
+    ----------
+    world
+        The world.
+    tmp_path
+        Pytest's directory.
+    monkeypatch
+        Changes the working directory.
+    engine
+        The fake Docker engine.
+    """
+    with real_launcher(tmp_path, monkeypatch, engine) as client:
+        attempts = work_dir(tmp_path)
+        docker = DockerCheck(client=client, owner="box-1.abc", work_dir=attempts, trust=None)
+        running = loop(world, runner_kind="docker", docker=docker)
+        # A proxy kind: no relay, whose verdict the launcher would wait for.
+        test_id = world.connection(
+            "api", kind="http", address={"base_url": "https://api.example.com"}
+        )
+
+        assert running.step()
+
+    row = world.test(test_id)
+    assert (row.outcome, row.message) == ("failed", connection_tests.NO_CHECK_IN_IMAGE)
+    assert "/opt/lakana-check-env" in connection_tests.NO_CHECK_IN_IMAGE

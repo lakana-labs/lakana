@@ -14,6 +14,7 @@ import dataclasses
 import hashlib
 import io
 import os
+import subprocess
 import sys
 import tarfile
 import threading
@@ -135,6 +136,13 @@ def build_task_image(client: Any) -> str:
         The tag.
     """
     tag = f"lakana-task:test-py{PYTHON}"
+    # The check environment's packages, by hash from uv.lock, as the release workflow exports them.
+    requirements = subprocess.run(
+        ["uv", "export", "--frozen", "--only-group", "check", "--no-emit-workspace"],
+        cwd=REPO,
+        capture_output=True,
+        check=True,
+    ).stdout
     context = io.BytesIO()
     with tarfile.open(fileobj=context, mode="w") as archive:
         for relative in (
@@ -143,6 +151,9 @@ def build_task_image(client: Any) -> str:
             "packages/lakana/src/lakana/ingest/_check.py",
         ):
             archive.add(REPO / relative, arcname=relative)
+        entry = tarfile.TarInfo("dist/check-requirements.txt")
+        entry.size = len(requirements)
+        archive.addfile(entry, io.BytesIO(requirements))
     context.seek(0)
     client.images.build(
         fileobj=context,

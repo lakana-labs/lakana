@@ -114,22 +114,39 @@ with the connection's address and settings. The worker checks, in this order, th
 the connection (TCP), the TLS handshake with the connection's CA certificate, and, for a
 `directory` or `sqlite-file` connection, that the ingestion root exists and the path is under it.
 For an `http` connection with an OAuth2 `token_url` the token host is checked the same way as the
-base URL, and the test is not `ok` unless both pass; the message names the host that failed. The TLS
-of a `mariadb` connection is not checked yet (the check reads the server's greeting only).
-The credentials of `s3` and `azure` connections with a secret are checked last, by listing at most
-one object under the connection's prefix (an `s3` request is signed with SigV4, an `azure` one with the
-account key or the SAS token); a refused key is `credentials`, with the store's own code. The
-credentials of a `gcs` connection are not checked, because the check uses the standard library only
-and cannot sign a service-account key: its message says so, and a refused key shows in the first
-`files.read`. The credentials of `http` (bearer, basic, api_key and oauth2), `postgresql` and
-`mariadb` connections are not checked yet: their test ends with "credentials not checked yet",
-until their helpers arrive. A `tcp` connection is checked for reachability only. Any worker runs
-the check.
-With the local runner it is a subprocess of the worker's Python that needs `lakana` installed next to
-the worker (without it the test fails and says so). With the Docker runner (the Compose bundle's
-default) the launcher runs it in a container of the task image, from the image's own copy of the check,
-with the network rules a task with that connection gets: through the egress proxy or the task's relay
-to the connection's endpoints only, its ingestion root read-only, the worker's trust bundle
+base URL, and the test is not `ok` unless both pass; the message names the host that failed.
+Then, for a connection with a secret, the credentials:
+
+- `postgresql`: a login, with `SELECT 1` run in a read-only transaction.
+- `mariadb`: a login over TLS as the connection's `tls` says (`verify-full` checks the certificate,
+  `require` uses TLS without checking it, `disable` uses none; a server without TLS is `tls`, never
+  a quiet fallback to plain text), with `SELECT 1` in a read-only transaction. A `mariadb`
+  connection without a secret is checked by the server's greeting only: its TLS and credentials
+  are not checked, and the message says so.
+- `s3`, `azure` and `gcs`: a listing of at most one object under the connection's prefix (an `s3`
+  request is signed with SigV4, an `azure` one with the account key or the SAS token). A `gcs` key
+  signs a token request that goes to Google's token endpoint (`oauth2.googleapis.com`) only: a key
+  whose `token_uri` names another host is `credentials`, and nothing is sent.
+- `http` (bearer, basic, api_key and oauth2): not checked yet; the test ends with "credentials not
+  checked yet".
+
+A `sqlite-file` connection has no secret: its file is opened read-only as a SQLite database, and a
+file that is none fails naming the path. A refused login or key is `credentials`, with the server's
+or the store's own words; the password, the key and any token never appear in the message. A `tcp`
+connection is checked for reachability only. Any worker runs the check.
+
+With the local runner it is a subprocess of the worker's Python, which needs `lakana` installed next
+to the worker (without it the test fails and says so), and `lakana[assets]` for `postgresql`,
+`mariadb` and `sqlite-file` connections (a `gcs` key needs nothing more: the worker brings
+`cryptography`). Without the drivers the test is `failed`, and its message names the module the worker's Python cannot import and what to install
+(``... cannot import `adbc_driver_postgresql`; install lakana[assets] next to the worker ...``);
+it never passes without checking.
+
+With the Docker runner (the Compose bundle's
+default) the launcher runs it in a container of the task image, from the image's own copy of the check
+and on the image's check environment (`/opt/lakana-check-env`, which holds exactly the drivers the
+check needs), with the network rules a task with that connection gets: through the egress proxy or the
+task's relay to the connection's endpoints only, its ingestion root read-only, the worker's trust bundle
 (`LAKANA_RUN__CA_BUNDLE`), no Lakana server on its network, 30 seconds and 256 MiB. Its token
 for the egress proxy has the purpose `connection-test` and names only the connection's endpoints.
 How the outcome is decided depends on the route class:

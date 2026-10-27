@@ -1152,6 +1152,37 @@ def test_the_compose_smoke_job_builds_a_task_image_and_hands_it_to_the_script() 
     assert "uv run --locked bash scripts/compose_smoke_test.sh lakana:ci lakana-task:ci" in commands
 
 
+_CHECK_EXPORT = (
+    "uv export --frozen --only-group check --no-emit-workspace -o dist/check-requirements.txt"
+)
+"""Writes the task image's check environment (by hash, from uv.lock) into its build context."""
+
+
+def test_every_task_image_build_exports_the_check_environment_first() -> None:
+    """`Dockerfile.task` copies dist/check-requirements.txt; each job that builds it writes it."""
+    smoke = [c for s in _jobs("ci.yml")["compose-smoke"]["steps"] for c in _commands(s)]
+    build = "docker build -f Dockerfile.task --build-arg PYTHON=3.14 -t lakana-task:ci-py3.14 ."
+    assert smoke.index(_CHECK_EXPORT) < smoke.index(build)
+
+    steps = _jobs("release.yml")["publish-task-images"]["steps"]
+    exported = next(i for i, s in enumerate(steps) if _CHECK_EXPORT in _commands(s))
+    built = next(
+        i for i, s in enumerate(steps) if (s.get("with") or {}).get("file") == "Dockerfile.task"
+    )
+    assert any("astral-sh/setup-uv@" in str(s.get("uses", "")) for s in steps[:exported])
+    assert exported < built
+
+
+def test_the_compose_smoke_test_exports_the_check_environment_before_it_builds() -> None:
+    """The script builds a missing local task image itself, so it writes the export first."""
+    script = (ROOT / "scripts" / "compose_smoke_test.sh").read_text()
+    export = 'uv export --frozen --only-group check --no-emit-workspace -o "$here/../dist/check-'
+    build = 'docker build -f "$here/../Dockerfile.task"'
+
+    assert export in script
+    assert script.index(export) < script.index(build)
+
+
 def test_the_release_compose_smoke_job_uses_the_published_task_images() -> None:
     """The release's own task images, which `publish-task-images` pushed before it."""
     job = _jobs("release.yml")["compose-smoke-release"]
@@ -1188,7 +1219,8 @@ def test_the_compose_smoke_test_builds_only_a_local_task_image_and_pulls_a_publi
     loop = script.split('for version in 3.11 "$python"; do', 1)[1].split("\ndone\n", 1)[0]
 
     assert '*/*) docker pull "$reference" ;;' in loop
-    assert '*) docker build -f "$here/../Dockerfile.task"' in loop
+    local = loop.split("\n    *)", 1)[1].split(";;", 1)[0]
+    assert 'docker build -f "$here/../Dockerfile.task"' in local
     assert "|| docker" not in loop and "&& ! docker pull" not in loop
     assert "2>&1" not in loop.split('docker pull "$reference"', 1)[1].split(";;", 1)[0]
 

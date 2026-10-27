@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import errno
 import os
 import socket
 import sqlite3
@@ -23,6 +24,7 @@ from lakana.ingest import (
     SourceError,
     SourceRefused,
     UsageError,
+    _check,
     _connections,
     _types,
     sql,
@@ -580,17 +582,39 @@ def test_bad_arguments_are_refused_before_the_fetch(kwargs: dict[str, Any], frag
         sql.read("crm-db", "SELECT 1", **kwargs)
 
 
+@pytest.mark.parametrize("content", [None, "caf\u00e9"])
 def test_an_unreadable_trust_bundle_names_the_worker_setting(
-    driver: _Driver, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    driver: _Driver, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, content: str | None
 ) -> None:
-    """A bundle the worker named but the task cannot read is a setup error, not retried."""
-    monkeypatch.setenv("LAKANA_CA_BUNDLE", str(tmp_path / "missing.pem"))
+    """A bundle the worker named but the task cannot read (missing, not ASCII) is a setup error."""
+    bundle = tmp_path / "unreadable.pem"
+    if content is not None:
+        bundle.write_text(content, encoding="utf-8")
+    monkeypatch.setenv("LAKANA_CA_BUNDLE", str(bundle))
     _postgres(relay=True)
 
     with pytest.raises(UsageError, match=r"trust bundle .*LAKANA_RUN__CA_BUNDLE") as caught:
         sql.read("crm-db", "SELECT 1")
 
     assert caught.value.retryable is False
+    assert driver.seen == []
+
+
+def test_a_ca_file_that_cannot_be_written_keeps_its_own_words(
+    driver: _Driver, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only the bundle's read is an unreadable bundle; a full /tmp is said as such."""
+
+    def full(*args: object, **kwargs: object) -> object:
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr(_check.tempfile, "NamedTemporaryFile", full)
+    _postgres(relay=True, settings={"user": "reader", "ca_certificate": "-----BEGIN"})
+
+    with pytest.raises(OSError, match="No space left on device") as caught:
+        sql.read("crm-db", "SELECT 1")
+
+    assert "trust bundle" not in str(caught.value)
     assert driver.seen == []
 
 
