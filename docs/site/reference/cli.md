@@ -48,6 +48,27 @@ Usage: `lakana whoami [OPTIONS]`
 
 Show who the configured credential authenticates as.
 
+## `lakana load`
+
+Usage: `lakana load [OPTIONS] {file} {table}`
+
+Load FILE into TABLE of the bronze layer, once.
+
+Shows the schema and the row count and asks before it writes. A first load creates the table; later loads replace its rows or, with --write append, add to them, and fail clearly if someone changed the table in between. For anything that should run again, write a Python asset instead.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `FILE` | path | required | The local file: CSV, Parquet, Arrow, JSON, NDJSON or a spreadsheet. |
+| `TABLE` | text | required | The bronze table; a bare name means bronze.<name>. |
+| `--env` | text | none | Environment (default: the profile's). |
+| `--write` | text | `replace` | replace (the default) or append, once the table exists; a first load creates it. |
+| `--format` | text | none | The file's format, if the extension doesn't say. |
+| `--sheet` | text | none | A spreadsheet's sheet (default: the first). |
+| `--header-row` | whole number | `1` | Row of the column names in a CSV or sheet; 0 for none. |
+| `--yes` | flag | off | Don't ask for confirmation. |
+| `--break-glass` | flag | off | Write to a protected environment outside a run (needs MANAGE_ENVIRONMENT; audited). |
+| `--reason` | text | none | Why, 10-500 characters on one line (with --break-glass). |
+
 ## `lakana sql`
 
 Usage: `lakana sql [OPTIONS] {query}`

@@ -256,6 +256,7 @@ lakana env create dev --storage-root file:///srv/lake
 lakana env delete dev --yes        # 409 while a repository is deployed there: `lakana undeploy REPO --env dev` first
 lakana table create bronze.sales --column id:long --column 'region:string?'  # quote: shells glob ?
 lakana table append bronze.sales sales.csv      # Parquet, CSV or Arrow; a CSV is parsed with the table's types
+lakana load customers.csv customers --env dev  # once, into bronze.customers: shows schema and rows, asks; a first load creates the table
 lakana sql "SELECT region, count(*) FROM bronze.sales GROUP BY region"
 lakana sql - --out report.parquet < report.sql
 lakana sql "SELECT * FROM bronze.sales" --into silver.sales --mode create

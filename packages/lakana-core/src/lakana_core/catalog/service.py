@@ -102,6 +102,7 @@ from lakana_core.catalog.health import (
 )
 from lakana_core.catalog.identity import artifact_refusal, resolve_table_id
 from lakana_core.catalog.json_schema import ColumnSpec, from_iceberg_schema
+from lakana_core.catalog.loads import require_bronze
 from lakana_core.catalog.locations import (
     CLAIM_RELEASED_MESSAGE,
     claim_holder,
@@ -5119,6 +5120,93 @@ class CatalogService:
         if row.table_type is not TableType.ICEBERG:
             raise ValidationError(unmanaged)
         return row
+
+    def check_can_load(
+        self,
+        p: PrincipalRef,
+        ref: TableRef,
+        *,
+        write: str,
+        expected_snapshot_id: ExpectedSnapshot | None,
+        schema: pa.Schema | None = None,
+    ) -> bool:
+        """Verify a load (`lakana load`) may write its target, before any data is read.
+
+        In this order: the target is in the bronze layer (`require_bronze`); the caller may
+        write it (`check_can_append`, or `check_can_replace`, which also asks `CREATE_TABLE`
+        when `expected_snapshot_id` is ``none`` and the table is missing); the namespace of a
+        table the load would create exists. With `schema`, an existing table is checked
+        against it as the write would check the rows: column for column for an append, by the
+        schema rules of a replace without evolving it.
+
+        Parameters
+        ----------
+        p
+            The acting principal.
+        ref
+            The table.
+        write
+            ``replace`` or ``append``.
+        expected_snapshot_id
+            The caller's precondition; ``none`` on a first load.
+        schema
+            The schema of the rows the load would write, or `None` to check only the target.
+
+        Returns
+        -------
+        bool
+            `True` when the load would create the table.
+
+        Raises
+        ------
+        ValidationError
+            For a target outside bronze, a table that is not managed, or a schema the write
+            would refuse (the message shows the difference).
+        PermissionDenied
+            As `check_can_append` and `check_can_replace`.
+        NotFoundError
+            For a missing table without ``none``, or a missing namespace (naming the command
+            that creates it).
+        ConflictError
+            When the table's current snapshot is not `expected_snapshot_id` (``none`` on a
+            table that exists included), as the write would find.
+        """
+        require_bronze(ref)
+        if write == "append" and expected_snapshot_id != "none":
+            self.check_can_append(p, ref)
+        else:
+            self.check_can_replace(p, ref, expected_snapshot_id=expected_snapshot_id)
+        row = self._existing_table(ref)
+        if row is None:
+            namespace = ".".join(ref.namespace.parts)
+            try:
+                self._find_namespace(self._find_environment(ref.environment), ref.namespace)
+            except NotFoundError:
+                raise NotFoundError(
+                    f"Namespace {shown(namespace)} does not exist in {shown(ref.environment)!r}: "
+                    f"create it with `lakana ns create {shown(namespace)} --env "
+                    f"{shown(ref.environment)}`, then load again."
+                ) from None
+            return True
+        current = self._to_loaded_table(ref, row).metadata
+        if (
+            expected_snapshot_id is not None
+            and expected_snapshot_value(expected_snapshot_id) != current.current_snapshot_id
+        ):
+            raise ConflictError(target_changed_message(ref.dotted()))
+        if schema is not None:
+            if write == "append":
+                validate_arrow_schema(current.schema(), schema.empty_table())
+            else:
+                plan_schema(
+                    current.schema(),
+                    arrow_to_iceberg_schema(schema),
+                    evolve=False,
+                    last_column_id=current.last_column_id,
+                    next_schema_id=max(s.schema_id for s in current.schemas) + 1,
+                    table_name=ref.dotted(),
+                )
+        return False
 
     def append(
         self,

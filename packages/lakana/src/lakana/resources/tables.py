@@ -34,6 +34,7 @@ from lakana._models import (
     Lineage,
     LineageEdge,
     LineageNode,
+    LoadResult,
     MergeResult,
     Reader,
     Table,
@@ -43,7 +44,7 @@ from lakana._models import (
     WriteResult,
 )
 from lakana._routes import ROUTES
-from lakana.errors import Conflict, ValidationError
+from lakana.errors import Conflict, LakanaConnectionError, LakanaError, ValidationError
 from lakana.resources.queries import QueryRun
 
 _APPEND_CONTENT_TYPE = "application/vnd.apache.arrow.stream"
@@ -1134,6 +1135,106 @@ class Tables:
         )
         return _write_result_from_json(response.json())
 
+    def upload_limit(self) -> int | None:
+        """Ask the server for the largest Arrow body one write may send.
+
+        Returns
+        -------
+        int or None
+            `LAKANA_APPEND__MAX_BYTES` of the server, or `None` when it does not say (an older
+            server); its own 413 then applies.
+
+        Raises
+        ------
+        lakana.errors.LakanaConnectionError
+            If the server could not be reached.
+        """
+        try:
+            response = self._transport.request(ROUTES["info"], retry=False)
+        except LakanaConnectionError:
+            raise
+        except LakanaError:
+            return None
+        try:
+            data = response.json()
+        except ValueError:
+            return None
+        value = data.get("upload_max_bytes") if isinstance(data, dict) else None
+        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+            return None
+        return value
+
+    def load(
+        self,
+        environment: str,
+        qualified_name: str,
+        data: pa.Table | pa.RecordBatch | object,
+        *,
+        write: str = "replace",
+        expected_snapshot_id: int | str | None = None,
+        break_glass_reason: str | None = None,
+        dry_run: bool = False,
+    ) -> LoadResult:
+        """Load rows into a table of the bronze layer, as `lakana load` does.
+
+        The server refuses a table whose first namespace segment is not `bronze`, before it
+        reads the rows, with a `ValidationError` that says to load into `bronze.<name>` and
+        transform it with an asset. Loads are for one-off files; anything that runs again
+        belongs in an asset. Never retried on a conflict: a load always names the snapshot it
+        expects.
+
+        Parameters
+        ----------
+        environment
+            The environment name.
+        qualified_name
+            Dot-joined `"bronze.table"` (or a deeper `"bronze.…"`) name.
+        data
+            The rows: a `pa.Table`, a `pa.RecordBatch`, or anything `pyarrow.table()`
+            accepts. For a dry run, an empty table of the schema to check.
+        write
+            ``replace`` (the default) or ``append``. A first load creates the table either way.
+        expected_snapshot_id
+            The table's current snapshot as you read it (`Table.snapshot_id`), or ``"none"``
+            for a table that does not exist yet, which the load then creates.
+        break_glass_reason
+            Write to a protected environment outside a run: 10-500 characters, needs
+            `MANAGE_ENVIRONMENT`, audited.
+        dry_run
+            Run every check, the schema against an existing table included, and write nothing.
+
+        Returns
+        -------
+        LoadResult
+            What was written, and whether the table was created.
+
+        Raises
+        ------
+        lakana.errors.ValidationError
+            For a target outside bronze, or rows the table refuses.
+        lakana.errors.NotFound
+            If the namespace does not exist (the message names the command that creates it),
+            or the table does not and `expected_snapshot_id` is not ``"none"``.
+        lakana.errors.PermissionDenied
+            Without `WRITE_TABLE`, or without `CREATE_TABLE` for a first load.
+        lakana.errors.Conflict
+            If the table's snapshot is no longer `expected_snapshot_id`.
+        """
+        params: dict[str, object] = {"write": write, "dry_run": "true" if dry_run else "false"}
+        if expected_snapshot_id is not None:
+            params["expected_snapshot_id"] = str(expected_snapshot_id)
+        if break_glass_reason is not None:
+            params["break_glass_reason"] = break_glass_reason
+        body = self._send_arrow(
+            "tables.load", environment, qualified_name, data, params, retry_conflict=False
+        ).json()
+        return LoadResult(
+            snapshot_id=body["snapshot_id"],
+            rows=body["rows"],
+            created=body["created"],
+            dry_run=body["dry_run"],
+        )
+
     def merge(
         self,
         environment: str,
@@ -1355,7 +1456,7 @@ class Tables:
         Parameters
         ----------
         route
-            `"tables.append"`, `"tables.replace"` or `"tables.merge"`.
+            `"tables.append"`, `"tables.replace"`, `"tables.merge"` or `"tables.load"`.
         environment
             The environment name.
         qualified_name

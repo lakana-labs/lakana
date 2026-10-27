@@ -45,7 +45,8 @@ def platform_version() -> str:
 def info(request: Request, principal: PrincipalRef = Depends(get_principal)) -> InfoOut:
     """Describe the instance.
 
-    Shows the platform version of the running server and the limits it applies to artifacts.
+    Shows the platform version of the running server the limits it applies to artifacts and the
+    largest Arrow upload it accepts.
     Any authenticated caller may ask, a task token included.
 
     Parameters
@@ -58,7 +59,7 @@ def info(request: Request, principal: PrincipalRef = Depends(get_principal)) -> 
     Returns
     -------
     InfoOut
-        The platform version and the artifact limits.
+        The platform version, the artifact limits and the upload limit.
     """
     limits = request.app.state.settings.artifacts
     return InfoOut(
@@ -68,4 +69,5 @@ def info(request: Request, principal: PrincipalRef = Depends(get_principal)) -> 
             max_file_bytes=limits.max_file_bytes,
             max_bytes=limits.max_bytes,
         ),
+        upload_max_bytes=request.app.state.settings.append.max_bytes,
     )

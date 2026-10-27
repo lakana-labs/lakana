@@ -903,6 +903,7 @@ _NOTHING_OF_A_KEPT_TABLE = {
     "check_can_append": "the precheck of `append`; returns nothing",
     "check_can_replace": "the precheck of `replace`; returns nothing",
     "check_can_merge": "the precheck of `merge`; returns nothing",
+    "check_can_load": "the precheck of `lakana load`; returns whether it creates the table",
     "roll_back": "sets the task's own asset back (`_require_own_task`); returns an outcome",
     "read_watermark": (
         "one value of the target of an incremental append, for which it authorizes WRITE_TABLE: "

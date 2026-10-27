@@ -43,6 +43,12 @@ COMMANDS: dict[str, tuple[str, ...]] = {
     "table append": ("tables.get", "tables.append"),
     "table replace": ("tables.get", "tables.replace"),
     "table merge": ("tables.get", "tables.merge"),
+    "load": (
+        "environments.get",
+        "tables.upload_limit",
+        "tables.get",
+        "tables.load",
+    ),
     "table lineage": ("tables.lineage",),
     "table maintain": ("tables.maintain", "query_run.wait"),
     "artifact upload": ("artifacts.upload",),

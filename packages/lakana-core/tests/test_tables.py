@@ -1496,6 +1496,8 @@ def test_no_new_catalog_method_builds_a_loaded_table_without_a_decision() -> Non
         # `describe_table` reads through it, then adds the descriptions.
         "_describe_row",
         "append",
+        # A writer's: it compares the pin and the schema; returns whether it creates the table.
+        "check_can_load",
         # A writer's: a create whose commit raised but landed returns the table it created.
         "create_table",
         "load_table",

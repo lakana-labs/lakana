@@ -31,6 +31,7 @@ from lakana._models import (
     Lineage,
     LineageEdge,
     LineageNode,
+    LoadResult,
     MergeResult,
     Namespace,
     QueryStatus,
@@ -41,7 +42,7 @@ from lakana._models import (
 )
 from lakana._routes import ROUTES, Route
 from lakana.client import Client
-from lakana.errors import Conflict, QueryFailed, ValidationError
+from lakana.errors import Conflict, LakanaConnectionError, QueryFailed, ValidationError
 from lakana.resources.environments import Environments
 from lakana.resources.namespaces import Namespaces
 from lakana.resources.queries import Queries, QueryRun, waiting_for_from_json
@@ -2739,3 +2740,95 @@ def test_environments_orphaned_locations_lists_and_deletes() -> None:
     )
     assert first.newest_file_at == datetime(2026, 9, 1, 10, tzinfo=UTC)
     assert (second.newest_file_at, second.recent, second.kept_because) == (None, True, "recent")
+
+
+def test_tables_load_posts_the_stream_with_its_options() -> None:
+    """`tables.load` POSTs to `…/load` with `write`, `dry_run`, the pin and the reason."""
+    seen: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["method"] = request.method
+        seen["path"] = request.url.path
+        seen["params"] = request.url.params.multi_items()
+        with pyarrow.ipc.open_stream(pa.BufferReader(request.content)) as reader:
+            seen["table"] = reader.read_all()
+        return httpx.Response(
+            200, json={"snapshot_id": 7, "rows": 2, "created": False, "dry_run": False}
+        )
+
+    data = pa.table({"id": [1, 2]})
+    result = Tables(_transport(handler)).load(
+        "dev",
+        "bronze.customers",
+        data,
+        write="append",
+        expected_snapshot_id=6,
+        break_glass_reason="incident 4: load the export",
+    )
+
+    assert seen["method"] == "POST"
+    assert seen["path"] == "/api/v1/environments/dev/namespaces/bronze/tables/customers/load"
+    assert seen["params"] == [
+        ("write", "append"),
+        ("dry_run", "false"),
+        ("expected_snapshot_id", "6"),
+        ("break_glass_reason", "incident 4: load the export"),
+    ]
+    assert seen["table"].equals(data)
+    assert result == LoadResult(snapshot_id=7, rows=2, created=False, dry_run=False)
+
+
+def test_tables_load_shows_the_servers_bronze_refusal_and_never_retries() -> None:
+    """The 422 arrives as `ValidationError` with the server's text; a 409 is not retried."""
+    text = (
+        "`lakana load` loads into bronze only: load into `bronze.customers` and transform it "
+        "into `silver.customers` with an asset."
+    )
+    calls: list[str] = []
+
+    def refuse(request: httpx.Request) -> httpx.Response:
+        calls.append(request.url.path)
+        return httpx.Response(422, json={"detail": text})
+
+    with pytest.raises(ValidationError) as caught:
+        Tables(_transport(refuse)).load(
+            "dev", "silver.customers", pa.table({"id": [1]}), expected_snapshot_id="none"
+        )
+    assert text in str(caught.value)
+
+    def conflict(request: httpx.Request) -> httpx.Response:
+        calls.append(request.url.path)
+        return httpx.Response(409, json={"detail": "changed"})
+
+    with pytest.raises(Conflict):
+        Tables(_transport(conflict)).load("dev", "bronze.customers", pa.table({"id": [1]}))
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        httpx.Response(200, json={"version": "1", "upload_max_bytes": 1024}),
+        httpx.Response(200, json={"version": "1"}),
+        httpx.Response(200, json={"version": "1", "upload_max_bytes": True}),
+        httpx.Response(200, json={"version": "1", "upload_max_bytes": 0}),
+        httpx.Response(200, content=b"not json"),
+        httpx.Response(404, json={"detail": "no such route"}),
+    ],
+)
+def test_tables_upload_limit_reads_the_info_route_or_says_nothing(answer: httpx.Response) -> None:
+    """Only a positive integer counts; an older or odd answer leaves the check to the server."""
+    limit = Tables(_transport(lambda request: answer)).upload_limit()
+
+    expected = 1024 if answer.status_code == 200 and b"1024" in answer.content else None
+    assert limit == expected
+
+
+def test_tables_upload_limit_lets_an_unreachable_server_say_so() -> None:
+    """A connection failure is not "no limit": it is raised."""
+
+    def down(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("refused", request=request)
+
+    with pytest.raises(LakanaConnectionError):
+        Tables(_transport(down)).upload_limit()

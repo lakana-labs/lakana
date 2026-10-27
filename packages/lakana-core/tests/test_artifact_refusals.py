@@ -748,6 +748,7 @@ _ARTIFACT_HANDLING = {
         "check_can_replace": "refuses",
         "replace": "refuses",
         "check_can_merge": "refuses",
+        "check_can_load": "refuses",
         "merge": "refuses",
         "read_watermark": "refuses",
         "maintain": "refuses",
@@ -907,3 +908,16 @@ def test_every_operation_on_a_table_says_what_it_does_with_an_artifact(cls: type
             "remove it from _ARTIFACT_HANDLING, or fix the selection rule in _table_methods."
         )
     assert set(classified.values()) <= _KINDS_OF_HANDLING
+
+
+def test_a_load_names_the_bronze_layer_and_never_the_artifact(
+    session: Session, tmp_path: Path
+) -> None:
+    """`check_can_load` refuses a target outside bronze by its layer first, artifact or not."""
+    catalog, p = _catalog(session, tmp_path)
+
+    with pytest.raises(ValidationError) as caught:
+        catalog.check_can_load(p, _REF, write="replace", expected_snapshot_id="none")
+
+    assert "loads into bronze only" in str(caught.value)
+    assert "artifact" not in str(caught.value)

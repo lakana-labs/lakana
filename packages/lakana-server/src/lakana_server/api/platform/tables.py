@@ -34,6 +34,7 @@ from starlette.requests import ClientDisconnect
 from lakana_core.auth import PrincipalRef
 from lakana_core.catalog.json_schema import ColumnSpec, from_iceberg_schema, to_iceberg_schema
 from lakana_core.catalog.lineage_graph import LineageDirection, LineageService
+from lakana_core.catalog.loads import require_bronze
 from lakana_core.catalog.query_service import QueryService
 from lakana_core.catalog.retention import TableRetention
 from lakana_core.catalog.service import CatalogService, LoadedTable, TableDescription
@@ -55,6 +56,7 @@ from lakana_server.api.platform.schemas import (
     LineageEdgeOut,
     LineageNodeOut,
     LineageOut,
+    LoadOut,
     MaintenanceIn,
     MergeOut,
     QuerySubmitOut,
@@ -2035,4 +2037,114 @@ async def merge_table_data(
         snapshot_id=result.snapshot_id,
         rows_inserted=result.rows_inserted,
         rows_updated=result.rows_updated,
+    )
+
+
+@router.post("/{name}/load", response_model=LoadOut, responses=errors(403, 404, 409, 408, 413, 503))
+@streams_its_own_body
+async def load_table_data(
+    env: str,
+    path: str,
+    name: str,
+    request: Request,
+    write: Literal["replace", "append"] = Query(default="replace"),
+    expected_snapshot_id: str | None = Query(default=None, max_length=64),
+    dry_run: bool = Query(default=False),
+    principal: PrincipalRef = Depends(get_write_principal),
+    catalog: CatalogService = Depends(get_catalog),
+    session: Session = Depends(get_session),
+) -> LoadOut:
+    """Load rows into a table of the bronze layer.
+
+    The route `lakana load` calls: it writes the rows of an Arrow IPC stream, sent as the
+    request body, into a table whose first namespace segment is `bronze`, and refuses any other
+    target with 422 before it reads the body, for every client alike. `expected_snapshot_id=none`
+    creates a missing table (`CREATE_TABLE` as well as `WRITE_TABLE`); otherwise `write`
+    replaces or appends (`WRITE_TABLE`), committing only while the table's snapshot is still
+    `expected_snapshot_id`. `dry_run=true` runs every check, the schema of the (usually empty)
+    stream against an existing table included, and writes nothing. Answers 404 when the
+    namespace does not exist (naming the command that creates it), 409 when the snapshot moved,
+    413 for a body over the server's limit, 408 when it arrives too slowly and 503 when the
+    server is busy with other uploads.
+
+    Parameters
+    ----------
+    env
+        Environment name.
+    path
+        Dot-joined namespace path; its first segment must be `bronze`.
+    name
+        Table name.
+    request
+        The current request.
+    write
+        ``replace`` (the default) or ``append``; a first load creates the table either way.
+    expected_snapshot_id
+        The table's current snapshot as the caller read it, or `none` for a missing table.
+    dry_run
+        Check only; write nothing.
+    principal
+        The authenticated caller, with any `?break_glass_reason=` attached.
+    catalog
+        The catalog service for this request.
+    session
+        The request's session.
+
+    Returns
+    -------
+    LoadOut
+        The committed snapshot, the rows written, and whether the table was created.
+
+    Raises
+    ------
+    lakana_core.errors.ValidationError
+        Mapped to 422: a target outside bronze, or rows the table refuses.
+    lakana_core.errors.NotFoundError
+        Mapped to 404: the namespace, or the table without `none`, does not exist.
+    lakana_core.errors.PermissionDenied
+        Mapped to 403.
+    lakana_core.errors.ConflictError
+        Mapped to 409: `expected_snapshot_id` no longer matches.
+    """
+    expected = _expected_snapshot(request, expected_snapshot_id)
+    ref = TableRef(environment=env, namespace=NamespacePath.from_parts(path.split(".")), name=name)
+    require_bronze(ref)
+    created: list[bool] = []
+
+    def precheck() -> None:
+        """Run the load's checks and remember whether it creates the table."""
+        created.append(
+            catalog.check_can_load(principal, ref, write=write, expected_snapshot_id=expected)
+        )
+
+    def load(data: pa.Table) -> LoadOut:
+        """Check, or write, the decoded rows.
+
+        Parameters
+        ----------
+        data
+            The rows.
+
+        Returns
+        -------
+        LoadOut
+            What was written.
+        """
+        if dry_run:
+            would_create = catalog.check_can_load(
+                principal, ref, write=write, expected_snapshot_id=expected, schema=data.schema
+            )
+            return LoadOut(snapshot_id=None, rows=0, created=would_create, dry_run=True)
+        if created[0]:
+            result = catalog.replace(principal, ref, data, expected_snapshot_id="none")
+        elif write == "append":
+            result = catalog.append(principal, ref, data, expected_snapshot_id=expected)
+        else:
+            result = catalog.replace(principal, ref, data, expected_snapshot_id=expected)
+        return LoadOut(
+            snapshot_id=result.snapshot_id, rows=result.rows, created=created[0], dry_run=False
+        )
+
+    return await _governed_arrow_write(
+        request, principal, catalog, session, ref, load, precheck=precheck
     )

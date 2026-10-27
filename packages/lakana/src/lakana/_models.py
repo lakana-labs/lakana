@@ -633,6 +633,30 @@ class AppendResult:
 
 
 @dataclass(frozen=True)
+class LoadResult:
+    """The outcome of a load into the bronze layer (`Tables.load`).
+
+    Parameters
+    ----------
+    snapshot_id
+        The new snapshot of the table, or `None` when nothing was committed (a dry run, or no
+        rows).
+    rows
+        How many rows the load wrote (`0` after a dry run).
+    created
+        `True` when the table did not exist before; after a dry run, when the load would
+        create it.
+    dry_run
+        `True` when only the checks ran and nothing was written.
+    """
+
+    snapshot_id: int | None
+    rows: int
+    created: bool
+    dry_run: bool
+
+
+@dataclass(frozen=True)
 class MergeResult:
     """The outcome of a governed Arrow merge.
 

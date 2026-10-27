@@ -6,6 +6,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from lakana_server.api.platform import info as info_module
+from lakana_server.app import create_app
+from lakana_server.settings import AppendConfig, Settings
 from tests.conftest import AUTH_HEADER
 
 
@@ -21,6 +23,7 @@ def test_info_reports_the_platform_version_from_package_metadata(client: TestCli
             "max_file_bytes": 2 * 1024**3,
             "max_bytes": 10 * 1024**3,
         },
+        "upload_max_bytes": 256 * 1024 * 1024,
     }
 
 
@@ -61,3 +64,12 @@ def test_a_source_checkout_without_package_metadata_reports_an_unknown_version(
 
     monkeypatch.setattr(info_module, "version", missing)
     assert info_module.platform_version() == "0+unknown"
+
+
+def test_info_reports_the_upload_limit_the_operator_set(settings: Settings) -> None:
+    """`LAKANA_APPEND__MAX_BYTES` reaches the client, so `lakana load` can check a file first."""
+    capped = settings.model_copy(update={"append": AppendConfig(max_bytes=4096)})
+    with TestClient(create_app(capped)) as client:
+        response = client.get("/api/v1/info", headers=AUTH_HEADER)
+
+    assert response.json()["upload_max_bytes"] == 4096

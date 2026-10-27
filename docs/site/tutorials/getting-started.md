@@ -1,7 +1,8 @@
 # Getting started
 
-At the end of this tutorial you will have a Lakana instance running on your own machine, three
-tables built by a sample project you deployed, and one query answered from those tables. You do not need
+At the end of this tutorial you will have a Lakana instance running on your own machine, a table
+loaded from a file, three tables built by a sample project you deployed, and one query answered
+from those tables. You do not need
 Docker or a database server.
 
 Lakana is pre-beta: the API and the data layout may change between 0.x releases, so do not put
@@ -100,6 +101,50 @@ instance http://127.0.0.1:8765: 0.8.1.dev6+g6af3c5d2a
 An **environment** is a separate place where a project is deployed and its tables live. A local
 instance has one, called `dev`. Every command below that needs an environment names it with
 `--env dev`.
+
+## Load a file
+
+The quickest way to see your own data in Lakana is to load a file. Save these lines as
+`readings.csv` in the folder your second terminal is in:
+
+<!-- source: docs/examples/getting-started/readings.csv -->
+```text
+station_id,day,temp_c
+A1,2026-01-07,3.5
+B2,2026-01-07,0.5
+C3,2026-01-07,8.0
+```
+
+Then load it:
+
+<!-- source: docs/examples/getting-started/run.sh#load -->
+```bash
+lakana load readings.csv first_file --env dev --yes
+```
+
+The command reads the file, shows each column with the type it found, and writes the rows into
+a new table, `bronze.first_file`:
+
+<!-- output: getting-started#load -->
+```text
+readings.csv: 3 rows, 3 columns
+  station_id: string
+  day: date32[day]
+  temp_c: double
+Loaded 3 rows into dev/bronze.first_file (created the table). To clean it up or load it again on a schedule, write an asset that reads it.
+```
+
+Without `--yes`, it asks before it writes. A load always lands in the **bronze** layer, the
+tables that hold data as it comes in (the sections below say more about layers): a bare name
+such as `first_file` means `bronze.first_file`, and any other layer is refused. It reads CSV,
+Parquet, Arrow and newline-delimited JSON files; a JSON array and spreadsheets need the `assets`
+extra of the `lakana` package as well. Loading the file again replaces the table's rows; with
+`--write append` it adds them.
+
+`lakana load` is for exploring, testing and teaching. A table you clean up, and anything that
+should run again, belongs in an asset, which the rest of this tutorial builds; a
+[Python asset](../reference/python-assets.md) can read files. The
+[load reference](../reference/load.md) has every option and error.
 
 ## Create a project
 

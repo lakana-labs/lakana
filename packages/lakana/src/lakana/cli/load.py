@@ -1,0 +1,479 @@
+"""`lakana load`: load a local file into a table of the bronze layer, once.
+
+For exploration, testing and teaching. Anything that should run again belongs in an asset; the
+server's load route therefore writes only into `bronze` and refuses every other layer before it
+reads the body. This command holds no copy of that rule: it shows the server's refusal as it is.
+
+CSV, Parquet and Arrow files and newline-delimited JSON are read with pyarrow, which every
+install has; a JSON array and spreadsheets are read by the files helper's reader, which needs
+the ``assets`` extra (polars, fastexcel).
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Annotated
+
+import pyarrow as pa
+import pyarrow.csv as pacsv
+import pyarrow.ipc as ipc
+import pyarrow.json as pajson
+import pyarrow.parquet as pq
+import typer
+
+from lakana._arrow import cast_timestamp_ns_columns_to_us, normalize_view_columns, schema_to_columns
+from lakana.cli import _output
+from lakana.cli._break_glass import BREAK_GLASS, REASON, break_glass_reason
+from lakana.cli._state import CliError, confirm, resolve_environment, state_of
+from lakana.errors import NotFound, ValidationError
+
+_EXTENSIONS = {
+    "csv": "csv",
+    "parquet": "parquet",
+    "pq": "parquet",
+    "arrow": "arrow",
+    "ipc": "arrow",
+    "feather": "arrow",
+    "json": "json",
+    "ndjson": "ndjson",
+    "jsonl": "ndjson",
+    "xlsx": "xlsx",
+    "xlsm": "xlsm",
+    "xlsb": "xlsb",
+    "xls": "xls",
+    "ods": "ods",
+}
+FORMATS = ("csv", "parquet", "arrow", "json", "ndjson", "xlsx", "xlsm", "xlsb", "xls", "ods")
+"""The formats `lakana load` reads."""
+_WITH_EXTRA = frozenset({"json", "xlsx", "xlsm", "xlsb", "xls", "ods"})
+"""Read by the files helper's reader, which needs the assets extra."""
+_SPREADSHEETS = frozenset({"xlsx", "xlsm", "xlsb", "xls", "ods"})
+_MIB = 1024 * 1024
+
+
+def bronze_name(table: str) -> str:
+    """Give a bare table name its layer: `customers` means `bronze.customers`.
+
+    Parameters
+    ----------
+    table
+        TABLE as given.
+
+    Returns
+    -------
+    str
+        The dotted target; a dotted name is kept as it is (the server judges its layer).
+    """
+    return table if "." in table else f"bronze.{table}"
+
+
+def _format(path: Path, given: str | None) -> str:
+    """Decide the file's format from `--format` or its extension.
+
+    Parameters
+    ----------
+    path
+        The file.
+    given
+        `--format`, or `None`.
+
+    Returns
+    -------
+    str
+        One of `FORMATS`.
+
+    Raises
+    ------
+    CliError
+        For an unknown format (exit 2).
+    """
+    if given is not None:
+        found = _EXTENSIONS.get(given.lower())
+        if found is None:
+            raise CliError(f"--format must be one of {', '.join(FORMATS)}; got {given!r}")
+        return found
+    found = _EXTENSIONS.get(path.suffix.lower().lstrip("."))
+    if found is None:
+        raise CliError(
+            f"Can't tell the format of {_output.inline(path.name)}; pass --format "
+            f"({', '.join(FORMATS)})"
+        )
+    return found
+
+
+def _csv(path: Path, header_row: int) -> pa.Table:
+    """Read a CSV file with pyarrow, inferring each column's type.
+
+    Parameters
+    ----------
+    path
+        The file.
+    header_row
+        The 1-based row of the column names; ``0`` for none (columns ``column_1``, ...).
+
+    Returns
+    -------
+    pa.Table
+        The rows.
+    """
+    read = pacsv.ReadOptions(
+        skip_rows=max(header_row - 1, 0), autogenerate_column_names=not header_row
+    )
+    convert = pacsv.ConvertOptions(strings_can_be_null=True, null_values=[""])
+    table = pacsv.read_csv(path, read_options=read, convert_options=convert)
+    if not header_row:
+        table = table.rename_columns([f"column_{i + 1}" for i in range(table.num_columns)])
+    return table
+
+
+def _ndjson(path: Path, data: bytes) -> pa.Table:
+    """Read newline-delimited JSON with pyarrow, after the helpers' encoding and depth checks.
+
+    Parameters
+    ----------
+    path
+        The file, for messages.
+    data
+        Its bytes.
+
+    Returns
+    -------
+    pa.Table
+        The rows.
+
+    Raises
+    ------
+    CliError
+        For text that is not UTF-8 or nests deeper than the helpers read (exit 8).
+    """
+    from lakana.ingest._formats import MAX_NESTING, nested_deeper
+
+    data = data.removeprefix(b"\xef\xbb\xbf")
+    try:
+        data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise CliError(
+            f"{_output.inline(path.name)} is not UTF-8 (byte {data[exc.start]:#04x} at position "
+            f"{exc.start}); save it as UTF-8 and load it again",
+            8,
+            kind="FileError",
+        ) from None
+    if nested_deeper(data):
+        raise CliError(
+            f"{_output.inline(path.name)} nests arrays and objects deeper than {MAX_NESTING} "
+            "levels, which Lakana does not read; flatten it first",
+            8,
+            kind="FileError",
+        )
+    return pajson.read_json(pa.BufferReader(data))
+
+
+def _with_extra(path: Path, data: bytes, fmt: str, sheet: str | None, header_row: int) -> pa.Table:
+    """Read a JSON array or a spreadsheet with the files helper's reader.
+
+    Parameters
+    ----------
+    path
+        The file.
+    data
+        Its bytes.
+    fmt
+        Its format.
+    sheet
+        `--sheet`.
+    header_row
+        `--header-row`.
+
+    Returns
+    -------
+    pa.Table
+        The rows.
+
+    Raises
+    ------
+    CliError
+        Without the assets extra (exit 2), or when the file cannot be parsed (exit 8).
+    """
+    from lakana.ingest import _formats
+    from lakana.ingest._errors import IngestError
+
+    try:
+        import polars  # ruff: ignore[unused-import] (presence check)
+
+        if fmt in _SPREADSHEETS:
+            import fastexcel  # ruff: ignore[unused-import] (presence check)
+    except ImportError:
+        raise CliError(
+            f"reading .{fmt} needs the assets extra: pip install 'lakana[assets]'"
+        ) from None
+    if fmt in _formats.ZIPPED:
+        counted = _formats.unpacked_size(data, 16 * len(data) + _MIB)
+        if counted is not None and counted[1]:
+            raise CliError(
+                f"{_output.inline(path.name)} unpacks to more than 16 times its size; split the "
+                "workbook",
+                8,
+                kind="FileError",
+            )
+    try:
+        frame = _formats.parse(data, name=path.name, format=fmt, sheet=sheet, header_row=header_row)
+    except IngestError as exc:
+        raise CliError(str(exc), 8, kind="FileError") from None
+    return frame.to_arrow()
+
+
+def read_file(path: Path, fmt: str, *, sheet: str | None, header_row: int) -> pa.Table:
+    """Read a local file into an Arrow table the platform can store.
+
+    Parameters
+    ----------
+    path
+        The file.
+    fmt
+        One of `FORMATS`.
+    sheet
+        `--sheet` (spreadsheets only).
+    header_row
+        `--header-row` (CSV and spreadsheets only).
+
+    Returns
+    -------
+    pa.Table
+        The rows, with view and nanosecond columns converted.
+
+    Raises
+    ------
+    CliError
+        For an option the format does not take, an unreadable file, or a column type a table
+        cannot store.
+    """
+    if sheet is not None and fmt not in _SPREADSHEETS:
+        raise CliError(f"--sheet applies to spreadsheets; {_output.inline(path.name)} is {fmt}")
+    if header_row != 1 and fmt not in _SPREADSHEETS | {"csv"}:
+        raise CliError(
+            f"--header-row applies to CSV files and spreadsheets; {_output.inline(path.name)} "
+            f"is {fmt}"
+        )
+    if header_row < 0:
+        raise CliError("--header-row is the 1-based row of the column names, or 0 for none")
+    try:
+        if fmt == "csv":
+            table = _csv(path, header_row)
+        elif fmt == "parquet":
+            table = pq.read_table(path)
+        elif fmt == "arrow":
+            with pa.memory_map(str(path)) as source:
+                try:
+                    table = ipc.open_file(source).read_all()
+                except pa.ArrowInvalid:
+                    source.seek(0)
+                    table = ipc.open_stream(source).read_all()
+        elif fmt == "ndjson":
+            table = _ndjson(path, path.read_bytes())
+        else:
+            table = _with_extra(path, path.read_bytes(), fmt, sheet, header_row)
+    except (pa.ArrowException, OSError) as exc:
+        raise CliError(
+            f"Could not read {_output.inline(path.name)} as {fmt}: {_output.inline(str(exc))}",
+            8,
+            kind="FileError",
+        ) from None
+    table = normalize_view_columns(cast_timestamp_ns_columns_to_us(table))
+    try:
+        schema_to_columns(table.schema)
+    except ValidationError as exc:
+        raise CliError(
+            f"{_output.inline(path.name)}: {exc}; convert the column before loading",
+            8,
+            kind="FileError",
+        ) from None
+    return table
+
+
+def _check_size(path: Path, size: int, limit: int | None) -> None:
+    """Refuse a file larger than one upload may be.
+
+    Parameters
+    ----------
+    path
+        The file.
+    size
+        What would be sent, or the file's size.
+    limit
+        The server's upload limit; `None` when the server does not say (its 413 applies).
+
+    Raises
+    ------
+    CliError
+        Exit 2, naming the limit and the way to load the file instead.
+    """
+    if limit is None or size <= limit:
+        return
+    shown = f"{limit / _MIB:g} MiB" if limit % _MIB == 0 else f"{limit} bytes"
+    raise CliError(
+        f"{_output.inline(path.name)} ({size} bytes) is larger than one upload may be "
+        f"({shown}); load it with a Python asset and a directory or object-store connection"
+    )
+
+
+def _ipc_size(table: pa.Table) -> int:
+    """Count the bytes the table takes as the Arrow stream the SDK sends.
+
+    Parameters
+    ----------
+    table
+        The rows.
+
+    Returns
+    -------
+    int
+        The stream's size.
+    """
+    sink = pa.MockOutputStream()
+    with ipc.new_stream(sink, table.schema) as writer:
+        writer.write_table(table)
+    return sink.size()
+
+
+def load(
+    ctx: typer.Context,
+    file: Annotated[
+        Path,
+        typer.Argument(help="The local file: CSV, Parquet, Arrow, JSON, NDJSON or a spreadsheet."),
+    ],
+    table: Annotated[
+        str, typer.Argument(help="The bronze table; a bare name means bronze.<name>.")
+    ],
+    env: Annotated[
+        str | None, typer.Option("--env", help="Environment (default: the profile's).")
+    ] = None,
+    write: Annotated[
+        str,
+        typer.Option(
+            "--write",
+            help="replace (the default) or append, once the table exists; a first load creates it.",
+        ),
+    ] = "replace",
+    file_format: Annotated[
+        str | None,
+        typer.Option("--format", help="The file's format, if the extension doesn't say."),
+    ] = None,
+    sheet: Annotated[
+        str | None, typer.Option("--sheet", help="A spreadsheet's sheet (default: the first).")
+    ] = None,
+    header_row: Annotated[
+        int,
+        typer.Option("--header-row", help="Row of the column names in a CSV or sheet; 0 for none."),
+    ] = 1,
+    yes: Annotated[bool, typer.Option("--yes", help="Don't ask for confirmation.")] = False,
+    break_glass: BREAK_GLASS = False,
+    reason: REASON = None,
+) -> None:
+    """Load FILE into TABLE of the bronze layer, once.
+
+    Shows the schema and the row count and asks before it writes. A first load creates the
+    table; later loads replace its rows or, with --write append, add to them, and fail
+    clearly if someone changed the table in between. For anything that should run again,
+    write a Python asset instead.
+
+    Parameters
+    ----------
+    ctx
+        The Typer context.
+    file
+        The local file.
+    table
+        The target; `name` means `bronze.name`.
+    env
+        `--env`.
+    write
+        `--write`: ``replace`` or ``append``.
+    file_format
+        `--format`.
+    sheet
+        `--sheet`.
+    header_row
+        `--header-row`.
+    yes
+        `--yes`: skip the question; required in a protected environment.
+    break_glass
+        `--break-glass`.
+    reason
+        `--reason`.
+
+    Raises
+    ------
+    CliError
+        For a bad option, an unreadable file, a file over the upload limit, a protected
+        environment without --yes, or a declined confirmation.
+    """
+    if write not in ("replace", "append"):
+        raise CliError(f"--write must be replace or append; got {write!r}")
+    state = state_of(ctx)
+    environment = resolve_environment(state, env)
+    target = bronze_name(table)
+    fmt = _format(file, file_format)
+    if not file.is_file():
+        raise CliError(f"No such file: {_output.inline(str(file))}", 8, kind="FileError")
+    client = state.client()
+    if client.environments.get(environment).is_protected and not yes:
+        raise CliError(
+            f"`{_output.inline(environment)}` is protected: recurring loads belong in an asset; "
+            "pass --yes to load once (and --break-glass --reason REASON if writes are locked)"
+        )
+    glass = break_glass_reason(break_glass, reason, environment)
+    limit = client.tables.upload_limit()
+    size = file.stat().st_size
+    _check_size(file, size, limit)
+    data = read_file(file, fmt, sheet=sheet, header_row=header_row)
+    if limit is not None:
+        _check_size(file, _ipc_size(data), limit)
+    try:
+        current = client.tables.get(environment, target).snapshot_id
+    except NotFound:
+        current = None
+    pin: int | str = "none" if current is None else current
+    checked = client.tables.load(
+        environment,
+        target,
+        data.schema.empty_table(),
+        write=write,
+        expected_snapshot_id=pin,
+        break_glass_reason=glass,
+        dry_run=True,
+    )
+    lines = [f"{_output.inline(file.name)}: {data.num_rows} rows, {data.num_columns} columns"]
+    lines += [f"  {_output.inline(field.name)}: {field.type}" for field in data.schema]
+    typer.echo("\n".join(lines), err=True)
+    action = "create" if checked.created else write
+    confirm(
+        state,
+        f"Load {data.num_rows} rows into {environment}/{target} ({action})?",
+        yes,
+    )
+    result = client.tables.load(
+        environment,
+        target,
+        data,
+        write=write,
+        expected_snapshot_id=pin,
+        break_glass_reason=glass,
+    )
+    made = " (created the table)" if result.created else ""
+    _output.done(
+        state,
+        f"Loaded {result.rows} rows into {_output.inline(environment)}/{_output.inline(target)}"
+        f"{made}. To clean it up or load it again on a schedule, write an asset that reads it.",
+        result,
+    )
+
+
+def register(app: typer.Typer) -> None:
+    """Add `load` to the root app.
+
+    Parameters
+    ----------
+    app
+        The root app.
+    """
+    app.command("load")(load)
