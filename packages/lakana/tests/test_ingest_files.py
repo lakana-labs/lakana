@@ -1223,3 +1223,13 @@ def test_json_nested_deeper_than_the_limit_is_refused_before_polars(
         "does not read; flatten the file at the source, or read it with connections.get and "
         "your own parser"
     )
+
+
+@pytest.mark.parametrize("format", ["json", "ndjson"])
+@pytest.mark.parametrize("encoding", ["utf-16-le", "utf-16", "utf-32"])
+def test_json_in_another_encoding_than_utf_8_is_a_shape_error(format: str, encoding: str) -> None:
+    """Polars reads UTF-8 only: a UTF-16 or UTF-32 file never reaches a parser that guesses."""
+    text = '[{"a": 1}]' if format == "json" else '{"a": 1}\n'
+
+    with pytest.raises(_formats.FileShapeError, match=r"`exports/a\.json`: "):
+        _formats.parse(text.encode(encoding), name="exports/a.json", format=format)

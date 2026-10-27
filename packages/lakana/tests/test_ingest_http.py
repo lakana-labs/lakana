@@ -718,6 +718,12 @@ def _trust(authority: Authority) -> ssl.SSLContext:
         (503, b"", SourceError, "answered HTTP 503"),
         (200, b'{"token": "x"}', UsageError, "answered without an access_token"),
         (200, b"<html>", UsageError, "answered without an access_token"),
+        (
+            200,
+            json.dumps({"access_token": "utf-16-token"}).encode("utf-16"),
+            UsageError,
+            "answered without an access_token",
+        ),
         (200, json.dumps({"access_token": "a\r\nb"}).encode(), UsageError, "without an access"),
         (200, b'{"access_token": "abcd", "token_type": "mac"}', UsageError, "of type 'mac'"),
     ],

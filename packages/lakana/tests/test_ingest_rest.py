@@ -983,6 +983,72 @@ def test_json_nested_deeper_than_the_limit_is_refused_before_arrow(
     assert caught.value.retryable is False
 
 
+@pytest.mark.parametrize("encoding", ["utf-16-le", "utf-16-be", "utf-16", "utf-32"])
+def test_a_page_in_another_encoding_is_refused_before_any_parsing(
+    authority: Authority, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, encoding: str
+) -> None:
+    """JSON from an API is UTF-8 (RFC 8259), refused otherwise before any parser runs.
+
+    json.loads would guess UTF-16 or UTF-32 and decode past the nesting check, which reads UTF-8
+    bytes: pyarrow crashed at 20,000 levels.
+    """
+
+    def never(*args: object, **kwargs: object) -> None:
+        raise AssertionError("reached a parser")
+
+    body = _deep(500).decode().replace('"a": ', '"a": "\u2200", "b": ').encode(encoding)
+    with scripted(
+        authority, tmp_path, lambda e: (200, {"Content-Type": "application/json"}, body)
+    ) as server:
+        _task(server.base, authority)
+        monkeypatch.setattr(json, "loads", never)
+        monkeypatch.setattr(pa, "array", never)
+        with pytest.raises(FileShapeError) as caught:
+            rest.read("api", "items")
+
+    assert f"`api`: page 1 of GET {server.base}/items is not UTF-8 (" in str(caught.value)
+    assert str(caught.value).endswith(
+        "); JSON from an API must be UTF-8 (RFC 8259): ask the API for UTF-8, or read it with "
+        "connections.get and your own client"
+    )
+    assert caught.value.retryable is False
+
+
+@pytest.mark.parametrize(
+    ("body", "reason"),
+    [
+        (b'{"data": [{"a": "\xff"}]}', "byte 0xff at position 17 is no UTF-8"),
+        (
+            b'{"data": [{"a": 1}]}'.decode().encode("utf-16-le"),
+            "it holds a NUL byte, as UTF-16 and UTF-32 text do",
+        ),
+    ],
+    ids=["invalid-utf-8", "nul-byte"],
+)
+def test_a_page_that_is_not_utf_8_names_the_byte(
+    authority: Authority, tmp_path: Path, body: bytes, reason: str
+) -> None:
+    with scripted(authority, tmp_path, lambda e: (200, {}, body)) as server:
+        _task(server.base, authority)
+        with pytest.raises(FileShapeError) as caught:
+            rest.read("api", "items")
+
+    assert str(caught.value) == (
+        f"`api`: page 1 of GET {server.base}/items is not UTF-8 ({reason}); JSON from an API "
+        "must be UTF-8 (RFC 8259): ask the API for UTF-8, or read it with connections.get and "
+        "your own client"
+    )
+
+
+def test_a_utf_8_byte_order_mark_is_accepted(authority: Authority, tmp_path: Path) -> None:
+    body = b"\xef\xbb\xbf" + '{"data": [{"name": "Zoë"}]}'.encode()
+    with scripted(authority, tmp_path, lambda e: (200, {}, body)) as server:
+        _task(server.base, authority)
+        table = rest.read("api", "items")
+
+    assert table.column("name").to_pylist() == ["Zoë"]
+
+
 def test_json_nested_to_the_limit_is_read(authority: Authority, tmp_path: Path) -> None:
     body = _deep(100)
     with scripted(authority, tmp_path, lambda e: (200, {}, body)) as server:

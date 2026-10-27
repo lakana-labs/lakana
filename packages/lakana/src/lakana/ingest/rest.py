@@ -598,19 +598,35 @@ def _parse(name: str, page: int, answer: _http.Answer) -> object:
     SourceError
         When the body is no JSON (retried: an API may answer a maintenance page for a while).
     FileShapeError
-        When it nests arrays and objects deeper than `MAX_NESTING` (pyarrow would crash on it).
+        When it is not UTF-8 (a UTF-8 byte order mark is dropped), or nests arrays and objects
+        deeper than `MAX_NESTING` (pyarrow would crash on it).
     """
     if answer.status == 204 or not answer.body.strip():
         return None
-    if nested_deeper(answer.body):
+    shown = f"page {page} of GET {_http.shown_url(answer.url)}"
+    body = answer.body.removeprefix(b"\xef\xbb\xbf")
+    try:
+        text = body.decode("utf-8")
+        reason = "it holds a NUL byte, as UTF-16 and UTF-32 text do" if "\x00" in text else ""
+    except UnicodeDecodeError as exc:
+        reason = f"byte {body[exc.start]:#04x} at position {exc.start} is no UTF-8"
+    if reason:
+        # JSON exchanged between systems is UTF-8 (RFC 8259). json.loads would guess UTF-16 or
+        # UTF-32 from bytes, past the nesting check below, which reads UTF-8.
         raise FileShapeError(
-            f"`{name}`: page {page} of GET {_http.shown_url(answer.url)} nests arrays and objects "
-            f"deeper than {MAX_NESTING} levels, which Lakana does not read; read it with "
-            "connections.get and your own client, and flatten it"
+            f"`{name}`: {shown} is not UTF-8 ({reason}); JSON from an API must be UTF-8 "
+            "(RFC 8259): ask the API for UTF-8, or read it with connections.get and your own "
+            "client"
+        )
+    if nested_deeper(body):
+        raise FileShapeError(
+            f"`{name}`: {shown} nests arrays and objects deeper than {MAX_NESTING} levels, "
+            "which Lakana does not read; read it with connections.get and your own client, and "
+            "flatten it"
         )
     try:
         return json.loads(
-            answer.body,
+            text,
             parse_int=_parse_int,
             parse_float=_parse_float,
             parse_constant=_parse_constant,
@@ -618,8 +634,7 @@ def _parse(name: str, page: int, answer: _http.Answer) -> object:
     except (ValueError, RecursionError):
         kind = safe_name(answer.headers.get("content-type", "no content type"))[:80]
         raise SourceError(
-            f"`{name}`: page {page} of GET {_http.shown_url(answer.url)} is not JSON ({kind}); "
-            "check path= against the API's documentation"
+            f"`{name}`: {shown} is not JSON ({kind}); check path= against the API's documentation"
         ) from None
 
 

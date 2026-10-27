@@ -139,8 +139,8 @@ of the files. Pass `schema=` with one type for the column.
 |---|---|
 | `.csv` | Polars CSV |
 | `.parquet` | Polars Parquet |
-| `.json` | Polars JSON (an array of objects) |
-| `.ndjson`, `.jsonl` | Polars newline-delimited JSON |
+| `.json` | Polars JSON (an array of objects), UTF-8 |
+| `.ndjson`, `.jsonl` | Polars newline-delimited JSON, UTF-8 |
 | `.xlsx`, `.xlsm`, `.xlsb`, `.xls`, `.ods` | `fastexcel` (calamine) |
 
 Any other extension needs `format=`. `sheet=` on a file without sheets, and `header_row=` other
@@ -325,6 +325,10 @@ stacks the records of every page into one table.
 A key that holds dots (`@odata.nextLink`) is looked up whole first, then as a dotted path. No
 records at all is a table without columns, which an `append` or `merge` asset may return.
 
+A page must be UTF-8, as JSON exchanged between systems is (RFC 8259); a UTF-8 byte order mark
+is dropped. A page in UTF-16 or UTF-32, or with bytes that are no UTF-8, fails for good, before
+it is parsed.
+
 ### Pages
 
 - **`rest.PageNumber(param="page", start=1, size_param=None, size=None)`** sends `page=1`,
@@ -380,7 +384,7 @@ The classes are those of [files.read](#errors):
 |---|---|---|
 | `UsageError` | The call or the setup is wrong: a path that could leave the base URL, a `None` or unsupported `params` value, a `params` key the paginator or the connection's API key sets, `records=` that does not lead to a list of objects, a cursor or link of the wrong type, a page that repeats an earlier one, a connection of another kind, a missing secret or one no header can carry, a token endpoint that answers without a bearer token. | No |
 | `SourceRefused` (a `SourceError`) | The API refused the credential (401, 403) or the request (another 4xx), answered with a redirect, a next link names another host, a certificate is not trusted, an OAuth2 token endpoint refused the client, or the task's egress proxy refused the host (403) or the task's token (407). | No |
-| `FileShapeError` (a `SourceError`) | A field holds values of different types (a number and a text), or a value Arrow cannot hold (an integer beyond 64 bits, a number beyond a 64-bit float such as `1e400`, `NaN` or `Infinity`), or a page nests arrays and objects more than 100 levels deep. | No |
+| `FileShapeError` (a `SourceError`) | A field holds values of different types (a number and a text), or a value Arrow cannot hold (an integer beyond 64 bits, a number beyond a 64-bit float such as `1e400`, `NaN` or `Infinity`), or a page nests arrays and objects more than 100 levels deep or is not UTF-8. | No |
 | `SourceError` | The API kept failing past the retries or the budget, answered another 5xx, could not be reached, or a page is not JSON (a maintenance page, say). | Yes |
 | `CapExceeded` | A cap was reached. | No |
 
@@ -399,6 +403,7 @@ The classes are those of [files.read](#errors):
 | `...: field 'id' of page 2 holds values of different types` (or `the pages of ... cannot be combined`) | The API mixes types in a field. | Read it with `connections.get` and your own client to convert it. |
 | `...: field 'amount' of page 1 holds an integer of 5000 digits, which Arrow cannot hold` (or `1e400, beyond a 64-bit float`, `NaN, which JSON does not allow`) | A number no table column holds. | Read it with `connections.get` and your own client to convert it. |
 | `...: page 1 of GET ... nests arrays and objects deeper than 100 levels` | A page nested deeper than any table needs (Arrow would crash on it). | Read it with `connections.get` and your own client, and flatten it. |
+| `...: page 1 of GET ... is not UTF-8 (it holds a NUL byte, as UTF-16 and UTF-32 text do)` (or `byte 0xff at position 17 is no UTF-8`) | The API answers in another encoding. | Ask the API for UTF-8 (often an `Accept-Charset` or a setting of the account), or read it with `connections.get` and your own client. |
 | `...: page 1 of GET ... is not JSON (text/html)` | The API answered something else. | Check `path=`; the task is retried in case it was a maintenance page. |
 | `... is not a connection of this asset: declare it in @asset(connections=[...])` | Under the Docker runner the egress proxy refused the host: it is not one of the asset's connections, or it is inside the Lakana stack or on the Docker host. | Declare the connection; give it an address outside the Lakana stack. |
 | `...: 'items' has more than max_pages (10000) pages` (or `max_bytes`, `max_rows`) | The read is larger than the cap. | Narrow with `params=` (such as a date filter), or raise the cap. |

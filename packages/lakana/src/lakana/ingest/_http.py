@@ -460,7 +460,8 @@ class ClientCredentials:
             can carry.
         """
         try:
-            said = json.loads(body)
+            # Decoded here: json.loads would guess UTF-16 or UTF-32 from bytes; JSON is UTF-8.
+            said = json.loads(body.decode("utf-8"))
         except (ValueError, RecursionError):
             said = None
         if not isinstance(said, dict):
