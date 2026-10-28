@@ -12,8 +12,8 @@ Every source below goes through both. The rule this module pins:
   line, and its body runs;
 - a source discovery **refuses** for the shape of its decorator or the place
   of its function is never run by the harness;
-- a source that only *running* it can tell apart (the name is rebound after
-  the function is defined) deploys, and the harness refuses it: it fails
+- a source that only *running* it can tell apart (the function's name is rebound
+  after it is defined) deploys, and the harness refuses it: it fails
   closed, it never runs the other function.
 """
 
@@ -176,17 +176,22 @@ _REFUSED = {
     ),
     "async": f"from lakana import asset\n\n\n@asset()\nasync def scores():\n    return {_RAN!r}\n",
     "does-not-parse": "from lakana import asset\n\n\n@asset(\ndef scores():\n    return 1\n",
+    # The name is rebound before the decorator is used (#51): discovery follows the rebinding.
+    "decorator-replaced-before-use": (
+        "from lakana import asset\n\n\ndef asset(**arguments):\n"
+        "    return lambda function: function\n\n\n"
+        f"@asset()\ndef scores():\n    return {_RAN!r}\n"
+    ),
+    "decorator-assigned-before-use": (
+        "from lakana import asset\n\nasset = print\n\n\n"
+        f"@asset()\ndef scores():\n    return {_RAN!r}\n"
+    ),
 }
 
 _ONLY_RUNNING_TELLS = {
     "name-rebound-to-another-function": _PLAIN
     + '\n\ndef other():\n    return "the wrong function ran"\n\n\nscores = other\n',
     "function-defined-again": _PLAIN + '\n\ndef scores():\n    return "the wrong function ran"\n',
-    "decorator-replaced-before-use": (
-        "from lakana import asset\n\n\ndef asset(**arguments):\n"
-        "    return lambda function: function\n\n\n"
-        f"@asset()\ndef scores():\n    return {_RAN!r}\n"
-    ),
 }
 
 

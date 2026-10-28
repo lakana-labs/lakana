@@ -6,6 +6,7 @@ import ast
 import base64
 import contextlib
 import errno
+import gc
 import hashlib
 import hmac
 import http.server
@@ -22,6 +23,7 @@ import sys
 import threading
 import time
 import urllib.parse
+import warnings
 from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -1687,6 +1689,12 @@ def _fake_postgres(
     seen: list[str] = []
 
     class Cursor:
+        def __enter__(self) -> Cursor:
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            seen.append("cursor closed")
+
         def execute(self, statement: str) -> None:
             if refuse_select is not None:
                 raise _PgError(refuse_select)
@@ -1749,7 +1757,7 @@ def test_postgresql_credentials_log_in_and_execute_select_1(
         "ok",
         f"reachable: `localhost:{port}`, TLS verified, credentials accepted",
     )
-    info, executed, closed = seen
+    info, executed, cursor_closed, closed = seen
     assert info.startswith(
         f"host='localhost' port='{port}' dbname='crm' user='reader' password='{SECRET}' "
     )
@@ -1757,7 +1765,7 @@ def test_postgresql_credentials_log_in_and_execute_select_1(
         "sslmode='verify-full'" in info and "options='-c default_transaction_read_only=on'" in info
     )
     assert "sslrootcert='/" in info
-    assert (executed, closed) == ("executed: SELECT 1", "closed")
+    assert (executed, cursor_closed, closed) == ("executed: SELECT 1", "cursor closed", "closed")
 
 
 @pytest.mark.parametrize(
@@ -2063,14 +2071,19 @@ def test_without_pymysql_a_mariadb_test_fails_saying_what_to_install(
 
 def test_a_sqlite_file_opens_read_only_or_is_named(tmp_path: Path) -> None:
     """A real database opens; a file that is none fails naming the path; nothing is written."""
-    with sqlite3.connect(tmp_path / "app.db") as db:
+    with contextlib.closing(sqlite3.connect(tmp_path / "app.db")) as db, db:
         db.execute("CREATE TABLE t(a)")
     (tmp_path / "notes.db").write_text("not a database at all " * 10)
     body = connection("sqlite-file", {"root": "shared", "path": "app.db"})
     routing = {"root": "shared", "root_dir": str(tmp_path)}
 
-    ok = _check.check(body, {**routing, "path": "app.db"}, timeout=FAST)
-    bad = _check.check(body, {**routing, "path": "notes.db"}, timeout=FAST)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        ok = _check.check(body, {**routing, "path": "app.db"}, timeout=FAST)
+        bad = _check.check(body, {**routing, "path": "notes.db"}, timeout=FAST)
+        gc.collect()
+    # A cursor or connection left to the garbage collector is a `ResourceWarning` (#10).
+    assert [str(w.message) for w in caught if issubclass(w.category, ResourceWarning)] == []
 
     assert ok == (
         "ok",

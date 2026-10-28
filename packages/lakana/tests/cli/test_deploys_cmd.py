@@ -817,6 +817,89 @@ def test_a_deploy_warning_is_printed_on_stderr_and_carried_in_json(tmp_path: Pat
     assert "warning" not in _plain(quiet.stderr)
 
 
+_RUN = "00000000-0000-0000-0000-0000000000c1"
+_ACTIVE = "00000000-0000-0000-0000-0000000000c2"
+_LACKS_RUN = (
+    "job `nightly` was not started: ci may not RUN in `dev`. Grant RUN with `lakana grant create "
+    "--principal ci --action RUN --kind ENVIRONMENT --env dev`, or start the job yourself with "
+    "`lakana job run nightly --repo analytics --env dev`."
+)
+_STARTS = [
+    {"job": "refresh", "outcome": "started", "run_id": _RUN},
+    {"job": "hourly", "outcome": "waiting", "waits_for_run_id": _ACTIVE},
+    {"job": "nightly", "outcome": "not_started", "reason": "lacks_run", "message": _LACKS_RUN},
+]
+
+
+def test_a_deploy_names_the_jobs_it_started_and_the_one_it_could_not(tmp_path: Path) -> None:
+    """The runs and the waiting start on stdout; a job not started is a warning with its fix."""
+    result = invoke(
+        make_state(tmp_path, _api(job_starts=_STARTS)),
+        "deploy",
+        "analytics",
+        "--env",
+        "dev",
+        env=_CI,
+    )
+    assert result.exit_code == 0, result.output
+    out = _plain(result.stdout)
+    assert (
+        f"Jobs started after the deploy: refresh: run {_RUN} hourly: waits for run {_ACTIVE}; "
+        "it starts then"
+    ) in out
+    err = _plain(result.stderr)
+    assert f"warning: {_LACKS_RUN}" in err
+    assert "Hint: follow a run with 'lakana runs show RUN_ID --env dev'." in err
+    assert "lakana run --env" not in err
+
+
+def test_a_deploy_whose_jobs_were_all_refused_keeps_the_run_hint(tmp_path: Path) -> None:
+    """Nothing started, so the usual hint to run what was deployed stays."""
+    refused = [_STARTS[2]]
+    result = invoke(
+        make_state(tmp_path, _api(job_starts=refused)),
+        "deploy",
+        "analytics",
+        "--env",
+        "dev",
+        env=_CI,
+    )
+    assert result.exit_code == 0, result.output
+    assert "Jobs started" not in _plain(result.stdout)
+    assert f"warning: {_LACKS_RUN}" in _plain(result.stderr)
+    assert "Hint: run 'lakana run analytics --env dev'" in _plain(result.stderr)
+
+
+def test_a_start_without_a_message_is_still_named(tmp_path: Path) -> None:
+    """A damaged entry from the server still says which job did not start."""
+    bare = [{"job": "refresh", "outcome": "not_started"}]
+    result = invoke(
+        make_state(tmp_path, _api(job_starts=bare)), "deploy", "analytics", "--env", "dev", env=_CI
+    )
+    assert "warning: job `refresh` was not started (not_started)" in _plain(result.stderr)
+
+
+def test_the_job_starts_are_in_the_json_output(tmp_path: Path) -> None:
+    """`--output json` carries every start as the API sent it."""
+    result = invoke(
+        make_state(tmp_path, _api(job_starts=_STARTS)),
+        "--output",
+        "json",
+        "deploy",
+        "analytics",
+        "--env",
+        "dev",
+        env=_CI,
+    )
+    assert result.exit_code == 0, result.output
+    starts = json.loads(result.stdout)["job_starts"]
+    assert [(s["job"], s["outcome"]) for s in starts] == [
+        ("refresh", "started"),
+        ("hourly", "waiting"),
+        ("nightly", "not_started"),
+    ]
+
+
 def test_project_version_show_notes_hidden_edges(tmp_path: Path) -> None:
     """Like hidden external inputs, hidden DAG edges are counted on their own line."""
     api = FakeApi()

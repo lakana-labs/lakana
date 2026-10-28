@@ -13,7 +13,7 @@ import re
 import uuid
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
 import sqlglot
@@ -66,6 +66,12 @@ from lakana_core.models.run import ACTIVE_RUN_STATUSES
 from lakana_core.pagination import decode_cursor, encode_cursor
 from lakana_core.projects.checks import ParsedCheck, check_sql_references, may_read_every
 from lakana_core.projects.dag import ProjectGraph
+from lakana_core.projects.deploy_jobs import (
+    OUTCOME_PENDING,
+    DeployJobStart,
+    job_starts_view,
+    pending_job_starts,
+)
 from lakana_core.projects.diff import DeployDiff, diff_manifests
 from lakana_core.projects.git_input import is_full_sha, validate_ref
 from lakana_core.projects.issues import ProjectIssue, ProjectValidationError
@@ -406,6 +412,10 @@ class DeployRunView:
     waiting_for
         Why a `QUEUED` run has not started (`DeployService.get` only; `None` for any other
         status and in a listing).
+    job_starts
+        The jobs with ``on_deploy: true`` a successful deploy started, by name: the run, the
+        start that waits, or why a job was not started (`lakana_core.projects.deploy_jobs`).
+        Empty for a run that starts no job.
     """
 
     id: uuid.UUID
@@ -427,6 +437,7 @@ class DeployRunView:
     checks: dict[str, list[dict[str, str]]] | None = None
     warnings: list[str] = field(default_factory=list)
     waiting_for: WaitReason | None = None
+    job_starts: tuple[DeployJobStart, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -664,7 +675,42 @@ class DeployService:
                 *self._kept_removed_warnings(run, env_name, reader, diff, reads or _WarningReads()),
                 *(run.warnings_json or []),
             ],
+            job_starts=job_starts_view(
+                run.job_starts_json,
+                lost=self._starts_lost(run),
+                repository=repo_name,
+                environment=env_name,
+            ),
         )
+
+    def _starts_lost(self, run: DeployRun) -> bool:
+        """Say whether a start the deploy left pending will never be made.
+
+        The worker starts the jobs right after the deploy's transaction. A start still pending a
+        run lease after the deploy finished was not made: the worker stopped in between. Reads the
+        database's clock only for a run with a pending start.
+
+        Parameters
+        ----------
+        run
+            The deploy run.
+
+        Returns
+        -------
+        bool
+            Whether pending starts are to be shown as lost.
+        """
+        stored = run.job_starts_json
+        if run.finished_at is None or not isinstance(stored, list):
+            return False
+        if not any(
+            isinstance(entry, dict) and entry.get("outcome") == OUTCOME_PENDING for entry in stored
+        ):
+            return False
+        finished = run.finished_at
+        if finished.tzinfo is None:  # pragma: no cover -- UTCDateTime reads aware times
+            finished = finished.replace(tzinfo=UTC)
+        return db_now(self._session) - finished > timedelta(seconds=self._lease_seconds)
 
     def _kept_removed_warnings(
         self,
@@ -2869,8 +2915,11 @@ class DeployService:
 
         Locks the run and checks it is still `running` under `worker_id` (`_hold`), then
         inserts or reuses the project version, compare-and-swaps the pointer, marks the run
-        succeeded and writes the `DEPLOYED` audit event. Check and writes are one transaction,
-        so a deploy whose run the scheduler ended meanwhile writes nothing. The
+        succeeded and writes the `DEPLOYED` audit event. When the pointer moved to another project
+        version, the jobs with ``on_deploy: true`` are stored as pending starts
+        (`job_starts_json`), which the worker makes after the commit
+        (`lakana_core.jobs.on_deploy.start_jobs_after_deploy`). Check and writes are one
+        transaction, so a deploy whose run the scheduler ended meanwhile writes nothing. The
         swap runs in the same transaction as the insert, so the loser of a
         race rolls back and leaves no project version behind.
 
@@ -2959,6 +3008,13 @@ class DeployService:
                 run.resolved_sha = sha
         previous = self.current_job_version(environment_id, repository_id)
         self._swap_pointer(environment_id, repository_id, expected_job_version_id, version.id)
+        # The jobs start only when the deploy made another project version current: deploying the
+        # commit that is already current changes nothing, so it starts nothing.
+        run.job_starts_json = (
+            pending_job_starts(version.manifest_json)
+            if previous is None or previous.id != version.id
+            else None
+        )
         finished = datetime.now(UTC)
         run.warnings_json = self._sync_job_schedules(
             environment_id,

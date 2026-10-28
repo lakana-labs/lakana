@@ -466,6 +466,28 @@ A dropped table that had been renamed into another namespace used to be shown or
 Lakana recorded for it: it is shown, under that name, to a reader of that name's namespace, and
 hidden from a reader of only its earlier namespace.
 
+### A job can start after each deploy
+
+A job with `on_deploy: true` in `lakana.yaml` starts after each deploy that makes another
+project version current, as whoever deployed; runs started this way have the trigger `deploy`
+(`lakana runs list --trigger deploy`). A deploy through a CI token starts them only when its CI
+trust rule opts in: the new rule setting `start_on_deploy_jobs` (`lakana ci-trust update RULE_ID
+--start-on-deploy-jobs`) is false on every existing rule. The key is off by default, so existing
+jobs do not change, and a project that does not use it keeps its manifest. Migration `0051` adds
+the record of these starts to each deploy (`job_starts` in `GET .../deploys/{id}`) and the rule
+setting. A worker of an
+earlier release refuses a project that uses the key
+(`jobs.refresh.on_deploy: Extra inputs are not permitted`), so upgrade the workers before you
+deploy one. A downgrade records each run with the trigger `deploy` as `api` (a service account
+started it) or `manual`. See
+[Start a job after each deploy](../how-to/run-a-job-on-a-schedule.md#start-a-job-after-each-deploy).
+
+**Breaking for a REST client that reads every trigger kind:** the `triggers` of a job
+(`GET .../jobs`, `GET .../jobs/{job}`, pause and resume) may now hold `{"kind": "deploy"}`, between
+`schedule` and `on_demand`. The [Jobs reference](../reference/jobs.md#triggers) has always asked a
+client to ignore a kind it does not know; the SDK of every release does, and this release's reads
+it.
+
 ## Notes for 0.20.0
 
 ### Python tasks run in containers in the Compose bundle

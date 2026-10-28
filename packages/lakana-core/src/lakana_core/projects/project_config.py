@@ -507,7 +507,7 @@ class NotifyConfig(StrictModel):
 
 
 class JobConfig(StrictModel):
-    """A named selection of assets, optionally started on a schedule.
+    """A named selection of assets, optionally started on a schedule or after each deploy.
 
     Parameters
     ----------
@@ -521,6 +521,9 @@ class JobConfig(StrictModel):
         When it starts by itself; none means it only starts by hand or through the API.
     notify
         Where a failed or recovered run is reported; none means nobody is told.
+    on_deploy
+        Start the job after each deploy that changes the project version of the environment,
+        as the principal that deployed; off by default.
     """
 
     select: Annotated[list[str], Field(min_length=1)]
@@ -528,6 +531,7 @@ class JobConfig(StrictModel):
     downstream: StrictBool = False
     schedule: ScheduleConfig | None = None
     notify: NotifyConfig | None = None
+    on_deploy: StrictBool = False
 
 
 class ScheduleOverride(StrictModel):
@@ -582,6 +586,8 @@ class JobOverride(StrictModel):
         Changes to the schedule, or ``null`` for none.
     notify
         Changes to the notification, or ``null`` for none.
+    on_deploy
+        Whether the job starts after each deploy in this environment.
     """
 
     select: Annotated[list[str], Field(min_length=1)] = []
@@ -589,6 +595,7 @@ class JobOverride(StrictModel):
     downstream: StrictBool = False
     schedule: ScheduleOverride | None = None
     notify: NotifyOverride | None = None
+    on_deploy: StrictBool = False
 
 
 class ProjectSettings(StrictModel):

@@ -12,9 +12,11 @@ from types import SimpleNamespace
 import pyarrow as pa
 import pytest
 from core_test_helpers import ActionAllowList
+from pyiceberg.schema import Schema
 from pyiceberg.table import StaticTable
 from pyiceberg.table.snapshots import Summary
 from pyiceberg.table.update import AddSnapshotUpdate, TableRequirement, TableUpdate
+from pyiceberg.types import LongType, NestedField
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -248,6 +250,26 @@ def test_a_table_that_appears_during_the_precheck_is_a_conflict(
     monkeypatch.setattr(catalog, "_existing_table", lambda _ref: None)
     with pytest.raises(ConflictError, match="changed during the write"):
         catalog.check_can_replace(principal, _ref("gold.t"))
+
+
+def test_a_create_pin_on_a_table_that_has_a_snapshot_is_refused_before_any_data_is_read(
+    catalog: CatalogService, principal: PrincipalRef
+) -> None:
+    with pytest.raises(ConflictError, match=r"gold\.t already has data"):
+        catalog.check_can_replace(principal, _ref("gold.t"), expected_snapshot_id="none")
+    with pytest.raises(ConflictError, match=r"gold\.t already has data"):
+        catalog.check_can_append(principal, _ref("gold.t"), expected_snapshot_id="none")
+
+
+def test_a_create_pin_on_a_table_without_a_snapshot_passes_the_prechecks(
+    catalog: CatalogService, principal: PrincipalRef
+) -> None:
+    ref = _ref("gold.empty")
+    catalog.create_table(principal, ref, schema=Schema(NestedField(1, "id", LongType())))
+
+    catalog.check_can_replace(principal, ref, expected_snapshot_id="none")
+    catalog.check_can_append(principal, ref, expected_snapshot_id="none")
+    catalog.check_can_merge(principal, ref, expected_snapshot_id="none")
 
 
 def test_a_replace_on_an_external_table_says_replace(

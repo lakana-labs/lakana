@@ -9,6 +9,7 @@ wait instead of being refused.
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 import uuid
 from collections.abc import Mapping, Sequence
@@ -21,7 +22,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from lakana_core.audit.service import AuditService
-from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable
+from lakana_core.auth import Action, AuthorizationService, CiScope, PrincipalRef, Securable
+from lakana_core.ci_oidc.exchange import resolve_ci_scope
 from lakana_core.ci_oidc.scope import refuse_ci_token
 from lakana_core.db import db_now
 from lakana_core.errors import ConflictError, NotFoundError, ValidationError
@@ -31,6 +33,7 @@ from lakana_core.jobs.cron import fire_times_between, next_fire_after
 from lakana_core.jobs.tz import load_zone
 from lakana_core.models import (
     AuditEventType,
+    CiToken,
     Environment,
     EnvironmentDeployment,
     JobFire,
@@ -44,15 +47,17 @@ from lakana_core.models import (
     RunKind,
     RunTrigger,
 )
+from lakana_core.models.base import utcnow
 from lakana_core.models.run import ACTIVE_RUN_STATUSES
 from lakana_core.notifications.events import new_delivery
 from lakana_core.notifications.views import DeliveryView, delivery_view
 from lakana_core.projects.deploys import DeploymentMoved, DeployService
 from lakana_core.projects.lookups import deployment_row, environment_by_name, repository_by_name
-from lakana_core.projects.manifest import job_notify, job_schedule, manifest_jobs
+from lakana_core.projects.manifest import job_notify, job_on_deploy, job_schedule, manifest_jobs
 from lakana_core.projects.run_policy import RunCaps
 from lakana_core.runs.service import (
     ActiveRunError,
+    NotOnDeploy,
     RunService,
     RunView,
     authorize_run_read,
@@ -92,6 +97,7 @@ DROP_RUN_PRINCIPAL_UNUSABLE = "run_principal_unusable"
 DROP_JOB_REMOVED = "job_removed"
 DROP_SELECTION_INVALID = "selection_invalid"
 DROP_UNREADABLE = "unreadable"
+DROP_NOT_ON_DEPLOY = "not_on_deploy"
 """The reasons a waiting start is dropped when it comes to start (`JOB_START_DROPPED`)."""
 
 
@@ -108,8 +114,8 @@ class WaitingStart:
     waits_for_run_id
         The active run it waits for.
     trigger
-        ``schedule``, ``api`` or ``manual``: the latest request's, unless a scheduled start waits
-        (a start by hand then adds to it).
+        ``schedule``, ``api``, ``manual`` or ``deploy``: the latest request's, unless a scheduled
+        start waits (a start by hand or by a deploy then adds to it).
     requested_at
         When it was first requested (a later request that merges into it does not change this).
     requested_by
@@ -244,6 +250,8 @@ class JobView:
         What started it.
     last_run_at
         When it was created.
+    on_deploy
+        Whether the job starts after each deploy that changes the project version here.
     """
 
     name: str
@@ -264,6 +272,7 @@ class JobView:
     last_run_status: str | None
     last_run_trigger: str | None
     last_run_at: datetime | None
+    on_deploy: bool = False
 
 
 PROBLEM_NONE = "none"
@@ -308,6 +317,65 @@ def run_principal_problem(session: Session, env_id: uuid.UUID, repo_id: uuid.UUI
     ):
         return PROBLEM_UNUSABLE
     return None
+
+
+def deploy_jobs_scope(
+    session: Session, token_id: object, principal_id: uuid.UUID, repository_id: uuid.UUID
+) -> CiScope | None:
+    """Resolve the CI scope of a start of a CI deploy's ``on_deploy`` jobs, as it starts.
+
+    The token is read again (`resolve_ci_scope`, its expiry aside: the deploy used it in time),
+    so a rule that was disabled, deleted or changed since (any change, the opt-in too, raises
+    its revision) no longer allows the start. Used for the start right after the deploy and for
+    a start that waited.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    token_id
+        The CI token's id (``deploy_runs.ci_token_id``, or the stored ``ci_token_id`` of a
+        waiting start).
+    principal_id
+        The requester, which must be the token's principal.
+    repository_id
+        The repository whose job starts, which must be the rule's (and token's) repository.
+
+    Returns
+    -------
+    CiScope or None
+        The scope marked as starting the deploy's jobs, or `None` when it no longer resolves.
+    """
+    try:
+        token = session.get(CiToken, uuid.UUID(str(token_id)))
+    except ValueError:
+        return None
+    if token is None or token.principal_id != principal_id:
+        return None
+    scope = resolve_ci_scope(session, token, now=utcnow(), require_unexpired=False)
+    if scope is None or scope.repository_id != repository_id:
+        return None
+    return dataclasses.replace(scope, starting_deploy_jobs=True)
+
+
+def _rule_allowed(scope: CiScope | None) -> dict[str, str]:
+    """Name the CI trust rule that allowed a request, for its audit event.
+
+    Parameters
+    ----------
+    scope
+        The request's CI scope, if any.
+
+    Returns
+    -------
+    dict
+        ``ci_rule_id`` and ``allowed_by`` when the request is a CI deploy's start of its
+        ``on_deploy`` job (also when it merges into a waiting scheduled start, which keeps no
+        trace of it otherwise); empty for any other request.
+    """
+    if scope is None or not scope.starting_deploy_jobs:
+        return {}
+    return {"ci_rule_id": str(scope.rule_id), "allowed_by": "start_on_deploy_jobs"}
 
 
 def _requested_at(pending: Mapping[str, Any]) -> datetime:
@@ -526,8 +594,9 @@ class JobService:
         job
             The job's name.
         trigger
-            ``schedule`` for the scheduler. Left out, it follows the caller: ``api`` for a
-            service account, ``manual`` otherwise.
+            ``schedule`` for the scheduler, ``deploy`` for a start a deploy makes as its
+            deployer (checked for `RUN` like any start with a caller). Left out, it follows the
+            caller: ``api`` for a service account, ``manual`` otherwise.
         scheduled_for
             For a scheduled start, the time the schedule named.
         missed
@@ -653,6 +722,11 @@ class JobService:
             "missed": missed,
             "merged": 1,
         }
+        scope = p.ci_scope if p is not None else None
+        if scope is not None and scope.starting_deploy_jobs:
+            # Checked again when it starts: the rule must still opt in, under the same revision.
+            fresh["ci_rule_id"] = str(scope.rule_id)
+            fresh["ci_token_id"] = str(scope.token_id)
         old = row.pending_start
         replaced: dict[str, Any] | None = None
         if old is None:
@@ -684,6 +758,7 @@ class JobService:
                 waits_for_run_id=str(active),
                 request_trigger=trigger.value,
                 replaced=replaced,
+                **_rule_allowed(scope),
             ),
         )
         self._session.commit()
@@ -951,6 +1026,12 @@ class JobService:
                 drop(DROP_REQUESTER_INACTIVE)
                 return None
             requester = PrincipalRef(id=person.id, name=person.name, type=person.type)
+            if pending.get("ci_token_id") is not None:
+                scope = deploy_jobs_scope(session, pending["ci_token_id"], person.id, repo_id)
+                if scope is None:
+                    drop(DROP_REQUESTER_LACKS_RUN)
+                    return None
+                requester = dataclasses.replace(requester, ci_scope=scope)
             if not service._authz.permits(
                 requester, Action.RUN, Securable.environment_scope(env_name)
             ):
@@ -966,6 +1047,9 @@ class JobService:
                 authorize=False,
                 bound_only=requester is None,
             )
+        except NotOnDeploy:
+            drop(DROP_NOT_ON_DEPLOY)
+            return None
         except NotFoundError:
             drop(DROP_JOB_REMOVED)
             return None
@@ -1361,6 +1445,7 @@ class JobService:
             last_run_status=last[1].value if last else None,
             last_run_trigger=last[2].value if last and last[2] is not None else None,
             last_run_at=last[3] if last else None,
+            on_deploy=job_on_deploy(entry),
         )
 
     def list(

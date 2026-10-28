@@ -1639,6 +1639,7 @@ Create a CI trust rule.
 | `--principal` | text | required | The service account the CI job acts as; it needs DEPLOY. |
 | `--claim` | text, repeatable | required | NAME=VALUE the ID token's claim must equal exactly (repeatable). Must include repository_id (GitHub) or project_id (GitLab), ref or environment, and how the run was started: event_name or environment (GitHub); ref_protected, pipeline_source or environment (GitLab). |
 | `--kind` | text, repeatable | none | deploy (the default) or dry_run; repeat for both. |
+| `--start-on-deploy-jobs` | flag | off | Let a deploy under this rule start the project's jobs with on_deploy: true in its environment, as the CI identity (off by default). |
 
 ### `lakana ci-trust list`
 
@@ -1668,6 +1669,7 @@ Change CI trust rule RULE_ID; the tokens issued under it stop working at once.
 | `--principal` | text | none | A new service account. |
 | `--claim` | text, repeatable | none | NAME=VALUE (repeatable); replaces all of the rule's conditions. |
 | `--kind` | text, repeatable | none | deploy or dry_run (repeatable). |
+| `--start-on-deploy-jobs` / `--no-start-on-deploy-jobs` | flag | none | Whether a deploy under this rule starts the project's on_deploy jobs. |
 
 ### `lakana ci-trust enable`
 
@@ -1816,7 +1818,7 @@ A long list prints a "More results" line with the command that shows the next pa
 | `--env` | text | none | Environment (default: the profile's). |
 | `--repo` | text | none | Only this repository. |
 | `--status` | text, repeatable | none | Only runs in this status: queued, running, succeeded, failed or cancelled. Repeat the option or separate the values with commas. |
-| `--trigger` | text, repeatable | none | Only runs started this way: schedule, api or manual. Repeat the option or separate the values with commas. |
+| `--trigger` | text, repeatable | none | Only runs started this way: schedule, api, manual or deploy. Repeat the option or separate the values with commas. |
 | `--job` | text | none | Only runs of this job. |
 | `--since` | text | none | Only runs created at or after this date or time, such as 2026-10-18 or 2026-10-18T09:30:00Z. Without a time zone it is read in yours. |
 | `--limit` | whole number, 1 to 200 | none | Most runs to list (default 100). |
@@ -1898,7 +1900,7 @@ A worker is alive while its heartbeat is recent and lost after that; a lost work
 
 Usage: `lakana job [OPTIONS] COMMAND [ARGS]...`
 
-Jobs: named selections of a project, started by hand, by the API or by a schedule.
+Jobs: named selections of a project, started by hand, by the API, by a schedule or after each deploy.
 
 ### `lakana job list`
 

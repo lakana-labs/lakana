@@ -8,7 +8,7 @@ from typing import Annotated
 
 import typer
 
-from lakana._models import Deploy, ProjectVersion
+from lakana._models import Deploy, DeployJobStart, ProjectVersion
 from lakana.cli import _output
 from lakana.cli._paging import more_results
 from lakana.cli._project import find_project_root, is_dirty, project_repo
@@ -185,10 +185,41 @@ def _report(state: CliState, deploy: Deploy, verb: str) -> None:
             value = _output.inline(defaulted[0]["on_failure"])
             takes = "check takes" if len(defaulted) == 1 else "checks take"
             typer.echo(f"{len(defaulted)} {takes} `on_failure: {value}` from lakana.yaml.")
+    accepted = [start for start in deploy.job_starts if start.outcome in _ACCEPTED]
+    if accepted:
+        typer.echo("Jobs started after the deploy:")
+        for start in accepted:
+            typer.echo(f"  {_output.inline(start.job)}: {_started(start)}")
     for hint in diff.get("hints", ()):
         typer.echo(f"hint: {_output.inline(hint, 500)}", err=True)
     for warning in deploy.warnings:
         typer.echo(f"warning: {_output.inline(warning, 500)}", err=True)
+    for start in deploy.job_starts:
+        if start.outcome not in _ACCEPTED:
+            text = start.message or f"job `{start.job}` was not started ({start.outcome})"
+            typer.echo(f"warning: {_output.inline(text, 500)}", err=True)
+
+
+_ACCEPTED = frozenset({"started", "waiting"})
+"""The outcomes of a job start that need nothing from the person who deployed."""
+
+
+def _started(start: DeployJobStart) -> str:
+    """Say what came of a job start the deploy made.
+
+    Parameters
+    ----------
+    start
+        A ``started`` or ``waiting`` start.
+
+    Returns
+    -------
+    str
+        ``run ID``, or ``waits for run ID; it starts then``.
+    """
+    if start.outcome == "started":
+        return f"run {start.run_id}"
+    return f"waits for run {start.waits_for_run_id}; it starts then"
 
 
 def _wait(
@@ -320,7 +351,12 @@ def deploy(
         return
     finished = _wait(state, client, environment, accepted.id, timeout)
     _report(state, finished, "Dry run of" if dry_run else "Deployed")
-    if not dry_run and state.output != "json":
+    if any(start.outcome in _ACCEPTED for start in finished.job_starts):
+        if state.output != "json":
+            typer.echo(
+                f"Hint: follow a run with 'lakana runs show RUN_ID --env {environment}'.", err=True
+            )
+    elif not dry_run and state.output != "json":
         # A repository named on the command line must be named again: the short form only
         # works from inside the project.
         target = f"{repo} " if repo else ""

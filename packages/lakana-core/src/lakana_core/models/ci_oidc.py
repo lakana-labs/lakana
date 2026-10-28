@@ -12,7 +12,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, ForeignKey, Index, Integer, String, Uuid
+from sqlalchemy import JSON, Boolean, ForeignKey, Index, Integer, String, Uuid, false
 from sqlalchemy.orm import Mapped, mapped_column
 
 from lakana_core.models.base import Base, UTCDateTime, utcnow
@@ -48,6 +48,11 @@ class CiTrustRule(Base):
     conditions: Mapped[dict] = mapped_column(JSON)
     """Claim name to the exact text the claim must have."""
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    start_on_deploy_jobs: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=false()
+    )
+    """Whether a deploy accepted under the rule starts the deployed project's jobs with
+    ``on_deploy: true`` in its environment, as the CI identity; nothing else. Off by default."""
     revision: Mapped[int] = mapped_column(Integer, default=1)
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("principals.id", ondelete="SET NULL"), nullable=True

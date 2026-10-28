@@ -25,7 +25,7 @@ _ENV = "/api/v1/environments/dev"
 _BODY = {"repository": "analytics"}
 
 
-def _deploy_jobs(client: TestClient, notifying: bool = False) -> None:
+def _deploy_jobs(client: TestClient, notifying: bool = False, on_deploy: bool = False) -> None:
     """Create `dev`, the repository and a deployment whose manifest declares two jobs.
 
     Parameters
@@ -34,6 +34,8 @@ def _deploy_jobs(client: TestClient, notifying: bool = False) -> None:
         The test client.
     notifying
         Add a third job, `alerting`, that notifies a webhook.
+    on_deploy
+        Make `daily` and `manual` start after each deploy.
     """
     _setup(client)
     jobs = {
@@ -50,6 +52,9 @@ def _deploy_jobs(client: TestClient, notifying: bool = False) -> None:
             "schedule": None,
         },
     }
+    if on_deploy:
+        for job in jobs.values():
+            job["on_deploy"] = True
     if notifying:
         jobs["alerting"] = {
             "select": ["silver.*"],
@@ -394,6 +399,15 @@ def test_a_job_without_a_schedule_has_only_on_demand(client: TestClient) -> None
     _deploy_jobs(client)
     manual = client.get(f"{_ENV}/jobs/manual", headers=AUTH_HEADER).json()
     assert manual["triggers"] == [{"kind": "on_demand"}]
+
+
+def test_a_job_that_starts_after_each_deploy_lists_the_deploy_trigger(client: TestClient) -> None:
+    """The deploy trigger comes after a schedule and before on demand, which is always last."""
+    _deploy_jobs(client, on_deploy=True)
+    by_name = {j["name"]: j for j in client.get(f"{_ENV}/jobs", headers=AUTH_HEADER).json()}
+    assert [t["kind"] for t in by_name["daily"]["triggers"]] == ["schedule", "deploy", "on_demand"]
+    assert by_name["manual"]["triggers"] == [{"kind": "deploy"}, {"kind": "on_demand"}]
+    assert "on_deploy" not in by_name["manual"]
 
 
 def test_the_list_and_the_detail_agree(client: TestClient) -> None:
