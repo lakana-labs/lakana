@@ -38,7 +38,22 @@ if [ -n "$capture_root" ]; then
 fi
 
 names=("$@")
-if [ ${#names[@]} -eq 0 ]; then
+shard=${LAKANA_DOCS_SHARD:-}
+if [ -n "$shard" ] && [ ${#names[@]} -ne 0 ]; then
+  echo "LAKANA_DOCS_SHARD=$shard and example names were both given; name the examples or set the shard, not both" >&2
+  exit 2
+fi
+if [ -n "$shard" ]; then
+  if ! shard_names=$(cd "$root" && python3 -m scripts.docs_example_shards select "$shard"); then
+    exit 2
+  fi
+  mapfile -t names <<< "$shard_names"
+  if [ -z "$shard_names" ]; then
+    echo "shard $shard has no example (there are more shards than examples): nothing to run"
+    exit 0
+  fi
+  echo "shard $shard runs: ${names[*]}"
+elif [ ${#names[@]} -eq 0 ]; then
   mapfile -t names < <(find "$examples_dir" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort)
 fi
 if [ ${#names[@]} -eq 0 ]; then

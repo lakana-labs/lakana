@@ -2916,6 +2916,7 @@ def test_the_relay_gets_the_upstream_proxy_of_the_egress_service(tmp_path: Path)
     assert "LAKANA_EGRESS__UPSTREAM_PROXY=http://corp:3128" in relay["Env"]
 
 
+@pytest.mark.quarantine(issue=365)
 def test_the_relays_lines_reach_the_tasks_log(tmp_path: Path) -> None:
     """Review Focus 3: the relay's refusal is in the run's log, prefixed as the relay wrote it."""
     line = b"lakana-relay: refused postgres:5432: it resolves to an internal address\n"

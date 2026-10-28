@@ -10,7 +10,8 @@
 "integration (*)" = 15
 "test (*)" = 10
 "integration" = 5
-"docs-examples" = 15
+"docs-examples (*)" = 10
+"docs-examples" = 5
 "compose-smoke" = 15
 "five-minute" = 10
 "lint" = 10

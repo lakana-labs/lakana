@@ -425,12 +425,21 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # Runs the example projects the site shows, each against a fresh local instance.
-  docs-examples:
+  # Runs the example projects the site shows, each against a fresh local instance, in three
+  # shards side by side. `LAKANA_DOCS_SHARD=I/N` makes the runner run the examples
+  # `scripts/docs_example_shards.py` gives shard I: the longest first, each to the shard with the
+  # least time so far, by the seconds in scripts/docs-example-durations.json. One shard alone is
+  # not the check: `docs-examples` below collects them and compares the pages with the output.
+  docs-examples-shard:
+    name: docs-examples (${{ matrix.shard }}/3)
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.already_tested != 'true' }}
     runs-on: ${{ (github.actor != 'dependabot[bot]' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.CI_RUNNER) || 'ubuntu-latest' }}
-    timeout-minutes: 25
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
@@ -448,7 +457,47 @@ jobs:
           LAKANA_TEST_WHEELHOUSE: ${{ runner.temp }}/wheelhouse
           LAKANA_DOCS_EXAMPLE_BUDGET: "240"
           LAKANA_DOCS_CAPTURE: ${{ runner.temp }}/docs-captures
+          LAKANA_DOCS_SHARD: ${{ matrix.shard }}/3
         run: uv run bash scripts/run_docs_examples.sh
+      - name: Upload what the examples printed
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
+        with:
+          name: docs-captures-${{ matrix.shard }}
+          path: ${{ runner.temp }}/docs-captures
+          if-no-files-found: warn
+          include-hidden-files: false
+          retention-days: 7
+
+  # The required check `docs-examples`: green only when every shard was, and when the pages'
+  # output blocks match what the examples printed, which needs the captures of all shards.
+  docs-examples:
+    needs: [changes, docs-examples-shard]
+    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.already_tested != 'true' }}
+    runs-on: ${{ (github.actor != 'dependabot[bot]' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.CI_RUNNER) || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    steps:
+      - name: Example shards
+        env:
+          RESULT: ${{ needs.docs-examples-shard.result }}
+        run: |
+          if [ "$RESULT" != "success" ]; then
+            echo "::error::A docs-examples shard ended with '$RESULT': the failing job of this run is named 'docs-examples (N/3)', and its log names the example."
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          fetch-depth: 0          # hatch-vcs needs tags to compute a version
+      - uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa  # v10.3.1
+        with:
+          enable-cache: true
+      - run: uv sync --locked --all-packages
+      - name: Download what every shard's examples printed
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8
+        with:
+          pattern: docs-captures-*
+          path: ${{ runner.temp }}/docs-captures
+          merge-multiple: true
       # What each region of an example printed, compared with the `<!-- output: EXAMPLE#REGION -->`
       # blocks of the pages (parts that differ per run masked). A mismatch prints a diff; to repair
       # the pages, download the artifact below and run

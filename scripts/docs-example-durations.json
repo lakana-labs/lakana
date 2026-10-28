@@ -1,0 +1,23 @@
+{
+ "bind-a-secret": 12.7,
+ "check-your-data": 112,
+ "connections": 14,
+ "describe-a-table": 11,
+ "drop-and-restore-a-table": 20.3,
+ "filter-rows": 12,
+ "find-a-table": 10.3,
+ "get-told": 18,
+ "getting-started": 46,
+ "give-access": 20,
+ "ingest-files": 34,
+ "ingest-generic": 25,
+ "ingest-rest": 34,
+ "ingest-sql": 24.7,
+ "let-tables-expire": 13.7,
+ "move-a-sql-project": 42,
+ "projects": 31,
+ "proprietary-db": 20,
+ "run-a-job": 19,
+ "train-and-predict": 119,
+ "write-modes": 35.7
+}
