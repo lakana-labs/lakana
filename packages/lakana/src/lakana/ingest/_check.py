@@ -101,6 +101,18 @@ MARIADB_GREETING_ONLY = (
 )
 """What a ``mariadb`` test without a secret adds: the greeting alone proves neither."""
 
+PG_LOGIN_HINT = (
+    "if this is a refused login on a server whose messages are not in English, check the user "
+    "and password"
+)
+"""What a failed PostgreSQL login adds: a refusal is recognised by libpq's English words only.
+
+libpq keeps no SQLSTATE for a refused login, so a server whose ``lc_messages`` is not English
+refuses in words Lakana does not read; `sql.read` adds the same hint."""
+_SERVER_WORDS = 700
+"""The most characters of a server's words a failed login keeps (masked first, then cut), so
+the hint is never cut."""
+
 TCP_OK = "reachable; Lakana does not check the protocol, TLS or credentials of a tcp connection"
 
 MISSING_ROOT = (
@@ -996,12 +1008,30 @@ class BundleUnreadable(OSError):
     """The file `LAKANA_CA_BUNDLE` names cannot be read, or is not ASCII."""
 
 
+NOWHERE = "/dev/null/nowhere"
+"""A path that cannot exist (``/dev/null`` is no directory), for the libpq file options."""
+_OWN_FILES_OFF = {
+    "sslcertmode": "disable",
+    "sslrootcert": NOWHERE,
+    "sslcrl": NOWHERE,
+    "passfile": NOWHERE,
+}
+"""What keeps libpq out of the worker user's ``~/.postgresql/`` and ``~/.pgpass``."""
+
+
 def conninfo(parts: Mapping[str, str]) -> str:
     r"""Write a libpq connection string, every value quoted.
 
     The ADBC driver takes only a connection string. Each value is single-quoted with ``\`` and
     ``'`` escaped, so a database or user name can never add a keyword of its own. `sql.read`
     uses the same function.
+
+    libpq would otherwise read files of the user it runs as: it would present
+    ``~/.postgresql/postgresql.crt`` and its key to any server that asks, turn ``require`` into a
+    chain check against ``~/.postgresql/root.crt``, apply ``root.crl``, and look a missing
+    password up in ``~/.pgpass``. A connection carries no client certificate, so
+    ``sslcertmode=disable`` never sends one, and the other file options point at `NOWHERE`
+    unless `parts` names its own (``sslrootcert`` for ``verify-full``).
 
     Parameters
     ----------
@@ -1011,13 +1041,14 @@ def conninfo(parts: Mapping[str, str]) -> str:
     Returns
     -------
     str
-        Such as ``host='db' port='5432'``.
+        Such as ``host='db' port='5432' sslcertmode='disable' ...``.
     """
 
     def quoted(value: str) -> str:
         return "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"
 
-    return " ".join(f"{key}={quoted(value)}" for key, value in parts.items())
+    full = {**parts, **{key: value for key, value in _OWN_FILES_OFF.items() if key not in parts}}
+    return " ".join(f"{key}={quoted(value)}" for key, value in full.items())
 
 
 @contextlib.contextmanager
@@ -1179,7 +1210,13 @@ def _postgresql_credentials(body: Mapping[str, Any], routing: Mapping[str, Any],
             raise _Found("credentials", f"PostgreSQL refused the login ({_said(text)})") from None
         if "certificate verify failed" in text or "does not match host name" in text:
             raise _Found("tls", _tls_text(host)) from None
-        raise _Found("failed", f"the PostgreSQL login failed ({_said(text)})") from None
+        # Only libpq's English words mark a refusal; a server that words it in another language
+        # (its lc_messages) lands here, so the message says what to check (a known limit).
+        raise _Found(
+            "failed",
+            f"the PostgreSQL login failed ({_mask(_said(text), secret)[:_SERVER_WORDS]}); "
+            f"{PG_LOGIN_HINT}",
+        ) from None
     try:
         database.cursor().execute("SELECT 1")
     except pg.Error as exc:

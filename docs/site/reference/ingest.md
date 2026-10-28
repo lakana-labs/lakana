@@ -249,7 +249,7 @@ could end differently (the task is retried only when it could):
 |---|---|---|
 | `UsageError` | The call or the setup is wrong: a connection of another kind, an unknown extension or `format=`, `sheet=` or `header_row=` where they mean nothing, a cap that is not a positive whole number, `since=` of the wrong type, `modified_from=` without `since=`, a wildcard in an `http` path; a missing secret or one that is no service-account key, a secret value no HTTP header can carry, a token endpoint that answers without a bearer token, a CA certificate that is not PEM, a trust bundle the worker cannot read. Every attempt fails the same way. | No |
 | `FileShapeError` (a `SourceError`) | The files are wrong: types that do not fit across files, a `schema=` column a file lacks, a `schema=` value that is no Polars type, a file that cannot be parsed, a CSV, JSON or NDJSON file that is compressed or not UTF-8, a JSON file that nests arrays and objects more than 100 levels deep, a bucket key with an empty, `.` or `..` segment. The same files fail every attempt. | No |
-| `SourceRefused` (a `SourceError`) | The store or server refused the credential (HTTP 401 or 403), an OAuth2 token endpoint refused the client (400 or 401) or answered with a redirect, another 4xx, a 1xx or a 2xx other than 200, its certificate is not trusted, it answered with a redirect, or a request would go to another host than the `base_url`'s. Every attempt would; the message names the next step. | No |
+| `SourceRefused` (a `SourceError`) | The store or server refused the credential (HTTP 401 or 403), an OAuth2 token endpoint refused the client (400 or 401) or answered with a redirect, another 4xx, a 1xx or a 2xx other than 200, its certificate is not trusted, it answered with a redirect or in a `Content-Encoding` Lakana did not ask for (zstd, br), or a request would go to another host than the `base_url`'s. Every attempt would; the message names the next step. | No |
 | `SourceError` | The store or server failed or could not be reached (a network error, a timeout, HTTP 404, 429 or 5xx, the egress proxy's refusal), which may pass. | Yes |
 | `DirectoryError` | A directory or file is missing, a link, not a directory, or denied; or the pattern is refused. The same path fails every attempt. | No |
 | `DirectoryError` from an I/O error (`EIO` and the like) on a path that is there | The disk or share failed this time. | Yes |
@@ -392,7 +392,14 @@ followed), and a certificate that is not trusted fail at once.
 Each page is turned into Arrow before the next is read, so the records of one page are in
 memory as Python objects at a time. The caps count the bytes and the records as they arrive; an
 answer without `Content-Length` is read only up to `max_bytes`. A compressed answer counts what it
-decodes to, and one network chunk can decode to a few MiB more before the cap stops it.
+decodes to: Lakana asks for gzip or deflate and decodes them itself, at most 64 KiB at a time,
+and counts the compressed bytes as they arrive as well, so the read stops within 64 KiB of the
+cap however small the compressed answer was. Every member of a gzip answer is read; bytes after
+the end of the compressed data that start no gzip member, or a body that is not of its encoding,
+are refused (`SourceRefused`, not retried); a body that ends inside its compressed data is a
+`SourceError` and retried. `deflate` is read in the zlib format or as raw deflate. An answer in any
+other `Content-Encoding` (zstd, br, or two encodings at once) is refused (`SourceRefused`) before
+it is decoded.
 
 ### Errors of rest.read
 
@@ -401,13 +408,15 @@ The classes are those of [files.read](#errors):
 | Class | Meaning | Retried |
 |---|---|---|
 | `UsageError` | The call or the setup is wrong: a path that could leave the base URL, a `None` or unsupported `params` value, a `params` key the paginator or the connection's API key sets, `records=` that does not lead to a list of objects, a cursor or link of the wrong type, a page that repeats an earlier one, a connection of another kind, a missing secret or one no header can carry, a token endpoint that answers without a bearer token. | No |
-| `SourceRefused` (a `SourceError`) | The API refused the credential (401, 403) or the request (another 4xx), answered with a redirect, a next link names another host, a certificate is not trusted, an OAuth2 token endpoint refused the client, or the task's egress proxy refused the host (403) or the task's token (407). | No |
+| `SourceRefused` (a `SourceError`) | The API refused the credential (401, 403) or the request (another 4xx), answered with a redirect, a next link names another host, a page arrived in a `Content-Encoding` Lakana did not ask for, a certificate is not trusted, an OAuth2 token endpoint refused the client, or the task's egress proxy refused the host (403) or the task's token (407). | No |
 | `FileShapeError` (a `SourceError`) | A field holds values of different types (a number and a text), or a value Arrow cannot hold (an integer beyond 64 bits, a number beyond a 64-bit float such as `1e400`, `NaN` or `Infinity`), or a page nests arrays and objects more than 100 levels deep or is not UTF-8. | No |
 | `SourceError` | The API kept failing past the retries or the budget, answered another 5xx, could not be reached, or a page is not JSON (a maintenance page, say). | Yes |
 | `CapExceeded` | A cap was reached. | No |
 
 | Message starts or contains | Cause | Next step |
 |---|---|---|
+| ``...: the server answered in Content-Encoding `zstd`, which Lakana does not ask for`` | The server, or a proxy before it, ignores `Accept-Encoding: gzip, deflate`. | Have the server send gzip, deflate or no encoding. |
+| `...: the answer's body is not valid gzip (...)` (or `deflate`) | The body is not what its `Content-Encoding` says, or bytes follow the compressed data. | Have the server send a well-formed body, or none encoded. |
 | `rest.read reads http connections; ... is s3: use files.read` | The connection is of another kind. | Use the helper the message names. |
 | `path= is relative to the connection's base URL` | `path` is an absolute URL or `//host`. | Pass the part below the base URL. |
 | `params= since is None, which would send an empty value` | A `None` value, usually the first run's watermark. | Pass `ctx.watermark(default=...)`. |
@@ -601,6 +610,23 @@ the task trusts the workers' trust bundle (`LAKANA_RUN__CA_BUNDLE`) and the conn
 `ca_certificate`; without either, the system's CAs. `tls: require` encrypts without checking the
 certificate, `tls: disable` does not encrypt. A connection takes at most 10 seconds.
 
+**Known limit: a refused login is recognised only in English.** libpq, the PostgreSQL client
+library sql.read uses, does not keep PostgreSQL's error code for a refused login, so sql.read
+recognises one by the server's English words (`password authentication failed`, `no pg_hba.conf
+entry`). A server whose messages are in another language (its `lc_messages`, such as German)
+refuses a wrong password in words sql.read does not read: the read fails as a `SourceError`, is
+retried like any failure to connect, and its message ends with "if this is a refused login on a
+server whose messages are not in English, check the user and password". Check the secret with
+`lakana connection test`, or set the server's `lc_messages` to `C` or `en_US.UTF-8`.
+
+sql.read never uses files of the user the worker runs as: it presents no client certificate
+(not even `~/.postgresql/postgresql.crt`, which libpq would otherwise send to any server that
+asks), `tls: require` does not turn into a certificate check against `~/.postgresql/root.crt`,
+`~/.pgpass` is not read, and neither is a service file (`~/.pg_service.conf`): sql.read connects
+with `PGSERVICE`, `PGSERVICEFILE` and `PGSYSCONFDIR` taken out of its environment. The
+connection test behaves the same (its process gets none of the worker's variables). This matters
+with the local runner, where the worker may run as your own account.
+
 A MariaDB connection with `tls: verify-full` or `require` never falls back to a plain
 connection: a server without TLS fails the read, and is not retried. MySQL 8's default `caching_sha2_password`
 needs the `cryptography` package over a connection without TLS; use `tls: verify-full`, or add
@@ -634,7 +660,7 @@ The classes are those of [files.read](#errors):
 |---|---|---|
 | `UsageError` | The call, the query or the setup is wrong: a placeholder without a value, a `None` value, a value that is not a plain finite scalar, an executable comment in a MariaDB query, a MariaDB statement that does not start with a reading keyword, a `sql_mode` sql.read does not know, a query that fails (syntax, a missing table or column) or writes, a column without a faithful Arrow form, a connection of another kind, a missing password, a trust bundle the task cannot read, the `lakana[assets]` extra missing. | No |
 | `SourceRefused` (a `SourceError`) | The database refused the password, its certificate is not trusted, the user may not read the table, or the connection's `tls` and the server disagree (no TLS offered, or TLS required). | No |
-| `SourceError` | The database failed or could not be reached (a timeout, a connection closed, a cancelled statement), which may pass. MariaDB's server errors are `UsageError`s, except these, which pass with time and are retried: 1037, 1038 and 1041 (out of memory), 1040 (too many connections), 1053 (shutdown in progress), 1158 to 1161 (network read or write), 1203 and 1226 (a user's connection or resource limit), 1205 (lock wait timeout), 1213 (deadlock), 1317 (interrupted), 1927 (connection killed) and 1969 (statement time limit). | Yes |
+| `SourceError` | The database failed or could not be reached (a timeout, a connection closed, a cancelled statement), or a SQLite file changed while it was opened, which may pass. MariaDB's server errors are `UsageError`s, except these, which pass with time and are retried: 1037, 1038 and 1041 (out of memory), 1040 (too many connections), 1053 (shutdown in progress), 1158 to 1161 (network read or write), 1203 and 1226 (a user's connection or resource limit), 1205 (lock wait timeout), 1213 (deadlock), 1317 (interrupted), 1927 (connection killed) and 1969 (statement time limit). | Yes |
 | `DirectoryError` | A SQLite path that is a link, missing or not a regular file. | No |
 | `CapExceeded` | A cap was reached. | No |
 
@@ -655,6 +681,9 @@ The classes are those of [files.read](#errors):
 | ``...: column `...` is ..., which sql.read cannot read as it is; cast it in the query`` | A column without a faithful Arrow form. | Use the cast the message names. |
 | ``...: column `...` holds a value that decimal128(...) cannot hold`` | A `NaN` or `Infinity` in a `numeric` column. | Filter it out, or cast to `double precision`. |
 | ``...: column `...` changes type within the result`` | A SQLite column holds values of different types. | Use the `CAST` the message names. |
+| `...: '...' changed while SQLite opened it (replaced, or swapped for a link)` | The file was replaced between the check and the open: an export rewriting it, or a symbolic link put in its place. | Nothing for a rewrite: the task is retried. Find out who put a link in the ingestion root if it repeats. |
+| `sql.read cannot list this process's open files (/dev/fd)` | The worker's system has no `/dev/fd`, so sql.read cannot check which file SQLite opened. | Run the worker on Linux or macOS. |
+| `...; if this is a refused login on a server whose messages are not in English, check the user and password` | PostgreSQL could not be reached or refused the login, in a language other than English (see the known limit above). | Check the user and password with `lakana connection test`; otherwise the host, port and database. |
 | `...: SQLite could not read the file read-only` | A query that writes, or a WAL database or hot journal in a directory the worker cannot write. | Read only; or give the connection a copy made with `PRAGMA journal_mode=DELETE`. |
 | `...: the result has more than max_rows (...) rows` (or `is larger than max_bytes`) | The result is larger than the cap. | Narrow the query (a `WHERE` clause or a `LIMIT`), or raise the cap. |
 | ``... has no secret with `password` `` | The connection has no password. | Run the command the message names. |

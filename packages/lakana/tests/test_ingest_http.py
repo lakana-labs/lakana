@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import base64
+import gzip
 import itertools
 import json
 import secrets
 import ssl
+import time
+import tracemalloc
+import zlib
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,6 +22,7 @@ from sdk_tls_fixture import Answer, Authority, Exchange, make_authority, scripte
 
 from lakana import context
 from lakana.ingest import (
+    CapExceeded,
     SourceError,
     SourceRefused,
     UsageError,
@@ -981,3 +986,302 @@ def test_a_token_answer_with_a_utf8_byte_order_mark_is_read(
         )
 
         assert grant.header() == f"Bearer {ACCESS}"
+
+
+# --- compressed answers --------------------------------------------------------------------------
+
+_INFLATED = 64 * 1024 * 1024
+"""What a compressed test body decodes to: 64 times the cap the tests read it with."""
+_CAP = 1024 * 1024
+
+
+def _compressed(encoding: str, size: int = _INFLATED) -> bytes:
+    """Compress `size` zero bytes in steps, never holding them whole.
+
+    Parameters
+    ----------
+    encoding
+        ``gzip`` or ``deflate`` (the zlib format, as RFC 9110 names it).
+    size
+        The decoded size.
+
+    Returns
+    -------
+    bytes
+        The encoded body.
+    """
+    packer = zlib.compressobj(9, zlib.DEFLATED, 16 + zlib.MAX_WBITS if encoding == "gzip" else 15)
+    block = bytes(1024 * 1024)
+    body = b"".join(packer.compress(block) for _ in range(size // len(block)))
+    return body + packer.flush()
+
+
+def _response(encoding: str, body: bytes | list[bytes]) -> httpx.Response:
+    """Build a streamed response whose raw body is `body`.
+
+    Parameters
+    ----------
+    encoding
+        Its ``Content-Encoding``, or ``""`` for none.
+    body
+        The raw bytes, or the raw chunks they arrive in.
+
+    Returns
+    -------
+    httpx.Response
+        Not read yet.
+    """
+    chunks = [body] if isinstance(body, bytes) else body
+    headers = {"Content-Encoding": encoding} if encoding else {}
+    request = httpx.Request("GET", "https://api.test/items")
+    return httpx.Response(
+        200, headers=headers, stream=httpx.ByteStream(b"".join(chunks)), request=request
+    )
+
+
+@pytest.mark.parametrize("encoding", ["gzip", "x-gzip", "deflate"])
+def test_a_compressed_body_stops_at_the_cap_holding_little_more(encoding: str) -> None:
+    """A 64 KiB body that decodes to 64 MiB is refused at a 1 MiB cap, never decoded whole."""
+    response = _response(encoding, _compressed("deflate" if encoding == "deflate" else "gzip"))
+    tracemalloc.start()
+    try:
+        with pytest.raises(OverflowError):
+            _http.read_capped(response, _CAP, "api")
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+
+    assert peak < 4 * _CAP
+
+
+def test_a_zstd_body_is_refused_before_it_is_decoded() -> None:
+    """Lakana asks for gzip or deflate only; a zstd answer is refused, however small."""
+    zstandard = pytest.importorskip("zstandard")
+    body = zstandard.ZstdCompressor().compress(bytes(_INFLATED))
+    tracemalloc.start()
+    try:
+        with pytest.raises(SourceRefused) as caught:
+            _http.read_capped(_response("zstd", body), _CAP, "api")
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+
+    assert "`api`" in str(caught.value)
+    assert "Content-Encoding `zstd`" in str(caught.value)
+    assert "gzip or deflate" in str(caught.value)
+    assert peak < 4 * _CAP
+
+
+@pytest.mark.parametrize("encoding", ["br", "compress", "gzip, gzip", "zstd\x1b[2J"])
+def test_an_encoding_lakana_did_not_ask_for_is_refused(encoding: str) -> None:
+    with pytest.raises(SourceRefused) as caught:
+        _http.read_capped(_response(encoding, b"anything"), _CAP, "api")
+
+    assert "Content-Encoding" in str(caught.value)
+    assert "\x1b" not in str(caught.value)
+
+
+@pytest.mark.parametrize("encoding", ["", "identity", "gzip", "deflate"])
+def test_a_body_under_the_cap_decodes_whole_across_chunks(encoding: str) -> None:
+    text = b"id,name\n" + b"".join(b"%d,row\n" % i for i in range(50_000))
+    if encoding in ("gzip", "deflate"):
+        packer = zlib.compressobj(6, zlib.DEFLATED, 31 if encoding == "gzip" else 15)
+        raw = packer.compress(text) + packer.flush()
+    else:
+        raw = text
+    chunks = [raw[i : i + 7] for i in range(0, 70, 7)] + [raw[70:]]
+    response = httpx.Response(
+        200,
+        headers={"Content-Encoding": encoding} if encoding else {},
+        stream=_Chunks(chunks),
+        request=httpx.Request("GET", "https://api.test/items"),
+    )
+
+    assert _http.read_capped(response, len(text), "api") == text
+
+
+@pytest.mark.parametrize(("limit", "fits"), [(5, True), (4, False)])
+def test_an_answer_built_in_memory_is_held_to_the_cap(limit: int, fits: bool) -> None:
+    """An answer of httpx's MockTransport is read when built; the cap still applies to it."""
+    response = httpx.Response(200, content=b"12345")
+    del response.headers["content-length"]
+    if fits:
+        assert _http.read_capped(response, limit, "api") == b"12345"
+    else:
+        with pytest.raises(OverflowError):
+            _http.read_capped(response, limit, "api")
+
+
+@pytest.mark.parametrize(
+    ("encoding", "body"),
+    [
+        ("gzip", b"this is not gzip"),
+        ("deflate", b"neither zlib nor raw deflate \xff\xff\xff"),
+        ("deflate", zlib.compress(b"one") + b"trailing"),
+        ("gzip", gzip.compress(b"one") + b"not a gzip member"),
+    ],
+    ids=["not-gzip", "not-deflate", "after-deflate", "after-gzip"],
+)
+def test_a_body_that_is_not_its_encoding_is_refused_for_good(encoding: str, body: bytes) -> None:
+    """Another attempt gets the same bytes: refused, not retried, naming the encoding."""
+    with pytest.raises(SourceRefused) as caught:
+        _http.read_capped(_response(encoding, body), _CAP, "api")
+
+    assert f"`api`: the answer's body is not valid {encoding}" in str(caught.value)
+
+
+def test_bytes_after_the_end_of_a_gzip_stream_are_refused_at_once() -> None:
+    """A 27-byte gzip member and a 32 MiB trailer: refused quickly, holding little."""
+    body = gzip.compress(b"tiny\n") + bytes(32 * 1024 * 1024)
+    chunks = [body[i : i + 65536] for i in range(0, len(body), 65536)]
+    response = httpx.Response(
+        200,
+        headers={"Content-Encoding": "gzip"},
+        stream=_Chunks(chunks),
+        request=httpx.Request("GET", "https://api.test/items"),
+    )
+    started = time.monotonic()
+    tracemalloc.start()
+    try:
+        with pytest.raises((SourceRefused, OverflowError)):
+            _http.read_capped(response, _CAP, "api")
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+
+    assert peak < 4 * _CAP
+    assert time.monotonic() - started < 0.5
+
+
+def test_raw_bytes_count_against_the_cap_too() -> None:
+    """Members that each decode to little still stop at the cap of what arrived."""
+    member = gzip.compress(b"")
+    chunks = [member * 64] * ((2 * _CAP) // (len(member) * 64) + 1)
+    response = httpx.Response(
+        200,
+        headers={"Content-Encoding": "gzip"},
+        stream=_Chunks(chunks),
+        request=httpx.Request("GET", "https://api.test/items"),
+    )
+
+    with pytest.raises(OverflowError):
+        _http.read_capped(response, _CAP, "api")
+
+
+def test_every_gzip_member_is_decoded() -> None:
+    body = gzip.compress(b"id\n1\n") + gzip.compress(b"2\n")
+    chunks = [body[:25], body[25:]]
+    response = httpx.Response(
+        200,
+        headers={"Content-Encoding": "gzip"},
+        stream=_Chunks(chunks),
+        request=httpx.Request("GET", "https://api.test/items"),
+    )
+
+    assert _http.read_capped(response, _CAP, "api") == b"id\n1\n2\n"
+
+
+def test_raw_deflate_is_read_as_httpx_did() -> None:
+    packer = zlib.compressobj(6, zlib.DEFLATED, -zlib.MAX_WBITS)
+    body = packer.compress(b"id\n1\n") + packer.flush()
+
+    assert _http.read_capped(_response("deflate", body), _CAP, "api") == b"id\n1\n"
+
+
+@pytest.mark.parametrize("encoding", ["gzip", "deflate"])
+def test_an_empty_body_with_an_encoding_is_empty(encoding: str) -> None:
+    """A 204-like answer that names an encoding but sends no byte is no cut stream."""
+    assert _http.read_capped(_response(encoding, []), _CAP, "api") == b""
+
+
+@pytest.mark.parametrize("encoding", ["gzip", "deflate"])
+def test_a_body_cut_short_is_a_decoding_error_that_may_pass(encoding: str) -> None:
+    """A truncated stream is never returned as the whole body; another attempt may get it all."""
+    whole = gzip.compress(b"x" * 1000) if encoding == "gzip" else zlib.compress(b"x" * 1000)
+
+    with pytest.raises(httpx.DecodingError):
+        _http.read_capped(_response(encoding, whole[:-6]), _CAP, "api")
+
+
+def test_the_client_asks_for_gzip_and_deflate_only(authority: Authority, tmp_path: Path) -> None:
+    _state()
+    with (
+        scripted(authority, tmp_path, _ok) as server,
+        _http.client_for(_conn(server.base, authority, {"auth": "none"})) as client,
+    ):
+        client.get("items")
+
+    assert server.seen[0].headers["accept-encoding"] == "gzip, deflate"
+
+
+def test_files_read_stops_a_compressed_file_at_its_cap(
+    authority: Authority, tmp_path: Path
+) -> None:
+    body = _compressed("gzip", 16 * _CAP)
+
+    def answer(exchange: Exchange) -> Answer:
+        return 200, {"Content-Encoding": "gzip", "Content-Length": str(len(body))}, body
+
+    with scripted(authority, tmp_path, answer) as server:
+        _http_task(server.base, authority)
+        tracemalloc.start()
+        try:
+            with pytest.raises(CapExceeded, match=r"more than max_file_bytes \(1048576\)"):
+                files.read("api", "export.csv", max_file_bytes=_CAP)
+            _, peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+
+    assert peak < 4 * _CAP
+
+
+def _http_task(base: str, authority: Authority) -> None:
+    """Run as a task that declares one ``http`` connection without auth.
+
+    Parameters
+    ----------
+    base
+        The scripted server's base URL.
+    authority
+        Whose CA the connection trusts.
+    """
+    body = {
+        "name": "api",
+        "kind": "http",
+        "address": {"base_url": f"{base}/v1"},
+        "settings": {"auth": "none", "ca_certificate": authority.ca_file.read_text()},
+        "endpoints": [],
+        "secret": None,
+    }
+    context._set(
+        context._TaskState(
+            client=_Client(body),  # ty: ignore[invalid-argument-type]
+            environment="dev",
+            asset="bronze.x",
+            declared=frozenset({"api"}),
+            connections={"api": {"kind": "http"}},
+        )
+    )
+
+
+class _Chunks(httpx.SyncByteStream):
+    """A raw body that arrives in the given chunks.
+
+    Parameters
+    ----------
+    chunks
+        The chunks.
+    """
+
+    def __init__(self, chunks: list[bytes]) -> None:
+        self._chunks = chunks
+
+    def __iter__(self) -> Iterator[bytes]:
+        """Yield the chunks.
+
+        Yields
+        ------
+        bytes
+            One chunk.
+        """
+        yield from self._chunks

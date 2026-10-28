@@ -8,6 +8,7 @@ import os
 import socket
 import sqlite3
 import sys
+import threading
 import types
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
@@ -26,6 +27,7 @@ from lakana.ingest import (
     UsageError,
     _check,
     _connections,
+    _directory,
     _types,
     sql,
 )
@@ -238,6 +240,10 @@ class _Database:
         self.closed = True
 
 
+_SERVICE_VARIABLES = ("PGSERVICE", "PGSERVICEFILE", "PGSYSCONFDIR")
+"""What would make libpq read a service file (``~/.pg_service.conf`` among them)."""
+
+
 @dataclass
 class _Driver:
     """A fake ``adbc_driver_postgresql.dbapi``: records the connection string."""
@@ -246,6 +252,7 @@ class _Driver:
     refuse: Exception | None = None
     seen: list[str] = field(default_factory=list)
     roots: list[str] = field(default_factory=list)
+    services: list[dict[str, str]] = field(default_factory=list)
     Error: type[Exception] = _Error
     database: _Database | None = None
 
@@ -268,8 +275,9 @@ class _Driver:
             The configured refusal.
         """
         self.seen.append(conninfo)
+        self.services.append({k: v for k, v in os.environ.items() if k in _SERVICE_VARIABLES})
         for part in conninfo.split("' "):
-            if part.startswith("sslrootcert='"):
+            if part.startswith("sslrootcert='") and _check.NOWHERE not in part:
                 path = part.removeprefix("sslrootcert='").rstrip("'")
                 self.roots.append(Path(path).read_text() if path.startswith("/") else path)
         if self.refuse is not None:
@@ -333,7 +341,8 @@ def test_under_docker_libpq_dials_the_relay_and_verifies_the_real_host(driver: _
     assert driver.seen == [
         "host='db.example.com' port='15001' hostaddr='10.207.0.3' dbname='crm' user='reader' "
         f"password='{_PASSWORD}' sslmode='verify-full' connect_timeout='10' "
-        f"options='-c default_transaction_read_only=on' sslrootcert='{bundle}'"
+        f"options='-c default_transaction_read_only=on' sslrootcert='{bundle}' "
+        f"sslcertmode='disable' sslcrl='{_check.NOWHERE}' passfile='{_check.NOWHERE}'"
     ]
     assert driver.cursor.executed == [("SELECT id FROM customers",)]
     assert driver.database is not None and driver.database.closed
@@ -358,7 +367,7 @@ def test_a_connection_ca_is_trusted_next_to_the_bundle_and_its_file_removed(
     sql.read("crm-db", "SELECT 1")
 
     assert driver.roots == ["BUNDLE\n\nOWN CA\n"]
-    path = driver.seen[0].split("sslrootcert='")[1].rstrip("'")
+    path = driver.seen[0].split("sslrootcert='")[1].split("'")[0]
     assert not Path(path).exists()
 
 
@@ -366,13 +375,32 @@ def test_a_connection_ca_is_trusted_next_to_the_bundle_and_its_file_removed(
 def test_require_and_disable_name_no_root_certificates(
     driver: _Driver, tls: str, mode: str
 ) -> None:
-    """The ``require`` of libpq would verify the chain if it got a root file; ours must not."""
+    """The ``require`` of libpq would verify the chain if it got a root file; ours must not.
+
+    Not even ``~/.postgresql/root.crt`` of the worker's user: the root file is a path that
+    cannot exist, and no client certificate is ever presented.
+    """
     _postgres(relay=False, settings={"user": "reader", "tls": tls})
 
     sql.read("crm-db", "SELECT 1")
 
     assert f"sslmode='{mode}'" in driver.seen[0]
-    assert "sslrootcert" not in driver.seen[0]
+    assert f"sslrootcert='{_check.NOWHERE}'" in driver.seen[0]
+    assert "sslcertmode='disable'" in driver.seen[0]
+
+
+def test_libpq_reads_no_service_file_the_environment_names(
+    driver: _Driver, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """``PGSERVICE`` would fill unset keywords from ``~/.pg_service.conf``: out while connecting."""
+    for name in _SERVICE_VARIABLES:
+        monkeypatch.setenv(name, str(tmp_path / name))
+    _postgres(relay=False)
+
+    sql.read("crm-db", "SELECT 1")
+
+    assert driver.services == [{}]
+    assert os.environ["PGSERVICE"] == str(tmp_path / "PGSERVICE")
 
 
 def test_a_database_name_cannot_add_a_keyword(driver: _Driver) -> None:
@@ -467,6 +495,38 @@ def test_an_authentication_failure_names_the_test_command_and_masks_the_password
     assert _PASSWORD not in text and "***" in text
     assert len(text) < 1200
     assert caught.value.retryable is False
+
+
+def test_a_login_refused_in_another_language_is_retried_with_the_hint(driver: _Driver) -> None:
+    """The known limit: a refusal is recognised by libpq's English words only.
+
+    In German it is a `SourceError`, retried like any failure to connect, and its message says
+    what to check (docs/site/reference/ingest.md says the same).
+    """
+    driver.refuse = _Error(
+        "FATAL:  Passwort-Authentifizierung für Benutzer »reader« fehlgeschlagen"
+    )
+    _postgres(relay=False)
+
+    with pytest.raises(SourceError) as caught:
+        sql.read("crm-db", "SELECT 1")
+
+    assert type(caught.value) is SourceError
+    assert "Passwort-Authentifizierung" in str(caught.value)
+    assert str(caught.value).endswith(
+        "if this is a refused login on a server whose messages are not in English, check the "
+        "user and password"
+    )
+
+
+def test_a_query_error_without_a_sqlstate_has_no_login_hint(driver: _Driver) -> None:
+    driver.cursor.fail = _Error("ERROR: something odd")
+    _postgres(relay=False)
+
+    with pytest.raises(SourceError) as caught:
+        sql.read("crm-db", "SELECT 1")
+
+    assert "check the user and password" not in str(caught.value)
 
 
 @pytest.mark.parametrize(
@@ -627,7 +687,7 @@ def test_without_a_trust_bundle_libpq_uses_the_system_roots(
 
     sql.read("crm-db", "SELECT 1")
 
-    assert driver.seen[0].endswith("sslrootcert='system'")
+    assert "sslrootcert='system'" in driver.seen[0]
 
 
 def test_a_relay_that_does_not_resolve_is_retried(
@@ -906,6 +966,161 @@ def test_sqlite_refuses_a_link_at_the_file_path(lite: Path, tmp_path: Path) -> N
 
     with pytest.raises(DirectoryError, match="symbolic link"):
         sql.read("local-db", "SELECT * FROM t")
+
+
+def test_sqlite_refuses_a_link_swapped_in_between_the_check_and_the_open(
+    lite: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The file SQLite opened is compared with the one the walker found; a swap is refused."""
+    _sqlite(lite, ["CREATE TABLE t(v TEXT)", "INSERT INTO t VALUES ('inside')"])
+    elsewhere = tmp_path / "elsewhere.db"
+    _sqlite(elsewhere, ["CREATE TABLE t(v TEXT)", "INSERT INTO t VALUES ('outside')"])
+    moved = lite.with_name("moved.db")
+    checked = _directory.regular_file
+    checks: list[str] = []
+
+    def check_then_swap(root_dir: str, path: str) -> int:
+        if lite.is_symlink():  # the attacker puts the file back for each check
+            lite.unlink()
+            moved.rename(lite)
+        found = checked(root_dir, path)
+        checks.append(path)
+        lite.rename(moved)
+        lite.symlink_to(elsewhere)
+        return found
+
+    monkeypatch.setattr(_directory, "regular_file", check_then_swap)
+
+    with pytest.raises(SourceError, match=r"`local-db`: 'data/app.db' changed while") as caught:
+        sql.read("local-db", "SELECT v FROM t")
+
+    assert type(caught.value) is SourceError
+    assert len(checks) == 3
+
+
+def test_sqlite_reads_of_different_files_on_threads_do_not_see_each_others_files(
+    tmp_path: Path,
+) -> None:
+    """One read's descriptors are not another's mismatch: the /dev/fd window is serialised."""
+    root = tmp_path / "shared"
+    root.mkdir()
+    names = [f"db{i}" for i in range(4)]
+    bodies: dict[str, dict[str, object]] = {}
+    routing: dict[str, dict[str, object]] = {}
+    for name in names:
+        _sqlite(root / f"{name}.db", ["CREATE TABLE t(a)", "INSERT INTO t VALUES (1)"])
+        bodies[name] = {
+            "name": name,
+            "kind": "sqlite-file",
+            "address": {"root": "shared", "path": f"{name}.db"},
+            "settings": {},
+            "endpoints": [],
+            "secret": None,
+        }
+        routing[name] = {"kind": "sqlite-file", "root_dir": str(root), "path": f"{name}.db"}
+    _task(bodies, routing)
+    for name in names:  # fetched once, before the threads
+        sql.read(name, "SELECT a FROM t")
+    failures: list[BaseException] = []
+    start = threading.Barrier(len(names))
+
+    def reads(name: str) -> None:
+        start.wait()
+        for _ in range(15):
+            try:
+                sql.read(name, "SELECT a FROM t")
+            except SourceError as exc:
+                failures.append(exc)
+
+    threads = [threading.Thread(target=reads, args=(name,)) for name in names]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert failures == []
+
+
+def test_sqlite_reads_a_file_replaced_in_place_on_the_next_attempt(
+    lite: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An export that renames a new file over the old one while it is opened is read anew."""
+    _sqlite(lite, ["CREATE TABLE t(v TEXT)", "INSERT INTO t VALUES ('old')"])
+    fresh = lite.with_name("fresh.db")
+    _sqlite(fresh, ["CREATE TABLE t(v TEXT)", "INSERT INTO t VALUES ('new')"])
+    checked = _directory.regular_file
+
+    def check_then_replace(root_dir: str, path: str) -> int:
+        found = checked(root_dir, path)
+        if fresh.exists():
+            fresh.replace(lite)
+        return found
+
+    monkeypatch.setattr(_directory, "regular_file", check_then_replace)
+
+    assert sql.read("local-db", "SELECT v FROM t").column("v").to_pylist() == ["new"]
+
+
+def test_sqlite_reads_with_no_descriptor_of_the_file_left_open(lite: Path) -> None:
+    _sqlite(lite, ["CREATE TABLE t(a)"])
+    seen = os.stat(lite)
+
+    sql.read("local-db", "SELECT a FROM t")
+
+    assert (seen.st_dev, seen.st_ino) not in sql._open_files().values()
+
+
+def test_sqlite_refuses_when_this_process_cannot_list_its_open_files(
+    lite: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Without ``/dev/fd`` the file SQLite opened cannot be compared: strict, not a silent pass."""
+    _sqlite(lite, ["CREATE TABLE t(a)"])
+
+    def missing(path: str) -> list[str]:
+        raise FileNotFoundError(2, "No such file or directory", path)
+
+    monkeypatch.setattr(sql.os, "listdir", missing)
+
+    with pytest.raises(UsageError, match=r"/dev/fd"):
+        sql.read("local-db", "SELECT a FROM t")
+
+
+def test_only_the_checked_file_counts_as_the_one_sqlite_opened(tmp_path: Path) -> None:
+    """Another file still open is a mismatch; one closed again (another thread's) is not."""
+    checked, earlier = (1, 10), (1, 12)
+    walker = {4: checked}
+    other = tmp_path / "other.db"
+    other.write_bytes(b"")
+    with contextlib.ExitStack() as stack:
+        held = os.open(other, os.O_RDONLY)
+        stack.callback(os.close, held)
+        foreign = sql._identity(held)
+        assert foreign is not None
+        closed = held + 1000  # no descriptor this high is open
+
+        assert sql._opened_only(checked, 4, walker, {**walker, 5: checked})
+        assert sql._opened_only(checked, 4, {**walker, 5: earlier}, {**walker, 5: checked})
+        assert sql._opened_only(checked, 4, {**walker, 5: checked}, {**walker, 5: checked})
+        assert sql._opened_only(checked, 4, walker, {**walker, 5: checked, closed: foreign})
+        assert not sql._opened_only(checked, 4, walker, {**walker, 5: checked, held: foreign})
+        assert not sql._opened_only(checked, 4, walker, {**walker, held: foreign})
+        assert not sql._opened_only(checked, 4, walker, walker)
+
+
+def test_open_files_name_regular_files_only(tmp_path: Path) -> None:
+    regular = tmp_path / "a.db"
+    regular.write_bytes(b"")
+    with contextlib.ExitStack() as stack:
+        file_fd = os.open(regular, os.O_RDONLY)
+        stack.callback(os.close, file_fd)
+        directory_fd = os.open(tmp_path, os.O_RDONLY)
+        stack.callback(os.close, directory_fd)
+
+        found = sql._open_files()
+
+    seen = os.stat(regular)
+    assert found[file_fd] == (seen.st_dev, seen.st_ino)
+    assert directory_fd not in found
 
 
 def test_sqlite_names_a_column_that_changes_type_within_the_result(lite: Path) -> None:
