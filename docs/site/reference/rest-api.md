@@ -30,6 +30,10 @@ cover their shapes. What Lakana does change there is which commits it accepts (i
 commit); such a change is announced in the changelog and the [upgrade
 notes](../explanation/upgrades.md) like any other.
 
+A commit's snapshot summary may not carry `lakana.task-run-id` or `lakana.task-claim`: Lakana
+removes both from every snapshot a client commits, because only the platform records which Python
+task attempt wrote a snapshot.
+
 ## The promise
 
 - **Before v1.0.0**, a minor release (0.N.0) may break the platform API, but only openly: the

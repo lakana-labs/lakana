@@ -876,8 +876,14 @@ def test_a_build_failing_on_an_untrusted_certificate_names_the_setting(tmp_path:
             b"  `-> error sending request for url (https://pypi.org/simple/setuptools/)\n",
             False,
         ),
+        (
+            b"  x Failed to build `brokenpkg==1.0`\n"
+            b"  |-> The build backend returned an error\n"
+            b"      OSError: [Errno 28] No space left on device\n",
+            False,
+        ),
     ],
-    ids=["backend-failed", "no-file-for-platform", "network"],
+    ids=["backend-failed", "no-file-for-platform", "network", "disk-full"],
 )
 def test_a_container_build_that_cannot_succeed_is_permanent(
     tmp_path: Path, output: bytes, broken: bool

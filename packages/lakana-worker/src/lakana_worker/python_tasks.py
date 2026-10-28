@@ -260,9 +260,12 @@ _NO_WRITE = (
     "asset function and do not exit the process or write the result file yourself"
 )
 _NOT_ITS_WRITE = (
-    "the task reported success, but {table} was changed by another writer, not by this attempt; "
-    "return the DataFrame from the asset function and do not exit the process or write the "
-    "result file yourself"
+    "the task reported success, but {table} holds no write of this attempt: another writer "
+    "changed it. If something else writes {table} (the audit log shows who: `lakana audit list "
+    "--env {environment}`), stop it and run again. If the server runs an older release than this "
+    "worker, upgrade the server and the workers together. If table maintenance expired snapshots "
+    "while the task ran, run again. If the asset writes the result file itself, return the "
+    "DataFrame from the asset function instead"
 )
 _NO_VERSION = (
     "the task reported success without storing a version of its artifact; return the path from "
@@ -1616,9 +1619,24 @@ class PythonRuntime:
             start = baseline or Baseline(
                 before.snapshot_id, before.table_id is None or before.unpublished
             )
-            if after != before and after.table_id is not None:
-                if not self._attempt_wrote(session, claimed, before, after):
-                    return self._not_its_write(session, keeper, claimed, ended)
+            nothing_new = (
+                after.table_id is not None
+                and prepared.write in ("append", "merge")
+                and outcome.rows == 0
+                and outcome.snapshot_id is None
+            )
+            proven = (
+                after != before
+                and after.table_id is not None
+                and self._attempt_wrote(session, claimed, before, after)
+            )
+            if after != before and after.table_id is not None and not proven:
+                if nothing_new and before.table_id == after.table_id:
+                    # The attempt says it wrote nothing and the proof agrees: the change is
+                    # somebody else's, and this run found nothing new (review S1).
+                    return self._wrote_nothing(before, start, baseline, ended)
+                return self._not_its_write(session, keeper, claimed, prepared, ended)
+            if proven:
                 return ended(
                     None,
                     None,
@@ -1636,36 +1654,11 @@ class PythonRuntime:
                         else None
                     ),
                 )
-            if (
-                after == before
-                and after.table_id is not None
-                and prepared.write in ("append", "merge")
-                and outcome.rows == 0
-                and outcome.snapshot_id is None
-            ):
+            if after == before and nothing_new:
                 # Nothing new since the last run: an append or merge that writes nothing has
                 # done its work. A record can claim this without running the asset, which then
                 # left the table as it was, the outcome a run that found nothing has.
-                earlier = baseline is not None and (
-                    start.publishes or start.snapshot_id != after.snapshot_id
-                )
-                # An earlier attempt of this task run wrote (and created the table, when the
-                # baseline publishes): the check phase must still know that write, to set it
-                # back or leave the table unpublished when a check fails.
-                return ended(
-                    None,
-                    None,
-                    rows=0,
-                    written=Written(
-                        after.table_id,
-                        start.snapshot_id,
-                        after.snapshot_id,
-                        publishes=start.publishes,
-                    )
-                    if earlier
-                    else None,
-                    wrote_nothing=not earlier,
-                )
+                return self._wrote_nothing(before, start, baseline, ended)
         stop = cancel_kind(session, keeper, claimed.run_id)
         if stop is not None:
             return ended(stop[0], _stop_text(stop), failure_code=stop_code(stop[0]))
@@ -1728,10 +1721,61 @@ class PythonRuntime:
             session.rollback()
 
     @staticmethod
+    def _wrote_nothing(
+        before: _TargetState,
+        start: Baseline,
+        baseline: Baseline | None,
+        ended: Callable[..., TaskOutcome],
+    ) -> TaskOutcome:
+        """End an append or merge that found nothing new, as succeeded.
+
+        What counts is the table as this attempt found it (`before`): a change somebody else
+        made while it ran is not this task run's write.
+
+        Parameters
+        ----------
+        before
+            The table before the process started; it exists.
+        start
+            The task run's baseline, or what this attempt found when there is none.
+        baseline
+            The recorded baseline, for an asset with checks.
+        ended
+            Builds the outcome to record.
+
+        Returns
+        -------
+        TaskOutcome
+            Succeeded with no rows. When an earlier attempt of the task run wrote (and created
+            the table, when the baseline publishes), that write is the outcome's `written`: the
+            check phase must still know it, to set it back or leave the table unpublished when a
+            check fails.
+        """
+        assert before.table_id is not None  # nosec B101 -- the caller checked
+        earlier = baseline is not None and (
+            start.publishes or start.snapshot_id != before.snapshot_id
+        )
+        return ended(
+            None,
+            None,
+            rows=0,
+            written=Written(
+                before.table_id,
+                start.snapshot_id,
+                before.snapshot_id,
+                publishes=start.publishes,
+            )
+            if earlier
+            else None,
+            wrote_nothing=not earlier,
+        )
+
+    @staticmethod
     def _not_its_write(
         session: Session,
         keeper: LeaseKeeper,
         claimed: ClaimedTask,
+        prepared: _Prepared,
         ended: Callable[..., TaskOutcome],
     ) -> TaskOutcome:
         """End an attempt that reported success while somebody else changed its table.
@@ -1746,22 +1790,25 @@ class PythonRuntime:
             The running lease keeper.
         claimed
             The claim.
+        prepared
+            The prepared attempt, for the environment the message names.
         ended
             Builds the outcome to record.
 
         Returns
         -------
         TaskOutcome
-            Permanent: the attempt's own write is not in the table, so what it reported is not
-            true, and a retry would not write over somebody else's data more safely.
+            Permanent, code ``conflict``: the attempt's own write is not in the table, and a
+            retry could add an append's rows twice when the cause is an older server that does
+            not stamp writes.
         """
         stop = cancel_kind(session, keeper, claimed.run_id)
         if stop is not None:
             return ended(stop[0], _stop_text(stop), failure_code=stop_code(stop[0]))
         return ended(
             FailureKind.PERMANENT,
-            _NOT_ITS_WRITE.format(table=claimed.asset),
-            failure_code=FailureCode.BUILD_FAILED,
+            _NOT_ITS_WRITE.format(table=claimed.asset, environment=prepared.environment),
+            failure_code=FailureCode.CONFLICT,
         )
 
     def _prepare(

@@ -105,6 +105,11 @@ def written_by_attempt(
     `since`: a later writer may have committed on top of the attempt's snapshot, and a snapshot
     at or before `since` was there before the attempt started.
 
+    Maintenance spares a running task's baseline, not the snapshot its attempt wrote: expired
+    under a later writer's snapshot (`keep_days=0` while somebody else commits), the walk ends
+    at the missing parent and the write reads as unproven. Rare, and the attempt then fails
+    rather than counting somebody else's data as its own.
+
     Parameters
     ----------
     metadata

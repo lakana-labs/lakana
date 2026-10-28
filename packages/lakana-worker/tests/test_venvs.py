@@ -1448,6 +1448,19 @@ def test_a_build_that_failed_on_the_network_is_still_retried(fake: Fake) -> None
     for output in (
         _BUILD_REQUIRES_UNREACHABLE,
         _BACKEND_FAILED + "      urllib.error.URLError: Connection refused (os error 111)\n",
+        *(
+            _BACKEND_FAILED + f"      {line}\n"
+            for line in (
+                "socket.gaierror: [Errno -2] Name or service not known",
+                "OSError: [Errno 113] No route to host",
+                "urllib.error.HTTPError: HTTP Error 503: Service Unavailable",
+                "urllib.error.HTTPError: HTTP Error 502: Bad Gateway",
+                "requests.exceptions.ConnectionError: Max retries exceeded with url: /x",
+                "http.client.RemoteDisconnected: Remote end closed connection without response",
+                "curl: (6) Could not resolve host: example.org",
+                "fatal: unable to access 'https://example.org/x.git/': SSL connection timeout",
+            )
+        ),
         _NO_PLATFORM + _REFUSAL.replace("client error (401 Unauthorized)", "server error (503)"),
     ):
         fake.behave(mode="fail", code=1, output=output)
@@ -1462,3 +1475,41 @@ def test_a_refusal_wins_over_a_broken_build(fake: Fake) -> None:
     fake.behave(mode="fail", code=1, output=_REFUSAL + _BACKEND_FAILED)
     with pytest.raises(VenvBuildRefused):
         fake.acquire(_SHA_A, lambda: [_TEAM])
+
+
+@pytest.mark.parametrize(
+    ("line", "cause"),
+    [
+        ("OSError: [Errno 28] No space left on device", "ran out of disk space"),
+        ("gcc: fatal error: Killed signal terminated program cc1plus", "ran out of memory"),
+        ("MemoryError", "ran out of memory"),
+        ("error: Cannot allocate memory", "ran out of memory"),
+        (
+            "  ╰─▶ Call to `setuptools.build_meta.build_wheel` failed (exit status: 137)",
+            "ran out of memory",
+        ),
+        ("process didn't exit successfully: (signal: 9, SIGKILL: kill)", "ran out of memory"),
+    ],
+)
+def test_a_build_that_ran_out_of_disk_or_memory_is_retried_and_says_so(
+    fake: Fake, line: str, cause: str
+) -> None:
+    """Review S2: the machine, not the package, failed; an operator frees disk or memory.
+
+    Parameters
+    ----------
+    fake
+        The fake uv.
+    line
+        What the build printed.
+    cause
+        Part of the message.
+    """
+    fake.behave(mode="fail", code=1, output=_BACKEND_FAILED + f"      {line}\n")
+    with pytest.raises(VenvBuildError) as caught:
+        fake.acquire()
+    assert not isinstance(caught.value, VenvBuildBroken)
+    message = str(caught.value)
+    assert message.startswith("environment build failed: uv exited with status 1: the build ")
+    assert cause in message
+    assert "uv lock" not in message

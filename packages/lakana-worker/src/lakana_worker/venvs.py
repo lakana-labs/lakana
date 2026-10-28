@@ -233,11 +233,54 @@ _NO_PLATFORM = re.compile(
 """uv's report of a locked package with neither a wheel for this platform nor an sdist."""
 _NETWORK = re.compile(
     r"Failed to fetch|Failed to download|error sending request|tcp connect error|dns error|"
-    r"Connection refused|Connection reset|timed out|HTTP status server error|"
-    r"Temporary failure in name resolution|Network is unreachable",
+    r"Connection refused|Connection reset|Connection aborted|timed out|\btimeout\b|"
+    r"HTTP status server error|HTTP Error 5\d\d|Temporary failure|Network is unreachable|"
+    r"Name or service not known|No route to host|getaddrinfo|Could not resolve host|"
+    r"Max retries exceeded|RemoteDisconnected|Remote end closed connection|ECONNRESET|EAI_AGAIN",
     re.IGNORECASE,
 )
 """Anything in uv's output that says the network failed: then a retry may succeed."""
+
+
+_NO_DISK = re.compile(r"No space left on device|Disk quota exceeded|ENOSPC|Errno 28\]")
+"""The build's machine ran out of disk space."""
+_NO_MEMORY = re.compile(
+    r"Killed signal|MemoryError|Cannot allocate memory|out of memory|exit status: 137|"
+    r"signal: 9\b|SIGKILL|\bKilled\b",
+    re.IGNORECASE,
+)
+"""The build's machine ran out of memory, or something killed the build."""
+_DISK_HINT = (
+    "the build ran out of disk space on the worker (No space left on device); free space where "
+    "the worker keeps its environments and uv's package cache, then run again"
+)
+_MEMORY_HINT = (
+    "the build ran out of memory, or was killed (the task's log has the build's output); give "
+    "the build more memory (the worker's machine, or LAKANA_RUN__TASK_MEMORY with the docker "
+    "runner), or depend on a version of the package with a wheel so nothing is compiled, then "
+    "run again"
+)
+
+
+def machine_hint(output: str) -> str | None:
+    """Say which resource of the machine a failed build ran out of, if its output shows one.
+
+    Parameters
+    ----------
+    output
+        The end of what uv printed; never shown, only matched.
+
+    Returns
+    -------
+    str or None
+        What to do about the disk or the memory; `None` when the output shows neither. Such a
+        failure is retried: it depends on the machine, not on the lock.
+    """
+    if _NO_DISK.search(output):
+        return _DISK_HINT
+    if _NO_MEMORY.search(output):
+        return _MEMORY_HINT
+    return None
 
 
 def broken_build(output: str) -> str | None:
@@ -252,10 +295,10 @@ def broken_build(output: str) -> str | None:
     -------
     str or None
         The message after ``environment build failed: ``, naming the package and the next step;
-        `None` when the failure may be transient (a network error anywhere in the output, or
-        a failure this does not know).
+        `None` when the failure may be transient (a network error, a full disk or a lack of
+        memory anywhere in the output, or a failure this does not know).
     """
-    if _NETWORK.search(output):
+    if _NETWORK.search(output) or machine_hint(output) is not None:
         return None
     built = _BACKEND_FAILED.search(output)
     if built is not None and _BACKEND_ERROR in output:
@@ -795,7 +838,7 @@ def _build(
                 broken = broken_build(output)
                 if broken is not None:
                     raise VenvBuildBroken(f"{_FAILED}: {broken}") from exc
-                hint = certificate_hint(output)
+                hint = machine_hint(output) or certificate_hint(output)
                 if hint is not None:
                     raise VenvBuildError(f"{exc}: {hint}") from exc
                 raise

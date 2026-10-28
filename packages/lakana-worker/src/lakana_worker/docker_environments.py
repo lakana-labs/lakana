@@ -60,6 +60,7 @@ from lakana_worker.venvs import (
     VenvBuildStopped,
     VenvLease,
     broken_build,
+    machine_hint,
 )
 
 PUBLIC_INDEX_HOSTS = ("pypi.org", "files.pythonhosted.org")
@@ -495,7 +496,7 @@ class DockerEnvironments:
         broken = broken_build(output)
         if broken is not None:
             return VenvBuildBroken(f"{_FAILED}: {broken}")
-        hint = certificate_hint(output)
+        hint = machine_hint(output) or certificate_hint(output)
         return VenvBuildError(
             f"{_FAILED}: uv exited with status {code}" + (f": {hint}" if hint else "")
         )

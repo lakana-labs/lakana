@@ -1168,9 +1168,12 @@ def _write_as_admin(world: World, rows: int = 1, *, append: bool = False) -> Non
 
 
 _NOT_ITS_WRITE = (
-    "the task reported success, but gold.scores was changed by another writer, not by this "
-    "attempt; return the DataFrame from the asset function and do not exit the process or write "
-    "the result file yourself"
+    "the task reported success, but gold.scores holds no write of this attempt: another writer "
+    "changed it. If something else writes gold.scores (the audit log shows who: `lakana audit "
+    "list --env dev`), stop it and run again. If the server runs an older release than this "
+    "worker, upgrade the server and the workers together. If table maintenance expired "
+    "snapshots while the task ran, run again. If the asset writes the result file itself, "
+    "return the DataFrame from the asset function instead"
 )
 
 
@@ -1195,7 +1198,7 @@ def test_success_after_somebody_else_wrote_the_table_is_not_a_write(
         return RunOutcome(succeeded=True, snapshot_id=None, rows=3)
 
     task, message = _fails(py, py.engine(script))
-    assert (task.status, task.attempt, task.failure_code) == (TaskStatus.FAILED, 1, "build_failed")
+    assert (task.status, task.attempt, task.failure_code) == (TaskStatus.FAILED, 1, "conflict")
     assert message == _NOT_ITS_WRITE
 
 
@@ -1207,7 +1210,7 @@ def test_an_empty_table_somebody_else_created_is_not_a_write(py: PyWorld) -> Non
         return RunOutcome(succeeded=True, snapshot_id=None, rows=0)
 
     task, message = _fails(py, py.engine(script))
-    assert (task.status, task.failure_code) == (TaskStatus.FAILED, "build_failed")
+    assert (task.status, task.failure_code) == (TaskStatus.FAILED, "conflict")
     assert message == _NOT_ITS_WRITE
 
 
@@ -7764,6 +7767,41 @@ def test_an_empty_append_is_a_success(py: PyWorld, write: str) -> None:
     assert f"write mode: {write}" in log
     assert "snapshot:" not in log
     assert _ids(py.world, "gold.scores") == [1]
+
+
+@pytest.mark.parametrize("write", ["append", "merge"])
+def test_an_empty_append_while_somebody_else_writes_is_still_a_success(
+    py: PyWorld, write: str
+) -> None:
+    """Review S1: a run that found nothing new wrote nothing; another writer's commit is theirs.
+
+    Parameters
+    ----------
+    py
+        The world.
+    write
+        The asset's write mode.
+    """
+    extra: dict[str, object] = (
+        {"watermark": "id", "write_mode": "append"}
+        if write == "append"
+        else {"key": ["id"], "write_mode": "merge"}
+    )
+    py.deploy(entry={"write": write, **extra})
+    engine = py.engine(_harness_writes(py.world, [1]))
+    run_claimed(engine, py.claim_python(engine))
+
+    def foreign(task: PythonTask, on_log: Callable[[bytes], None], stop: StopSignal) -> RunOutcome:
+        _write_as_admin(py.world, 1, append=True)
+        return RunOutcome(succeeded=True, snapshot_id=None, rows=0)
+
+    claimed = _rerun(py, py.engine(foreign))
+
+    task = _task(py.world, "gold.scores")
+    assert task.status is TaskStatus.SUCCEEDED, task.error_message
+    attempt = _attempts(py.world, claimed.task_run_id)[0]
+    assert (attempt.outcome, attempt.rows_written) == (AttemptOutcome.SUCCEEDED, 0)
+    assert "snapshot:" not in _log(py.world, claimed.run_id, "gold.scores")
 
 
 def _nothing_new(task: PythonTask, on_log: Callable[[bytes], None], stop: StopSignal) -> RunOutcome:
