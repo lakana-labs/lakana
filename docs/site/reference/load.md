@@ -138,7 +138,7 @@ is audited; the dry run checks this too, so nothing is uploaded before the refus
 | `403`, exit 5 | a protected environment without break glass | ``Environment 'prod' is protected: only runs of the deployed project version may write. See `lakana run`.`` |
 | `403`, exit 5 | break glass without `MANAGE_ENVIRONMENT` | the permission |
 | `409`, exit 7 | the table changed since the command looked at it | ``bronze.customers changed during the write; retry.`` |
-| `409`, exit 7 | the command expects the table not to exist (`expected_snapshot_id` is `none`), but it has data; refused before any rows are read | ``bronze.customers already has data, so it cannot be created again. Pass its current snapshot id as expected_snapshot_id, or leave expected_snapshot_id out.`` |
+| `409`, exit 7 | the command expects the table not to exist (`expected_snapshot_id` is `none`), but it has data; refused before any rows are read | ``bronze.customers already has data, so it cannot be created again. A run or load that creates a table: retry, it will update the table. A call that sets expected_snapshot_id: pass the table's current snapshot id or leave it out.`` |
 | `422`, exit 8 | the file's columns do not fit the existing table | the column that differs, as for an append |
 | exit 2 | a protected environment without `--yes`, `--break-glass` and `--reason` | `` `prod` is protected: a load there needs --yes --break-glass --reason REASON (MANAGE_ENVIRONMENT, audited); recurring loads belong in an asset `` |
 | exit 2 | a file larger than one upload may be | `big.parquet (300000000 bytes) is larger than one upload may be (256 MiB); load it with a Python asset and a directory or object-store connection` |

@@ -309,9 +309,9 @@ def _ids(values: list[int]) -> pa.Table:
     return pa.table({"id": values}, schema=pa.schema([pa.field("id", pa.int64(), nullable=False)]))
 
 
-@pytest.mark.parametrize("method", ["POST", "PUT"])
+@pytest.mark.parametrize("route", ["POST data", "PUT data", "POST merge"])
 def test_a_create_pin_on_a_table_with_data_is_refused_before_the_body_is_read(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch, method: str
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, route: str
 ) -> None:
     """`expected_snapshot_id=none` on a table that has a snapshot is a 409 with no body decoded."""
     create_environment(client)
@@ -324,10 +324,11 @@ def test_a_create_pin_on_a_table_with_data_is_refused_before_the_body_is_read(
         raise AssertionError("the body was decoded")
 
     monkeypatch.setattr("lakana_server.api.platform.tables._decode_arrow_stream", body_was_read)
+    method, tail = route.split()
     refused = client.request(
         method,
-        url,
-        params={"expected_snapshot_id": "none"},
+        url.replace("/data", f"/{tail}"),
+        params={"expected_snapshot_id": "none", **({"key": "id"} if tail == "merge" else {})},
         headers=_ARROW_STREAM_HEADERS,
         content=_ipc_stream_bytes(_ids([2])),
     )

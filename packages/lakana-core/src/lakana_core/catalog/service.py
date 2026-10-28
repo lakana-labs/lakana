@@ -4966,8 +4966,9 @@ class CatalogService:
             and self._to_loaded_table(ref, row).metadata.current_snapshot_id is not None
         ):
             raise ConflictError(
-                f"{ref.dotted()} already has data, so it cannot be created again. Pass its "
-                "current snapshot id as expected_snapshot_id, or leave expected_snapshot_id out."
+                f"{ref.dotted()} already has data, so it cannot be created again. A run or "
+                "load that creates a table: retry, it will update the table. A call that sets "
+                "expected_snapshot_id: pass the table's current snapshot id or leave it out."
             )
 
     def _existing_table(self, ref: TableRef) -> Table | None:

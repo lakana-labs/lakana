@@ -1763,7 +1763,6 @@ class _ArrowSink:
 
     def __init__(self, stream: StreamWriter) -> None:
         self._stream = stream
-        self._position = 0
         self.closed = False
 
     def write(self, data: bytes | memoryview) -> int:
@@ -1781,25 +1780,10 @@ class _ArrowSink:
         """
         piece = bytes(data)
         self._stream.write(piece)
-        self._position += len(piece)
         return len(piece)
-
-    def tell(self) -> int:
-        """Say how many bytes were written.
-
-        Returns
-        -------
-        int
-            The position.
-        """
-        return self._position
 
     def flush(self) -> None:
         """Do nothing: the stream buffers on its own."""
-
-    def close(self) -> None:
-        """Mark the sink closed; the caller commits or aborts the stream."""
-        self.closed = True
 
 
 def _store_result(storage: Storage, path: str, result: pa.Table) -> None:
