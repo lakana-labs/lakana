@@ -4079,7 +4079,12 @@ secret's values, and the only way a secret reaches a Python asset (#23). User re
   must pass `same_origin` with the base URL (no userinfo), else `SourceRefused` before it is
   requested; a cursor, link or records hash an earlier page gave stops the read (`UsageError`),
   and `max_pages`, `max_bytes` (counted as bytes arrive, chunked bodies included) and `max_rows`
-  bound it. Retries are classified by type and status only (408/429/500/502/503/504, httpx's
+  bound it. Every `http` client asks for `Accept-Encoding: gzip, deflate`, and `_http.read_capped`
+  (the REST pages, `files.read` over `http`, the OAuth2 token answer) decodes the raw body itself
+  with `zlib.decompressobj().decompress(data, 64 KiB)`, counting each step against the cap; any
+  other `Content-Encoding` (zstd, br, a chain) is `SourceRefused` unread. httpx decoded a whole
+  network chunk before the cap saw it: a 32 KiB zstd body became 1 GiB at a 1 MiB cap (M6 review
+  M1, #356). Retries are classified by type and status only (408/429/500/502/503/504, httpx's
   timeout, network, remote-protocol and decoding errors, the egress proxy's 502/503/504; never a
   certificate refusal), within `retries` attempts and `retry_budget_seconds`, honouring
   `Retry-After`; a non-2xx body is never read. An OAuth2 401 calls

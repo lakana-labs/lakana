@@ -25,7 +25,8 @@ import random
 import re
 import ssl
 import time
-from collections.abc import Callable, Generator
+import zlib
+from collections.abc import Callable, Generator, Iterable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from urllib.parse import parse_qsl, unquote, urlsplit
@@ -63,6 +64,14 @@ RETRIED_STATUSES = frozenset({408, 429, 500, 502, 503, 504})
 """Statuses `send` retries: a timeout, too many requests, and a server that may recover."""
 MAX_DELAY_SECONDS = 60.0
 """The longest backoff between two attempts (a server's ``Retry-After`` may ask for more)."""
+
+ACCEPT_ENCODING = "gzip, deflate"
+"""The encodings a client asks for; `read_capped` decodes each in bounded steps and refuses any
+other, so no answer is ever decoded faster than the cap counts it."""
+DECODE_STEP = 64 * 1024
+"""The most decoded bytes one step of `read_capped` produces."""
+_WBITS = {"gzip": 16 + zlib.MAX_WBITS, "x-gzip": 16 + zlib.MAX_WBITS, "deflate": zlib.MAX_WBITS}
+"""The zlib window of each encoding `read_capped` decodes (deflate is the zlib format)."""
 
 _HEADER_SAFE = re.compile(r"[\x20-\x7e]+")
 _PROXY_STATUS = re.compile(r"\A(\d{3})\b")
@@ -260,12 +269,70 @@ def transport_failure(name: str, host: str, error: httpx.HTTPError) -> IngestErr
     return SourceError(f"`{name}`: the request to `{shown}` failed ({type(error).__name__})")
 
 
-def read_capped(response: httpx.Response, limit: int) -> bytes:
+def _inflated(raw: Iterable[bytes], wbits: int) -> Generator[bytes]:
+    """Decode a gzip or deflate body in steps of at most `DECODE_STEP` bytes.
+
+    Parameters
+    ----------
+    raw
+        The body as it arrives.
+    wbits
+        The zlib window of its encoding.
+
+    Yields
+    ------
+    bytes
+        The next decoded bytes, possibly none.
+
+    Raises
+    ------
+    zlib.error
+        When the bytes are not of the encoding.
+    """
+    inflater = zlib.decompressobj(wbits)
+    for data in raw:
+        while True:
+            decoded = inflater.decompress(data, DECODE_STEP)
+            yield decoded
+            data = inflater.unconsumed_tail
+            # A full step may leave decoded bytes inside zlib although no input is left.
+            if not data and len(decoded) < DECODE_STEP:
+                break
+
+
+def _within(body: bytes, limit: int) -> bytes:
+    """Return a body already in memory, unless it is larger than `limit`.
+
+    Parameters
+    ----------
+    body
+        The body.
+    limit
+        The most bytes.
+
+    Returns
+    -------
+    bytes
+        `body`.
+
+    Raises
+    ------
+    OverflowError
+        When it is larger.
+    """
+    if len(body) > limit:
+        raise OverflowError(limit)
+    return body
+
+
+def read_capped(response: httpx.Response, limit: int, name: str) -> bytes:
     """Read a streamed answer's body, refusing one larger than `limit` before and while reading.
 
     ``Content-Length`` is checked first (with a content encoding it is the encoded size, which
-    is never larger than the decoded one); then the decoded bytes are counted as they arrive, so
-    an answer without a length, or one that decodes to more, stops at the limit.
+    is never larger than the decoded one). Then the raw bytes are decoded here, not by httpx, in
+    steps of at most `DECODE_STEP` bytes, and counted as each step produces them: a small
+    compressed body that decodes to far more stops at the limit, holding at most one step more.
+    Only the encodings of `ACCEPT_ENCODING` are decoded; any other is refused.
 
     Parameters
     ----------
@@ -273,6 +340,8 @@ def read_capped(response: httpx.Response, limit: int) -> bytes:
         A response opened with ``stream=True``.
     limit
         The most bytes.
+    name
+        The connection, for the refusal.
 
     Returns
     -------
@@ -283,18 +352,42 @@ def read_capped(response: httpx.Response, limit: int) -> bytes:
     ------
     OverflowError
         When the body is larger than `limit`; the caller names its own cap.
+    SourceRefused
+        When the answer is in a ``Content-Encoding`` Lakana did not ask for (``zstd``, ``br``,
+        or more than one).
+    httpx.DecodingError
+        When the body is not of its ``Content-Encoding`` (retried, as httpx's own).
     """
     length = response.headers.get("content-length", "")
     if length.isdigit() and int(length) > limit:
         raise OverflowError(limit)
-    chunks: list[bytes] = []
+    encoding = response.headers.get("content-encoding", "").strip().lower()
+    if encoding not in ("", "identity") and encoding not in _WBITS:
+        raise SourceRefused(
+            f"`{name}`: the server answered in Content-Encoding "
+            f"`{safe_name(encoding)[:SHOWN_HOST]}`, which Lakana does not ask for (it asks for "
+            "gzip or deflate, or none); the server or a proxy before it ignores Accept-Encoding: "
+            "have it send one of those"
+        )
+    if response.is_stream_consumed:
+        # An answer built in memory (httpx's MockTransport) was decoded whole when it was built;
+        # an answer from the network is a stream, decoded only here.
+        return _within(response.content, limit)
+    raw = response.iter_raw()
+    chunks = _inflated(raw, _WBITS[encoding]) if encoding in _WBITS else raw
+    kept: list[bytes] = []
     total = 0
-    for chunk in response.iter_bytes():
-        total += len(chunk)
-        if total > limit:
-            raise OverflowError(limit)
-        chunks.append(chunk)
-    return b"".join(chunks)
+    try:
+        for chunk in chunks:
+            total += len(chunk)
+            if total > limit:
+                raise OverflowError(limit)
+            kept.append(chunk)
+    except zlib.error as exc:
+        raise httpx.DecodingError(
+            f"the body is not {encoding} ({exc})", request=response.request
+        ) from exc
+    return b"".join(kept)
 
 
 class ClientCredentials:
@@ -430,7 +523,7 @@ class ClientCredentials:
                     f"`{self.name}`: the token endpoint `{where}` answered HTTP {status}"
                 )
             try:
-                body = read_capped(response, MAX_TOKEN_ANSWER)
+                body = read_capped(response, MAX_TOKEN_ANSWER, self.name)
             except OverflowError:
                 raise UsageError(
                     f"`{self.name}`: the token endpoint `{where}` answered more than "
@@ -776,7 +869,11 @@ def client_for(conn: Connection) -> httpx.Client:
     oauth: ClientCredentials | None = None
     if secret is not None:
         token_client = httpx.Client(
-            transport=transport, trust_env=False, follow_redirects=False, timeout=TIMEOUT_SECONDS
+            transport=transport,
+            headers={"Accept-Encoding": ACCEPT_ENCODING},
+            trust_env=False,
+            follow_redirects=False,
+            timeout=TIMEOUT_SECONDS,
         )
         oauth = ClientCredentials(
             conn.name,
@@ -789,6 +886,7 @@ def client_for(conn: Connection) -> httpx.Client:
     return httpx.Client(
         base_url=base_url,
         transport=OwnOrigin(conn.name, base_url, transport),
+        headers={"Accept-Encoding": ACCEPT_ENCODING},
         trust_env=False,
         auth=ConnectionAuth(conn.name, base_url, headers, params, oauth),
         follow_redirects=False,
@@ -1015,7 +1113,7 @@ def send(
                     refreshed = True
                     continue
                 if status not in RETRIED_STATUSES:
-                    body = read_capped(response, limit) if 200 <= status < 300 else b""
+                    body = read_capped(response, limit, name) if 200 <= status < 300 else b""
                     return Answer(status, response.headers, body, request.url)
                 happened = f"answered {status}"
                 retry_after = response.headers.get("retry-after")

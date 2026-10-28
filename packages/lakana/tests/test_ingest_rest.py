@@ -1247,7 +1247,7 @@ def test_a_page_cut_short_is_retried_then_named(
 def test_an_error_while_reading_that_cannot_pass_is_not_retried(
     authority: Authority, tmp_path: Path, clock: Clock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def refuse(response: object, limit: int) -> bytes:
+    def refuse(response: object, limit: int, name: str) -> bytes:
         raise httpx.LocalProtocolError("bad")
 
     monkeypatch.setattr(_http, "read_capped", refuse)

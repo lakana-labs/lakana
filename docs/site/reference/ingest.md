@@ -249,7 +249,7 @@ could end differently (the task is retried only when it could):
 |---|---|---|
 | `UsageError` | The call or the setup is wrong: a connection of another kind, an unknown extension or `format=`, `sheet=` or `header_row=` where they mean nothing, a cap that is not a positive whole number, `since=` of the wrong type, `modified_from=` without `since=`, a wildcard in an `http` path; a missing secret or one that is no service-account key, a secret value no HTTP header can carry, a token endpoint that answers without a bearer token, a CA certificate that is not PEM, a trust bundle the worker cannot read. Every attempt fails the same way. | No |
 | `FileShapeError` (a `SourceError`) | The files are wrong: types that do not fit across files, a `schema=` column a file lacks, a `schema=` value that is no Polars type, a file that cannot be parsed, a CSV, JSON or NDJSON file that is compressed or not UTF-8, a JSON file that nests arrays and objects more than 100 levels deep, a bucket key with an empty, `.` or `..` segment. The same files fail every attempt. | No |
-| `SourceRefused` (a `SourceError`) | The store or server refused the credential (HTTP 401 or 403), an OAuth2 token endpoint refused the client (400 or 401) or answered with a redirect, another 4xx, a 1xx or a 2xx other than 200, its certificate is not trusted, it answered with a redirect, or a request would go to another host than the `base_url`'s. Every attempt would; the message names the next step. | No |
+| `SourceRefused` (a `SourceError`) | The store or server refused the credential (HTTP 401 or 403), an OAuth2 token endpoint refused the client (400 or 401) or answered with a redirect, another 4xx, a 1xx or a 2xx other than 200, its certificate is not trusted, it answered with a redirect or in a `Content-Encoding` Lakana did not ask for (zstd, br), or a request would go to another host than the `base_url`'s. Every attempt would; the message names the next step. | No |
 | `SourceError` | The store or server failed or could not be reached (a network error, a timeout, HTTP 404, 429 or 5xx, the egress proxy's refusal), which may pass. | Yes |
 | `DirectoryError` | A directory or file is missing, a link, not a directory, or denied; or the pattern is refused. The same path fails every attempt. | No |
 | `DirectoryError` from an I/O error (`EIO` and the like) on a path that is there | The disk or share failed this time. | Yes |
@@ -392,7 +392,10 @@ followed), and a certificate that is not trusted fail at once.
 Each page is turned into Arrow before the next is read, so the records of one page are in
 memory as Python objects at a time. The caps count the bytes and the records as they arrive; an
 answer without `Content-Length` is read only up to `max_bytes`. A compressed answer counts what it
-decodes to, and one network chunk can decode to a few MiB more before the cap stops it.
+decodes to: Lakana asks for gzip or deflate and decodes them itself, at most 64 KiB at a time,
+so the read stops within 64 KiB of the cap however small the compressed answer was. An answer in
+any other `Content-Encoding` (zstd, br, or two encodings at once) is refused (`SourceRefused`)
+before it is decoded.
 
 ### Errors of rest.read
 
@@ -401,13 +404,14 @@ The classes are those of [files.read](#errors):
 | Class | Meaning | Retried |
 |---|---|---|
 | `UsageError` | The call or the setup is wrong: a path that could leave the base URL, a `None` or unsupported `params` value, a `params` key the paginator or the connection's API key sets, `records=` that does not lead to a list of objects, a cursor or link of the wrong type, a page that repeats an earlier one, a connection of another kind, a missing secret or one no header can carry, a token endpoint that answers without a bearer token. | No |
-| `SourceRefused` (a `SourceError`) | The API refused the credential (401, 403) or the request (another 4xx), answered with a redirect, a next link names another host, a certificate is not trusted, an OAuth2 token endpoint refused the client, or the task's egress proxy refused the host (403) or the task's token (407). | No |
+| `SourceRefused` (a `SourceError`) | The API refused the credential (401, 403) or the request (another 4xx), answered with a redirect, a next link names another host, a page arrived in a `Content-Encoding` Lakana did not ask for, a certificate is not trusted, an OAuth2 token endpoint refused the client, or the task's egress proxy refused the host (403) or the task's token (407). | No |
 | `FileShapeError` (a `SourceError`) | A field holds values of different types (a number and a text), or a value Arrow cannot hold (an integer beyond 64 bits, a number beyond a 64-bit float such as `1e400`, `NaN` or `Infinity`), or a page nests arrays and objects more than 100 levels deep or is not UTF-8. | No |
 | `SourceError` | The API kept failing past the retries or the budget, answered another 5xx, could not be reached, or a page is not JSON (a maintenance page, say). | Yes |
 | `CapExceeded` | A cap was reached. | No |
 
 | Message starts or contains | Cause | Next step |
 |---|---|---|
+| ``...: the server answered in Content-Encoding `zstd`, which Lakana does not ask for`` | The server, or a proxy before it, ignores `Accept-Encoding: gzip, deflate`. | Have the server send gzip, deflate or no encoding. |
 | `rest.read reads http connections; ... is s3: use files.read` | The connection is of another kind. | Use the helper the message names. |
 | `path= is relative to the connection's base URL` | `path` is an absolute URL or `//host`. | Pass the part below the base URL. |
 | `params= since is None, which would send an empty value` | A `None` value, usually the first run's watermark. | Pass `ctx.watermark(default=...)`. |
