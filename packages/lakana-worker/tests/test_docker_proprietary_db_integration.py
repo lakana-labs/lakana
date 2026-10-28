@@ -70,8 +70,30 @@ _RECIPE = Path(__file__).resolve().parents[3] / "docs" / "examples" / "proprieta
 _ENVIRONMENT_KEY = "7" * 64
 _DRIVER = ("python-tds==1.17.1", "pyopenssl==26.4.0")
 """The example's pins; `test_the_driver_pins_are_the_examples` keeps them equal."""
-_DRIVER_TREE = ("cryptography==50.0.2", "cffi==2.1.1", "pycparser==3.12")
-"""What the driver pulls in, pinned too (installed with ``--no-deps``)."""
+_DRIVER_REQUIREMENTS = """\
+python-tds==1.17.1 \\
+    --hash=sha256:35cb210b1a54e5ccc91570a83d4e9a2a16682cbeb00bede06fd6cdf9afa9762f
+pyopenssl==26.4.0 \\
+    --hash=sha256:f0eb0cb2d581d3ad2b9c489468485e7f2ab6727d08401bcf9d824c3caddf3c1c
+cryptography==50.0.2 \\
+    --hash=sha256:630ebfea3bf689d075f82316324ff7433dc447fe6bc1bfc76524b74b4a9567d2 \\
+    --hash=sha256:4061c0079120205fb760c58acab6443e217307dcf05e3702cf970e0689972856 \\
+    --hash=sha256:9dab55f57c74c3cad24c323bacbbd04be4705ba6eb0d92e920b1fc4837ed5079 \\
+    --hash=sha256:ee247f5c245c9a2fe7c8e2214e295918838e44e00a45a6718451e4004219e767 \\
+    --hash=sha256:f21e8a22c8605750c7af886bab299a363721264061b4ac0a30efb73cfd58efc5 \\
+    --hash=sha256:1981f1db4630889b9ef7803fadef12b056f428cb6b85c27ba57b774793b6093c
+cffi==2.1.1 \\
+    --hash=sha256:34e261f78cb6ceaaa36f42f2613f4380d94d9c759a9c73c769ee6e0247364632 \\
+    --hash=sha256:c1453022f490d2459a11819d83ad1d586e9ff65a12ac3e705ffebd46d3685dcf \\
+    --hash=sha256:a931079504ecc49efed7744c476a5c343a92fabf66dec2db95edb1b2fdc770e2 \\
+    --hash=sha256:b0431303acaea1089ad4b3e9ce4e6518193def1118d4073ca848635ee4ea2e96
+pycparser==3.12 \\
+    --hash=sha256:a076f3f489b39b43ed13563a1dafe42447445bec2e294154ec5c57fcdda4c85e
+"""
+"""The driver and what it pulls in, with the SHA-256 of each linux x86-64 wheel PyPI has for it
+(cryptography's abi3 wheels, cffi's for CPython 3.11 to 3.14): pip installs them with
+``--require-hashes``, so a file added to a release later is refused. Another Python needs cffi's
+hash for it, and the install says so."""
 
 _CONFIG = b"""[network]
 tlscert = /var/opt/mssql/tls/erp.pem
@@ -83,9 +105,10 @@ forceencryption = 1
 
 _SETUP = """
 CREATE TABLE dbo.orders (id bigint NOT NULL PRIMARY KEY, customer nvarchar(100) NOT NULL,
-    amount money NOT NULL, ordered_at datetime2 NOT NULL);
-INSERT INTO dbo.orders VALUES (1, N'Åsa Berg', 1250.5, '2026-10-01T08:00:00.1234567'),
-    (2, N'Kowalski', 99.9999, '2026-10-01T09:30:00'), (3, N'Müller GmbH', 0, '2026-10-02T10:00:00');
+    amount money NOT NULL, ordered_at datetime2 NOT NULL, row_version rowversion);
+INSERT INTO dbo.orders (id, customer, amount, ordered_at) VALUES
+    (1, N'Åsa Berg', 1250.5, '2026-10-01T08:00:00.1234567'),
+    (2, N'Kowalski', 99.9999, '2026-10-01T09:30:00'), (4, N'Müller GmbH', 0, '2026-10-02T10:00:00');
 CREATE TABLE dbo.customers (id int NOT NULL PRIMARY KEY, customer_guid uniqueidentifier NOT NULL,
     name nvarchar(100) NOT NULL, country char(2) NOT NULL, updated_at datetimeoffset NOT NULL);
 INSERT INTO dbo.customers VALUES
@@ -218,6 +241,7 @@ def erp(sources: Sources) -> Iterator[_Server]:
     client = sources.stack.client
     if client.info().get("Architecture") != "x86_64":
         pytest.skip("Microsoft's SQL Server image is built for x86-64 only")
+    _wheelhouse()  # every case needs it: skip (or fail in CI) before pulling the image
     directory = sources.material / f"erp-{uuid.uuid4().hex[:8]}"
     directory.mkdir()
     certificate, key = issue_leaf(sources.authority, directory, names=(_HOST,))
@@ -266,7 +290,7 @@ def _driver_environment(stack: Stack, wheels: Path) -> None:
     """Build the environment `_ENVIRONMENT_KEY`: the wheelhouse's lakana and the recipe's driver.
 
     ``lakana[assets]`` comes from the wheelhouse only; the driver and its tree from the public
-    index at exact versions, as wheels, without resolving anything else.
+    index, as the wheels `_DRIVER_REQUIREMENTS` names by hash, without resolving anything else.
 
     Parameters
     ----------
@@ -285,9 +309,14 @@ def _driver_environment(stack: Stack, wheels: Path) -> None:
     stack.client.volumes.create(volume, labels=stack.labels)
     stack.put(
         store,
-        [(path.name, "file", path.read_bytes(), 0o644, 10002) for path in wheels.glob("*.whl")],
+        [
+            *(
+                (path.name, "file", path.read_bytes(), 0o644, 10002)
+                for path in wheels.glob("*.whl")
+            ),
+            ("driver.txt", "file", _DRIVER_REQUIREMENTS.encode(), 0o644, 10002),
+        ],
     )
-    pins = " ".join((*_DRIVER, *_DRIVER_TREE))
     stack.client.containers.run(
         stack.image,
         [
@@ -295,7 +324,7 @@ def _driver_environment(stack: Stack, wheels: Path) -> None:
             "-c",
             "python -m venv /env && /env/bin/python -m pip install -q --no-index "
             "--find-links /wheels 'lakana[assets]' && /env/bin/python -m pip install -q "
-            f"--no-deps --only-binary=:all: {pins}",
+            "--require-hashes --no-deps --only-binary=:all: -r /wheels/driver.txt",
         ],
         user="10002:10002",
         environment={"HOME": "/tmp"},
@@ -421,6 +450,8 @@ def test_the_driver_pins_are_the_examples() -> None:
     """The environment of this module has the driver the page tells a team to install."""
     project = tomllib.loads((_RECIPE / "pyproject.toml").read_text())["project"]
     assert [pin for pin in project["dependencies"] if not pin.startswith("lakana")] == list(_DRIVER)
+    pinned = [line.split()[0] for line in _DRIVER_REQUIREMENTS.splitlines() if "==" in line]
+    assert pinned[: len(_DRIVER)] == list(_DRIVER)
 
 
 def test_the_full_read_returns_every_customer_with_its_types(
@@ -462,58 +493,63 @@ def test_the_full_read_returns_every_customer_with_its_types(
     }, text
 
 
-def test_the_incremental_read_returns_only_the_orders_after_the_watermark(
+def test_the_incremental_read_finds_a_late_row_and_a_changed_one(
     sources: Sources,
     worker_side: _Mirrored,
     erp: _Server,
 ) -> None:
-    """``erp_orders``: a first run reads every order; the next, with the watermark, the new one.
+    """``erp_orders`` by ``rowversion``: the next run reads what was written after the first.
 
-    ``money`` stays exact as ``decimal128(19, 4)``; ``datetime2``'s seventh digit is cut.
+    Order 3 arrives after the first run read 1, 2 and 4, as a row does whose id was taken before
+    the run but committed after it: by id it is behind the largest one read, by rowversion
+    after it. Order 1 changes. The second run, from the first's largest ``row_version``, reads
+    exactly those two; ``money`` stays exact as ``decimal128(19, 4)``, ``datetime2``'s seventh
+    digit is cut.
     """
     schema = [
         ["id", "int64"],
         ["customer", "string"],
         ["amount", "decimal128(19, 4)"],
         ["ordered_at", "timestamp[us]"],
+        ["row_version", "int64"],
     ]
 
     first, text, _ = _run(sources, worker_side, erp, asset="erp_orders")
+    assert first is not None, text
+    watermark = max(row["row_version"] for row in first["rows"])
     erp.sql(
-        "INSERT INTO dbo.orders VALUES (4, N'Ngata', 18.75, '2026-10-03T07:15:00')",
+        "INSERT INTO dbo.orders (id, customer, amount, ordered_at) "
+        "VALUES (3, N'Ngata', 18.75, '2026-10-03T07:15:00'); "
+        "UPDATE dbo.orders SET amount = 1300 WHERE id = 1",
         database="erp",
     )
-    second, later, _ = _run(sources, worker_side, erp, asset="erp_orders", watermark="long:3")
+    second, later, _ = _run(
+        sources, worker_side, erp, asset="erp_orders", watermark=f"long:{watermark}"
+    )
+    assert second is not None, later
 
-    assert first == {
-        "schema": schema,
-        "rows": [
-            {
-                "id": 1,
-                "customer": "Åsa Berg",
-                "amount": "1250.5000",
-                "ordered_at": "2026-10-01 08:00:00.123456",
-            },
-            {
-                "id": 2,
-                "customer": "Kowalski",
-                "amount": "99.9999",
-                "ordered_at": "2026-10-01 09:30:00",
-            },
-            {
-                "id": 3,
-                "customer": "Müller GmbH",
-                "amount": "0.0000",
-                "ordered_at": "2026-10-02 10:00:00",
-            },
-        ],
-    }, text
-    assert second == {
-        "schema": schema,
-        "rows": [
-            {"id": 4, "customer": "Ngata", "amount": "18.7500", "ordered_at": "2026-10-03 07:15:00"}
-        ],
-    }, later
+    assert first["schema"] == schema, text
+    assert [{k: v for k, v in row.items() if k != "row_version"} for row in first["rows"]] == [
+        {
+            "id": 1,
+            "customer": "Åsa Berg",
+            "amount": "1250.5000",
+            "ordered_at": "2026-10-01 08:00:00.123456",
+        },
+        {"id": 2, "customer": "Kowalski", "amount": "99.9999", "ordered_at": "2026-10-01 09:30:00"},
+        {
+            "id": 4,
+            "customer": "Müller GmbH",
+            "amount": "0.0000",
+            "ordered_at": "2026-10-02 10:00:00",
+        },
+    ], text
+    assert second["schema"] == schema, later
+    assert [(row["id"], row["amount"]) for row in second["rows"]] == [
+        (3, "18.7500"),
+        (1, "1300.0000"),
+    ], later
+    assert min(row["row_version"] for row in second["rows"]) > watermark
 
 
 def test_a_refused_login_names_the_connection_and_never_the_password(

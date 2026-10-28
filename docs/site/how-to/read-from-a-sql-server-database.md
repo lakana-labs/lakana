@@ -26,12 +26,14 @@ The steps:
   ([Network settings](../reference/network-settings.md)). The asset below refuses to log in
   without it.
 - **A login that may only read.** An administrator runs this with `sqlcmd`, after setting the
-  environment variable `READER_PASSWORD` to a new password:
+  environment variable `READER_PASSWORD` to a new password without a single quote (such as the
+  output of `python3 -c 'import secrets; print(secrets.token_urlsafe(24))'`):
 
 <!-- source: docs/examples/proprietary-db/reader.sql -->
 ```sql
 -- A login for the asset that may only read the database erp. Run it as an administrator with
--- sqlcmd, which puts in the password from the environment variable READER_PASSWORD.
+-- sqlcmd, which puts in the password from the environment variable READER_PASSWORD (a password
+-- without a single quote, which would end the text early).
 CREATE LOGIN lakana_reader WITH PASSWORD = '$(READER_PASSWORD)';
 USE erp;
 CREATE USER lakana_reader FOR LOGIN lakana_reader;
@@ -85,8 +87,10 @@ Created connection erp-db in dev with its secret erp-db-connection
 ```
 
 Give the host by the name in the server's certificate: the asset checks the certificate for it.
-A named instance (`HOST\INSTANCE`) needs its TCP port here; under the Docker runner a task cannot
-ask the server which port an instance has.
+For a named instance, give the host name alone, without `\INSTANCE`, and the instance's TCP
+port (SQL Server Configuration Manager shows it). With `\INSTANCE` and a port, `pytds` refuses to
+connect; with `\INSTANCE` alone, it asks the server's browser service for the port over UDP,
+which a task under the Docker runner cannot reach.
 
 Test it. For a `tcp` connection Lakana checks only that a worker reaches the host and port: it
 does not know the protocol, so it checks neither TLS nor the login. Here the host does not exist:
@@ -106,11 +110,13 @@ dns: cannot resolve `erp-db.example.internal` (Name or service not known)
 
 ### New rows: an incremental read
 
-This asset appends the orders whose `id` is larger than the largest one already loaded:
+This asset reads the orders written or changed since the last run and merges them into the table
+on `id`. It needs a `rowversion` column in the source table (here `row_version`); the next section
+says why, and what to do without one:
 
 <!-- source: docs/examples/proprietary-db/project/assets/bronze/erp_orders.py -->
 ```python
-"""Orders from the ERP's SQL Server database, appended as new ones arrive."""
+"""Orders from the ERP's SQL Server database, merged on their id as they are written or changed."""
 
 import os
 import socket
@@ -128,6 +134,7 @@ SCHEMA = pa.schema(
         ("customer", pa.string()),  # nvarchar(100)
         ("amount", pa.decimal128(19, 4)),  # money: exact, never a float
         ("ordered_at", pa.timestamp("us")),  # datetime2: no time zone, 100 ns cut to 1 µs
+        ("row_version", pa.int64()),  # rowversion, as the number it counts
     ]
 )
 
@@ -172,12 +179,17 @@ def connect(name, database):
         ) from exc
 
 
-@asset(connections=["erp-db"], write="append", watermark="id")
+@asset(connections=["erp-db"], write="merge", key=["id"], watermark="row_version")
 def erp_orders(ctx):
-    """New orders: each run reads the ids after the last one loaded."""
+    """Orders written or changed since the last run, merged into the table on their id."""
     with connect("erp-db", "erp") as conn, conn.cursor() as cursor:
         cursor.execute(
-            "SELECT id, customer, amount, ordered_at FROM dbo.orders WHERE id > %s ORDER BY id",
+            # Every insert and update gives the row a new, larger rowversion. Below
+            # MIN_ACTIVE_ROWVERSION() no open transaction can still commit a row, so a row
+            # committed late is read by the next run instead of being skipped.
+            "SELECT id, customer, amount, ordered_at, CAST(row_version AS bigint) AS row_version "
+            "FROM dbo.orders WHERE row_version > CAST(CAST(%s AS bigint) AS binary(8)) "
+            "AND row_version < MIN_ACTIVE_ROWVERSION() ORDER BY row_version",
             (ctx.watermark(default=0),),  # a bound value, never formatted into the text
         )
         rows = cursor.fetchall()
@@ -191,13 +203,33 @@ def erp_orders(ctx):
   real name as `dsn`, so TLS checks the certificate for that name, not for the relay's.
 - `%s` is a parameter: `pytds` sends the value apart from the SQL text. Never build the SQL with
   an f-string or `%` from a value.
-- `write="append"` and `watermark="id"` add each run's rows to the table, and `ctx.watermark()`
-  returns the largest `id` it holds; `default=0` reads everything on the first run. For rows that
-  change after they were written, merge on the key instead, with a change column such as a
-  `datetime2` that the application sets on every update:
-  `@asset(connections=["erp-db"], write="merge", key=["id"], watermark="updated_at")`.
+- `write="merge"`, `key=["id"]` and `watermark="row_version"`: each run merges its rows into the
+  table on `id`, so a changed order replaces its old row, and `ctx.watermark()` returns the
+  largest `row_version` the table holds; `default=0` reads everything on the first run. Deleted
+  rows are not seen; read the table whole for those (below).
 - `SCHEMA` names a type for every column. Without it, Arrow guesses from the rows of each run: a
   run that reads only `NULL` in a column, or only whole amounts, gives the table another type.
+
+### Why `rowversion`, and not the largest id
+
+Appending the rows whose `id` is larger than the largest one loaded looks right, and loses rows
+without an error. SQL Server hands out an `IDENTITY` value or a sequence number when a row is
+written, but other sessions see the row only when its transaction commits. A transaction that took
+id 10 and commits after another one took and committed id 11 shows its row late: a run in between
+reads 11, the next one starts after 11, and row 10 is never read. A `datetime2` change column has
+the same gap.
+
+A `rowversion` column closes it. SQL Server gives the row a new, larger value, counted across the
+database, on every insert and every update, and `MIN_ACTIVE_ROWVERSION()` is the smallest value an
+open transaction may still commit. The asset reads only below it, so a row that commits late has a
+value above the run's largest one and the next run reads it. Updates are read too, which is why
+the asset merges on `id`. An existing table gets the column with `ADD row_version rowversion` in
+an `ALTER TABLE`, and SQL Server fills it for every row.
+
+Without a `rowversion` column, read again behind the watermark, as the SQL template of
+[Load data from a source](load-data-from-a-source.md#a-sql-database) does: `WHERE id > %s` with
+`ctx.watermark(default=0) - LOOK_BACK`, merged on `id`, where `LOOK_BACK` is more ids than the
+source hands out while one of its transactions is open.
 
 ### Every row: a full read
 
@@ -296,7 +328,7 @@ run's log (`lakana runs logs RUN_ID --env ENV`):
 |---|---|---|
 | `erp-db: no CA to check the server's certificate; set LAKANA_RUN__CA_BUNDLE on the worker to the CA that signed it` | The worker has no trust bundle, so the asset will not send the password. | The operator sets `LAKANA_RUN__CA_BUNDLE` ([Network settings](../reference/network-settings.md)). |
 | `erp-db: the server refused the login (Login failed for user '***'.); check the user and the password: lakana connection update erp-db --values-stdin` | Wrong user or password, a disabled login, or a login without access to the database. | Check the login on the server; give the secret again with `lakana connection update erp-db --env ENV --values-stdin`. The server's own log says which (error 18456 and its state). |
-| `lakana-relay: refused erp-db.lakana.test:1434: cannot reach erp-db.lakana.test:1434 (Connection refused)`, then `erp-db: no answer from the server; ...` | Under the Docker runner: the relay could not reach the server. The relay's line, before the traceback, says why: `Connection refused` (nothing listens on that port), `cannot resolve` (the host name), or that the address is one a task may not reach. | `lakana connection test erp-db --env ENV` checks the host and the port with the same route. Check the port, the server's firewall, and that the server is reachable from the workers. |
+| `lakana-relay: refused erp-db.example.internal:1433: cannot reach erp-db.example.internal:1433 (Connection refused)`, then `erp-db: no answer from the server; ...` | Under the Docker runner: the relay could not reach the server. The relay's line, before the traceback, says why: `Connection refused` (nothing listens on that port), `cannot resolve` (the host name), or that the address is one a task may not reach. | `lakana connection test erp-db --env ENV` checks the host and the port with the same route. Check the port, the server's firewall, and that the server is reachable from the workers. |
 | `erp-db: no answer from the server; ...`, without a relay line | Under the local runner: the worker could not reach the server. The traceback above it names the error. | The same as above. |
 | `AttributeError: 'X509' object has no attribute 'get_extension'` | The certificate's CN is not the connection's host name (see [TLS](#tls)). | Give the connection the host name of the certificate's CN, with the secret again (`lakana connection update erp-db --env ENV --host ... --values-stdin`), or give the server a certificate whose CN is the host name. |
 | `certificate verify failed` | The certificate is not signed by a CA of the trust bundle, or it is the certificate SQL Server made for itself. | Install a certificate from your CA on the server, and put that CA into the trust bundle. |
@@ -308,10 +340,12 @@ against **Microsoft SQL Server 2022 Developer edition** (the image
 `mcr.microsoft.com/mssql/server:2022-latest`, build 16.0.4305.5, pinned by its digest), with
 `python-tds` 1.17.1 and pyOpenSSL 26.4.0 on Python 3.14. The server had Force Encryption on and a
 certificate whose CN and other name were its host name. The tests check: the full read and its
-types, a first incremental read and a second one that returns only the new order, the refused
-login's message (with the user and the password hidden), the relay's line for a closed port, and
-that no login is sent without a trust bundle, with a bundle that lacks the server's CA, or to a
-name the certificate does not hold.
+types; a first incremental read and a second one that reads an order written after the first run
+with a smaller id, and an order that changed; the
+refused login's message (with the user and the password hidden); the relay's line for a closed
+port; and that no login is sent without a trust bundle, with a bundle that lacks the server's CA,
+or to a name the certificate does not hold. A transaction still open while a run reads was not
+tested: that `MIN_ACTIVE_ROWVERSION()` holds back its rows rests on Microsoft's documentation.
 
 Not tested: other versions of SQL Server, Azure SQL Database and Azure SQL Managed Instance,
 Windows or Microsoft Entra ID sign-in, named instances, availability groups with read-only

@@ -46,6 +46,8 @@ cd sources
 rm assets/bronze/orders.py
 cp "$EXAMPLE_DIR"/project/assets/bronze/*.py assets/bronze/
 cp "$EXAMPLE_DIR/project/pyproject.toml" pyproject.toml
+# The run at the end fails on purpose: without retries it fails at once, not after two more tries.
+python3 -c 'import pathlib; p = pathlib.Path("lakana.yaml"); t = p.read_text(); assert "\ndefaults:\n" in t; p.write_text(t.replace("\ndefaults:\n", "\ndefaults:\n  retries: 0\n"))'
 mkdir wheelhouse
 cp "$LAKANA_TEST_WHEELHOUSE"/lakana-[0-9]*.whl wheelhouse/
 test "$(find wheelhouse -type f | wc -l)" -eq 1

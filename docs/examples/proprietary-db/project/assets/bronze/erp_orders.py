@@ -1,4 +1,4 @@
-"""Orders from the ERP's SQL Server database, appended as new ones arrive."""
+"""Orders from the ERP's SQL Server database, merged on their id as they are written or changed."""
 
 import os
 import socket
@@ -16,6 +16,7 @@ SCHEMA = pa.schema(
         ("customer", pa.string()),  # nvarchar(100)
         ("amount", pa.decimal128(19, 4)),  # money: exact, never a float
         ("ordered_at", pa.timestamp("us")),  # datetime2: no time zone, 100 ns cut to 1 µs
+        ("row_version", pa.int64()),  # rowversion, as the number it counts
     ]
 )
 
@@ -60,12 +61,17 @@ def connect(name, database):
         ) from exc
 
 
-@asset(connections=["erp-db"], write="append", watermark="id")
+@asset(connections=["erp-db"], write="merge", key=["id"], watermark="row_version")
 def erp_orders(ctx):
-    """New orders: each run reads the ids after the last one loaded."""
+    """Orders written or changed since the last run, merged into the table on their id."""
     with connect("erp-db", "erp") as conn, conn.cursor() as cursor:
         cursor.execute(
-            "SELECT id, customer, amount, ordered_at FROM dbo.orders WHERE id > %s ORDER BY id",
+            # Every insert and update gives the row a new, larger rowversion. Below
+            # MIN_ACTIVE_ROWVERSION() no open transaction can still commit a row, so a row
+            # committed late is read by the next run instead of being skipped.
+            "SELECT id, customer, amount, ordered_at, CAST(row_version AS bigint) AS row_version "
+            "FROM dbo.orders WHERE row_version > CAST(CAST(%s AS bigint) AS binary(8)) "
+            "AND row_version < MIN_ACTIVE_ROWVERSION() ORDER BY row_version",
             (ctx.watermark(default=0),),  # a bound value, never formatted into the text
         )
         rows = cursor.fetchall()
