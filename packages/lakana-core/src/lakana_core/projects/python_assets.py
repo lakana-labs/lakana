@@ -130,8 +130,15 @@ def _bound_names(node: ast.stmt) -> set[str]:
         if isinstance(current, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             names.add(current.name)
             continue
+        if isinstance(current, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+            # A comprehension has a scope of its own: its variables are not the module's.
+            continue
         if isinstance(current, ast.Name) and isinstance(current.ctx, (ast.Store, ast.Del)):
             names.add(current.id)
+        elif isinstance(current, (ast.MatchAs, ast.MatchStar)) and current.name is not None:
+            names.add(current.name)
+        elif isinstance(current, ast.MatchMapping) and current.rest is not None:
+            names.add(current.rest)
         elif isinstance(current, (ast.Import, ast.ImportFrom)):
             for alias in current.names:
                 top = alias.name.split(".")[0]

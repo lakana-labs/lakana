@@ -146,6 +146,21 @@ def test_the_module_attribute_form_and_no_inputs() -> None:
     assert parsed.metadata.description is None
 
 
+def test_a_comprehension_variable_does_not_rebind_the_decorator() -> None:
+    parsed = _parsed(
+        """\
+        from lakana import asset
+
+        names = [asset for asset in range(3)]
+
+        @asset()
+        def load():
+            return None
+        """
+    )
+    assert parsed.inputs == ()
+
+
 def test_a_submodule_import_and_a_later_rebinding_do_not_unbind_the_decorator() -> None:
     parsed = _parsed(
         """\
@@ -256,6 +271,11 @@ _HEAD = "from lakana import asset\n"
         (
             _HEAD + "if True:\n    asset = print\n@asset()\ndef f():\n    pass\n",
             4,
+            "aliases and re-exports are not resolved",
+        ),
+        (
+            _HEAD + "match 1:\n    case asset:\n        pass\n@asset()\ndef f():\n    pass\n",
+            5,
             "aliases and re-exports are not resolved",
         ),
         (
