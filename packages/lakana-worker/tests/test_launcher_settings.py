@@ -11,6 +11,7 @@ import pytest
 
 from lakana_worker.launcher import egress
 from lakana_worker.launcher.settings import (
+    FORBIDDEN_ROOTS,
     KNOWN_SETTINGS,
     LauncherSettings,
     SettingsError,
@@ -253,6 +254,21 @@ def _roots(path: str) -> dict[str, str]:
         The launcher's environment.
     """
     return {**_BASE, _ROOTS: json.dumps({"landing": path})}
+
+
+@pytest.mark.parametrize("refused", [str(root) for root in FORBIDDEN_ROOTS[1:]])
+def test_the_roots_refusal_names_every_directory_it_refuses(refused: str) -> None:
+    """An operator refused for `/root/exports` must read `/root` in the message.
+
+    Parameters
+    ----------
+    refused
+        One entry of `FORBIDDEN_ROOTS`.
+    """
+    with pytest.raises(SettingsError) as caught:
+        load_settings({**_BASE, _ROOTS: json.dumps({"x": f"{refused}/exports"})})
+
+    assert re.search(rf"(?<![\w/]){re.escape(refused)}(?![\w/-])", str(caught.value)), refused
 
 
 @pytest.mark.parametrize("value", [None, "", "{}"])

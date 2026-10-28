@@ -542,11 +542,12 @@ def _roots_message(variable: str) -> str:
     str
         What the setting must be, naming it.
     """
+    *named, last = (str(root) for root in FORBIDDEN_ROOTS[1:])
     return (
         f"{variable} must be a JSON object from a name (lower-case letters, digits, "
         "'-' and '_') to an absolute host directory that is not a system directory, not the "
         "Docker socket's directory and not the launcher's own: / and anything that holds or sits "
-        "under /run, /var/run, /var/lib/docker, /proc, /sys, /dev or /etc is refused."
+        f"under {', '.join(named)} or {last} is refused."
     )
 
 
