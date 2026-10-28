@@ -26,6 +26,7 @@ nav:
   - Tutorials:
       - tutorials/index.md
       - tutorials/getting-started.md
+      - tutorials/python-sample.md
       - tutorials/train-a-model.md
       - tutorials/move-a-sql-project.md
   - How-to guides:

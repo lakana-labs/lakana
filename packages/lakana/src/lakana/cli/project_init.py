@@ -6,10 +6,14 @@ what is written is exactly what is reviewed here.
 
 from __future__ import annotations
 
+import fnmatch
 import os
 import re
 import shlex
+import shutil
 import subprocess  # nosec B404 -- `git var` with fixed argv
+import tomllib
+from collections.abc import Callable
 from enum import StrEnum
 from pathlib import Path
 from typing import Annotated
@@ -40,19 +44,25 @@ requirements:
   fields: [description]
 """
 
-_TEST = '''\
-"""Project checks that need no server. Asset tests arrive with M5c."""
-
-from pathlib import Path
-
-ROOT = Path(__file__).resolve().parents[1]
-
+_SQL_CHECK = '''
 
 def test_every_asset_has_front_matter() -> None:
     """Each SQL asset starts with a /* lakana */ block."""
     for path in (ROOT / "assets").rglob("*.sql"):
         assert path.read_text().lstrip().startswith("/* lakana"), path
 '''
+
+_TEST = (
+    '''\
+"""Project checks that need no server. Asset tests arrive with M5c."""
+
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+
+'''
+    + _SQL_CHECK
+)
 
 _PYPROJECT = """\
 [project]
@@ -357,8 +367,13 @@ PAT_CI_TEMPLATES: dict[str, str] = {_GITHUB_PATH: _GITHUB_PAT, _GITLAB_PATH: _GI
 
 
 class Template(StrEnum):
-    """A starting point `lakana init --template` writes: one asset that ingests from a source."""
+    """A starting point `lakana init --template` writes.
 
+    ``python`` is the sample with one Python asset and a lock; the others are one asset that
+    ingests from a source.
+    """
+
+    python = "python"
     ingest_files = "ingest-files"
     ingest_sql = "ingest-sql"
     ingest_rest = "ingest-rest"
@@ -379,6 +394,20 @@ dependencies = ["lakana[assets]=={version}"]
 dev = ["pytest>=8"]
 """
 
+_PYPROJECT_PYTHON = """\
+[project]
+name = "{repo}"
+version = "0.1.0"
+requires-python = ">=3.11"
+# A Python asset needs lakana[assets] and a lock. `lakana init` ran `uv lock`, which wrote uv.lock:
+# commit it with the code, because the worker builds the asset's environment from it. After you
+# change the dependencies below, run `uv lock` again in this directory and commit both files.
+dependencies = ["lakana[assets]=={version}"]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+"""
+
 _TEST_PYTHON = '''\
 """Project checks that need no server."""
 
@@ -393,6 +422,85 @@ def test_every_python_asset_parses() -> None:
     for path in (ROOT / "assets").rglob("*.py"):
         ast.parse(path.read_text(), filename=str(path))
 '''
+
+_TEST_PYTHON_SAMPLE = _TEST_PYTHON + _SQL_CHECK
+
+_PYTHON_ASSET = '''\
+"""How far each reading lies from its station's average: a Python asset built from the sample."""
+
+import polars as pl
+
+from lakana import asset
+
+
+@asset(
+    inputs={"readings": "bronze.readings", "stations": "silver.station_temperatures"},
+    columns={
+        "station_id": "The station that took the reading.",
+        "day": "The day of the reading.",
+        "temp_c": "The temperature in degrees Celsius.",
+        "anomaly_c": "How many degrees the reading lies above (positive) or below (negative) "
+        "the station's average.",
+    },
+)
+def temperature_anomalies(readings: pl.DataFrame, stations: pl.DataFrame) -> pl.DataFrame:
+    """Each reading, and how much warmer or colder than its station's average it was."""
+    averages = stations.select("station_id", "avg_temp_c")
+    return (
+        readings.join(averages, on="station_id")
+        .with_columns(anomaly_c=pl.col("temp_c") - pl.col("avg_temp_c"))
+        .select("station_id", "day", "temp_c", "anomaly_c")
+        .sort("station_id", "day")
+    )
+'''
+
+PYTHON_QUERY = "SELECT * FROM gold.temperature_anomalies WHERE station_id = 'B2' ORDER BY day"
+"""The query the next steps of `--template python` suggest once the project is built."""
+
+_PYTHON_README = f"""\
+# {{repo}}
+
+A Lakana project with a small sample and one Python asset. The sample generates readings from three
+weather stations (`assets/bronze/readings.sql`), builds two tables from them with SQL
+(`assets/silver/station_temperatures.sql` and `assets/gold/station_ranking.sql`) and checks one of
+them (`checks/`). The Python asset `assets/gold/temperature_anomalies.py` builds
+`gold.temperature_anomalies` from two of those tables: each reading, and how far it lies from its
+station's average.
+
+`lakana init --template python` needed network access and a few more minutes than the SQL sample
+alone. A Python asset runs in a Python environment of its own, so uv resolved `lakana[assets]` and
+every package it needs from the public package index and pinned them in `uv.lock`. Commit `uv.lock`
+with the code: the worker builds the asset's environment from it, and its first build downloads
+the packages too. After you change the dependencies in `pyproject.toml`, run `uv lock` again and
+commit both files.
+
+1. Commit:
+
+       git init && git add -A && git commit -m 'Initial project'
+
+2. Register the repository, deploy and run. The first run builds the Python asset's environment,
+   which takes a few minutes more:
+
+       lakana repo add {{repo}} --kind local --url <this directory>
+       lakana deploy --env dev
+       lakana run --env dev
+
+3. Look at the Python asset's table:
+
+       lakana sql "{PYTHON_QUERY}"
+
+The same steps, explained: https://lakana-labs.github.io/lakana/tutorials/python-sample/
+Python assets: https://lakana-labs.github.io/lakana/how-to/projects/#python-assets
+"""
+
+PYTHON_TEMPLATE: dict[str, str] = {
+    "assets/gold/temperature_anomalies.py": _PYTHON_ASSET,
+    "README.md": _PYTHON_README,
+}
+"""What `--template python` adds to the sample, by relative path; `{repo}` is substituted."""
+
+_LOCK_TIMEOUT = 600
+"""Seconds `uv lock` may take for `--template python` (it resolves from the public index)."""
 
 _INGEST_FILES = '''\
 """Rows of the CSV files a source system exports into a directory."""
@@ -600,6 +708,277 @@ def _git_lacks_identity(directory: Path) -> bool:
     return False
 
 
+_UV_NOISE = ("Using CPython", "Using Python")
+"""Lines of uv's standard error that say nothing about why it failed."""
+
+
+def _uv_error(stderr: str) -> str:
+    """Pick the lines of uv's standard error that say why it failed.
+
+    Parameters
+    ----------
+    stderr
+        What `uv lock` printed on standard error.
+
+    Returns
+    -------
+    str
+        From its first ``error:`` or cross (U+00D7) line on (or else its last eight lines), at most
+        twelve whole lines without uv's tree marks, joined by spaces.
+    """
+    lines = [
+        line.strip().removeprefix("╰─▶").strip()
+        for line in stderr.splitlines()
+        if line.strip() and not line.strip().startswith(_UV_NOISE)
+    ]
+    start = next((i for i, line in enumerate(lines) if line.startswith(("error:", "\u00d7"))), None)
+    picked = lines[start:] if start is not None else lines[-8:]
+    return " ".join(picked[:12]) or "(it printed nothing)"
+
+
+def _workspace_table(folder: Path) -> dict[str, object] | None:
+    """Read the `[tool.uv.workspace]` table of a folder's `pyproject.toml`.
+
+    Parameters
+    ----------
+    folder
+        The folder.
+
+    Returns
+    -------
+    dict or None
+        The table; `None` if the file is missing, unreadable or declares no workspace.
+    """
+    try:
+        data = tomllib.loads((folder / "pyproject.toml").read_text())
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
+        return None
+    tool = data.get("tool")
+    uv = tool.get("uv") if isinstance(tool, dict) else None
+    table = uv.get("workspace") if isinstance(uv, dict) else None
+    return table if isinstance(table, dict) else None
+
+
+def _workspace_above(directory: Path) -> Path | None:
+    """Find the uv workspace a folder lies in, if any.
+
+    Parameters
+    ----------
+    directory
+        The project directory.
+
+    Returns
+    -------
+    Path or None
+        The nearest folder above `directory` whose `pyproject.toml` declares
+        ``[tool.uv.workspace]``; `None` if there is none or it cannot be read.
+    """
+    return next((folder for folder in directory.parents if _workspace_table(folder)), None)
+
+
+def _globs(table: dict[str, object], key: str) -> list[str]:
+    """Read a list of glob patterns from a workspace table.
+
+    Parameters
+    ----------
+    table
+        The `[tool.uv.workspace]` table.
+    key
+        ``members`` or ``exclude``.
+
+    Returns
+    -------
+    list of str
+        The patterns, without a leading ``./``; anything that is not a string is left out.
+    """
+    value = table.get(key)
+    items = value if isinstance(value, list) else []
+    return [item.removeprefix("./") for item in items if isinstance(item, str)]
+
+
+def _member_match(parts: tuple[str, ...], pattern: tuple[str, ...]) -> bool:
+    """Match a relative path against a members glob, folder by folder, as uv's glob does.
+
+    ``*``, ``?`` and ``[...]`` stay within one folder name; ``**`` matches any number of folders.
+
+    Parameters
+    ----------
+    parts
+        The path's folder names.
+    pattern
+        The pattern's parts.
+
+    Returns
+    -------
+    bool
+        Whether the path matches.
+    """
+    if not pattern:
+        return not parts
+    if pattern[0] == "**":
+        return any(_member_match(parts[i:], pattern[1:]) for i in range(len(parts) + 1))
+    return (
+        bool(parts)
+        and fnmatch.fnmatchcase(parts[0], pattern[0])
+        and _member_match(parts[1:], pattern[1:])
+    )
+
+
+def _workspace_including(directory: Path) -> Path | None:
+    """Find the uv workspace whose members would take in `directory`.
+
+    uv takes the nearest folder above with ``[tool.uv.workspace]``. A members glob matches folder
+    by folder; an exclude glob matches the whole relative path, where ``*`` also spans folders.
+
+    Parameters
+    ----------
+    directory
+        The project directory (it need not exist yet).
+
+    Returns
+    -------
+    Path or None
+        That workspace's `pyproject.toml` when a members glob matches `directory` and no
+        exclude glob does; `None` otherwise.
+    """
+    root = _workspace_above(directory)
+    if root is None:
+        return None
+    table = _workspace_table(root) or {}
+    relative = directory.relative_to(root)
+    parts = relative.parts
+    member = any(
+        _member_match(parts, tuple(p for p in glob.split("/") if p))
+        for glob in _globs(table, "members")
+    )
+    excluded = any(
+        fnmatch.fnmatchcase(relative.as_posix(), glob.rstrip("/"))
+        for glob in _globs(table, "exclude")
+    )
+    return root / "pyproject.toml" if member and not excluded else None
+
+
+def _lock(directory: Path, uv: str) -> None:
+    """Run `uv lock` in `directory`, so the project of `--template python` deploys as written.
+
+    Parameters
+    ----------
+    directory
+        The project directory, already written.
+    uv
+        The `uv` executable.
+
+    Raises
+    ------
+    CliError
+        Exit 1 if uv cannot be run, fails or takes longer than `_LOCK_TIMEOUT`; the message
+        names uv's reason, the network it needs and the next step.
+    """
+    workspace = _workspace_above(directory)
+    parent_lock = None if workspace is None else workspace / "uv.lock"
+    saved = _read_bytes(parent_lock)
+    try:
+        result = subprocess.run(  # nosec B603 -- fixed argv, uv found on the PATH
+            [uv, "lock", "--project", str(directory)],
+            cwd=directory,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=_LOCK_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        reason = f"uv lock did not finish within {_LOCK_TIMEOUT // 60} minutes"
+    except OSError as exc:
+        reason = f"uv could not be run: {exc}"
+    else:
+        if result.returncode == 0 and os.path.lexists(directory / "uv.lock"):
+            return
+        if result.returncode == 0:
+            where = ""
+            if parent_lock is not None:
+                _restore(parent_lock, saved)
+                where = f" (it lies in the uv workspace {workspace}, whose uv.lock is as before)"
+            raise CliError(
+                f"uv lock succeeded but wrote no uv.lock in {directory}{where}; nothing was "
+                "left in the project. Run `lakana init` in a folder outside that workspace, or "
+                "add this folder to the workspace's `exclude` and run the same command again.",
+                1,
+            )
+        reason = f"uv lock failed: {_uv_error(result.stderr)}"
+    message = (
+        f"{reason.rstrip('.')}. The python template locks its packages from the public "
+        "package index, so it needs network access to it (behind a proxy, set HTTPS_PROXY "
+        f"first). Nothing was written into {directory}. Fix the cause and run the same "
+        "command again, or leave out --template for the SQL sample, which needs no network."
+    )
+    if _is_dev_build(__version__):
+        message += (
+            f" lakana {__version__} is a development build, which no package index has: put its "
+            f"wheel (uv build --package lakana --wheel) into a folder `wheelhouse` in {directory}, "
+            "set UV_FIND_LINKS=wheelhouse and run the command again; commit the folder with the "
+            "lock."
+        )
+    raise CliError(message, 1)
+
+
+def _read_bytes(path: Path | None) -> bytes | None:
+    """Read a file's bytes, if there is one.
+
+    Parameters
+    ----------
+    path
+        The file, or `None`.
+
+    Returns
+    -------
+    bytes or None
+        Its content; `None` when `path` is `None` or cannot be read.
+    """
+    if path is None:
+        return None
+    try:
+        return path.read_bytes()
+    except OSError:
+        return None
+
+
+def _restore(path: Path, saved: bytes | None) -> None:
+    """Put a workspace's lock back as it was before `uv lock` ran.
+
+    Parameters
+    ----------
+    path
+        The workspace's `uv.lock`.
+    saved
+        Its bytes before; `None` if it did not exist (it is then removed).
+    """
+    if _read_bytes(path) == saved:
+        return
+    if saved is None:
+        path.unlink(missing_ok=True)
+    else:
+        path.write_bytes(saved)
+
+
+def _remove(files: list[Path], directories: list[Path]) -> None:
+    """Remove what a failed `lakana init` wrote: its files, then the directories it created.
+
+    Parameters
+    ----------
+    files
+        The files written.
+    directories
+        The directories that did not exist before, parents first; each is removed if empty.
+    """
+    for path in files:
+        path.unlink(missing_ok=True)
+    for path in reversed(directories):
+        try:
+            path.rmdir()
+        except OSError:
+            continue
+
+
 def write_project(
     directory: Path,
     repo: str,
@@ -607,6 +986,8 @@ def write_project(
     sample: bool = True,
     ci_auth: str = "oidc",
     template: str | None = None,
+    uv: str = "uv",
+    on_checked: Callable[[], None] | None = None,
 ) -> list[Path]:
     """Write every template into `directory`, refusing to overwrite anything.
 
@@ -622,56 +1003,125 @@ def write_project(
         ``oidc``: the CI files exchange the job's ID token; ``pat``: they read a stored token.
     template
         A `Template` value: its asset and README, a pyproject with ``lakana[assets]`` and a
-        test that parses Python assets; `None` for none.
+        test that parses Python assets; `None` for none. ``python`` adds the sample too and
+        locks the project with `uv lock`.
+    uv
+        The `uv` executable that locks the project of the ``python`` template.
+    on_checked
+        Called once every check has passed, before the first write.
 
     Returns
     -------
     list of Path
-        The files written.
+        The files written (without the lock).
 
     Raises
     ------
     CliError
-        Exit 2 if any target exists or a parent is
-        not a directory (nothing is written); exit 3 on a filesystem error
-        (files already written are removed).
+        Exit 2 if any target (or, for ``python``, `uv.lock`) exists or, for ``python``, the
+        directory is a member of a uv workspace above it; exit 3 if a parent is not
+        a directory or is a symbolic link (nothing is written in either case); exit 3 on a
+        filesystem error and exit 1 if the lock fails. On those, and on an interrupt, what was
+        written is removed, with the folders it created.
     """
     templates = TEMPLATES | (PAT_CI_TEMPLATES if ci_auth == "pat" else {})
     texts = {
         relative: text.format(repo=repo, version=__version__)
         for relative, text in templates.items()
     }
-    if sample:
+    added: dict[str, str] = {}
+    if sample or template == Template.python:
         texts.update(SAMPLE)
     if template is not None:
         texts["pyproject.toml"] = _PYPROJECT_ASSETS.format(repo=repo, version=__version__)
         texts["tests/test_example.py"] = _TEST_PYTHON
-        for relative, text in INGEST_TEMPLATES[template].items():
-            texts[relative] = text.format(repo=repo) if relative == "README.md" else text
+        added = PYTHON_TEMPLATE if template == Template.python else INGEST_TEMPLATES[template]
+    if template == Template.python:
+        texts["pyproject.toml"] = _PYPROJECT_PYTHON.format(repo=repo, version=__version__)
+        texts["tests/test_example.py"] = _TEST_PYTHON_SAMPLE
+    for relative, text in added.items():
+        texts[relative] = text.format(repo=repo) if relative == "README.md" else text
     targets = {directory / relative: text for relative, text in texts.items()}
-    existing = [str(path) for path in targets if os.path.lexists(path)]
+    if template == Template.python:
+        workspace = _workspace_including(directory)
+        if workspace is not None:
+            relative = directory.relative_to(workspace.parent).as_posix()
+            raise CliError(
+                f"{directory} lies in the uv workspace of {workspace}, whose members include it, "
+                "so `uv lock` would lock that workspace instead of this project. Add the folder "
+                f'to that workspace\'s `exclude = ["{relative}"]` under [tool.uv.workspace], or '
+                "run `lakana init` outside the workspace; then run the same command again."
+            )
+    reserved = [directory / "uv.lock"] if template == Template.python else []
+    existing = [str(path) for path in [*targets, *reserved] if os.path.lexists(path)]
     if existing:
-        raise CliError(f"Refusing to overwrite: {', '.join(existing)}")
+        raise CliError(
+            f"Refusing to overwrite: {', '.join(existing)}. To start over, remove them (or the "
+            "folder, if nothing else in it is yours), or choose another directory."
+        )
     parents = {directory} | {
         directory / parent for relative in texts for parent in Path(relative).parents if parent.name
     }
     for parent in sorted(parents):
+        if parent != directory and parent.is_symlink():
+            raise CliError(
+                f"Can't write the project into {directory}: {parent} is a symbolic link, which "
+                "could carry a file outside the project; remove the link or choose another "
+                "directory",
+                3,
+            )
         if os.path.lexists(parent) and not parent.is_dir():
             raise CliError(
                 f"Can't write the project into {directory}: {parent} is not a directory", 3
             )
+    above = [folder for folder in directory.parents if not os.path.lexists(folder)]
+    created = [*reversed(above)] + [p for p in sorted(parents) if not os.path.lexists(p)]
+    if on_checked is not None:
+        on_checked()
     written: list[Path] = []
+    done = False
     try:
-        for path, text in targets.items():
-            path.parent.mkdir(parents=True, exist_ok=True)
-            with path.open("x") as handle:
-                handle.write(text)
-            written.append(path)
-    except OSError as exc:
-        for path in written:
-            path.unlink(missing_ok=True)
-        raise CliError(f"Can't write the project into {directory}: {exc}", 3) from exc
+        try:
+            for path, text in targets.items():
+                path.parent.mkdir(parents=True, exist_ok=True)
+                with path.open("x") as handle:
+                    handle.write(text)
+                written.append(path)
+        except OSError as exc:
+            raise CliError(f"Can't write the project into {directory}: {exc}", 3) from exc
+        if template == Template.python:
+            _lock(directory, uv)
+        done = True
+    finally:
+        if not done:
+            if template == Template.python:
+                written.append(directory / "uv.lock")
+            _remove(written, created)
     return written
+
+
+def _find_uv(target: Path) -> str | None:
+    """Find `uv` on the PATH, never in the current directory or the project.
+
+    Parameters
+    ----------
+    target
+        The project directory, which `uv lock` runs in.
+
+    Returns
+    -------
+    str or None
+        The absolute path of the first `uv` in an absolute PATH entry other than the current
+        directory and `target`; `None` if there is none.
+    """
+    here = Path.cwd().resolve()
+    entries = [
+        entry
+        for entry in os.environ.get("PATH", "").split(os.pathsep)
+        if os.path.isabs(entry) and Path(entry).resolve() not in (here, target)
+    ]
+    found = shutil.which("uv", path=os.pathsep.join(entries))
+    return None if found is None else os.path.abspath(found)
 
 
 def _create_command(readme: str) -> str:
@@ -736,12 +1186,16 @@ def init(
         Template | None,
         typer.Option(
             "--template",
-            help="Start from one asset that ingests from a source: ingest-files, ingest-sql or "
-            "ingest-rest (the sample is then left out).",
+            help="Start from a template. python: the sample plus one Python asset, locked with "
+            "`uv lock` (needs network access and a few more minutes). ingest-files, ingest-sql or "
+            "ingest-rest: one asset that ingests from a source, instead of the sample.",
         ),
     ] = None,
 ) -> None:
     """Create a Lakana project that deploys unchanged.
+
+    Nothing is overwritten: if a file it would write exists, or a folder inside the project is a
+    symbolic link (a write through it could land outside the project), it writes nothing.
 
     Parameters
     ----------
@@ -757,13 +1211,14 @@ def init(
     ci_auth
         `--ci-auth`: ``oidc`` (the default) or ``pat``.
     template
-        `--template`: ``ingest-files``, ``ingest-sql`` or ``ingest-rest``.
+        `--template`: ``python``, ``ingest-files``, ``ingest-sql`` or ``ingest-rest``.
 
     Raises
     ------
     CliError
-        If the name is not a valid repository name, or `--sample` comes with `--template`
-        (exit 2).
+        If the name is not a valid repository name, `--sample` comes with `--template`, or
+        `--no-sample` with `--template python` (exit 2); for ``python``, if `uv` is not on the
+        PATH or the lock fails (exit 1).
     """
     target = directory.resolve()
     name = repo or target.name
@@ -771,8 +1226,39 @@ def init(
         raise CliError(
             f"{name!r} is not a valid repository name (letters, digits, '-' and '_'); pass --repo"
         )
+    if template is Template.python and sample is not None:
+        option = "--sample" if sample else "--no-sample"
+        raise CliError(
+            f"--template python always writes the sample, which its Python asset builds from; "
+            f"leave out {option}"
+        )
     if template is not None and sample:
-        raise CliError("--template writes its own asset instead of the sample; leave out --sample")
+        raise CliError(
+            f"--template {template.value} writes its own asset instead of the sample; "
+            "leave out --sample"
+        )
+    uv = "uv"
+    announce = None
+    if template is Template.python:
+        found = _find_uv(target)
+        if found is None:
+            raise CliError(
+                "--template python locks the project's Python packages with uv, which is not on "
+                "your PATH. Install uv (https://docs.astral.sh/uv/getting-started/installation/), "
+                "then run the same command again.",
+                1,
+            )
+        uv = found
+
+        def announce() -> None:
+            """Say, before the first write, what the lock needs and why."""
+            typer.echo(
+                "The template python locks the project's Python packages with `uv lock` once it "
+                "is written. That needs network access to the public package index and can take "
+                "a few minutes: uv resolves every package the Python asset needs and pins it in "
+                "uv.lock."
+            )
+
     skipped = template is None and sample is None and _points_off_this_machine(state_of(ctx))
     with_sample = template is None and (sample if sample is not None else not skipped)
     write_project(
@@ -781,13 +1267,31 @@ def init(
         sample=with_sample,
         ci_auth=ci_auth.value,
         template=None if template is None else template.value,
+        uv=uv,
+        on_checked=announce,
     )
     setup = [
         f"  cd {shlex.quote(str(target))}",
         "  git init && git add -A && git commit -m 'Initial project'",
         f"  lakana repo add {name} --kind local --url {shlex.quote(str(target))}",
     ]
-    if template is not None:
+    if template is Template.python:
+        lines = [
+            f"Created a Lakana project in {target} from the template python: the sample "
+            "(generated readings from three weather stations, three SQL assets built from them, "
+            "and one check) and a Python asset, assets/gold/temperature_anomalies.py, built from "
+            "two of the sample's tables.",
+            "Locked its packages in uv.lock; commit it with the rest (README.md says why).",
+            "Next:",
+            *setup,
+            "Then build the project. The first run also builds the Python asset's environment, "
+            "which downloads its packages and takes a few minutes more:",
+            "  lakana deploy --env dev",
+            "  lakana run --env dev",
+            "Then look at the Python asset's table:",
+            f'  lakana sql "{PYTHON_QUERY}"',
+        ]
+    elif template is not None:
         lines = [
             f"Created a Lakana project in {target} from the template {template.value}: "
             f"{next(p for p in INGEST_TEMPLATES[template] if p.endswith('.py'))} reads a source "
@@ -848,7 +1352,7 @@ def init(
             "you use CI; then edit the pinned version in .github/workflows/lakana-deploy.yml "
             "and .gitlab-ci.yml, or set LAKANA_INDEX_URL to an index that has it."
         )
-        if template is not None:
+        if template is not None and template is not Template.python:
             lines.append(
                 f"pyproject.toml pins lakana[assets]=={__version__} too, so `uv lock` fails "
                 "until it finds that version: add an index that has it to pyproject.toml "

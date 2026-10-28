@@ -128,7 +128,7 @@ def test_the_rest_template_returns_an_empty_page_unchanged(monkeypatch: pytest.M
     assert result.num_columns == 0
 
 
-@pytest.mark.parametrize("template", list(Template))
+@pytest.mark.parametrize("template", list(INGEST_TEMPLATES))
 def test_each_recipe_shows_the_asset_its_template_writes(template: Template) -> None:
     """The how-to's recipes under docs/examples run the assets `lakana init --template` writes."""
     recipe = Path(__file__).resolve().parents[3] / "docs" / "examples" / template.value / "project"

@@ -184,6 +184,14 @@ with one asset that reads a source incrementally, and a README with the connecti
 Existing projects are not changed. See
 [Load data from a source](../how-to/load-data-from-a-source.md).
 
+### Start a project with a Python asset with `lakana init --template python`
+
+`lakana init DIRECTORY --template python` writes the sample project, one Python asset built from
+two of its tables, a `pyproject.toml` that depends on `lakana[assets]`, and runs `uv lock`, so the
+project deploys as written. It needs `uv` on your `PATH` and network access to the public package
+index. Existing projects are not changed. See
+[Build a table with Python](../tutorials/python-sample.md).
+
 ### The Compose bundle mounts ingestion roots
 
 A bundle's `.env` gains `LAKANA_INGESTION_ROOTS`, a JSON object of root name to absolute host
