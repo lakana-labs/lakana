@@ -1815,7 +1815,7 @@ async def append_table_data(
             source_versions=versions,
             expected_snapshot_id=expected,
         ),
-        precheck=lambda: catalog.check_can_append(principal, ref),
+        precheck=lambda: catalog.check_can_append(principal, ref, expected_snapshot_id=expected),
     )
     return AppendOut(rows=result.rows, files=result.files, snapshot_id=result.snapshot_id)
 

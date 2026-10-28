@@ -4890,7 +4890,13 @@ class CatalogService:
             .execution_options(synchronize_session=False)
         )
 
-    def check_can_append(self, p: PrincipalRef, ref: TableRef) -> None:
+    def check_can_append(
+        self,
+        p: PrincipalRef,
+        ref: TableRef,
+        *,
+        expected_snapshot_id: ExpectedSnapshot | None = None,
+    ) -> None:
         """Cheaply verify an append would be authorized, before any data is read.
 
         A server-side caller reading a request body incrementally (the
@@ -4911,6 +4917,9 @@ class CatalogService:
             The acting principal.
         ref
             The table an append is being considered for.
+        expected_snapshot_id
+            The caller's precondition, if any. ``none`` is refused here when the table already
+            has a snapshot, so the caller's body is never read.
 
         Raises
         ------
@@ -4921,6 +4930,8 @@ class CatalogService:
             message.
         PermissionDenied
             If the principal may not write to this table.
+        ConflictError
+            If `expected_snapshot_id` is ``none`` and the table already has a snapshot.
         """
         securable = Securable.table_scope(ref.environment, ref.namespace, ref.name)
         self._authz.authorize(p, Action.WRITE_TABLE, securable)
@@ -4929,6 +4940,35 @@ class CatalogService:
             raise ValidationError(artifact_refusal(ref.dotted(), "appending rows"))
         if row.table_type is not TableType.ICEBERG:
             raise ValidationError("Appends are only supported on managed (Iceberg) tables.")
+        self._refuse_create_pin_on_snapshot(ref, row, expected_snapshot_id)
+
+    def _refuse_create_pin_on_snapshot(
+        self, ref: TableRef, row: Table, expected_snapshot_id: ExpectedSnapshot | None
+    ) -> None:
+        """Refuse ``expected_snapshot_id=none`` on a table that already has a snapshot.
+
+        Parameters
+        ----------
+        ref
+            The table.
+        row
+            Its row.
+        expected_snapshot_id
+            The caller's precondition, if any.
+
+        Raises
+        ------
+        ConflictError
+            If the pin is ``none`` and the table's metadata shows a current snapshot.
+        """
+        if (
+            expected_snapshot_id == "none"
+            and self._to_loaded_table(ref, row).metadata.current_snapshot_id is not None
+        ):
+            raise ConflictError(
+                f"{ref.dotted()} already has data, so it cannot be created again. Pass its "
+                "current snapshot id as expected_snapshot_id, or leave expected_snapshot_id out."
+            )
 
     def _existing_table(self, ref: TableRef) -> Table | None:
         """Look a table up without raising.
@@ -5119,13 +5159,7 @@ class CatalogService:
             raise ValidationError(artifact_refusal(ref.dotted(), artifact_operation))
         if row.table_type is not TableType.ICEBERG:
             raise ValidationError(unmanaged)
-        if (
-            expected_snapshot_id == "none"
-            and self._to_loaded_table(ref, row).metadata.current_snapshot_id is not None
-        ):
-            # "Create it" cannot succeed on a table that already has a snapshot: refuse now
-            # (from the small metadata file), not after the caller sent the whole body.
-            raise ConflictError(target_changed_message(ref.dotted()))
+        self._refuse_create_pin_on_snapshot(ref, row, expected_snapshot_id)
         return row
 
     def check_can_load(

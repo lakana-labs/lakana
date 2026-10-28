@@ -293,6 +293,49 @@ def test_append_then_query_returns_the_rows(client: TestClient) -> None:
     assert result.schema.field("amount").type == pa.float64()
 
 
+def _ids(values: list[int]) -> pa.Table:
+    """Build rows for a table with one required `id` column.
+
+    Parameters
+    ----------
+    values
+        The ids.
+
+    Returns
+    -------
+    pa.Table
+        The rows.
+    """
+    return pa.table({"id": values}, schema=pa.schema([pa.field("id", pa.int64(), nullable=False)]))
+
+
+@pytest.mark.parametrize("method", ["POST", "PUT"])
+def test_a_create_pin_on_a_table_with_data_is_refused_before_the_body_is_read(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, method: str
+) -> None:
+    """`expected_snapshot_id=none` on a table that has a snapshot is a 409 with no body decoded."""
+    create_environment(client)
+    _create_table(client, "dev", "gold", "sales", _ID_ONLY_SCHEMA)
+    url = "/api/v1/environments/dev/namespaces/gold/tables/sales/data"
+    first = client.post(url, headers=_ARROW_STREAM_HEADERS, content=_ipc_stream_bytes(_ids([1])))
+    assert first.status_code == 200, first.text
+
+    def body_was_read(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("the body was decoded")
+
+    monkeypatch.setattr("lakana_server.api.platform.tables._decode_arrow_stream", body_was_read)
+    refused = client.request(
+        method,
+        url,
+        params={"expected_snapshot_id": "none"},
+        headers=_ARROW_STREAM_HEADERS,
+        content=_ipc_stream_bytes(_ids([2])),
+    )
+
+    assert refused.status_code == 409, refused.text
+    assert "already has data" in refused.text
+
+
 def test_append_without_write_table_is_403(client: TestClient) -> None:
     """A VIEWER-only principal cannot append."""
     create_environment(client)
