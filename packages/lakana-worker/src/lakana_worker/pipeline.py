@@ -51,7 +51,6 @@ stored result names is read at the snapshot the check read (`_resolve_sources`).
 from __future__ import annotations
 
 import functools
-import io
 import logging
 import re
 import threading
@@ -162,6 +161,7 @@ from lakana_core.runs.lockdown import WriteFenceRefused
 from lakana_core.runs.store import query_completed_detail
 from lakana_core.secrets.keys import KeyProvider
 from lakana_core.sql_syntax import SQL_SYNTAX_ERRORS, describe_syntax_error
+from lakana_core.storage.base import Storage, StreamWriter
 from lakana_core.storage.resolver import (
     ResolvedStorage,
     StorageResolver,
@@ -1752,6 +1752,68 @@ def _snapshot_gone_after_failure(
     return None
 
 
+class _ArrowSink:
+    """Give pyarrow a file-like object that forwards what it writes to a storage stream.
+
+    Parameters
+    ----------
+    stream
+        The open stream.
+    """
+
+    def __init__(self, stream: StreamWriter) -> None:
+        self._stream = stream
+        self.closed = False
+
+    def write(self, data: bytes | memoryview) -> int:
+        """Pass a piece on.
+
+        Parameters
+        ----------
+        data
+            The bytes pyarrow wrote.
+
+        Returns
+        -------
+        int
+            How many bytes were taken.
+        """
+        piece = bytes(data)
+        self._stream.write(piece)
+        return len(piece)
+
+    def flush(self) -> None:
+        """Do nothing: the stream buffers on its own."""
+
+
+def _store_result(storage: Storage, path: str, result: pa.Table) -> None:
+    """Write a query result to `path` as an Arrow IPC file, piece by piece.
+
+    The table is serialised straight into a storage stream, so the bytes of the file never
+    exist in memory a second time (they sat outside DuckDB's ``memory_limit``, about once more
+    than `max_result_bytes` for a bytes object plus its copy). Nothing is visible at `path` until
+    the whole file is written; a failure discards what was sent.
+
+    Parameters
+    ----------
+    storage
+        The environment's storage.
+    path
+        Root-relative path of the result.
+    result
+        The rows.
+    """
+    stream = storage.open_write(path)
+    try:
+        sink = _ArrowSink(stream)
+        with pyarrow.ipc.new_file(pa.PythonFile(sink, mode="w"), result.schema) as writer:
+            writer.write_table(result)
+        stream.commit()
+    except BaseException:
+        stream.abort()
+        raise
+
+
 def _create_view(
     session: Session,
     run: QueryRun,
@@ -2613,10 +2675,7 @@ def _run_one(
                     )
                 else:
                     result_path = f"_artifacts/queries/{run.id}/result.arrow"
-                    buffer = io.BytesIO()
-                    with pyarrow.ipc.new_file(buffer, result.schema) as writer:
-                        writer.write_table(result)
-                    resolved_storage.storage.write(result_path, buffer.getvalue())
+                    _store_result(resolved_storage.storage, result_path, result)
                     run.result_location = result_path
                 row_count = result.num_rows
             elif run.write_mode == WriteMode.VIEW:

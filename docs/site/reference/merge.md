@@ -119,6 +119,7 @@ the filter or mask for you.
 | `404` | the table does not exist and `expected_snapshot_id` is not `none`, or a source does not exist | the name |
 | `403` | no `WRITE_TABLE` or `READ_TABLE`, or no `CREATE_TABLE` where the merge would create the table | the permission |
 | `409` | `expected_snapshot_id` no longer matches, or another writer committed first | ``bronze.customers changed during the write; retry.`` |
+| `409` | `expected_snapshot_id` is `none` but the table already has data; refused before the body is read | ``bronze.customers already has data, so it cannot be created again. A run or load that creates a table: retry, it will update the table. A call that sets expected_snapshot_id: pass the table's current snapshot id or leave it out.`` |
 | `413`, `408`, `503` | the body is over the limit, arrives too slowly, or the server is busy with other uploads | as for an append |
 
 The repeated-key and 5,000-row messages above are written for someone who sends the rows. An

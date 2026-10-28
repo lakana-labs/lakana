@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 import sqlalchemy as sa
 from core_test_helpers import _prepared_catalog, ensure_table, python_task_run
-from sqlalchemy import select
+from sqlalchemy import event, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -226,6 +226,26 @@ def test_a_view_input_makes_the_tables_behind_it_readable(
     monkeypatch.setattr(task_tokens_module, "_MAX_VIEW_DEPTH", 10)
     monkeypatch.setattr(task_tokens_module, "_MAX_READABLE", 1)
     assert readable({"a": "gold.vv"}) == ("gold.vv",)
+
+
+def test_view_expansion_costs_a_query_per_level_not_one_per_name(
+    session: Session, dev: None
+) -> None:
+    names = tuple(f"bronze.t{i:02d}" for i in range(30))
+    statements: list[str] = []
+
+    def count(*event: object) -> None:
+        statements.append(str(event[2]))
+
+    engine = session.get_bind()
+    event.listen(engine, "before_cursor_execute", count)
+    try:
+        readable = task_tokens_module._readable_tables(session, "dev", names)
+    finally:
+        event.remove(engine, "before_cursor_execute", count)
+
+    assert readable == names
+    assert len(statements) <= 2, statements
 
 
 @pytest.mark.parametrize(

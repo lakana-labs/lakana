@@ -6,8 +6,8 @@ the secrets routes (create, list, rotate and their error cases), of every GET ro
 no path parameter (the audit log among them), in the raw `secrets` row, in the raw audit
 events and in the captured log. A hit means a value leaked.
 
-Not covered here: an environment that uses a secret, the Iceberg configuration routes and a
-failing storage call.
+The paths that use a secret (an environment that reaches its storage through one, the Iceberg
+routes, a query, a storage call that fails) are in `test_secrets_use_integration.py`.
 """
 
 import base64

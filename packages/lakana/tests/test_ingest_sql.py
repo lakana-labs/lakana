@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import contextlib
 import errno
+import gc
 import os
 import socket
 import sqlite3
 import sys
 import threading
 import types
+import warnings
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -956,6 +958,18 @@ def test_sqlite_reads_read_only_with_bound_parameters(lite: Path) -> None:
     assert table.to_pylist() == [{"a": 2, "b": "y"}]
     with contextlib.closing(sqlite3.connect(lite)) as db:
         assert db.execute("SELECT count(*) FROM t").fetchone() == (2,)
+
+
+def test_a_sqlite_read_closes_everything_it_opened(lite: Path) -> None:
+    """No cursor or connection is left to the garbage collector (a `ResourceWarning`, #10)."""
+    _sqlite(lite, ["CREATE TABLE t(a INTEGER)", "INSERT INTO t VALUES (1)"])
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        sql.read("local-db", "SELECT a FROM t")
+        gc.collect()
+
+    assert [str(w.message) for w in caught if issubclass(w.category, ResourceWarning)] == []
 
 
 def test_sqlite_refuses_a_link_at_the_file_path(lite: Path, tmp_path: Path) -> None:
