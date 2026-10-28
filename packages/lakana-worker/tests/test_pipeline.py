@@ -2653,8 +2653,8 @@ def test_run_one_reads_a_secret_backed_environment_and_never_leaks_it_on_write_f
     `storage_secret_ref`, so `resolved_storage.config.options` in `run_one`
     genuinely contains the decrypted value (real crypto, real
     `EnvKeyProvider`, real `StorageResolver.for_environment` call) -- only
-    the call that opens the result's stream (`Storage.open_write`) is patched to fail, standing in for a
-    real backend (S3, credential rejected, endpoint unreachable) echoing a
+    the call that opens the result's stream (`Storage.open_write`) is patched to fail,
+    standing in for a real backend (S3, credential rejected, endpoint unreachable) echoing a
     credential back in its exception text. `update_environment_storage`
     only ever changes `storage_secret_ref`/`storage_options`, never
     `storage_root` (there is no API to promote a `file` environment to
