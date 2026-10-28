@@ -25,7 +25,13 @@ from lakana_worker.index_credentials import IndexAccess
 from lakana_worker.launcher.task_build import NO_INTERPRETER, NO_SDK, TOO_LARGE
 from lakana_worker.launcher_client import LauncherUnavailable
 from lakana_worker.runners import NO_SDK_MESSAGE
-from lakana_worker.venvs import VenvBuildError, VenvBuildRefused, VenvBuildStopped, VenvLease
+from lakana_worker.venvs import (
+    VenvBuildBroken,
+    VenvBuildError,
+    VenvBuildRefused,
+    VenvBuildStopped,
+    VenvLease,
+)
 
 LOCK = "a" * 64
 PROJECT = uuid.UUID("00000000-0000-4000-8000-000000000001")
@@ -847,3 +853,76 @@ def test_a_build_failing_on_an_untrusted_certificate_names_the_setting(tmp_path:
         _acquire(_environments(launcher), _project(tmp_path))
     assert "LAKANA_RUN__CA_BUNDLE" in str(caught.value)
     assert not isinstance(caught.value, VenvBuildRefused)
+
+
+@pytest.mark.parametrize(
+    ("output", "broken"),
+    [
+        (
+            b"  x Failed to build `brokenpkg==1.0`\n"
+            b"  |-> The build backend returned an error\n"
+            b"  `-> Call to `setuptools.build_meta.build_wheel` failed (exit status: 1)\n",
+            True,
+        ),
+        (
+            b"error: Distribution `macpkg==1.0 @ registry+https://pypi.org/simple` can't be "
+            b"installed because it doesn't have a source distribution or wheel for the current "
+            b"platform\n",
+            True,
+        ),
+        (
+            b"  x Failed to build `brokenpkg==1.0`\n"
+            b"  |-> Failed to resolve requirements from `build-system.requires`\n"
+            b"  `-> error sending request for url (https://pypi.org/simple/setuptools/)\n",
+            False,
+        ),
+        (
+            b"  x Failed to build `brokenpkg==1.0`\n"
+            b"  |-> The build backend returned an error\n"
+            b"      OSError: [Errno 28] No space left on device\n",
+            False,
+        ),
+    ],
+    ids=["backend-failed", "no-file-for-platform", "network", "disk-full"],
+)
+def test_a_container_build_that_cannot_succeed_is_permanent(
+    tmp_path: Path, output: bytes, broken: bool
+) -> None:
+    """Issue #48: classified as the local venv cache classifies it.
+
+    Parameters
+    ----------
+    tmp_path
+        The test's directory.
+    output
+        What uv printed in the build container.
+    broken
+        Whether a retry cannot help.
+    """
+
+    def build(request: dict[str, Any], on_log: Callable[[bytes], None]) -> dict[str, object]:
+        """Fail with `output`.
+
+        Parameters
+        ----------
+        request
+            The request.
+        on_log
+            The log sink.
+
+        Returns
+        -------
+        dict
+            A failed build.
+        """
+        on_log(output)
+        return {"complete": False, "exit": 1}
+
+    launcher = FakeLauncher(scripts={"status": _status(False), "build": build})
+
+    with pytest.raises(VenvBuildError, match="environment build failed") as caught:
+        _acquire(_environments(launcher), _project(tmp_path))
+    assert isinstance(caught.value, VenvBuildBroken) is broken
+    assert not isinstance(caught.value, VenvBuildRefused)
+    if broken:
+        assert "run `uv lock`, commit and deploy again" in str(caught.value)

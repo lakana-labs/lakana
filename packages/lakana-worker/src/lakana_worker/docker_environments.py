@@ -54,10 +54,13 @@ from lakana_worker.venvs import (
     BuildStop,
     IndexResolver,
     Tee,
+    VenvBuildBroken,
     VenvBuildError,
     VenvBuildRefused,
     VenvBuildStopped,
     VenvLease,
+    broken_build,
+    machine_hint,
 )
 
 PUBLIC_INDEX_HOSTS = ("pypi.org", "files.pythonhosted.org")
@@ -467,7 +470,8 @@ class DockerEnvironments:
         Returns
         -------
         VenvBuildError
-            `VenvBuildRefused` when a retry cannot help.
+            `VenvBuildRefused` when a credential or the launcher refused, `VenvBuildBroken` when
+            a package cannot be built or installed until the lock changes.
         """
         code = result.get("exit")
         if result.get("timed_out") is True:
@@ -489,7 +493,10 @@ class DockerEnvironments:
         package = missing_wheel(output) if wheels_only(accesses) else None
         if package is not None:
             return VenvBuildRefused(f"{_FAILED}: {no_wheel_message(package)}")
-        hint = certificate_hint(output)
+        broken = broken_build(output)
+        if broken is not None:
+            return VenvBuildBroken(f"{_FAILED}: {broken}")
+        hint = machine_hint(output) or certificate_hint(output)
         return VenvBuildError(
             f"{_FAILED}: uv exited with status {code}" + (f": {hint}" if hint else "")
         )

@@ -14,12 +14,15 @@ import pytest
 from core_test_helpers import ActionAllowList
 from pyiceberg.schema import Schema
 from pyiceberg.table import StaticTable
-from pyiceberg.table.update import TableRequirement, TableUpdate
+from pyiceberg.table.snapshots import Summary
+from pyiceberg.table.update import AddSnapshotUpdate, TableRequirement, TableUpdate
 from pyiceberg.types import LongType, NestedField
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from lakana_core.auth import Action, AllowAllAuthorization, BoundTask, PrincipalRef, TaskScope
+from lakana_core.catalog.append import build_transaction
+from lakana_core.catalog.attempt_stamp import CLAIM_PROPERTY, TASK_RUN_PROPERTY
 from lakana_core.catalog.service import CatalogService, LoadedTable
 from lakana_core.catalog.writes import parse_expected_snapshot
 from lakana_core.config import StorageConfig
@@ -630,3 +633,38 @@ def test_a_connection_of_another_environment_is_never_a_source(
     assert _connection_edges(session) == []
     skipped = [r for r in caplog.records if "'crm-db'" in r.getMessage()]
     assert [r.levelno for r in skipped] == [logging.INFO]
+
+
+def test_a_commit_cannot_claim_the_write_of_a_task_attempt(
+    principal: PrincipalRef, catalog: CatalogService
+) -> None:
+    """Issue #49: a client's snapshot summary that names a task attempt loses that name."""
+    loaded = catalog.load_table(principal, _ref("gold.t"))
+    resolved = StorageResolver(catalog._session).for_environment("dev")
+    requirements, updates = build_transaction(
+        loaded.metadata, loaded.metadata_location, resolved.file_io, _ids([5])
+    )
+    forged: list[TableUpdate] = []
+    for update in updates:
+        if isinstance(update, AddSnapshotUpdate):
+            summary = update.snapshot.summary
+            assert summary is not None
+            claim = {TASK_RUN_PROPERTY: str(uuid.uuid4()), CLAIM_PROPERTY: "1"}
+            update = AddSnapshotUpdate(
+                snapshot=update.snapshot.model_copy(
+                    update={
+                        "summary": Summary(
+                            summary.operation, **summary.additional_properties, **claim
+                        )
+                    }
+                )
+            )
+        forged.append(update)
+
+    catalog.commit_table(principal, _ref("gold.t"), requirements=requirements, updates=forged)
+
+    current = catalog.load_table(principal, _ref("gold.t")).metadata.current_snapshot()
+    assert current is not None and current.summary is not None
+    assert current.summary.get(TASK_RUN_PROPERTY) is None
+    assert current.summary.get(CLAIM_PROPERTY) is None
+    assert current.summary.get("added-records") == "1"

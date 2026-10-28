@@ -26,6 +26,7 @@ import lakana_worker.venvs as venvs_module
 from lakana_worker.index_credentials import IndexAccess
 from lakana_worker.venvs import (
     MARKER,
+    VenvBuildBroken,
     VenvBuildError,
     VenvBuildRefused,
     VenvBuildStopped,
@@ -1380,3 +1381,154 @@ def test_a_local_build_failing_on_an_untrusted_certificate_names_the_setting(fak
         fake.acquire()
     assert str(caught.value).startswith("environment build failed: uv exited with status 2: ")
     assert "LAKANA_RUN__CA_BUNDLE" in str(caught.value)
+
+
+_BACKEND_FAILED = (
+    "Resolved 2 packages in 3ms\n"
+    "   Building brokenpkg==1.0\n"
+    "  \N{MULTIPLICATION SIGN} Failed to build `brokenpkg==1.0`\n"
+    "  ├─▶ The build backend returned an error\n"
+    "  ╰─▶ Call to `backend.build_wheel` failed (exit status: 1)\n"
+    "\n"
+    "      [stderr]\n"
+    "      RuntimeError: this package cannot be built here\n"
+    "\n"
+    "hint: Build failures usually indicate a problem with the package or the build environment\n"
+)
+"""What uv 0.12 prints when a source distribution's own build fails."""
+_NO_PLATFORM = (
+    "error: Distribution `macpkg==1.0 @ registry+https://pypi.org/simple` can't be installed "
+    "because it doesn't have a source distribution or wheel for the current platform\n"
+    "\n"
+    "hint: You're on Linux (`manylinux_2_43_x86_64`), but `macpkg` (v1.0) only has wheels for "
+    "the following platform: `macosx_11_0_arm64`\n"
+)
+"""What uv 0.12 prints for a locked package with no file the worker can install."""
+_BUILD_REQUIRES_UNREACHABLE = (
+    "  \N{MULTIPLICATION SIGN} Failed to build `brokenpkg==1.0`\n"
+    "  ├─▶ Failed to resolve requirements from `build-system.requires`\n"
+    "  ├─▶ Failed to fetch: `https://pypi.org/simple/setuptools/`\n"
+    "  ├─▶ error sending request for url (https://pypi.org/simple/setuptools/)\n"
+    "  ╰─▶ Connection refused (os error 111)\n"
+)
+"""A build that failed because the network did: a retry can succeed."""
+
+
+def test_a_package_whose_own_build_fails_is_not_retried(fake: Fake) -> None:
+    """Issue #48: the same sources build the same way on every attempt."""
+    fake.behave(mode="fail", code=1, output=_BACKEND_FAILED)
+    with pytest.raises(VenvBuildBroken) as caught:
+        fake.acquire()
+    assert not isinstance(caught.value, VenvBuildRefused)
+    assert str(caught.value) == (
+        "environment build failed: the package brokenpkg could not be built from its source "
+        "(the task's log has the build's output), and every attempt builds it the same way. "
+        "Depend on a version of brokenpkg that publishes a wheel for the worker's platform and "
+        "the task's Python, or on one whose build works there, then run `uv lock`, commit and "
+        "deploy again."
+    )
+    assert b"this package cannot be built here" in fake.output()
+
+
+def test_a_package_without_any_file_for_the_platform_is_not_retried(fake: Fake) -> None:
+    """Issue #48: no wheel and no source distribution stays so until the lock changes."""
+    fake.behave(mode="fail", code=2, output=_NO_PLATFORM)
+    with pytest.raises(VenvBuildBroken) as caught:
+        fake.acquire()
+    assert str(caught.value) == (
+        "environment build failed: the package macpkg has no wheel for the worker's platform "
+        "and the task's Python, and no source distribution, so it cannot be installed. Depend "
+        "on a version of macpkg that publishes such a wheel (the task's log names the "
+        "platforms it has), then run `uv lock`, commit and deploy again."
+    )
+
+
+def test_a_build_that_failed_on_the_network_is_still_retried(fake: Fake) -> None:
+    """A source build whose build requirements could not be fetched may work next time."""
+    for output in (
+        _BUILD_REQUIRES_UNREACHABLE,
+        _BACKEND_FAILED + "      urllib.error.URLError: Connection refused (os error 111)\n",
+        *(
+            _BACKEND_FAILED + f"      {line}\n"
+            for line in (
+                "socket.gaierror: [Errno -2] Name or service not known",
+                "OSError: [Errno 113] No route to host",
+                "urllib.error.HTTPError: HTTP Error 503: Service Unavailable",
+                "urllib.error.HTTPError: HTTP Error 502: Bad Gateway",
+                "requests.exceptions.ConnectionError: Max retries exceeded with url: /x",
+                "http.client.RemoteDisconnected: Remote end closed connection without response",
+                "curl: (6) Could not resolve host: example.org",
+                "fatal: unable to access 'https://example.org/x.git/': SSL connection timeout",
+            )
+        ),
+        _NO_PLATFORM + _REFUSAL.replace("client error (401 Unauthorized)", "server error (503)"),
+    ):
+        fake.behave(mode="fail", code=1, output=output)
+        with pytest.raises(VenvBuildError) as caught:
+            fake.acquire()
+        assert not isinstance(caught.value, VenvBuildBroken)
+        assert str(caught.value) == "environment build failed: uv exited with status 1"
+
+
+def test_a_refusal_wins_over_a_broken_build(fake: Fake) -> None:
+    """A refused credential says what to fix first; it is the more specific message."""
+    fake.behave(mode="fail", code=1, output=_REFUSAL + _BACKEND_FAILED)
+    with pytest.raises(VenvBuildRefused):
+        fake.acquire(_SHA_A, lambda: [_TEAM])
+
+
+@pytest.mark.parametrize(
+    ("line", "cause"),
+    [
+        ("OSError: [Errno 28] No space left on device", "ran out of disk space"),
+        ("gcc: fatal error: Killed signal terminated program cc1plus", "ran out of memory"),
+        ("MemoryError", "ran out of memory"),
+        ("error: Cannot allocate memory", "ran out of memory"),
+        (
+            "  ╰─▶ Call to `setuptools.build_meta.build_wheel` failed (exit status: 137)",
+            "ran out of memory",
+        ),
+        ("process didn't exit successfully: (signal: 9, SIGKILL: kill)", "ran out of memory"),
+        ("collect2: fatal error: ld terminated with signal 9 [Killed]", "ran out of memory"),
+        ("g++: internal compiler error: Killed (program cc1plus)", "ran out of memory"),
+        ("clang: error: unable to execute command: Killed", "ran out of memory"),
+        ("make: *** [Makefile:2: all] Killed", "ran out of memory"),
+        ("make: *** [Makefile:2: all] Error 137", "ran out of memory"),
+    ],
+)
+def test_a_build_that_ran_out_of_disk_or_memory_is_retried_and_says_so(
+    fake: Fake, line: str, cause: str
+) -> None:
+    """Review S2: the machine, not the package, failed; an operator frees disk or memory.
+
+    Parameters
+    ----------
+    fake
+        The fake uv.
+    line
+        What the build printed.
+    cause
+        Part of the message.
+    """
+    fake.behave(mode="fail", code=1, output=_BACKEND_FAILED + f"      {line}\n")
+    with pytest.raises(VenvBuildError) as caught:
+        fake.acquire()
+    assert not isinstance(caught.value, VenvBuildBroken)
+    message = str(caught.value)
+    assert message.startswith("environment build failed: uv exited with status 1: the build ")
+    assert cause in message
+    assert "uv lock" not in message
+
+
+def test_identifiers_in_compiler_lines_do_not_veto_a_broken_build(fake: Fake) -> None:
+    """Review R2-N1: `getaddrinfo.c` or a quoted `SIGKILL` is source code, not a failure cause."""
+    compiler = (
+        "      gcc -O2 -fPIC -c src/unix/getaddrinfo.c -o build/getaddrinfo.o\n"
+        "      gcc -O2 -fPIC -c src/ares_getaddrinfo.c -o build/ares_getaddrinfo.o\n"
+        "      src/unix/process.c:42:5: note: kill(pid, SIGKILL); /* Killed on timeout */\n"
+        '      src/errors.c:7:1: note: return "out of memory"; /* ECONNRESET EAI_AGAIN */\n'
+        "      src/unix/core.c:99:10: fatal error: linux/io_uring.h: No such file or directory\n"
+    )
+    fake.behave(mode="fail", code=1, output=_BACKEND_FAILED + compiler)
+    with pytest.raises(VenvBuildBroken):
+        fake.acquire()

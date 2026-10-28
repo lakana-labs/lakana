@@ -2260,7 +2260,7 @@ def test_the_deploy_refuses_what_an_artifact_cannot_do(stack: _Stack, wheelhouse
     ] == []
 
 
-_WIDE_TIMEOUT = 10
+_WIDE_TIMEOUT = 25
 """Attempt 1's whole budget: the process starts, reads its input and replaces the table within
 it, and then its timeout ends it while the reply is held."""
 

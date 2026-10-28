@@ -70,6 +70,7 @@ from lakana_core.auth import (
     RunContext,
     Securable,
 )
+from lakana_core.catalog.attempt_stamp import CLAIM_PROPERTY, TASK_RUN_PROPERTY
 from lakana_core.catalog.json_schema import ColumnSpec
 from lakana_core.catalog.metadata import read_metadata
 from lakana_core.catalog.query_service import QueryService
@@ -183,6 +184,7 @@ from lakana_worker.task_outcome import TaskFailure, TaskOutcome
 from lakana_worker.tasks import RunEngine, run_claimed
 from lakana_worker.venvs import (
     IndexResolver,
+    VenvBuildBroken,
     VenvBuildError,
     VenvBuildRefused,
     VenvBuildStopped,
@@ -1141,6 +1143,139 @@ def test_a_first_write_of_zero_rows_counts_as_written(py: PyWorld) -> None:
     assert "snapshot:" not in _log(py.world, claimed.run_id, "gold.scores")
 
 
+def _write_as_admin(world: World, rows: int = 1, *, append: bool = False) -> None:
+    """Write `gold.scores` as the administrator, without the task's token: another writer.
+
+    Parameters
+    ----------
+    world
+        The world.
+    rows
+        How many rows to write.
+    append
+        Append to the table instead of replacing (or creating) it.
+    """
+    data = pa.table({"id": pa.array(list(range(rows)), pa.int64())})
+    ref = TableRef.from_dotted("dev", "gold.scores")
+    with world.session() as session:
+        catalog = CatalogService(session, StorageResolver(session), AllowAllAuthorization())
+        if append:
+            catalog.append(world.admin, ref, data)
+        elif catalog.table_exists(world.admin, ref):
+            catalog.replace(world.admin, ref, data)
+        else:
+            catalog.replace(world.admin, ref, data, expected_snapshot_id="none")
+
+
+_NOT_ITS_WRITE = (
+    "the task reported success, but gold.scores holds no write of this attempt: another writer "
+    "changed it. If something else writes gold.scores, stop it and run again; the audit log "
+    "shows who wrote (`lakana audit list --env dev`, which needs READ_AUDIT_LOG: ask an "
+    "administrator if you do not hold it). If the server runs an older release than this "
+    "worker, upgrade the server and the workers together. If table maintenance expired "
+    "snapshots while the task ran, run again"
+)
+
+
+@pytest.mark.parametrize("exists", [False, True], ids=["first-run", "table-exists"])
+def test_success_after_somebody_else_wrote_the_table_is_not_a_write(
+    py: PyWorld, exists: bool
+) -> None:
+    """Issue #49: the table changed, but no snapshot names this attempt.
+
+    Parameters
+    ----------
+    py
+        The world.
+    exists
+        Whether the table exists before the task runs.
+    """
+    if exists:
+        _write_as_admin(py.world)
+
+    def script(task: PythonTask, on_log: Callable[[bytes], None], stop: StopSignal) -> RunOutcome:
+        _write_as_admin(py.world, 3)
+        return RunOutcome(succeeded=True, snapshot_id=None, rows=3)
+
+    task, message = _fails(py, py.engine(script))
+    assert (task.status, task.attempt, task.failure_code) == (TaskStatus.FAILED, 1, "conflict")
+    assert message == _NOT_ITS_WRITE
+
+
+def test_an_empty_table_somebody_else_created_is_not_a_write(py: PyWorld) -> None:
+    """A table created without rows has no snapshot to stamp: the claim of its location tells."""
+
+    def script(task: PythonTask, on_log: Callable[[bytes], None], stop: StopSignal) -> RunOutcome:
+        _write_as_admin(py.world, 0)
+        return RunOutcome(succeeded=True, snapshot_id=None, rows=0)
+
+    task, message = _fails(py, py.engine(script))
+    assert (task.status, task.failure_code) == (TaskStatus.FAILED, "conflict")
+    assert message == _NOT_ITS_WRITE
+
+
+def test_an_empty_table_somebody_else_put_in_place_of_the_old_one_is_not_a_write(
+    py: PyWorld,
+) -> None:
+    """The table existed before; a new, empty table under its name is somebody else's."""
+    _write_as_admin(py.world)
+
+    def script(task: PythonTask, on_log: Callable[[bytes], None], stop: StopSignal) -> RunOutcome:
+        with py.world.session() as session:
+            CatalogService(session, StorageResolver(session), AllowAllAuthorization()).drop_table(
+                py.world.admin, TableRef.from_dotted("dev", "gold.scores")
+            )
+        _write_as_admin(py.world, 0)
+        return RunOutcome(succeeded=True, snapshot_id=None, rows=0)
+
+    task, message = _fails(py, py.engine(script))
+    assert (task.status, task.failure_code) == (TaskStatus.FAILED, "conflict")
+    assert message == _NOT_ITS_WRITE
+
+
+def test_a_cancel_wins_over_a_success_whose_write_is_somebody_elses(py: PyWorld) -> None:
+    runs: list[uuid.UUID] = []
+
+    def script(task: PythonTask, on_log: Callable[[bytes], None], stop: StopSignal) -> RunOutcome:
+        _write_as_admin(py.world, 3)
+        py.cancel(runs[0])
+        return RunOutcome(succeeded=True, snapshot_id=None, rows=3)
+
+    engine = py.engine(script)
+    claimed = py.claim_python(engine)
+    runs.append(claimed.run_id)
+    run_claimed(engine, claimed)
+    assert _task(py.world, "gold.scores").status is TaskStatus.CANCELLED
+
+
+def test_a_write_another_writer_appended_to_afterwards_still_counts(py: PyWorld) -> None:
+    """The attempt's own snapshot is under the current one: the write is proven."""
+
+    def script(task: PythonTask, on_log: Callable[[bytes], None], stop: StopSignal) -> RunOutcome:
+        written = _upload(py.world, task, 2)
+        _write_as_admin(py.world, 1, append=True)
+        return RunOutcome(succeeded=True, snapshot_id=written.snapshot_id, rows=written.rows)
+
+    engine = py.engine(script)
+    claimed = py.claim_python(engine)
+    run_claimed(engine, claimed)
+    assert _task(py.world, "gold.scores").status is TaskStatus.SUCCEEDED
+
+
+def test_a_write_of_the_task_is_stamped_with_its_task_run_and_claim(py: PyWorld) -> None:
+    engine = py.engine(_writer(py.world))
+    claimed = py.claim_python(engine)
+    run_claimed(engine, claimed)
+    with py.world.session() as session:
+        catalog = CatalogService(session, StorageResolver(session), AllowAllAuthorization())
+        snapshot = catalog.load_table(
+            py.world.admin, TableRef.from_dotted("dev", "gold.scores")
+        ).metadata.current_snapshot()
+    assert snapshot is not None and snapshot.summary is not None
+    assert snapshot.summary.get(TASK_RUN_PROPERTY) == str(claimed.task_run_id)
+    assert snapshot.summary.get(CLAIM_PROPERTY) == str(claimed.claim)
+
+
 def test_success_without_a_write_is_a_permanent_failure(py: PyWorld) -> None:
     """The worker never trusts the record: it reads the table's snapshot itself."""
     task, message = _fails(py, py.engine(_forged))
@@ -1725,6 +1860,18 @@ def test_an_asset_that_reads_its_own_missing_table_fails_permanently_and_says_wh
     assert message == _SELF_INPUT_MESSAGE
     assert py.runner.tasks == [] and py.tokens() == []
     assert all(lease.descriptor is None for lease in py.leases)
+
+
+def test_an_asset_that_reads_its_own_missing_table_fails_before_its_environment_is_built(
+    py: PyWorld,
+) -> None:
+    """Issue #48: a first run that can never succeed does not wait for a build first."""
+    py.deploy(inputs={"prev": "gold.scores"})
+    task, message = _fails(py, py.engine(_forged))
+    assert message == _SELF_INPUT_MESSAGE
+    assert (task.status, task.failure_code) == (TaskStatus.FAILED, "build_failed")
+    assert py.leases == [] and py.resolvers == []
+    assert list((py.root / "work").iterdir()) == []
 
 
 def test_an_asset_that_reads_its_own_existing_table_runs(py: PyWorld) -> None:
@@ -7168,6 +7315,12 @@ def test_a_docker_build_resolves_only_the_indexes_its_lock_uses(py: PyWorld) -> 
             "build_failed",
             "runner unavailable: the launcher is busy",
         ),
+        (
+            VenvBuildBroken("environment build failed: the package brokenpkg could not be built"),
+            TaskStatus.FAILED,
+            "build_failed",
+            "environment build failed: the package brokenpkg could not be built",
+        ),
     ],
 )
 def test_a_failed_docker_build_ends_the_task_with_its_code(
@@ -7648,6 +7801,41 @@ def test_an_empty_append_is_a_success(py: PyWorld, write: str) -> None:
     assert f"write mode: {write}" in log
     assert "snapshot:" not in log
     assert _ids(py.world, "gold.scores") == [1]
+
+
+@pytest.mark.parametrize("write", ["append", "merge"])
+def test_an_empty_append_while_somebody_else_writes_is_still_a_success(
+    py: PyWorld, write: str
+) -> None:
+    """Review S1: a run that found nothing new wrote nothing; another writer's commit is theirs.
+
+    Parameters
+    ----------
+    py
+        The world.
+    write
+        The asset's write mode.
+    """
+    extra: dict[str, object] = (
+        {"watermark": "id", "write_mode": "append"}
+        if write == "append"
+        else {"key": ["id"], "write_mode": "merge"}
+    )
+    py.deploy(entry={"write": write, **extra})
+    engine = py.engine(_harness_writes(py.world, [1]))
+    run_claimed(engine, py.claim_python(engine))
+
+    def foreign(task: PythonTask, on_log: Callable[[bytes], None], stop: StopSignal) -> RunOutcome:
+        _write_as_admin(py.world, 1, append=True)
+        return RunOutcome(succeeded=True, snapshot_id=None, rows=0)
+
+    claimed = _rerun(py, py.engine(foreign))
+
+    task = _task(py.world, "gold.scores")
+    assert task.status is TaskStatus.SUCCEEDED, task.error_message
+    attempt = _attempts(py.world, claimed.task_run_id)[0]
+    assert (attempt.outcome, attempt.rows_written) == (AttemptOutcome.SUCCEEDED, 0)
+    assert "snapshot:" not in _log(py.world, claimed.run_id, "gold.scores")
 
 
 def _nothing_new(task: PythonTask, on_log: Callable[[bytes], None], stop: StopSignal) -> RunOutcome:
