@@ -372,10 +372,10 @@ class _Budget:
         batch
             The rows as read.
         """
-        _check_size(self.path, self.size + sum(map(_column_size, batch.columns)), self.limit)
-        decoded = _decoded(batch)
-        self.size += decoded.nbytes
-        self.kept.append(decoded)
+        size = sum(map(_column_size, batch.columns))
+        _check_size(self.path, self.size + size, self.limit)
+        self.size += size
+        self.kept.append(_decoded(batch))
 
     def table(self, schema: pa.Schema) -> pa.Table:
         """Join the rows read.

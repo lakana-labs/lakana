@@ -501,3 +501,26 @@ def test_a_view_column_counts_its_values_not_its_buffers() -> None:
 
     assert load_module._column_size(column) == 2 + 20 + 3 + 4 * 5 + 1
     assert load_module._column_size(column.slice(2)) == 20 + 3 + 4 * 3 + 1
+
+
+def test_many_view_batches_count_their_values_as_they_are_added(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """PR review S2: the running total adds the size checked, not the shared buffers' size."""
+    path = tmp_path / "manyviews.arrow"
+    batch = pa.record_batch({"v": _shared_views(128, 4096)})
+    with pa.ipc.new_file(str(path), batch.schema) as writer:
+        for _ in range(80):
+            writer.write_batch(batch)
+
+    def never(table: pa.Table) -> pa.Table:
+        raise AssertionError("the views were converted")
+
+    monkeypatch.setattr(load_module, "normalize_view_columns", never)
+
+    result = invoke(
+        make_state(tmp_path, _api(1024 * 1024)), "load", str(path), "t", "--env", "dev"
+    )
+
+    assert result.exit_code == 2, result.output
+    assert "is larger than one upload may be (1 MiB)" in result.output
