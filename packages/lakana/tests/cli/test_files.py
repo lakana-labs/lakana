@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import time
+import tracemalloc
 import uuid
 from decimal import Decimal
 from pathlib import Path
@@ -592,3 +593,39 @@ def test_conform_accepts_0_1_and_null_for_a_boolean() -> None:
     result = _files.conform(table, [Column("flag", "boolean", True)])
 
     assert result.column("flag").to_pylist() == [False, True, None]
+
+
+def test_strict_utf8_checks_in_pieces_without_decoding_the_whole_file(tmp_path: Path) -> None:
+    """Review M2: the check holds no decoded copy of the file, whatever its size."""
+    data = b"\xef\xbb\xbf" + b"a,\xc3\xbc\n" * 3_000_000
+    tracemalloc.start()
+    try:
+        _files.strict_utf8(tmp_path / "big.csv", data)
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+
+    assert peak < len(data) // 2
+
+
+@pytest.mark.parametrize(
+    ("data", "position", "byte"),
+    [
+        (b"a" * (1024 * 1024 - 1) + b"\xc3\xbc" + b"b\xff", 1024 * 1024 + 2, 0xFF),
+        (b"a" * (1024 * 1024 - 1) + b"\xc3", 1024 * 1024 - 1, 0xC3),
+        (b"\xef\xbb\xbfab\xfc", 2, 0xFC),
+    ],
+    ids=["across-pieces", "cut-at-the-end", "after-a-bom"],
+)
+def test_strict_utf8_names_the_first_bad_byte(
+    tmp_path: Path, data: bytes, position: int, byte: int
+) -> None:
+    """A character split between two pieces is fine; the position counts from the text's start."""
+    with pytest.raises(CliError) as caught:
+        _files.strict_utf8(tmp_path / "in.csv", data)
+
+    assert caught.value.exit_code == 8
+    assert str(caught.value) == (
+        f"in.csv is not UTF-8 (byte {byte:#04x} at position {position}); convert it to UTF-8 "
+        "and run the command again"
+    )

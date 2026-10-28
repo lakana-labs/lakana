@@ -677,9 +677,18 @@ def test_table_append_refuses_a_csv_that_is_not_utf8(tmp_path: Path, command: st
 
     assert result.exit_code == 8, result.output
     assert (
-        "data.csv is not UTF-8 (byte 0xfc at position 13); save it as UTF-8 and load it again"
+        "data.csv is not UTF-8 (byte 0xfc at position 13); convert it to UTF-8 and run the "
+        "command again"
     ) in _plain(result.stderr)
     assert all(r.method == "GET" for r in api.requests)
+
+
+@pytest.mark.parametrize("command", ["append", "replace", "merge"])
+def test_table_help_says_a_csv_must_be_utf8(tmp_path: Path, command: str) -> None:
+    """Every command that reads a CSV says it must be UTF-8, `replace --evolve-schema` too."""
+    result = invoke(make_state(tmp_path, FakeApi()), "table", command, "--help")
+
+    assert "A CSV must be UTF-8" in _plain(result.stdout)
 
 
 def test_table_append_reads_a_utf8_csv_with_a_byte_order_mark(tmp_path: Path) -> None:

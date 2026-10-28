@@ -133,7 +133,7 @@ is audited; the dry run checks this too, so nothing is uploaded before the refus
 | exit 2 | a file larger than one upload may be | `big.parquet (300000000 bytes) is larger than one upload may be (256 MiB); load it with a Python asset and a directory or object-store connection` |
 | exit 2 | a JSON array or spreadsheet without the `assets` extra | `reading .xlsx needs the assets extra: pip install 'lakana[assets]'` |
 | exit 2 | you answer no | `Aborted.` |
-| exit 8 | a CSV or NDJSON file that is not UTF-8 | `data.csv is not UTF-8 (byte 0xfc at position 6); save it as UTF-8 and load it again` |
+| exit 8 | a CSV or NDJSON file that is not UTF-8 | `data.csv is not UTF-8 (byte 0xfc at position 6); convert it to UTF-8 and run the command again` |
 | exit 8 | a file without columns (such as a JSON file `[]`) | `empty.json has no columns; a load needs at least one column and one row: add them and load it again` |
 | exit 8 | a CSV, JSON or spreadsheet without rows (only a header) | `hdr.csv has no rows, so there is nothing to load and no column types to infer; add rows and load it again` |
 | exit 8 | a column that is empty in every row | ``nullcol.csv: column `b` has no values in any row, so its type cannot be inferred; fill it or drop it, then load it again`` |

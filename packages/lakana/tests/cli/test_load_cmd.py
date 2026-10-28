@@ -757,7 +757,8 @@ def _fail(tmp_path: Path, name: str, content: bytes, *options: str) -> tuple[int
             b"name\nM\xfcnchen\n",
             (),
             8,
-            "data.csv is not UTF-8 (byte 0xfc at position 6); save it as UTF-8 and load it again",
+            "data.csv is not UTF-8 (byte 0xfc at position 6); convert it to UTF-8 and run the "
+            "command again",
         ),
         (
             "hdr.csv",
@@ -933,3 +934,19 @@ def test_a_type_that_shows_after_the_first_mib_is_inferred_from_the_whole_file(
     sent = _rows_sent(_loads(api)[-1])
     assert sent.num_rows == 400_001
     assert sent.schema.field(column).type == kind
+
+
+@pytest.mark.parametrize("name", ["bom.csv", "bom.ndjson"])
+def test_a_byte_order_mark_is_not_part_of_the_first_column(tmp_path: Path, name: str) -> None:
+    """A UTF-8 byte order mark is allowed and skipped; the first column keeps its name."""
+    path = tmp_path / name
+    text = "id,name\n1,a\n" if name.endswith(".csv") else '{"id": 1, "name": "a"}\n'
+    path.write_bytes(b"\xef\xbb\xbf" + text.encode())
+    api = _api()
+
+    result = invoke(
+        make_state(tmp_path, api), "load", str(path), "customers", "--env", "dev", "--yes"
+    )
+
+    assert result.exit_code == 0, result.output
+    assert _rows_sent(_loads(api)[-1]).column_names == ["id", "name"]

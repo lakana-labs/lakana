@@ -125,7 +125,8 @@ def _csv(path: Path, header_row: int) -> pa.Table:
     pa.Table
         The rows.
     """
-    data = _files.strict_utf8(path, path.read_bytes())
+    data = path.read_bytes()
+    _files.strict_utf8(path, data)
     read = pacsv.ReadOptions(
         skip_rows=max(header_row - 1, 0), autogenerate_column_names=not header_row
     )
@@ -160,7 +161,7 @@ def _ndjson(path: Path, data: bytes) -> pa.Table:
     """
     from lakana.ingest._formats import MAX_NESTING, nested_deeper
 
-    data = _files.strict_utf8(path, data)
+    _files.strict_utf8(path, data)
     if nested_deeper(data):
         raise CliError(
             f"{_output.inline(path.name)} nests arrays and objects deeper than {MAX_NESTING} "
