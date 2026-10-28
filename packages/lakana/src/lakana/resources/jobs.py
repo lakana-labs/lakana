@@ -30,7 +30,7 @@ def _when(value: str | None) -> datetime | None:
     return datetime.fromisoformat(value) if value is not None else None
 
 
-_KINDS = ("schedule", "on_demand")
+_KINDS = ("schedule", "deploy", "on_demand")
 """The trigger kinds this SDK reads; any other is left out."""
 
 

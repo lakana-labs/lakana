@@ -199,7 +199,8 @@ def list_runs(
         Only runs in these statuses (`queued`, `running`, `succeeded`, `failed`,
         `cancelled`); repeat the parameter or separate the values with commas.
     trigger
-        Only runs started this way (`schedule`, `api`, `manual`); repeat or separate with commas.
+        Only runs started this way (`schedule`, `api`, `manual`, `deploy`); repeat or separate
+        with commas.
     job
         Only runs of this job.
     since

@@ -8,7 +8,8 @@ down.
 In short:
 
 - A **job** is a name for a selection of assets, with an optional schedule. It lives in
-  `lakana.yaml`, so a deploy changes it together with the code.
+  `lakana.yaml`, so a deploy changes it together with the code. A job can also start after each
+  deploy.
 - A scheduled run starts **as a service account** that an administrator binds to the deployment.
   Without one, nothing runs by itself.
 - Only one run of a project is active at a time. A start that meets an active run **waits** and
@@ -144,8 +145,8 @@ lakana job list --env dev
 Not shown: repository, last_run. Use --output json to see them.
 ```
 
-`triggers` lists how each job starts: its schedule (marked `(paused)` while paused) and `on demand`, which every job has. The next run is shown in the job's time zone and in UTC. `last_run`, hidden when the terminal is narrow (`--output json` has it), shows the status of the latest
-run and what started it (`schedule`, `api` or `manual`). The list shows every job of the
+`triggers` lists how each job starts: its schedule (marked `(paused)` while paused), `after each deploy` for a job with `on_deploy: true`, and `on demand`, which every job has. The next run is shown in the job's time zone and in UTC. `last_run`, hidden when the terminal is narrow (`--output json` has it), shows the status of the latest
+run and what started it (`schedule`, `api`, `manual` or `deploy`). The list shows every job of the
 environment to anyone who may read it; `--repo` limits it to one repository.
 
 | State | Meaning | What to do |
@@ -223,7 +224,7 @@ lakana --output json runs list --env dev --limit 1
 ```
 
 The fields `job`, `trigger` (`manual` for a person, `api` for a service account, `schedule` for the
-timer; null for an ad-hoc `lakana run`), `scheduled_for` and `missed` are the last four of the run.
+timer, `deploy` for a start after a deploy; null for an ad-hoc `lakana run`), `scheduled_for` and `missed` are the last four of the run.
 
 From CI, give the pipeline a service account with `RUN` on the environment and its token (see
 [CI deploys to protected environments](projects.md#ci-deploys-to-protected-environments) for the
@@ -266,6 +267,111 @@ run. A script that needs the result follows the run it names with `lakana runs s
 A start by hand follows the rules of `lakana run` for who the run writes as: the bound run
 principal if there is one; in an unprotected environment otherwise the caller; in a protected one
 without a principal it is refused with a message that says to bind one.
+
+## Start a job after each deploy
+
+A job can also start by itself right after a deploy, for example to rebuild the tables whose SQL
+the deploy just changed. Add `on_deploy: true` to it. This guide's second example,
+`docs/examples/run-after-deploy/`, has the project:
+
+<!-- source: docs/examples/run-after-deploy/project/jobs.yaml -->
+```yaml
+jobs:
+  refresh:
+    select: ["silver.*"]
+    upstream: true
+    on_deploy: true
+environments:
+  prod:
+    jobs:
+      refresh: { on_deploy: false }
+```
+
+`refresh` starts after each deploy in every environment but `prod`, where the override turns it
+off. It has no schedule, so it starts only after a deploy, by hand or through the API; a job can
+have both a schedule and `on_deploy: true`. A deploy prints the run it started:
+
+<!-- source: docs/examples/run-after-deploy/run.sh#deploy -->
+```bash
+lakana deploy --env dev
+```
+
+<!-- output: run-after-deploy#deploy -->
+```text
+Queued deploy 0a45ad2b-cfcb-4ac2-8843-83cf57245e89
+Deployed readings in dev at e34e3221afbf6ae591a6c39a1cffdbcf318ac207
+┏━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ change ┃ table                       ┃
+┡━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ added  │ bronze.readings             │
+│ added  │ silver.station_temperatures │
+└────────┴─────────────────────────────┘
+Jobs:
+  added refresh
+Jobs started after the deploy:
+  refresh: run 3a17e4b3-b4ce-4b3f-b0f7-79fd38ac160b
+Hint: follow a run with 'lakana runs show RUN_ID --env dev'.
+```
+
+The run has the trigger `deploy`, so you can find the runs that deploys started:
+
+<!-- source: docs/examples/run-after-deploy/run.sh#runs -->
+```bash
+lakana --output json runs list --env dev --trigger deploy --limit 1
+```
+
+The rules:
+
+- **It starts only when the deploy changes what is deployed.** That is, when the deploy makes
+  another project version current: the first deploy, a new commit, or a commit you deployed
+  before and deploy again over a newer one. Deploying the commit that is already current changes
+  nothing and starts nothing. A dry run, a rollback and a deploy that fails start nothing either.
+- **It runs as whoever deployed**, with the rights the deploy had, as if they had run
+  `lakana job run` right after the deploy: they need `RUN` on the environment, and a protected
+  environment needs a bound run principal (the run then writes as that account). A deploy through
+  a CI token (`LAKANA_OIDC`) starts the jobs only when its CI trust rule opts in with
+  `start_on_deploy_jobs`; the start is then allowed by the rule, and its audit event names it
+  ([CI trust rules](../reference/ci-trust-rules.md)). The start is in
+  the audit log as `RUN_STARTED` with the trigger `deploy` and the deployer as its actor.
+- **A busy project makes it wait**, like any other start: the deploy prints
+  `waits for run RUN_ID; it starts then`, and the job shows as `waiting` in `lakana job list`. When
+  it begins it is checked again, as a waiting start by hand is.
+- **A deployer without `RUN` still deploys.** The job does not start, and the deploy ends with a
+  warning that names the job, the missing right and the two ways on. A CI account that may only
+  deploy, for example:
+
+<!-- source: docs/examples/run-after-deploy/run.sh#ci-account -->
+```bash
+lakana principal create ci-deploy --type service-account
+lakana grant create --principal ci-deploy --action DEPLOY --kind ENVIRONMENT --env dev
+```
+
+Its deploy goes through, and says what to do about the job:
+
+<!-- source: docs/examples/run-after-deploy/run.sh#ci-deploy -->
+```bash
+lakana deploy --env dev
+```
+
+<!-- output: run-after-deploy#ci-deploy -->
+```text
+Queued deploy c61d46b2-14af-42a5-9a9d-92b464e4041c
+Deployed readings in dev at ffdc9d4c590f944b1351944e258e39839567f979
+No changes.
+warning: job `refresh` was not started: ci-deploy may not RUN in `dev`. Grant RUN with `lakana grant create --principal ci-deploy --action RUN --kind ENVIRONMENT --env dev`, or start the job yourself with `lakana job run refresh --repo readings --env dev`.
+Hint: run 'lakana run --env dev' to run what you just deployed.
+```
+
+Grant the account `RUN` as the warning says, or start the job yourself. Every outcome is also in
+the deploy's record, under `job_starts` in the JSON of the deploy
+([Jobs reference](../reference/jobs.md#after-a-deploy)).
+
+**A start can be lost.** The worker that ran the deploy starts the jobs right after the deploy
+is recorded. If that worker stops in between (it crashed, or its machine went down), the deploy
+stays succeeded and nothing tries again. The deploy's record then shows the job with the reason
+`lost`, and `lakana deploy` prints a warning. The worker may have stopped after it started the
+job and before it recorded that, so look for the job's run first, as the warning says
+(`lakana runs list --repo REPO --trigger deploy --job JOB`), and start it by hand only if there is none.
 
 ## When the project is busy
 

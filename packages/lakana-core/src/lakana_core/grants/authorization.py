@@ -281,6 +281,8 @@ class GrantAuthorization:
             except PermissionDenied as exc:
                 return Decision(allowed=False, grants=(), reason=str(exc))
         if principal.ci_scope is not None:
+            if self._ci_deploy_job_start(principal.ci_scope, action, securable):
+                return Decision(allowed=True, grants=(), reason=None)
             reason = self._ci_scope_refusal(principal, principal.ci_scope, action, securable)
             if reason is not None:
                 return Decision(allowed=False, grants=(), reason=reason)
@@ -467,6 +469,38 @@ class GrantAuthorization:
                 grant.namespace + NAMESPACE_SEPARATOR
             )
         return table_id is not None and grant.table_id == table_id
+
+    @staticmethod
+    def _ci_deploy_job_start(scope: CiScope, action: Action, securable: Securable) -> bool:
+        """Say whether a CI scope may start its deploy's `on_deploy` jobs here.
+
+        The one widening of a CI scope, and an explicit one: the trust rule opted in
+        (`start_on_deploy_jobs`), and the worker is starting the jobs of the deploy the token
+        queued (`starting_deploy_jobs`, which no request can set). Then `RUN` on the scope's own
+        environment is allowed by the rule itself, not by the account's grants; every other
+        action, environment or securable is decided as before.
+
+        Parameters
+        ----------
+        scope
+            The CI scope.
+        action
+            The action requested.
+        securable
+            The object acted upon.
+
+        Returns
+        -------
+        bool
+            Whether the rule allows it.
+        """
+        return (
+            scope.start_on_deploy_jobs
+            and scope.starting_deploy_jobs
+            and action is Action.RUN
+            and securable.kind == SecurableKind.ENVIRONMENT
+            and securable.environment == scope.environment
+        )
 
     @staticmethod
     def _ci_scope_refusal(

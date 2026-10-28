@@ -942,3 +942,48 @@ def test_a_due_schedule_is_fired_by_the_leader_and_a_worker_builds_its_table(
         reader.join(0.1)
     table = thread_result(reader, result)
     assert table.to_pylist() == [{"id": 1}, {"id": 2}, {"id": 3}]  # ty: ignore[unresolved-attribute]
+
+
+_ON_DEPLOY = (
+    "defaults:\n  retry_delay: 0\n  retries: 1\n"
+    "jobs:\n  refresh:\n    select: ['silver.*']\n    on_deploy: true\n"
+)
+
+
+def test_a_deploy_starts_its_job_and_the_next_deploy_waits_for_that_run(
+    stack: QueryStack,
+) -> None:
+    """On Postgres, through the worker: the deploy's start runs, the next one waits, then runs.
+
+    The same commit deployed again starts nothing.
+    """
+    environment = stack.environment()
+    repository = unique_name()
+    path = stack.services.roots / repository
+    commit_files(path, {"lakana.yaml": _ON_DEPLOY, **_FILES})
+    stack.admin.repositories.create(repository, "local", str(path))
+    project = Project(environment, repository, path)
+
+    first = stack.admin.deploys.create(environment, repository)
+    _drain(stack)
+    (start,) = stack.admin.deploys.wait(environment, first.id, timeout=30).job_starts
+    (run,) = _runs(stack, project)
+    assert (start.outcome, start.run_id) == ("started", str(run.id))
+    assert (run.trigger, run.triggered_by) == (RunTrigger.DEPLOY, _admin(stack).id)
+
+    commit_files(path, {"assets/silver/y.sql": "SELECT id FROM bronze.nums\n"})
+    second = stack.admin.deploys.create(environment, repository)
+    _drain(stack)
+    (waiting,) = stack.admin.deploys.wait(environment, second.id, timeout=30).job_starts
+    assert (waiting.outcome, waiting.waits_for_run_id) == ("waiting", str(run.id))
+    assert len(_runs(stack, project)) == 1
+
+    _end_runs(stack, project)
+    (started,) = _start_waiting(stack)
+    assert (started.trigger, started.triggered_by) == (RunTrigger.DEPLOY, _admin(stack).id)
+
+    _end_runs(stack, project)
+    same = stack.admin.deploys.create(environment, repository)
+    _drain(stack)
+    assert stack.admin.deploys.wait(environment, same.id, timeout=30).job_starts == ()
+    assert len(_runs(stack, project)) == 2

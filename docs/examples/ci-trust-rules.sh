@@ -39,6 +39,10 @@ lakana ci-trust create --issuer gitlab --principal ci-prod --env prod --repo ana
 lakana ci-trust update RULE_ID --kind deploy --kind dry_run
 # docs:end both-kinds
 
+# docs:start start-jobs
+lakana ci-trust update RULE_ID --start-on-deploy-jobs
+# docs:end start-jobs
+
 # docs:start explain
 lakana ci-trust explain --claims claims.json --env prod --repo analytics
 # docs:end explain

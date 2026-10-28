@@ -83,6 +83,7 @@ def create_ci_trust_rule(
             repository=body.repository,
             kinds=body.kinds,
             conditions=body.conditions,
+            start_on_deploy_jobs=body.start_on_deploy_jobs,
         )
     )
 
@@ -183,7 +184,8 @@ def update_ci_trust_rule(
 ) -> CiTrustRuleOut:
     """Change a CI trust rule.
 
-    Changes the rule's principal, kinds or conditions. The tokens issued under it end. Needs
+    Changes the rule's principal, kinds, conditions or `start_on_deploy_jobs`. The tokens issued
+    under it end. Needs
     the `ADMIN` role on the instance. Answers 404 when there is no such rule or principal
     and 422 when nothing is given or a field breaks the rules of a trust rule.
 
@@ -210,6 +212,7 @@ def update_ci_trust_rule(
             principal=body.principal,
             kinds=body.kinds,
             conditions=body.conditions,
+            start_on_deploy_jobs=body.start_on_deploy_jobs,
         )
     )
 

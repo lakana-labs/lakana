@@ -338,6 +338,8 @@ class CiTrustRuleView:
         Claim name to required text.
     enabled
         Whether it accepts ID tokens.
+    start_on_deploy_jobs
+        Whether a deploy accepted under it starts the project's jobs with ``on_deploy: true``.
     created_by
         Who created it; `None` once that principal is deleted.
     created_at
@@ -360,6 +362,7 @@ class CiTrustRuleView:
     created_at: datetime
     updated_by: str | None
     updated_at: datetime
+    start_on_deploy_jobs: bool = False
 
 
 @dataclass(frozen=True)
@@ -578,6 +581,7 @@ class CiTrustRuleService:
             created_at=row.created_at,
             updated_by=self._name(Principal, row.updated_by) or None,
             updated_at=row.updated_at,
+            start_on_deploy_jobs=row.start_on_deploy_jobs,
         )
 
     def _audit(
@@ -608,6 +612,7 @@ class CiTrustRuleService:
                 "repository": view.repository,
                 "kinds": view.kinds,
                 "conditions": view.conditions,
+                "start_on_deploy_jobs": view.start_on_deploy_jobs,
                 **extra,
             },
         )
@@ -622,6 +627,7 @@ class CiTrustRuleService:
         repository: str,
         kinds: Sequence[str],
         conditions: Mapping[str, str],
+        start_on_deploy_jobs: bool = False,
     ) -> CiTrustRuleView:
         """Create an enabled rule.
 
@@ -641,6 +647,9 @@ class CiTrustRuleService:
             ``deploy`` and/or ``dry_run``.
         conditions
             Claim name to the exact text the claim must have.
+        start_on_deploy_jobs
+            Let a deploy accepted under the rule start the project's jobs with
+            ``on_deploy: true`` in the environment, as the CI identity; off by default.
 
         Returns
         -------
@@ -673,6 +682,7 @@ class CiTrustRuleService:
             kinds=allowed,
             conditions=pinned,
             enabled=True,
+            start_on_deploy_jobs=start_on_deploy_jobs,
             revision=1,
             created_by=p.id,
             created_at=now,
@@ -742,8 +752,9 @@ class CiTrustRuleService:
         principal: str | None = None,
         kinds: Sequence[str] | None = None,
         conditions: Mapping[str, str] | None = None,
+        start_on_deploy_jobs: bool | None = None,
     ) -> CiTrustRuleView:
-        """Change a rule's principal, kinds or conditions; every token issued under it ends.
+        """Change a rule's principal, kinds, conditions or opt-in; every token issued under it ends.
 
         The issuer, environment and repository never change: create another rule instead.
 
@@ -759,6 +770,8 @@ class CiTrustRuleService:
             New kinds.
         conditions
             New conditions, replacing all of the old ones.
+        start_on_deploy_jobs
+            Whether a deploy under the rule starts the project's ``on_deploy`` jobs.
 
         Returns
         -------
@@ -776,8 +789,17 @@ class CiTrustRuleService:
         """
         authorize_admin_only(self._session, self._authz, p, Action.MANAGE_TOKEN)
         row = self._rule(rule_id)
-        if principal is None and kinds is None and conditions is None:
-            raise ValidationError("Nothing to change: give a principal, kinds or conditions.")
+        if (
+            principal is None
+            and kinds is None
+            and conditions is None
+            and start_on_deploy_jobs is None
+        ):
+            raise ValidationError(
+                "Nothing to change: give a principal, kinds, conditions or start_on_deploy_jobs."
+            )
+        if start_on_deploy_jobs is not None:
+            row.start_on_deploy_jobs = start_on_deploy_jobs
         if kinds is not None:
             row.kinds = _validate_kinds(kinds)
         row.conditions = _validate_conditions(

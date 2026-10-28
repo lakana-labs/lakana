@@ -238,6 +238,7 @@ def add_rule(
     repository: str = "analytics",
     kinds: tuple[str, ...] = ("deploy", "dry_run"),
     conditions: dict[str, str] | None = None,
+    start_on_deploy_jobs: bool = False,
 ) -> uuid.UUID:
     """Create a rule for ``deployer`` that matches `claims()`.
 
@@ -255,6 +256,8 @@ def add_rule(
         What it allows.
     conditions
         Its claim conditions; ``repository_id`` and ``ref`` of `claims()` by default.
+    start_on_deploy_jobs
+        Whether its deploys start the project's `on_deploy` jobs.
 
     Returns
     -------
@@ -270,6 +273,7 @@ def add_rule(
         kinds=list(kinds),
         conditions=conditions
         or {"repository_id": "123456", "ref": "refs/heads/main", "event_name": "push"},
+        start_on_deploy_jobs=start_on_deploy_jobs,
     )
     return view.id
 

@@ -5,6 +5,7 @@ The server only queues and reads: the worker fetches, validates and records.
 
 from __future__ import annotations
 
+import dataclasses
 import uuid
 
 from fastapi import APIRouter, Depends, Query, Response
@@ -16,6 +17,7 @@ from lakana_server.api.platform.listing import set_next_cursor
 from lakana_server.api.platform.schemas import (
     DeployAccepted,
     DeployCreate,
+    DeployJobStartOut,
     DeploymentOut,
     DeployOut,
     OrphanOut,
@@ -68,6 +70,7 @@ def _to_out(view: DeployRunView) -> DeployOut:
         checks=view.checks,
         warnings=view.warnings,
         waiting_for=None if view.waiting_for is None else view.waiting_for.to_json(),
+        job_starts=[DeployJobStartOut(**dataclasses.asdict(start)) for start in view.job_starts],
     )
 
 

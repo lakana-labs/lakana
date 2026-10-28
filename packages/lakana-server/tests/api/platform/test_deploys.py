@@ -403,6 +403,53 @@ def test_a_deploy_run_shows_its_checks(client: TestClient) -> None:
     }
 
 
+def test_a_deploy_body_names_the_jobs_it_started(client: TestClient) -> None:
+    """`job_starts` lists each job's outcome; empty for a deploy that starts no job."""
+    _setup(client)
+    plain = client.post(
+        "/api/v1/environments/dev/deploys", headers=AUTH_HEADER, json={"repository": "analytics"}
+    ).json()
+    started = client.post(
+        "/api/v1/environments/dev/deploys", headers=AUTH_HEADER, json={"repository": "analytics"}
+    ).json()
+    run_id, active_id = uuid.uuid4(), uuid.uuid4()
+    with Session(client.app.state.engine) as session:
+        run = session.get(DeployRun, uuid.UUID(started["id"]))
+        assert run is not None
+        run.status = DeployStatus.SUCCEEDED
+        run.finished_at = db_now(session)
+        run.job_starts_json = [
+            {"job": "a", "outcome": "started", "run_id": str(run_id)},
+            {"job": "b", "outcome": "waiting", "waits_for_run_id": str(active_id)},
+            {
+                "job": "c",
+                "outcome": "not_started",
+                "reason": "lacks_run",
+                "message": "job `c` was not started: admin may not RUN in `dev`.",
+            },
+            {"job": "d", "outcome": "pending"},
+        ]
+        session.commit()
+
+    body = client.get(f"/api/v1/environments/dev/deploys/{started['id']}", headers=AUTH_HEADER)
+
+    empty = {"run_id": None, "waits_for_run_id": None, "reason": None, "message": None}
+    assert body.json()["job_starts"] == [
+        {**empty, "job": "a", "outcome": "started", "run_id": str(run_id)},
+        {**empty, "job": "b", "outcome": "waiting", "waits_for_run_id": str(active_id)},
+        {
+            **empty,
+            "job": "c",
+            "outcome": "not_started",
+            "reason": "lacks_run",
+            "message": "job `c` was not started: admin may not RUN in `dev`.",
+        },
+        {**empty, "job": "d", "outcome": "pending"},
+    ]
+    bare = client.get(f"/api/v1/environments/dev/deploys/{plain['id']}", headers=AUTH_HEADER)
+    assert bare.json()["job_starts"] == []
+
+
 def _queue_deploy(client: TestClient) -> str:
     """Queue a deploy of `analytics` and return its id.
 

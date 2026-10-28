@@ -10,6 +10,7 @@ from lakana_core.projects.manifest import (
     entry_keep_versions,
     entry_output,
     entry_write,
+    job_on_deploy,
     manifest_assets,
     manifest_jobs,
 )
@@ -61,8 +62,9 @@ def _job_changes(before: dict[str, Any], after: dict[str, Any]) -> list[str]:
     -------
     list of str
         ``selection`` (patterns or closure flags), ``cron`` (also a schedule added or removed)
-        and ``time zone`` (when both versions have a schedule), and ``notify`` (a notification
-        added, removed or changed in its secret or format), for each that changed.
+        and ``time zone`` (when both versions have a schedule), ``notify`` (a notification
+        added, removed or changed in its secret or format) and ``on deploy`` (the job starts after
+        each deploy, or no longer does), for each that changed.
     """
     schedule_before = before.get("schedule") or {}
     schedule_after = after.get("schedule") or {}
@@ -81,6 +83,8 @@ def _job_changes(before: dict[str, Any], after: dict[str, Any]) -> list[str]:
         changes.append("time zone")
     if before.get("notify") != after.get("notify"):
         changes.append("notify")
+    if job_on_deploy(before) != job_on_deploy(after):
+        changes.append("on deploy")
     return changes
 
 

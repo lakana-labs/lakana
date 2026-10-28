@@ -1,0 +1,9 @@
+jobs:
+  refresh:
+    select: ["silver.*"]
+    upstream: true
+    on_deploy: true
+environments:
+  prod:
+    jobs:
+      refresh: { on_deploy: false }

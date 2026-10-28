@@ -182,6 +182,24 @@ Exchanged the CI job's ID token: acting as ci-prod for one deploy of analytics a
 - Each `lakana deploy` makes its own exchange. A job that runs a dry run and then a deploy gets a
   new ID token from GitHub for each, without anything to configure.
 
+## Start the project's jobs after a deploy
+
+A job with `on_deploy: true` in `lakana.yaml` starts after each deploy
+([Start a job after each deploy](run-a-job-on-a-schedule.md#start-a-job-after-each-deploy)). A
+deploy through a CI token starts it only when the trust rule opts in; without that, the deploy
+succeeds and its warning names each job it did not start. To opt in, for the prod rule
+(`lakana ci-trust list` shows its id):
+
+<!-- source: docs/examples/ci-trust-rules.sh#start-jobs -->
+```bash
+lakana ci-trust update RULE_ID --start-on-deploy-jobs
+```
+
+The deploys under that rule then start the deployed project's `on_deploy` jobs in that
+environment, as the rule's account, and nothing else: the CI token still cannot start any other
+run. In a protected environment the run writes as the bound run principal and needs one. The
+audit event of each run names the rule ([CI trust rules](../reference/ci-trust-rules.md)).
+
 ## What a stolen CI token can do
 
 Very little, by design. A CI token expires after an hour (the operator's

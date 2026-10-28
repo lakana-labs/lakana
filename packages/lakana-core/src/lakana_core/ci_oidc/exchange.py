@@ -350,6 +350,7 @@ def resolve_ci_scope(
         sha=token.sha,
         used=token.used_at is not None,
         expires_at=token.expires_at,
+        start_on_deploy_jobs=rule.start_on_deploy_jobs,
     )
 
 

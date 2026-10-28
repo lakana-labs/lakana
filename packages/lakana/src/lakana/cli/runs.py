@@ -742,8 +742,8 @@ def list_runs(
         list[str] | None,
         typer.Option(
             "--trigger",
-            help="Only runs started this way: schedule, api or manual. Repeat the option or "
-            "separate the values with commas.",
+            help="Only runs started this way: schedule, api, manual or deploy. Repeat the "
+            "option or separate the values with commas.",
         ),
     ] = None,
     job: Annotated[str | None, typer.Option("--job", help="Only runs of this job.")] = None,

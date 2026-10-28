@@ -56,6 +56,14 @@ def create(
         list[str] | None,
         typer.Option("--kind", help="deploy (the default) or dry_run; repeat for both."),
     ] = None,
+    start_on_deploy_jobs: Annotated[
+        bool,
+        typer.Option(
+            "--start-on-deploy-jobs",
+            help="Let a deploy under this rule start the project's jobs with on_deploy: true "
+            "in its environment, as the CI identity (off by default).",
+        ),
+    ] = False,
 ) -> None:
     """Create a CI trust rule.
 
@@ -75,6 +83,8 @@ def create(
         The claim conditions.
     kind
         What the rule allows.
+    start_on_deploy_jobs
+        Whether its deploys start the project's on_deploy jobs.
     """
     state = state_of(ctx)
     rule = state.client().ci_trust_rules.create(
@@ -84,12 +94,14 @@ def create(
         repository=repo,
         conditions=parse_key_values(claim, "--claim"),
         kinds=kind or ["deploy"],
+        start_on_deploy_jobs=start_on_deploy_jobs,
     )
+    starts = " Each deploy starts the deploy's on_deploy jobs." if rule.start_on_deploy_jobs else ""
     _output.done(
         state,
         f"Created CI trust rule {rule.id}: {_output.inline(rule.issuer)} jobs may "
         f"{' and '.join(rule.kinds)} {_output.inline(repo)} to {_output.inline(env)} as "
-        f"{_output.inline(principal)}.\n"
+        f"{_output.inline(principal)}.{starts}\n"
         f"Check that {_output.inline(principal)} holds DEPLOY there: "
         f"lakana access explain {shlex.quote(principal)} --scope {shlex.quote(env)}",
         rule,
@@ -145,6 +157,13 @@ def update(
     kind: Annotated[
         list[str] | None, typer.Option("--kind", help="deploy or dry_run (repeatable).")
     ] = None,
+    start_on_deploy_jobs: Annotated[
+        bool | None,
+        typer.Option(
+            "--start-on-deploy-jobs/--no-start-on-deploy-jobs",
+            help="Whether a deploy under this rule starts the project's on_deploy jobs.",
+        ),
+    ] = None,
 ) -> None:
     """Change CI trust rule RULE_ID; the tokens issued under it stop working at once.
 
@@ -160,6 +179,8 @@ def update(
         New claim conditions, replacing the old ones.
     kind
         New kinds.
+    start_on_deploy_jobs
+        Whether its deploys start the project's on_deploy jobs.
 
     Raises
     ------
@@ -167,13 +188,16 @@ def update(
         If nothing would change (exit 2).
     """
     state = state_of(ctx)
-    if principal is None and not claim and not kind:
-        raise CliError("Nothing to change; pass --principal, --claim or --kind.")
+    if principal is None and not claim and not kind and start_on_deploy_jobs is None:
+        raise CliError(
+            "Nothing to change; pass --principal, --claim, --kind or --start-on-deploy-jobs."
+        )
     rule = state.client().ci_trust_rules.update(
         rule_id,
         principal=principal,
         kinds=kind or None,
         conditions=parse_key_values(claim, "--claim") if claim else None,
+        start_on_deploy_jobs=start_on_deploy_jobs,
     )
     _output.done(state, f"Updated CI trust rule {rule.id}.", rule)
 
