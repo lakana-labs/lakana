@@ -17,6 +17,7 @@ import secrets
 import socket
 import sqlite3
 import ssl
+import struct
 import subprocess
 import sys
 import threading
@@ -28,6 +29,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
+from pg_wire_fixture import Login, error_response, pg_login_server
 from sdk_tls_fixture import (
     Answer,
     Authority,
@@ -1666,9 +1668,12 @@ class _PgError(Exception):
 
 
 def _fake_postgres(
-    monkeypatch: pytest.MonkeyPatch, refuse: str | None = None, refuse_select: str | None = None
+    monkeypatch: pytest.MonkeyPatch,
+    refuse: str | None = None,
+    refuse_select: str | None = None,
+    sqlstate: str | None = None,
 ) -> list[str]:
-    """Put a fake ``adbc_driver_postgresql.dbapi`` in place.
+    """Put a fake ``adbc_driver_postgresql.dbapi`` in place, and a fake second login.
 
     Parameters
     ----------
@@ -1678,6 +1683,8 @@ def _fake_postgres(
         The text `connect` raises, or `None` to accept.
     refuse_select
         The text `execute` raises, or `None` to run the statement.
+    sqlstate
+        What `_check.postgres_refusal` finds after a refused `connect`.
 
     Returns
     -------
@@ -1711,6 +1718,9 @@ def _fake_postgres(
     module.connect = connect  # ty: ignore[unresolved-attribute]
     module.Error = _PgError  # ty: ignore[unresolved-attribute]
     monkeypatch.setitem(sys.modules, "adbc_driver_postgresql.dbapi", module)
+    if "adbc_driver_postgresql" in sys.modules:  # imported for real by an end-to-end test
+        monkeypatch.setattr(sys.modules["adbc_driver_postgresql"], "dbapi", module, raising=False)
+    monkeypatch.setattr(_check, "postgres_refusal", lambda *args: sqlstate)
     return seen
 
 
@@ -1761,31 +1771,47 @@ def test_postgresql_credentials_log_in_and_execute_select_1(
 
 
 @pytest.mark.parametrize(
-    ("refusal", "outcome", "fragment"),
+    ("refusal", "sqlstate", "outcome", "fragment"),
     [
         (
             'FATAL:  password authentication failed for user "reader"',
+            "28P01",
             "credentials",
             "PostgreSQL refused the login (FATAL: password",
         ),
-        ("SSL error: certificate verify failed", "tls", "not trusted for `localhost`"),
+        (
+            "FATAL:  kein pg_hba.conf-Eintrag für Host »10.0.0.1«",
+            "28000",
+            "credentials",
+            "PostgreSQL refused the login (FATAL: kein pg_hba.conf-Eintrag",
+        ),
+        ("SSL error: certificate verify failed", None, "tls", "not trusted for `localhost`"),
         (
             'FATAL:  database "crm" does not exist',
+            "3D000",
             "failed",
             'the PostgreSQL login failed (FATAL: database "crm"',
         ),
+        (
+            'FATAL:  password authentication failed for user "reader"',
+            None,
+            "failed",
+            "the PostgreSQL login failed (FATAL: password",
+        ),
     ],
+    ids=["28P01", "28000", "tls", "3D000", "no-sqlstate"],
 )
 def test_a_refused_postgresql_login_is_its_outcome(
     authority: Authority,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     refusal: str,
+    sqlstate: str | None,
     outcome: str,
     fragment: str,
 ) -> None:
-    """The server's words are kept, the password never."""
-    _fake_postgres(monkeypatch, refuse=f"{refusal} {SECRET}")
+    """Classified by the SQLSTATE, never by words; the server's words are kept, the password not."""
+    _fake_postgres(monkeypatch, refuse=f"{refusal} {SECRET}", sqlstate=sqlstate)
     with listening(tls_server(authority, tmp_path)) as port:
         found, message = _check.check(_pg_body(port, authority), {}, timeout=FAST)
 
@@ -2047,7 +2073,9 @@ def test_a_server_s_control_characters_are_escaped_in_the_message(
     authority: Authority, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A hostile server cannot forge a line or recolour a terminal through its error text."""
-    _fake_postgres(monkeypatch, refuse="FATAL: \x1b[2Jno pg_hba.conf entry ‮evil\x07")
+    _fake_postgres(
+        monkeypatch, refuse="FATAL: \x1b[2Jno pg_hba.conf entry ‮evil\x07", sqlstate="28000"
+    )
     with listening(tls_server(authority, tmp_path)) as port:
         outcome, message = _check.check(_pg_body(port, authority), {}, timeout=FAST)
 
@@ -2914,3 +2942,222 @@ def test_an_http_connection_whose_auth_sends_nothing_is_not_sent_a_get(
 
     assert (outcome, server.seen) == ("ok", [])
     assert message.endswith("TLS verified")
+
+
+# --- the SQLSTATE of a refused PostgreSQL login ---------------------------------------------------
+
+
+def _wire_body(port: int, password: str, tls: str = "disable") -> dict[str, object]:
+    """Build a `postgresql` connection on a fake wire server.
+
+    Parameters
+    ----------
+    port
+        The server's port.
+    password
+        The connection's password.
+    tls
+        Its ``tls`` setting.
+
+    Returns
+    -------
+    dict
+        The body.
+    """
+    return connection(
+        "postgresql",
+        {"host": "localhost", "port": port, "database": "crm"},
+        {"user": "reader", "tls": tls},
+        secret={"password": password},
+    )
+
+
+@pytest.mark.parametrize(
+    ("login", "outcome"),
+    [
+        (Login("cleartext"), "credentials"),
+        (Login("md5"), "credentials"),
+        (Login("scram"), "credentials"),
+        (
+            Login("now", sqlstate="28000", message="kein pg_hba.conf-Eintrag für Host"),
+            "credentials",
+        ),
+        (Login("now", sqlstate="53300", message="zu viele Verbindungen"), "failed"),
+    ],
+    ids=["cleartext", "md5", "scram", "pg-hba", "too-many"],
+)
+def test_a_login_refused_in_german_is_classified_by_its_sqlstate(
+    login: Login, outcome: str
+) -> None:
+    """A refused login carries no SQLSTATE in libpq; the check's own login reads it."""
+    login.password = secrets.token_urlsafe(12)
+    with pg_login_server(login) as port:
+        found, message = _check.check(_wire_body(port, "not-the-password"), {}, timeout=FAST)
+
+    assert found == outcome
+    assert login.message in message
+    assert login.seen == ["reader", "reader"]
+
+
+@pytest.mark.parametrize("auth", ["cleartext", "md5", "scram"])
+def test_a_right_password_with_a_missing_database_is_no_credentials_failure(auth: str) -> None:
+    """The fake server checks each answer: a wrong SCRAM proof or MD5 hash would read 28P01."""
+    password = secrets.token_urlsafe(12)
+    login = Login(
+        auth, password=password, sqlstate="3D000", message="Datenbank »crm« existiert nicht"
+    )
+    with pg_login_server(login) as port:
+        found, message = _check.check(_wire_body(port, password), {}, timeout=FAST)
+        address = {"host": "127.0.0.1", "port": port, "database": "crm"}
+        state = _check.postgres_refusal(
+            address, {"user": "reader", "tls": "disable"}, password, {}, FAST
+        )
+
+    assert found == "failed"
+    assert "Datenbank »crm« existiert nicht" in message
+    assert state == "3D000"
+
+
+def test_the_second_login_runs_over_the_connections_tls(
+    authority: Authority, tmp_path: Path
+) -> None:
+    cert, key = issue_leaf(authority, tmp_path)
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    context.load_cert_chain(cert, key)
+    login = Login("scram", tls=context)
+    settings = {"user": "reader", "ca_certificate": authority.ca_file.read_text()}
+    with pg_login_server(login) as port:
+        address = {"host": "localhost", "port": port, "database": "crm"}
+
+        assert _check.postgres_refusal(address, settings, "wrong", {}, FAST) == "28P01"
+
+
+def test_the_second_login_never_runs_over_tls_it_does_not_trust(
+    authority: Authority, tmp_path: Path
+) -> None:
+    """No CA for the server's certificate: the handshake fails, and no password is sent."""
+    cert, key = issue_leaf(authority, tmp_path)
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    context.load_cert_chain(cert, key)
+    login = Login("cleartext", tls=context)
+    with pg_login_server(login) as port:
+        address = {"host": "localhost", "port": port, "database": "crm"}
+
+        assert _check.postgres_refusal(address, {"user": "reader"}, "wrong", {}, FAST) is None
+
+    assert login.seen == []
+
+
+def test_the_second_login_finds_nothing_without_a_postgresql_server() -> None:
+    """A closed port, a server without TLS, or an accepted login: no SQLSTATE."""
+    settings = {"user": "reader"}
+    closed = {"host": "127.0.0.1", "port": closed_port(), "database": "crm"}
+    assert _check.postgres_refusal(closed, settings, "x", {}, FAST) is None
+    with pg_login_server(Login("now")) as port:
+        address = {"host": "127.0.0.1", "port": port, "database": "crm"}
+        assert _check.postgres_refusal(address, settings, "x", {}, FAST) is None
+    with pg_login_server(Login("cleartext", password="x", sqlstate=None)) as port:
+        address = {"host": "127.0.0.1", "port": port, "database": "crm"}
+        assert (
+            _check.postgres_refusal(address, {**settings, "tls": "disable"}, "x", {}, FAST) is None
+        )
+
+
+def _auth(code: int, data: bytes = b"") -> bytes:
+    """Frame an ``Authentication*`` message.
+
+    Parameters
+    ----------
+    code
+        Its code.
+    data
+        What follows.
+
+    Returns
+    -------
+    bytes
+        The message.
+    """
+    body = struct.pack("!i", code) + data
+    return b"R" + struct.pack("!i", len(body) + 4) + body
+
+
+_FIRST = b"r=nonce,s=" + base64.b64encode(b"salt") + b",i="
+
+
+@pytest.mark.parametrize(
+    "answers",
+    [
+        b"Z\x00\x00\x00\x05I",
+        b"R\x00\x00\x00\x05\x00",
+        _auth(7),
+        _auth(11, _FIRST + b"4096"),
+        _auth(10, b"SCRAM-SHA-256-PLUS\x00\x00"),
+        _auth(10, b"SCRAM-SHA-256\x00\x00") + _auth(11, _FIRST + b"1000001"),
+        _auth(10, b"SCRAM-SHA-256\x00\x00") + _auth(11, b"r=nonce,i=4096"),
+        b"E" + struct.pack("!i", 1 << 20),
+        b"E\x00\x00",
+        b"E" + struct.pack("!i", 20) + b"C28P0",
+        error_response("bad", "words"),
+        b"E\x00\x00\x00\x0bMwords\x00\x00",
+        _auth(12) * 65,
+        _auth(0)
+        + b"S\x00\x00\x00\x16server_version\x0018\x00"
+        + b"K\x00\x00\x00\x0c\x00\x00\x00\x01\x00\x00\x00\x02"
+        + b"Z\x00\x00\x00\x05I",
+    ],
+    ids=[
+        "not-auth",
+        "short-auth",
+        "gss",
+        "continue-unasked",
+        "plus-only",
+        "too-many-rounds",
+        "no-salt",
+        "too-long",
+        "cut-short",
+        "body-cut-short",
+        "bad-sqlstate",
+        "no-sqlstate",
+        "endless",
+        "accepted",
+    ],
+)
+def test_an_odd_login_exchange_finds_no_sqlstate(answers: bytes) -> None:
+    client, server = socket.socketpair()
+    with client, server:
+        server.sendall(answers)
+        server.shutdown(socket.SHUT_WR)
+        client.settimeout(FAST)
+
+        assert _check._login_state(client, "reader", "crm", "pw") is None
+
+
+def test_a_sasl_final_message_is_followed_by_the_answer() -> None:
+    client, server = socket.socketpair()
+    with client, server:
+        server.sendall(_auth(12, b"v=x") + error_response("28P01", "nein"))
+        client.settimeout(FAST)
+
+        assert _check._login_state(client, "reader", "crm", "pw") == "28P01"
+
+
+@pytest.mark.parametrize(
+    ("password", "prepared"),
+    [
+        ("plain ascii\x07", "plain ascii\x07"),
+        ("I\u00adX", "IX"),
+        ("\u2168", "IX"),
+        ("a\u00a0b", "a b"),
+        ("\u00ad", "\u00ad"),
+        ("\u00e9\u0007", "\u00e9\u0007"),
+        ("\u0627\u0031", "\u0627\u0031"),
+        ("\u0627\u0628", "\u0627\u0628"),
+    ],
+    ids=["ascii", "mapped-to-nothing", "nfkc", "space", "empty", "prohibited", "bidi", "rtl"],
+)
+def test_saslprep_prepares_a_password_as_postgresql_does(password: str, prepared: str) -> None:
+    """RFC 4013; a password it refuses is used as it is, as PostgreSQL stores it then."""
+    assert _check._saslprep(password) == prepared

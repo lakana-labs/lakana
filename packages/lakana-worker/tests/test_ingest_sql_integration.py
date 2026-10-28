@@ -270,10 +270,13 @@ def relay(
 def _task_environment(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """Resolve ``lakana-relay`` to the in-process relay; leave no task state behind.
 
+    libpq's ``hostaddr`` comes from ``gethostbyname``; the check's own sockets (the connection
+    test, `_check.postgres_refusal`) dial the name with ``create_connection``.
+
     Parameters
     ----------
     monkeypatch
-        Patches the resolver and removes `LAKANA_CA_BUNDLE`.
+        Patches the resolver and the dial, and removes `LAKANA_CA_BUNDLE`.
 
     Yields
     ------
@@ -281,11 +284,18 @@ def _task_environment(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
         While the test runs.
     """
     real = socket.gethostbyname
+    real_dial = socket.create_connection
 
     def resolve(name: str) -> str:
         return RELAY_ADDRESS if name == _check.RELAY_HOST else real(name)
 
+    def dial(address: tuple[str, int], *args: object, **kwargs: object) -> socket.socket:
+        host, target = address
+        dialed = (RELAY_ADDRESS if host == _check.RELAY_HOST else host, target)
+        return real_dial(dialed, *args, **kwargs)  # ty: ignore[invalid-argument-type]
+
     monkeypatch.setattr(socket, "gethostbyname", resolve)
+    monkeypatch.setattr(socket, "create_connection", dial)
     monkeypatch.delenv("LAKANA_CA_BUNDLE", raising=False)
     yield
     context._set(None)
@@ -343,6 +353,7 @@ def _crm(
     host: str = "db.test",
     password: str = _READER_PASSWORD,
     own_ca: bool = True,
+    database: str = "postgres",
 ) -> None:
     """Declare `crm-db`: the container through the relay, ``verify-full``.
 
@@ -356,6 +367,8 @@ def _crm(
         The secret's password.
     own_ca
         Whether the connection carries the authority (else the bundle must).
+    database
+        The database.
     """
     settings: dict[str, object] = {"user": "reader", "tls": "verify-full"}
     if own_ca:
@@ -363,7 +376,7 @@ def _crm(
     _declare(
         "crm-db",
         "postgresql",
-        {"host": host, "port": 5432, "database": "postgres"},
+        {"host": host, "port": 5432, "database": database},
         settings,
         {"password": password},
         {"relay_port": RELAY_PORT},
@@ -409,6 +422,18 @@ def test_a_wrong_password_gives_the_authentication_text(pki: _Pki, relay: list[s
     assert text.startswith("`crm-db`: authentication failed (PostgreSQL said: ")
     assert 'password authentication failed for user "reader"' in text
     assert _WRONG_PASSWORD not in text
+
+
+def test_a_missing_database_behind_a_right_password_is_no_authentication_failure(
+    pki: _Pki, relay: list[str]
+) -> None:
+    """The second login (SCRAM, TLS, the relay) reads 3D000; a wrong proof would read 28P01."""
+    _crm(pki, database="missing")
+
+    with pytest.raises(UsageError, match=r'database "missing" does not exist') as caught:
+        sql.read("crm-db", "SELECT 1")
+
+    assert type(caught.value) is UsageError
 
 
 @pytest.mark.parametrize("params", [None, {"id": "00010203-0405-0607-0809-0a0b0c0d0e0f"}])
@@ -1163,9 +1188,7 @@ def test_mariadb_dml_after_with_is_stopped_by_the_read_only_transaction(
     assert _kinds_rows(mariadb_container) == "1"
 
 
-def _mariadb_check(
-    pki: _Pki, port: int, password: str, monkeypatch: pytest.MonkeyPatch
-) -> tuple[str, str]:
+def _mariadb_check(pki: _Pki, port: int, password: str) -> tuple[str, str]:
     """Run the connection test's check of `shop-db` through the relay, as a task would.
 
     Parameters
@@ -1176,21 +1199,12 @@ def _mariadb_check(
         The relay's port.
     password
         The secret's password.
-    monkeypatch
-        Points the check's dial of ``lakana-relay`` at the in-process relay.
 
     Returns
     -------
     tuple of str
         The outcome and the message.
     """
-    real = socket.create_connection
-
-    def dial(address: tuple[str, int], *args: object, **kwargs: object) -> socket.socket:
-        host, target = address
-        return real((RELAY_ADDRESS if host == _check.RELAY_HOST else host, target), *args, **kwargs)  # ty: ignore[invalid-argument-type]
-
-    monkeypatch.setattr(_check.socket, "create_connection", dial)
     body = {
         "name": "shop-db",
         "kind": "mariadb",
@@ -1207,10 +1221,10 @@ def _mariadb_check(
 
 
 def test_the_check_logs_in_to_mariadb_over_verified_tls(
-    pki: _Pki, mariadb_relay: list[str], monkeypatch: pytest.MonkeyPatch
+    pki: _Pki, mariadb_relay: list[str]
 ) -> None:
     """The connection test's credential step against the real server, through the relay."""
-    found = _mariadb_check(pki, MARIADB_RELAY_PORT, _READER_PASSWORD, monkeypatch)
+    found = _mariadb_check(pki, MARIADB_RELAY_PORT, _READER_PASSWORD)
 
     assert found == (
         "ok",
@@ -1220,10 +1234,10 @@ def test_the_check_logs_in_to_mariadb_over_verified_tls(
 
 
 def test_the_check_names_a_refused_mariadb_login_without_the_password(
-    pki: _Pki, mariadb_relay: list[str], monkeypatch: pytest.MonkeyPatch
+    pki: _Pki, mariadb_relay: list[str]
 ) -> None:
     """MariaDB's 1045 is `credentials`, with its words and without the password."""
-    outcome, message = _mariadb_check(pki, MARIADB_RELAY_PORT, _WRONG_PASSWORD, monkeypatch)
+    outcome, message = _mariadb_check(pki, MARIADB_RELAY_PORT, _WRONG_PASSWORD)
 
     assert outcome == "credentials"
     assert message.startswith("MariaDB refused the login (Access denied for user 'reader'")
@@ -1231,10 +1245,10 @@ def test_the_check_names_a_refused_mariadb_login_without_the_password(
 
 
 def test_the_check_refuses_mariadb_without_tls_when_tls_is_required(
-    pki: _Pki, plain_mariadb: list[str], monkeypatch: pytest.MonkeyPatch
+    pki: _Pki, plain_mariadb: list[str]
 ) -> None:
     """``verify-full`` against ``--skip-ssl``: the permanent TLS outcome, never plain text."""
-    outcome, message = _mariadb_check(pki, PLAIN_RELAY_PORT, _READER_PASSWORD, monkeypatch)
+    outcome, message = _mariadb_check(pki, PLAIN_RELAY_PORT, _READER_PASSWORD)
 
     assert (outcome, message) == (
         "tls",

@@ -238,8 +238,16 @@ def _relay_ip(name: str) -> str:
         ) from None
 
 
-def _postgres_error(conn: FetchedConnection, exc: Exception, host: str) -> Exception:
+def _postgres_error(
+    conn: FetchedConnection, exc: Exception, host: str, *, connecting: bool = False
+) -> Exception:
     """Choose the error for what the PostgreSQL driver raised.
+
+    Classified by the SQLSTATE. libpq keeps none for a refused login (ADBC's error has none)
+    and says why in the server's language, so a failure to connect asks the server once more,
+    over `_check.postgres_refusal`, for the SQLSTATE it refuses with. libpq's and OpenSSL's own
+    words (the driver's libpq has no translations) still tell a certificate refusal and a
+    connection the relay closed.
 
     Parameters
     ----------
@@ -249,6 +257,8 @@ def _postgres_error(conn: FetchedConnection, exc: Exception, host: str) -> Excep
         The driver's error.
     host
         The name the certificate is checked for.
+    connecting
+        Whether the error ended the login (then the SQLSTATE is asked for).
 
     Returns
     -------
@@ -256,18 +266,22 @@ def _postgres_error(conn: FetchedConnection, exc: Exception, host: str) -> Excep
         The error to raise.
     """
     said = _said(str(exc), conn.secret)
-    state = getattr(exc, "sqlstate", None) or ""
     text = str(exc)
-    if (
-        "password authentication failed" in text
-        or "no pg_hba.conf entry" in text
-        or state.startswith("28")
-    ):
-        return _authentication(conn.name, "PostgreSQL", said)
     if "certificate verify failed" in text or "does not match host name" in text:
         return _untrusted(conn.name, host)
     if "server closed the connection unexpectedly" in text and "relay_port" in conn.routing:
         return SourceError(_RELAY_CLOSED.format(name=conn.name, product="PostgreSQL"))
+    state = getattr(exc, "sqlstate", None) or ""
+    if not state and connecting:
+        password = str((conn.secret or {}).get("password", ""))
+        state = (
+            _check.postgres_refusal(
+                conn.address, conn.settings, password, conn.routing, CONNECT_SECONDS
+            )
+            or ""
+        )
+    if state.startswith("28"):
+        return _authentication(conn.name, "PostgreSQL", said)
     if state == "25006":
         return UsageError(
             f"`{conn.name}`: sql.read runs every query in a read-only transaction, and this one "
@@ -285,7 +299,7 @@ def _postgres_error(conn: FetchedConnection, exc: Exception, host: str) -> Excep
             "a value of the column's type, such as a datetime for a timestamp, or cast the "
             "placeholder, such as :since::timestamptz"
         )
-    if state.startswith(("42", "0A", "22", "21")) or "does not exist" in text:
+    if state.startswith(("42", "0A", "22", "21", "3D")):
         return UsageError(f"`{conn.name}`: the query failed (PostgreSQL said: {said})")
     return SourceError(f"`{conn.name}`: {said}")
 
@@ -361,7 +375,7 @@ def _read_postgres(
             "be read; check the worker's LAKANA_RUN__CA_BUNDLE"
         ) from None
     except pg.Error as exc:
-        failure = _postgres_error(conn, exc, host)
+        failure = _postgres_error(conn, exc, host, connecting=True)
         raise failure from None
     try:
         cursor = database.cursor()
