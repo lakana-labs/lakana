@@ -1326,7 +1326,8 @@ def _sqlite_opens(routing: Mapping[str, Any]) -> None:
     try:
         database = lite.connect(f"file:{quote(path)}?mode=ro")
         try:
-            database.cursor().execute("SELECT 1")
+            with database.cursor() as cursor:
+                cursor.execute("SELECT 1")
         finally:
             database.close()
     except lite.Error as exc:

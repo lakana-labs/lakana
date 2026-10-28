@@ -6,6 +6,7 @@ import ast
 import base64
 import contextlib
 import errno
+import gc
 import hashlib
 import hmac
 import http.server
@@ -22,6 +23,7 @@ import sys
 import threading
 import time
 import urllib.parse
+import warnings
 from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -2063,14 +2065,19 @@ def test_without_pymysql_a_mariadb_test_fails_saying_what_to_install(
 
 def test_a_sqlite_file_opens_read_only_or_is_named(tmp_path: Path) -> None:
     """A real database opens; a file that is none fails naming the path; nothing is written."""
-    with sqlite3.connect(tmp_path / "app.db") as db:
+    with contextlib.closing(sqlite3.connect(tmp_path / "app.db")) as db, db:
         db.execute("CREATE TABLE t(a)")
     (tmp_path / "notes.db").write_text("not a database at all " * 10)
     body = connection("sqlite-file", {"root": "shared", "path": "app.db"})
     routing = {"root": "shared", "root_dir": str(tmp_path)}
 
-    ok = _check.check(body, {**routing, "path": "app.db"}, timeout=FAST)
-    bad = _check.check(body, {**routing, "path": "notes.db"}, timeout=FAST)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        ok = _check.check(body, {**routing, "path": "app.db"}, timeout=FAST)
+        bad = _check.check(body, {**routing, "path": "notes.db"}, timeout=FAST)
+        gc.collect()
+    # A cursor or connection left to the garbage collector is a `ResourceWarning` (#10).
+    assert [str(w.message) for w in caught if issubclass(w.category, ResourceWarning)] == []
 
     assert ok == (
         "ok",
