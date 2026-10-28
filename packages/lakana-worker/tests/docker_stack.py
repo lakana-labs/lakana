@@ -21,7 +21,7 @@ import threading
 import time
 import uuid
 import zipfile
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -29,6 +29,7 @@ from typing import Any
 import pytest
 
 import lakana_worker.launcher
+from lakana_worker.launcher.egress import PORT as EGRESS_PORT
 from lakana_worker.launcher.engine import DockerEngine
 from lakana_worker.launcher.requests import (
     LABEL_ID,
@@ -840,6 +841,65 @@ def build_egress_image(client: Any, image: str) -> str:
     return tag
 
 
+def wait_until_listening(
+    container: Any,
+    port: int,
+    *,
+    seconds: float = 60,
+    clock: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
+) -> None:
+    """Wait until a process in a started container accepts connections on a port.
+
+    `docker start` returns once the process is started, not once it listens: the proxy's Python
+    still imports its package then. The first build of the egress module connected in that gap
+    and got `[Errno 111] Connection refused` (#319). Each probe connects from inside the
+    container (its own loopback), so it works whichever networks the container is on and from
+    any host, Docker Desktop included.
+
+    Parameters
+    ----------
+    container
+        The started container (`docker.models.containers.Container`); its image has `python`.
+    port
+        The port its process listens on, on every address.
+    seconds
+        How long to wait at most.
+    clock
+        Monotonic seconds; a seam for tests.
+    sleep
+        Waits between probes; a seam for tests.
+
+    Raises
+    ------
+    AssertionError
+        When the container stopped, or nothing accepted a connection within `seconds`; the
+        message holds its log.
+    """
+    probe = [
+        "python",
+        "-I",
+        "-S",
+        "-c",
+        f"import socket; socket.create_connection(('127.0.0.1', {port}), 1).close()",
+    ]
+    deadline = clock() + seconds
+    while True:
+        code, _ = container.exec_run(probe)
+        if code == 0:
+            return
+        container.reload()
+        if container.status != "running":
+            problem = f"the container {container.status} before it listened on port {port}"
+            break
+        if clock() >= deadline:
+            problem = f"nothing listened on port {port} within {seconds:g} s"
+            break
+        sleep(0.2)
+    log = container.logs().decode(errors="replace")[-4000:]
+    raise AssertionError(f"{problem}; its log:\n{log}")
+
+
 def start_egress(stack: Stack, *, network: str | None = None, reachable: str | None = None) -> Any:
     """Start the stack's egress service, run from this checkout's proxy, in `build_egress_image`.
 
@@ -866,7 +926,7 @@ def start_egress(stack: Stack, *, network: str | None = None, reachable: str | N
     Returns
     -------
     docker.models.containers.Container
-        The started container; the stack removes it.
+        The started container, already accepting connections; the stack removes it.
     """
     launcher = stack.launcher
     assert launcher is not None
@@ -914,4 +974,5 @@ def start_egress(stack: Stack, *, network: str | None = None, reachable: str | N
 
     launcher._replace_refused = mirrored  # ty: ignore[invalid-assignment]
     egress.start()
+    wait_until_listening(egress, EGRESS_PORT)
     return egress

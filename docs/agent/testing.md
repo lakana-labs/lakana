@@ -1527,7 +1527,11 @@ launcher's key and `refused.json`; `start_egress` wraps the launcher's `_replace
 time the launcher writes the refused ranges (at each network open) the copy is replaced too, with
 a PAX nanosecond mtime: the proxy re-reads on a change of inode, mtime or size, and Docker may
 reuse the inode for a list of the same length. A network a test makes after the launcher started
-thus has its gateway refused from the next run on, as in production.
+thus has its gateway refused from the next run on, as in production. `start_egress` returns only
+once the proxy accepts connections (`wait_until_listening`: a connection from inside the container
+to port 3128, every 0.2 s, at most 60 s, then a failure with the container's log): `docker start`
+returns before the proxy's Python listens, about half a second later, and a build that connected
+in that gap got `Connection refused` (#319).
 
 `test_docker_task_egress_integration.py` (all `slow`) proves task egress (#308): a source container
 on a labelled network `<stack>-sources` serves TLS on 8443 (a private authority's leaf for
