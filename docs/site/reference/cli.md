@@ -587,7 +587,7 @@ Usage: `lakana table replace [OPTIONS] {name} {file}`
 
 Replace every row of table NAME with FILE (Parquet, CSV or Arrow).
 
-Without --evolve-schema the file is conformed to the table's columns first, exactly as `table append` does. With it, the file is sent as it is and the table takes its schema. A CSV must be UTF-8 either way (a byte order mark is dropped); one in another encoding is refused (exit 8): convert it to UTF-8 and run the command again.
+Without --evolve-schema the file is conformed to the table's columns first, exactly as `table append` does. With it, the file is sent as it is and the table takes its schema. A CSV must be UTF-8 either way, as for `table append`.
 
 | Name | Type | Default | Description |
 |---|---|---|---|
