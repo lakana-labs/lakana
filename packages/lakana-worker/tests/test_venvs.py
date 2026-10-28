@@ -1489,6 +1489,11 @@ def test_a_refusal_wins_over_a_broken_build(fake: Fake) -> None:
             "ran out of memory",
         ),
         ("process didn't exit successfully: (signal: 9, SIGKILL: kill)", "ran out of memory"),
+        ("collect2: fatal error: ld terminated with signal 9 [Killed]", "ran out of memory"),
+        ("g++: internal compiler error: Killed (program cc1plus)", "ran out of memory"),
+        ("clang: error: unable to execute command: Killed", "ran out of memory"),
+        ("make: *** [Makefile:2: all] Killed", "ran out of memory"),
+        ("make: *** [Makefile:2: all] Error 137", "ran out of memory"),
     ],
 )
 def test_a_build_that_ran_out_of_disk_or_memory_is_retried_and_says_so(

@@ -251,7 +251,9 @@ _NO_DISK = re.compile(r"No space left on device|Disk quota exceeded|\[Errno 28\]
 """The build's machine ran out of disk space."""
 _NO_MEMORY = re.compile(
     r"Killed signal|^\s*MemoryError\b|Cannot allocate memory|: out of memory|"
-    r"exit status: 137|signal: 9\b|^\s*Killed\s*$",
+    r"exit status: 137|signal: 9\b|^\s*Killed\s*$|terminated with signal 9\b|"
+    r"internal compiler error: Killed|unable to execute command: Killed|"
+    r"\] (?:Killed|Error 137)\s*$",
     re.IGNORECASE | re.MULTILINE,
 )
 """The build's machine ran out of memory, or something killed the build."""
