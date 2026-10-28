@@ -6,6 +6,7 @@ import contextlib
 import errno
 import gc
 import os
+import re
 import socket
 import sqlite3
 import sys
@@ -961,15 +962,27 @@ def test_sqlite_reads_read_only_with_bound_parameters(lite: Path) -> None:
 
 
 def test_a_sqlite_read_closes_everything_it_opened(lite: Path) -> None:
-    """No cursor or connection is left to the garbage collector (a `ResourceWarning`, #10)."""
+    """No cursor or connection is left to the garbage collector (a `ResourceWarning`, #10).
+
+    Garbage of earlier tests in the same process (a socket in a reference cycle) is collected
+    before the read, and only warnings about the read's own ADBC and SQLite objects count: a
+    collection inside the block would otherwise report somebody else's leak.
+    """
     _sqlite(lite, ["CREATE TABLE t(a INTEGER)", "INSERT INTO t VALUES (1)"])
+    gc.collect()
 
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         sql.read("local-db", "SELECT a FROM t")
         gc.collect()
 
-    assert [str(w.message) for w in caught if issubclass(w.category, ResourceWarning)] == []
+    leaks = [
+        str(w.message)
+        for w in caught
+        if issubclass(w.category, ResourceWarning)
+        and re.search(r"adbc|sqlite|explicitly close\(\)d", str(w.message), re.IGNORECASE)
+    ]
+    assert leaks == []
 
 
 def test_sqlite_refuses_a_link_at_the_file_path(lite: Path, tmp_path: Path) -> None:
