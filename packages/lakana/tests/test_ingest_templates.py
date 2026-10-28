@@ -10,6 +10,7 @@ from typing import Any
 import pyarrow as pa
 import pytest
 
+from lakana.assets import ASSET_ATTRIBUTE
 from lakana.cli.project_init import INGEST_TEMPLATES, Template
 from lakana.ingest import files, rest, sql
 
@@ -73,11 +74,15 @@ def test_the_files_template_passes_the_watermark_as_since(monkeypatch: pytest.Mo
     assert seen == [("exports", "*.csv", None)]
 
 
-@pytest.mark.parametrize(("stored", "sent"), [(None, 0), (41, 41)])
-def test_the_sql_template_binds_the_last_id(
+@pytest.mark.parametrize(("stored", "sent"), [(None, -1000), (4100, 3100)])
+def test_the_sql_template_reads_again_behind_the_last_id(
     monkeypatch: pytest.MonkeyPatch, stored: int | None, sent: int
 ) -> None:
-    """The first run starts after 0; later runs after the largest id loaded."""
+    """Each run starts `LOOK_BACK` ids behind the largest one loaded (0 on a first run).
+
+    A row whose id was taken before a run but committed after it has a smaller id than rows the
+    run read; reading again behind the watermark finds it, and the merge on `id` keeps one row.
+    """
     seen: dict[str, object] = {}
 
     def fake(connection: str, query: str, *, params: dict[str, object]) -> pa.Table:
@@ -90,6 +95,8 @@ def test_the_sql_template_binds_the_last_id(
 
     assert seen["connection"] == "source-db"
     assert seen["params"] == {"since": sent}
+    spec = getattr(_asset(Template.ingest_sql), ASSET_ATTRIBUTE)
+    assert (spec.write, tuple(spec.key), spec.watermark) == ("merge", ("id",), "id")
 
 
 def test_the_rest_template_makes_updated_at_a_timestamp(monkeypatch: pytest.MonkeyPatch) -> None:

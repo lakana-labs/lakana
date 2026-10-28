@@ -83,7 +83,7 @@ cd sources
 | Template | Asset | Reads | Write mode |
 |---|---|---|---|
 | `ingest-files` | `assets/bronze/exports.py` | the CSV files of a `directory` connection, with `files.read` | `append`, the files changed since the last run |
-| `ingest-sql` | `assets/bronze/orders.py` | a table of a PostgreSQL, MariaDB or SQLite database, with `sql.read` | `append`, the ids after the largest one loaded |
+| `ingest-sql` | `assets/bronze/orders.py` | a table of a PostgreSQL, MariaDB or SQLite database, with `sql.read` | `merge` on `id`, the ids from 1,000 before the largest one loaded |
 | `ingest-rest` | `assets/bronze/items.py` | a JSON REST API, with `rest.read` | `merge` on `id`, the items updated since the last run |
 
 Each project also gets `lakana.yaml`, the CI files, a `pyproject.toml` that depends on
@@ -238,32 +238,48 @@ and how to pause the job.
 
 ### A SQL database
 
-The asset of `ingest-sql` appends the orders whose `id` is larger than the largest one loaded:
+The asset of `ingest-sql` reads the orders whose `id` is larger than the largest one loaded, less
+`LOOK_BACK`, and merges them into the table on `id`:
 
 <!-- source: docs/examples/ingest-sql/project/assets/bronze/orders.py -->
 ```python
-"""Orders from a source database, appended as new ones arrive."""
+"""Orders from a source database, merged on their id as new ones arrive."""
 
 from lakana import asset
 from lakana.ingest import sql
 
+# How many ids behind the largest one loaded each run reads again. A row gets its id when it is
+# written but is seen only once its transaction commits, so a row with a smaller id can appear
+# after a run read larger ones; without reading again it would be skipped for good. The merge on
+# `id` keeps one row per id. Make it larger than the ids the source hands out while one of its
+# transactions is open.
+LOOK_BACK = 1000
 
-@asset(connections=["source-db"], write="append", watermark="id")
+
+@asset(connections=["source-db"], write="merge", key=["id"], watermark="id")
 def orders(ctx):
-    """New orders from the source database: each run reads the ids after the last one loaded."""
-    # For rows that change after they were written, merge on the key instead:
-    # @asset(connections=["source-db"], write="merge", key=["id"], watermark="updated_at")
-    # with "... WHERE updated_at > :since" and a datetime default.
+    """Orders from the source database: each run reads from LOOK_BACK ids before the last one."""
+    # For rows that change after they were written, use a change column as the watermark:
+    # watermark="updated_at" with "... WHERE updated_at > :since", a datetime default, and the
+    # look-back as a timedelta.
     return sql.read(
         "source-db",
         "SELECT * FROM orders WHERE id > :since ORDER BY id",
-        params={"since": ctx.watermark(default=0)},
+        params={"since": ctx.watermark(default=0) - LOOK_BACK},
     )
 ```
 
-An ever-growing key appends each row once. Rows that change after they were written are appended
-again with every change; for those, use the `merge` variant in the comment, which keeps one row
-per key. The value goes in the `:since` placeholder, never into the text of the query.
+Why not simply append the ids after the largest one? A database hands out an id when a row is
+written, but other sessions see the row only when its transaction commits. A transaction that
+took id 10 and commits after another one took and committed id 11 shows its row late: a run in
+between reads 11, the next one starts after 11, and row 10 is never read, with no error. Reading
+again from `LOOK_BACK` ids behind the watermark finds such a row, and the merge on `id` keeps one
+row per id however often it is read. Make `LOOK_BACK` larger than the ids your source hands out
+while one of its transactions is open; the cost is reading those rows again on every run.
+
+For rows that change after they were written, use the variant in the comment: a change column as
+the watermark, with a look-back as a `timedelta`. The value goes in the `:since` placeholder,
+never into the text of the query.
 
 The template's `README.md` creates a PostgreSQL connection, which asks for the password on
 standard input. The tested recipe reads a SQLite file below the ingestion root instead, which
@@ -279,7 +295,9 @@ lakana connection create source-db --env dev --kind sqlite-file --root landing -
 Created connection source-db in dev
 ```
 
-After a first run and two new orders, the second run appended only those two:
+In the recipe the first run reads orders 1, 2 and 4: order 3 had its id but had not committed.
+Then order 3 commits and order 5 arrives. The second run reads both, and every order is in the
+table once:
 
 <!-- source: docs/examples/ingest-sql/run.sh#query -->
 ```bash
@@ -372,6 +390,11 @@ lakana connection create source-api --env dev --kind http --url "https://localho
 ```text
 Created connection source-api in dev with its secret source-api-connection
 ```
+
+`localhost:$API_PORT`, `ca.pem` and `token.txt` belong to the recipe's stand-in API. For your API,
+give its base URL, such as `--url https://api.example.com/v2`, and leave out `--ca-file` when a
+public CA signed its certificate. Pipe the token in from where you keep it, or type it after the
+command and end the input with Ctrl-D.
 
 After a first run, one item changed and one was added. The second run merged both: the change
 replaced its row, and the new item was added:
@@ -483,7 +506,8 @@ lakana sql "SELECT id, name, price, updated_at FROM bronze.items ORDER BY id"
 
 Unlike a SQL asset, a Python asset filters its own rows: it must return only the rows past
 `ctx.watermark()`, as the templates do with `since=` and a query parameter. A row returned twice
-by an `append` asset is in the table twice. The watermark is a column of the result, of an
+by an `append` asset is in the table twice, so an asset that reads behind its watermark, as the SQL
+template does, merges on a key. The watermark is a column of the result, of an
 integer, decimal, date or timestamp type. The rules in full:
 [Write modes](../reference/asset-front-matter.md#write-modes).
 

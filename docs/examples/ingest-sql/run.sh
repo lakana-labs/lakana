@@ -18,9 +18,10 @@ cd sources
 diff -r "$EXAMPLE_DIR/project/assets" assets
 grep -Fq "lakana connection create source-db --env dev --kind postgresql" README.md
 
-# The source database: a SQLite file with three orders, made with Python's own sqlite3.
+# The source database: a SQLite file with three orders, made with Python's own sqlite3. Order 3 is
+# missing: its id was taken, but its transaction commits only after the first run.
 mkdir -p ~/landing
-python3 "$EXAMPLE_DIR/orders_db.py" ~/landing/shop.db 1 2 3
+python3 "$EXAMPLE_DIR/orders_db.py" ~/landing/shop.db 1 2 4
 
 # docs:start connection
 lakana connection create source-db --env dev --kind sqlite-file --root landing --path shop.db
@@ -46,10 +47,11 @@ lakana deploy --env dev >/dev/null
 
 lakana run --env dev >/dev/null
 out=$(lakana --output json sql "SELECT id FROM bronze.orders ORDER BY id")
-python3 -c 'import json,sys; assert [r["id"] for r in json.loads(sys.argv[1])] == [1, 2, 3], sys.argv[1]' "$out"
+python3 -c 'import json,sys; assert [r["id"] for r in json.loads(sys.argv[1])] == [1, 2, 4], sys.argv[1]' "$out"
 
-# Two new orders; the next run appends only those, the ids after the largest one loaded.
-python3 "$EXAMPLE_DIR/orders_db.py" ~/landing/shop.db 4 5
+# Order 3 commits late, below the largest id loaded, and order 5 is new. The next run reads from
+# 1,000 ids before 4 and merges on id: both arrive, and no order is there twice.
+python3 "$EXAMPLE_DIR/orders_db.py" ~/landing/shop.db 3 5
 lakana run --env dev >/dev/null
 
 # docs:start query

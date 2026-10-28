@@ -512,6 +512,24 @@ def test_init_notes_after_the_steps_when_the_cli_is_a_dev_or_local_build(
     assert f"lakana=={version}" in (target / ".gitlab-ci.yml").read_text()
 
 
+def test_a_template_on_a_dev_build_notes_that_uv_lock_needs_an_index_with_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A template pins `lakana[assets]` to this version, which `uv lock` cannot find on PyPI."""
+    monkeypatch.setattr("lakana.cli.project_init.__version__", "0.7.1.dev3+gabc123")
+    target = tmp_path / "sources"
+    result = invoke(
+        make_state(tmp_path, FakeApi()), "init", str(target), "--template", "ingest-sql"
+    )
+    assert result.exit_code == 0, result.output
+    text = " ".join(result.stdout.split())
+    note = text[text.index("Note:") :]
+    assert "pyproject.toml" in note
+    assert "uv lock" in note
+    assert "[[tool.uv.index]]" in note
+    assert "lakana[assets]==0.7.1.dev3+gabc123" in (target / "pyproject.toml").read_text()
+
+
 @pytest.mark.parametrize("version", ["1.2.3", "0.7.0", "1.0.0rc1", "2.0.0.post1"])
 def test_init_is_quiet_for_a_release_build(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, version: str
@@ -748,19 +766,33 @@ def test_a_template_writes_its_asset_readme_and_an_assets_pyproject(
 
 
 def test_the_sql_template_reads_new_ids_with_a_first_run_default(tmp_path: Path) -> None:
-    """The asset the plan's Review Focus asks for: a parameter, never a None watermark."""
+    """A parameter, never a None watermark; a merge that reads again behind the largest id."""
     invoke(make_state(tmp_path, FakeApi()), "init", str(tmp_path / "p"), "--template", "ingest-sql")
 
     text = (tmp_path / "p" / "assets/bronze/orders.py").read_text()
 
-    assert '@asset(connections=["source-db"], write="append", watermark="id")' in text
+    assert '@asset(connections=["source-db"], write="merge", key=["id"], watermark="id")' in text
     assert "WHERE id > :since" in text
-    assert 'params={"since": ctx.watermark(default=0)}' in text
+    assert "\nLOOK_BACK = 1000\n" in text
+    assert 'params={"since": ctx.watermark(default=0) - LOOK_BACK}' in text
     readme = (tmp_path / "p" / "README.md").read_text()
     assert (
         "lakana connection create source-db --env dev --kind postgresql --host <host> "
         "--database <database> --user <user> --password-stdin"
     ) in readme
+    assert "the 1,000 before it again" in " ".join(readme.split())
+
+
+def test_the_files_template_readme_says_the_operator_names_the_root(tmp_path: Path) -> None:
+    """`--root` names an ingestion root only the operator can give the worker."""
+    invoke(
+        make_state(tmp_path, FakeApi()), "init", str(tmp_path / "p"), "--template", "ingest-files"
+    )
+
+    readme = " ".join((tmp_path / "p" / "README.md").read_text().split())
+
+    assert "LAKANA_RUN__INGESTION_ROOTS" in readme
+    assert "LAKANA_LAUNCHER__INGESTION_ROOTS" in readme
 
 
 def test_an_unknown_template_lists_the_three(tmp_path: Path) -> None:

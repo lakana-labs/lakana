@@ -411,22 +411,29 @@ def exports(ctx):
 '''
 
 _INGEST_SQL = '''\
-"""Orders from a source database, appended as new ones arrive."""
+"""Orders from a source database, merged on their id as new ones arrive."""
 
 from lakana import asset
 from lakana.ingest import sql
 
+# How many ids behind the largest one loaded each run reads again. A row gets its id when it is
+# written but is seen only once its transaction commits, so a row with a smaller id can appear
+# after a run read larger ones; without reading again it would be skipped for good. The merge on
+# `id` keeps one row per id. Make it larger than the ids the source hands out while one of its
+# transactions is open.
+LOOK_BACK = 1000
 
-@asset(connections=["source-db"], write="append", watermark="id")
+
+@asset(connections=["source-db"], write="merge", key=["id"], watermark="id")
 def orders(ctx):
-    """New orders from the source database: each run reads the ids after the last one loaded."""
-    # For rows that change after they were written, merge on the key instead:
-    # @asset(connections=["source-db"], write="merge", key=["id"], watermark="updated_at")
-    # with "... WHERE updated_at > :since" and a datetime default.
+    """Orders from the source database: each run reads from LOOK_BACK ids before the last one."""
+    # For rows that change after they were written, use a change column as the watermark:
+    # watermark="updated_at" with "... WHERE updated_at > :since", a datetime default, and the
+    # look-back as a timedelta.
     return sql.read(
         "source-db",
         "SELECT * FROM orders WHERE id > :since ORDER BY id",
-        params={"since": ctx.watermark(default=0)},
+        params={"since": ctx.watermark(default=0) - LOOK_BACK},
     )
 '''
 
@@ -469,7 +476,7 @@ A Lakana project whose asset `{table}` reads {source} through the connection `{c
 1. Create the connection in each environment the project deploys to (here `dev`):
 
        {create}
-
+{root}
 2. Lock the project's packages, then commit:
 
        uv lock
@@ -481,8 +488,10 @@ A Lakana project whose asset `{table}` reads {source} through the connection `{c
        lakana deploy --env dev
        lakana run --env dev
 
-Each run reads only what is new since the last one ({how}). To run it on a schedule, add a job to
-lakana.yaml: https://lakana-labs.github.io/lakana/how-to/run-a-job-on-a-schedule/
+Each run reads {how}.
+
+To run it on a schedule, add a job to lakana.yaml:
+https://lakana-labs.github.io/lakana/how-to/run-a-job-on-a-schedule/
 More: https://lakana-labs.github.io/lakana/how-to/load-data-from-a-source/
 """
 
@@ -495,7 +504,11 @@ INGEST_TEMPLATES: dict[str, dict[str, str]] = {
             connection="exports",
             create="lakana connection create exports --env dev --kind directory --root <root> "
             "--path <directory below it>",
-            how="files changed after the newest one it loaded",
+            root="""
+   `<root>` is an ingestion root: a directory the operator gives the worker by name, in
+   LAKANA_RUN__INGESTION_ROOTS (or LAKANA_LAUNCHER__INGESTION_ROOTS with the Docker runner).
+""",
+            how="only the files changed after the newest one it loaded",
         ),
     },
     Template.ingest_sql: {
@@ -506,7 +519,10 @@ INGEST_TEMPLATES: dict[str, dict[str, str]] = {
             connection="source-db",
             create="lakana connection create source-db --env dev --kind postgresql --host <host> "
             "--database <database> --user <user> --password-stdin",
-            how="ids after the largest one it loaded",
+            root="",
+            how="the ids after the largest one it loaded and the 1,000 before it again (LOOK_BACK "
+            "in the asset): a row committed late has a smaller id than rows already read. The "
+            "merge on `id` keeps one row per id",
         ),
     },
     Template.ingest_rest: {
@@ -517,7 +533,8 @@ INGEST_TEMPLATES: dict[str, dict[str, str]] = {
             connection="source-api",
             create="lakana connection create source-api --env dev --kind http "
             "--url https://<host>/<base path> --auth bearer --password-stdin",
-            how="items updated after the newest one it loaded",
+            root="",
+            how="only the items updated after the newest one it loaded",
         ),
     },
 }
@@ -821,6 +838,13 @@ def init(
             "you use CI; then edit the pinned version in .github/workflows/lakana-deploy.yml "
             "and .gitlab-ci.yml, or set LAKANA_INDEX_URL to an index that has it."
         )
+        if template is not None:
+            lines.append(
+                f"pyproject.toml pins lakana[assets]=={__version__} too, so `uv lock` fails "
+                "until it finds that version: add an index that has it to pyproject.toml "
+                "([[tool.uv.index]], such as a flat folder with the wheel), or pin a released "
+                "version."
+            )
     typer.echo("\n".join(lines))
 
 
