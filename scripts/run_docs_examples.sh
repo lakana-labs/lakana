@@ -12,7 +12,9 @@
 # itself, as its tutorial tells the reader to. `run.sh` starts in WORK; HOME is its parent.
 # The instance is started by the command in the `start` region of the example's start.sh (the
 # one its tutorial shows) with `--port <free port>` appended; without a start.sh the default
-# `lakana server start --local` is used.
+# `lakana server start --local` is used. The command runs in bash as the page shows it, after the
+# private HOME is set, so it may set a variable for the instance (`NAME="$HOME/..." lakana ...`);
+# it must stay one simple command, which bash replaces itself with, so a stop reaches the server.
 # LAKANA_DOCS_EXAMPLE_BUDGET (default 120) is the number of seconds one example may take. An
 # example that needs longer (it waits for a schedule, or builds a Python environment) says so in
 # a file `budget` next to its run.sh, one number of seconds; the longer of the two applies.
@@ -124,8 +126,8 @@ free_port() {
   python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])'
 }
 
-# The words of the example's start command: the `start` region of its start.sh, read with the
-# documentation's own block checker, or the default.
+# The example's start command: the `start` region of its start.sh, read with the documentation's
+# own block checker, or the default.
 start_command() {
   if [ -f "$1/start.sh" ]; then
     PYTHONPATH="$root" python3 -c '
@@ -181,7 +183,7 @@ for run in runs if isinstance(runs, list) else []:
 }
 
 run_one() {
-  local name=$1 log status=0 port words budget=$default_budget own
+  local name=$1 log status=0 port command budget=$default_budget own
   if [ -f "$examples_dir/$name/budget" ]; then
     own=$(tr -d '[:space:]' < "$examples_dir/$name/budget")
     if ! [[ "$own" =~ ^[0-9]+$ ]]; then
@@ -216,8 +218,8 @@ run_one() {
   fi
   port=$(free_port)
   # Its own process group, so a hard stop reaches the server and worker too.
-  read -ra words <<< "$(start_command "$examples_dir/$name")"
-  setsid "${words[@]}" --port "$port" > "$log" 2>&1 &
+  command=$(start_command "$examples_dir/$name")
+  setsid bash -c "$command --port $port" > "$log" 2>&1 &
   pid=$!
   local ready=0
   for _ in $(seq 1 120); do

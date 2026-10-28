@@ -571,7 +571,11 @@ To add one:
 
    The page shows the region; the lines between regions are the checks and stay out of it.
 3. If the instance needs a non-default start command, put it in the `start` region of
-   `start.sh`. The runner appends `--port <free port>`.
+   `start.sh`. The runner appends `--port <free port>` and runs the command in bash, after the
+   private `HOME` is set, so it may set a variable for the instance as the page shows it
+   (`LAKANA_RUN__INGESTION_ROOTS="{\"landing\": \"$HOME/landing\"}" lakana server start --local`).
+   Keep it one simple command: bash then replaces itself with it, and the runner's stop reaches
+   the server.
 4. Files a page shows whole live under `project/` and are copied into the work directory by
    `run.sh`; the page syncs the block from the file path.
 5. In the page, put a `source` marker above each block and run `uv run python
@@ -618,6 +622,21 @@ for the worker's first build. Run it locally the same way: build the wheel into 
 memory scope. The runner's private `HOME` hides uv's cache and the Pythons uv downloaded; the
 example sets `UV_PYTHON` to the interpreter that runs it, and the worker builds with its own cache.
 `docs-examples` is a required check; `docs` is not.
+
+The ingestion recipes of "Load data from a source" (`ingest-files`, `ingest-sql`, `ingest-rest`,
+`ingest-generic`) are Python assets set up the same way: `lakana init --template` writes the
+project (the asset under test is the one the CLI wrote; `run.sh` diffs it against
+`project/assets`, and `test_ingest_templates.py` compares those files with `INGEST_TEMPLATES`), and
+`ingest-files/use_wheelhouse.py`, which all four call, swaps the template's pin for the wheel. Their
+sources are stand-ins that need neither Docker nor a server: the files and the SQLite database lie
+below an ingestion root of the example's private `HOME`, named in the `start` region of
+`start.sh`; the SQLite file is made with Python's `sqlite3` (`ingest-sql/orders_db.py`). The REST
+API is `ingest-rest/stand_in.py`, an OData-style `http.server` behind TLS 1.2 or newer, with a CA
+and a certificate for `localhost` and `127.0.0.1` that `make_certs.py` makes with `cryptography`
+for each run; the bearer token is generated for each run too, so no secret is in the tree.
+`run.sh` starts the stand-in in the background, waits for the port it writes, and stops it on exit.
+`ingest-generic` reuses those two scripts. Under the local runner a task reaches `127.0.0.1`
+directly.
 ## CI runners
 
 CI jobs run on the runner named by the repository variable `CI_RUNNER`; when the variable is not

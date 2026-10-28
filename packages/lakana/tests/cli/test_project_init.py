@@ -713,3 +713,94 @@ def test_the_ci_files_name_the_rules_the_how_tos_create(tmp_path: Path) -> None:
     assert len(documented) == 4
     assert _commands(github_text, "#") == documented[:2]
     assert _commands(gitlab_text, "#") == documented[2:]
+
+
+_TEMPLATE_ASSETS = {
+    "ingest-files": "assets/bronze/exports.py",
+    "ingest-sql": "assets/bronze/orders.py",
+    "ingest-rest": "assets/bronze/items.py",
+}
+
+
+@pytest.mark.parametrize(("template", "asset"), sorted(_TEMPLATE_ASSETS.items()))
+def test_a_template_writes_its_asset_readme_and_an_assets_pyproject(
+    tmp_path: Path, template: str, asset: str
+) -> None:
+    """No sample; the asset, a README with the connection command, and lakana[assets] pinned."""
+    result = invoke(
+        make_state(tmp_path, FakeApi()), "init", str(tmp_path / "p"), "--template", template
+    )
+
+    assert result.exit_code == 0, result.output
+    root = tmp_path / "p"
+    files = _files(root)
+    assert asset in files
+    assert "README.md" in files
+    assert not files & _SAMPLE
+    pyproject = tomllib.loads((root / "pyproject.toml").read_text())
+    assert pyproject["project"]["dependencies"] == [f"lakana[assets]=={__version__}"]
+    readme = (root / "README.md").read_text()
+    assert "lakana connection create" in readme
+    assert "uv lock" in readme
+    assert "# p\n" in readme
+    assert "lakana connection create" in result.stdout
+    assert "  uv lock" in result.stdout
+
+
+def test_the_sql_template_reads_new_ids_with_a_first_run_default(tmp_path: Path) -> None:
+    """The asset the plan's Review Focus asks for: a parameter, never a None watermark."""
+    invoke(make_state(tmp_path, FakeApi()), "init", str(tmp_path / "p"), "--template", "ingest-sql")
+
+    text = (tmp_path / "p" / "assets/bronze/orders.py").read_text()
+
+    assert '@asset(connections=["source-db"], write="append", watermark="id")' in text
+    assert "WHERE id > :since" in text
+    assert 'params={"since": ctx.watermark(default=0)}' in text
+    readme = (tmp_path / "p" / "README.md").read_text()
+    assert (
+        "lakana connection create source-db --env dev --kind postgresql --host <host> "
+        "--database <database> --user <user> --password-stdin"
+    ) in readme
+
+
+def test_an_unknown_template_lists_the_three(tmp_path: Path) -> None:
+    """Exit 2, naming every template."""
+    result = invoke(
+        make_state(tmp_path, FakeApi()), "init", str(tmp_path / "p"), "--template", "ingest-xml"
+    )
+
+    assert result.exit_code == 2
+    text = " ".join(result.output.split())
+    for name in _TEMPLATE_ASSETS:
+        assert name in text
+    assert not (tmp_path / "p").exists()
+
+
+def test_a_template_with_the_sample_is_refused(tmp_path: Path) -> None:
+    """One starting point at a time."""
+    result = invoke(
+        make_state(tmp_path, FakeApi()),
+        "init",
+        str(tmp_path / "p"),
+        "--template",
+        "ingest-files",
+        "--sample",
+    )
+
+    assert result.exit_code == 2
+    assert "leave out --sample" in result.output
+    assert not (tmp_path / "p").exists()
+
+
+def test_the_template_project_test_parses_its_asset(tmp_path: Path) -> None:
+    """The project's own test runs green on what the template wrote."""
+    invoke(
+        make_state(tmp_path, FakeApi()), "init", str(tmp_path / "p"), "--template", "ingest-rest"
+    )
+    namespace: dict[str, object] = {"__file__": str(tmp_path / "p" / "tests" / "test_example.py")}
+
+    exec((tmp_path / "p" / "tests" / "test_example.py").read_text(), namespace)  # nosec B102
+
+    check = namespace["test_every_python_asset_parses"]
+    assert callable(check)
+    check()

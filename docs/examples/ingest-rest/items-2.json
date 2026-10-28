@@ -1,0 +1,6 @@
+[
+  {"id": 1, "name": "Anchor", "price": 24.5, "updated_at": "2026-10-01T08:00:00Z"},
+  {"id": 2, "name": "Buoy, large", "price": 9.25, "updated_at": "2026-10-02T08:00:00Z"},
+  {"id": 3, "name": "Cleat", "price": 3.75, "updated_at": "2026-10-01T10:00:00Z"},
+  {"id": 4, "name": "Deck mop", "price": 12.5, "updated_at": "2026-10-02T09:00:00Z"}
+]

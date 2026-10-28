@@ -31,6 +31,7 @@ nav:
   - How-to guides:
       - how-to/index.md
       - how-to/projects.md
+      - how-to/load-data-from-a-source.md
       - how-to/deploy-from-github-actions.md
       - how-to/deploy-from-gitlab-ci.md
       - how-to/check-your-data.md
