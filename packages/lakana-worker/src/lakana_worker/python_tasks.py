@@ -47,6 +47,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from itertools import accumulate
 from pathlib import Path, PurePosixPath
+from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -54,6 +55,7 @@ from sqlalchemy.orm import Session
 
 from lakana_core.artifacts.store import attempt_version, kind_of, run_input_version
 from lakana_core.auth import PrincipalRef, RunContext
+from lakana_core.catalog.attempt_stamp import created_by_task_run, written_by_attempt
 from lakana_core.catalog.identity import resolve_table_id
 from lakana_core.catalog.metadata import read_metadata
 from lakana_core.catalog.service import CatalogService
@@ -175,6 +177,7 @@ from lakana_worker.tasks import (
 from lakana_worker.venvs import (
     AcquireVenv,
     IndexResolver,
+    VenvBuildBroken,
     VenvBuildError,
     VenvBuildRefused,
     VenvBuildStopped,
@@ -183,6 +186,9 @@ from lakana_worker.venvs import (
     VenvSettings,
     acquire,
 )
+
+if TYPE_CHECKING:
+    from pyiceberg.table.metadata import TableMetadata
 
 logger = logging.getLogger(__name__)
 
@@ -252,6 +258,11 @@ _NO_MESSAGE = "the task failed without a message"
 _NO_WRITE = (
     "the task reported success without writing its table; return the DataFrame from the "
     "asset function and do not exit the process or write the result file yourself"
+)
+_NOT_ITS_WRITE = (
+    "the task reported success, but {table} was changed by another writer, not by this attempt; "
+    "return the DataFrame from the asset function and do not exit the process or write the "
+    "result file yourself"
 )
 _NO_VERSION = (
     "the task reported success without storing a version of its artifact; return the path from "
@@ -538,6 +549,9 @@ class _TargetState:
         the comparison either.
     seen
         The note as read, for the clear that supersedes it. Not part of the comparison.
+    metadata
+        The table's metadata as read, for the proof of whose write it is (#49). Not part of
+        the comparison.
     """
 
     table_id: uuid.UUID | None
@@ -545,6 +559,7 @@ class _TargetState:
     unpublished: bool = field(default=False, compare=False)
     kept: bool = field(default=False, compare=False)
     seen: KeptSeen = field(default=KeptSeen(None, None, None), compare=False)
+    metadata: TableMetadata | None = field(default=None, compare=False, repr=False)
 
 
 MAX_TASK_EGRESS = MAX_EGRESS
@@ -1385,6 +1400,10 @@ class PythonRuntime:
             lock_sha256 = self._check_lock(
                 code_dir, prepared.lock_sha256, prepared.sources, prepared.named_python
             )
+            if claimed.asset in prepared.inputs.values() and prepared.output != "artifact":
+                # Checked again after the build; here so that a first run that can never
+                # succeed does not wait for an environment build first (#48).
+                self._refuse_missing_self(claimed, self._target_state(session, engine, prepared))
             used = self._used_indexes(code_dir, prepared.sources)
             resolver = self._index_resolver(session, engine, prepared.environment, used)
             stop = KeeperStop(keeper)
@@ -1424,15 +1443,8 @@ class PythonRuntime:
                     )
                     if baseline is None:
                         raise LeaseLost
-            if before.table_id is None and claimed.asset in prepared.inputs.values():
-                raise TaskFailure(
-                    FailureKind.PERMANENT,
-                    f"{claimed.asset} reads its own table as an input, but the table does not "
-                    "exist yet, so its first run can never succeed. Create the table once: "
-                    "deploy a version of the asset that does not read itself, run it, then "
-                    "deploy the self-reading version",
-                    FailureCode.BUILD_FAILED,
-                )
+            if claimed.asset in prepared.inputs.values():
+                self._refuse_missing_self(claimed, before)
             shown.watermark = self._watermark(session, engine, prepared, before)
             _refuse_if_stopped(session, keeper, claimed.run_id)
             hidden = _connection_secrets(session, engine.key_provider, prepared)
@@ -1478,6 +1490,32 @@ class PythonRuntime:
         return self._classify(
             session, engine, claimed, keeper, prepared, before, outcome, ended, baseline
         )
+
+    @staticmethod
+    def _refuse_missing_self(claimed: ClaimedTask, state: _TargetState) -> None:
+        """Refuse the first run of an asset that reads its own table, which cannot succeed.
+
+        Parameters
+        ----------
+        claimed
+            The claim on an asset whose inputs name its own table.
+        state
+            The table's state as the worker read it.
+
+        Raises
+        ------
+        TaskFailure
+            Permanent, when the table does not exist.
+        """
+        if state.table_id is None:
+            raise TaskFailure(
+                FailureKind.PERMANENT,
+                f"{claimed.asset} reads its own table as an input, but the table does not "
+                "exist yet, so its first run can never succeed. Create the table once: "
+                "deploy a version of the asset that does not read itself, run it, then "
+                "deploy the self-reading version",
+                FailureCode.BUILD_FAILED,
+            )
 
     def _classify(
         self,
@@ -1579,6 +1617,8 @@ class PythonRuntime:
                 before.snapshot_id, before.table_id is None or before.unpublished
             )
             if after != before and after.table_id is not None:
+                if not self._attempt_wrote(session, claimed, before, after):
+                    return self._not_its_write(session, keeper, claimed, ended)
                 return ended(
                     None,
                     None,
@@ -1644,6 +1684,85 @@ class PythonRuntime:
         else:
             kind = FailureKind.TRANSIENT
         return ended(kind, outcome.error_message or _NO_MESSAGE, failure_code=outcome.failure_code)
+
+    @staticmethod
+    def _attempt_wrote(
+        session: Session, claimed: ClaimedTask, before: _TargetState, after: _TargetState
+    ) -> bool:
+        """Tell whether the change the worker found on the table is this attempt's write (#49).
+
+        Parameters
+        ----------
+        session
+            The supervisor's session; rolled back afterwards.
+        claimed
+            The claim: the task run and claim the write must carry.
+        before
+            The table before the process started.
+        after
+            The table after it ended, changed and existing.
+
+        Returns
+        -------
+        bool
+            A snapshot on the table's current branch, newer than `before`, carries this
+            attempt's stamp; or, for a table the attempt created without rows (no snapshot),
+            the table's location was claimed by this task run.
+        """
+        assert after.table_id is not None  # nosec B101 -- the caller checked
+        if after.snapshot_id is not None:
+            if after.metadata is None:
+                return False
+            since = before.snapshot_id if before.table_id == after.table_id else None
+            return written_by_attempt(
+                after.metadata,
+                since=since,
+                task_run_id=claimed.task_run_id,
+                claim=claimed.claim,
+            )
+        if before.table_id is not None:
+            return False
+        try:
+            return created_by_task_run(session, after.table_id, claimed.task_run_id)
+        finally:
+            session.rollback()
+
+    @staticmethod
+    def _not_its_write(
+        session: Session,
+        keeper: LeaseKeeper,
+        claimed: ClaimedTask,
+        ended: Callable[..., TaskOutcome],
+    ) -> TaskOutcome:
+        """End an attempt that reported success while somebody else changed its table.
+
+        A cancel or a drain still wins, as it does over every other failure.
+
+        Parameters
+        ----------
+        session
+            The supervisor's session.
+        keeper
+            The running lease keeper.
+        claimed
+            The claim.
+        ended
+            Builds the outcome to record.
+
+        Returns
+        -------
+        TaskOutcome
+            Permanent: the attempt's own write is not in the table, so what it reported is not
+            true, and a retry would not write over somebody else's data more safely.
+        """
+        stop = cancel_kind(session, keeper, claimed.run_id)
+        if stop is not None:
+            return ended(stop[0], _stop_text(stop), failure_code=stop_code(stop[0]))
+        return ended(
+            FailureKind.PERMANENT,
+            _NOT_ITS_WRITE.format(table=claimed.asset),
+            failure_code=FailureCode.BUILD_FAILED,
+        )
 
     def _prepare(
         self, session: Session, engine: RunEngine, claimed: ClaimedTask
@@ -2457,7 +2576,9 @@ class PythonRuntime:
             If `stop` said so before the venv was there; the caller asks the keeper why.
         TaskFailure
             Permanent for an unsafe cache (a configuration error), for a build that cannot
-            succeed until a credential, an index or the lock changes, and for a launcher build
+            succeed until a credential, an index or the lock changes (a refused credential, a
+            package whose own build fails, a package without a file for the platform), and
+            for a launcher build
             whose output the log sink would not take; transient when the build failed otherwise.
         """
         try:
@@ -2486,6 +2607,8 @@ class PythonRuntime:
             ) from exc
         except VenvBuildRefused as exc:
             raise TaskFailure(FailureKind.PERMANENT, str(exc), FailureCode.SECRET_REFUSED) from exc
+        except VenvBuildBroken as exc:
+            raise TaskFailure(FailureKind.PERMANENT, str(exc), FailureCode.BUILD_FAILED) from exc
         except VenvCacheUnsafe as exc:
             raise TaskFailure(FailureKind.PERMANENT, str(exc), FailureCode.NO_RUNTIME) from exc
         except VenvBuildError as exc:
@@ -2556,6 +2679,7 @@ class PythonRuntime:
                 row.unpublished_run_id is not None,
                 row.kept_run_id is not None,
                 KeptSeen(row.kept_run_id, row.kept_task_run_id, row.kept_snapshot_id),
+                metadata,
             )
         finally:
             session.rollback()

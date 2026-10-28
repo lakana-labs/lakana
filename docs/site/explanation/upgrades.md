@@ -134,6 +134,21 @@ Each cell is a summary. The page named in the last column has the detail. The ch
 
 ## Notes for the next release
 
+### Python tasks: builds that cannot succeed fail at once, and a task proves its write
+
+An environment build fails for good, without retries, when a package's own build from its source
+fails or a package has no file for the worker's platform: every attempt would build it the same
+way. Depend on a version with a wheel for the platform, run `uv lock` and deploy again. A build that
+failed on the network is still retried. An asset that reads its own table, which does not exist
+yet, now fails before its environment is built.
+
+A Python task now counts as succeeded only when the table holds its own write: each snapshot a task
+writes carries `lakana.task-run-id` and `lakana.task-claim` in its snapshot summary, and a change
+somebody else made fails the attempt with `… was changed by another writer, not by this attempt`.
+The server sets both properties; a worker of this release next to an older server fails every
+Python task that way, so upgrade the server and the workers together, as always. See
+[Python assets](../reference/python-assets.md#failure-retry-and-cancel).
+
 ### Connections: name each source once per environment
 
 `lakana connection create NAME --env ENV --kind KIND ...` stores a source system's address,

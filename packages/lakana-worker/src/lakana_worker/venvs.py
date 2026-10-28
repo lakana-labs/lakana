@@ -213,6 +213,71 @@ class VenvBuildRefused(VenvBuildError):
     """
 
 
+class VenvBuildBroken(VenvBuildError):
+    """uv reported a failure that every attempt meets again until the lock changes (#48).
+
+    A package's own build from its source distribution failed, or a locked package has no file
+    the worker can install. A failure that also shows a network error is not one of these.
+    """
+
+
+_PACKAGE = r"([A-Za-z0-9][A-Za-z0-9._-]{0,99})"
+_BACKEND_FAILED = re.compile(rf"Failed to build `{_PACKAGE}==[^`\n]*`")
+"""uv's report of a source distribution it could not build; broken only with `_BACKEND_ERROR`."""
+_BACKEND_ERROR = "The build backend returned an error"
+"""The cause uv names when the package's own build backend ran and failed."""
+_NO_PLATFORM = re.compile(
+    rf"Distribution `{_PACKAGE}==[^`\n]*` can't be installed because it doesn't have a source "
+    r"distribution or wheel for the current platform"
+)
+"""uv's report of a locked package with neither a wheel for this platform nor an sdist."""
+_NETWORK = re.compile(
+    r"Failed to fetch|Failed to download|error sending request|tcp connect error|dns error|"
+    r"Connection refused|Connection reset|timed out|HTTP status server error|"
+    r"Temporary failure in name resolution|Network is unreachable",
+    re.IGNORECASE,
+)
+"""Anything in uv's output that says the network failed: then a retry may succeed."""
+
+
+def broken_build(output: str) -> str | None:
+    """Say why a failed build cannot succeed on a retry, if uv's output shows that.
+
+    Parameters
+    ----------
+    output
+        The end of what uv printed; never shown, only matched.
+
+    Returns
+    -------
+    str or None
+        The message after ``environment build failed: ``, naming the package and the next step;
+        `None` when the failure may be transient (a network error anywhere in the output, or
+        a failure this does not know).
+    """
+    if _NETWORK.search(output):
+        return None
+    built = _BACKEND_FAILED.search(output)
+    if built is not None and _BACKEND_ERROR in output:
+        name = built.group(1)
+        return (
+            f"the package {name} could not be built from its source (the task's log has the "
+            "build's output), and every attempt builds it the same way. Depend on a version of "
+            f"{name} that publishes a wheel for the worker's platform and the task's Python, "
+            "or on one whose build works there, then run `uv lock`, commit and deploy again."
+        )
+    missing = _NO_PLATFORM.search(output)
+    if missing is not None:
+        name = missing.group(1)
+        return (
+            f"the package {name} has no wheel for the worker's platform and the task's Python, "
+            "and no source distribution, so it cannot be installed. Depend on a version of "
+            f"{name} that publishes such a wheel (the task's log names the platforms it has), "
+            "then run `uv lock`, commit and deploy again."
+        )
+    return None
+
+
 class VenvBuildStopped(VenvBuildError):
     """The build was stopped because its task is to stop; nothing of it was kept."""
 
@@ -661,6 +726,8 @@ def _build(
         If a credential cannot be read (raised by `indexes`), a registered
         index answered 401 or 403, or a package has no wheel while a
         credential is in play.
+    VenvBuildBroken
+        If a package's own build failed, or a package has no file for this platform.
     VenvBuildError
         If uv cannot be found, or the build fails or exceeds a limit.
     _UvExited
@@ -725,6 +792,9 @@ def _build(
                 package = missing_wheel(output) if wheels_only(accesses) else None
                 if package is not None:
                     raise VenvBuildRefused(f"{_FAILED}: {no_wheel_message(package)}") from exc
+                broken = broken_build(output)
+                if broken is not None:
+                    raise VenvBuildBroken(f"{_FAILED}: {broken}") from exc
                 hint = certificate_hint(output)
                 if hint is not None:
                     raise VenvBuildError(f"{exc}: {hint}") from exc
@@ -895,6 +965,8 @@ def acquire(
         If the cache directory, a lock file or the venv directory is unsafe.
     VenvBuildRefused
         If the build cannot succeed until a credential, an index or the lock changes.
+    VenvBuildBroken
+        If a package cannot be built or installed on this platform until the lock changes.
     VenvBuildError
         If `lock_sha256` is not a SHA-256 hex digest, `pyproject.toml` cannot be
         read, the build fails, or the

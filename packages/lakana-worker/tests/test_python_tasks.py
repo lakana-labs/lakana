@@ -70,6 +70,7 @@ from lakana_core.auth import (
     RunContext,
     Securable,
 )
+from lakana_core.catalog.attempt_stamp import CLAIM_PROPERTY, TASK_RUN_PROPERTY
 from lakana_core.catalog.json_schema import ColumnSpec
 from lakana_core.catalog.metadata import read_metadata
 from lakana_core.catalog.query_service import QueryService
@@ -183,6 +184,7 @@ from lakana_worker.task_outcome import TaskFailure, TaskOutcome
 from lakana_worker.tasks import RunEngine, run_claimed
 from lakana_worker.venvs import (
     IndexResolver,
+    VenvBuildBroken,
     VenvBuildError,
     VenvBuildRefused,
     VenvBuildStopped,
@@ -1141,6 +1143,102 @@ def test_a_first_write_of_zero_rows_counts_as_written(py: PyWorld) -> None:
     assert "snapshot:" not in _log(py.world, claimed.run_id, "gold.scores")
 
 
+def _write_as_admin(world: World, rows: int = 1, *, append: bool = False) -> None:
+    """Write `gold.scores` as the administrator, without the task's token: another writer.
+
+    Parameters
+    ----------
+    world
+        The world.
+    rows
+        How many rows to write.
+    append
+        Append to the table instead of replacing (or creating) it.
+    """
+    data = pa.table({"id": pa.array(list(range(rows)), pa.int64())})
+    ref = TableRef.from_dotted("dev", "gold.scores")
+    with world.session() as session:
+        catalog = CatalogService(session, StorageResolver(session), AllowAllAuthorization())
+        if append:
+            catalog.append(world.admin, ref, data)
+        elif catalog.table_exists(world.admin, ref):
+            catalog.replace(world.admin, ref, data)
+        else:
+            catalog.replace(world.admin, ref, data, expected_snapshot_id="none")
+
+
+_NOT_ITS_WRITE = (
+    "the task reported success, but gold.scores was changed by another writer, not by this "
+    "attempt; return the DataFrame from the asset function and do not exit the process or write "
+    "the result file yourself"
+)
+
+
+@pytest.mark.parametrize("exists", [False, True], ids=["first-run", "table-exists"])
+def test_success_after_somebody_else_wrote_the_table_is_not_a_write(
+    py: PyWorld, exists: bool
+) -> None:
+    """Issue #49: the table changed, but no snapshot names this attempt.
+
+    Parameters
+    ----------
+    py
+        The world.
+    exists
+        Whether the table exists before the task runs.
+    """
+    if exists:
+        _write_as_admin(py.world)
+
+    def script(task: PythonTask, on_log: Callable[[bytes], None], stop: StopSignal) -> RunOutcome:
+        _write_as_admin(py.world, 3)
+        return RunOutcome(succeeded=True, snapshot_id=None, rows=3)
+
+    task, message = _fails(py, py.engine(script))
+    assert (task.status, task.attempt, task.failure_code) == (TaskStatus.FAILED, 1, "build_failed")
+    assert message == _NOT_ITS_WRITE
+
+
+def test_an_empty_table_somebody_else_created_is_not_a_write(py: PyWorld) -> None:
+    """A table created without rows has no snapshot to stamp: the claim of its location tells."""
+
+    def script(task: PythonTask, on_log: Callable[[bytes], None], stop: StopSignal) -> RunOutcome:
+        _write_as_admin(py.world, 0)
+        return RunOutcome(succeeded=True, snapshot_id=None, rows=0)
+
+    task, message = _fails(py, py.engine(script))
+    assert (task.status, task.failure_code) == (TaskStatus.FAILED, "build_failed")
+    assert message == _NOT_ITS_WRITE
+
+
+def test_a_write_another_writer_appended_to_afterwards_still_counts(py: PyWorld) -> None:
+    """The attempt's own snapshot is under the current one: the write is proven."""
+
+    def script(task: PythonTask, on_log: Callable[[bytes], None], stop: StopSignal) -> RunOutcome:
+        written = _upload(py.world, task, 2)
+        _write_as_admin(py.world, 1, append=True)
+        return RunOutcome(succeeded=True, snapshot_id=written.snapshot_id, rows=written.rows)
+
+    engine = py.engine(script)
+    claimed = py.claim_python(engine)
+    run_claimed(engine, claimed)
+    assert _task(py.world, "gold.scores").status is TaskStatus.SUCCEEDED
+
+
+def test_a_write_of_the_task_is_stamped_with_its_task_run_and_claim(py: PyWorld) -> None:
+    engine = py.engine(_writer(py.world))
+    claimed = py.claim_python(engine)
+    run_claimed(engine, claimed)
+    with py.world.session() as session:
+        catalog = CatalogService(session, StorageResolver(session), AllowAllAuthorization())
+        snapshot = catalog.load_table(
+            py.world.admin, TableRef.from_dotted("dev", "gold.scores")
+        ).metadata.current_snapshot()
+    assert snapshot is not None and snapshot.summary is not None
+    assert snapshot.summary.get(TASK_RUN_PROPERTY) == str(claimed.task_run_id)
+    assert snapshot.summary.get(CLAIM_PROPERTY) == str(claimed.claim)
+
+
 def test_success_without_a_write_is_a_permanent_failure(py: PyWorld) -> None:
     """The worker never trusts the record: it reads the table's snapshot itself."""
     task, message = _fails(py, py.engine(_forged))
@@ -1725,6 +1823,18 @@ def test_an_asset_that_reads_its_own_missing_table_fails_permanently_and_says_wh
     assert message == _SELF_INPUT_MESSAGE
     assert py.runner.tasks == [] and py.tokens() == []
     assert all(lease.descriptor is None for lease in py.leases)
+
+
+def test_an_asset_that_reads_its_own_missing_table_fails_before_its_environment_is_built(
+    py: PyWorld,
+) -> None:
+    """Issue #48: a first run that can never succeed does not wait for a build first."""
+    py.deploy(inputs={"prev": "gold.scores"})
+    task, message = _fails(py, py.engine(_forged))
+    assert message == _SELF_INPUT_MESSAGE
+    assert (task.status, task.failure_code) == (TaskStatus.FAILED, "build_failed")
+    assert py.leases == [] and py.resolvers == []
+    assert list((py.root / "work").iterdir()) == []
 
 
 def test_an_asset_that_reads_its_own_existing_table_runs(py: PyWorld) -> None:
@@ -7167,6 +7277,12 @@ def test_a_docker_build_resolves_only_the_indexes_its_lock_uses(py: PyWorld) -> 
             TaskStatus.PENDING,
             "build_failed",
             "runner unavailable: the launcher is busy",
+        ),
+        (
+            VenvBuildBroken("environment build failed: the package brokenpkg could not be built"),
+            TaskStatus.FAILED,
+            "build_failed",
+            "environment build failed: the package brokenpkg could not be built",
         ),
     ],
 )

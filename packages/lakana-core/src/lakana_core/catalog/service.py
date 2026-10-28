@@ -63,6 +63,7 @@ from lakana_core.catalog.append import (
     strip_field_metadata,
     validate_arrow_schema,
 )
+from lakana_core.catalog.attempt_stamp import stamp_snapshots
 from lakana_core.catalog.columns import sync_table_columns
 from lakana_core.catalog.commit import commit_metadata_pointer
 from lakana_core.catalog.connection_lineage import (
@@ -4290,6 +4291,9 @@ class CatalogService:
             # pyiceberg refuses to remove a key the table does not have, which would tell this
             # caller which keys it has; for it, such a removal changes nothing, as in Iceberg.
             updates = [_present_removals(u, current.properties) for u in updates]
+        # Only the catalog says which task attempt made a snapshot (#49): a caller's own claim
+        # is removed, and a bound task token's write is stamped.
+        updates = stamp_snapshots(updates, p.run_context)
         added = {u.snapshot.snapshot_id for u in updates if isinstance(u, AddSnapshotUpdate)}
         with self._state_withheld(p, ref, ValidationError, _UPDATE_DOES_NOT_FIT):
             updated = apply_updates(current, updates)
@@ -6841,7 +6845,7 @@ class CatalogService:
                     data_files,
                     replace=False,
                 )
-                metadata = apply_updates(prepared.metadata, updates)
+                metadata = apply_updates(prepared.metadata, stamp_snapshots(updates, p.run_context))
                 snapshot_id = snapshot.snapshot_id
             result = WriteResult(
                 table_id=prepared.table_id,

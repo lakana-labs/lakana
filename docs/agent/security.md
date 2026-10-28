@@ -960,8 +960,13 @@ code in this area has to know.
 - **Untrusted inputs of the worker:** the code tarball (digest re-checked, unpacked fresh for
   every attempt with no links and no special files into a read-only directory inside the
   private attempt directory), the result file the child writes (opened `O_NOFOLLOW`, regular
-  files only, 64 KiB, shape-checked, and never believed: success needs the worker to find the
-  target table changed), the child's output (redacted, control characters replaced, 1 MiB per
+  files only, 64 KiB, shape-checked, and never believed: success needs the worker to find this
+  attempt's own write, #49: a snapshot on the current branch, newer than the attempt's start,
+  whose summary carries `lakana.task-run-id` and `lakana.task-claim`; `CatalogService.commit_table`
+  and `_write_new_table` set both from the claim-form `RunContext` only and remove them from every
+  other added snapshot, so no client, Iceberg REST included, can claim an attempt's write; a table
+  created without rows is proven by its location's `holder_run_id`, and only the current claim of a
+  task run can commit, `record_pending`), the child's output (redacted, control characters replaced, 1 MiB per
   attempt in all), uv's output (redacted of proxy and index credentials).
 - **The artifact harness has two residuals that are recorded, not closed (#67):** the upload
   works with `os.fchdir` into the directory it pinned, and the check that `inputs` is still the
