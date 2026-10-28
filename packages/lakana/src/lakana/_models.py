@@ -1671,15 +1671,15 @@ class DeployJobStart:
         ``pending`` (the worker has not started it yet), ``started``, ``waiting`` (the project
         was busy; the start waits for the active run) or ``not_started``.
     run_id
-        For ``started``, the queued run; follow it with `client.runs.wait`.
+        The queued run when `outcome` is ``started``; follow it with `client.runs.wait`.
     waits_for_run_id
-        For ``waiting``, the active run the start waits for.
+        The run of the project the start waits behind when `outcome` is ``waiting``.
     reason
-        For ``not_started``: ``lacks_run`` (the deployer may not `RUN` in the environment),
-        ``refused`` (refused as a start by hand would be), ``error`` or ``lost`` (the worker
-        stopped before it started the job).
+        Why a ``not_started`` job did not start: ``lacks_run`` (you may not `RUN` in the
+        environment), ``refused`` (a start by hand would be refused too), ``error`` (the
+        worker's log has it) or ``lost`` (the worker stopped before the start).
     message
-        For ``not_started``, one sentence that names the cause and the next step.
+        What to do about a ``not_started`` job, as one sentence for a person.
     """
 
     job: str
