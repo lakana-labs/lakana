@@ -131,7 +131,13 @@ def _bound_names(node: ast.stmt) -> set[str]:
             names.add(current.name)
             continue
         if isinstance(current, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
-            # A comprehension has a scope of its own: its variables are not the module's.
+            # A comprehension has a scope of its own: its loop variables are not the module's.
+            # What leaks out of it: a `:=` target anywhere inside (PEP 572), and the first
+            # iterable, which is evaluated in the enclosing scope.
+            names.update(
+                inner.target.id for inner in ast.walk(current) if isinstance(inner, ast.NamedExpr)
+            )
+            pending.append(current.generators[0].iter)
             continue
         if isinstance(current, ast.Name) and isinstance(current.ctx, (ast.Store, ast.Del)):
             names.add(current.id)

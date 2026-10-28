@@ -73,6 +73,15 @@ _MASTER_KEY = base64.b64encode(b"k" * 32).decode()
 _BOOTSTRAP = {"Authorization": "Bearer lakana_pat_m10secretuse_m10secretusesecret"}
 _ENV = "dev"
 _SECRET = "s3-creds"
+_STORAGE_ROUTES = frozenset(
+    {
+        "/api/v1/environments/{env}/namespaces/{path}/tables",
+        "/api/v1/environments/{env}/namespaces/{path}/tables/{name}",
+        "/api/v1/environments/{name}/orphaned-locations",
+        "/v1/{prefix}/namespaces/{namespace}/tables/{table}",
+    }
+)
+"""The route templates that read the environment's storage, and so may fail with the secret."""
 _PARAMETER = re.compile(r"\{(\w+)\}")
 
 
@@ -244,6 +253,22 @@ class _Stack:
             if path is not None:
                 statuses[template] = self.call("GET", path, allow_5xx=allow_5xx).status_code
         return statuses
+
+    def assert_only_storage_routes_failed(self, statuses: dict[str, int]) -> None:
+        """Require that a route that answered 5xx is one that reads the environment's storage.
+
+        Parameters
+        ----------
+        statuses
+            What `sweep` returned.
+
+        Raises
+        ------
+        AssertionError
+            If a route outside `_STORAGE_ROUTES` answered 5xx.
+        """
+        failed = {template for template, status in statuses.items() if status >= 500}
+        assert failed <= _STORAGE_ROUTES, sorted(failed - _STORAGE_ROUTES)
 
     def raw_rows(self) -> list[bytes]:
         """Read what the database holds, as bytes to search.
@@ -667,7 +692,7 @@ def test_an_error_raised_by_storage_after_the_secret_was_resolved_shows_no_value
     assert any(answer.status_code >= 400 for answer in refused), [a.status_code for a in refused]
     _, status = _run_query(stack, "SELECT id FROM bronze.t")
     assert status == QueryRunStatus.FAILED
-    stack.sweep(allow_5xx=True)
+    stack.assert_only_storage_routes_failed(stack.sweep(allow_5xx=True))
 
     stack.assert_nothing_leaked(expect_log=True)
 
@@ -694,7 +719,7 @@ def test_revoking_a_secret_an_environment_still_refers_to_shows_no_value(stack: 
     assert all(answer.status_code >= 400 for answer in answers), [a.status_code for a in answers]
     _, status = _run_query(stack, "SELECT id FROM bronze.t")
     assert status == QueryRunStatus.FAILED
-    stack.sweep(allow_5xx=True)
+    stack.assert_only_storage_routes_failed(stack.sweep(allow_5xx=True))
     stack.call("GET", f"/api/v1/environments/{_ENV}/secrets")
 
     stack.assert_nothing_leaked()

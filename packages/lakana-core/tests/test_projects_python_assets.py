@@ -279,6 +279,16 @@ _HEAD = "from lakana import asset\n"
             "aliases and re-exports are not resolved",
         ),
         (
+            _HEAD + "names = [(asset := print) for x in range(2)]\n@asset()\ndef f():\n    pass\n",
+            3,
+            "aliases and re-exports are not resolved",
+        ),
+        (
+            _HEAD + "names = [x for x in (asset := print, 1)]\n@asset()\ndef f():\n    pass\n",
+            3,
+            "aliases and re-exports are not resolved",
+        ),
+        (
             "import lakana\nlakana = object()\n@lakana.asset()\ndef f():\n    pass\n",
             3,
             "aliases and re-exports are not resolved",
