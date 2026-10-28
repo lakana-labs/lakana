@@ -21,7 +21,11 @@ _VALUE = Annotated[
     ),
 ]
 _STDIN = Annotated[
-    bool, typer.Option("--values-stdin", help="Read a JSON object of values from stdin.")
+    bool,
+    typer.Option(
+        "--values-stdin",
+        help="Read a JSON object of values from stdin (a leading byte order mark is dropped).",
+    ),
 ]
 
 
@@ -82,6 +86,20 @@ def chosen_use(
     return chosen[0] if chosen else None
 
 
+def read_stdin() -> str:
+    """Read standard input as text, less one leading byte order mark.
+
+    A Windows editor may start a file with a UTF-8 byte order mark, which is not part of a
+    secret and which JSON does not allow.
+
+    Returns
+    -------
+    str
+        The text.
+    """
+    return sys.stdin.read().removeprefix("\ufeff")
+
+
 def read_values(value: list[str] | None, values_stdin: bool) -> dict[str, str]:
     """Collect secret values from `--value` or `--values-stdin`.
 
@@ -108,7 +126,7 @@ def read_values(value: list[str] | None, values_stdin: bool) -> dict[str, str]:
     if not values_stdin:
         return parse_key_values(value, "--value", sensitive=True)
     try:
-        data = json.loads(sys.stdin.read())
+        data = json.loads(read_stdin())
     except json.JSONDecodeError as exc:
         raise CliError(f"--values-stdin expects a JSON object: {exc}") from exc
     if not isinstance(data, dict) or not all(

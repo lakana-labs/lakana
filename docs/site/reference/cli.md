@@ -1294,7 +1294,7 @@ Name its use with `--index`, `--repository`, `--connection` or `--own-env` to bi
 | `NAME` | text | required |  |
 | `--env` | text | none | Environment (default: the profile's). |
 | `--value` | text, repeatable | none | key=value (repeatable). Lands in shell history; prefer --values-stdin. |
-| `--values-stdin` | flag | off | Read a JSON object of values from stdin. |
+| `--values-stdin` | flag | off | Read a JSON object of values from stdin (a leading byte order mark is dropped). |
 | `--index` | text | none | Bind it to this package index. |
 | `--repository` | text | none | Bind it to this repository. |
 | `--connection` | text | none | Bind it to this connection; it becomes the secret it uses. |
@@ -1325,7 +1325,7 @@ Replace secret NAME's values.
 | `NAME` | text | required |  |
 | `--env` | text | none | Environment (default: the profile's). |
 | `--value` | text, repeatable | none | key=value (repeatable). Lands in shell history; prefer --values-stdin. |
-| `--values-stdin` | flag | off | Read a JSON object of values from stdin. |
+| `--values-stdin` | flag | off | Read a JSON object of values from stdin (a leading byte order mark is dropped). |
 
 ### `lakana secret bind`
 
@@ -1399,8 +1399,8 @@ Give the kind's address and settings options, and its secret one of three ways: 
 | `--access-key-id` | text | none | s3: access key id. |
 | `--prefix` | text | none | s3, gcs, azure: only objects under this prefix. |
 | `--secret` | text | none | Use this existing secret of the environment. |
-| `--password-stdin` | flag | off | Read the secret from stdin: the password, token or key the kind takes. |
-| `--values-stdin` | flag | off | Read the secret's keys as a JSON object from stdin. |
+| `--password-stdin` | flag | off | Read the secret from stdin: the password, token or key the kind takes, less one leading byte order mark and one trailing line ending. |
+| `--values-stdin` | flag | off | Read the secret's keys as a JSON object from stdin (a leading byte order mark is dropped). |
 
 ### `lakana connection list`
 
@@ -1462,8 +1462,8 @@ Change connection NAME; only the options given change. Its name and kind never c
 | `--access-key-id` | text | none | s3: access key id. |
 | `--prefix` | text | none | s3, gcs, azure: only objects under this prefix. |
 | `--secret` | text | none | Use this existing secret of the environment. |
-| `--password-stdin` | flag | off | Read the secret from stdin: the password, token or key the kind takes. |
-| `--values-stdin` | flag | off | Read the secret's keys as a JSON object from stdin. |
+| `--password-stdin` | flag | off | Read the secret from stdin: the password, token or key the kind takes, less one leading byte order mark and one trailing line ending. |
+| `--values-stdin` | flag | off | Read the secret's keys as a JSON object from stdin (a leading byte order mark is dropped). |
 
 ### `lakana connection delete`
 
