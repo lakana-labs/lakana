@@ -1053,6 +1053,61 @@ def test_an_artifact_asset_takes_no_write_model(argument: str) -> None:
     assert f"argument {name!r} does not apply to an artifact asset; remove it" in messages
 
 
+_EVOLVE_NEEDS_REPLACE = (
+    'evolve_schema=True works with write="replace" (the default) only; remove evolve_schema, '
+    "or replace the table instead of appending or merging"
+)
+
+
+def test_evolve_schema_is_read_from_the_decorator_of_a_replacing_asset() -> None:
+    """A Python asset opts in to schema evolution; the manifest gets it from the metadata."""
+    evolving = _parsed(_GOOD.replace("@asset(", "@asset(evolve_schema=True, ", 1))
+    assert evolving.metadata.evolve_schema is True
+    assert evolving.metadata.write is None
+    explicit = _parsed(_GOOD.replace("@asset(", '@asset(write="replace", evolve_schema=True, ', 1))
+    assert explicit.metadata.evolve_schema is True
+    off = _parsed(_GOOD.replace("@asset(", "@asset(evolve_schema=False, ", 1))
+    assert off.metadata.evolve_schema is False
+    assert _parsed(_GOOD).metadata.evolve_schema is None
+    unset = _parsed(_GOOD.replace("@asset(", "@asset(evolve_schema=None, ", 1))
+    assert unset.metadata.evolve_schema is None
+
+
+@pytest.mark.parametrize(
+    ("argument", "message"),
+    [
+        ('write="append", watermark="ts", evolve_schema=True', _EVOLVE_NEEDS_REPLACE),
+        ('write="merge", key=["id"], evolve_schema=True', _EVOLVE_NEEDS_REPLACE),
+        ('evolve_schema="yes"', "argument 'evolve_schema' must be True or False"),
+        ("evolve_schema=1", "argument 'evolve_schema' must be True or False"),
+    ],
+)
+def test_a_wrong_evolve_schema_is_a_deploy_issue_at_the_decorator(
+    argument: str, message: str
+) -> None:
+    source = _GOOD.replace("@asset(", f"@asset({argument}, ", 1)
+    issues = _issues(source)
+    assert [issue.message for issue in issues] == [message]
+    assert issues[0].line == 5
+
+
+@pytest.mark.parametrize(
+    "argument", ['write="append", watermark="ts"', 'write="merge", key=["id"]']
+)
+def test_evolve_schema_false_is_the_default_and_fits_every_write(argument: str) -> None:
+    parsed = _parsed(_GOOD.replace("@asset(", f"@asset({argument}, evolve_schema=False, ", 1))
+    assert parsed.metadata.evolve_schema is False
+
+
+def test_an_artifact_asset_takes_no_evolve_schema() -> None:
+    messages = [
+        issue.message for issue in _issues(_MODEL.replace("keep_versions=2", "evolve_schema=True"))
+    ]
+    assert messages == ["argument 'evolve_schema' does not apply to an artifact asset; remove it"]
+    kept = _parsed(_MODEL.replace("keep_versions=2", "evolve_schema=False"))
+    assert kept.metadata.evolve_schema is None
+
+
 def test_ctx_is_the_context_and_not_an_input() -> None:
     source = _GOOD.replace(
         "def station_scores(obs: pl.DataFrame, stations: pl.DataFrame)",

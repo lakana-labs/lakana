@@ -235,6 +235,10 @@ class PythonTask:
     root_users
         Each of `roots` to the first connection naming it, for the message when a root is
         missing.
+    evolve_schema
+        Whether the harness's replace lets the table take the result's schema: the asset
+        opted in with ``evolve_schema=True``. Always `False` for an append, a merge and an
+        artifact.
     """
 
     code_dir: Path
@@ -266,6 +270,7 @@ class PythonTask:
     relay: tuple[tuple[int, str, int], ...] = ()
     roots: tuple[str, ...] = ()
     root_users: Mapping[str, str] = field(default_factory=dict)
+    evolve_schema: bool = False
 
 
 @dataclass(frozen=True)
@@ -749,7 +754,9 @@ def task_description(
     bytes
         The JSON document: version `_WRITES_DESCRIPTION_VERSION` for an asset that appends,
         merges or declares a connection, else version `_DESCRIPTION_VERSION`, unchanged, so a
-        harness of the previous release still runs every other asset.
+        harness of the previous release still runs every other asset. ``evolve_schema`` is
+        sent only when it is on, in either version: an older harness ignores it and refuses
+        a changed schema, as it always did.
     """
     document: dict[str, object] = {
         "version": _DESCRIPTION_VERSION,
@@ -769,6 +776,8 @@ def task_description(
         "decimals": task.decimals,
         "work_dir": work_dir,
     }
+    if task.evolve_schema:
+        document["evolve_schema"] = True
     if task.write != "replace" or task.connections:
         document["version"] = _WRITES_DESCRIPTION_VERSION
         document["write"] = task.write

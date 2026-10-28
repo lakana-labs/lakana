@@ -842,7 +842,22 @@ def test_a_replace_without_connections_keeps_description_version_2(harness: Harn
     """A harness of the previous release reads it: no key of version 3 is sent."""
     description = _description(harness, hidden=("s3cr3t",))
     assert description["version"] == 2
-    assert not {"write", "key", "watermark", "connections", "hidden"} & set(description)
+    assert not {"write", "key", "watermark", "connections", "hidden", "evolve_schema"} & set(
+        description
+    )
+
+
+def test_an_evolving_replace_says_so_and_keeps_description_version_2(harness: Harness) -> None:
+    """A harness of the previous release ignores the key and refuses the changed schema."""
+    description = _description(harness, evolve_schema=True)
+    assert description["version"] == 2
+    assert description["evolve_schema"] is True
+
+
+def test_the_sdk_parses_the_evolve_schema_of_a_task(harness: Harness) -> None:
+    assert _real_parse(harness).evolve_schema is False
+    harness.fields = {"evolve_schema": True}
+    assert _real_parse(harness).evolve_schema is True
 
 
 @pytest.mark.parametrize(

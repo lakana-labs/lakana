@@ -23,6 +23,9 @@ unless ``write`` is ``"merge"``), ``watermark`` (``null`` or ``{"column": str, "
 str | null}``, the value in the worker's ``<type>:<value>`` form) and ``connections``
 (each declared connection's name to an object with at least its ``kind``); the worker
 sends it only to an asset that uses one of them, and a version 2 document replaces.
+Either version may carry ``evolve_schema`` (``true`` when the asset says
+``@asset(evolve_schema=True)``; the worker sends it only then): a replace then lets the table
+take the result's schema.
 
 An append uploads with `client.tables.append` against ``expected_snapshot_id`` (the
 snapshot the worker read the watermark from), except on a first run (``"none"``), which
@@ -140,7 +143,8 @@ MAX_ERROR_MESSAGE_CHARS = 2000
 
 _MODULE_NAME = "lakana_asset"
 _SERVER_ADVICE = " Pass evolve_schema"
-"""Where the server's schema-mismatch text starts advising an option Python assets lack."""
+"""Where the server's schema-mismatch text starts advising its own spelling of the option; a
+Python asset gives it as ``@asset(evolve_schema=True)``."""
 _INPUT_HINT = (
     " An input is read whole into memory: if it is too large, narrow it with an upstream SQL "
     "asset (for example a view) and declare that as the input."
@@ -376,6 +380,9 @@ class TaskDescription:
         Whether the table existed when the worker read it: one created by a first run of zero
         rows has no snapshot (`expected_snapshot_id` ``"none"``) and still exists. Version 2
         documents leave it out; then ``"none"`` means a first run.
+    evolve_schema
+        Whether a replace lets the table take the result's schema (the asset says
+        ``evolve_schema=True``). Either version may carry it; an absent key means `False`.
     """
 
     server_url: str
@@ -399,6 +406,7 @@ class TaskDescription:
     watermark: WatermarkValue | None = None
     connections: dict[str, dict[str, object]] = field(default_factory=dict)
     table_exists: bool = False
+    evolve_schema: bool = False
 
 
 def _text(document: dict[str, object], key: str) -> str:
@@ -724,6 +732,9 @@ def parse_description(text: str) -> TaskDescription:
     if decimals is not None and decimals not in DECIMALS_MODES:
         raise ValueError("task description: decimals must be 'float' or 'exact'")
     writes = _write_fields(document) if document["version"] == 3 else _Writes()
+    evolve_schema = document.get("evolve_schema", False)
+    if not isinstance(evolve_schema, bool):
+        raise ValueError("task description: evolve_schema must be true or false")
     return TaskDescription(
         server_url=_text(document, "server_url"),
         token=_text(document, "token"),
@@ -746,6 +757,7 @@ def parse_description(text: str) -> TaskDescription:
         watermark=writes.watermark,
         connections=writes.connections,
         table_exists=writes.table_exists,
+        evolve_schema=evolve_schema,
     )
 
 
@@ -1758,10 +1770,11 @@ def _store_artifact(
 def _upload_message(exc: ValidationError, table: str) -> str:
     """Word a refused upload for the task's error.
 
-    A `table` asset replaces its table with ``evolve_schema`` off, as a SQL
-    `table` asset does, so a changed output schema is refused for good. The
-    schema mismatch is recognised by the error type the server returns, not by
-    its wording, and the harness writes its own advice.
+    A `table` asset replaces its table with ``evolve_schema`` off unless it
+    says ``@asset(evolve_schema=True)``, so without that a changed output schema
+    is refused for good. The schema mismatch is recognised by the error type the
+    server returns, not by its wording, and the harness writes its own advice,
+    which names the decorator's option.
 
     Parameters
     ----------
@@ -1776,15 +1789,16 @@ def _upload_message(exc: ValidationError, table: str) -> str:
         The server's reason; for a schema mismatch, the harness's explanation
         with the server's detail and the remedy. The server's own advice to
         pass ``evolve_schema`` is cut off when it is there, because a Python
-        asset cannot follow it; a detail worded differently is kept whole.
+        asset spells it in its decorator; a detail worded differently is kept whole.
     """
     if exc.error_type != "SchemaMismatchError":
         return str(exc)
     detail = str(exc).split(_SERVER_ADVICE, 1)[0].strip().rstrip(".")
     return (
         f"the asset's output no longer matches the schema of {table}. Server detail: {detail}. "
-        f"Restore the columns and types the table has, or drop {table} and run the asset "
-        "again so it is recreated with the new schema. A Python asset cannot pass evolve_schema."
+        f"To let {table} take the new schema, add evolve_schema=True to the asset's "
+        "@asset(...) and deploy again (a column the output no longer has is then removed from "
+        "the table); otherwise restore the columns and types the table has."
     )
 
 
@@ -1986,7 +2000,8 @@ def _upload(client: Client, description: TaskDescription, arrow: pa.Table) -> di
             description.environment,
             description.table,
             arrow,
-            evolve_schema=False,
+            # Never on the first run of an append: deploy allows the option only on a replace.
+            evolve_schema=description.evolve_schema and description.write == "replace",
             expected_snapshot_id=expected,
             **lineage,
         )

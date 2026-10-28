@@ -45,7 +45,7 @@ import lakana
 from lakana._models import Deploy as SdkDeploy
 from lakana._models import Run as SdkRun
 from lakana.cli.app import build_app
-from lakana.errors import DeployFailed, NotFound
+from lakana.errors import DeployFailed, NotFound, QueryFailed
 from lakana.errors import PermissionDenied as SdkPermissionDenied
 from lakana_core.catalog.service import Rollback
 from lakana_core.db import create_engine, db_now
@@ -202,6 +202,33 @@ def shaped(knobs: pl.DataFrame) -> pl.DataFrame:
     return wide.rename({"id": "ident"}) if wide.height else wide
 '''
 
+_EVOLVING = '''\
+import polars as pl
+from lakana import asset
+
+
+@asset(inputs={"dials": "bronze.dials"}, evolve_schema=True, retries=0)
+def evolving(dials: pl.DataFrame) -> pl.DataFrame:
+    """Each new dial changes the shape of the result."""
+    step = dials["id"].max()
+    if step == 1:
+        return pl.DataFrame(
+            {
+                "id": pl.Series([1, 2], dtype=pl.Int32),
+                "ratio": pl.Series([0.5, 1.5], dtype=pl.Float32),
+                "code": [10, 20],
+                "gone": ["a", "b"],
+            }
+        )
+    if step == 2:
+        # Polars' default Int64 and Float64 into the Int32 and Float32 columns: both widen.
+        return pl.DataFrame(
+            {"id": [3], "ratio": [2.5], "code": ["x"], "label": ["new"]}
+        )
+    # No rows, a Float32 into the Float64 column, `code` and `label` gone, `note` added.
+    return pl.DataFrame(schema={"id": pl.Int64, "ratio": pl.Float32, "note": pl.String})
+'''
+
 _FILES = {
     "assets/silver/clean.sql": "SELECT id FROM bronze.events\n",
     "assets/silver/recent.sql": (
@@ -215,6 +242,7 @@ _FILES = {
     "assets/gold/nested.py": _NESTED,
     "assets/gold/from_view.py": _FROM_VIEW,
     "assets/gold/shaped.py": _SHAPED,
+    "assets/gold/evolving.py": _EVOLVING,
 }
 
 
@@ -670,6 +698,7 @@ def _deploy(
         for table, values in (
             ("bronze.events", [1, 2]),
             ("bronze.knobs", [1]),
+            ("bronze.dials", [1]),
             ("bronze.staging.fresh", [3, 4]),
         ):
             admin.tables.create(env, table, schema=ids)
@@ -969,9 +998,81 @@ def test_zero_rows_create_the_table_and_a_changed_schema_fails_for_good(
     message = attempt.error_message or ""
     assert "no longer matches the schema of gold.shaped" in message
     assert "renamed-looking id -> ident" in message
-    assert "drop gold.shaped and run the asset again" in message
+    assert "add evolve_schema=True to the asset's @asset(...)" in message
     assert "Pass evolve_schema" not in message
     assert stack.sql("SELECT count(*) AS n FROM gold.shaped", env) == [{"n": 0}]
+
+
+def _columns(stack: _Stack, environment: str, table: str) -> list[tuple[str, str]]:
+    """Return a table's columns as the catalog describes them.
+
+    Parameters
+    ----------
+    stack
+        The stack.
+    environment
+        Environment name.
+    table
+        The dotted table name.
+
+    Returns
+    -------
+    list of tuple
+        ``(name, type)`` per column, in order.
+    """
+    return [(c.name, c.type) for c in stack.admin.tables.get(environment, table).columns]
+
+
+def test_an_evolving_replace_changes_the_schema_and_an_empty_one_still_proves_its_write(
+    stack: _Stack, project: _Project
+) -> None:
+    """`evolve_schema=True` widens, retypes, drops and adds; every run proves its own write.
+
+    The worker counts a Python task's success only when it finds the attempt's stamp on a
+    snapshot the attempt committed, else it fails the task with `conflict`; a run that
+    succeeds here therefore committed its own stamped snapshot, also with no rows.
+    """
+    admin, env = stack.admin, project.environment
+    run = admin.runs.start(env, project.repository, select=["gold.evolving"])
+    stack.succeed(env, run.id)
+    assert _columns(stack, env, "gold.evolving") == [
+        ("id", "int"),
+        ("ratio", "float"),
+        ("code", "long"),
+        ("gone", "string"),
+    ]
+    before = admin.tables.get(env, "gold.evolving").snapshot_id
+
+    admin.tables.append(env, "bronze.dials", pa.table({"id": pa.array([2], pa.int64())}))
+    changed = admin.runs.start(env, project.repository, select=["gold.evolving"])
+    stack.succeed(env, changed.id)
+    assert _columns(stack, env, "gold.evolving") == [
+        ("id", "long"),
+        ("ratio", "double"),
+        ("code", "string"),
+        ("label", "string"),
+    ]
+    assert stack.sql("SELECT id, ratio, code, label FROM gold.evolving", env) == [
+        {"id": 3, "ratio": 2.5, "code": "x", "label": "new"}
+    ]
+    with pytest.raises(QueryFailed) as dropped:
+        stack.sql("SELECT gone FROM gold.evolving", env)
+    assert "gone" in str(dropped.value)
+    after = admin.tables.get(env, "gold.evolving").snapshot_id
+    assert after not in (None, before)
+
+    admin.tables.append(env, "bronze.dials", pa.table({"id": pa.array([3], pa.int64())}))
+    emptied = admin.runs.start(env, project.repository, select=["gold.evolving"])
+    stack.succeed(env, emptied.id)
+    (attempt,) = _attempts(stack, emptied.id, "gold.evolving")
+    assert attempt.outcome is AttemptOutcome.SUCCEEDED
+    assert _columns(stack, env, "gold.evolving") == [
+        ("id", "long"),
+        ("ratio", "double"),
+        ("note", "string"),
+    ]
+    assert stack.sql("SELECT count(*) AS n FROM gold.evolving", env) == [{"n": 0}]
+    assert admin.tables.get(env, "gold.evolving").snapshot_id not in (None, after)
 
 
 class _CutConnectionsAfterTheProcess:

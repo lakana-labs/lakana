@@ -8245,6 +8245,28 @@ def test_the_task_carries_the_kind_of_every_declared_connection(py: PyWorld) -> 
     assert _task(py.world, "gold.scores").status is TaskStatus.SUCCEEDED
 
 
+@pytest.mark.parametrize(
+    ("entry", "evolves"),
+    [
+        ({}, False),
+        ({"evolve_schema": False}, False),
+        ({"evolve_schema": True}, True),
+        ({"evolve_schema": "true"}, False),
+        ({"evolve_schema": True, "write": "append", "watermark": "id"}, False),
+    ],
+    ids=["default", "off", "on", "not-a-boolean", "append"],
+)
+def test_the_task_evolves_the_schema_only_for_a_replace_that_opted_in(
+    py: PyWorld, entry: dict[str, object], evolves: bool
+) -> None:
+    """Deploy refuses `evolve_schema` with an append; a manifest with it there never evolves."""
+    py.deploy(entry=entry)
+    engine = py.engine(_writer(py.world))
+    run_claimed(engine, py.claim_python(engine))
+    (task,) = py.runner.tasks
+    assert task.evolve_schema is evolves
+
+
 def test_a_connection_deleted_after_the_attempt_was_prepared_hides_nothing(
     py: PyWorld, monkeypatch: pytest.MonkeyPatch
 ) -> None:
