@@ -459,8 +459,8 @@ wait_for_scheduled_run() {
     if [ -n "$run_id" ]; then break; fi
     sleep 3
   done
-  if [ -z "$run_id" ]; then echo "no scheduled run of job ingest started within 4 minutes" >&2; lakana job show ingest --env dev >&2; return 1; fi
-  lakana job pause ingest --env dev >/dev/null
+  if [ -z "$run_id" ]; then echo "no scheduled run of job ingest started within 4 minutes" >&2; lakana job show ingest --env dev --repo ingest >&2; return 1; fi
+  lakana job pause ingest --env dev --repo ingest >/dev/null
   deadline=$((SECONDS + 240))
   while [ "$SECONDS" -lt "$deadline" ]; do
     out=$(lakana --output json runs show "$run_id" --env dev)
@@ -492,7 +492,7 @@ orders <<'SQL'
 INSERT INTO orders VALUES (3, 'Linus', 20.00), (5, 'Barbara', 9.75);
 SQL
 cp "$examples/ingest-rest/items-2.json" "$sources/api/items.json"
-lakana job resume ingest --env dev >/dev/null
+lakana job resume ingest --env dev --repo ingest >/dev/null
 wait_for_scheduled_run "$first"
 counts '{"files": 5, "orders": 5, "items": 4}'
 out=$(lakana --output json sql "SELECT id, count(*) AS n FROM bronze.orders GROUP BY id ORDER BY id")

@@ -117,8 +117,8 @@ def test_the_runs_come_from_a_schedule_with_a_bound_principal() -> None:
     deadlines = [int(n) for n in re.findall(r"deadline=\$\(\(SECONDS \+ (\d+)\)\)", part)]
     assert deadlines and max(deadlines) <= 240
     assert part.count("wait_for_scheduled_run ") == 2
-    assert "lakana job pause ingest --env dev" in part
-    assert "lakana job resume ingest --env dev" in part
+    assert "lakana job pause ingest --env dev --repo ingest" in part
+    assert "lakana job resume ingest --env dev --repo ingest" in part
 
 
 def test_the_second_run_adds_exactly_the_new_rows() -> None:
@@ -151,3 +151,15 @@ def test_the_cleanup_removes_the_sources_before_the_work_directory() -> None:
     assert removal in cleanup
     assert cleanup.index(removal) < cleanup.index('rm -rf "$work"')
     assert _ingestion().count('--label "lakana.smoke.source=$project_name"') == 2
+
+
+def test_every_job_command_names_the_repository() -> None:
+    """The script runs in the bundle's directory, which has no `lakana.yaml` to name the repo.
+
+    `lakana job pause`, `resume` and `show` fall back to `lakana.yaml`'s `repo:` and stop with
+    "Name a repository" without it; the first CI run failed that way.
+    """
+    lines = [line for line in _ingestion().splitlines() if "lakana job " in line]
+    assert lines
+    for line in lines:
+        assert "--repo ingest" in line, line
