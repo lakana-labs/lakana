@@ -11,12 +11,14 @@ the ``assets`` extra (polars, fastexcel).
 
 from __future__ import annotations
 
+import mmap
 import struct
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Annotated
 
 import pyarrow as pa
+import pyarrow.compute as pc
 import pyarrow.csv as pacsv
 import pyarrow.ipc as ipc
 import pyarrow.json as pajson
@@ -24,7 +26,7 @@ import pyarrow.parquet as pq
 import typer
 
 from lakana._arrow import cast_timestamp_ns_columns_to_us, normalize_view_columns, schema_to_columns
-from lakana.cli import _files, _output
+from lakana.cli import _files, _output, _parquet_pages
 from lakana.cli._break_glass import BREAK_GLASS, REASON, break_glass_reason
 from lakana.cli._state import CliError, confirm, resolve_environment, state_of
 from lakana.errors import NotFound, ValidationError
@@ -52,8 +54,7 @@ _WITH_EXTRA = frozenset({"json", "xlsx", "xlsm", "xlsb", "xls", "ods"})
 _SPREADSHEETS = frozenset({"xlsx", "xlsm", "xlsb", "xls", "ods"})
 _MIB = 1024 * 1024
 _BATCH_ROWS = 1024
-"""Rows decoded at a time from a Parquet file, and from a batch with a dictionary column, so a
-read stops soon after the limit."""
+"""The most rows decoded at a time from a Parquet file, so a read stops soon after the limit."""
 
 
 def bronze_name(table: str) -> str:
@@ -246,67 +247,122 @@ def _decoded(batch: pa.RecordBatch) -> pa.RecordBatch:
     )
 
 
-def _pieces(batch: pa.RecordBatch) -> Iterable[pa.RecordBatch]:
-    """Split a batch with a dictionary column into decoded pieces of a few rows.
-
-    A dictionary column takes little room encoded and may take far more decoded (one long
-    value behind many small indices), so it is decoded a few rows at a time.
+def _plain(schema: pa.Schema) -> pa.Schema:
+    """Give each dictionary column of a schema its values' type, which a table stores.
 
     Parameters
     ----------
-    batch
-        The batch as read.
-
-    Returns
-    -------
-    Iterable[pa.RecordBatch]
-        The batch itself when it has no dictionary column, else its decoded pieces.
-    """
-    if not any(pa.types.is_dictionary(kind) for kind in batch.schema.types):
-        return (batch,)
-    return (
-        _decoded(batch.slice(start, _BATCH_ROWS)) for start in range(0, batch.num_rows, _BATCH_ROWS)
-    )
-
-
-def _bounded(
-    path: Path, schema: pa.Schema, batches: Iterable[pa.RecordBatch], limit: int | None
-) -> pa.Table:
-    """Collect decoded batches, stopping as soon as they pass the upload limit.
-
-    Dictionary columns are decoded before they are counted, so the count is of the values the
-    table will hold.
-
-    Parameters
-    ----------
-    path
-        The file, for the message.
     schema
-        The batches' schema.
-    batches
-        The batches, decoded one at a time.
-    limit
-        The upload limit, or `None` when the server does not say.
+        The schema as read.
 
     Returns
     -------
-    pa.Table
-        The rows.
+    pa.Schema
+        The schema with plain columns.
     """
-    plain = pa.schema(
+    return pa.schema(
         [
             field.with_type(field.type.value_type) if pa.types.is_dictionary(field.type) else field
             for field in schema
         ]
     )
-    kept: list[pa.RecordBatch] = []
-    size = 0
-    for batch in batches:
-        for piece in _pieces(batch):
-            size += piece.nbytes
-            _check_size(path, size, limit)
-            kept.append(piece)
-    return pa.Table.from_batches(kept, plain)
+
+
+def _column_size(column: pa.Array) -> int:
+    """Count the bytes a column takes once its dictionary is decoded, without decoding it.
+
+    A dictionary column takes little room encoded and may take far more decoded (one long
+    value behind many small indices), so its decoded size is added up from its values' lengths.
+
+    Parameters
+    ----------
+    column
+        A column of a batch.
+
+    Returns
+    -------
+    int
+        Its size in bytes; a column without a dictionary as it is.
+    """
+    if not pa.types.is_dictionary(column.type):
+        return column.nbytes
+    values = column.dictionary
+    rows = len(column)
+    bitmap = (rows + 7) // 8
+    if pa.types.is_large_string(values.type) or pa.types.is_large_binary(values.type):
+        offsets = 8 * (rows + 1)
+    elif pa.types.is_string(values.type) or pa.types.is_binary(values.type):
+        offsets = 4 * (rows + 1)
+    else:
+        try:
+            return rows * max(values.type.bit_width // 8, 1) + bitmap
+        except ValueError:
+            return rows * values.nbytes + bitmap
+    lengths = pc.take(pc.binary_length(values), column.indices)  # ty: ignore[unresolved-attribute]
+    return (pc.sum(lengths).as_py() or 0) + offsets + bitmap  # ty: ignore[unresolved-attribute]
+
+
+class _Budget:
+    """Decoded rows read so far, refused as soon as they pass the upload limit.
+
+    Parameters
+    ----------
+    path
+        The file, for the message.
+    limit
+        The upload limit, or `None` when the server does not say.
+    """
+
+    def __init__(self, path: Path, limit: int | None) -> None:
+        self.path = path
+        self.limit = limit
+        self.size = 0
+        self.kept: list[pa.RecordBatch] = []
+
+    def rows(self, per_row: int) -> int:
+        """Say how many rows a batch may hold so that, at worst, it fits in what is left.
+
+        Parameters
+        ----------
+        per_row
+            The most bytes one row can take once decoded.
+
+        Returns
+        -------
+        int
+            Between 1 and `_BATCH_ROWS`; `_BATCH_ROWS` without a limit.
+        """
+        if self.limit is None:
+            return _BATCH_ROWS
+        return min(max((self.limit - self.size) // per_row, 1), _BATCH_ROWS)
+
+    def add(self, batch: pa.RecordBatch) -> None:
+        """Count a batch, refusing it before its dictionary columns are decoded if it can't fit.
+
+        Parameters
+        ----------
+        batch
+            The rows as read.
+        """
+        _check_size(self.path, self.size + sum(map(_column_size, batch.columns)), self.limit)
+        decoded = _decoded(batch)
+        self.size += decoded.nbytes
+        self.kept.append(decoded)
+
+    def table(self, schema: pa.Schema) -> pa.Table:
+        """Join the rows read.
+
+        Parameters
+        ----------
+        schema
+            The batches' schema as read.
+
+        Returns
+        -------
+        pa.Table
+            The rows, with plain columns.
+        """
+        return pa.Table.from_batches(self.kept, _plain(schema))
 
 
 def _slot(buf: bytes, table: int, index: int) -> int | None:
@@ -426,11 +482,19 @@ def _arrow(path: Path, limit: int | None) -> pa.Table:
             source.seek(0)
             reader = ipc.open_stream(source)
             batches = reader
-        return _bounded(path, reader.schema, batches, limit)
+        budget = _Budget(path, limit)
+        for batch in batches:
+            budget.add(batch)
+        return budget.table(reader.schema)
 
 
 def _parquet(path: Path, limit: int | None) -> pa.Table:
-    """Read a Parquet file a few rows at a time, after an estimate from its metadata.
+    """Read a Parquet file row group by row group, bounded by its metadata and page headers.
+
+    The whole file is first estimated from them. Then each row group is read in batches of only
+    as many rows as fit in what is left of the limit, counting each row at its worst: a text
+    column's value at the size of its largest page, which no value decodes larger than (one
+    value repeated by a dictionary or by shared prefixes takes only a few bytes in the file).
 
     Parameters
     ----------
@@ -444,43 +508,110 @@ def _parquet(path: Path, limit: int | None) -> pa.Table:
     pa.Table
         The rows.
     """
-    _check_size(path, _parquet_size(path), limit)
     with pq.ParquetFile(path) as parquet:
-        return _bounded(path, parquet.schema_arrow, parquet.iter_batches(_BATCH_ROWS), limit)
+        schema = _plain(parquet.schema_arrow)
+        _storable(path, pa.schema([f for f in schema if pa.types.is_nested(f.type)]).empty_table())
+        metadata = parquet.metadata
+        pages = _page_headers(path, metadata)
+        widths = [_width(field) for field in schema]
+        text = [
+            metadata.schema.column(i).physical_type == "BYTE_ARRAY"
+            for i in range(metadata.num_columns)
+        ]
+        _check_size(path, _parquet_size(metadata, widths, pages), limit)
+        budget = _Budget(path, limit)
+        for group, chunks in enumerate(pages):
+            per_row = sum(
+                chunk.largest + 4 if is_text else width
+                for chunk, is_text, width in zip(chunks, text, widths, strict=True)
+            )
+            for batch in parquet.iter_batches(budget.rows(per_row), row_groups=[group]):
+                budget.add(batch)
+        return budget.table(parquet.schema_arrow)
 
 
-def _parquet_size(path: Path) -> int:
-    """Estimate, from a Parquet file's metadata, how many bytes its rows take once read.
+def _width(field: pa.Field) -> int:
+    """Give the bytes a row of a column takes at least: its width, or 4 (offsets) for text.
 
-    A small file can hold many rows of repeated values, which its encoding and compression
-    shrink to almost nothing; reading it would build the whole table in memory. The estimate is
-    the larger of the column chunks' uncompressed sizes and the rows times the columns' widths
-    (a column without a fixed width counted at 4 bytes a row, its offsets).
+    Parameters
+    ----------
+    field
+        The column, with a plain type.
+
+    Returns
+    -------
+    int
+        The bytes.
+    """
+    try:
+        return max(field.type.bit_width // 8, 1)
+    except ValueError:
+        return 4
+
+
+def _page_headers(path: Path, metadata: pq.FileMetaData) -> list[list[_parquet_pages.ChunkPages]]:
+    """Read the page headers of every column chunk, as the reader will find them.
+
+    A chunk starts at its dictionary page if it has one, else at its first data page, and
+    spans its compressed size.
 
     Parameters
     ----------
     path
         The file.
+    metadata
+        Its metadata.
+
+    Returns
+    -------
+    list of list of ChunkPages
+        Per row group, per column.
+    """
+    with path.open("rb") as handle, mmap.mmap(handle.fileno(), 0, access=mmap.ACCESS_READ) as buf:
+        found: list[list[_parquet_pages.ChunkPages]] = []
+        for index in range(metadata.num_row_groups):
+            group = metadata.row_group(index)
+            chunks: list[_parquet_pages.ChunkPages] = []
+            for column in (group.column(i) for i in range(group.num_columns)):
+                start = column.data_page_offset
+                if column.has_dictionary_page and column.dictionary_page_offset:
+                    start = min(start, column.dictionary_page_offset)
+                chunks.append(_parquet_pages.chunk_pages(buf, start, column.total_compressed_size))
+            found.append(chunks)
+        return found
+
+
+def _parquet_size(
+    metadata: pq.FileMetaData, widths: list[int], pages: list[list[_parquet_pages.ChunkPages]]
+) -> int:
+    """Estimate how many bytes a Parquet file's rows take once read.
+
+    A small file can hold many rows of repeated values, which its encoding and compression
+    shrink to almost nothing; reading it would build the whole table in memory. The estimate is
+    the largest of the column chunks' uncompressed sizes (as the metadata gives them and as the
+    page headers add up) and the rows times the columns' widths.
+
+    Parameters
+    ----------
+    metadata
+        The file's metadata.
+    widths
+        Each column's width (`_width`).
+    pages
+        The chunks' page headers (`_page_headers`).
 
     Returns
     -------
     int
         The estimated size in bytes.
     """
-    metadata = pq.read_metadata(path)
-    schema = metadata.schema.to_arrow_schema()
-    width = 0
-    for field in schema:
-        try:
-            width += max(field.type.bit_width // 8, 1)
-        except ValueError:
-            width += 4
     chunks = sum(
         group.column(index).total_uncompressed_size
         for group in (metadata.row_group(i) for i in range(metadata.num_row_groups))
         for index in range(group.num_columns)
     )
-    return max(chunks, metadata.num_rows * width)
+    walked = sum(chunk.total for group in pages for chunk in group)
+    return max(chunks, walked, metadata.num_rows * sum(widths))
 
 
 def read_file(
@@ -500,7 +631,8 @@ def read_file(
         `--header-row` (CSV and spreadsheets only).
     limit
         The server's upload limit: a Parquet or Arrow file is read in pieces and refused as soon
-        as its decoded rows pass it (a Parquet file is first estimated from its metadata); a
+        as its decoded rows pass it (a Parquet file is first estimated from its metadata and page
+        headers); a
         text file, whose size was checked before, is measured once read, by the caller.
 
     Returns
@@ -535,7 +667,7 @@ def read_file(
             table = _ndjson(path, path.read_bytes())
         else:
             table = _with_extra(path, path.read_bytes(), fmt, sheet, header_row)
-    except (pa.ArrowException, OSError, struct.error) as exc:
+    except (pa.ArrowException, OSError, struct.error, _parquet_pages.PageHeaderError) as exc:
         raise CliError(
             f"Could not read {_output.inline(path.name)} as {fmt}: {_output.inline(str(exc))}",
             8,
@@ -574,6 +706,29 @@ def read_file(
                 8,
                 kind="FileError",
             )
+    return _storable(path, table)
+
+
+def _storable(path: Path, table: pa.Table) -> pa.Table:
+    """Convert view and nanosecond columns, and refuse a column type a table cannot store.
+
+    Parameters
+    ----------
+    path
+        The file, for the message.
+    table
+        The rows.
+
+    Returns
+    -------
+    pa.Table
+        The rows with view and nanosecond columns converted.
+
+    Raises
+    ------
+    CliError
+        For a column type a table cannot store (exit 8).
+    """
     table = normalize_view_columns(cast_timestamp_ns_columns_to_us(table))
     try:
         schema_to_columns(table.schema)
