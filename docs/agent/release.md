@@ -335,7 +335,10 @@ the stack is attached to nor a Docker gateway, and gives the bundle a directory 
 the ingestion root `exports` (`LAKANA_INGESTION_ROOTS`). It creates the three connections and
 tests them, deploys the three `lakana init --template` assets with a job every minute and a run
 principal, and waits (at most four minutes each) for two scheduled runs: the second must add
-exactly the new rows of each source (the REST table by merge). It then checks the lineage of
+exactly the new rows of each source (the REST and SQL tables by merge) and must have read
+incrementally: each task's `rows_written` counts only the new or changed rows inside its
+watermark's window (2 each), and a row changed at each source before the window (order 1, item 1)
+stays as the first run loaded it, which a full re-read would have changed. It then checks the lineage of
 `bronze.orders` to `connection source-db (postgresql)`, that a fourth asset is refused a host no
 connection names (`is not a destination this task may reach`), and one `lakana load`. The
 sources carry the label `lakana.smoke.source=<project>` and the cleanup removes them.

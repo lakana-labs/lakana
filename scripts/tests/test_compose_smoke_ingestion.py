@@ -129,6 +129,37 @@ def test_the_second_run_adds_exactly_the_new_rows() -> None:
     assert '"Buoy, large"' in part
 
 
+def test_the_second_run_proves_each_read_is_incremental() -> None:
+    """Run 2 is checked by what each task wrote and by source rows outside each read's window.
+
+    A full re-read would give the same 5/5/4, because merges on `id` hide it.
+
+    - files (`append`): `rows_written` 2, the new file only.
+    - SQL (`merge`, `LOOK_BACK = 1000`): the seed ids are 1, 2 and 2004, then 2003 commits late
+      and 2005 arrives, and order 1 changes at the source. Run 2 reads ids past 2004 - 1000:
+      `rows_written` 2 (2003 and 2005 inserted, 2004 unchanged), and order 1 keeps its first
+      amount. A full re-read would write 3 and change it.
+    - REST (`merge`, one hour back): item 2 changes, item 4 is added, and item 1 is renamed at the
+      source with its old `updated_at`, before the window. `rows_written` 2 and item 1 keeps its
+      name; a full re-read would write 3 and rename it.
+
+    A merge's `rows_written` counts inserted and changed rows (`MergeCounts`), so an unchanged row
+    the window reads again does not show; the source changes outside the window do.
+    """
+    part = _ingestion()
+    run_two = part.split('wait_for_scheduled_run "$first"', 1)[1]
+    assert 'rows_written \'{"bronze.exports": 2, "bronze.orders": 2, "bronze.items": 2}\'' in (
+        run_two
+    )
+    assert "(1, 'Ada', 12.50), (2, 'Grace', 8.00), (2004, 'Ada', 5.25)" in part
+    assert "UPDATE orders SET amount = 99.00 WHERE id = 1;" in part
+    assert "(2003, 'Linus', 20.00), (2005, 'Barbara', 9.75)" in part
+    assert "[(1, 1), (2, 1), (2003, 1), (2004, 1), (2005, 1)]" in run_two
+    assert "SELECT amount = 12.50 AS kept FROM bronze.orders WHERE id = 1" in run_two
+    assert '"Anchor, renamed at the source"' in part
+    assert '[(1, "Anchor"), (2, "Buoy, large"), (3, "Cleat"), (4, "Deck mop")]' in run_two
+
+
 def test_the_exit_criterion_checks_lineage_egress_and_load() -> None:
     """Lineage to the PostgreSQL connection, the proxy's refusal of an undeclared host, a load."""
     part = _ingestion()

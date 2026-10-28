@@ -307,9 +307,10 @@ mkdir -p "$sources/api"
 python3 "$examples/ingest-rest/make_certs.py" "$sources/tls" "$host_ip"
 secret() { python3 -c 'import secrets; print(secrets.token_urlsafe(24), end="")'; }
 
-# The SQL source: PostgreSQL 18 with TLS, a read-only login, three orders. Order 3 is missing: its
-# id was taken, but its transaction commits only after the first run (the template reads again
-# behind the largest id).
+# The SQL source: PostgreSQL 18 with TLS, a read-only login, three orders. Order 2003 is missing:
+# its id was taken, but its transaction commits only after the first run (the template reads
+# again 1,000 ids behind the largest one). Orders 1 and 2 lie further back than that, so a second
+# run that reads incrementally never sees them again.
 postgres_image="postgres:18.6@sha256:edb0c08dc33befd0262ab3b5cf1c4f3f8cfd8b09e88c05b45adee29d6761ddb6"
 docker pull -q "$postgres_image" >/dev/null
 db="$project_name-source-db"
@@ -331,7 +332,7 @@ orders <<SQL
 CREATE ROLE reader LOGIN PASSWORD '$db_login';
 CREATE TABLE orders (id bigint PRIMARY KEY, customer text NOT NULL, amount numeric(10, 2) NOT NULL);
 GRANT SELECT ON orders TO reader;
-INSERT INTO orders VALUES (1, 'Ada', 12.50), (2, 'Grace', 8.00), (4, 'Ada', 5.25);
+INSERT INTO orders VALUES (1, 'Ada', 12.50), (2, 'Grace', 8.00), (2004, 'Ada', 5.25);
 SQL
 
 # The REST source: the how-to's stand-in (bearer token, pages, TLS 1.2 or newer) in a container of
@@ -475,6 +476,11 @@ wait_for_scheduled_run() {
   fi
   python3 -c 'import json,sys; r=json.loads(sys.argv[1]); assert (r["trigger"], r["job"], r["run_as"]) == ("schedule", "ingest", "ingest-runner"), r' "$out"
 }
+# The rows each task of run $run_id wrote, by asset. A merge counts inserted and changed rows.
+rows_written() {
+  out=$(lakana --output json runs show "$run_id" --env dev)
+  python3 -c 'import json,sys; got={t["asset"]: t["rows_written"] for t in json.loads(sys.argv[1])["tasks"]}; assert got == json.loads(sys.argv[2]), got' "$out" "$1"
+}
 counts() {
   out=$(lakana --output json sql "SELECT (SELECT count(*) FROM bronze.exports) AS files, (SELECT count(*) FROM bronze.orders) AS orders, (SELECT count(*) FROM bronze.items) AS items")
   python3 -c 'import json,sys; assert json.loads(sys.argv[1]) == [json.loads(sys.argv[2])], sys.argv[1]' "$out" "$1"
@@ -482,21 +488,39 @@ counts() {
 wait_for_scheduled_run ""
 first=$run_id
 counts '{"files": 3, "orders": 3, "items": 3}'
+rows_written '{"bronze.exports": 3, "bronze.orders": 3, "bronze.items": 3}'
 
-# New data in each source: a third export written on 2 October; order 3 commits late and order 5
-# is new; one item changes and one is added. The next scheduled run reads only what is new.
+# New data in each source: a third export written on 2 October; order 2003 commits late and
+# order 2005 is new; one item changes and one is added. Each source also changes a row that lies
+# before its read's window: order 1's amount, and item 1's name (with its old updated_at). An
+# incremental read leaves both alone, a full re-read would merge them: that, and what each task
+# wrote, tell the two apart, which the merged end state alone cannot.
 cp "$examples/ingest-files/exports/orders-3.csv" "$landing/orders/"
 touch -d '2026-10-02 08:00:00 UTC' "$landing/orders/orders-3.csv"
 chmod 644 "$landing/orders/orders-3.csv"
 orders <<'SQL'
-INSERT INTO orders VALUES (3, 'Linus', 20.00), (5, 'Barbara', 9.75);
+UPDATE orders SET amount = 99.00 WHERE id = 1;
+INSERT INTO orders VALUES (2003, 'Linus', 20.00), (2005, 'Barbara', 9.75);
 SQL
-cp "$examples/ingest-rest/items-2.json" "$sources/api/items.json"
+cat > "$sources/api/items.json" <<'JSON'
+[
+  {"id": 1, "name": "Anchor, renamed at the source", "price": 24.5, "updated_at": "2026-10-01T08:00:00Z"},
+  {"id": 2, "name": "Buoy, large", "price": 9.25, "updated_at": "2026-10-02T08:00:00Z"},
+  {"id": 3, "name": "Cleat", "price": 3.75, "updated_at": "2026-10-01T10:00:00Z"},
+  {"id": 4, "name": "Deck mop", "price": 12.5, "updated_at": "2026-10-02T09:00:00Z"}
+]
+JSON
 lakana job resume ingest --env dev --repo ingest >/dev/null
 wait_for_scheduled_run "$first"
 counts '{"files": 5, "orders": 5, "items": 4}'
+# Files: the new file's two rows. SQL: ids past 2004 - 1000, so 2003 and 2005 inserted and 2004
+# unchanged; order 1 is not read. REST: items since 09:00 on 1 October (an hour before the newest
+# loaded), so 2 changed and 4 inserted, 3 unchanged; item 1 is not read.
+rows_written '{"bronze.exports": 2, "bronze.orders": 2, "bronze.items": 2}'
 out=$(lakana --output json sql "SELECT id, count(*) AS n FROM bronze.orders GROUP BY id ORDER BY id")
-python3 -c 'import json,sys; rows=json.loads(sys.argv[1]); assert [(r["id"], r["n"]) for r in rows] == [(1, 1), (2, 1), (3, 1), (4, 1), (5, 1)], rows' "$out"
+python3 -c 'import json,sys; rows=json.loads(sys.argv[1]); assert [(r["id"], r["n"]) for r in rows] == [(1, 1), (2, 1), (2003, 1), (2004, 1), (2005, 1)], rows' "$out"
+out=$(lakana --output json sql "SELECT amount = 12.50 AS kept FROM bronze.orders WHERE id = 1")
+python3 -c 'import json,sys; assert json.loads(sys.argv[1]) == [{"kept": True}], sys.argv[1]' "$out"
 out=$(lakana --output json sql "SELECT id, name FROM bronze.items ORDER BY id")
 python3 -c 'import json,sys; rows=json.loads(sys.argv[1]); assert [(r["id"], r["name"]) for r in rows] == [(1, "Anchor"), (2, "Buoy, large"), (3, "Cleat"), (4, "Deck mop")], rows' "$out"
 
