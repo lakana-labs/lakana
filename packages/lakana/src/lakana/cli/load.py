@@ -282,8 +282,10 @@ def _column_size(column: pa.Array) -> int:
     Returns
     -------
     int
-        Its size in bytes; a column without a dictionary as it is.
+        Its size in bytes; a text view column as plain text; any other column as it is.
     """
+    if pa.types.is_string_view(column.type) or pa.types.is_binary_view(column.type):
+        return _view_size(column)
     if not pa.types.is_dictionary(column.type):
         return column.nbytes
     values = column.dictionary
@@ -300,6 +302,31 @@ def _column_size(column: pa.Array) -> int:
             return rows * values.nbytes + bitmap
     lengths = pc.take(pc.binary_length(values), column.indices)  # ty: ignore[unresolved-attribute]
     return (pc.sum(lengths).as_py() or 0) + offsets + bitmap  # ty: ignore[unresolved-attribute]
+
+
+def _view_size(column: pa.Array) -> int:
+    """Count the bytes a text view column takes once converted to plain text.
+
+    Many views can point at one long value, which the buffers hold once, so the lengths are
+    read from the views themselves (each 16 bytes, starting with its value's length).
+
+    Parameters
+    ----------
+    column
+        A `string_view` or `binary_view` column.
+
+    Returns
+    -------
+    int
+        Its values' lengths added up, with offsets and a validity bitmap.
+    """
+    rows = len(column)
+    views = pa.Array.from_buffers(
+        pa.int32(), 4 * rows, [None, column.buffers()[1]], offset=4 * column.offset
+    )
+    lengths = pc.if_else(column.is_valid(), views[::4], 0)  # ty: ignore[unresolved-attribute]
+    total = pc.sum(lengths).as_py() or 0  # ty: ignore[unresolved-attribute]
+    return total + 4 * (rows + 1) + (rows + 7) // 8
 
 
 class _Budget:

@@ -451,3 +451,53 @@ def test_an_old_parquet_mr_file_is_bounded_by_the_pages_read_past_its_chunk(
     assert result.exit_code == 2, result.output
     assert "is larger than one upload may be (1 MiB)" in result.output
     assert sum(yielded) <= 1100
+
+
+def _shared_views(rows: int, size: int) -> pa.Array:
+    """Build a text view column whose rows all point at one value.
+
+    Parameters
+    ----------
+    rows
+        How many rows.
+    size
+        The value's length.
+
+    Returns
+    -------
+    pa.Array
+        The column: `rows` views of 16 bytes over one buffer of `size` bytes.
+    """
+    view = struct.pack("<i4sii", size, b"xxxx", 0, 0)
+    return pa.Array.from_buffers(
+        pa.string_view(), rows, [None, pa.py_buffer(view * rows), pa.py_buffer(b"x" * size)]
+    )
+
+
+def test_views_over_one_value_count_every_row(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Review M1: 1,024 views of one 64 KiB value are 64 MiB of text, refused before conversion."""
+    path = tmp_path / "views.arrow"
+    table = pa.table({"v": _shared_views(1024, 65536)})
+    with pa.ipc.new_file(str(path), table.schema) as writer:
+        writer.write_table(table)
+    assert path.stat().st_size < 128 * 1024
+
+    def never(table: pa.Table) -> pa.Table:
+        raise AssertionError("the views were converted")
+
+    monkeypatch.setattr(load_module, "normalize_view_columns", never)
+
+    result = invoke(make_state(tmp_path, _api(1024 * 1024)), "load", str(path), "t", "--env", "dev")
+
+    assert result.exit_code == 2, result.output
+    assert "is larger than one upload may be (1 MiB)" in result.output
+
+
+def test_a_view_column_counts_its_values_not_its_buffers() -> None:
+    """Null rows count nothing, and a slice counts only its own rows."""
+    column = pa.array(["ab", None, "x" * 20, "yyy"], pa.string_view())
+
+    assert load_module._column_size(column) == 2 + 20 + 3 + 4 * 5 + 1
+    assert load_module._column_size(column.slice(2)) == 20 + 3 + 4 * 3 + 1
