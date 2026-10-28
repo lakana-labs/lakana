@@ -99,6 +99,12 @@ class DeployRun(Base):
     warnings_json: Mapped[list | None] = mapped_column(JSON, nullable=True)
     """What the deploy leaves for its owner to act on and only the deploy could tell, as
     sentences: a waiting job start it dropped, a scheduled job with no run principal."""
+    job_starts_json: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    """The jobs with ``on_deploy: true`` that a successful deploy starts, one entry per job:
+    ``job``, ``outcome`` (``pending`` until the worker started it) and what came of the start
+    (`lakana_core.projects.deploy_jobs`). `None` for a run that starts no job: a dry run, a
+    rollback, a failed deploy, a deploy that left the project version as it was, and a run
+    written before the column existed."""
     job_version_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("job_versions.id", ondelete="SET NULL"), nullable=True
     )

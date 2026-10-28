@@ -26,16 +26,17 @@ from sqlalchemy import delete, select, text, update
 from sqlalchemy.orm import Session
 from worker_git_helpers import GitHttpServer, bare_copy, commit, git, make_repo
 
-from lakana_core.auth import Action, AllowAllAuthorization, PrincipalRef, SecurableKind
+from lakana_core.auth import Action, AllowAllAuthorization, PrincipalRef, Securable, SecurableKind
 from lakana_core.catalog.identity import resolve_table_id
 from lakana_core.catalog.service import CatalogService
 from lakana_core.config import StorageConfig
 from lakana_core.connections.kinds import ConnectionKind
 from lakana_core.connections.service import ConnectionService
-from lakana_core.errors import ConflictError, NotFoundError
+from lakana_core.errors import ConflictError, NotFoundError, PermissionDenied
 from lakana_core.grants.authorization import GrantAuthorization
 from lakana_core.grants.service import GrantService
 from lakana_core.identifiers import NamespacePath, TableRef
+from lakana_core.log_events import LogEvent
 from lakana_core.models import (
     DeployKind,
     DeployRun,
@@ -48,6 +49,8 @@ from lakana_core.models import (
     PrincipalType,
     Repository,
     RepositoryKind,
+    Run,
+    RunTrigger,
     Secret,
     SecretUseKind,
 )
@@ -2927,3 +2930,147 @@ def test_the_old_incremental_spelling_deploys_with_one_hint_per_asset(
         DeployService(session, AllowAllAuthorization()).get(principal, "dev", run.id).diff
         == run.diff_json
     )
+
+
+_ON_DEPLOY_YAML = (
+    "repo: analytics\ndefaults:\n  owner: data-eng\n"
+    "jobs:\n  refresh:\n    select: ['silver.*']\n    on_deploy: true\n"
+)
+
+
+class _AllButRun(AllowAllAuthorization):
+    """Allows everything but `RUN`: a deployer who may not start runs."""
+
+    def authorize(self, principal: PrincipalRef, action: Action, securable: Securable) -> None:
+        """Refuse `RUN`, allow the rest.
+
+        Parameters
+        ----------
+        principal
+            The actor.
+        action
+            The action.
+        securable
+            The object.
+
+        Raises
+        ------
+        PermissionDenied
+            For `RUN`.
+        """
+        if action is Action.RUN:
+            raise PermissionDenied(f"{principal.name!r} may not RUN this.")
+
+    def permits(self, principal: PrincipalRef, action: Action, securable: Securable) -> bool:
+        """Answer as `authorize` would.
+
+        Parameters
+        ----------
+        principal
+            The actor.
+        action
+            The action.
+        securable
+            The object.
+
+        Returns
+        -------
+        bool
+            False for `RUN` only.
+        """
+        return action is not Action.RUN
+
+
+def test_a_deploy_starts_its_on_deploy_jobs_as_the_deployer(
+    session: Session, principal: PrincipalRef, world: World
+) -> None:
+    """After the deploy committed, the worker starts the job with the trigger `deploy`."""
+    commit(world.repo_path, {"lakana.yaml": _ON_DEPLOY_YAML})
+
+    run = _submit_and_run(session, principal, world)
+
+    assert (run.status, run.error_message) == (DeployStatus.SUCCEEDED, None)
+    (started,) = session.scalars(select(Run)).all()
+    assert (started.job, started.trigger, started.triggered_by) == (
+        "refresh",
+        RunTrigger.DEPLOY,
+        principal.id,
+    )
+    session.refresh(run)
+    assert run.job_starts_json == [
+        {"job": "refresh", "outcome": "started", "run_id": str(started.id)}
+    ]
+
+
+def test_a_deployer_without_run_deploys_and_starts_no_job(
+    session: Session, principal: PrincipalRef, world: World
+) -> None:
+    """The deploy succeeds; the record says the job was not started and why."""
+    commit(world.repo_path, {"lakana.yaml": _ON_DEPLOY_YAML})
+    view = DeployService(session, AllowAllAuthorization()).submit(
+        principal, "dev", repository="analytics", kind=DeployKind.DEPLOY
+    )
+
+    run_deploy(session, view.id, _AllButRun(), _KEY, world.settings)
+
+    run = session.get(DeployRun, view.id)
+    assert run is not None
+    session.refresh(run)
+    assert run.status is DeployStatus.SUCCEEDED
+    assert session.scalars(select(Run)).all() == []
+    (entry,) = run.job_starts_json or []
+    assert (entry["job"], entry["outcome"], entry["reason"]) == (
+        "refresh",
+        "not_started",
+        "lacks_run",
+    )
+
+
+def test_a_failed_deploy_starts_no_job(
+    session: Session, principal: PrincipalRef, world: World
+) -> None:
+    """A deploy that fails validation stores and starts nothing."""
+    commit(
+        world.repo_path, {"lakana.yaml": _ON_DEPLOY_YAML, "assets/silver/bad.sql": "DROP TABLE x\n"}
+    )
+
+    run = _submit_and_run(session, principal, world)
+
+    assert run.status is DeployStatus.FAILED
+    assert run.job_starts_json is None
+    assert session.scalars(select(Run)).all() == []
+
+
+def test_a_dry_run_starts_no_job(session: Session, principal: PrincipalRef, world: World) -> None:
+    """A dry run changes nothing, so it starts nothing."""
+    commit(world.repo_path, {"lakana.yaml": _ON_DEPLOY_YAML})
+
+    run = _submit_and_run(session, principal, world, DeployKind.DRY_RUN)
+
+    assert run.status is DeployStatus.SUCCEEDED
+    assert run.job_starts_json is None
+    assert session.scalars(select(Run)).all() == []
+
+
+def test_an_error_before_the_starts_leaves_the_deploy_succeeded(
+    session: Session,
+    principal: PrincipalRef,
+    world: World,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The deploy is committed first; a failure of the starts is logged and changes nothing."""
+    commit(world.repo_path, {"lakana.yaml": _ON_DEPLOY_YAML})
+
+    def broken(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("the database went away")
+
+    monkeypatch.setattr(deploy_module, "start_jobs_after_deploy", broken)
+
+    run = _submit_and_run(session, principal, world)
+
+    session.refresh(run)
+    assert run.status is DeployStatus.SUCCEEDED
+    assert run.job_starts_json == [{"job": "refresh", "outcome": "pending"}]
+    (record,) = [r for r in caplog.records if "Could not start the jobs" in r.getMessage()]
+    assert getattr(record, "event", None) == LogEvent.INTERNAL_ERROR.value

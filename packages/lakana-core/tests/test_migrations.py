@@ -12,7 +12,9 @@ not reflected in a migration (or vice versa) fails here.
 
 import json
 import logging
+import sqlite3
 import uuid
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
@@ -24,7 +26,8 @@ from alembic.autogenerate import compare_metadata
 from alembic.config import Config
 from alembic.migration import MigrationContext
 from core_test_helpers import assert_loads_as_pre_m5a, seed_m5a_rows
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import create_engine, event, inspect
+from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 
 from lakana_core.identifiers import NAMESPACE_SEPARATOR
@@ -4220,5 +4223,123 @@ def test_0050_adds_the_merge_key_and_maps_merge_runs_down_to_append(
         with engine.begin() as connection:
             modes = dict(connection.execute(sa.text("SELECT id, write_mode FROM query_runs")).all())
         assert modes == {merged: "APPEND", replaced: "REPLACE"}
+    finally:
+        engine.dispose()
+
+
+_REVISION_0051 = "c9e5a1b3d4f6"
+
+
+def _skip_fsync(dbapi_connection: object, connection_record: object) -> None:
+    """Turn off SQLite's flush to disk on commit, as the server tests do (#327).
+
+    Parameters
+    ----------
+    dbapi_connection
+        The new DB-API connection; anything but a `sqlite3.Connection` is left alone.
+    connection_record
+        SQLAlchemy's record of the connection (unused).
+    """
+    if isinstance(dbapi_connection, sqlite3.Connection):
+        dbapi_connection.execute("PRAGMA synchronous=OFF")
+
+
+@pytest.fixture
+def _without_fsync() -> Iterator[None]:
+    """Let the engines of one test commit without waiting for the disk.
+
+    Fifty migrations each commit; on a real disk the waits are most of the test's time. Nothing
+    a migration test checks depends on durability across a power cut.
+
+    Yields
+    ------
+    None
+        The listener is registered for the test and removed afterwards.
+    """
+    event.listen(Engine, "connect", _skip_fsync)
+    yield
+    event.remove(Engine, "connect", _skip_fsync)
+
+
+@pytest.mark.usefixtures("_without_fsync")
+def test_0051_adds_the_job_starts_and_maps_deploy_runs_down_by_their_starter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Revision `0051`: `deploy_runs.job_starts_json`; a downgrade leaves no trigger `DEPLOY`.
+
+    A run started by a deploy of a service account goes down as `API`, one of a person as
+    `MANUAL`; every other trigger is kept.
+
+    Parameters
+    ----------
+    tmp_path
+        Holds the throwaway SQLite file.
+    monkeypatch
+        Points `lakana_core.config.Settings` at that file.
+    """
+    db_path = tmp_path / "migrated.db"
+    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    config = Config(str(ALEMBIC_INI))
+    command.upgrade(config, _REVISION_0050)
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        assert "job_starts_json" not in {
+            c["name"] for c in inspect(engine).get_columns("deploy_runs")
+        }
+    finally:
+        engine.dispose()
+
+    command.upgrade(config, _REVISION_0051)
+    engine = create_engine(f"sqlite:///{db_path}")
+    account, person = uuid.uuid4().hex, uuid.uuid4().hex
+    by_account, by_person, scheduled = uuid.uuid4().hex, uuid.uuid4().hex, uuid.uuid4().hex
+    try:
+        (column,) = [
+            c for c in inspect(engine).get_columns("deploy_runs") if c["name"] == "job_starts_json"
+        ]
+        assert column["nullable"] is True
+        with engine.begin() as connection:
+            connection.execute(sa.text("PRAGMA foreign_keys=OFF"))
+            for principal_id, kind in ((account, "SERVICE_ACCOUNT"), (person, "USER")):
+                connection.execute(
+                    sa.text(
+                        "INSERT INTO principals (id, type, name, is_active, created_at, "
+                        "updated_at) VALUES (:id, :type, :id, 1, :t, :t)"
+                    ),
+                    {"id": principal_id, "type": kind, "t": _utc_text()},
+                )
+            for run_id, trigger, by in (
+                (by_account, "DEPLOY", account),
+                (by_person, "DEPLOY", person),
+                (scheduled, "SCHEDULE", account),
+            ):
+                connection.execute(
+                    sa.text(
+                        "INSERT INTO runs (id, environment_id, repository_id, job_version_id,"
+                        " kind, selection_json, status, cancel_requested, created_at,"
+                        " triggered_by, job, trigger) VALUES (:id, :a, :b, :c, 'FULL', '{}',"
+                        " 'SUCCEEDED', 0, '2026-10-28 00:00:00', :by, 'refresh', :trigger)"
+                    ),
+                    {
+                        "id": run_id,
+                        "a": uuid.uuid4().hex,
+                        "b": uuid.uuid4().hex,
+                        "c": uuid.uuid4().hex,
+                        "by": by,
+                        "trigger": trigger,
+                    },
+                )
+    finally:
+        engine.dispose()
+
+    command.downgrade(config, _REVISION_0050)
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        assert "job_starts_json" not in {
+            c["name"] for c in inspect(engine).get_columns("deploy_runs")
+        }
+        with engine.begin() as connection:
+            triggers = dict(connection.execute(sa.text("SELECT id, trigger FROM runs")).all())
+        assert triggers == {by_account: "API", by_person: "MANUAL", scheduled: "SCHEDULE"}
     finally:
         engine.dispose()

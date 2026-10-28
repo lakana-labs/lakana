@@ -49,7 +49,7 @@ from lakana_core.notifications.events import new_delivery
 from lakana_core.notifications.views import DeliveryView, delivery_view
 from lakana_core.projects.deploys import DeploymentMoved, DeployService
 from lakana_core.projects.lookups import deployment_row, environment_by_name, repository_by_name
-from lakana_core.projects.manifest import job_notify, job_schedule, manifest_jobs
+from lakana_core.projects.manifest import job_notify, job_on_deploy, job_schedule, manifest_jobs
 from lakana_core.projects.run_policy import RunCaps
 from lakana_core.runs.service import (
     ActiveRunError,
@@ -108,8 +108,8 @@ class WaitingStart:
     waits_for_run_id
         The active run it waits for.
     trigger
-        ``schedule``, ``api`` or ``manual``: the latest request's, unless a scheduled start waits
-        (a start by hand then adds to it).
+        ``schedule``, ``api``, ``manual`` or ``deploy``: the latest request's, unless a scheduled
+        start waits (a start by hand or by a deploy then adds to it).
     requested_at
         When it was first requested (a later request that merges into it does not change this).
     requested_by
@@ -244,6 +244,8 @@ class JobView:
         What started it.
     last_run_at
         When it was created.
+    on_deploy
+        Whether the job starts after each deploy that changes the project version here.
     """
 
     name: str
@@ -264,6 +266,7 @@ class JobView:
     last_run_status: str | None
     last_run_trigger: str | None
     last_run_at: datetime | None
+    on_deploy: bool = False
 
 
 PROBLEM_NONE = "none"
@@ -526,8 +529,9 @@ class JobService:
         job
             The job's name.
         trigger
-            ``schedule`` for the scheduler. Left out, it follows the caller: ``api`` for a
-            service account, ``manual`` otherwise.
+            ``schedule`` for the scheduler, ``deploy`` for a start a deploy makes as its
+            deployer (checked for `RUN` like any start with a caller). Left out, it follows the
+            caller: ``api`` for a service account, ``manual`` otherwise.
         scheduled_for
             For a scheduled start, the time the schedule named.
         missed
@@ -1361,6 +1365,7 @@ class JobService:
             last_run_status=last[1].value if last else None,
             last_run_trigger=last[2].value if last and last[2] is not None else None,
             last_run_at=last[3] if last else None,
+            on_deploy=job_on_deploy(entry),
         )
 
     def list(

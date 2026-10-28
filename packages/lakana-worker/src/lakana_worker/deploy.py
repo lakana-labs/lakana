@@ -36,6 +36,7 @@ from lakana_core.errors import (
     ValidationError,
 )
 from lakana_core.identifiers import shown
+from lakana_core.jobs.on_deploy import start_jobs_after_deploy
 from lakana_core.log_events import LogEvent, log_event
 from lakana_core.models import (
     DeployKind,
@@ -641,6 +642,47 @@ def run_deploy(
         )
         session.rollback()
         _fail(service, run, INTERNAL_ERROR_MESSAGE, worker_id)
+    else:
+        if kind is DeployKind.DEPLOY:
+            _start_jobs(session, authz, run_id, principal, settings.caps)
+
+
+def _start_jobs(
+    session: Session,
+    authz: AuthorizationService,
+    run_id: uuid.UUID,
+    principal: PrincipalRef,
+    caps: RunCaps,
+) -> None:
+    """Start the jobs with ``on_deploy: true`` of a deploy that was recorded; never raises.
+
+    The deploy is committed and stays as it is whatever happens here: each job's outcome is
+    written to the deploy run (`start_jobs_after_deploy`), and an error before any start is
+    logged, which leaves the starts pending (the deploy's record shows them as lost after the run
+    lease).
+
+    Parameters
+    ----------
+    session
+        Database session.
+    authz
+        The worker's authorization service, which checks and audits `RUN` as for any start.
+    run_id
+        The deploy run.
+    principal
+        The principal that deployed.
+    caps
+        The operator's maximums for each task's policy.
+    """
+    try:
+        start_jobs_after_deploy(session, authz, run_id, principal, caps=caps)
+    except Exception:
+        session.rollback()
+        logger.exception(
+            "Could not start the jobs of deploy run %s.",
+            run_id,
+            extra=log_event(LogEvent.INTERNAL_ERROR),
+        )
 
 
 def _deploy(

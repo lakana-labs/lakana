@@ -41,11 +41,16 @@ class RunKind(enum.StrEnum):
 
 
 class RunTrigger(enum.StrEnum):
-    """What started a run of a job; an ad-hoc `lakana run` has none."""
+    """What started a run of a job; an ad-hoc `lakana run` has none.
+
+    ``deploy`` is a start that a deploy of the project made for a job with ``on_deploy: true``,
+    as the principal that deployed.
+    """
 
     SCHEDULE = "schedule"
     API = "api"
     MANUAL = "manual"
+    DEPLOY = "deploy"
 
 
 class RunStatus(enum.StrEnum):
