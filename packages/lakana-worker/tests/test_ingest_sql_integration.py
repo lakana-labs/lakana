@@ -427,7 +427,7 @@ def test_a_wrong_password_gives_the_authentication_text(pki: _Pki, relay: list[s
 def test_a_missing_database_behind_a_right_password_is_no_authentication_failure(
     pki: _Pki, relay: list[str]
 ) -> None:
-    """The second login (SCRAM, TLS, the relay) reads 3D000; a wrong proof would read 28P01."""
+    """A missing database is the query's setup, not a refused login, and is not retried."""
     _crm(pki, database="missing")
 
     with pytest.raises(UsageError, match=r'database "missing" does not exist') as caught:

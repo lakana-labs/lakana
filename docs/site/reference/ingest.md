@@ -605,6 +605,15 @@ the task trusts the workers' trust bundle (`LAKANA_RUN__CA_BUNDLE`) and the conn
 `ca_certificate`; without either, the system's CAs. `tls: require` encrypts without checking the
 certificate, `tls: disable` does not encrypt. A connection takes at most 10 seconds.
 
+**Known limit: a refused login is recognised only in English.** libpq, the PostgreSQL client
+library sql.read uses, does not keep PostgreSQL's error code for a refused login, so sql.read
+recognises one by the server's English words (`password authentication failed`, `no pg_hba.conf
+entry`). A server whose messages are in another language (its `lc_messages`, such as German)
+refuses a wrong password in words sql.read does not read: the read fails as a `SourceError`, is
+retried like any failure to connect, and its message ends with "if this is a refused login on a
+server whose messages are not in English, check the user and password". Check the secret with
+`lakana connection test`, or set the server's `lc_messages` to `C` or `en_US.UTF-8`.
+
 sql.read never uses files of the user the worker runs as: it presents no client certificate
 (not even `~/.postgresql/postgresql.crt`, which libpq would otherwise send to any server that
 asks), `tls: require` does not turn into a certificate check against `~/.postgresql/root.crt`,
@@ -653,7 +662,7 @@ The classes are those of [files.read](#errors):
 | `sql.read reads postgresql, mariadb and sqlite-file connections; ... is s3: use files.read` | The connection is of another kind. | Use the helper the message names. |
 | `parameter since is None, so the comparison would match no row` | A `None` value, usually the first run's watermark. | Pass `ctx.watermark(default=...)`. |
 | `placeholder :x has no value in params` (or `params has x, which the query does not use`) | A placeholder and `params` do not match. | Give every placeholder one value. |
-| ``...: authentication failed (PostgreSQL said: ...). Check the secret with `lakana connection test ...` `` (or `MariaDB said:`) | The database refused the user or the password: PostgreSQL's SQLSTATE 28P01 or 28000, in whatever language it words it (sql.read logs in once more to read the code, which libpq does not keep), MariaDB's error 1044, 1045 or 1698. | Check the secret with `lakana connection test`, and set it again with `lakana connection update`. |
+| ``...: authentication failed (PostgreSQL said: ...). Check the secret with `lakana connection test ...` `` (or `MariaDB said:`) | The database refused the user or the password. | Check the secret with `lakana connection test`, and set it again with `lakana connection update`. |
 | ``...: the server's certificate is not trusted for `...`. Give the connection your CA: ...`` | No CA the task trusts signed the server's certificate, or it is for another name. | Run the `lakana connection update ... --ca-file ca.pem` the message names. |
 | `...: the connection through the task's relay closed before PostgreSQL answered` (or `MariaDB`) | Under the Docker runner the relay refused the target. | Read the task log's `lakana-relay:` line; an address inside the Lakana stack or on the Docker host is never reachable. |
 | `...: sql.read runs every query in a read-only transaction, and this one writes` | The query writes. | Read only; write with the asset's return value. |
@@ -667,6 +676,7 @@ The classes are those of [files.read](#errors):
 | ``...: column `...` changes type within the result`` | A SQLite column holds values of different types. | Use the `CAST` the message names. |
 | `...: '...' changed while SQLite opened it (replaced, or swapped for a link)` | The file was replaced between the check and the open: an export rewriting it, or a symbolic link put in its place. | Nothing for a rewrite: the task is retried. Find out who put a link in the ingestion root if it repeats. |
 | `sql.read cannot list this process's open files (/dev/fd)` | The worker's system has no `/dev/fd`, so sql.read cannot check which file SQLite opened. | Run the worker on Linux or macOS. |
+| `...; if this is a refused login on a server whose messages are not in English, check the user and password` | PostgreSQL could not be reached or refused the login, in a language other than English (see the known limit above). | Check the user and password with `lakana connection test`; otherwise the host, port and database. |
 | `...: SQLite could not read the file read-only` | A query that writes, or a WAL database or hot journal in a directory the worker cannot write. | Read only; or give the connection a copy made with `PRAGMA journal_mode=DELETE`. |
 | `...: the result has more than max_rows (...) rows` (or `is larger than max_bytes`) | The result is larger than the cap. | Narrow the query (a `WHERE` clause or a `LIMIT`), or raise the cap. |
 | ``... has no secret with `password` `` | The connection has no password. | Run the command the message names. |

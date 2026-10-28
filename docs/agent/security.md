@@ -4112,18 +4112,13 @@ secret's values, and the only way a secret reaches a Python asset (#23). User re
   session's `sql_mode` (an unknown mode, or a mode and server status that disagree about
   backslashes, sends nothing) and its values are plain scalars. Under the Docker runner libpq
   dials the relay (`hostaddr`) while `host` stays the connection's, so `verify-full` checks the
-  real name; PyMySQL gets a socket to the relay and a TLS context for the real host. A failure is
-  classified by SQLSTATE (MariaDB by error number), never by the server's words, which follow its
-  `lc_messages`: libpq keeps no SQLSTATE for a refused login (ADBC's error has none at connect),
-  so after a failed connect `_check.postgres_refusal` logs in once more over the check's own wire
-  client (same route through the relay, same TLS policy via `_tls`, cleartext/MD5/SCRAM-SHA-256
-  answered as libpq does, at most 1,000,000 PBKDF2 rounds, the server's SCRAM signature not
-  checked because only the SQLSTATE is read and the socket closed) and reads the `C` field: 28xxx
-  is `SourceRefused` (the connection test: `credentials`), 3D000 a `UsageError`, anything else or
-  nothing the retried `SourceError`. The server therefore sees a refused password twice, once per
-  attempt instead of once per harness retry (M6 review M2, #357). Only libpq's and OpenSSL's own
-  words, untranslated in the driver's build, still decide a certificate refusal and a connection
-  the relay closed. libpq never
+  real name; PyMySQL gets a socket to the relay and a TLS context for the real host. A query
+  error is classified by SQLSTATE (MariaDB by error number). **Known limit, accepted (#357):** a
+  refused PostgreSQL login is recognised by libpq's English words only, because libpq keeps no
+  SQLSTATE for it (ADBC's error has none at connect, measured with 1.13); a server with a
+  non-English `lc_messages` makes it a retried `SourceError` (the connection test: `failed`)
+  whose message ends with `_check.PG_LOGIN_HINT`, never `credentials`. A login of Lakana's own to
+  read the code was rejected as too much protocol code for the gain. libpq never
   reads the files of the user it runs as (`_check.conninfo`, also for the connection test): a
   connection carries no client certificate, so `sslcertmode=disable` never presents the worker
   user's `~/.postgresql/postgresql.crt` and key to a declared host, and `sslrootcert` (unless

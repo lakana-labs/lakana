@@ -41,12 +41,10 @@ import re
 import socket
 import ssl
 import stat
-import stringprep
 import struct
 import sys
 import tempfile
 import time
-import unicodedata
 from collections.abc import Generator, Mapping
 from email.utils import formatdate
 from pathlib import Path
@@ -102,6 +100,17 @@ MARIADB_GREETING_ONLY = (
     "`lakana connection update`"
 )
 """What a ``mariadb`` test without a secret adds: the greeting alone proves neither."""
+
+PG_LOGIN_HINT = (
+    "if this is a refused login on a server whose messages are not in English, check the user "
+    "and password"
+)
+"""What a failed PostgreSQL login adds: a refusal is recognised by libpq's English words only.
+
+libpq keeps no SQLSTATE for a refused login, so a server whose ``lc_messages`` is not English
+refuses in words Lakana does not read; `sql.read` adds the same hint."""
+_SERVER_WORDS = 700
+"""The most characters of a server's words a failed login keeps, so the hint is never cut."""
 
 TCP_OK = "reachable; Lakana does not check the protocol, TLS or credentials of a tcp connection"
 
@@ -1129,291 +1138,6 @@ def _bundle_unreadable() -> _Found:
     )
 
 
-_PROTOCOL_3 = 196608
-"""The startup message's protocol version, 3.0."""
-_SCRAM_ROUNDS = 1_000_000
-"""The most PBKDF2 rounds a SCRAM login is computed with (PostgreSQL's default is 4096)."""
-_SQLSTATE = re.compile(r"[0-9A-Z]{5}")
-_LOGIN_MESSAGES = 64
-"""The most messages a login is read for (requests, then a server's parameters)."""
-_PROHIBITED = (
-    stringprep.in_table_c12,
-    stringprep.in_table_c21_c22,
-    stringprep.in_table_c3,
-    stringprep.in_table_c4,
-    stringprep.in_table_c5,
-    stringprep.in_table_c6,
-    stringprep.in_table_c7,
-    stringprep.in_table_c8,
-    stringprep.in_table_c9,
-    stringprep.in_table_a1,
-)
-"""What SASLprep (RFC 4013) refuses in a prepared string."""
-
-
-def _saslprep(password: str) -> str:
-    """Prepare a password for SCRAM as PostgreSQL does (RFC 4013, its fallback included).
-
-    Parameters
-    ----------
-    password
-        The password.
-
-    Returns
-    -------
-    str
-        An ASCII password as it is; otherwise mapped and NFKC-normalized, or as it is when
-        SASLprep refuses it (PostgreSQL then stores the verifier of the raw password).
-    """
-    if password.isascii():
-        return password
-    mapped = "".join(
-        " " if stringprep.in_table_c12(ch) else ch
-        for ch in password
-        if not stringprep.in_table_b1(ch)
-    )
-    prepared = unicodedata.normalize("NFKC", mapped)
-    if not prepared or any(check(ch) for ch in prepared for check in _PROHIBITED):
-        return password
-    right_to_left = [stringprep.in_table_d1(ch) for ch in prepared]
-    if any(right_to_left) and (
-        any(stringprep.in_table_d2(ch) for ch in prepared)
-        or not (right_to_left[0] and right_to_left[-1])
-    ):
-        return password
-    return prepared
-
-
-def _pg_message(sock: socket.socket) -> tuple[bytes, bytes]:
-    """Read one backend message.
-
-    Parameters
-    ----------
-    sock
-        The connection.
-
-    Returns
-    -------
-    tuple
-        Its type byte and body.
-
-    Raises
-    ------
-    ConnectionError
-        When the server closes before the message ends.
-    ValueError
-        For a length that is no message's (at most 64 KiB is read).
-    """
-    head = _recv_exactly(sock, 5)
-    if len(head) < 5:
-        raise ConnectionError("the server closed the connection")
-    (length,) = struct.unpack("!i", head[1:])
-    if not 4 <= length <= _ANSWER_LIMIT:
-        raise ValueError(length)
-    body = _recv_exactly(sock, length - 4)
-    if len(body) < length - 4:
-        raise ConnectionError("the server closed the connection")
-    return head[:1], body
-
-
-def _sqlstate(body: bytes) -> str | None:
-    """Read the SQLSTATE of an ``ErrorResponse``.
-
-    Parameters
-    ----------
-    body
-        The message's body: fields of a type byte and a NUL-terminated value.
-
-    Returns
-    -------
-    str or None
-        The ``C`` field when it is a SQLSTATE.
-    """
-    for item in body.split(b"\0"):
-        if item[:1] == b"C":
-            code = item[1:].decode("ascii", "replace")
-            return code if _SQLSTATE.fullmatch(code) else None
-    return None
-
-
-def _scram_final(password: str, nonce: str, server_first: bytes) -> bytes | None:
-    """Answer SCRAM-SHA-256's server-first message with the client's proof.
-
-    The server's signature is not checked: the answer is read only for its SQLSTATE, and the
-    connection is closed at once.
-
-    Parameters
-    ----------
-    password
-        The password.
-    nonce
-        The client's nonce.
-    server_first
-        ``r=...,s=...,i=...``.
-
-    Returns
-    -------
-    bytes or None
-        The client-final message, or `None` for a server-first message without a nonce or
-        salt, or with more than `_SCRAM_ROUNDS` rounds.
-    """
-    text = server_first.decode("utf-8")
-    fields = dict(item.split("=", 1) for item in text.split(",") if "=" in item)
-    rounds = int(fields.get("i", "0"))
-    if not 0 < rounds <= _SCRAM_ROUNDS or "r" not in fields or "s" not in fields:
-        return None
-    salt = base64.b64decode(fields["s"], validate=True)
-    salted = hashlib.pbkdf2_hmac("sha256", _saslprep(password).encode(), salt, rounds)
-    client_key = hmac.new(salted, b"Client Key", "sha256").digest()
-    without_proof = f"c=biws,r={fields['r']}"
-    signed = f"n=,r={nonce},{text},{without_proof}".encode()
-    signature = hmac.new(hashlib.sha256(client_key).digest(), signed, "sha256").digest()
-    proof = bytes(a ^ b for a, b in zip(client_key, signature, strict=True))
-    return f"{without_proof},p={base64.b64encode(proof).decode()}".encode()
-
-
-def _login_answer(code: int, data: bytes, user: str, password: str, nonce: str) -> bytes | None:
-    """Answer one authentication request as libpq would.
-
-    Parameters
-    ----------
-    code
-        The request: 3 cleartext, 5 MD5, 10 SASL, 11 SASL continue.
-    data
-        What follows the code.
-    user
-        The user, which MD5 salts with.
-    password
-        The password.
-    nonce
-        The SCRAM client nonce.
-
-    Returns
-    -------
-    bytes or None
-        The ``p`` message's body, or `None` for a request Lakana does not answer (GSSAPI, SSPI,
-        a SASL mechanism other than SCRAM-SHA-256).
-    """
-    if code == 3:
-        return password.encode() + b"\0"
-    if code == 5:
-        inner = hashlib.md5((password + user).encode(), usedforsecurity=False).hexdigest()
-        outer = hashlib.md5(inner.encode() + data[:4], usedforsecurity=False).hexdigest()
-        return f"md5{outer}".encode() + b"\0"
-    if code == 10 and b"SCRAM-SHA-256" in data.split(b"\0"):
-        first = f"n,,n=,r={nonce}".encode()
-        return b"SCRAM-SHA-256\0" + struct.pack("!i", len(first)) + first
-    if code == 11:
-        return _scram_final(password, nonce, data)
-    return None
-
-
-def _login_state(sock: socket.socket, user: str, database: str, password: str) -> str | None:
-    """Log in over the wire protocol and read the SQLSTATE PostgreSQL refuses the login with.
-
-    Parameters
-    ----------
-    sock
-        A connection to the server, over TLS when the connection uses it.
-    user
-        The user.
-    database
-        The database.
-    password
-        The password.
-
-    Returns
-    -------
-    str or None
-        The SQLSTATE of the ``ErrorResponse`` the login ends with (after an accepted password
-        too: a missing database is 3D000); `None` when it is accepted (``ReadyForQuery``), when
-        the server asks for something Lakana does not answer, or for anything that is not a
-        PostgreSQL login.
-    """
-    startup = f"user\0{user}\0database\0{database}\0\0".encode()
-    nonce = base64.b64encode(os.urandom(18)).decode()
-    accepted = False
-    try:
-        sock.sendall(struct.pack("!ii", 8 + len(startup), _PROTOCOL_3) + startup)
-        for _ in range(_LOGIN_MESSAGES):
-            kind, body = _pg_message(sock)
-            if kind == b"E":
-                return _sqlstate(body)
-            if accepted and kind in (b"S", b"K", b"N"):
-                continue  # parameters, the cancel key, a notice: the database is checked next
-            if kind != b"R" or len(body) < 4:
-                break
-            (code,) = struct.unpack("!i", body[:4])
-            if code == 0:  # the password is accepted; a missing database is refused after it
-                accepted = True
-                continue
-            if code == 12:  # SASL final: the answer follows
-                continue
-            answer = _login_answer(code, body[4:], user, password, nonce)
-            if answer is None:
-                break
-            sock.sendall(b"p" + struct.pack("!i", len(answer) + 4) + answer)
-        sock.sendall(b"X\0\0\0\4")
-    except (OSError, ValueError):
-        return None
-    return None
-
-
-def postgres_refusal(
-    address: Mapping[str, Any],
-    settings: Mapping[str, Any],
-    password: str,
-    routing: Mapping[str, Any],
-    t: float,
-) -> str | None:
-    """Log in once more over Lakana's own client and name the SQLSTATE PostgreSQL refuses with.
-
-    libpq keeps no SQLSTATE of a refused login (ADBC's error has none) and says why in the
-    server's language, so a refusal can be classified only by what the server sends: an
-    ``ErrorResponse`` whose ``C`` field is 28P01 (wrong password) or 28000 (no ``pg_hba.conf``
-    entry, a missing role). This login goes where the task's would (the relay), with the same
-    TLS (`_tls`: the trust bundle plus the connection's CA, the name checked for
-    ``verify-full``), and answers cleartext, MD5 and SCRAM-SHA-256 as libpq does. Called only
-    after libpq failed, so a server sees a refused password twice. `sql.read` uses it too.
-
-    Parameters
-    ----------
-    address
-        The connection's address: ``host``, ``port``, ``database``.
-    settings
-        Its settings: ``user``, ``tls``, ``ca_certificate``.
-    password
-        The password.
-    routing
-        The routing entry (``relay_port``).
-    t
-        Seconds per step.
-
-    Returns
-    -------
-    str or None
-        The SQLSTATE, or `None` when the server could not be reached, accepted the login, or
-        did not answer like PostgreSQL.
-    """
-    host, port = str(address["host"]), int(address["port"])
-    mode = str(settings.get("tls", "verify-full"))
-    try:
-        sock = _open(host, port, routing, t)
-    except _Found:
-        return None
-    try:
-        if mode != "disable":
-            sock.sendall(_SSL_REQUEST)
-            if _recv_exactly(sock, 1) != b"S":
-                return None
-            sock = _tls(sock, host, settings.get("ca_certificate"), mode)
-        return _login_state(sock, str(settings["user"]), str(address["database"]), password)
-    except (OSError, _Found):
-        return None
-    finally:
-        sock.close()
-
-
 def _postgresql_credentials(body: Mapping[str, Any], routing: Mapping[str, Any], t: float) -> None:
     """Log in to PostgreSQL and execute ``SELECT 1`` in a read-only transaction.
 
@@ -1481,15 +1205,16 @@ def _postgresql_credentials(body: Mapping[str, Any], routing: Mapping[str, Any],
         ) from None
     except pg.Error as exc:
         text = str(exc)
-        # libpq's and OpenSSL's own words, never translated (the driver's libpq has no NLS).
+        if "password authentication failed" in text or "no pg_hba.conf entry" in text:
+            raise _Found("credentials", f"PostgreSQL refused the login ({_said(text)})") from None
         if "certificate verify failed" in text or "does not match host name" in text:
             raise _Found("tls", _tls_text(host)) from None
-        state = getattr(exc, "sqlstate", None) or postgres_refusal(
-            address, settings, parts["password"], routing, t
-        )
-        if (state or "").startswith("28"):
-            raise _Found("credentials", f"PostgreSQL refused the login ({_said(text)})") from None
-        raise _Found("failed", f"the PostgreSQL login failed ({_said(text)})") from None
+        # Only libpq's English words mark a refusal; a server that words it in another language
+        # (its lc_messages) lands here, so the message says what to check (a known limit).
+        raise _Found(
+            "failed",
+            f"the PostgreSQL login failed ({_said(text)[:_SERVER_WORDS]}); {PG_LOGIN_HINT}",
+        ) from None
     try:
         database.cursor().execute("SELECT 1")
     except pg.Error as exc:

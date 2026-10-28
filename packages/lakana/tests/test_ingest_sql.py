@@ -5,7 +5,6 @@ from __future__ import annotations
 import contextlib
 import errno
 import os
-import secrets
 import socket
 import sqlite3
 import sys
@@ -17,7 +16,6 @@ from typing import Any
 
 import pyarrow as pa
 import pytest
-from pg_wire_fixture import Login, pg_login_server
 from pymysql import converters as real_converters
 
 from lakana import context
@@ -129,8 +127,6 @@ def _postgres(
     settings: Mapping[str, object] | None = None,
     database: str = "crm",
     password: str | None = _PASSWORD,
-    host: str = "db.example.com",
-    port: int = 5432,
 ) -> None:
     """Declare `crm-db`, a PostgreSQL connection, under the Docker runner or locally.
 
@@ -144,20 +140,16 @@ def _postgres(
         Its database.
     password
         The secret's password; no secret at all when `None`.
-    host
-        Its host.
-    port
-        Its port.
     """
     body = {
         "name": "crm-db",
         "kind": "postgresql",
-        "address": {"host": host, "port": port, "database": database},
+        "address": {"host": "db.example.com", "port": 5432, "database": database},
         "settings": dict(settings or {"user": "reader"}),
-        "endpoints": [{"host": host, "port": port, "role": "service"}],
+        "endpoints": [{"host": "db.example.com", "port": 5432, "role": "service"}],
         "secret": None if password is None else {"password": password},
     }
-    routing: dict[str, object] = {"kind": "postgresql", "grant": [[host, port]]}
+    routing: dict[str, object] = {"kind": "postgresql", "grant": [["db.example.com", 5432]]}
     if relay:
         routing["relay_port"] = 15001
     _task({"crm-db": body}, {"crm-db": routing})
@@ -247,10 +239,6 @@ class _Database:
         self.closed = True
 
 
-_Login = tuple[Mapping[str, object], Mapping[str, object], str, Mapping[str, object], float]
-"""The arguments of one second login."""
-
-
 @dataclass
 class _Driver:
     """A fake ``adbc_driver_postgresql.dbapi``: records the connection string."""
@@ -261,39 +249,6 @@ class _Driver:
     roots: list[str] = field(default_factory=list)
     Error: type[Exception] = _Error
     database: _Database | None = None
-    sqlstate: str | None = None
-    logins: list[_Login] = field(default_factory=list)
-
-    def refusal(
-        self,
-        address: Mapping[str, object],
-        settings: Mapping[str, object],
-        password: str,
-        routing: Mapping[str, object],
-        seconds: float,
-    ) -> str | None:
-        """Stand in for `_check.postgres_refusal`: record the second login, answer `sqlstate`.
-
-        Parameters
-        ----------
-        address
-            The connection's address.
-        settings
-            Its settings.
-        password
-            Its password.
-        routing
-            Its routing.
-        seconds
-            Seconds per step.
-
-        Returns
-        -------
-        str or None
-            `sqlstate`.
-        """
-        self.logins.append((address, settings, password, routing, seconds))
-        return self.sqlstate
 
     def connect(self, conninfo: str) -> _Database:
         """Record the connection string and the root file's content, or refuse.
@@ -361,9 +316,6 @@ def driver(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> _Driver:
     module.connect = fake.connect  # ty: ignore[unresolved-attribute]
     module.Error = _Error  # ty: ignore[unresolved-attribute]
     monkeypatch.setitem(sys.modules, "adbc_driver_postgresql.dbapi", module)
-    if "adbc_driver_postgresql" in sys.modules:  # imported for real by an end-to-end test
-        monkeypatch.setattr(sys.modules["adbc_driver_postgresql"], "dbapi", module, raising=False)
-    monkeypatch.setattr(sql._check, "postgres_refusal", fake.refusal)
     monkeypatch.setattr(sql.socket, "gethostbyname", lambda name: "10.207.0.3")
     bundle = tmp_path / "bundle.pem"
     bundle.write_text("BUNDLE\n")
@@ -511,7 +463,6 @@ def test_an_authentication_failure_names_the_test_command_and_masks_the_password
     driver.refuse = _Error(
         f'FATAL:  password authentication failed for user "reader" {_PASSWORD} ' + "x" * 2000
     )
-    driver.sqlstate = "28P01"
     _postgres(relay=False)
 
     with pytest.raises(SourceRefused) as caught:
@@ -525,60 +476,36 @@ def test_an_authentication_failure_names_the_test_command_and_masks_the_password
     assert caught.value.retryable is False
 
 
-@pytest.mark.parametrize(
-    ("sqlstate", "kind"),
-    [
-        ("28P01", SourceRefused),
-        ("28000", SourceRefused),
-        ("3D000", UsageError),
-        ("53300", SourceError),
-        (None, SourceError),
-    ],
-)
-def test_a_refused_login_is_classified_by_the_sqlstate_of_a_second_login(
-    driver: _Driver, sqlstate: str | None, kind: type[Exception]
-) -> None:
-    """ADBC gives no SQLSTATE at connect, and the words are in the server's language."""
+def test_a_login_refused_in_another_language_is_retried_with_the_hint(driver: _Driver) -> None:
+    """The known limit: a refusal is recognised by libpq's English words only.
+
+    In German it is a `SourceError`, retried like any failure to connect, and its message says
+    what to check (docs/site/reference/ingest.md says the same).
+    """
     driver.refuse = _Error(
         "FATAL:  Passwort-Authentifizierung für Benutzer »reader« fehlgeschlagen"
     )
-    driver.sqlstate = sqlstate
-    _postgres(relay=True)
-
-    with pytest.raises(kind) as caught:
-        sql.read("crm-db", "SELECT 1")
-
-    assert type(caught.value) is kind
-    assert "Passwort-Authentifizierung" in str(caught.value)
-    ((address, settings, password, routing, seconds),) = driver.logins
-    assert (address["host"], settings["user"], password) == ("db.example.com", "reader", _PASSWORD)
-    assert (routing["relay_port"], seconds) == (15001, sql.CONNECT_SECONDS)
-
-
-def test_a_query_error_or_a_certificate_needs_no_second_login(driver: _Driver) -> None:
-    driver.cursor.fail = _Error("ERROR: permission denied for table t", "42501")
     _postgres(relay=False)
-    with pytest.raises(SourceRefused, match="may not read this"):
-        sql.read("crm-db", "SELECT 1")
-    driver.refuse = _Error("SSL error: certificate verify failed")
-    with pytest.raises(SourceRefused, match="not trusted"):
+
+    with pytest.raises(SourceError) as caught:
         sql.read("crm-db", "SELECT 1")
 
-    assert driver.logins == []
+    assert type(caught.value) is SourceError
+    assert "Passwort-Authentifizierung" in str(caught.value)
+    assert str(caught.value).endswith(
+        "if this is a refused login on a server whose messages are not in English, check the "
+        "user and password"
+    )
 
 
-def test_a_real_libpq_refused_in_german_is_an_authentication_failure() -> None:
-    """End to end: the ADBC driver against a server that refuses in German with 28P01."""
-    login = Login("scram", password=secrets.token_urlsafe(12))
-    with pg_login_server(login) as port:
-        settings = {"user": "reader", "tls": "disable"}
-        _postgres(relay=False, settings=settings, host="127.0.0.1", port=port)
-        with pytest.raises(SourceRefused) as caught:
-            sql.read("crm-db", "SELECT 1")
+def test_a_query_error_without_a_sqlstate_has_no_login_hint(driver: _Driver) -> None:
+    driver.cursor.fail = _Error("ERROR: something odd")
+    _postgres(relay=False)
 
-    assert "authentication failed (PostgreSQL said:" in str(caught.value)
-    assert "fehlgeschlagen" in str(caught.value)
-    assert login.seen == ["reader", "reader"]
+    with pytest.raises(SourceError) as caught:
+        sql.read("crm-db", "SELECT 1")
+
+    assert "check the user and password" not in str(caught.value)
 
 
 @pytest.mark.parametrize(
