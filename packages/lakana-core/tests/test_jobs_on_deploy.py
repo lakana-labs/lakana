@@ -582,3 +582,15 @@ def test_the_job_view_says_the_job_starts_after_each_deploy(
     }
 
     assert (views["refresh"].on_deploy, views["daily"].on_deploy) == (True, False)
+
+
+def test_an_outcome_for_a_deploy_that_is_gone_writes_nothing(
+    session: Session, env: None, principal: PrincipalRef
+) -> None:
+    """A deploy run deleted with its repository meanwhile, or one without starts, is left alone."""
+    outcome = DeployJobStart(job="refresh", outcome=OUTCOME_STARTED, run_id=uuid.uuid4())
+    on_deploy_module._write_outcome(session, uuid.uuid4(), outcome)
+    plain = _deployed_jobs(session, principal, _repo(session), "a" * 40, {"daily": _job()})
+    on_deploy_module._write_outcome(session, plain.id, outcome)
+    session.expire_all()
+    assert session.get(DeployRun, plain.id).job_starts_json is None  # ty: ignore
