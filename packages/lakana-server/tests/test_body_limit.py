@@ -32,6 +32,7 @@ STREAMING_ROUTES = {
     ("POST", "/api/v1/environments/{env}/namespaces/{path}/tables/{name}/data"),
     ("PUT", "/api/v1/environments/{env}/namespaces/{path}/tables/{name}/data"),
     ("POST", "/api/v1/environments/{env}/namespaces/{path}/tables/{name}/merge"),
+    ("POST", "/api/v1/environments/{env}/namespaces/{path}/tables/{name}/load"),
     ("POST", "/api/v1/environments/{env}/namespaces/{path}/artifacts/{name}/uploads"),
     (
         "PUT",

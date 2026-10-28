@@ -70,6 +70,7 @@ nav:
       - reference/checks.md
       - reference/descriptions.md
       - reference/merge.md
+      - reference/load.md
       - reference/table-health.md
       - reference/search.md
       - reference/lists.md

@@ -122,6 +122,7 @@ ROUTES: dict[str, Route] = {
     "tables.replace": Route(
         "PUT", "/api/v1/environments/{env}/namespaces/{path}/tables/{name}/data"
     ),
+    "tables.load": Route("POST", "/api/v1/environments/{env}/namespaces/{path}/tables/{name}/load"),
     "tables.merge": Route(
         "POST", "/api/v1/environments/{env}/namespaces/{path}/tables/{name}/merge"
     ),

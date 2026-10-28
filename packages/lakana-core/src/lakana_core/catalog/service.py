@@ -102,6 +102,7 @@ from lakana_core.catalog.health import (
 )
 from lakana_core.catalog.identity import artifact_refusal, resolve_table_id
 from lakana_core.catalog.json_schema import ColumnSpec, from_iceberg_schema
+from lakana_core.catalog.loads import require_bronze
 from lakana_core.catalog.locations import (
     CLAIM_RELEASED_MESSAGE,
     claim_holder,
@@ -5119,6 +5120,128 @@ class CatalogService:
         if row.table_type is not TableType.ICEBERG:
             raise ValidationError(unmanaged)
         return row
+
+    def check_can_load(
+        self,
+        p: PrincipalRef,
+        ref: TableRef,
+        *,
+        write: str,
+        expected_snapshot_id: ExpectedSnapshot | None,
+        schema: pa.Schema | None = None,
+    ) -> bool:
+        """Verify a load (`lakana load`) may write its target, before any data is read.
+
+        In this order: the target is in the bronze layer (`require_bronze`); the caller may
+        write it (`check_can_append`, or `check_can_replace`, which also asks `CREATE_TABLE`
+        when `expected_snapshot_id` is ``none`` and the table is missing); the environment's
+        write guard allows it (a protected environment needs break glass with
+        `MANAGE_ENVIRONMENT`; recorded by the write, not here); the namespace of a table the
+        load would create exists, and a missing table has the pin ``none``. With `schema`, a
+        table the load would create gets no column name twice, and an existing table is checked
+        against it as the write would check the rows: column for column for an append, by the
+        schema rules of a replace without evolving it.
+
+        Parameters
+        ----------
+        p
+            The acting principal.
+        ref
+            The table.
+        write
+            ``replace`` or ``append``.
+        expected_snapshot_id
+            The caller's precondition; ``none`` on a first load.
+        schema
+            The schema of the rows the load would write, or `None` to check only the target.
+
+        Returns
+        -------
+        bool
+            `True` when the load would create the table.
+
+        Raises
+        ------
+        ValidationError
+            For a target outside bronze, a table that is not managed, a repeated column name
+            for a table the load would create, or a schema the write would refuse (the message
+            shows the difference).
+        PermissionDenied
+            As `check_can_append` and `check_can_replace`, and as the write guard refuses a
+            write to a protected environment.
+        NotFoundError
+            For a missing namespace (naming the command that creates it), or a missing table
+            without ``none`` (naming the pin that creates it).
+        ConflictError
+            When the table's current snapshot is not `expected_snapshot_id` (``none`` on a
+            table that exists included), as the write would find.
+        """
+        require_bronze(ref)
+        missing_without_pin = False
+        try:
+            if write == "append" and expected_snapshot_id != "none":
+                self.check_can_append(p, ref)
+            else:
+                self.check_can_replace(p, ref, expected_snapshot_id=expected_snapshot_id)
+        except NotFoundError:
+            # Only a missing table without a pin gets here, after `WRITE_TABLE` was granted:
+            # name the namespace if that is missing too, else the pin that creates the table.
+            if expected_snapshot_id is not None or self._existing_table(ref) is not None:
+                raise
+            missing_without_pin = True
+        row = self._existing_table(ref)
+        appends = row is not None and write == "append" and expected_snapshot_id != "none"
+        self._guard.check(
+            p,
+            ref.environment,
+            WriteOperation.APPEND if appends else WriteOperation.WRITE,
+            table_target(ref),
+            record_break_glass=False,
+        )
+        if row is None:
+            namespace = ".".join(ref.namespace.parts)
+            try:
+                self._find_namespace(self._find_environment(ref.environment), ref.namespace)
+            except NotFoundError:
+                raise NotFoundError(
+                    f"Namespace `{shown(namespace)}` does not exist in "
+                    f"{shown(ref.environment)!r}: create it with `lakana ns create "
+                    f"{shown(namespace)} --env {shown(ref.environment)}`, then load again."
+                ) from None
+            if missing_without_pin:
+                raise NotFoundError(
+                    f"Table `{shown(ref.dotted())}` does not exist in {shown(ref.environment)!r}: "
+                    "a first load passes expected_snapshot_id=none, which creates it."
+                )
+            if schema is not None:
+                seen: set[str] = set()
+                for name in schema.names:
+                    if name in seen:
+                        raise ValidationError(
+                            f"Column {shown(name)!r} appears more than once in the rows sent; "
+                            "rename one and load again."
+                        )
+                    seen.add(name)
+            return True
+        current = self._to_loaded_table(ref, row).metadata
+        if (
+            expected_snapshot_id is not None
+            and expected_snapshot_value(expected_snapshot_id) != current.current_snapshot_id
+        ):
+            raise ConflictError(target_changed_message(ref.dotted()))
+        if schema is not None:
+            if write == "append":
+                validate_arrow_schema(current.schema(), schema.empty_table())
+            else:
+                plan_schema(
+                    current.schema(),
+                    arrow_to_iceberg_schema(schema),
+                    evolve=False,
+                    last_column_id=current.last_column_id,
+                    next_schema_id=max(s.schema_id for s in current.schemas) + 1,
+                    table_name=ref.dotted(),
+                )
+        return False
 
     def append(
         self,

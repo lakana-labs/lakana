@@ -11,6 +11,7 @@ Pages:
 - [Checks](checks.md): the files, the keys, every refusal at deploy, the outcomes, commands, routes, permissions and audit events of data quality checks.
 - [Descriptions](descriptions.md): the two sources of a table's and a column's description, commands, SDK, REST routes, rights and audit events.
 - [Merging rows into a table](merge.md): the key, the counts, the first merge, the command, the SDK, the REST route, who may merge, every refusal, the audit event and the limits.
+- [Loading a local file](load.md): `lakana load` into the bronze layer, the formats it reads, the SDK, the REST route, who may load and every refusal.
 - [Table health](table-health.md): the numbers of a table's snapshot, its last maintenance, the newest result of each check and who reads it; the fields, the rules, the settings, commands, SDK and routes.
 - [Search](search.md): what is matched, the ranking, who sees what, the route, the command, the SDK and how the columns of existing tables are filled in.
 

@@ -521,10 +521,15 @@ class InfoOut(BaseModel):
     artifact_limits
         The artifact limits the operator set, so a client can check a tree against them before
         it sends a byte. An older server does not send it.
+    upload_max_bytes
+        The largest Arrow body one append, replace, merge or load may send
+        (`LAKANA_APPEND__MAX_BYTES`), so `lakana load` can refuse a file before it reads or
+        sends it. An older server does not send it.
     """
 
     version: str
     artifact_limits: ArtifactLimitsOut
+    upload_max_bytes: int
 
 
 class QueryStatusOut(BaseModel):
@@ -744,6 +749,27 @@ class AppendOut(BaseModel):
     rows: int
     files: int
     snapshot_id: int | None
+
+
+class LoadOut(BaseModel):
+    """Response body for a load into the bronze layer (`lakana load`).
+
+    Parameters
+    ----------
+    snapshot_id
+        The snapshot the load committed; `None` for a dry run and for a load without rows.
+    rows
+        Rows written; `0` for a dry run.
+    created
+        Whether the load created the table (for a dry run: would create it).
+    dry_run
+        Whether this was a dry run, which checks and writes nothing.
+    """
+
+    snapshot_id: int | None
+    rows: int
+    created: bool
+    dry_run: bool
 
 
 class MergeOut(BaseModel):

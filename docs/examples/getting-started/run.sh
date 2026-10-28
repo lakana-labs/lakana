@@ -32,6 +32,27 @@ lakana --version
 # The instance is up, so both lines are printed: the CLI's version and the instance's.
 lakana --version | grep -q '^instance http://'
 
+# The first step loads a small CSV file into bronze. The reader saves the file the page shows in
+# the folder they are in; here it is copied from the example into WORK.
+cp "$EXAMPLE_DIR/readings.csv" .
+capture_start
+# docs:start load
+lakana load readings.csv first_file --env dev --yes
+# docs:end load
+capture_end
+grep -Fxq 'readings.csv: 3 rows, 3 columns' "$captured"
+grep -Fxq '  day: date32[day]' "$captured"
+grep -Fxq 'Loaded 3 rows into dev/bronze.first_file (created the table). To clean it up or load it again on a schedule, write an asset that reads it.' "$captured"
+out=$(lakana --output json sql "SELECT count(*) AS n FROM bronze.first_file")
+python3 -c 'import json,sys; assert json.loads(sys.argv[1]) == [{"n": 3}], sys.argv[1]' "$out"
+# Any other layer is refused by the server, before a row is uploaded.
+set +e
+out=$(lakana load readings.csv silver.first_file --env dev --yes 2>&1)
+status=$?
+set -e
+test "$status" -ne 0
+tr -s '[:space:]' ' ' <<<"$out" | grep -Fq 'loads into bronze only: load into `bronze.first_file`'
+
 capture_start
 # docs:start init
 cd ~

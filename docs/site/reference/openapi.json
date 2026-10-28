@@ -4457,6 +4457,221 @@
         }
       }
     },
+    "/api/v1/environments/{env}/namespaces/{path}/tables/{name}/load": {
+      "post": {
+        "tags": [
+          "tables"
+        ],
+        "summary": "Load rows into a table of the bronze layer",
+        "description": "The route `lakana load` calls: it writes the rows of an Arrow IPC stream, sent as the request body, into a table whose first namespace segment is `bronze`, and refuses any other target with 422 before it reads the body, for every client alike. `expected_snapshot_id=none` creates a missing table (`CREATE_TABLE` as well as `WRITE_TABLE`); otherwise `write` replaces or appends (`WRITE_TABLE`), committing only while the table's snapshot is still `expected_snapshot_id`. `dry_run=true` runs every check, the schema of the (usually empty) stream against an existing table included, and writes nothing. In a protected environment a load, its dry run included, needs `break_glass_reason` and `MANAGE_ENVIRONMENT` (403 before the body otherwise). Answers 404 when the namespace does not exist (naming the command that creates it) or the table does not and no pin was sent (naming `none`), 409 when the snapshot moved, 413 for a body over the server's limit, 408 when it arrives too slowly and 503 when the server is busy with other uploads.",
+        "operationId": "load_table_data_api_v1_environments__env__namespaces__path__tables__name__load_post",
+        "parameters": [
+          {
+            "name": "env",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Env"
+            },
+            "description": "Environment name."
+          },
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            },
+            "description": "Dot-joined namespace path; its first segment must be `bronze`."
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            },
+            "description": "Table name."
+          },
+          {
+            "name": "write",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "replace",
+                "append"
+              ],
+              "type": "string",
+              "default": "replace",
+              "title": "Write"
+            },
+            "description": "``replace`` (the default) or ``append``; a first load creates the table either way."
+          },
+          {
+            "name": "expected_snapshot_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Expected Snapshot Id"
+            },
+            "description": "The table's current snapshot as the caller read it, or `none` for a missing table."
+          },
+          {
+            "name": "dry_run",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Dry Run"
+            },
+            "description": "Check only; write nothing."
+          },
+          {
+            "name": "break_glass_reason",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 500
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Why the protection of a protected environment is broken, up to 500 characters; recorded in the audit log. Only a protected environment needs it.",
+              "title": "Break Glass Reason"
+            },
+            "description": "Why the protection of a protected environment is broken, up to 500 characters; recorded in the audit log. Only a protected environment needs it."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoadOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token is missing, wrong, expired or revoked.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "No part of the request body arrived within the read timeout.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The request body is larger than the server accepts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The server cannot do this right now; ask again after the time in `Retry-After`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/environments/{env}/namespaces/{path}/dropped-tables": {
       "get": {
         "tags": [
@@ -15688,7 +15903,7 @@
           "info"
         ],
         "summary": "Describe the instance",
-        "description": "Shows the platform version of the running server and the limits it applies to artifacts. Any authenticated caller may ask, a task token included.",
+        "description": "Shows the platform version of the running server the limits it applies to artifacts and the largest Arrow upload it accepts. Any authenticated caller may ask, a task token included.",
         "operationId": "info_api_v1_info_get",
         "parameters": [
           {
@@ -18972,15 +19187,20 @@
           },
           "artifact_limits": {
             "$ref": "#/components/schemas/ArtifactLimitsOut"
+          },
+          "upload_max_bytes": {
+            "type": "integer",
+            "title": "Upload Max Bytes"
           }
         },
         "type": "object",
         "required": [
           "version",
-          "artifact_limits"
+          "artifact_limits",
+          "upload_max_bytes"
         ],
         "title": "InfoOut",
-        "description": "Response body for `GET /api/v1/info`.\n\nParameters\n----------\nversion\n    The platform version the server runs. A project's `lakana[assets]` pin must be\n    compatible with it.\nartifact_limits\n    The artifact limits the operator set, so a client can check a tree against them before\n    it sends a byte. An older server does not send it."
+        "description": "Response body for `GET /api/v1/info`.\n\nParameters\n----------\nversion\n    The platform version the server runs. A project's `lakana[assets]` pin must be\n    compatible with it.\nartifact_limits\n    The artifact limits the operator set, so a client can check a tree against them before\n    it sends a byte. An older server does not send it.\nupload_max_bytes\n    The largest Arrow body one append, replace, merge or load may send\n    (`LAKANA_APPEND__MAX_BYTES`), so `lakana load` can refuse a file before it reads or\n    sends it. An older server does not send it."
       },
       "JobOut": {
         "properties": {
@@ -19436,6 +19656,42 @@
         ],
         "title": "LineageOut",
         "description": "Response body for a table's lineage.\n\nParameters\n----------\nroot_id\n    The table asked about.\ndirection\n    `upstream` or `downstream`.\ndepth\n    The hops walked.\nnodes\n    Every node the caller may read.\nedges\n    One edge per source/target pair, the most recent.\nhidden_nodes\n    Nodes omitted because the caller can't read them.\ntruncated\n    Whether the walk stopped at the node cap with a readable node left\n    out. A node the caller can't read never sets it."
+      },
+      "LoadOut": {
+        "properties": {
+          "snapshot_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snapshot Id"
+          },
+          "rows": {
+            "type": "integer",
+            "title": "Rows"
+          },
+          "created": {
+            "type": "boolean",
+            "title": "Created"
+          },
+          "dry_run": {
+            "type": "boolean",
+            "title": "Dry Run"
+          }
+        },
+        "type": "object",
+        "required": [
+          "snapshot_id",
+          "rows",
+          "created",
+          "dry_run"
+        ],
+        "title": "LoadOut",
+        "description": "Response body for a load into the bronze layer (`lakana load`).\n\nParameters\n----------\nsnapshot_id\n    The snapshot the load committed; `None` for a dry run and for a load without rows.\nrows\n    Rows written; `0` for a dry run.\ncreated\n    Whether the load created the table (for a dry run: would create it).\ndry_run\n    Whether this was a dry run, which checks and writes nothing."
       },
       "MaintenanceIn": {
         "properties": {
