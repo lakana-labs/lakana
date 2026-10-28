@@ -1214,6 +1214,40 @@ def test_an_empty_table_somebody_else_created_is_not_a_write(py: PyWorld) -> Non
     assert message == _NOT_ITS_WRITE
 
 
+def test_an_empty_table_somebody_else_put_in_place_of_the_old_one_is_not_a_write(
+    py: PyWorld,
+) -> None:
+    """The table existed before; a new, empty table under its name is somebody else's."""
+    _write_as_admin(py.world)
+
+    def script(task: PythonTask, on_log: Callable[[bytes], None], stop: StopSignal) -> RunOutcome:
+        with py.world.session() as session:
+            CatalogService(session, StorageResolver(session), AllowAllAuthorization()).drop_table(
+                py.world.admin, TableRef.from_dotted("dev", "gold.scores")
+            )
+        _write_as_admin(py.world, 0)
+        return RunOutcome(succeeded=True, snapshot_id=None, rows=0)
+
+    task, message = _fails(py, py.engine(script))
+    assert (task.status, task.failure_code) == (TaskStatus.FAILED, "conflict")
+    assert message == _NOT_ITS_WRITE
+
+
+def test_a_cancel_wins_over_a_success_whose_write_is_somebody_elses(py: PyWorld) -> None:
+    runs: list[uuid.UUID] = []
+
+    def script(task: PythonTask, on_log: Callable[[bytes], None], stop: StopSignal) -> RunOutcome:
+        _write_as_admin(py.world, 3)
+        py.cancel(runs[0])
+        return RunOutcome(succeeded=True, snapshot_id=None, rows=3)
+
+    engine = py.engine(script)
+    claimed = py.claim_python(engine)
+    runs.append(claimed.run_id)
+    run_claimed(engine, claimed)
+    assert _task(py.world, "gold.scores").status is TaskStatus.CANCELLED
+
+
 def test_a_write_another_writer_appended_to_afterwards_still_counts(py: PyWorld) -> None:
     """The attempt's own snapshot is under the current one: the write is proven."""
 

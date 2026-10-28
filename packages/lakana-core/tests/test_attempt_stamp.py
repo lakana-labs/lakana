@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 
+import pytest
 from pyiceberg.schema import Schema
 from pyiceberg.table.metadata import TableMetadata
 from pyiceberg.table.refs import SnapshotRefType
@@ -17,6 +18,7 @@ from pyiceberg.table.update import (
 from pyiceberg.types import LongType, NestedField
 
 from lakana_core.auth import RunContext
+from lakana_core.catalog import attempt_stamp
 from lakana_core.catalog.attempt_stamp import (
     CLAIM_PROPERTY,
     TASK_RUN_PROPERTY,
@@ -186,3 +188,38 @@ def test_a_snapshot_off_the_current_branch_is_not_the_write() -> None:
     """A stamped snapshot that `main` no longer descends from (rolled back) does not count."""
     metadata = _table(_snapshot(1, None), _snapshot(2, 1, **_stamp()), _snapshot(3, 1))
     assert not written_by_attempt(metadata, since=1, task_run_id=_TASK_RUN, claim=2)
+
+
+def test_a_snapshot_without_a_summary_is_left_as_it_is() -> None:
+    """A client's snapshot may omit the summary: there is nothing to strip, and none is invented."""
+    bare = Snapshot(
+        snapshot_id=5,
+        parent_snapshot_id=None,
+        sequence_number=5,
+        timestamp_ms=1_700_000_000_005,
+        manifest_list="file:///t/metadata/snap-5.avro",
+        summary=None,
+        schema_id=0,
+    )
+    update = AddSnapshotUpdate(snapshot=bare)
+    for context in (None, RunContext(task_run_id=_TASK_RUN, claim=2)):
+        (same,) = stamp_snapshots([update], context)
+        assert same is update
+
+
+def test_a_stamp_under_an_expired_parent_is_not_found() -> None:
+    """Review N1: the walk ends at a parent that is no longer in the metadata."""
+    metadata = _table(_snapshot(1, None, **_stamp()), _snapshot(3, 2))
+    assert metadata.snapshot_by_id(2) is None
+    assert not written_by_attempt(metadata, since=None, task_run_id=_TASK_RUN, claim=2)
+
+
+def test_the_walk_gives_up_after_its_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    """More foreign snapshots on top than the walk reads: the write is not proven."""
+    monkeypatch.setattr(attempt_stamp, "MAX_ANCESTORS", 2)
+    metadata = _table(
+        _snapshot(1, None), _snapshot(2, 1, **_stamp()), _snapshot(3, 2), _snapshot(4, 3)
+    )
+    assert not written_by_attempt(metadata, since=1, task_run_id=_TASK_RUN, claim=2)
+    monkeypatch.setattr(attempt_stamp, "MAX_ANCESTORS", 3)
+    assert written_by_attempt(metadata, since=1, task_run_id=_TASK_RUN, claim=2)

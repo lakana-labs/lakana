@@ -1704,8 +1704,8 @@ class PythonRuntime:
         """
         assert after.table_id is not None  # nosec B101 -- the caller checked
         if after.snapshot_id is not None:
-            if after.metadata is None:
-                return False
+            # `_target_state` keeps the metadata it read the snapshot from.
+            assert after.metadata is not None  # nosec B101
             since = before.snapshot_id if before.table_id == after.table_id else None
             return written_by_attempt(
                 after.metadata,
