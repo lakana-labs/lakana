@@ -11,6 +11,8 @@ the ``assets`` extra (polars, fastexcel).
 
 from __future__ import annotations
 
+import struct
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Annotated
 
@@ -49,6 +51,8 @@ _WITH_EXTRA = frozenset({"json", "xlsx", "xlsm", "xlsb", "xls", "ods"})
 """Read by the files helper's reader, which needs the assets extra."""
 _SPREADSHEETS = frozenset({"xlsx", "xlsm", "xlsb", "xls", "ods"})
 _MIB = 1024 * 1024
+_PARQUET_BATCH_ROWS = 1024
+"""Rows decoded at a time from a Parquet file, so a read stops soon after the limit."""
 
 
 def bronze_name(table: str) -> str:
@@ -134,8 +138,8 @@ def _utf8(path: Path, data: bytes) -> bytes:
     return data
 
 
-def _csv(path: Path, header_row: int) -> pa.Table:
-    """Read a CSV file with pyarrow, inferring each column's type.
+def _csv(path: Path, header_row: int, limit: int | None) -> pa.Table:
+    """Read a CSV file with pyarrow block by block, inferring each column's type.
 
     Parameters
     ----------
@@ -143,6 +147,8 @@ def _csv(path: Path, header_row: int) -> pa.Table:
         The file; its size is bounded by the upload limit before it is read.
     header_row
         The 1-based row of the column names; ``0`` for none (columns ``column_1``, ...).
+    limit
+        The upload limit the decoded rows must stay within, or `None`.
 
     Returns
     -------
@@ -154,13 +160,14 @@ def _csv(path: Path, header_row: int) -> pa.Table:
         skip_rows=max(header_row - 1, 0), autogenerate_column_names=not header_row
     )
     convert = pacsv.ConvertOptions(strings_can_be_null=True, null_values=[""])
-    table = pacsv.read_csv(pa.BufferReader(data), read_options=read, convert_options=convert)
+    reader = pacsv.open_csv(pa.BufferReader(data), read_options=read, convert_options=convert)
+    table = _bounded(path, reader.schema, reader, limit)
     if not header_row:
         table = table.rename_columns([f"column_{i + 1}" for i in range(table.num_columns)])
     return table
 
 
-def _ndjson(path: Path, data: bytes) -> pa.Table:
+def _ndjson(path: Path, data: bytes, limit: int | None) -> pa.Table:
     """Read newline-delimited JSON with pyarrow, after the helpers' encoding and depth checks.
 
     Parameters
@@ -169,6 +176,8 @@ def _ndjson(path: Path, data: bytes) -> pa.Table:
         The file, for messages.
     data
         Its bytes.
+    limit
+        The upload limit the decoded rows must stay within, or `None`.
 
     Returns
     -------
@@ -190,7 +199,8 @@ def _ndjson(path: Path, data: bytes) -> pa.Table:
             8,
             kind="FileError",
         )
-    return pajson.read_json(pa.BufferReader(data))
+    reader = pajson.open_json(pa.BufferReader(data))
+    return _bounded(path, reader.schema, reader, limit)
 
 
 def _with_extra(path: Path, data: bytes, fmt: str, sheet: str | None, header_row: int) -> pa.Table:
@@ -247,6 +257,178 @@ def _with_extra(path: Path, data: bytes, fmt: str, sheet: str | None, header_row
     return frame.to_arrow()
 
 
+def _bounded(
+    path: Path, schema: pa.Schema, batches: Iterable[pa.RecordBatch], limit: int | None
+) -> pa.Table:
+    """Collect decoded batches, stopping as soon as they pass the upload limit.
+
+    Parameters
+    ----------
+    path
+        The file, for the message.
+    schema
+        The batches' schema.
+    batches
+        The batches, decoded one at a time.
+    limit
+        The upload limit, or `None` when the server does not say.
+
+    Returns
+    -------
+    pa.Table
+        The rows.
+    """
+    kept: list[pa.RecordBatch] = []
+    size = 0
+    for batch in batches:
+        size += batch.nbytes
+        _check_size(path, size, limit)
+        kept.append(batch)
+    return pa.Table.from_batches(kept, schema)
+
+
+def _slot(buf: bytes, table: int, index: int) -> int | None:
+    """Find a field of a FlatBuffers table.
+
+    Parameters
+    ----------
+    buf
+        The encoded bytes.
+    table
+        The table's position.
+    index
+        The field's index in the table's declaration.
+
+    Returns
+    -------
+    int or None
+        The field's position, or `None` when the table does not have it.
+    """
+    vtable = table - struct.unpack_from("<i", buf, table)[0]
+    at = 4 + 2 * index
+    if at + 2 > struct.unpack_from("<H", buf, vtable)[0]:
+        return None
+    offset = struct.unpack_from("<H", buf, vtable + at)[0]
+    return table + offset if offset else None
+
+
+def _child(buf: bytes, table: int, index: int) -> int | None:
+    """Follow a FlatBuffers table field to the table it points at.
+
+    Parameters
+    ----------
+    buf
+        The encoded bytes.
+    table
+        The table's position.
+    index
+        The field's index in the table's declaration.
+
+    Returns
+    -------
+    int or None
+        The child table's position, or `None` when the field is absent.
+    """
+    field = _slot(buf, table, index)
+    return None if field is None else field + struct.unpack_from("<I", buf, field)[0]
+
+
+def _arrow_compressed(path: Path) -> bool:
+    """Tell, from the messages' headers alone, whether an Arrow IPC file is compressed.
+
+    A compressed batch is decompressed to its full size when it is read, so a small file can
+    take far more memory than the upload limit before anything can be measured. The server
+    refuses compressed IPC for the same reason. The check reads each record batch's (or
+    dictionary batch's) `compression` field from its FlatBuffers header, never the body:
+    `Message.header` is field 2, `DictionaryBatch.data` field 1, `RecordBatch.compression`
+    field 3 of the Arrow format.
+
+    Parameters
+    ----------
+    path
+        The file, in the file or the stream format.
+
+    Returns
+    -------
+    bool
+        Whether any batch declares compression.
+    """
+    with pa.memory_map(str(path)) as source:
+        source.seek(8 if source.read(6) == b"ARROW1" else 0)
+        for message in ipc.MessageReader.open_stream(source):
+            if message.type not in ("record batch", "dictionary"):
+                continue
+            buf = message.metadata.to_pybytes()
+            batch = _child(buf, struct.unpack_from("<I", buf, 0)[0], 2)
+            if batch is not None and message.type == "dictionary":
+                batch = _child(buf, batch, 1)
+            if batch is not None and _slot(buf, batch, 3) is not None:
+                return True
+    return False
+
+
+def _arrow(path: Path, limit: int | None) -> pa.Table:
+    """Read an uncompressed Arrow IPC file or stream batch by batch.
+
+    Parameters
+    ----------
+    path
+        The file.
+    limit
+        The upload limit the batches must stay within, or `None`.
+
+    Returns
+    -------
+    pa.Table
+        The rows.
+
+    Raises
+    ------
+    CliError
+        For a compressed file (exit 8).
+    """
+    if _arrow_compressed(path):
+        raise CliError(
+            f"{_output.inline(path.name)} is compressed, which Lakana does not read: write it "
+            "uncompressed (or as Parquet) and load it again",
+            8,
+            kind="FileError",
+        )
+    with pa.memory_map(str(path)) as source:
+        try:
+            reader = ipc.open_file(source)
+            batches: Iterable[pa.RecordBatch] = (
+                reader.get_batch(i) for i in range(reader.num_record_batches)
+            )
+        except pa.ArrowInvalid:
+            source.seek(0)
+            reader = ipc.open_stream(source)
+            batches = reader
+        return _bounded(path, reader.schema, batches, limit)
+
+
+def _parquet(path: Path, limit: int | None) -> pa.Table:
+    """Read a Parquet file a few rows at a time, after an estimate from its metadata.
+
+    Parameters
+    ----------
+    path
+        The file.
+    limit
+        The upload limit the rows must stay within, or `None`.
+
+    Returns
+    -------
+    pa.Table
+        The rows.
+    """
+    _check_size(path, _parquet_size(path), limit)
+    with pq.ParquetFile(path) as parquet:
+        return _bounded(
+            path, parquet.schema_arrow, parquet.iter_batches(_PARQUET_BATCH_ROWS), limit
+        )
+
+
 def _parquet_size(path: Path) -> int:
     """Estimate, from a Parquet file's metadata, how many bytes its rows take once read.
 
@@ -297,8 +479,8 @@ def read_file(
     header_row
         `--header-row` (CSV and spreadsheets only).
     limit
-        The server's upload limit: a Parquet file whose rows would take more is refused from
-        its metadata, before they are read.
+        The server's upload limit: reading stops, refused, as soon as the decoded rows pass it
+        (a Parquet file is first estimated from its metadata).
 
     Returns
     -------
@@ -308,8 +490,9 @@ def read_file(
     Raises
     ------
     CliError
-        For an option the format does not take, an unreadable or empty file, a Parquet file
-        over the limit, or a column type a table cannot store.
+        For an option the format does not take, an unreadable, compressed Arrow or empty file,
+        rows over the limit, a repeated column name, an empty column, or a column type a table
+        cannot store.
     """
     if sheet is not None and fmt not in _SPREADSHEETS:
         raise CliError(f"--sheet applies to spreadsheets; {_output.inline(path.name)} is {fmt}")
@@ -322,22 +505,16 @@ def read_file(
         raise CliError("--header-row is the 1-based row of the column names, or 0 for none")
     try:
         if fmt == "csv":
-            table = _csv(path, header_row)
+            table = _csv(path, header_row, limit)
         elif fmt == "parquet":
-            _check_size(path, _parquet_size(path), limit)
-            table = pq.read_table(path)
+            table = _parquet(path, limit)
         elif fmt == "arrow":
-            with pa.memory_map(str(path)) as source:
-                try:
-                    table = ipc.open_file(source).read_all()
-                except pa.ArrowInvalid:
-                    source.seek(0)
-                    table = ipc.open_stream(source).read_all()
+            table = _arrow(path, limit)
         elif fmt == "ndjson":
-            table = _ndjson(path, path.read_bytes())
+            table = _ndjson(path, path.read_bytes(), limit)
         else:
             table = _with_extra(path, path.read_bytes(), fmt, sheet, header_row)
-    except (pa.ArrowException, OSError) as exc:
+    except (pa.ArrowException, OSError, struct.error) as exc:
         raise CliError(
             f"Could not read {_output.inline(path.name)} as {fmt}: {_output.inline(str(exc))}",
             8,
@@ -357,6 +534,32 @@ def read_file(
             8,
             kind="FileError",
         )
+    seen: set[str] = set()
+    for name in table.column_names:
+        if name in seen:
+            raise CliError(
+                f"{_output.inline(path.name)} has the column `{_output.inline(name)}` more than "
+                "once; rename one and load it again",
+                8,
+                kind="FileError",
+            )
+        seen.add(name)
+    for field in table.schema:
+        if pa.types.is_null(field.type):
+            raise CliError(
+                f"{_output.inline(path.name)}: column `{_output.inline(field.name)}` has no "
+                "values in any row, so its type cannot be inferred; fill it or drop it, then load "
+                "it again",
+                8,
+                kind="FileError",
+            )
+    table = pa.table(
+        [
+            column.cast(column.type.value_type) if pa.types.is_dictionary(column.type) else column
+            for column in table.columns
+        ],
+        names=table.column_names,
+    )
     table = normalize_view_columns(cast_timestamp_ns_columns_to_us(table))
     try:
         schema_to_columns(table.schema)

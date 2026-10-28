@@ -5137,9 +5137,10 @@ class CatalogService:
         when `expected_snapshot_id` is ``none`` and the table is missing); the environment's
         write guard allows it (a protected environment needs break glass with
         `MANAGE_ENVIRONMENT`; recorded by the write, not here); the namespace of a table the
-        load would create exists, and a missing table has the pin ``none``. With `schema`, an
-        existing table is checked against it as the write would check the rows: column for
-        column for an append, by the schema rules of a replace without evolving it.
+        load would create exists, and a missing table has the pin ``none``. With `schema`, a
+        table the load would create gets no column name twice, and an existing table is checked
+        against it as the write would check the rows: column for column for an append, by the
+        schema rules of a replace without evolving it.
 
         Parameters
         ----------
@@ -5162,8 +5163,9 @@ class CatalogService:
         Raises
         ------
         ValidationError
-            For a target outside bronze, a table that is not managed, or a schema the write
-            would refuse (the message shows the difference).
+            For a target outside bronze, a table that is not managed, a repeated column name
+            for a table the load would create, or a schema the write would refuse (the message
+            shows the difference).
         PermissionDenied
             As `check_can_append` and `check_can_replace`, and as the write guard refuses a
             write to a protected environment.
@@ -5211,6 +5213,15 @@ class CatalogService:
                     f"Table `{shown(ref.dotted())}` does not exist in {shown(ref.environment)!r}: "
                     "a first load passes expected_snapshot_id=none, which creates it."
                 )
+            if schema is not None:
+                seen: set[str] = set()
+                for name in schema.names:
+                    if name in seen:
+                        raise ValidationError(
+                            f"Column {shown(name)!r} appears more than once in the rows sent; "
+                            "rename one and load again."
+                        )
+                    seen.add(name)
             return True
         current = self._to_loaded_table(ref, row).metadata
         if (

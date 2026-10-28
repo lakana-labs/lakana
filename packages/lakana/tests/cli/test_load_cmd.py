@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from pathlib import Path
 
 import httpx
@@ -501,10 +502,133 @@ def test_a_column_type_a_table_cannot_store_is_named(tmp_path: Path) -> None:
 
     assert result.exit_code == 8, result.output
     assert (
-        "nulls.ndjson: Column 'nothing' has an unsupported Arrow type: null; convert the column "
-        "before loading"
+        "nulls.ndjson: column `nothing` has no values in any row, so its type cannot be "
+        "inferred; fill it or drop it, then load it again"
     ) in " ".join(result.output.split())
     assert _loads(api) == []
+
+
+def test_another_type_a_table_cannot_store_says_to_convert_it(tmp_path: Path) -> None:
+    """A duration column is named, with the type, once; the inner period is not doubled."""
+    path = tmp_path / "waits.parquet"
+    pq.write_table(pa.table({"wait": pa.array([1, 2], pa.duration("s"))}), path)
+    api = _api()
+
+    result = invoke(make_state(tmp_path, api), "load", str(path), "t", "--env", "dev", "--yes")
+
+    assert result.exit_code == 8, result.output
+    assert (
+        "waits.parquet: Column 'wait' has an unsupported Arrow type: duration[s]; convert the "
+        "column before loading"
+    ) in " ".join(result.output.split())
+    assert _loads(api) == []
+
+
+def test_an_all_empty_csv_column_is_named_with_what_to_do(tmp_path: Path) -> None:
+    """An empty column has no type to infer; the user can fill it or drop it."""
+    path = tmp_path / "nullcol.csv"
+    path.write_text("a,b\n1,\n2,\n")
+    api = _api()
+
+    result = invoke(make_state(tmp_path, api), "load", str(path), "t", "--env", "dev", "--yes")
+
+    assert result.exit_code == 8, result.output
+    assert (
+        "nullcol.csv: column `b` has no values in any row, so its type cannot be inferred; fill "
+        "it or drop it, then load it again"
+    ) in " ".join(result.output.split())
+    assert _loads(api) == []
+
+
+def test_a_repeated_column_name_is_refused_before_anything_is_sent(tmp_path: Path) -> None:
+    """A table cannot have two columns of one name; the file is named, not "the result"."""
+    path = tmp_path / "dup.csv"
+    path.write_text("a,a\n1,2\n")
+    api = _api()
+
+    result = invoke(make_state(tmp_path, api), "load", str(path), "t", "--env", "dev", "--yes")
+
+    assert result.exit_code == 8, result.output
+    assert "dup.csv has the column `a` more than once; rename one and load it again" in (
+        " ".join(result.output.split())
+    )
+    assert _loads(api) == []
+
+
+def test_parquet_strings_that_decode_past_the_limit_stop_after_one_batch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Repeated strings shrink to almost nothing on disk; reading stops at the limit."""
+    path = tmp_path / "strings.parquet"
+    pq.write_table(pa.table({"s": pa.array(["x" * 4096] * 50 * 1024)}), path, compression="zstd")
+    assert path.stat().st_size < 200_000
+    yielded: list[int] = []
+    iter_batches = pq.ParquetFile.iter_batches
+
+    def counted(self: pq.ParquetFile, *args: object, **kwargs: object) -> Iterator[pa.RecordBatch]:
+        for batch in iter_batches(self, *args, **kwargs):
+            yielded.append(batch.num_rows)
+            yield batch
+
+    monkeypatch.setattr(pq.ParquetFile, "iter_batches", counted)
+    api = _api(limit=1024 * 1024)
+
+    result = invoke(make_state(tmp_path, api), "load", str(path), "s", "--env", "dev", "--yes")
+
+    assert result.exit_code == 2, result.output
+    assert "is larger than one upload may be (1 MiB)" in result.output
+    assert len(yielded) == 1
+    assert _loads(api) == []
+
+
+@pytest.mark.parametrize("kind", ["file", "stream", "dictionary"])
+def test_a_compressed_arrow_file_is_refused_before_it_is_decoded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str
+) -> None:
+    """Compressed IPC is refused outright, as the server refuses it: nothing is decompressed."""
+    path = tmp_path / "zeros.arrow"
+    values = (
+        pa.array(["a"] * 1_000_000).dictionary_encode()
+        if kind == "dictionary"
+        else pa.array([0] * 1_000_000, pa.int64())
+    )
+    table = pa.table({"v": values})
+    options = pyarrow.ipc.IpcWriteOptions(compression="zstd")
+    new = pyarrow.ipc.new_stream if kind == "stream" else pyarrow.ipc.new_file
+    with new(str(path), table.schema, options=options) as writer:
+        writer.write_table(table)
+
+    def never(*args: object, **kwargs: object) -> None:
+        raise AssertionError("the batches were decoded")
+
+    monkeypatch.setattr(pyarrow.ipc, "open_file", never)
+    monkeypatch.setattr(pyarrow.ipc, "open_stream", never)
+    api = _api()
+
+    result = invoke(make_state(tmp_path, api), "load", str(path), "z", "--env", "dev", "--yes")
+
+    assert result.exit_code == 8, result.output
+    assert (
+        "zeros.arrow is compressed, which Lakana does not read: write it uncompressed (or as "
+        "Parquet) and load it again"
+    ) in " ".join(result.output.split())
+    assert _loads(api) == []
+
+
+def test_an_uncompressed_arrow_file_with_a_dictionary_is_read(tmp_path: Path) -> None:
+    """A dictionary batch without compression passes the scan."""
+    path = tmp_path / "dict.arrow"
+    table = pa.table({"v": pa.array(["a", "b", "a"]).dictionary_encode()})
+    with pyarrow.ipc.new_file(str(path), table.schema) as writer:
+        writer.write_table(table)
+    api = _api()
+
+    result = invoke(
+        make_state(tmp_path, api), "load", str(path), "customers", "--env", "dev", "--yes"
+    )
+
+    assert result.exit_code == 0, result.output
+    assert _rows_sent(_loads(api)[-1]).num_rows == 3
 
 
 def test_a_parquet_file_that_expands_past_the_limit_is_refused_before_it_is_read(

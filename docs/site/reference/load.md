@@ -28,9 +28,9 @@ What the command does, in order:
 1. It refuses a protected environment without `--yes`, `--break-glass` and `--reason`, before it
    reads the file: recurring loads into production belong in an asset.
 2. It asks the server how large one upload may be (`LAKANA_APPEND__MAX_BYTES`, 256 MiB by
-   default) and refuses a larger file before it reads it. A Parquet file is also measured from
-   its metadata, before its rows are read, since a small compressed file can hold far more; and
-   the rows are measured again before they are sent.
+   default) and refuses a larger file before it reads it. A small file can hold far more rows
+   than its size suggests, so it then reads the file a piece at a time and stops, refused, as
+   soon as the rows read pass the limit; a Parquet file is first measured from its metadata.
 3. It reads the file and checks with the server, without sending a row, that the load would
    succeed: the layer, your rights, the namespace, and the columns of a table that exists.
 4. It shows the columns and the row count and asks.
@@ -43,7 +43,7 @@ What the command does, in order:
 |---|---|---|
 | CSV | `.csv` | pyarrow, with each column's type inferred, as `lakana table append` reads it |
 | Parquet | `.parquet`, `.pq` | pyarrow |
-| Arrow | `.arrow`, `.ipc`, `.feather` (file or stream) | pyarrow |
+| Arrow | `.arrow`, `.ipc`, `.feather` (file or stream), uncompressed | pyarrow |
 | Newline-delimited JSON | `.ndjson`, `.jsonl` | pyarrow; the text must be UTF-8 |
 | A JSON array | `.json` | the files helper's reader; needs the `assets` extra |
 | Spreadsheets | `.xlsx`, `.xlsm`, `.xlsb`, `.xls`, `.ods` | the files helper's reader; needs the `assets` extra |
@@ -51,8 +51,11 @@ What the command does, in order:
 The `server` extra reads the first four. A JSON array or a spreadsheet needs the `assets` extra
 of the `lakana` package as well; without it, the command says what to install.
 
-A column whose type a table cannot store (for example one that holds only empty values) is
-refused, naming the column; convert it before loading.
+A column that is empty in every row has no type to infer and is refused, naming the column:
+fill it or drop it. A column name that appears twice is refused too. A dictionary-encoded column
+(a category column from pandas, for example) is loaded as its values. A compressed Arrow file is
+refused, as the server refuses compressed uploads: write it uncompressed, or as Parquet. Any
+other column whose type a table cannot store is refused, naming the column.
 
 ## SDK
 
@@ -127,6 +130,10 @@ is audited; the dry run checks this too, so nothing is uploaded before the refus
 | exit 8 | a CSV or NDJSON file that is not UTF-8 | `data.csv is not UTF-8 (byte 0xfc at position 6); save it as UTF-8 and load it again` |
 | exit 8 | a file without columns (such as a JSON file `[]`) | `empty.json has no columns; a load needs at least one column and one row: add them and load it again` |
 | exit 8 | a CSV, JSON or spreadsheet without rows (only a header) | `hdr.csv has no rows, so there is nothing to load and no column types to infer; add rows and load it again` |
+| exit 8 | a column that is empty in every row | ``nullcol.csv: column `b` has no values in any row, so its type cannot be inferred; fill it or drop it, then load it again`` |
+| exit 8 | a column name twice | ``dup.csv has the column `a` more than once; rename one and load it again`` |
+| exit 8 | a compressed Arrow file | `zeros.arrow is compressed, which Lakana does not read: write it uncompressed (or as Parquet) and load it again` |
+| `422` | a column name twice in the rows of a load that would create the table (the SDK and the route) | ``Column 'a' appears more than once in the rows sent; rename one and load again.`` |
 | exit 8 | the file is missing, cannot be read in its format, nests deeper than the helpers read, or has a column a table cannot store | the file and the cause |
 
 ## Audit

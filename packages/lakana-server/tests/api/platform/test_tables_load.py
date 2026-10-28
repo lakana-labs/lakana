@@ -433,3 +433,22 @@ def test_a_missing_table_without_a_pin_says_to_pass_none(client: TestClient) -> 
         "Table `bronze.customers` does not exist in 'dev': a first load passes "
         "expected_snapshot_id=none, which creates it."
     )
+
+
+def test_a_dry_run_that_would_create_refuses_a_repeated_column_name(client: TestClient) -> None:
+    """The create would refuse it after the upload; the dry run says so before it."""
+    create_environment(client)
+    repeated = pa.schema([pa.field("a", pa.int64()), pa.field("a", pa.int64())])
+
+    response = _load(
+        client,
+        "bronze.customers",
+        _ipc(repeated.empty_table()),
+        expected_snapshot_id="none",
+        dry_run="true",
+    )
+
+    assert response.status_code == 422, response.text
+    assert response.json()["detail"] == (
+        "Column 'a' appears more than once in the rows sent; rename one and load again."
+    )
