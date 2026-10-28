@@ -11,7 +11,6 @@ the ``assets`` extra (polars, fastexcel).
 
 from __future__ import annotations
 
-import mmap
 import struct
 from collections.abc import Iterable
 from pathlib import Path
@@ -26,7 +25,7 @@ import pyarrow.parquet as pq
 import typer
 
 from lakana._arrow import cast_timestamp_ns_columns_to_us, normalize_view_columns, schema_to_columns
-from lakana.cli import _files, _output, _parquet_pages
+from lakana.cli import _capped, _files, _output
 from lakana.cli._break_glass import BREAK_GLASS, REASON, break_glass_reason
 from lakana.cli._state import CliError, confirm, resolve_environment, state_of
 from lakana.errors import NotFound, ValidationError
@@ -517,14 +516,14 @@ def _arrow(path: Path, limit: int | None) -> pa.Table:
 
 
 def _parquet(path: Path, limit: int | None) -> pa.Table:
-    """Read a Parquet file row group by row group, bounded by its metadata and page headers.
+    """Read a Parquet file row group by row group, in batches its metadata says will fit.
 
     A column with more than one value a row (a nested type, or an extension type stored as
-    one, such as a tensor) is refused first: a table stores none, and its rows have no bound.
-    The whole file is then estimated from them. Then each row group is read in batches of only
-    as many rows as fit in what is left of the limit, counting each row at its worst: a text
-    column's value at the size of its largest page, which no value decodes larger than (one
-    value repeated by a dictionary or by shared prefixes takes only a few bytes in the file).
+    one, such as a tensor) is refused first: a table stores none. The whole file is then
+    estimated from its metadata, and each row group is read in batches of about as many rows
+    as fit in what is left of the limit, at the group's average row size. The metadata of a
+    crafted file can understate its rows; what bounds the memory then is the cap on the
+    process that reads it (`_capped`).
 
     Parameters
     ----------
@@ -553,22 +552,33 @@ def _parquet(path: Path, limit: int | None) -> pa.Table:
             or any(leaf == field.name or leaf.startswith(f"{field.name}.") for leaf in repeated)
         ]
         _storable(path, pa.schema(nested).empty_table())
-        pages = _page_headers(path, metadata)
-        widths = [_width(field) for field in schema]
-        text = [
-            metadata.schema.column(i).physical_type == "BYTE_ARRAY"
-            for i in range(metadata.num_columns)
-        ]
-        _check_size(path, _parquet_size(metadata, widths, pages), limit)
+        width = sum(_width(field) for field in schema)
+        groups = [metadata.row_group(i) for i in range(metadata.num_row_groups)]
+        _check_size(path, max([metadata.num_rows * width, *map(_group_size, groups)]), limit)
         budget = _Budget(path, limit)
-        for group, chunks in enumerate(pages):
-            per_row = sum(
-                chunk.largest + 4 if is_text else width
-                for chunk, is_text, width in zip(chunks, text, widths, strict=True)
-            )
-            for batch in parquet.iter_batches(budget.rows(per_row), row_groups=[group]):
+        for index, group in enumerate(groups):
+            size = max(_group_size(group), group.num_rows * width)
+            per_row = max(-(-size // max(group.num_rows, 1)), 1)
+            for batch in parquet.iter_batches(budget.rows(per_row), row_groups=[index]):
                 budget.add(batch)
         return budget.table(parquet.schema_arrow)
+
+
+def _group_size(group: pq.RowGroupMetaData) -> int:
+    """Give the bytes a row group's metadata says its rows take once read.
+
+    Parameters
+    ----------
+    group
+        The row group's metadata.
+
+    Returns
+    -------
+    int
+        The larger of its `total_byte_size` and its column chunks' uncompressed sizes.
+    """
+    chunks = sum(group.column(i).total_uncompressed_size for i in range(group.num_columns))
+    return max(group.total_byte_size, chunks)
 
 
 def _width(field: pa.Field) -> int:
@@ -590,76 +600,6 @@ def _width(field: pa.Field) -> int:
         return 4
 
 
-def _page_headers(path: Path, metadata: pq.FileMetaData) -> list[list[_parquet_pages.ChunkPages]]:
-    """Read the page headers of every column chunk, as the reader will find them.
-
-    A chunk starts at its dictionary page if it has one, else at its first data page, and
-    spans its compressed size, plus up to 100 bytes while values are missing, as the reader
-    reads the files of old writers (`_parquet_pages.chunk_pages`).
-
-    Parameters
-    ----------
-    path
-        The file.
-    metadata
-        Its metadata.
-
-    Returns
-    -------
-    list of list of ChunkPages
-        Per row group, per column.
-    """
-    with path.open("rb") as handle, mmap.mmap(handle.fileno(), 0, access=mmap.ACCESS_READ) as buf:
-        found: list[list[_parquet_pages.ChunkPages]] = []
-        for index in range(metadata.num_row_groups):
-            group = metadata.row_group(index)
-            chunks: list[_parquet_pages.ChunkPages] = []
-            for column in (group.column(i) for i in range(group.num_columns)):
-                start = column.data_page_offset
-                if column.has_dictionary_page and column.dictionary_page_offset:
-                    start = min(start, column.dictionary_page_offset)
-                chunks.append(
-                    _parquet_pages.chunk_pages(
-                        buf, start, column.total_compressed_size, column.num_values
-                    )
-                )
-            found.append(chunks)
-        return found
-
-
-def _parquet_size(
-    metadata: pq.FileMetaData, widths: list[int], pages: list[list[_parquet_pages.ChunkPages]]
-) -> int:
-    """Estimate how many bytes a Parquet file's rows take once read.
-
-    A small file can hold many rows of repeated values, which its encoding and compression
-    shrink to almost nothing; reading it would build the whole table in memory. The estimate is
-    the largest of the column chunks' uncompressed sizes (as the metadata gives them and as the
-    page headers add up) and the rows times the columns' widths.
-
-    Parameters
-    ----------
-    metadata
-        The file's metadata.
-    widths
-        Each column's width (`_width`).
-    pages
-        The chunks' page headers (`_page_headers`).
-
-    Returns
-    -------
-    int
-        The estimated size in bytes.
-    """
-    chunks = sum(
-        group.column(index).total_uncompressed_size
-        for group in (metadata.row_group(i) for i in range(metadata.num_row_groups))
-        for index in range(group.num_columns)
-    )
-    walked = sum(chunk.total for group in pages for chunk in group)
-    return max(chunks, walked, metadata.num_rows * sum(widths))
-
-
 def read_file(
     path: Path, fmt: str, *, sheet: str | None, header_row: int, limit: int | None = None
 ) -> pa.Table:
@@ -677,8 +617,7 @@ def read_file(
         `--header-row` (CSV and spreadsheets only).
     limit
         The server's upload limit: a Parquet or Arrow file is read in pieces and refused as soon
-        as its decoded rows pass it (a Parquet file is first estimated from its metadata and page
-        headers); a
+        as its decoded rows pass it (a Parquet file is first estimated from its metadata); a
         text file, whose size was checked before, is measured once read, by the caller.
 
     Returns
@@ -692,6 +631,8 @@ def read_file(
         For an option the format does not take, an unreadable, compressed Arrow or empty file,
         rows over the limit, a repeated column name, an empty column, or a column type a table
         cannot store.
+    MemoryError
+        When reading takes more memory than the process may have; `_capped` reports it.
     """
     if sheet is not None and fmt not in _SPREADSHEETS:
         raise CliError(f"--sheet applies to spreadsheets; {_output.inline(path.name)} is {fmt}")
@@ -713,7 +654,9 @@ def read_file(
             table = _ndjson(path, path.read_bytes())
         else:
             table = _with_extra(path, path.read_bytes(), fmt, sheet, header_row)
-    except (pa.ArrowException, OSError, struct.error, _parquet_pages.PageHeaderError) as exc:
+    except MemoryError:
+        raise
+    except (pa.ArrowException, OSError, struct.error) as exc:
         raise CliError(
             f"Could not read {_output.inline(path.name)} as {fmt}: {_output.inline(str(exc))}",
             8,
@@ -807,10 +750,34 @@ def _check_size(path: Path, size: int, limit: int | None) -> None:
     """
     if limit is None or size <= limit:
         return
+    error = too_large(path, limit, size)
+    raise error
+
+
+def too_large(path: Path, limit: int, size: int | None = None) -> CliError:
+    """Say that a file is larger than one upload may be, and how to load it instead.
+
+    Parameters
+    ----------
+    path
+        The file.
+    limit
+        The server's upload limit.
+    size
+        Its size in bytes, or `None` when it ran out of the memory its reading may take.
+
+    Returns
+    -------
+    CliError
+        Exit 2.
+    """
     shown = f"{limit / _MIB:g} MiB" if limit % _MIB == 0 else f"{limit} bytes"
-    raise CliError(
-        f"{_output.inline(path.name)} ({size} bytes) is larger than one upload may be "
-        f"({shown}); load it with a Python asset and a directory or object-store connection"
+    name = _output.inline(path.name)
+    what = f"{name} is larger than one upload may be ({shown}) once read"
+    if size is not None:
+        what = f"{name} ({size} bytes) is larger than one upload may be ({shown})"
+    return CliError(
+        f"{what}; load it with a Python asset and a directory or object-store connection"
     )
 
 
@@ -924,7 +891,7 @@ def load(
     limit = client.tables.upload_limit()
     size = file.stat().st_size
     _check_size(file, size, limit)
-    data = read_file(file, fmt, sheet=sheet, header_row=header_row, limit=limit)
+    data = _capped.read(file, fmt, sheet=sheet, header_row=header_row, limit=limit)
     if limit is not None:
         _check_size(file, _ipc_size(data), limit)
     try:

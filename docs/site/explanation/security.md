@@ -151,6 +151,11 @@ as two statements.
   ([Addresses builds and tasks never reach](../reference/network-settings.md#addresses-builds-and-tasks-never-reach)).
 - **Files read outside Lakana.** A filter or a mask guards Lakana's own query path, not the files in
   the object storage. Keep the storage credentials with the people who run the instance.
+- **`lakana load` on macOS and Windows.** On Linux the command reads a Parquet or Arrow file in a
+  process whose memory is capped, so a crafted file is refused as too large. Other systems do not
+  enforce that cap, and such a file can take far more of the command's memory than the upload limit
+  before it is refused ([`lakana load`](../reference/load.md)). Load files from people you do not
+  know on Linux, or with an asset.
 - **Local mode.** With storage on the local disk there is no cloud credential to scope, so a local
   instance relies on the other checks alone. Use a team deployment ([Deploying with Compose](../how-to/deploy-with-compose.md))
   for more than one person.

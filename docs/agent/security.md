@@ -197,6 +197,34 @@ both use `StorageOptions` / `OptionalStorageOptions`, which refuse a bad shape w
 names no key and no value. No other request body carries a credential: tokens and secrets are in
 headers or are only ever returned. The application logs no request body.
 
+## Local files `lakana load` reads: a capped child process (#353)
+
+A small Parquet or Arrow file can decode to far more than its size (one value repeated by a
+dictionary or by shared prefixes, views over one buffer, pages a footer hides), and its metadata
+can lie, so no estimate made before reading bounds what one batch takes. A hand-written parser of
+Parquet page headers was tried and dropped: each review found a new way past it.
+
+- `lakana.cli._capped.read` runs `load.read_file` for Parquet and Arrow in a child process
+  (`sys.executable -I -m lakana.cli._capped`, no shell) with `RLIMIT_AS` set to what the child has
+  mapped after its imports, plus twice the upload limit, plus `HEADROOM` (512 MiB). The rows come
+  back as an Arrow stream on its stdout. The CLI's own process is never capped.
+- The child uses the system allocator (`ARROW_DEFAULT_MEMORY_POOL=system`): mimalloc reserves
+  large regions up front, and failed reads at random under caps that left it room.
+- A `MemoryError` in the child (exit 4) or a child ended by a signal is the size refusal ("...
+  larger than one upload may be (N) once read", exit 2). A `CliError` crosses as JSON on stderr
+  (exit 3). Anything else is an unreadable file naming the child's last stderr line.
+- `read_file` lets `MemoryError` through (`pyarrow.ArrowMemoryError` is also an `ArrowException`),
+  so it is never reported as "could not read".
+- Still in the parent, cheap and parser-free: the metadata estimate and batch size, a dictionary
+  or view column measured from its values' lengths before it is decoded (the size checked is the
+  size added), and nested columns refused before any row is read (from the Parquet leaves'
+  repetition, which catches extension types such as tensors).
+- **Residual:** only Linux enforces `RLIMIT_AS`. On macOS and Windows the file is read in the
+  CLI's process with only the in-process bounds, and a crafted file can still take far more memory
+  than the limit. It only threatens the user's own CLI process; the server enforces its own limit.
+  CSV, JSON and spreadsheets are read in the CLI's process: their file size is checked against the
+  limit first, and text does not expand that way.
+
 ## Query limits: a hard time limit, a memory target, the worker's memory stop
 
 `QueryLimitsConfig` (`LAKANA_QUERY_LIMITS__*`) bounds a query. Each query runs in a process of

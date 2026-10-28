@@ -13,6 +13,23 @@ import pyarrow.parquet as pq
 import pytest
 from conftest import FakeApi, invoke, make_state
 
+from lakana.cli import _capped
+
+
+@pytest.fixture(autouse=True)
+def _read_here(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Read files in the test's own process, where the reading can be observed.
+
+    The capped child process is tested in `test_load_capped.py`.
+
+    Parameters
+    ----------
+    monkeypatch
+        Pytest's monkeypatch.
+    """
+    monkeypatch.setattr(_capped, "enforced", lambda: False)
+
+
 _ENV = "/api/v1/environments/dev"
 _BRONZE = f"{_ENV}/namespaces/bronze/tables/customers"
 _SILVER_TEXT = (
@@ -558,7 +575,7 @@ def test_a_repeated_column_name_is_refused_before_anything_is_sent(tmp_path: Pat
 def test_parquet_strings_that_decode_past_the_limit_stop_after_one_batch(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Repeated strings shrink to almost nothing on disk; reading stops soon after the limit."""
+    """Repeated strings shrink to almost nothing on disk; reading stops at the limit."""
     path = tmp_path / "strings.parquet"
     pq.write_table(pa.table({"s": pa.array(["x" * 4096] * 50 * 1024)}), path, compression="zstd")
     assert path.stat().st_size < 200_000
@@ -577,58 +594,7 @@ def test_parquet_strings_that_decode_past_the_limit_stop_after_one_batch(
 
     assert result.exit_code == 2, result.output
     assert "is larger than one upload may be (1 MiB)" in result.output
-    assert sum(yielded) * 4096 <= 2 * 1024 * 1024
-    assert _loads(api) == []
-
-
-@pytest.mark.parametrize("encoding", ["dictionary", "delta"])
-def test_one_large_string_repeated_is_refused_with_bounded_memory(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, encoding: str
-) -> None:
-    """#353: a few hundred bytes of Parquet holding 1,024 copies of one large string.
-
-    Its column chunk is small (one dictionary entry, or one value and 1,023 shared prefixes),
-    so the metadata estimate passes; the pages bound each row instead, so a batch holds only
-    the rows that fit and reading stops after a few rows, never building the 1,024 values.
-    """
-    path = tmp_path / "bomb.parquet"
-    rows = pa.table({"s": pa.array(["x" * (64 * 1024)] * 1024)})
-    if encoding == "dictionary":
-        pq.write_table(rows, path, compression="zstd")
-    else:
-        pq.write_table(
-            rows,
-            path,
-            compression="zstd",
-            use_dictionary=False,
-            column_encoding={"s": "DELTA_BYTE_ARRAY"},
-        )
-    del rows
-    assert path.stat().st_size < 1024
-    pool = pa.default_memory_pool()
-    start = pa.total_allocated_bytes()
-    peak_before = pool.max_memory()
-    held: list[int] = []
-    yielded: list[int] = []
-    iter_batches = pq.ParquetFile.iter_batches
-
-    def counted(self: pq.ParquetFile, *args: object, **kwargs: object) -> Iterator[pa.RecordBatch]:
-        for batch in iter_batches(self, *args, **kwargs):
-            yielded.append(batch.num_rows)
-            held.append(pa.total_allocated_bytes() - start)
-            yield batch
-
-    monkeypatch.setattr(pq.ParquetFile, "iter_batches", counted)
-    api = _api(limit=1024 * 1024)
-
-    result = invoke(make_state(tmp_path, api), "load", str(path), "b", "--env", "dev", "--yes")
-
-    assert result.exit_code == 2, result.output
-    assert "bomb.parquet" in result.output
-    assert "is larger than one upload may be (1 MiB)" in result.output
-    assert sum(yielded) <= 32
-    assert max(held) < 4 * 1024 * 1024
-    assert pool.max_memory() <= max(peak_before, start + 8 * 1024 * 1024)
+    assert len(yielded) == 1
     assert _loads(api) == []
 
 
