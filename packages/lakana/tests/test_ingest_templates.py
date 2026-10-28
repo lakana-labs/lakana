@@ -114,7 +114,7 @@ def test_the_rest_template_makes_updated_at_a_timestamp(monkeypatch: pytest.Monk
     assert seen["path"] == "items"
     assert seen["records"] == "value"
     assert isinstance(seen["paginate"], rest.NextLink)
-    assert seen["params"] == {"updated_since": dt.datetime(2000, 1, 1, tzinfo=dt.UTC)}
+    assert seen["params"] == {"updated_since": dt.datetime(1999, 12, 31, 23, tzinfo=dt.UTC)}
     assert result.schema.field("updated_at").type == pa.timestamp("us", "UTC")
     assert result.column("updated_at").to_pylist() == [dt.datetime(2026, 10, 27, 10, tzinfo=dt.UTC)]
 
@@ -135,3 +135,35 @@ def test_each_recipe_shows_the_asset_its_template_writes(template: Template) -> 
     (path,) = (p for p in INGEST_TEMPLATES[template] if p.endswith(".py"))
 
     assert (recipe / path).read_text() == INGEST_TEMPLATES[template][path]
+
+
+def test_the_rest_template_reads_an_item_committed_late(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Two runs and a merge on `id`: an item whose older `updated_at` became visible late is kept.
+
+    The source wrote item 2 at 09:50 but committed it after the first run had read item 1
+    (10:00). Starting the second run at the watermark would skip item 2 for good; the template
+    reads `LOOK_BACK` before it, and the merge keeps one row per id.
+    """
+    source = [{"id": 1, "updated_at": "2026-10-27T10:00:00Z"}]
+
+    def fake(connection: str, path: str, **options: Any) -> pa.Table:  # ruff: ignore[any-type]
+        since = options["params"]["updated_since"]
+        rows = [row for row in source if dt.datetime.fromisoformat(str(row["updated_at"])) > since]
+        return pa.Table.from_pylist(rows) if rows else pa.table({})
+
+    monkeypatch.setattr(rest, "read", fake)
+    table: dict[int, dt.datetime] = {}
+
+    def run() -> None:
+        """Run the asset with the table's watermark and merge what it returns on `id`."""
+        watermark = max(table.values()) if table else None
+        result = _asset(Template.ingest_rest)(_Context(watermark))
+        if result.num_columns:
+            for row in result.to_pylist():
+                table[row["id"]] = row["updated_at"]
+
+    run()
+    source.append({"id": 2, "updated_at": "2026-10-27T09:50:00Z"})
+    run()
+
+    assert sorted(table) == [1, 2]

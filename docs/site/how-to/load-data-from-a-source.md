@@ -84,7 +84,7 @@ cd sources
 |---|---|---|---|
 | `ingest-files` | `assets/bronze/exports.py` | the CSV files of a `directory` connection, with `files.read` | `append`, the files changed since the last run |
 | `ingest-sql` | `assets/bronze/orders.py` | a table of a PostgreSQL, MariaDB or SQLite database, with `sql.read` | `merge` on `id`, the ids from 1,000 before the largest one loaded |
-| `ingest-rest` | `assets/bronze/items.py` | a JSON REST API, with `rest.read` | `merge` on `id`, the items updated since the last run |
+| `ingest-rest` | `assets/bronze/items.py` | a JSON REST API, with `rest.read` | `merge` on `id`, the items updated since an hour before the newest one loaded |
 
 Each project also gets `lakana.yaml`, the CI files, a `pyproject.toml` that depends on
 `lakana[assets]` at the version that wrote it, a test that checks every Python asset parses, and a
@@ -340,7 +340,7 @@ into the table on `id`:
 ```python
 """Items from a source REST API, merged on their id as they change."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pyarrow as pa
 import pyarrow.compute as pc
@@ -348,14 +348,21 @@ import pyarrow.compute as pc
 from lakana import asset
 from lakana.ingest import rest
 
+# How far behind the newest `updated_at` loaded each run asks again. The source sets updated_at
+# when it writes an item, but the API shows the item only once that write commits, so an item
+# can appear after a run read newer ones; without asking again it would be skipped for good.
+# The merge on `id` keeps one row per item. Make it longer than the source's longest write.
+LOOK_BACK = timedelta(hours=1)
+
 
 @asset(connections=["source-api"], write="merge", key=["id"], watermark="updated_at")
 def items(ctx):
-    """Items changed since the last run, merged into the table on their id."""
+    """Items changed since LOOK_BACK before the last run's newest, merged on their id."""
+    since = ctx.watermark(default=datetime(2000, 1, 1, tzinfo=UTC)) - LOOK_BACK
     changed = rest.read(
         "source-api",
         "items",
-        params={"updated_since": ctx.watermark(default=datetime(2000, 1, 1, tzinfo=UTC))},
+        params={"updated_since": since},
         paginate=rest.NextLink(),
         records="value",
     )
@@ -372,6 +379,11 @@ def items(ctx):
 - `paginate=rest.NextLink()` follows the link each page holds, and `records="value"` is where a
   page keeps its list (OData's names). Change both, and the parameter's name, to what your API
   uses ([Pages](../reference/ingest.md#pages)).
+- `LOOK_BACK` asks again for the hour before the newest `updated_at` loaded, for the same reason
+  as the SQL template's: the source sets `updated_at` when it writes an item, but the API shows
+  the item only once the write commits, so an item can appear after a run read newer ones, with
+  an older time. The merge on `id` keeps one row per item however often it is read. Make it
+  longer than the source's longest write.
 - JSON keeps a time as text, and text cannot be a watermark, so the asset turns `updated_at` into
   a timestamp. When nothing changed, the API answers an empty list and `rest.read` returns a
   table without columns: the asset returns it as it is, and the run succeeds without writing.
