@@ -271,17 +271,10 @@ the host is visible to a task. To let tasks read the exports in `/srv/exports`:
    group 10003): `chmod 755 /srv/exports` and `chmod 644` for its files. Neither it nor any
    directory above it may be writable by anyone but root, and it must not be a symbolic link.
 2. Name it in `.env`, as a JSON object of root name to absolute directory:
-
-    ```bash
-    LAKANA_INGESTION_ROOTS='{"exports": "/srv/exports"}'
-    ```
-
+   `LAKANA_INGESTION_ROOTS='{"exports": "/srv/exports"}'`.
 3. Restart the launcher with the new value: `docker compose up -d --wait`.
 4. Create a connection that names the root and a path below it (`.` for the root itself):
-
-    ```bash
-    lakana connection create exports --env dev --kind directory --root exports --path daily
-    ```
+   `lakana connection create exports --env dev --kind directory --root exports --path daily`.
 
 Each task gets only the roots its asset's connections name, mounted read-only at
 `/ingest/<name>`; the files never pass through the server. The launcher looks at each root when it

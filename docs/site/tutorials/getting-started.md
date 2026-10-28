@@ -455,6 +455,8 @@ name. In a script, pass `--yes` to skip the question.
 - [Projects and deploys](../how-to/projects.md) covers Python assets, dry-run deploys, rollback, and
   selecting what to run. The keys you can write are in the reference:
   [asset front-matter](../reference/asset-front-matter.md) and [`lakana.yaml`](../reference/lakana-yaml.md).
+- [Load data from a source](../how-to/load-data-from-a-source.md) reads files, a database or a
+  REST API on a schedule, from a project that `lakana init --template` writes.
 - [Give a second person access](../how-to/give-a-second-person-access.md) issues a token to a
   colleague who may query one environment.
 - [Deploying with Compose (team mode)](../how-to/deploy-with-compose.md) moves from your machine to an

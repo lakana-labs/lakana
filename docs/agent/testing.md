@@ -291,7 +291,9 @@ every missing output of it means "run everything".
   one that did not succeed. Each has a 30-minute timeout.
 - **`compose-smoke`** starts the real console scripts in containers, so it runs for any change under
   `packages/*/src/` as well as for the bundle, packaging and script files in the filter of its
-  "Did the bundle change?" step. A `unit` shard has a 25-minute timeout, `test` 15 minutes.
+  "Did the bundle change?" step, and for the files and the REST stand-in of the `ingest-files`
+  and `ingest-rest` examples, which its ingestion part reads (M6's exit criterion, see
+  `docs/agent/release.md`). A `unit` shard has a 25-minute timeout, `test` 15 minutes.
 - **Coverage** is measured on 3.14 only, by the three 3.14 shards, and combined in exactly one
   job, `test (3.14)` (see the coverage ratchet below). That job uploads the combined report,
   `coverage.json`, as the artifact `coverage-report` (kept 7 days), also when the ratchet fails,
@@ -600,14 +602,10 @@ uv run bash scripts/run_docs_examples.sh        # every example, or name one: ..
 uv run pytest scripts/tests                     # the tests that read the site and the workflows
 ```
 
-All examples of one runner call share one uv cache outside their private homes: `UV_CACHE_DIR`
-for what `run.sh` runs (`uv lock`) and, through a link at `$HOME/.cache/lakana-worker/uv`, the
-worker's package cache; the environments themselves are never shared. Unset,
-`LAKANA_DOCS_UV_CACHE` makes it a temporary directory (under `/tmp`, which is RAM on the machines
-this repository is developed on: set it to a directory under `~/.cache` locally); CI's
-`docs-examples` sets it to `$RUNNER_TEMP/docs-uv-cache` and keeps that with `actions/cache`
-between runs (key: `uv.lock` and the examples' `pyproject.toml` files, restored from an older key
-when they change).
+Each example keeps uv's cache and its worker's in its own private home; the runner shares no
+cache between examples. A shared uv cache, kept between CI runs, was tried and removed: the job
+took 12m34s with a cold cache and 12m48s with a warm one, because downloads are not what costs
+time there.
 
 The runner needs `git` and a free port, and takes at most `LAKANA_DOCS_EXAMPLE_BUDGET` seconds
 (default 120) per example; an example that needs longer holds a number of seconds in a file `budget` next to its

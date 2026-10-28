@@ -117,6 +117,7 @@ Each cell is a summary. The page named in the last column has the detail. The ch
 
 | Release | What it asks | Where |
 |---|---|---|
+| Next release | Migrations `0049` (connections and their tests, the secret use `connection`) and `0050` (the key of a merge run). **Breaking:** a Python asset's parameter `ctx` is its context, never an input (rename such an input); an unusable `LAKANA_RUN__CA_BUNDLE` stops the worker, and local tasks trust Mozilla's roots plus that file instead of the system store; builds and tasks never reach a Docker gateway or `host.docker.internal` (list the host's other addresses in `LAKANA_EGRESS_REFUSED`); under the local runner a database connection test needs `lakana[assets]` next to the worker. Upgrade the launcher, `egress`, the task images (46.7 MB larger each) and the workers together, and the workers before you deploy connections or `write: append`/`merge`. Lock Python projects again: `lakana[assets]` gains six packages (about 19 MB of wheels). An http connection test that gets 5xx or 429 is `failed`. New: connections, task egress, the `lakana.ingest` helpers, `lakana load`, `lakana init --template`, and `LAKANA_INGESTION_ROOTS` in the bundle's `.env`. | [Notes for the next release](#notes-for-the-next-release), [Load data from a source](../how-to/load-data-from-a-source.md) |
 | 0.20.0 | No migration. **Breaking:** the Compose bundle runs Python tasks in containers: replace `compose.yaml`, add four `.env` lines, Docker Engine 28 or later; budget `LAKANA_RUN__TASK_MEMORY` (2 GB) per worker; with the docker runner `LAKANA_RUN__HTTPS_PROXY`, `LAKANA_RUN__CA_BUNDLE` (accepted again from the next release) and an `http://` `LAKANA_RUN__INDEX_URL` are refused, and a registered index on another port than 443 needs a credential. A protected environment runs Python assets only on workers with `LAKANA_RUN__RUNNER=docker`, so no longer in local mode. | [Notes for 0.20.0](#notes-for-0200), [Run Python tasks in containers](../how-to/run-python-tasks-in-containers.md) |
 | 0.19.0 | No migration. **Security fix**: upgrade the server and every worker. **Breaking:** queries run on DuckDB 2.0: `//` and `%` by zero fail (use `TRY` or `NULLIF`), an untyped `NULL AS x` in a write is refused (add a `CAST`), a table function's alias is its value, `price = 1.1` after a float-to-double widening matches only newer rows, some Parquet files from other writers may not read; the worker needs macOS 10.15 or glibc 2.27. A `PIVOT` lists its values; `CONNECT BY`, DuckDB-internal and sequence functions are refused; a query opens only the tables it reads. The worker stops at start-up on an unusable CA bundle; an unverifiable store certificate fails at once. | [Notes for 0.19.0](#notes-for-0190) |
 | 0.18.0 | Migrations `0047` (CI trust rules and CI tokens) and `0048` (measured sizes), both adding only empty tables and columns. A new environment's storage root must be in the environment's scheme, name a bucket or container, and may not be `file:///`, contain `::`, or lie in another environment's files (422 with a root to use; existing environments are not changed). An allowed webhook host may no longer reach loopback or cloud metadata addresses, except the entry `localhost`. Log lines worth an alert end with `event=<code>`. Copy the new healthchecks from a fresh `compose.yaml`. The workers trim uv's package cache above 10 GiB (`0` keeps it untrimmed). `lakana init` writes CI files that deploy without a stored secret; `--ci-auth pat` for the old ones. | [Notes for 0.18.0](#notes-for-0180) |
@@ -132,6 +133,67 @@ Each cell is a summary. The page named in the last column has the detail. The ch
 | 0.9.0 | Upgrade every worker before you deploy Python assets; rewrite `asset(deps=...)` as `asset(inputs=...)`; move helper modules out of `assets/`; an older bundle needs three additions. | [Upgrading](../how-to/deploy-with-compose.md#upgrading), [Projects and deploys](../how-to/projects.md) |
 
 ## Notes for the next release
+
+### Connections: name each source once per environment
+
+`lakana connection create NAME --env ENV --kind KIND ...` stores a source system's address,
+settings and secret once per environment; `list`, `show`, `update`, `delete` and `test` manage it
+([Connections](../reference/connections.md)). Migration `0049` adds the connections, their tests
+and the secret use `connection`; `0050` records the key a merge run matches rows on. Managing
+connections needs `MANAGE_CONNECTION` on the environment, which `ADMIN` and `DATA_ENGINEER` carry:
+existing grants need no change. An asset names the connections it reads
+(`@asset(connections=["crm-db"])`), a deploy refuses a name its environment does not have, and a
+running task fetches the credential with its own token, never from a variable or a file; every
+fetch is audited (`lakana audit --kind connection`). A project whose asset declares a connection
+gets manifest version 7, which a worker of an earlier release refuses: upgrade the workers before
+you deploy one. [Load data from a source](../how-to/load-data-from-a-source.md) walks through a
+first one.
+
+### Python assets may return an Arrow table
+
+A Python asset may return a `pyarrow.Table` as well as a `polars.DataFrame`; the `lakana.ingest`
+helpers return Arrow, so an asset can return what they read. The harness that accepts it is the
+`lakana` package in the project's own environment: lock the project with this release's `lakana`
+before an asset returns Arrow; an earlier one fails the run with
+`the asset must return a polars DataFrame, got pyarrow.lib.Table`. See
+[Python assets](../reference/python-assets.md).
+
+### `lakana[assets]` is larger
+
+`lakana[assets]` gains six packages for the ingest helpers: `fastexcel`, `obstore`,
+`adbc-driver-manager`, `adbc-driver-postgresql`, `adbc-driver-sqlite` and `PyMySQL`. Its wheels
+for CPython 3.14 on Linux x86-64 grow from 112.5 MB to 131.2 MB (download size, measured from
+`uv.lock`), so each environment build downloads about 19 MB more. A project locked earlier keeps
+its old lock until you run `uv lock --upgrade-package lakana`; it needs the new packages only for
+the helpers. The extras themselves are unchanged (`server`, `assets`); the repository's `uv.lock`
+gains a dependency group `check`, the packages of the connection check that `Dockerfile.task`
+installs (see "Connection tests check database and GCS credentials" below).
+
+### Load a local file into bronze with `lakana load`
+
+`lakana load FILE TABLE` loads a CSV, Parquet, Arrow, JSON, NDJSON or spreadsheet file into a
+table of the bronze layer once, after showing its schema and row count; a bare name means
+`bronze.<name>` ([`lakana load`](../reference/load.md)). The server refuses any other layer, for
+the CLI, the SDK and a raw request alike: transform bronze into silver with an asset. Nothing is
+to change for an upgrade; the route needs the server and the CLI of this release.
+
+### Start an ingestion project with `lakana init --template`
+
+`lakana init DIRECTORY --template ingest-files`, `ingest-sql` or `ingest-rest` writes a project
+with one asset that reads a source incrementally, and a README with the connection to create.
+Existing projects are not changed. See
+[Load data from a source](../how-to/load-data-from-a-source.md).
+
+### The Compose bundle mounts ingestion roots
+
+A bundle's `.env` gains `LAKANA_INGESTION_ROOTS`, a JSON object of root name to absolute host
+directory (`{}` by default), which `compose.yaml` passes to the launcher as
+`LAKANA_LAUNCHER__INGESTION_ROOTS`: each root is mounted read-only into a task whose `directory`
+or `sqlite-file` connection names it. To use it, add the line to an older `.env`
+(`LAKANA_INGESTION_ROOTS='{"exports": "/srv/exports"}'`), replace `compose.yaml` with this
+release's, and run `docker compose up -d --wait`. A bundle whose `.env` lacks the key, or whose
+`compose.yaml` is older, has no roots, as before. See
+[Files on this host](../how-to/deploy-with-compose.md#files-on-this-host).
 
 ### Read files with `lakana.ingest.files`
 
@@ -167,7 +229,7 @@ A `gcs` key needs nothing more: the worker already has what signs it.
 
 Under the Docker runner nothing is to install: each task image now holds a check environment,
 `/opt/lakana-check-env`, with exactly the check's drivers (installed by hash from the release's
-lock, owned by root and read-only), so **each task image grows by about 47 MB**. Pull the task
+lock, owned by root and read-only), so **each task image grows by 46.7 MB**. Pull the task
 images of this release together with the launcher and the workers, as every release asks; a test
 on a task image of an earlier release ends `failed` with ``the task image has no connection check
 (/opt/lakana-check/check.py and its environment /opt/lakana-check-env) ...``. A task image you
@@ -227,7 +289,9 @@ Docker host that Lakana's containers should not reach are safest bound to `127.0
 
 Under the docker runner a Python task whose asset declares connections now reaches exactly their
 endpoints: HTTPS through the `egress` service, databases and `tcp` through a relay the launcher
-starts for the task, directories as read-only mounts of `LAKANA_LAUNCHER__INGESTION_ROOTS`. Before,
+starts for the task, directories as read-only mounts of `LAKANA_LAUNCHER__INGESTION_ROOTS`
+(`LAKANA_INGESTION_ROOTS` in the bundle's `.env`, see "The Compose bundle mounts ingestion roots"
+above). Before,
 such a task reached the server only. A task without connections is unchanged. The `egress` service
 is now needed for tasks with HTTPS or database connections, not only for builds: the bundle's
 `compose.yaml` has it; without it running, those tasks fail with ``tasks with connections need

@@ -77,10 +77,22 @@ lakana sql "SELECT 42"
 See [Deploying with Compose (team mode)](docs/site/how-to/deploy-with-compose.md) for
 prerequisites, exposing it beyond localhost with TLS, scaling workers, upgrading, and backups.
 
+## Loading data
+
+A data source is a short Python asset in git that names a **connection** (an address and a
+secret, registered once per environment with `lakana connection create`) and reads it with a
+helper of `lakana.ingest`: files from directories, S3, GCS, Azure and HTTPS, PostgreSQL, SQLite,
+MariaDB and MySQL databases, and REST APIs. On a schedule it replaces, appends or merges into a
+bronze table, and in the Compose bundle its task reaches only the sources it declares.
+`lakana init --template ingest-files`, `ingest-sql` or `ingest-rest` writes a project that does
+it; `lakana load <file> <table>` loads a local file into bronze once, for exploring. See
+[Load data from a source](docs/site/how-to/load-data-from-a-source.md).
+
 ## Python assets
 
 SQL transforms, Python at the edges: a Python asset receives its declared inputs as polars
-DataFrames and returns the DataFrame that replaces its table; see
+DataFrames and returns a polars DataFrame or an Arrow table, which replaces its table or is
+appended or merged into it; see
 [Projects and deploys](docs/site/how-to/projects.md#python-assets). With `output="artifact"` it
 instead stores a file such as a trained model as a numbered version that another asset reads; see
 [Artifacts](docs/site/reference/artifacts.md).
@@ -104,8 +116,11 @@ The inputs are tables other assets build (here two SQL assets, `bronze.readings`
 deploy steps, is in `docs/site/how-to/projects.md`, "Python assets".
 
 The project also needs a `pyproject.toml` that depends on `lakana[assets]` and a committed
-`uv.lock`. Python assets run as processes of the worker's user and are not sandboxed: one
-instance is one trust domain, so deploy only code you would run on the worker yourself.
+`uv.lock`. In the Compose bundle each Python task runs in a container of its own that reaches
+the server and its declared connections only; in local mode Python assets run as processes of
+the worker's user and are not sandboxed. Either way one instance is one trust domain, so deploy
+only code you would run on the worker yourself; see
+[Run Python tasks in containers](docs/site/how-to/run-python-tasks-in-containers.md).
 
 ## License
 

@@ -1026,6 +1026,9 @@ def _compose_filter() -> re.Pattern[str]:
         "scripts/compose_smoke_test.sh",
         "docs/examples/compose-add-environment.sh",
         "docs/examples/compose-restore.sh",
+        "docs/examples/ingest-rest/stand_in.py",
+        "docs/examples/ingest-rest/items-2.json",
+        "docs/examples/ingest-files/exports/orders-3.csv",
         ".github/workflows/ci.yml",
     ],
 )
@@ -1044,6 +1047,7 @@ def test_the_compose_smoke_test_runs_for_any_source_change(path: str) -> None:
         "scripts/docs_only.py",
         "scripts/tests/test_workflows.py",
         "docs/examples/getting-started/run.sh",
+        "docs/examples/ingest-sql/run.sh",
     ],
 )
 def test_the_compose_smoke_test_ignores_what_cannot_change_the_images(path: str) -> None:

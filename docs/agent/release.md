@@ -328,6 +328,17 @@ locks it with `uv lock --offline` against a wheel directory. `compose_smoke_test
 directory with `scripts/build_wheelhouse.sh` (or takes `LAKANA_WHEELHOUSE`) for the image's
 Python (it asks the image which version that is), refuses a lakana wheel whose version differs
 from the image's, and then checks in the container that `uv` is on the worker's PATH and the venv cache is `10001 700`.
+`compose_smoke_test.sh` ends with M6's exit criterion. It starts a PostgreSQL 18 database (TLS,
+image by digest) and the REST stand-in of `docs/examples/ingest-rest` (in a container of the task
+image) on the host network, listening on the host's primary address, which is neither a network
+the stack is attached to nor a Docker gateway, and gives the bundle a directory of CSV files as
+the ingestion root `exports` (`LAKANA_INGESTION_ROOTS`). It creates the three connections and
+tests them, deploys the three `lakana init --template` assets with a job every minute and a run
+principal, and waits (at most four minutes each) for two scheduled runs: the second must add
+exactly the new rows of each source (the REST table by merge). It then checks the lineage of
+`bronze.orders` to `connection source-db (postgresql)`, that a fourth asset is refused a host no
+connection names (`is not a destination this task may reach`), and one `lakana load`. The
+sources carry the label `lakana.smoke.source=<project>` and the cleanup removes them.
 `five_minute_test.sh` uses `pip download` with its own install arguments to fill the directory
 (the same index traffic as the install). Build the image and the wheel directory from one
 commit: the version carries the commit hash.

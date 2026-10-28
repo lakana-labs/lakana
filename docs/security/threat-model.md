@@ -450,6 +450,23 @@ What it does not protect against. Each is accepted.
 8. **An ingestion root is mounted whole.** A task whose `directory` or `sqlite-file` connection
    names a root reads every path under it, other connections' paths included. The how-to tells
    operators to give each group of data that some tasks must not read a root of its own.
+9. **A `tcp` client checks the server's name only if it is told the real host.** It dials the
+   relay, so its TLS checks the certificate against the connection's host only when the driver
+   takes that name apart from the address it dials, as the SQL Server recipe does. With
+   python-tds 1.17.1 and pyOpenSSL 26.2 or later only the certificate's CN is checked (a mismatch
+   fails before any login); the recipe says so and asks for a read-only login.
+10. **Read-only is a property of the transaction.** `sql.read` runs in a read-only transaction
+    (or on a read-only SQLite file), but a source user with write rights could still call a
+    function with side effects inside a `SELECT`. The docs say to give a connection a read-only
+    database user.
+11. **PyMySQL interpolates values on the client.** MariaDB and MySQL get no server-side prepared
+    statement: the asset's SQL never holds a value, but the text on the wire does, escaped by
+    PyMySQL for the session's `sql_mode` (an unknown mode sends nothing).
+12. **A file that shares the newest loaded modification time and arrives later is not read.**
+    `files.read(since=...)` reads files changed strictly after the watermark;
+    `docs/site/reference/ingest.md` says when that happens and what to do instead.
+13. **A merge holds its target's matching rows in the server process**, bounded by the append
+    concurrency limit and, for a key of several columns, by 5,000 rows per batch.
 
 ## CI OIDC exchange (#15)
 
