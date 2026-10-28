@@ -68,7 +68,7 @@ dry run, a rollback, a deploy that failed and a deploy of the commit already cur
 | `outcome` | `pending` (the worker has not started it yet), `started`, `waiting` (the project was busy; the start waits for the active run) or `not_started` |
 | `run_id` | for `started`, the run |
 | `waits_for_run_id` | for `waiting`, the active run the start waits for |
-| `reason` | for `not_started`: `lacks_run` (the deployer may not `RUN` in the environment, or deployed with a CI token, which may only deploy), `refused` (refused as a start by hand would be: no run principal in a protected environment, an inactive one, a selection that matches nothing), `error` (the worker's log has it) or `lost` (the worker stopped before it started the job; shown once the deploy is older than the run lease, `LAKANA_RUN__LEASE_SECONDS`) |
+| `reason` | for `not_started`: `lacks_run` (the deployer may not `RUN` in the environment, or deployed with a CI token whose trust rule does not opt in with `start_on_deploy_jobs`), `refused` (refused as a start by hand would be: no run principal in a protected environment, an inactive one, a selection that matches nothing), `error` (the worker's log has it) or `lost` (the worker stopped before it started the job; shown once the deploy is older than the run lease, `LAKANA_RUN__LEASE_SECONDS`) |
 | `message` | for `not_started`, one sentence with the cause and the next step |
 
 `lakana deploy` waits until no start is `pending`, then prints the runs and the waiting starts

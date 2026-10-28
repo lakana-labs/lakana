@@ -2566,6 +2566,8 @@ def test_0051_on_postgres() -> None:
         assert _alembic_version(engine) == revision_0051
         columns = {c["name"]: c for c in sqlalchemy.inspect(engine).get_columns("deploy_runs")}
         assert columns["job_starts_json"]["nullable"] is True
+        rules = {c["name"]: c for c in sqlalchemy.inspect(engine).get_columns("ci_trust_rules")}
+        assert rules["start_on_deploy_jobs"]["nullable"] is False
         account, person = uuid.uuid4(), uuid.uuid4()
         by_account, by_person, scheduled = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
         with engine.begin() as conn:
@@ -2604,6 +2606,8 @@ def test_0051_on_postgres() -> None:
         assert _alembic_version(engine) == revision_0050
         columns = {c["name"] for c in sqlalchemy.inspect(engine).get_columns("deploy_runs")}
         assert "job_starts_json" not in columns
+        rules = {c["name"] for c in sqlalchemy.inspect(engine).get_columns("ci_trust_rules")}
+        assert "start_on_deploy_jobs" not in rules
         with engine.connect() as conn:
             triggers = dict(conn.execute(sqlalchemy.text("SELECT id, trigger FROM runs")).all())
         assert triggers == {by_account: "API", by_person: "MANUAL", scheduled: "SCHEDULE"}

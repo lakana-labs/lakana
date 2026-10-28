@@ -565,6 +565,26 @@ def _entries(manifest: Mapping[str, object]) -> dict[str, Mapping[str, object]]:
     }
 
 
+def _ci_rule_detail(p: PrincipalRef) -> dict[str, str]:
+    """Name the CI trust rule that allowed a start, for its audit event.
+
+    Parameters
+    ----------
+    p
+        The principal that started the run.
+
+    Returns
+    -------
+    dict
+        ``ci_rule_id`` and ``allowed_by: start_on_deploy_jobs`` when the start is one of a CI
+        deploy's ``on_deploy`` jobs, allowed by its rule's opt-in; empty otherwise.
+    """
+    scope = p.ci_scope
+    if scope is None or not scope.starting_deploy_jobs:
+        return {}
+    return {"ci_rule_id": str(scope.rule_id), "allowed_by": "start_on_deploy_jobs"}
+
+
 def trigger_of(p: PrincipalRef) -> RunTrigger:
     """Say what a start by this caller counts as.
 
@@ -1347,6 +1367,7 @@ class RunService:
                 "scheduled_for": scheduled_for.isoformat() if scheduled_for else None,
                 "missed": missed,
                 "merged": merged,
+                **_ci_rule_detail(p),
             },
         )
         return run

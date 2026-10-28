@@ -55,6 +55,7 @@ def _rule_from_json(data: object) -> CiTrustRule:
             created_at=datetime.fromisoformat(data["created_at"]),
             updated_by=data.get("updated_by"),
             updated_at=datetime.fromisoformat(data["updated_at"]),
+            start_on_deploy_jobs=data.get("start_on_deploy_jobs") is True,
         )
     except (AssertionError, KeyError, TypeError, ValueError):
         raise InvalidResponse(_ODD_ANSWER.format(what="a CI trust rule")) from None
@@ -215,6 +216,7 @@ class CiTrustRules:
         repository: str,
         conditions: Mapping[str, str],
         kinds: Sequence[str] = ("deploy",),
+        start_on_deploy_jobs: bool = False,
     ) -> CiTrustRule:
         """Create an enabled CI trust rule.
 
@@ -233,6 +235,9 @@ class CiTrustRules:
             (GitLab), and ``ref`` or ``environment``.
         kinds
             ``deploy`` and/or ``dry_run``.
+        start_on_deploy_jobs
+            Let a deploy under the rule start the project's `on_deploy` jobs; sent only when
+            true, so a server that predates the setting accepts the request.
 
         Returns
         -------
@@ -244,17 +249,17 @@ class CiTrustRules:
         lakana.errors.ValidationError
             If a field breaks the rules (the message says which).
         """
-        response = self._transport.request(
-            ROUTES["ci_trust_rules.create"],
-            json={
-                "issuer": issuer,
-                "principal": principal,
-                "environment": environment,
-                "repository": repository,
-                "kinds": list(kinds),
-                "conditions": dict(conditions),
-            },
-        )
+        body: dict[str, Any] = {
+            "issuer": issuer,
+            "principal": principal,
+            "environment": environment,
+            "repository": repository,
+            "kinds": list(kinds),
+            "conditions": dict(conditions),
+        }
+        if start_on_deploy_jobs:
+            body["start_on_deploy_jobs"] = True
+        response = self._transport.request(ROUTES["ci_trust_rules.create"], json=body)
         return _rule_from_json(_object(response, "a CI trust rule"))
 
     def list(self) -> _RuleList:
@@ -298,8 +303,9 @@ class CiTrustRules:
         principal: str | None = None,
         kinds: Sequence[str] | None = None,
         conditions: Mapping[str, str] | None = None,
+        start_on_deploy_jobs: bool | None = None,
     ) -> CiTrustRule:
-        """Change a rule's principal, kinds or conditions; the tokens issued under it end.
+        """Change a rule's principal, kinds, conditions or opt-in; the tokens issued under it end.
 
         Parameters
         ----------
@@ -311,6 +317,8 @@ class CiTrustRules:
             New kinds.
         conditions
             New conditions, replacing all of the old ones.
+        start_on_deploy_jobs
+            Whether a deploy under the rule starts the project's `on_deploy` jobs.
 
         Returns
         -------
@@ -318,6 +326,8 @@ class CiTrustRules:
             The rule.
         """
         changes: dict[str, Any] = {}
+        if start_on_deploy_jobs is not None:
+            changes["start_on_deploy_jobs"] = start_on_deploy_jobs
         if principal is not None:
             changes["principal"] = principal
         if kinds is not None:

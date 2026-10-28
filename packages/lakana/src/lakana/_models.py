@@ -2874,6 +2874,9 @@ class CiTrustRule:
         Who changed it last.
     updated_at
         When it last changed.
+    start_on_deploy_jobs
+        Whether a deploy accepted under the rule starts the project's `on_deploy` jobs; false
+        from a server that predates the setting.
     """
 
     id: str
@@ -2888,6 +2891,7 @@ class CiTrustRule:
     created_at: datetime
     updated_by: str | None
     updated_at: datetime
+    start_on_deploy_jobs: bool = False
 
 
 @dataclass(frozen=True)

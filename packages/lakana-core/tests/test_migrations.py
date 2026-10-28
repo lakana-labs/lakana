@@ -4298,8 +4298,32 @@ def test_0051_adds_the_job_starts_and_maps_deploy_runs_down_by_their_starter(
             c for c in inspect(engine).get_columns("deploy_runs") if c["name"] == "job_starts_json"
         ]
         assert column["nullable"] is True
+        (opt_in,) = [
+            c
+            for c in inspect(engine).get_columns("ci_trust_rules")
+            if c["name"] == "start_on_deploy_jobs"
+        ]
+        assert opt_in["nullable"] is False
         with engine.begin() as connection:
             connection.execute(sa.text("PRAGMA foreign_keys=OFF"))
+            connection.execute(
+                sa.text(
+                    "INSERT INTO ci_trust_rules (id, issuer, principal_id, environment_id,"
+                    " repository_id, kinds, conditions, enabled, revision, created_at,"
+                    " updated_at) VALUES (:id, 'https://i', :p, :e, :r, '[\"deploy\"]', '{}',"
+                    " 1, 1, :t, :t)"
+                ),
+                {
+                    "id": uuid.uuid4().hex,
+                    "p": uuid.uuid4().hex,
+                    "e": uuid.uuid4().hex,
+                    "r": uuid.uuid4().hex,
+                    "t": _utc_text(),
+                },
+            )
+            assert connection.execute(
+                sa.text("SELECT start_on_deploy_jobs FROM ci_trust_rules")
+            ).scalar_one() in (0, False)
             for principal_id, kind in ((account, "SERVICE_ACCOUNT"), (person, "USER")):
                 connection.execute(
                     sa.text(
@@ -4337,6 +4361,9 @@ def test_0051_adds_the_job_starts_and_maps_deploy_runs_down_by_their_starter(
     try:
         assert "job_starts_json" not in {
             c["name"] for c in inspect(engine).get_columns("deploy_runs")
+        }
+        assert "start_on_deploy_jobs" not in {
+            c["name"] for c in inspect(engine).get_columns("ci_trust_rules")
         }
         with engine.begin() as connection:
             triggers = dict(connection.execute(sa.text("SELECT id, trigger FROM runs")).all())

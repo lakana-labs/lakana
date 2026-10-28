@@ -33,9 +33,11 @@ def start_detail(
     -------
     dict
         ``repository``, ``job``, ``trigger``, ``requested_by``, ``scheduled_for``, ``missed``
-        and ``merged``, then `extra`.
+        and ``merged``, ``ci_rule_id`` for the start of a CI deploy's ``on_deploy`` job, then
+        `extra`.
     """
     stored = pending or {}
+    rule = {"ci_rule_id": stored["ci_rule_id"]} if stored.get("ci_rule_id") else {}
     return {
         "repository": repository,
         "job": job,
@@ -44,5 +46,6 @@ def start_detail(
         "scheduled_for": stored.get("scheduled_for"),
         "missed": stored.get("missed", 0),
         "merged": stored.get("merged", 1),
+        **rule,
         **extra,
     }

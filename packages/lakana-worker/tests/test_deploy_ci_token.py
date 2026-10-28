@@ -361,10 +361,28 @@ def test_a_ci_deploy_starts_no_job_though_its_account_may_run(
         "lacks_run",
     )
     assert entry["message"] == (
-        "job `refresh` was not started: deployer deployed with a CI token, which may only "
-        "deploy. Start the job with `lakana job run refresh --repo analytics --env dev`, as a "
-        "person or with a stored token that holds RUN."
+        "job `refresh` was not started: deployer deployed with a CI token, and its CI trust rule "
+        f"does not start the deploy's jobs. Enable it with `lakana ci-trust update {ci.rule_id} "
+        "--start-on-deploy-jobs`, or start the job with "
+        "`lakana job run refresh --repo analytics --env dev` and a stored token that holds RUN."
     )
+
+
+def test_a_ci_deploy_under_a_rule_that_opts_in_starts_the_job(
+    session: Session, ci: Ci, tmp_path: Path
+) -> None:
+    """The worker passes the token's scope; the rule's opt-in allows the start, nothing more."""
+    session.execute(update(CiTrustRule).values(start_on_deploy_jobs=True))
+    session.commit()
+    signed = _signed_on_deploy_commit(session, ci, tmp_path)
+
+    run = _run(session, signed)
+
+    assert run.status is DeployStatus.SUCCEEDED
+    (started,) = _runs(session)
+    assert (started.job, started.trigger) == ("refresh", RunTrigger.DEPLOY)
+    (entry,) = run.job_starts_json or []
+    assert (entry["outcome"], entry["run_id"]) == ("started", str(started.id))
 
 
 def test_the_same_account_without_a_ci_token_starts_the_job(

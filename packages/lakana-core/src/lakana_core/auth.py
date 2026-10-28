@@ -144,6 +144,13 @@ class CiScope:
         Whether the token has already submitted its one run.
     expires_at
         When the token stops working; `None` only where a scope is built without a token row.
+    start_on_deploy_jobs
+        The rule's opt-in (`CiTrustRule.start_on_deploy_jobs`): a deploy under it may start the
+        deployed project's jobs with ``on_deploy: true``.
+    starting_deploy_jobs
+        Set only by the worker while it starts those jobs after the deploy
+        (`lakana_core.jobs.on_deploy`), never from a request. With the opt-in, it lets the
+        scope `RUN` in its own environment; nothing else changes.
     """
 
     token_id: uuid.UUID
@@ -156,6 +163,8 @@ class CiScope:
     sha: str | None
     used: bool = False
     expires_at: datetime | None = None
+    start_on_deploy_jobs: bool = False
+    starting_deploy_jobs: bool = False
 
 
 @dataclass(frozen=True)

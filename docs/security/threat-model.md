@@ -503,8 +503,8 @@ OIDC exchange and CI tokens (#15)"; the user's view is
   the worker checks again after the fetch. Afterwards it reads only its own run. Undeploy, job
   pause, resume and test, and delivery reads refuse it. A test enumerates every `DEPLOY` check.
   The jobs with `on_deploy: true` that its deploy would start (#102) are authorized with the
-  token's scope as well, so they are refused (`RUN`) and the deploy names each one: a CI token
-  causes no run, whatever the account's grants.
+  token's scope as well: refused (`RUN`), and the deploy names each one, unless the rule opts in
+  (residual 7).
 - **Revocation.** Disabling, changing or deleting the rule, deactivating the service account or
   deleting the environment ends the token at its next request (each change raises the rule's
   revision); the worker re-checks a queued run's token, rule and account at claim time.
@@ -533,6 +533,17 @@ OIDC exchange and CI tokens (#15)"; the user's view is
    before the deletion works again.
 6. **The audit row's per-client bucket trusts `request.client.host`**, as `AUTHENTICATION_FAILED`
    does (see "Explicitly not defended"); behind a proxy all clients share one bucket.
+7. **A rule may grant the start of its deploys' `on_deploy` jobs** (`start_on_deploy_jobs`,
+   #102; off by default, set only by an instance administrator, audited as a rule change). With
+   it, a deploy accepted under the rule starts each job with `on_deploy: true` of the deployed
+   commit's manifest, in the rule's environment, as the rule's service account, allowed by the
+   rule and not by the account's `RUN` grant; the audit event names the rule. So whoever can
+   trigger an accepted deploy (residual 1) can also start those jobs, once per deploy that moves
+   the project version. The token gets no other run: the widening applies only while the worker
+   starts that deploy's jobs (`CiScope.starting_deploy_jobs`, never set from a request), and the
+   protected-environment rules of a start by hand still apply (the bound run principal writes;
+   without one the start is refused). A waiting start is checked again when it begins, against
+   the same token and rule revision, so a rule changed or disabled meanwhile starts nothing.
 
 ## Explicitly not defended
 

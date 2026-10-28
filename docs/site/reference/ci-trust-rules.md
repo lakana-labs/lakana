@@ -7,9 +7,9 @@ succeeds only when exactly one enabled **CI trust rule** matches the ID token. T
 the rule's service account and may queue one deploy, of the commit the job runs at, or one dry
 run, to one environment, and then follow that run. Nothing secret is stored in CI.
 
-A CI token may not start a run, and a deploy it queued does not start the project's jobs with
-`on_deploy: true` either, even when the service account holds `RUN`: the deploy succeeds and
-names each job it did not start. Start them in a later step with a stored token that holds `RUN`
+A CI token may not start a run. Only when its rule opts in (`start_on_deploy_jobs`, below) does a
+deploy it queued start the project's jobs with `on_deploy: true`, in the rule's environment, and
+nothing else. Without the opt-in the deploy succeeds and names each job it did not start
 ([Start a job after each deploy](../how-to/run-a-job-on-a-schedule.md#start-a-job-after-each-deploy)).
 
 This page lists the exact rules. The operator turns the exchange on with the `LAKANA_CI_OIDC__*`
@@ -30,6 +30,7 @@ secret](../how-to/deploy-from-gitlab-ci.md) set it up from start to end.
 | `kinds` | list | `deploy`, `dry_run` or both; `deploy` by default. A rollback and an undeploy are never allowed through CI. |
 | `conditions` | object | Claim name to the exact text the ID token's claim must have. |
 | `enabled` | true or false | A disabled rule matches no ID token. |
+| `start_on_deploy_jobs` | true or false | `false` by default. With `true`, a deploy accepted under the rule starts the deployed project's jobs with `on_deploy: true` in the rule's environment, as the rule's service account, allowed by this setting and not by the account's `RUN` grant. It allows no other run, and the rules of a protected environment still apply: the run writes as the bound run principal, and without one it is refused. The run's `RUN_STARTED` event names the rule (`ci_rule_id`) and `allowed_by: start_on_deploy_jobs`. Set with `lakana ci-trust create --start-on-deploy-jobs` or `lakana ci-trust update RULE_ID --start-on-deploy-jobs` (`--no-start-on-deploy-jobs` turns it off); changing it is a rule change like any other. |
 | `created_by`, `updated_by` | text or `null` | Who created it, who changed it last. |
 | `created_at`, `updated_at` | time | When. |
 

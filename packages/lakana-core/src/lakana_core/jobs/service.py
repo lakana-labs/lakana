@@ -9,6 +9,7 @@ wait instead of being refused.
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 import uuid
 from collections.abc import Mapping, Sequence
@@ -21,7 +22,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from lakana_core.audit.service import AuditService
-from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable
+from lakana_core.auth import Action, AuthorizationService, CiScope, PrincipalRef, Securable
+from lakana_core.ci_oidc.exchange import resolve_ci_scope
 from lakana_core.ci_oidc.scope import refuse_ci_token
 from lakana_core.db import db_now
 from lakana_core.errors import ConflictError, NotFoundError, ValidationError
@@ -31,6 +33,7 @@ from lakana_core.jobs.cron import fire_times_between, next_fire_after
 from lakana_core.jobs.tz import load_zone
 from lakana_core.models import (
     AuditEventType,
+    CiToken,
     Environment,
     EnvironmentDeployment,
     JobFire,
@@ -44,6 +47,7 @@ from lakana_core.models import (
     RunKind,
     RunTrigger,
 )
+from lakana_core.models.base import utcnow
 from lakana_core.models.run import ACTIVE_RUN_STATUSES
 from lakana_core.notifications.events import new_delivery
 from lakana_core.notifications.views import DeliveryView, delivery_view
@@ -311,6 +315,39 @@ def run_principal_problem(session: Session, env_id: uuid.UUID, repo_id: uuid.UUI
     ):
         return PROBLEM_UNUSABLE
     return None
+
+
+def _deploy_jobs_scope(
+    session: Session, token_id: object, principal_id: uuid.UUID
+) -> CiScope | None:
+    """Resolve the CI scope of a waiting start that a CI deploy made, as it starts.
+
+    The token is read again (`resolve_ci_scope`, its expiry aside: the deploy used it in time),
+    so a rule that was disabled, deleted or changed since (any change, the opt-in too, raises
+    its revision) no longer allows the start.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    token_id
+        The stored ``ci_token_id`` of the waiting start.
+    principal_id
+        The requester, which must be the token's principal.
+
+    Returns
+    -------
+    CiScope or None
+        The scope marked as starting the deploy's jobs, or `None` when it no longer resolves.
+    """
+    try:
+        token = session.get(CiToken, uuid.UUID(str(token_id)))
+    except ValueError:
+        return None
+    if token is None or token.principal_id != principal_id:
+        return None
+    scope = resolve_ci_scope(session, token, now=utcnow(), require_unexpired=False)
+    return None if scope is None else dataclasses.replace(scope, starting_deploy_jobs=True)
 
 
 def _requested_at(pending: Mapping[str, Any]) -> datetime:
@@ -657,6 +694,11 @@ class JobService:
             "missed": missed,
             "merged": 1,
         }
+        scope = p.ci_scope if p is not None else None
+        if scope is not None and scope.starting_deploy_jobs:
+            # Checked again when it starts: the rule must still opt in, under the same revision.
+            fresh["ci_rule_id"] = str(scope.rule_id)
+            fresh["ci_token_id"] = str(scope.token_id)
         old = row.pending_start
         replaced: dict[str, Any] | None = None
         if old is None:
@@ -955,6 +997,12 @@ class JobService:
                 drop(DROP_REQUESTER_INACTIVE)
                 return None
             requester = PrincipalRef(id=person.id, name=person.name, type=person.type)
+            if pending.get("ci_token_id") is not None:
+                scope = _deploy_jobs_scope(session, pending["ci_token_id"], person.id)
+                if scope is None:
+                    drop(DROP_REQUESTER_LACKS_RUN)
+                    return None
+                requester = dataclasses.replace(requester, ci_scope=scope)
             if not service._authz.permits(
                 requester, Action.RUN, Securable.environment_scope(env_name)
             ):

@@ -15384,7 +15384,7 @@
           "ci-trust-rules"
         ],
         "summary": "Change a CI trust rule",
-        "description": "Changes the rule's principal, kinds or conditions. The tokens issued under it end. Needs the `ADMIN` role on the instance. Answers 404 when there is no such rule or principal and 422 when nothing is given or a field breaks the rules of a trust rule.",
+        "description": "Changes the rule's principal, kinds, conditions or `start_on_deploy_jobs`. The tokens issued under it end. Needs the `ADMIN` role on the instance. Answers 404 when there is no such rule or principal and 422 when nothing is given or a field breaks the rules of a trust rule.",
         "operationId": "update_ci_trust_rule_api_v1_ci_trust_rules__rule_id__patch",
         "parameters": [
           {
@@ -17385,6 +17385,11 @@
             },
             "type": "object",
             "title": "Conditions"
+          },
+          "start_on_deploy_jobs": {
+            "type": "boolean",
+            "title": "Start On Deploy Jobs",
+            "default": false
           }
         },
         "additionalProperties": false,
@@ -17397,7 +17402,7 @@
           "conditions"
         ],
         "title": "CiTrustRuleCreate",
-        "description": "Request body for creating a CI trust rule.\n\nParameters\n----------\nissuer\n    ``github``, ``gitlab`` or the URL of an issuer in `LAKANA_CI_OIDC__ISSUERS`.\nprincipal\n    The active service account the CI job acts as; it needs its own `DEPLOY` grant.\nenvironment\n    The environment the CI job may deploy to.\nrepository\n    The registered repository it may deploy.\nkinds\n    ``deploy`` and/or ``dry_run`` (default ``[\"deploy\"]``).\nconditions\n    Claim name to the exact text the ID token's claim must have. Must contain the numeric\n    repository id (``repository_id`` on GitHub, ``project_id`` on GitLab) and a ``ref`` or\n    ``environment``."
+        "description": "Request body for creating a CI trust rule.\n\nParameters\n----------\nissuer\n    ``github``, ``gitlab`` or the URL of an issuer in `LAKANA_CI_OIDC__ISSUERS`.\nprincipal\n    The active service account the CI job acts as; it needs its own `DEPLOY` grant.\nenvironment\n    The environment the CI job may deploy to.\nrepository\n    The registered repository it may deploy.\nkinds\n    ``deploy`` and/or ``dry_run`` (default ``[\"deploy\"]``).\nconditions\n    Claim name to the exact text the ID token's claim must have. Must contain the numeric\n    repository id (``repository_id`` on GitHub, ``project_id`` on GitLab) and a ``ref`` or\n    ``environment``.\nstart_on_deploy_jobs\n    Let a deploy accepted under the rule start the deployed project's jobs with\n    `on_deploy: true` in its environment, as the CI identity, and nothing else; false by\n    default."
       },
       "CiTrustRuleExplanationOut": {
         "properties": {
@@ -17499,6 +17504,11 @@
             "type": "string",
             "format": "date-time",
             "title": "Updated At"
+          },
+          "start_on_deploy_jobs": {
+            "type": "boolean",
+            "title": "Start On Deploy Jobs",
+            "default": false
           }
         },
         "type": "object",
@@ -17517,7 +17527,7 @@
           "updated_at"
         ],
         "title": "CiTrustRuleOut",
-        "description": "Response body for a CI trust rule.\n\nParameters\n----------\nid\n    The rule's id.\nissuer\n    The issuer URL.\nprincipal\n    The service account.\nenvironment\n    The environment.\nrepository\n    The repository.\nkinds\n    ``deploy`` and/or ``dry_run``.\nconditions\n    Claim name to required text.\nenabled\n    Whether it accepts ID tokens.\ncreated_by\n    Who created it.\ncreated_at\n    When.\nupdated_by\n    Who changed it last.\nupdated_at\n    When it last changed."
+        "description": "Response body for a CI trust rule.\n\nParameters\n----------\nid\n    The rule's id.\nissuer\n    The issuer URL.\nprincipal\n    The service account.\nenvironment\n    The environment.\nrepository\n    The repository.\nkinds\n    ``deploy`` and/or ``dry_run``.\nconditions\n    Claim name to required text.\nenabled\n    Whether it accepts ID tokens.\ncreated_by\n    Who created it.\ncreated_at\n    When.\nupdated_by\n    Who changed it last.\nupdated_at\n    When it last changed.\nstart_on_deploy_jobs\n    Whether a deploy accepted under it starts the project's `on_deploy` jobs."
       },
       "CiTrustRuleUpdate": {
         "properties": {
@@ -17561,12 +17571,23 @@
               }
             ],
             "title": "Conditions"
+          },
+          "start_on_deploy_jobs": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start On Deploy Jobs"
           }
         },
         "additionalProperties": false,
         "type": "object",
         "title": "CiTrustRuleUpdate",
-        "description": "Request body for changing a CI trust rule; omitted fields stay.\n\nEvery change ends the tokens issued under the rule before it.\n\nParameters\n----------\nprincipal\n    A new service account.\nkinds\n    New kinds.\nconditions\n    New conditions, replacing all of the old ones."
+        "description": "Request body for changing a CI trust rule; omitted fields stay.\n\nEvery change ends the tokens issued under the rule before it.\n\nParameters\n----------\nprincipal\n    A new service account.\nkinds\n    New kinds.\nconditions\n    New conditions, replacing all of the old ones.\nstart_on_deploy_jobs\n    Whether a deploy under the rule starts the project's `on_deploy` jobs."
       },
       "ColumnIn": {
         "properties": {

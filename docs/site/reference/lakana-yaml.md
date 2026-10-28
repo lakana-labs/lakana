@@ -125,8 +125,8 @@ environments:
 - `on_deploy:` is `true` or `false` (the default). With `true` the job starts after each deploy that
   makes another project version current in the environment (a new commit, or an earlier one
   deployed again over a newer one), as whoever deployed, who needs `RUN` there. A deploy of the
-  commit already current, a dry run, a rollback, a failed deploy and a deploy through a CI token
-  (which may only deploy) start nothing. [Start a job after each deploy](../how-to/run-a-job-on-a-schedule.md#start-a-job-after-each-deploy)
+  commit already current, a dry run, a rollback and a failed deploy start nothing, and so does a
+  deploy through a CI token whose trust rule does not opt in (`start_on_deploy_jobs`). [Start a job after each deploy](../how-to/run-a-job-on-a-schedule.md#start-a-job-after-each-deploy)
   has the rest.
 - A job name follows the rules of a segment of an asset name: no dot, no slash, not empty.
 - An environment can change a job the file declares, with the same keys (`on_deploy` too); the rest

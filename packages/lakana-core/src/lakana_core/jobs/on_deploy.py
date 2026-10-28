@@ -12,6 +12,7 @@ says why and what to do (`lakana_core.projects.deploy_jobs`).
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 import uuid
 from collections.abc import Sequence
@@ -73,10 +74,13 @@ def _lacks_run_message(job: str, principal: str, repository: str, environment: s
     )
 
 
-def _ci_token_message(job: str, principal: str, repository: str, environment: str) -> str:
-    """Say that a deploy through a CI token starts no job, and how to start it.
+def _ci_token_message(
+    job: str, principal: str, repository: str, environment: str, rule_id: uuid.UUID
+) -> str:
+    """Say that a CI deploy's rule does not start its jobs, and the two ways on.
 
-    A CI token may only deploy, whatever its account's grants, so granting `RUN` would not help.
+    A CI token may only deploy unless its rule opts in (`start_on_deploy_jobs`), whatever its
+    account's grants, so granting `RUN` would not help.
 
     Parameters
     ----------
@@ -88,16 +92,19 @@ def _ci_token_message(job: str, principal: str, repository: str, environment: st
         The repository.
     environment
         The environment.
+    rule_id
+        The CI trust rule the token was issued under.
 
     Returns
     -------
     str
-        The cause and the start by hand.
+        The cause, the setting that changes it, and the start by hand.
     """
     return (
-        f"job `{job}` was not started: {principal} deployed with a CI token, which may only "
-        f"deploy. Start the job with {run_it_yourself(job, repository, environment)}, as a "
-        "person or with a stored token that holds RUN."
+        f"job `{job}` was not started: {principal} deployed with a CI token, and its CI trust "
+        f"rule does not start the deploy's jobs. Enable it with `lakana ci-trust update "
+        f"{rule_id} --start-on-deploy-jobs`, or start the job with "
+        f"{run_it_yourself(job, repository, environment)} and a stored token that holds RUN."
     )
 
 
@@ -136,7 +143,7 @@ def _start_one(
             outcome=OUTCOME_NOT_STARTED,
             reason=REASON_LACKS_RUN,
             message=(
-                _ci_token_message(job, p.name, repository, environment)
+                _ci_token_message(job, p.name, repository, environment, p.ci_scope.rule_id)
                 if p.ci_scope is not None
                 else _lacks_run_message(job, p.name, repository, environment)
             ),
@@ -225,8 +232,9 @@ def start_jobs_after_deploy(
         The deploy run, after `DeployService.record_deploy` committed it.
     p
         The principal that deployed, with the scope of the CI token that queued the deploy, if any:
-        each start is authorized with the rights the deploy request had, so a CI token, which may
-        only deploy, starts nothing.
+        each start is authorized with the rights the deploy request had. A CI token may start
+        the jobs only when its trust rule opts in (`start_on_deploy_jobs`); the start is then
+        allowed by the rule, not by the account's grants, and its audit event names the rule.
     caps
         The operator's maximums for each task's policy; `RunCaps()` when `None`.
 
@@ -257,6 +265,11 @@ def start_jobs_after_deploy(
     deployer = session.get(Principal, p.id)
     active = deployer is not None and deployer.is_active
     session.commit()
+    if p.ci_scope is not None:
+        # The one place a CI scope asks for more than DEPLOY: its rule's opt-in decides.
+        p = dataclasses.replace(
+            p, ci_scope=dataclasses.replace(p.ci_scope, starting_deploy_jobs=True)
+        )
     jobs = JobService(session, authz, caps=caps)
     outcomes: list[DeployJobStart] = []
     for job in pending:

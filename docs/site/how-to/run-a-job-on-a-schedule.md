@@ -329,7 +329,9 @@ The rules:
 - **It runs as whoever deployed**, with the rights the deploy had, as if they had run
   `lakana job run` right after the deploy: they need `RUN` on the environment, and a protected
   environment needs a bound run principal (the run then writes as that account). A deploy through
-  a CI token (`LAKANA_OIDC`) starts no job: the token may only deploy. The start is in
+  a CI token (`LAKANA_OIDC`) starts the jobs only when its CI trust rule opts in with
+  `start_on_deploy_jobs`; the start is then allowed by the rule, and its audit event names it
+  ([CI trust rules](../reference/ci-trust-rules.md)). The start is in
   the audit log as `RUN_STARTED` with the trigger `deploy` and the deployer as its actor.
 - **A busy project makes it wait**, like any other start: the deploy prints
   `waits for run RUN_ID; it starts then`, and the job shows as `waiting` in `lakana job list`. When

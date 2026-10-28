@@ -1637,6 +1637,7 @@ Create a CI trust rule.
 | `--principal` | text | required | The service account the CI job acts as; it needs DEPLOY. |
 | `--claim` | text, repeatable | required | NAME=VALUE the ID token's claim must equal exactly (repeatable). Must include repository_id (GitHub) or project_id (GitLab), ref or environment, and how the run was started: event_name or environment (GitHub); ref_protected, pipeline_source or environment (GitLab). |
 | `--kind` | text, repeatable | none | deploy (the default) or dry_run; repeat for both. |
+| `--start-on-deploy-jobs` | flag | off | Let a deploy under this rule start the project's jobs with on_deploy: true in its environment, as the CI identity (off by default). |
 
 ### `lakana ci-trust list`
 
@@ -1666,6 +1667,7 @@ Change CI trust rule RULE_ID; the tokens issued under it stop working at once.
 | `--principal` | text | none | A new service account. |
 | `--claim` | text, repeatable | none | NAME=VALUE (repeatable); replaces all of the rule's conditions. |
 | `--kind` | text, repeatable | none | deploy or dry_run (repeatable). |
+| `--start-on-deploy-jobs` / `--no-start-on-deploy-jobs` | flag | none | Whether a deploy under this rule starts the project's on_deploy jobs. |
 
 ### `lakana ci-trust enable`
 

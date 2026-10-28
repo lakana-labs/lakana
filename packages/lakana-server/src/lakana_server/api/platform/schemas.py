@@ -3779,6 +3779,10 @@ class CiTrustRuleCreate(BaseModel):
         Claim name to the exact text the ID token's claim must have. Must contain the numeric
         repository id (``repository_id`` on GitHub, ``project_id`` on GitLab) and a ``ref`` or
         ``environment``.
+    start_on_deploy_jobs
+        Let a deploy accepted under the rule start the deployed project's jobs with
+        `on_deploy: true` in its environment, as the CI identity, and nothing else; false by
+        default.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -3789,6 +3793,7 @@ class CiTrustRuleCreate(BaseModel):
     repository: str = Field(max_length=255)
     kinds: list[str] = Field(default_factory=lambda: ["deploy"], max_length=2)
     conditions: dict[str, str]
+    start_on_deploy_jobs: bool = False
 
 
 class CiTrustRuleUpdate(BaseModel):
@@ -3804,6 +3809,8 @@ class CiTrustRuleUpdate(BaseModel):
         New kinds.
     conditions
         New conditions, replacing all of the old ones.
+    start_on_deploy_jobs
+        Whether a deploy under the rule starts the project's `on_deploy` jobs.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -3811,6 +3818,7 @@ class CiTrustRuleUpdate(BaseModel):
     principal: str | None = Field(default=None, max_length=255)
     kinds: list[str] | None = Field(default=None, max_length=2)
     conditions: dict[str, str] | None = None
+    start_on_deploy_jobs: bool | None = None
 
 
 class CiTrustRuleOut(BaseModel):
@@ -3842,6 +3850,8 @@ class CiTrustRuleOut(BaseModel):
         Who changed it last.
     updated_at
         When it last changed.
+    start_on_deploy_jobs
+        Whether a deploy accepted under it starts the project's `on_deploy` jobs.
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -3858,6 +3868,7 @@ class CiTrustRuleOut(BaseModel):
     created_at: datetime
     updated_by: str | None
     updated_at: datetime
+    start_on_deploy_jobs: bool = False
 
 
 class CiTrustExplainIn(BaseModel):
