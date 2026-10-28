@@ -20,7 +20,7 @@ import typer
 from lakana._models import Connection, ConnectionTest
 from lakana.cli import _output
 from lakana.cli._state import CliError, confirm, resolve_environment, state_of
-from lakana.cli.secrets import read_values
+from lakana.cli.secrets import read_stdin, read_values
 
 connection_app = typer.Typer(
     help="Manage connections: the databases, file stores and APIs assets read from.",
@@ -202,12 +202,19 @@ _PASSWORD_STDIN = Annotated[
     bool,
     typer.Option(
         "--password-stdin",
-        help="Read the secret from stdin: the password, token or key the kind takes.",
+        help=(
+            "Read the secret from stdin: the password, token or key the kind takes, less one "
+            "leading byte order mark and one trailing line ending."
+        ),
     ),
 ]
 _VALUES_STDIN = Annotated[
     bool,
-    typer.Option("--values-stdin", help="Read the secret's keys as a JSON object from stdin."),
+    typer.Option(
+        "--values-stdin",
+        help="Read the secret's keys as a JSON object from stdin (a leading byte order mark is "
+        "dropped).",
+    ),
 ]
 
 
@@ -292,7 +299,7 @@ def _parts(given: Mapping[str, object]) -> tuple[dict[str, Any], dict[str, Any]]
 def _secret_values(
     kind: str, auth: str, password_stdin: bool, values_stdin: bool
 ) -> dict[str, str] | None:
-    """Read new secret values from standard input, if asked to.
+    r"""Read new secret values from standard input, if asked to.
 
     Parameters
     ----------
@@ -301,7 +308,8 @@ def _secret_values(
     auth
         Its `auth` setting after the change.
     password_stdin
-        `--password-stdin`: stdin, less one trailing newline, under the kind's single key.
+        `--password-stdin`: stdin, less one leading byte order mark and one trailing ``\r\n``,
+        ``\n`` or ``\r``, under the kind's single key.
     values_stdin
         `--values-stdin`: a JSON object of text keys and values.
 
@@ -325,8 +333,7 @@ def _secret_values(
             f"--password-stdin: kind {kind} with auth {auth} takes no secret; give --auth, or "
             "leave out --password-stdin"
         )
-    value = sys.stdin.read()
-    return {key: value.removesuffix("\n")}
+    return {key: read_stdin().removesuffix("\n").removesuffix("\r")}
 
 
 _OPTION_TYPES: dict[str, Any] = {

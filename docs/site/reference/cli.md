@@ -569,7 +569,7 @@ Usage: `lakana table append [OPTIONS] {name} {file}`
 
 Append FILE (Parquet, CSV or Arrow) to table NAME.
 
-The table's schema is fetched first. A CSV is parsed straight into the table's column types; Parquet and Arrow are cast to them. Nullability is checked too, and a column that doesn't fit fails here, before anything is sent.
+The table's schema is fetched first. A CSV is parsed straight into the table's column types; Parquet and Arrow are cast to them. Nullability is checked too, and a column that doesn't fit fails here, before anything is sent. A CSV must be UTF-8 (a byte order mark is dropped); one in another encoding is refused (exit 8): convert it to UTF-8 and run the command again.
 
 | Name | Type | Default | Description |
 |---|---|---|---|
@@ -587,7 +587,7 @@ Usage: `lakana table replace [OPTIONS] {name} {file}`
 
 Replace every row of table NAME with FILE (Parquet, CSV or Arrow).
 
-Without --evolve-schema the file is conformed to the table's columns first, exactly as `table append` does. With it, the file is sent as it is and the table takes its schema.
+Without --evolve-schema the file is conformed to the table's columns first, exactly as `table append` does. With it, the file is sent as it is and the table takes its schema. A CSV must be UTF-8 either way, as for `table append`.
 
 | Name | Type | Default | Description |
 |---|---|---|---|
@@ -606,7 +606,7 @@ Usage: `lakana table merge [OPTIONS] {name} {file}`
 
 Merge FILE (Parquet, CSV or Arrow) into table NAME on --key.
 
-A row whose key the table has replaces that row; any other row is added; nothing is deleted, all in one snapshot. The file is conformed to the table's columns first, exactly as `table append` does. The file must not repeat a key and no key may be empty.
+A row whose key the table has replaces that row; any other row is added; nothing is deleted, all in one snapshot. The file is conformed to the table's columns first, exactly as `table append` does. The file must not repeat a key and no key may be empty. A CSV must be UTF-8 (a byte order mark is dropped); one in another encoding is refused (exit 8).
 
 | Name | Type | Default | Description |
 |---|---|---|---|
@@ -1294,7 +1294,7 @@ Name its use with `--index`, `--repository`, `--connection` or `--own-env` to bi
 | `NAME` | text | required |  |
 | `--env` | text | none | Environment (default: the profile's). |
 | `--value` | text, repeatable | none | key=value (repeatable). Lands in shell history; prefer --values-stdin. |
-| `--values-stdin` | flag | off | Read a JSON object of values from stdin. |
+| `--values-stdin` | flag | off | Read a JSON object of values from stdin (a leading byte order mark is dropped). |
 | `--index` | text | none | Bind it to this package index. |
 | `--repository` | text | none | Bind it to this repository. |
 | `--connection` | text | none | Bind it to this connection; it becomes the secret it uses. |
@@ -1325,7 +1325,7 @@ Replace secret NAME's values.
 | `NAME` | text | required |  |
 | `--env` | text | none | Environment (default: the profile's). |
 | `--value` | text, repeatable | none | key=value (repeatable). Lands in shell history; prefer --values-stdin. |
-| `--values-stdin` | flag | off | Read a JSON object of values from stdin. |
+| `--values-stdin` | flag | off | Read a JSON object of values from stdin (a leading byte order mark is dropped). |
 
 ### `lakana secret bind`
 
@@ -1399,8 +1399,8 @@ Give the kind's address and settings options, and its secret one of three ways: 
 | `--access-key-id` | text | none | s3: access key id. |
 | `--prefix` | text | none | s3, gcs, azure: only objects under this prefix. |
 | `--secret` | text | none | Use this existing secret of the environment. |
-| `--password-stdin` | flag | off | Read the secret from stdin: the password, token or key the kind takes. |
-| `--values-stdin` | flag | off | Read the secret's keys as a JSON object from stdin. |
+| `--password-stdin` | flag | off | Read the secret from stdin: the password, token or key the kind takes, less one leading byte order mark and one trailing line ending. |
+| `--values-stdin` | flag | off | Read the secret's keys as a JSON object from stdin (a leading byte order mark is dropped). |
 
 ### `lakana connection list`
 
@@ -1462,8 +1462,8 @@ Change connection NAME; only the options given change. Its name and kind never c
 | `--access-key-id` | text | none | s3: access key id. |
 | `--prefix` | text | none | s3, gcs, azure: only objects under this prefix. |
 | `--secret` | text | none | Use this existing secret of the environment. |
-| `--password-stdin` | flag | off | Read the secret from stdin: the password, token or key the kind takes. |
-| `--values-stdin` | flag | off | Read the secret's keys as a JSON object from stdin. |
+| `--password-stdin` | flag | off | Read the secret from stdin: the password, token or key the kind takes, less one leading byte order mark and one trailing line ending. |
+| `--values-stdin` | flag | off | Read the secret's keys as a JSON object from stdin (a leading byte order mark is dropped). |
 
 ### `lakana connection delete`
 

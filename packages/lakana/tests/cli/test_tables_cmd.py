@@ -655,6 +655,50 @@ def test_table_append_still_reports_columns_missing_from_the_csv(tmp_path: Path)
     assert "missing ['region']; unexpected ['extra']" in result.stderr
 
 
+@pytest.mark.parametrize("command", ["append", "replace"])
+def test_table_append_refuses_a_csv_that_is_not_utf8(tmp_path: Path, command: str) -> None:
+    """#351: a Latin-1 CSV is refused as `lakana load` refuses it, before anything is sent."""
+    api = FakeApi()
+    api.on("GET", f"{_BASE}/sales", json=_TABLE)
+    csv = tmp_path / "data.csv"
+    csv.write_bytes("id,region\n1,M\u00fcnchen\n".encode("latin-1"))
+    extra = ["--evolve-schema"] if command == "replace" else []
+
+    result = invoke(
+        make_state(tmp_path, api),
+        "table",
+        command,
+        "bronze.sales",
+        str(csv),
+        "--env",
+        "dev",
+        *extra,
+    )
+
+    assert result.exit_code == 8, result.output
+    assert (
+        "data.csv is not UTF-8 (byte 0xfc at position 13); convert it to UTF-8 and run the "
+        "command again"
+    ) in _plain(result.stderr)
+    assert all(r.method == "GET" for r in api.requests)
+
+
+@pytest.mark.parametrize("command", ["append", "replace", "merge"])
+def test_table_help_says_a_csv_must_be_utf8(tmp_path: Path, command: str) -> None:
+    """Every command that reads a CSV says it must be UTF-8, `replace --evolve-schema` too."""
+    result = invoke(make_state(tmp_path, FakeApi()), "table", command, "--help")
+
+    assert "A CSV must be UTF-8" in _plain(result.stdout)
+
+
+def test_table_append_reads_a_utf8_csv_with_a_byte_order_mark(tmp_path: Path) -> None:
+    """A byte order mark is dropped, as `lakana load` drops it; the first column keeps its name."""
+    result, api = _append_csv(tmp_path, _COLUMNS, "\ufeffid,region\n1,M\u00fcnchen\n")
+
+    assert result.exit_code == 0, result.stderr
+    assert _sent(api).column("region").to_pylist() == ["M\u00fcnchen"]
+
+
 def test_table_create_column_help_shows_a_quoted_nullable_example(tmp_path: Path) -> None:
     """Final review minor 10: shells glob `?`, so the help's example is quoted."""
     result = invoke(make_state(tmp_path, FakeApi()), "table", "create", "--help")

@@ -197,6 +197,49 @@ both use `StorageOptions` / `OptionalStorageOptions`, which refuse a bad shape w
 names no key and no value. No other request body carries a credential: tokens and secrets are in
 headers or are only ever returned. The application logs no request body.
 
+## Local files `lakana load` reads: a capped child process (#353)
+
+A small Parquet or Arrow file can decode to far more than its size (one value repeated by a
+dictionary or by shared prefixes, views over one buffer, pages a footer hides), and its metadata
+can lie, so no estimate made before reading bounds what one batch takes. A hand-written parser of
+Parquet page headers was tried and dropped: each review found a new way past it.
+
+- `lakana.cli._capped.read` runs `load.read_file` for Parquet and Arrow in a child process
+  (`sys.executable -I -m lakana.cli._capped`, no shell) with `RLIMIT_DATA` set to the child's
+  `VmData` after its imports, plus twice the upload limit, plus `HEADROOM` (256 MiB; 768 MiB at the
+  default limit). The rows come back as an Arrow stream on its stdout. The CLI's own process is
+  never capped. Unlike the worker (below), the child reads one file and exits, so memory that does
+  not shrink is no reason against `setrlimit` here.
+- **Why `RLIMIT_DATA`, not `RLIMIT_AS`.** `RLIMIT_AS` counts reserved address space: glibc's
+  64 MiB malloc arena per pyarrow thread and the memory-mapped Arrow file. A 10 MiB file of
+  48 columns was refused on a 20-core machine, and an mmap failure surfaced as "could not read".
+  `RLIMIT_DATA` (Linux 4.7 and later) counts private writable memory only. Measured, it passes
+  with or without `MALLOC_ARENA_MAX` and at 128 threads; the bound is also tighter (the least that
+  let a 248 MiB table pass was 352 MiB beyond the child's base, against 576 MiB under
+  `RLIMIT_AS`).
+- The child's memory is also made independent of the machine: the system allocator
+  (`ARROW_DEFAULT_MEMORY_POOL=system`; mimalloc failed at random under a cap), `MALLOC_ARENA_MAX=2`,
+  `OMP_NUM_THREADS` and both pyarrow pools set to `THREADS` (2) before the cap.
+- A `MemoryError` in the child (exit 4), a child ended by a signal, and glibc's abort when a
+  thread cannot get its thread-local memory (exit 127 with "cannot allocate memory" on stderr,
+  told by its words because no type crosses a process) are the size refusal ("... larger than
+  one upload may be (N) once read", exit 2). A `CliError` crosses as JSON on stderr (exit 3).
+  Anything else, a loader failure with exit 127 included, is an unreadable file naming the child's
+  last stderr line.
+- Where `/proc/self/status` cannot be read, the child sets no cap (the residual below) instead of
+  failing.
+- `read_file` lets `MemoryError` through (`pyarrow.ArrowMemoryError` is also an `ArrowException`),
+  so it is never reported as "could not read".
+- Still in the parent, cheap and parser-free: the metadata estimate and batch size, a dictionary
+  or view column measured from its values' lengths before it is decoded (the size checked is the
+  size added), and nested columns refused before any row is read (from the Parquet leaves'
+  repetition, which catches extension types such as tensors).
+- **Residual:** only Linux (4.7 and later) enforces `RLIMIT_DATA`. On macOS and Windows the file is read in the
+  CLI's process with only the in-process bounds, and a crafted file can still take far more memory
+  than the limit. It only threatens the user's own CLI process; the server enforces its own limit.
+  CSV, JSON and spreadsheets are read in the CLI's process: their file size is checked against the
+  limit first, and text does not expand that way.
+
 ## Query limits: a hard time limit, a memory target, the worker's memory stop
 
 `QueryLimitsConfig` (`LAKANA_QUERY_LIMITS__*`) bounds a query. Each query runs in a process of
