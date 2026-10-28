@@ -6,7 +6,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import select, tuple_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -31,6 +31,7 @@ from lakana_core.grants.admin import holds_instance_admin
 from lakana_core.identifiers import NamespacePath, TableRef
 from lakana_core.identity.tokens import generate_token, verify_secret
 from lakana_core.models import (
+    LIVE_ENVIRONMENT,
     AuditEventType,
     Environment,
     JobVersion,
@@ -177,8 +178,10 @@ _MAX_VIEW_DEPTH = 10
 _MAX_READABLE = 1000
 
 
-def _view_references(session: Session, environment: str, dotted: str) -> list[str]:
-    """List the tables a view's stored definition references.
+def _view_references(session: Session, environment: str, names: list[str]) -> list[str]:
+    """List the tables the stored definitions of the views among `names` reference.
+
+    One query finds the views among all of `names`, however many there are.
 
     Parameters
     ----------
@@ -186,33 +189,52 @@ def _view_references(session: Session, environment: str, dotted: str) -> list[st
         Database session.
     environment
         Environment name.
-    dotted
-        A dotted table name.
+    names
+        Dotted table names.
 
     Returns
     -------
     list of str
-        The referenced dotted names; empty if `dotted` is not a view in
-        `environment` (a table, a missing name, a malformed name).
+        The referenced dotted names, in the order of `names`; nothing for a name that is not
+        a view in `environment` (a table, a missing name, a malformed name).
     """
-    from lakana_core.catalog.identity import resolve_table_id
-
-    try:
-        ref = TableRef.from_dotted(environment, dotted)
-    except ValidationError:
+    keys: list[tuple[str, str]] = []
+    for dotted in names:
+        try:
+            ref = TableRef.from_dotted(environment, dotted)
+        except ValidationError:
+            keys.append(("", ""))
+            continue
+        keys.append((ref.namespace.joined(), ref.name))
+    wanted = {key for key in keys if key != ("", "")}
+    if not wanted:
         return []
-    table_id = resolve_table_id(session, environment, ref.namespace.joined(), ref.name)
-    row = session.get(Table, table_id) if table_id is not None else None
-    if row is None or row.table_type is not TableType.VIEW:
-        return []
-    definition = row.view_definition if isinstance(row.view_definition, dict) else {}
-    references = definition.get("references")
-    names: list[str] = []
-    for reference in references if isinstance(references, list) else []:
-        name = _current_reference_name(session, reference)
-        if name is not None:
-            names.append(name)
-    return names
+    views = {
+        (path, name): row
+        for path, name, row in session.execute(
+            select(Namespace.path, Table.name, Table)
+            .join(Namespace, Table.namespace_id == Namespace.id)
+            .join(Environment, Namespace.environment_id == Environment.id)
+            .where(
+                Environment.name == environment,
+                LIVE_ENVIRONMENT,
+                Table.table_type == TableType.VIEW,
+                tuple_(Namespace.path, Table.name).in_(sorted(wanted)),
+            )
+        )
+    }
+    found: list[str] = []
+    for key in keys:
+        row = views.get(key)
+        if row is None:
+            continue
+        definition = row.view_definition if isinstance(row.view_definition, dict) else {}
+        references = definition.get("references")
+        for reference in references if isinstance(references, list) else []:
+            name = _current_reference_name(session, reference)
+            if name is not None:
+                found.append(name)
+    return found
 
 
 def _current_reference_name(session: Session, reference: object) -> str | None:
@@ -276,10 +298,7 @@ def _readable_tables(
     frontier = list(inputs)
     for _ in range(_MAX_VIEW_DEPTH):
         found = [
-            name
-            for dotted in frontier
-            for name in _view_references(session, environment, dotted)
-            if name not in seen
+            name for name in _view_references(session, environment, frontier) if name not in seen
         ]
         frontier = []
         for name in found:
