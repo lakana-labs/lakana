@@ -460,8 +460,9 @@ class ClientCredentials:
             can carry.
         """
         try:
-            # Decoded here: json.loads would guess UTF-16 or UTF-32 from bytes; JSON is UTF-8.
-            said = json.loads(body.decode("utf-8"))
+            # Decoded here: json.loads would guess UTF-16 or UTF-32 from bytes; JSON is UTF-8,
+            # with or without the byte order mark some providers send (as rest.read accepts).
+            said = json.loads(body.removeprefix(b"\xef\xbb\xbf").decode("utf-8"))
         except (ValueError, RecursionError):
             said = None
         if not isinstance(said, dict):

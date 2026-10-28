@@ -965,3 +965,19 @@ def test_a_proxy_without_a_password_registers_nothing(authority: Authority) -> N
     _http.client_for(_conn("https://api.test", authority, {}, None, "http://egress:3128")).close()
 
     assert state.secrets == set()
+
+
+def test_a_token_answer_with_a_utf8_byte_order_mark_is_read(
+    authority: Authority, tmp_path: Path
+) -> None:
+    """Some providers start their JSON with a UTF-8 BOM; it is UTF-8 and is accepted."""
+    provider = Provider(token_body=b"\xef\xbb\xbf" + json.dumps({"access_token": ACCESS}).encode())
+    with (
+        scripted(authority, tmp_path, provider) as server,
+        httpx.Client(verify=_trust(authority), trust_env=False) as token_client,
+    ):
+        grant = _http.ClientCredentials(
+            "api", f"{server.base}/token", "c", CLIENT_SECRET, None, token_client
+        )
+
+        assert grant.header() == f"Bearer {ACCESS}"

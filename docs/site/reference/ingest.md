@@ -91,8 +91,9 @@ def stations():
   the form body, to that URL only), keeps it until 30 seconds before its `expires_in` ends, and
   sends it as `Bearer`. A token valid for 30 seconds or less is fetched again for every request;
   an answer without `expires_in`, or with one that is not a whole number of seconds, is kept for 5
-  minutes. A token endpoint that answers anything but 200 with a token fails the read; only 408,
-  429 and 5xx are retried. A secret value with a line break, another control character or a
+  minutes. The token answer is JSON in UTF-8, with or without a byte order mark. A token endpoint
+  that answers anything but 200 with a token fails the read; only 408, 429 and 5xx are retried. A
+  secret value with a line break, another control character or a
   character outside ASCII is refused, never sent.
 
 ### files.read
