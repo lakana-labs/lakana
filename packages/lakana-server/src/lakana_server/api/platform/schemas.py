@@ -2451,7 +2451,7 @@ class DeployJobStartOut(BaseModel):
     reason
         For ``not_started``: ``lacks_run`` (the deployer may not `RUN` in the environment),
         ``refused`` (refused as a start by hand would be), ``error`` or ``lost`` (the worker
-        stopped before it started the job).
+        stopped before it recorded the start, which may or may not have been made).
     message
         For ``not_started``, one sentence that names the cause and the next step.
     """

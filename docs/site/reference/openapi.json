@@ -18339,7 +18339,7 @@
           "outcome"
         ],
         "title": "DeployJobStartOut",
-        "description": "What a deploy did with one job that starts after each deploy (`on_deploy: true`).\n\nParameters\n----------\njob\n    The job's name.\noutcome\n    ``pending`` (the worker has not started it yet), ``started``, ``waiting`` (the project\n    was busy; the start waits) or ``not_started``.\nrun_id\n    For ``started``, the queued run.\nwaits_for_run_id\n    For ``waiting``, the active run the start waits for.\nreason\n    For ``not_started``: ``lacks_run`` (the deployer may not `RUN` in the environment),\n    ``refused`` (refused as a start by hand would be), ``error`` or ``lost`` (the worker\n    stopped before it started the job).\nmessage\n    For ``not_started``, one sentence that names the cause and the next step."
+        "description": "What a deploy did with one job that starts after each deploy (`on_deploy: true`).\n\nParameters\n----------\njob\n    The job's name.\noutcome\n    ``pending`` (the worker has not started it yet), ``started``, ``waiting`` (the project\n    was busy; the start waits) or ``not_started``.\nrun_id\n    For ``started``, the queued run.\nwaits_for_run_id\n    For ``waiting``, the active run the start waits for.\nreason\n    For ``not_started``: ``lacks_run`` (the deployer may not `RUN` in the environment),\n    ``refused`` (refused as a start by hand would be), ``error`` or ``lost`` (the worker\n    stopped before it recorded the start, which may or may not have been made).\nmessage\n    For ``not_started``, one sentence that names the cause and the next step."
       },
       "DeployOut": {
         "properties": {

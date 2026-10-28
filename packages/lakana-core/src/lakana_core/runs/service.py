@@ -21,7 +21,13 @@ from sqlalchemy.orm import Session
 from lakana_core.audit.service import AuditService
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable
 from lakana_core.db import db_now
-from lakana_core.errors import ConflictError, LakanaError, NotFoundError, ValidationError
+from lakana_core.errors import (
+    ConflictError,
+    LakanaError,
+    NotFoundError,
+    PermissionDenied,
+    ValidationError,
+)
 from lakana_core.identifiers import TableRef
 from lakana_core.models import (
     AttemptOutcome,
@@ -63,7 +69,7 @@ from lakana_core.projects.checks import (
 )
 from lakana_core.projects.deploys import DeployService
 from lakana_core.projects.lookups import deployment_row, environment_by_name, repository_by_name
-from lakana_core.projects.manifest import manifest_assets, manifest_jobs
+from lakana_core.projects.manifest import job_on_deploy, manifest_assets, manifest_jobs
 from lakana_core.projects.run_policy import RunCaps, policy_from_manifest
 from lakana_core.runs.checks import (
     ASSET,
@@ -563,6 +569,44 @@ def _entries(manifest: Mapping[str, object]) -> dict[str, Mapping[str, object]]:
         for entry in (raw if isinstance(raw, list) else [])
         if isinstance(entry, dict) and isinstance(entry.get("table"), str)
     }
+
+
+class NotOnDeploy(PermissionDenied):
+    """A start a CI trust rule allows names a job that is not ``on_deploy`` in the version run.
+
+    The rule's opt-in (`start_on_deploy_jobs`) covers only the deployed project's jobs with
+    ``on_deploy: true``; a deploy by hand that moved the pointer meanwhile may have changed that.
+    """
+
+
+def _require_on_deploy(p: PrincipalRef | None, version: JobVersion, job: str, env: str) -> None:
+    """Refuse a rule-allowed CI start of a job that is not ``on_deploy`` in the version it runs.
+
+    Parameters
+    ----------
+    p
+        The caller.
+    version
+        The project version the start would run.
+    job
+        The job.
+    env
+        The environment's name, for the message.
+
+    Raises
+    ------
+    NotOnDeploy
+        When the caller's CI scope starts the deploy's jobs and the job lacks ``on_deploy: true``
+        in `version`.
+    """
+    scope = p.ci_scope if p is not None else None
+    if scope is None or not scope.starting_deploy_jobs:
+        return
+    if not job_on_deploy(manifest_jobs(version.manifest_json).get(job, {})):
+        raise NotOnDeploy(
+            f"it no longer has `on_deploy: true` in the project version now current in `{env}`, "
+            "and the CI trust rule allows only those"
+        )
 
 
 def _ci_rule_detail(p: PrincipalRef) -> dict[str, str]:
@@ -1560,6 +1604,7 @@ class RunService:
         row, version = self._deployment(env, repo)
         if job is not None:
             selection = self._job_selection(env, repo, version, job)
+            _require_on_deploy(p, version, job, env.name)
         elif selection is None:
             raise TypeError("an ad-hoc start needs a selection")
         choice = (

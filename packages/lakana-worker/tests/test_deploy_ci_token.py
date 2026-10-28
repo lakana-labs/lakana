@@ -362,8 +362,8 @@ def test_a_ci_deploy_starts_no_job_though_its_account_may_run(
     )
     assert entry["message"] == (
         "job `refresh` was not started: deployer deployed with a CI token, and its CI trust rule "
-        f"does not start the deploy's jobs. Enable it with `lakana ci-trust update {ci.rule_id} "
-        "--start-on-deploy-jobs`, or start the job with "
+        "does not start the deploy's jobs. An instance administrator can turn that on with "
+        f"`lakana ci-trust update {ci.rule_id} --start-on-deploy-jobs`; or start the job with "
         "`lakana job run refresh --repo analytics --env dev` and a stored token that holds RUN."
     )
 

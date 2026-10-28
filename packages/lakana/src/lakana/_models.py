@@ -1677,7 +1677,8 @@ class DeployJobStart:
     reason
         Why a ``not_started`` job did not start: ``lacks_run`` (you may not `RUN` in the
         environment), ``refused`` (a start by hand would be refused too), ``error`` (the
-        worker's log has it) or ``lost`` (the worker stopped before the start).
+        worker's log has it) or ``lost`` (the worker stopped before it recorded the start;
+        the job may have run).
     message
         What to do about a ``not_started`` job, as one sentence for a person.
     """

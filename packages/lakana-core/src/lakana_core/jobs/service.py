@@ -57,6 +57,7 @@ from lakana_core.projects.manifest import job_notify, job_on_deploy, job_schedul
 from lakana_core.projects.run_policy import RunCaps
 from lakana_core.runs.service import (
     ActiveRunError,
+    NotOnDeploy,
     RunService,
     RunView,
     authorize_run_read,
@@ -96,6 +97,7 @@ DROP_RUN_PRINCIPAL_UNUSABLE = "run_principal_unusable"
 DROP_JOB_REMOVED = "job_removed"
 DROP_SELECTION_INVALID = "selection_invalid"
 DROP_UNREADABLE = "unreadable"
+DROP_NOT_ON_DEPLOY = "not_on_deploy"
 """The reasons a waiting start is dropped when it comes to start (`JOB_START_DROPPED`)."""
 
 
@@ -317,23 +319,27 @@ def run_principal_problem(session: Session, env_id: uuid.UUID, repo_id: uuid.UUI
     return None
 
 
-def _deploy_jobs_scope(
-    session: Session, token_id: object, principal_id: uuid.UUID
+def deploy_jobs_scope(
+    session: Session, token_id: object, principal_id: uuid.UUID, repository_id: uuid.UUID
 ) -> CiScope | None:
-    """Resolve the CI scope of a waiting start that a CI deploy made, as it starts.
+    """Resolve the CI scope of a start of a CI deploy's ``on_deploy`` jobs, as it starts.
 
     The token is read again (`resolve_ci_scope`, its expiry aside: the deploy used it in time),
     so a rule that was disabled, deleted or changed since (any change, the opt-in too, raises
-    its revision) no longer allows the start.
+    its revision) no longer allows the start. Used for the start right after the deploy and for
+    a start that waited.
 
     Parameters
     ----------
     session
         Database session.
     token_id
-        The stored ``ci_token_id`` of the waiting start.
+        The CI token's id (``deploy_runs.ci_token_id``, or the stored ``ci_token_id`` of a
+        waiting start).
     principal_id
         The requester, which must be the token's principal.
+    repository_id
+        The repository whose job starts, which must be the rule's (and token's) repository.
 
     Returns
     -------
@@ -347,7 +353,29 @@ def _deploy_jobs_scope(
     if token is None or token.principal_id != principal_id:
         return None
     scope = resolve_ci_scope(session, token, now=utcnow(), require_unexpired=False)
-    return None if scope is None else dataclasses.replace(scope, starting_deploy_jobs=True)
+    if scope is None or scope.repository_id != repository_id:
+        return None
+    return dataclasses.replace(scope, starting_deploy_jobs=True)
+
+
+def _rule_allowed(scope: CiScope | None) -> dict[str, str]:
+    """Name the CI trust rule that allowed a request, for its audit event.
+
+    Parameters
+    ----------
+    scope
+        The request's CI scope, if any.
+
+    Returns
+    -------
+    dict
+        ``ci_rule_id`` and ``allowed_by`` when the request is a CI deploy's start of its
+        ``on_deploy`` job (also when it merges into a waiting scheduled start, which keeps no
+        trace of it otherwise); empty for any other request.
+    """
+    if scope is None or not scope.starting_deploy_jobs:
+        return {}
+    return {"ci_rule_id": str(scope.rule_id), "allowed_by": "start_on_deploy_jobs"}
 
 
 def _requested_at(pending: Mapping[str, Any]) -> datetime:
@@ -730,6 +758,7 @@ class JobService:
                 waits_for_run_id=str(active),
                 request_trigger=trigger.value,
                 replaced=replaced,
+                **_rule_allowed(scope),
             ),
         )
         self._session.commit()
@@ -998,7 +1027,7 @@ class JobService:
                 return None
             requester = PrincipalRef(id=person.id, name=person.name, type=person.type)
             if pending.get("ci_token_id") is not None:
-                scope = _deploy_jobs_scope(session, pending["ci_token_id"], person.id)
+                scope = deploy_jobs_scope(session, pending["ci_token_id"], person.id, repo_id)
                 if scope is None:
                     drop(DROP_REQUESTER_LACKS_RUN)
                     return None
@@ -1018,6 +1047,9 @@ class JobService:
                 authorize=False,
                 bound_only=requester is None,
             )
+        except NotOnDeploy:
+            drop(DROP_NOT_ON_DEPLOY)
+            return None
         except NotFoundError:
             drop(DROP_JOB_REMOVED)
             return None

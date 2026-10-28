@@ -20,10 +20,13 @@ from collections.abc import Sequence
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from lakana_core.auth import AuthorizationService, PrincipalRef
+from lakana_core.audit.service import AuditService
+from lakana_core.auth import AuthorizationService, PrincipalRef, Securable
 from lakana_core.errors import ConflictError, NotFoundError, PermissionDenied, ValidationError
-from lakana_core.jobs.service import JobService
+from lakana_core.jobs.audit import start_detail
+from lakana_core.jobs.service import JobService, deploy_jobs_scope
 from lakana_core.models import (
+    AuditEventType,
     DeployRun,
     DeployStatus,
     Environment,
@@ -43,6 +46,7 @@ from lakana_core.projects.deploy_jobs import (
     run_it_yourself,
 )
 from lakana_core.projects.run_policy import RunCaps
+from lakana_core.runs.service import NotOnDeploy
 
 logger = logging.getLogger(__name__)
 
@@ -102,10 +106,51 @@ def _ci_token_message(
     """
     return (
         f"job `{job}` was not started: {principal} deployed with a CI token, and its CI trust "
-        f"rule does not start the deploy's jobs. Enable it with `lakana ci-trust update "
-        f"{rule_id} --start-on-deploy-jobs`, or start the job with "
+        "rule does not start the deploy's jobs. An instance administrator can turn that on with "
+        f"`lakana ci-trust update {rule_id} --start-on-deploy-jobs`; or start the job with "
         f"{run_it_yourself(job, repository, environment)} and a stored token that holds RUN."
     )
+
+
+def _audit_not_on_deploy(
+    session: Session, p: PrincipalRef, environment: str, repository: str, job: str
+) -> None:
+    """Record that a rule-allowed start was dropped: the job is not ``on_deploy`` any more.
+
+    As a waiting start that is dropped, the system drops it, so the event has no actor; the
+    requester and the rule are in the detail.
+
+    Parameters
+    ----------
+    session
+        Database session; commits.
+    p
+        The CI-scoped deployer.
+    environment
+        Environment name.
+    repository
+        Repository name.
+    job
+        The job.
+    """
+    scope = p.ci_scope
+    assert scope is not None  # nosec B101 -- NotOnDeploy is raised for a CI scope only
+    AuditService(session).record(
+        None,
+        AuditEventType.JOB_START_DROPPED,
+        securable=Securable.environment_scope(environment),
+        detail=start_detail(
+            repository,
+            job,
+            {
+                "trigger": RunTrigger.DEPLOY.value,
+                "requested_by": str(p.id),
+                "ci_rule_id": str(scope.rule_id),
+            },
+            reason="not_on_deploy",
+        ),
+    )
+    session.commit()
 
 
 def _start_one(
@@ -136,6 +181,19 @@ def _start_one(
     """
     try:
         result = jobs.start(p, environment, repository, job, trigger=RunTrigger.DEPLOY)
+    except NotOnDeploy as exc:
+        session.rollback()
+        _audit_not_on_deploy(session, p, environment, repository, job)
+        return DeployJobStart(
+            job=job,
+            outcome=OUTCOME_NOT_STARTED,
+            reason=REASON_REFUSED,
+            message=(
+                f"job `{job}` was not started: {exc}. Start it with "
+                f"{run_it_yourself(job, repository, environment)} and a stored token that holds "
+                "RUN."
+            ),
+        )
     except PermissionDenied:
         session.rollback()
         return DeployJobStart(
@@ -263,25 +321,35 @@ def start_jobs_after_deploy(
         select(Repository.name).where(Repository.id == run.repository_id)
     ).scalar_one()
     deployer = session.get(Principal, p.id)
-    active = deployer is not None and deployer.is_active
+    refusal: str | None = (
+        None if deployer is not None and deployer.is_active else f"{p.name} is no longer active"
+    )
+    reason = REASON_REFUSED
+    if p.ci_scope is not None and refusal is None:
+        # The one place a CI scope asks for more than DEPLOY: its rule's opt-in decides, read
+        # again now, after the deploy committed, never the scope resolved when it was claimed.
+        scope = deploy_jobs_scope(session, run.ci_token_id, p.id, run.repository_id)
+        if scope is None:
+            refusal = (
+                "the CI trust rule of the deploy's token was changed, disabled or deleted since "
+                "the deploy began, or no longer covers this repository"
+            )
+            reason = REASON_LACKS_RUN
+        else:
+            p = dataclasses.replace(p, ci_scope=scope)
     session.commit()
-    if p.ci_scope is not None:
-        # The one place a CI scope asks for more than DEPLOY: its rule's opt-in decides.
-        p = dataclasses.replace(
-            p, ci_scope=dataclasses.replace(p.ci_scope, starting_deploy_jobs=True)
-        )
     jobs = JobService(session, authz, caps=caps)
     outcomes: list[DeployJobStart] = []
     for job in pending:
         outcome = (
             _start_one(session, jobs, p, environment, repository, job)
-            if active
+            if refusal is None
             else DeployJobStart(
                 job=job,
                 outcome=OUTCOME_NOT_STARTED,
-                reason=REASON_REFUSED,
+                reason=reason,
                 message=(
-                    f"job `{job}` was not started: {p.name} is no longer active. Start it with "
+                    f"job `{job}` was not started: {refusal}. Start it with "
                     f"{run_it_yourself(job, repository, environment)}."
                 ),
             )

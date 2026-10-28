@@ -30,11 +30,13 @@ from lakana_core.jobs.service import JobService
 from lakana_core.models import (
     AuditEvent,
     AuditEventType,
+    CiToken,
     CiTrustRule,
     DeployKind,
     DeployRun,
     DeployStatus,
     JobSchedule,
+    Repository,
     Run,
     RunStatus,
     RunTrigger,
@@ -45,6 +47,7 @@ from lakana_core.projects.deploy_jobs import (
     OUTCOME_STARTED,
     OUTCOME_WAITING,
     REASON_LACKS_RUN,
+    REASON_REFUSED,
 )
 from lakana_core.projects.deploys import DeployService
 from lakana_core.projects.diff import DeployDiff
@@ -98,7 +101,9 @@ def _authz(session: Session) -> AuditingAuthorization:
     return AuditingAuthorization(GrantAuthorization(session), session, DenialAuditLimiter(1000))
 
 
-def _ci_deploy(session: Session, sha: str = SHA) -> tuple[PrincipalRef, DeployRun]:
+def _ci_deploy(
+    session: Session, sha: str = SHA, jobs: dict[str, JobConfig] | None = None
+) -> tuple[PrincipalRef, DeployRun]:
     """Exchange an ID token, queue a deploy with the CI token and record it, as the worker does.
 
     Parameters
@@ -107,6 +112,8 @@ def _ci_deploy(session: Session, sha: str = SHA) -> tuple[PrincipalRef, DeployRu
         Database session.
     sha
         The commit the deploy records.
+    jobs
+        The jobs of its manifest; `_JOBS` by default.
 
     Returns
     -------
@@ -126,7 +133,9 @@ def _ci_deploy(session: Session, sha: str = SHA) -> tuple[PrincipalRef, DeployRu
     service.record_deploy(
         plain,
         run,
-        manifest=build_manifest([asset], build_graph([asset]), ResolvedProjectConfig(jobs=_JOBS)),
+        manifest=build_manifest(
+            [asset], build_graph([asset]), ResolvedProjectConfig(jobs=jobs or _JOBS)
+        ),
         code_uri=f"file:///prod/_artifacts/code/analytics/{sha}.tar.gz",
         code_sha256="0" * 64,
         diff=DeployDiff(),
@@ -235,8 +244,8 @@ def test_a_rule_that_does_not_opt_in_starts_nothing_and_names_the_setting(
     assert (outcome.outcome, outcome.reason) == (OUTCOME_NOT_STARTED, REASON_LACKS_RUN)
     assert outcome.message == (
         "job `refresh` was not started: deployer deployed with a CI token, and its CI trust rule "
-        f"does not start the deploy's jobs. Enable it with `lakana ci-trust update {rule_id} "
-        "--start-on-deploy-jobs`, or start the job with "
+        "does not start the deploy's jobs. An instance administrator can turn that on with "
+        f"`lakana ci-trust update {rule_id} --start-on-deploy-jobs`; or start the job with "
         "`lakana job run refresh --repo analytics --env prod` and a stored token that holds RUN."
     )
     assert _runs(session) == []
@@ -375,4 +384,173 @@ def test_the_setting_is_an_audited_rule_change_for_administrators_only(
     assert (created.detail["start_on_deploy_jobs"], updated.detail["start_on_deploy_jobs"]) == (
         False,
         True,
+    )
+
+
+def _plain_deploy(session: Session, world: CiWorld, sha: str, jobs: dict[str, JobConfig]) -> None:
+    """Deploy ``analytics`` to ``prod`` as the administrator, without a CI token.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    world
+        The world.
+    sha
+        The commit.
+    jobs
+        The jobs of the manifest.
+    """
+    service = DeployService(session, _authz(session))
+    view = service.submit(
+        world.admin, "prod", repository="analytics", kind=DeployKind.DEPLOY, ref=sha
+    )
+    run = session.get(DeployRun, view.id)
+    assert run is not None
+    run.status, run.worker_id, run.resolved_sha = DeployStatus.RUNNING, "w1", sha
+    session.commit()
+    asset = make_asset("silver.clean", ())
+    current = service.current_job_version(run.environment_id, run.repository_id)
+    service.record_deploy(
+        world.admin,
+        run,
+        manifest=build_manifest([asset], build_graph([asset]), ResolvedProjectConfig(jobs=jobs)),
+        code_uri=f"file:///prod/_artifacts/code/analytics/{sha}.tar.gz",
+        code_sha256="0" * 64,
+        diff=DeployDiff(),
+        expected_job_version_id=current.id if current is not None else None,
+        worker_id="w1",
+    )
+
+
+_BY_HAND = {"refresh": JobConfig(select=["silver.*"]), "plain": JobConfig(select=["silver.*"])}
+
+
+@pytest.mark.parametrize("change", ["opt_out", "disable"])
+def test_a_rule_changed_during_the_deploy_starts_nothing(
+    session: Session, world: CiWorld, change: str
+) -> None:
+    """The rule is read again after the deploy committed, not taken from when it was claimed."""
+    rule_id = add_rule(session, world, start_on_deploy_jobs=True)
+    ci, run = _ci_deploy(session)
+    if change == "opt_out":
+        rules(session).update(world.admin, rule_id, start_on_deploy_jobs=False)
+    else:
+        rules(session).disable(world.admin, rule_id)
+
+    (outcome,) = _start(session, ci, run)
+
+    assert (outcome.outcome, outcome.reason) == (OUTCOME_NOT_STARTED, REASON_LACKS_RUN)
+    assert outcome.message is not None
+    assert "changed, disabled or deleted since the deploy began" in outcome.message
+    assert _runs(session) == []
+
+
+def test_a_job_no_longer_on_deploy_in_the_current_version_is_not_started(
+    session: Session, world: CiWorld
+) -> None:
+    """A deploy by hand moved the pointer before the start: its job is not `on_deploy`."""
+    add_rule(session, world, start_on_deploy_jobs=True)
+    ci, run = _ci_deploy(session)
+    _plain_deploy(session, world, "2" * 40, _BY_HAND)
+
+    (outcome,) = _start(session, ci, run)
+
+    assert (outcome.outcome, outcome.reason) == (OUTCOME_NOT_STARTED, REASON_REFUSED)
+    assert outcome.message == (
+        "job `refresh` was not started: it no longer has `on_deploy: true` in the project version "
+        "now current in `prod`, and the CI trust rule allows only those. Start it with "
+        "`lakana job run refresh --repo analytics --env prod` and a stored token that holds RUN."
+    )
+    assert _runs(session) == []
+    (dropped,) = _events(session, AuditEventType.JOB_START_DROPPED)
+    assert (dropped.detail["reason"], dropped.detail["ci_rule_id"]) == (
+        "not_on_deploy",
+        str(ci.ci_scope.rule_id),  # ty: ignore
+    )
+
+
+def test_a_waiting_ci_start_whose_job_lost_on_deploy_is_dropped(
+    session: Session, world: CiWorld
+) -> None:
+    add_rule(session, world, start_on_deploy_jobs=True)
+    ci, first = _ci_deploy(session)
+    _start(session, ci, first)
+    ci_again, second = _ci_deploy(session, sha="1" * 40)
+    _start(session, ci_again, second)
+    _plain_deploy(session, world, "2" * 40, _BY_HAND)
+    session.execute(update(Run).values(status=RunStatus.SUCCEEDED))
+    session.commit()
+    row = session.scalars(select(JobSchedule).where(JobSchedule.job == "refresh")).one()
+
+    assert JobService.start_waiting(session, row, caps=_CAPS) is None
+
+    (dropped,) = _events(session, AuditEventType.JOB_START_DROPPED)
+    assert dropped.detail["reason"] == "not_on_deploy"
+    assert len(_runs(session)) == 1
+
+
+def test_a_start_whose_token_names_another_repository_is_not_made(
+    session: Session, world: CiWorld
+) -> None:
+    """The rule's repository binding holds also for the start, not only for the deploy."""
+    add_rule(session, world, start_on_deploy_jobs=True)
+    ci, run = _ci_deploy(session)
+    other = session.scalars(select(Repository.id).where(Repository.name == "other")).one()
+    session.execute(update(CiToken).values(repository_id=other))
+    session.execute(update(CiTrustRule).values(repository_id=other))
+    session.commit()
+
+    (outcome,) = _start(session, ci, run)
+
+    assert (outcome.outcome, outcome.reason) == (OUTCOME_NOT_STARTED, REASON_LACKS_RUN)
+    assert _runs(session) == []
+
+
+def test_a_waiting_start_whose_token_names_another_repository_is_dropped(
+    session: Session, world: CiWorld
+) -> None:
+    add_rule(session, world, start_on_deploy_jobs=True)
+    ci, first = _ci_deploy(session)
+    _start(session, ci, first)
+    ci_again, second = _ci_deploy(session, sha="1" * 40)
+    _start(session, ci_again, second)
+    other = session.scalars(select(Repository.id).where(Repository.name == "other")).one()
+    session.execute(update(CiToken).values(repository_id=other))
+    session.execute(update(CiTrustRule).values(repository_id=other))
+    session.execute(update(Run).values(status=RunStatus.SUCCEEDED))
+    session.commit()
+    row = session.scalars(select(JobSchedule).where(JobSchedule.job == "refresh")).one()
+
+    assert JobService.start_waiting(session, row, caps=_CAPS) is None
+    (dropped,) = _events(session, AuditEventType.JOB_START_DROPPED)
+    assert dropped.detail["reason"] == "requester_lacks_run"
+
+
+def test_a_ci_start_that_merges_into_a_waiting_scheduled_start_keeps_the_rule_in_the_audit(
+    session: Session, world: CiWorld
+) -> None:
+    rule_id = add_rule(session, world, start_on_deploy_jobs=True)
+    ci, first = _ci_deploy(session)
+    _start(session, ci, first)
+    row = session.scalars(select(JobSchedule).where(JobSchedule.job == "refresh")).one()
+    row.pending_start = {
+        "trigger": "schedule",
+        "requested_at": "2026-10-28T03:00:00+00:00",
+        "requested_by": None,
+        "scheduled_for": "2026-10-28T03:00:00+00:00",
+        "missed": 0,
+        "merged": 1,
+    }
+    session.commit()
+    ci_again, second = _ci_deploy(session, sha="1" * 40)
+
+    (outcome,) = _start(session, ci_again, second)
+
+    assert outcome.outcome == OUTCOME_WAITING
+    (waiting,) = _events(session, AuditEventType.JOB_START_WAITING)
+    assert (waiting.detail["trigger"], waiting.detail["merged"]) == ("schedule", 2)
+    assert (waiting.detail["ci_rule_id"], waiting.detail["allowed_by"]) == (
+        str(rule_id),
+        "start_on_deploy_jobs",
     )

@@ -44,7 +44,7 @@ REASON_ERROR = "error"
 
 REASON_LOST = "lost"
 """Shown, never stored: the start stayed ``pending`` longer than the run lease after the deploy
-finished, so the worker stopped before it started the job."""
+finished: the worker stopped before it recorded the start, which may or may not have been made."""
 
 
 @dataclass(frozen=True)
@@ -115,7 +115,10 @@ def run_it_yourself(job: str, repository: str, environment: str) -> str:
 
 
 def lost_message(job: str, repository: str, environment: str) -> str:
-    """Say that a start was never made because the worker stopped.
+    """Say that a start may not have been made because the worker stopped, and how to check.
+
+    The worker may have stopped after the start and before it recorded it, so the run can exist:
+    the message points at the runs list before a start by hand.
 
     Parameters
     ----------
@@ -132,8 +135,10 @@ def lost_message(job: str, repository: str, environment: str) -> str:
         The cause and the command that starts the job.
     """
     return (
-        f"job `{job}` was not started: the worker stopped before it started the job. Start it "
-        f"with {run_it_yourself(job, repository, environment)}."
+        f"job `{job}` may not have been started: the worker stopped before it recorded the "
+        f"start. Look for its run first with `lakana runs list --env {environment} --trigger "
+        f"deploy --job {job}`; if there is none, start it with "
+        f"{run_it_yourself(job, repository, environment)}."
     )
 
 

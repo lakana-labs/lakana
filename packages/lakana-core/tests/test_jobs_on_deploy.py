@@ -548,8 +548,10 @@ def test_a_start_left_pending_past_the_lease_shows_as_lost(
 
     assert (shown.outcome, shown.reason) == (OUTCOME_NOT_STARTED, REASON_LOST)
     assert shown.message == (
-        "job `refresh` was not started: the worker stopped before it started the job. Start it "
-        "with `lakana job run refresh --repo analytics --env dev`."
+        "job `refresh` may not have been started: the worker stopped before it recorded the "
+        "start. Look for its run first with `lakana runs list --env dev --trigger deploy --job "
+        "refresh`; if there is none, start it with "
+        "`lakana job run refresh --repo analytics --env dev`."
     )
 
 

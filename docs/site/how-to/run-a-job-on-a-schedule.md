@@ -368,9 +368,10 @@ the deploy's record, under `job_starts` in the JSON of the deploy
 
 **A start can be lost.** The worker that ran the deploy starts the jobs right after the deploy
 is recorded. If that worker stops in between (it crashed, or its machine went down), the deploy
-stays succeeded and the job does not start; nothing tries again. The deploy's record then shows
-the job as not started with the reason `lost`, and `lakana deploy` prints the warning. Start the
-job by hand, as the warning says.
+stays succeeded and nothing tries again. The deploy's record then shows the job with the reason
+`lost`, and `lakana deploy` prints a warning. The worker may have stopped after it started the
+job and before it recorded that, so look for the job's run first, as the warning says
+(`lakana runs list --trigger deploy --job JOB`), and start it by hand only if there is none.
 
 ## When the project is busy
 
