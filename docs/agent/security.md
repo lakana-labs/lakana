@@ -4084,13 +4084,53 @@ secret's values, and the only way a secret reaches a Python asset (#23). User re
   certificate refusal), within `retries` attempts and `retry_budget_seconds`, honouring
   `Retry-After`; a non-2xx body is never read. An OAuth2 401 calls
   `ClientCredentials.invalidate()` and sends once more with a new token; a second 401 is
-  `SourceRefused` naming `lakana connection test`. A page is decoded as strict UTF-8 first (a BOM dropped; a NUL byte or invalid UTF-8 is a `FileShapeError`), so `json.loads` never guesses UTF-16/32 past the byte-level nesting check; polars reads UTF-8 only, and the OAuth2 token answer is decoded the same way. A page or a JSON/NDJSON file nested more than `_formats.MAX_NESTING` (100) arrays and objects deep is a `FileShapeError` before it is parsed (`nested_deeper`, strings dropped, a running sum in pyarrow): pyarrow and polars recurse on the C stack and segfault the task at about 10,000 levels. A number no column holds (more than 20 digits, a float overflow, `NaN`/`Infinity`) becomes a stand-in through `json.loads`' hooks and a `FileShapeError` naming the field, never a retried "not JSON" or an `inf`. Field names and hosts in messages are cut to 100 characters. Messages show URLs through `shown_url`
+  `SourceRefused` naming `lakana connection test`. A page is decoded as strict UTF-8 first (a BOM dropped; a NUL byte or invalid UTF-8 is a `FileShapeError`), so `json.loads` never guesses UTF-16/32 past the byte-level nesting check; polars reads UTF-8 only, and the OAuth2 token answer is decoded the same way. A CSV, JSON or NDJSON file is checked by `_formats.check_text` before any parser: data that starts with a compression magic number (gzip `1f 8b`, zlib `78` with `01`/`5e`/`9c`/`da`, zstd `28 b5 2f fd`, bzip2 `BZh`, xz `fd 37 7a 58 5a 00`) is a `FileShapeError` (polars inflates gzip, zlib and zstd by their magic, past the byte caps and the nesting check, which count compressed bytes: a 437-byte gzip `.json` crashed the task, M6 review I-1), and so is anything that is not strict UTF-8. A page or a JSON/NDJSON file nested more than `_formats.MAX_NESTING` (100) arrays and objects deep is a `FileShapeError` before it is parsed (`nested_deeper`, strings dropped, a running sum in pyarrow): pyarrow and polars recurse on the C stack and segfault the task at about 10,000 levels. A number no column holds (more than 20 digits, a float overflow, `NaN`/`Infinity`) becomes a stand-in through `json.loads`' hooks and a `FileShapeError` naming the field, never a retried "not JSON" or an `inf`. Field names and hosts in messages are cut to 100 characters. Messages show URLs through `shown_url`
   (escaped first, then userinfo, fragment and query values dropped). Each OAuth2 token, also a
   refreshed one, is registered as a secret when it arrives.
+- **The SQL helper** (`lakana.ingest.sql`) only reads. Values reach a query only as bound
+  parameters of `:name` placeholders (`_params.translate`, a tokenizer that skips literals,
+  comments and `::`), never formatted into the asset's SQL. Every read is read-only at the
+  source: PostgreSQL with `default_transaction_read_only=on`, SQLite on a `file:` URI with
+  `mode=ro` (`ATTACH` and `DETACH` refused: SQLite would create the named file), MariaDB and MySQL
+  with `SET SESSION TRANSACTION READ ONLY` and `START TRANSACTION READ ONLY`. MariaDB commits
+  before DDL, outside that transaction, so it gets only a statement whose first keyword is
+  `SELECT`, `WITH`, `VALUES` or `TABLE`, never `INTO OUTFILE`/`DUMPFILE`; its tokenizer follows the
+  session's `sql_mode` (an unknown mode, or a mode and server status that disagree about
+  backslashes, sends nothing) and its values are plain scalars. Under the Docker runner libpq
+  dials the relay (`hostaddr`) while `host` stays the connection's, so `verify-full` checks the
+  real name; PyMySQL gets a socket to the relay and a TLS context for the real host.
+  **Residuals, accepted:** PyMySQL interpolates values client-side with its own escaping (no
+  server-side prepared statement), so the wire text holds them, though the asset's SQL never
+  does; and read-only is a property of the transaction, so a source user with write rights could
+  still call a function with side effects inside a `SELECT`. The docs tell teams to give a
+  connection a read-only database user.
+- **A `tcp` connection's TLS is the team's driver's.** The relay forwards bytes it never reads; a
+  client checks the certificate for the real host only if it takes that name apart from the
+  address it dials (the SQL Server recipe passes `sock=` to the relay and the real host as
+  `dsn`). **Residual, accepted:** with python-tds 1.17.1 and pyOpenSSL 26.2 or later the name is
+  checked against the certificate's CN only (a mismatch fails closed before any login; a name in
+  the SAN alone cannot work); `docs/site/how-to/read-from-a-sql-server-database.md` says so and
+  recommends a read-only login.
 - **Residual, accepted.** Deployed code sees the credentials of the connections its asset
-  declares and can send them to any host the task can reach (until task egress narrows that to
-  the declared endpoints). Reviewing an asset's `connections` is reviewing what it may read. The
-  fetched values live in the task process's memory, which the task's own code can read anyway.
+  declares. Under the docker runner it can send them to the endpoints of those connections only
+  (task egress); under the local runner, to any host the worker reaches. Reviewing an asset's
+  `connections` is reviewing what it may read and where it may send. The fetched values live in
+  the task process's memory, which the task's own code can read anyway.
+- **`lakana load` writes bronze only, checked before the body** (`POST
+  /api/v1/environments/{env}/namespaces/{path}/tables/{name}/load`,
+  `CatalogService.check_can_load`). In this
+  order: the target's first namespace segment is `bronze` (`catalog.loads.require_bronze`, a 422
+  with the same text for the CLI, the SDK and a raw request), the caller's write right
+  (`check_can_append`, or `check_can_replace` with `CREATE_TABLE` for a first load), the
+  environment's write guard (a protected environment needs break glass with
+  `MANAGE_ENVIRONMENT`, also for a dry run, so nothing is uploaded before the 403), then the
+  namespace and the snapshot pin; rights before existence, as every catalog precheck. The body
+  then takes the governed Arrow path of `table append` (byte cap, type allowlist, full
+  validation), and the write is audited by the core write it calls (`TABLE_APPENDED` or
+  `TABLE_WRITE`; there is no `via: load` detail). The CLI bounds what it reads before it uploads:
+  the file's size, then Parquet and Arrow batches counted as they decode (dictionaries decoded
+  first), compressed Arrow IPC refused. The generic append and
+  replace routes, which assets use, keep accepting any layer.
 
 ## Audit log (M3e — shipped)
 

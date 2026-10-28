@@ -15,6 +15,7 @@ import hmac
 import ipaddress
 import json
 import os
+import secrets
 import socket
 import ssl
 import threading
@@ -64,7 +65,9 @@ AZURITE = (
     "mcr.microsoft.com/azure-storage/azurite:3.37.0"
     "@sha256:830430c1da1a2d537e08f3e6764dd1f5ae00cf0346bcaf625b968ec3f0971fd5"
 )
-_S3_KEY_ID, _S3_SECRET = "lakanatest", "lakanatestsecret12345"
+_S3_KEY_ID = "lakanatest"
+_S3_KEY_VALUE = secrets.token_urlsafe(24)
+"""The S3 emulator's key, made for each run: the test writes it into the emulator's config."""
 _AZURE_ACCOUNT = "devstoreaccount1"
 # Azurite's well-known development key, published in its documentation; not a secret.
 _AZURE_KEY = (
@@ -184,7 +187,7 @@ def seaweedfs(pki: _Pki) -> Iterator[str]:
         "identities": [
             {
                 "name": "lakanatest",
-                "credentials": [{"accessKey": _S3_KEY_ID, "secretKey": _S3_SECRET}],
+                "credentials": [{"accessKey": _S3_KEY_ID, "secretKey": _S3_KEY_VALUE}],
                 "actions": ["Admin", "Read", "Write"],
             }
         ]
@@ -205,7 +208,7 @@ def seaweedfs(pki: _Pki) -> Iterator[str]:
         client = Minio(
             endpoint.removeprefix("https://"),
             access_key=_S3_KEY_ID,
-            secret_key=_S3_SECRET,
+            secret_key=_S3_KEY_VALUE,
             secure=True,
             http_client=pool,
         )
@@ -494,7 +497,7 @@ def store(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> _K
             "s3",
             {"bucket": _BUCKET, "region": "us-east-1", "endpoint": endpoint},
             {"access_key_id": _S3_KEY_ID},
-            {"secret_access_key": _S3_SECRET},
+            {"secret_access_key": _S3_KEY_VALUE},
         )
     if request.param == "gcs":
         monkeypatch.setattr(_stores, "GCS_BASE_URL", request.getfixturevalue("fake_gcs"))
@@ -811,5 +814,5 @@ def store_s3(seaweedfs: str) -> _Kind:
         "s3",
         {"bucket": _BUCKET, "region": "us-east-1", "endpoint": seaweedfs},
         {"access_key_id": _S3_KEY_ID},
-        {"secret_access_key": _S3_SECRET},
+        {"secret_access_key": _S3_KEY_VALUE},
     )

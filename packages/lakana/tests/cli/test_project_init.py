@@ -793,6 +793,7 @@ def test_the_files_template_readme_says_the_operator_names_the_root(tmp_path: Pa
 
     assert "LAKANA_RUN__INGESTION_ROOTS" in readme
     assert "LAKANA_LAUNCHER__INGESTION_ROOTS" in readme
+    assert "LAKANA_INGESTION_ROOTS in the Compose bundle's .env" in readme
 
 
 def test_an_unknown_template_lists_the_three(tmp_path: Path) -> None:

@@ -261,6 +261,31 @@ and task container itself. A file with a private key, without a certificate or o
 the worker with a message that names the cause:
 [The trust bundle of builds and tasks](../reference/network-settings.md#the-trust-bundle-of-builds-and-tasks).
 
+### Files on this host
+
+A task reads files on the Docker host through a `directory` or `sqlite-file` connection, which
+names an **ingestion root**: a host directory the operator gives a name in `.env`. Nothing else on
+the host is visible to a task. To let tasks read the exports in `/srv/exports`:
+
+1. Make the directory readable by everyone, as tasks run as a user of their own (uid 10001,
+   group 10003): `chmod 755 /srv/exports` and `chmod 644` for its files. Neither it nor any
+   directory above it may be writable by anyone but root, and it must not be a symbolic link.
+2. Name it in `.env`, as a JSON object of root name to absolute directory:
+   `LAKANA_INGESTION_ROOTS='{"exports": "/srv/exports"}'`.
+3. Restart the launcher with the new value: `docker compose up -d --wait`.
+4. Create a connection that names the root and a path below it (`.` for the root itself):
+   `lakana connection create exports --env dev --kind directory --root exports --path daily`.
+
+Each task gets only the roots its asset's connections name, mounted read-only at
+`/ingest/<name>`; the files never pass through the server. The launcher looks at each root when it
+starts: it stops on a system directory (`/`, `/etc`, `/run`, `/var/lib/docker` and the others in
+[Ingestion roots](run-python-tasks-in-containers.md#ingestion-roots)), and refuses tasks for a
+root that does not exist or holds a socket, a pipe or a device, logging why. `lakana connection
+test exports --env dev` shows whether a task would see the directory. The default, `{}`, gives
+tasks no host directory. With `LAKANA_RUNNER=local` the workers read
+`LAKANA_RUN__INGESTION_ROOTS` instead, which needs the directory mounted into the `worker`
+service by hand.
+
 `LAKANA_TASK_TOKENS__MAX_TTL_SECONDS` caps the lifetime of every task token, and the server and the
 worker both read it. If you change it, set it to the same value on the `server` and the `worker`
 service: a cap lowered on the server only is not applied to the tokens the worker mints.

@@ -2,9 +2,11 @@
 
 The REST recipes read an HTTPS API that the example starts on this machine (stand_in.py). Its
 certificate is signed by a CA made here, which the connection is given with `--ca-file`, as a
-team gives the CA of an internal API. Nothing is kept: every run makes new keys.
+team gives the CA of an internal API. Nothing is kept: every run makes new keys. Each further
+ADDRESS (an IP address) is added to the certificate's names: the Compose smoke test serves its
+sources on the host's own address.
 
-Usage: python3 make_certs.py DIRECTORY   (writes ca.pem, server.pem and server-key.pem)
+Usage: python3 make_certs.py DIRECTORY [ADDRESS ...]   (writes ca.pem, server.pem, server-key.pem)
 """
 
 import datetime as dt
@@ -18,6 +20,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
 directory = Path(sys.argv[1])
+addresses = [ipaddress.ip_address(value) for value in ("127.0.0.1", *sys.argv[2:])]
 directory.mkdir(parents=True, exist_ok=True)
 now = dt.datetime.now(dt.UTC)
 ca_key = ec.generate_private_key(ec.SECP256R1())
@@ -59,7 +62,7 @@ server = (
     .not_valid_after(now + dt.timedelta(days=1))
     .add_extension(
         x509.SubjectAlternativeName(
-            [x509.DNSName("localhost"), x509.IPAddress(ipaddress.ip_address("127.0.0.1"))]
+            [x509.DNSName("localhost"), *(x509.IPAddress(address) for address in addresses)]
         ),
         critical=False,
     )

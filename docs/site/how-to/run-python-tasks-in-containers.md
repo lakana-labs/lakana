@@ -278,7 +278,8 @@ A `directory` or `sqlite-file` connection names a root (`--address
 the launcher with `LAKANA_LAUNCHER__INGESTION_ROOTS` for the docker runner, the worker itself with
 `LAKANA_RUN__INGESTION_ROOTS` for the local runner. Both take the same JSON object, such as
 `{"shared": "/srv/landing"}`, and refuse the same directories; a refused value stops the
-launcher or the worker at start, naming the setting. A task whose connection names a root its
+launcher or the worker at start, naming the setting. The Compose bundle sets the launcher's from
+`LAKANA_INGESTION_ROOTS` in `.env` ([Files on this host](deploy-with-compose.md#files-on-this-host)). A task whose connection names a root its
 worker lacks fails without retry: ``` `exports` names ingestion root `shared`, which this worker
 does not have ... ```.
 

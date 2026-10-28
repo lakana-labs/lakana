@@ -135,6 +135,9 @@ services:
       LAKANA_LAUNCHER__IMAGES: '{"3.11": "${LAKANA_TASK_IMAGE:?set LAKANA_TASK_IMAGE in .env, see the upgrade notes}-py3.11", "3.12": "${LAKANA_TASK_IMAGE}-py3.12", "3.13": "${LAKANA_TASK_IMAGE}-py3.13", "3.14": "${LAKANA_TASK_IMAGE}-py3.14"}'
       # Ranges egress and relays refuse besides Docker's gateways: this host's LAN address (.env).
       LAKANA_LAUNCHER__EGRESS_REFUSED: ${LAKANA_EGRESS_REFUSED:-}
+      # Host directories a task's `directory` and `sqlite-file` connections read, mounted
+      # read-only (.env). Blank, as in a .env that predates the key, means none.
+      LAKANA_LAUNCHER__INGESTION_ROOTS: ${LAKANA_INGESTION_ROOTS:-}
     volumes:
       - ${LAKANA_DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
       - launcher-socket:/run/lakana-launcher

@@ -4,10 +4,11 @@ It serves `GET /api/items` from the file `items.json` in DIRECTORY, two items a 
 list under `value` and the next page's link under `@odata.nextLink`. `updated_since` (ISO 8601)
 keeps only the items whose `updated_at` is later. Every request must carry the bearer token in
 `token.txt`; the base URL `/api` answers an authorised `GET` with an empty object, as the
-connection test asks for it. TLS 1.2 or newer, with the certificate make_certs.py wrote. The port
-is chosen by the system and written to `port` once the server listens.
+connection test asks for it. TLS 1.2 or newer, with the certificate make_certs.py wrote. It
+listens on ADDRESS and PORT (127.0.0.1 and a port the system chooses, by default) and writes the
+port to `port` once it listens.
 
-Usage: python3 stand_in.py DIRECTORY
+Usage: python3 stand_in.py DIRECTORY [ADDRESS PORT]
 """
 
 import datetime as dt
@@ -20,6 +21,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlsplit
 
 directory = Path(sys.argv[1])
+address, port = (sys.argv[2], int(sys.argv[3])) if len(sys.argv) > 2 else ("127.0.0.1", 0)
 token = (directory / "token.txt").read_text().strip()
 PAGE = 2
 
@@ -115,7 +117,7 @@ class Server(ThreadingHTTPServer):
 context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
 context.minimum_version = ssl.TLSVersion.TLSv1_2
 context.load_cert_chain(directory / "server.pem", directory / "server-key.pem")
-server = Server(("127.0.0.1", 0), Handler)
+server = Server((address, port), Handler)
 server.socket = context.wrap_socket(server.socket, server_side=True)
 (directory / "port").write_text(f"{server.server_address[1]}\n")
 server.serve_forever()

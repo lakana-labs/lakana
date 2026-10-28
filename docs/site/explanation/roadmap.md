@@ -106,16 +106,30 @@ dependency updates and a batch of small issues, then M6 ingestion, M8d data mode
 interface and sign-in, a small private test round on a hosted instance, M7c (the public beta,
 #33), M8, M8b, M8c, M9, M10 and v1.0.0.
 
+After 0.20.0, M6, ingestion (#1), was built; it ships with the next release (see the
+[notes for the next release](upgrades.md#notes-for-the-next-release)). An administrator registers
+a source once per environment as a named connection (#85), and `lakana connection test` checks
+its address and credentials; a Python asset declares the connections it reads, fetches their
+credentials at run time (#23), and under the docker runner its task reaches exactly their
+endpoints, through the egress proxy or a relay of its own (#308), trusting the operator's
+certificate authority (#292). The helpers in `lakana[assets]` read files from directories, S3,
+GCS, Azure and HTTPS (#26), PostgreSQL, SQLite, MariaDB and MySQL (#27) and REST APIs, with
+OAuth2 (#28); assets replace, append or merge. `lakana load` loads a local file into bronze
+(#29), and `lakana init --template` starts a project from a tested asset for files, SQL or REST,
+with a recipe for SQL Server (#56). The next elements are M8d data modelling, M7 web interface
+and sign-in, a small private test round on a hosted instance, M7c (the public beta, #33), M8,
+M8b, M8c, M9, M10 and v1.0.0.
+
 ## To v1.0.0
 
-The order up to the public beta is: M6 ingestion, M8d data modelling, M7 web interface and
+The order up to the public beta is: M6 ingestion (built), M8d data modelling, M7 web interface and
 sign-in, a small private test round on a hosted instance, and then M7c, the public beta. Dates
 follow the plan. The reasons: the first audience, teams without a senior data engineer, needs
 the web interface and real sign-in from the start; the strict data-model rules (a declared kind,
 grain, key and references, with generated checks, #250) should exist before anyone builds projects
 on Lakana; and the interface then shows model metadata from its first version. Ingestion (M6)
-comes first (task isolation, M7b, is built): a new team's first job is getting its data in, so
-the beta ships with the ingestion helpers and named connections.
+came first, after task isolation (M7b): a new team's first job is getting its data in, so the
+beta ships with the ingestion helpers and named connections.
 
 1. **M5d, triggers, data quality checks and notifications (built).** Runs start by hand, on a schedule
    or through an API call. A check, a SQL file that must return no rows, can block, keep or
@@ -135,24 +149,26 @@ the beta ships with the ingestion helpers and named connections.
    only its package indexes, through an egress proxy. The Compose bundle uses the docker runner
    by default, and a protected environment runs Python tasks only in containers. See
    [Run Python tasks in containers](../how-to/run-python-tasks-in-containers.md).
-4. **M6, ingestion.** An administrator registers a source once as a named connection (#85), per
+4. **M6, ingestion (built, next release).** An administrator registers a source once as a named connection (#85), per
    environment, with its address and credentials; a connection is managed through the CLI and the
    API, and in the web interface from M7. A Python asset declares the connections it uses in
    its header, and an ingestion task reaches only those connections and nothing else on the
    network (#308). Helpers in `lakana[assets]` read files (S3, GCS, Azure, HTTPS and
-   directories), SQL databases (PostgreSQL, SQLite and MariaDB) and REST APIs. The write modes
+   directories), SQL databases (PostgreSQL, SQLite, MariaDB and MySQL) and REST APIs. The write modes
    are `replace`, `append` and `merge` (an upsert); `history` follows in M8d. `lakana load`
    loads a local file into bronze, and stays as a convenience for exploration and tests. A
    connection is only a name for an address and a secret: Lakana runs no connectors, and the
    asset's helper does the reading. Done when a new team loads data from each kind of source
    with a short asset, merges a changing source into a table, or loads a local file with
-   `lakana load`.
+   `lakana load`: the Compose smoke test runs the three templates on a schedule against a file
+   directory, a PostgreSQL database and a REST API outside the stack, and every helper has a
+   tested recipe.
 5. **M8d, data modelling (epic #249).** Decided on 2026-10-20; on 2026-10-24 it moved before
     the public beta, after M6 and before M7. Opinionated support for medallion layers (bronze, silver, gold) and
     Kimball-lite star schemas, with optional wide tables. The parts: model metadata in the asset
     header (#250); translated labels and descriptions with a main language (#251); layer rules,
     first opt-in and then enforced (#252); the write mode `history` (SCD type 2) (#253); `merge`
-    (upsert) comes earlier, with M6; a template and a guide (#254); and measures as
+    (upsert) came earlier, with M6; a template and a guide (#254); and measures as
     metadata only, with no metrics layer (#255). Done when a new team can start from the
     template, build a star schema with a history dimension, and see its layers and labels in the
     catalog.

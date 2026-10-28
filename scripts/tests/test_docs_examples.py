@@ -7,6 +7,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+import yaml
 
 from scripts.docs_blocks import read_source
 
@@ -254,7 +255,7 @@ def _run_with_budget_file(
     environment = {
         key: value
         for key, value in os.environ.items()
-        if key not in ("LAKANA_DOCS_EXAMPLE_BUDGET", "LAKANA_DOCS_CAPTURE", "LAKANA_DOCS_UV_CACHE")
+        if key not in ("LAKANA_DOCS_EXAMPLE_BUDGET", "LAKANA_DOCS_CAPTURE", "UV_CACHE_DIR")
     }
     environment.update(
         {
@@ -478,40 +479,30 @@ def test_a_pipeline_status_survives_a_region(tmp_path: Path) -> None:
 
 
 _RECORD_CACHES = (
-    'echo "$UV_CACHE_DIR $(cd "$HOME/.cache/lakana-worker/uv" && pwd -P) $HOME" > "$RECORD"\n'
+    'echo "uv=${UV_CACHE_DIR:-unset} link=$(test -L "$HOME/.cache/lakana-worker/uv" && echo yes'
+    ' || echo no)" > "$RECORD"\n'
 )
-"""An example that records its `UV_CACHE_DIR`, where its worker's uv cache resolves, and `HOME`."""
+"""An example that records the `UV_CACHE_DIR` it got and whether its worker's uv cache is a link."""
 
 
-def test_the_examples_share_one_uv_cache_outside_their_homes(tmp_path: Path) -> None:
-    """Uv's cache and the worker's lie outside the example's HOME, in the run's own directory.
+def test_each_example_keeps_its_uv_caches_in_its_own_home(tmp_path: Path) -> None:
+    """The runner sets no shared uv cache; each example's caches stay in its private HOME.
 
-    The runner makes that directory once, before the first example, so every example of the run
-    gets the same one; it is removed when the run ends.
+    A shared one saved no time in CI (12m34s cold, 12m48s warm), so it was removed.
     """
     record = tmp_path / "record"
 
     result = _run_with_budget_file(tmp_path / "t", None, _RECORD_CACHES, RECORD=str(record))
 
     assert result.returncode == 0, result.stderr
-    uv_cache, worker_cache, home = record.read_text().split()
-    assert Path(uv_cache).parent == Path(worker_cache).parent
-    assert uv_cache != worker_cache
-    assert not uv_cache.startswith(home)
-    assert not worker_cache.startswith(home)
-    assert not Path(uv_cache).parent.exists()
+    assert record.read_text().split() == ["uv=unset", "link=no"]
 
 
-def test_lakana_docs_uv_cache_keeps_the_shared_cache(tmp_path: Path) -> None:
-    """`LAKANA_DOCS_UV_CACHE` names a directory that outlives the run, for CI's cache."""
-    record, kept = tmp_path / "record", tmp_path / "kept"
+def test_the_docs_examples_job_restores_no_uv_cache() -> None:
+    """No `actions/cache` step and no cache variable: the shared cache is gone for good."""
+    job = yaml.safe_load((ROOT / ".github" / "workflows" / "ci.yml").read_text())["jobs"][
+        "docs-examples"
+    ]
 
-    result = _run_with_budget_file(
-        tmp_path / "t", None, _RECORD_CACHES, RECORD=str(record), LAKANA_DOCS_UV_CACHE=str(kept)
-    )
-
-    assert result.returncode == 0, result.stderr
-    uv_cache, worker_cache, _ = record.read_text().split()
-    assert Path(uv_cache) == kept.resolve() / "uv"
-    assert Path(worker_cache) == kept.resolve() / "worker-uv"
-    assert Path(uv_cache).is_dir()
+    assert not [s for s in job["steps"] if "actions/cache@" in str(s.get("uses", ""))]
+    assert "DOCS_UV_CACHE" not in str(job)

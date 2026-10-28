@@ -22,7 +22,9 @@ from lakana.cli._state import CliError
 from lakana.cli.deploy import _init
 from lakana.errors import ConfigError
 
-_SAFE = re.compile(r"[A-Za-z0-9_\-+/=.:]*")
+_SAFE = re.compile(r"[A-Za-z0-9_\-+/=.:{}]*")
+"""What a generated value may hold. Braces are plain text to Compose without a `$` (the empty
+JSON object of `LAKANA_INGESTION_ROOTS`)."""
 
 
 def _env(path: Path) -> dict[str, str]:
@@ -1049,6 +1051,31 @@ def test_the_launcher_refuses_the_ranges_of_the_env_file(tmp_path: Path, release
     at = lines.index("LAKANA_EGRESS_REFUSED=''")
     assert lines[at - 1].startswith("# ") and "LAN address" in lines[at - 1]
     assert lines[at - 2].startswith("LAKANA_EGRESS_UPSTREAM_PROXY=")
+
+
+def test_the_launcher_gets_the_ingestion_roots_of_the_env_file(
+    tmp_path: Path, released: None
+) -> None:
+    """`LAKANA_INGESTION_ROOTS` reaches the launcher only; `{}` by default, with a comment above.
+
+    Compose's default is blank, which the launcher reads as no roots, so a bundle whose `.env`
+    predates the key starts as before.
+    """
+    services = _services(tmp_path)
+    lines = (tmp_path / "b" / ".env").read_text().splitlines()
+
+    assert services["launcher"]["environment"]["LAKANA_LAUNCHER__INGESTION_ROOTS"] == (
+        "${LAKANA_INGESTION_ROOTS:-}"
+    )
+    assert [name for name, spec in services.items() if "INGESTION_ROOTS" in str(spec)] == [
+        "launcher"
+    ]
+    at = lines.index("LAKANA_INGESTION_ROOTS='{}'")
+    comment = lines[at - 1]
+    assert comment.startswith("# ")
+    for words in ("JSON object", "absolute", "read-only", "directory", "sqlite-file"):
+        assert words in comment, words
+    assert lines[at - 2] == "LAKANA_EGRESS_REFUSED=''"
 
 
 def test_the_env_file_explains_the_four_task_container_keys(tmp_path: Path, released: None) -> None:

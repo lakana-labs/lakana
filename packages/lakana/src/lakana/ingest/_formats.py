@@ -40,6 +40,52 @@ _NOT_BRACKET = bytes(b for b in range(256) if b not in b"[]{}")
 _STEPS = bytes.maketrans(b"[{]}", b"\x01\x01\xff\xff")
 
 
+_COMPRESSED = (
+    (b"\x1f\x8b", "gzip"),
+    (b"\x28\xb5\x2f\xfd", "zstd"),
+    (b"BZh", "bzip2"),
+    (b"\xfd7zXZ\x00", "xz"),
+    *((b"\x78" + level, "zlib") for level in (b"\x01", b"\x5e", b"\x9c", b"\xda")),
+)
+"""The first bytes of compressed data. Polars inflates gzip, zlib and zstd input it recognises
+this way, past the byte caps and the nesting check, which count the compressed bytes; bzip2 and
+xz are refused too, in case a later polars learns them."""
+_TEXT = frozenset({"csv", "json", "ndjson"})
+"""The formats read as text, which must be uncompressed UTF-8."""
+
+
+def check_text(data: bytes, name: str) -> None:
+    """Refuse a text file that is compressed or not UTF-8, before any parser sees it.
+
+    Parameters
+    ----------
+    data
+        The file's bytes.
+    name
+        The file, for messages (already escaped).
+
+    Raises
+    ------
+    FileShapeError
+        For data that starts like a compressed file, or that is not strict UTF-8 (a UTF-8 byte
+        order mark is allowed).
+    """
+    for magic, kind in _COMPRESSED:
+        if data.startswith(magic):
+            raise FileShapeError(
+                f"`{name}`: is {kind}-compressed, and Lakana reads CSV, JSON and NDJSON files "
+                "uncompressed only: decompress it at the source, or export it as Parquet"
+            )
+    try:
+        data.removeprefix(b"\xef\xbb\xbf").decode("utf-8")
+    except UnicodeDecodeError as exc:
+        at = exc.start + (3 if data.startswith(b"\xef\xbb\xbf") else 0)
+        raise FileShapeError(
+            f"`{name}`: is not UTF-8 text (byte {data[at]:#04x} at position {at}); save or "
+            "export it as UTF-8"
+        ) from None
+
+
 def format_of(name: str, given: str | None) -> str:
     """Decide a file's format from `format=` or its extension.
 
@@ -219,8 +265,9 @@ def parse(
         For ``sheet=`` on a file without sheets, or ``header_row`` other than 1 on a file
         without a header row.
     FileShapeError
-        When the file cannot be parsed, or a JSON file nests deeper than `MAX_NESTING`; the
-        message names the file and the problem.
+        When the file cannot be parsed, a CSV, JSON or NDJSON file is compressed or not UTF-8
+        (`check_text`), or a JSON file nests deeper than `MAX_NESTING`; the message names the
+        file and the problem.
     """
     import polars as pl
 
@@ -237,6 +284,8 @@ def parse(
         # A missing engine is the worker's fault, not the file's: let the ImportError out.
         importlib.import_module("fastexcel")
 
+    if format in _TEXT:
+        check_text(data, name)
     if format in ("json", "ndjson") and nested_deeper(data):
         raise FileShapeError(
             f"`{name}`: nests arrays and objects deeper than {MAX_NESTING} levels, which Lakana "

@@ -146,13 +146,18 @@ of the files. Pass `schema=` with one type for the column.
 
 | Extension | Reader |
 |---|---|
-| `.csv` | Polars CSV |
+| `.csv` | Polars CSV, UTF-8 |
 | `.parquet` | Polars Parquet |
 | `.json` | Polars JSON (an array of objects), UTF-8 |
 | `.ndjson`, `.jsonl` | Polars newline-delimited JSON, UTF-8 |
 | `.xlsx`, `.xlsm`, `.xlsb`, `.xls`, `.ods` | `fastexcel` (calamine) |
 
-Any other extension needs `format=`. `sheet=` on a file without sheets, and `header_row=` other
+CSV, JSON and NDJSON files must be uncompressed UTF-8 text (a UTF-8 byte order mark is
+allowed). A file that starts like gzip, zlib, zstd, bzip2 or xz data, whatever its name, or that
+holds bytes that are not UTF-8, fails with a `FileShapeError` before it is parsed (`` `exports/a.csv`:
+is gzip-compressed, and Lakana reads CSV, JSON and NDJSON files uncompressed only ... ``):
+decompress it at the source, or export it as Parquet, which is compressed inside and read as
+such. Any other extension needs `format=`. `sheet=` on a file without sheets, and `header_row=` other
 than `1` on JSON or Parquet, are refused rather than ignored. `schema=` names must exist in each
 file: a column it names that a file lacks fails, naming the file and the column.
 
@@ -207,8 +212,9 @@ What bounds the memory of a read:
   reader stops decoding after that many rows, so a small file that holds a billion rows is
   refused, not decoded. A row can still be wide; lower `max_rows` (or `max_file_bytes`) when the
   sender is not someone you trust.
-- **CSV, NDJSON, JSON:** text, decoded to a few times its size; the byte caps and `max_rows`
-  bound it.
+- **CSV, NDJSON, JSON:** uncompressed UTF-8 text, decoded to a few times its size; the byte caps
+  and `max_rows` bound it. A compressed file is refused before it is parsed (see
+  [Formats](#formats)), so it cannot inflate past the caps.
 
 The worker's memory limit is the last backstop and ends the task when it is passed.
 
@@ -242,7 +248,7 @@ could end differently (the task is retried only when it could):
 | Class | Meaning | Retried |
 |---|---|---|
 | `UsageError` | The call or the setup is wrong: a connection of another kind, an unknown extension or `format=`, `sheet=` or `header_row=` where they mean nothing, a cap that is not a positive whole number, `since=` of the wrong type, `modified_from=` without `since=`, a wildcard in an `http` path; a missing secret or one that is no service-account key, a secret value no HTTP header can carry, a token endpoint that answers without a bearer token, a CA certificate that is not PEM, a trust bundle the worker cannot read. Every attempt fails the same way. | No |
-| `FileShapeError` (a `SourceError`) | The files are wrong: types that do not fit across files, a `schema=` column a file lacks, a `schema=` value that is no Polars type, a file that cannot be parsed, a JSON file that nests arrays and objects more than 100 levels deep, a bucket key with an empty, `.` or `..` segment. The same files fail every attempt. | No |
+| `FileShapeError` (a `SourceError`) | The files are wrong: types that do not fit across files, a `schema=` column a file lacks, a `schema=` value that is no Polars type, a file that cannot be parsed, a CSV, JSON or NDJSON file that is compressed or not UTF-8, a JSON file that nests arrays and objects more than 100 levels deep, a bucket key with an empty, `.` or `..` segment. The same files fail every attempt. | No |
 | `SourceRefused` (a `SourceError`) | The store or server refused the credential (HTTP 401 or 403), an OAuth2 token endpoint refused the client (400 or 401) or answered with a redirect, another 4xx, a 1xx or a 2xx other than 200, its certificate is not trusted, it answered with a redirect, or a request would go to another host than the `base_url`'s. Every attempt would; the message names the next step. | No |
 | `SourceError` | The store or server failed or could not be reached (a network error, a timeout, HTTP 404, 429 or 5xx, the egress proxy's refusal), which may pass. | Yes |
 | `DirectoryError` | A directory or file is missing, a link, not a directory, or denied; or the pattern is refused. The same path fails every attempt. | No |

@@ -1225,6 +1225,114 @@ def test_json_nested_deeper_than_the_limit_is_refused_before_polars(
     )
 
 
+def _compressed(kind: str, data: bytes) -> bytes:
+    """Compress bytes as `kind`, the way a source might hand a file over.
+
+    Parameters
+    ----------
+    kind
+        ``gzip``, ``zlib``, ``zstd``, ``bzip2`` or ``xz``.
+    data
+        What to compress.
+
+    Returns
+    -------
+    bytes
+        The compressed bytes; for zstd without the standard library's module (before Python
+        3.14), its magic number and the data, which is all the check reads.
+    """
+    import bz2
+    import gzip
+    import lzma
+    import zlib
+
+    if kind == "zstd":
+        try:
+            from compression import zstd  # ty: ignore[unresolved-import]
+        except ImportError:
+            return b"\x28\xb5\x2f\xfd" + data
+        return zstd.compress(data)
+    compressors = {
+        "gzip": gzip.compress,
+        "zlib": zlib.compress,
+        "bzip2": bz2.compress,
+        "xz": lzma.compress,
+    }
+    return compressors[kind](data)
+
+
+_BOMBS = {
+    "json": b"[" + b'{"a": ' + b"[" * 200_000 + b"1" + b"]" * 200_000 + b"}]",
+    "ndjson": b'{"a": ' + b"[" * 200_000 + b"1" + b"]" * 200_000 + b"}\n",
+    "csv": b"a\n" + b"x" * 4_000_000 + b"\n",
+}
+"""Tiny once compressed: 200,000 levels crash polars, and the CSV value is 4 MB."""
+
+
+@pytest.mark.parametrize("format", ["csv", "json", "ndjson"])
+@pytest.mark.parametrize("kind", ["gzip", "zlib", "zstd", "bzip2", "xz"])
+def test_a_compressed_text_file_is_refused_before_any_parser(
+    monkeypatch: pytest.MonkeyPatch, format: str, kind: str
+) -> None:
+    """Polars inflates gzip, zlib and zstd by their magic: past the byte caps and the nesting check.
+
+    A 437-byte gzip `.json` nested 200,000 deep crashed the task. Each kind is refused from its
+    first bytes, before a parser runs, naming the file and what to do.
+    """
+
+    def never(*args: object, **kwargs: object) -> None:
+        raise AssertionError("reached polars")
+
+    for reader in ("read_csv", "read_json", "read_ndjson"):
+        monkeypatch.setattr(pl, reader, never)
+    data = _compressed(kind, _BOMBS[format])
+
+    with pytest.raises(_formats.FileShapeError) as caught:
+        _formats.parse(data, name=f"exports/a.{format}", format=format)
+
+    assert str(caught.value) == (
+        f"`exports/a.{format}`: is {kind}-compressed, and Lakana reads CSV, JSON and NDJSON "
+        "files uncompressed only: decompress it at the source, or export it as Parquet"
+    )
+
+
+@pytest.mark.parametrize("format", ["csv", "json", "ndjson"])
+def test_a_text_file_that_is_not_utf_8_is_refused_before_any_parser(
+    monkeypatch: pytest.MonkeyPatch, format: str
+) -> None:
+    """Strict UTF-8 first, as `rest.read` decodes a page: nothing binary reaches polars."""
+
+    def never(*args: object, **kwargs: object) -> None:
+        raise AssertionError("reached polars")
+
+    for reader in ("read_csv", "read_json", "read_ndjson"):
+        monkeypatch.setattr(pl, reader, never)
+
+    with pytest.raises(_formats.FileShapeError) as caught:
+        _formats.parse(b"name\nJos\xe9\n", name=f"exports/a.{format}", format=format)
+
+    assert str(caught.value) == (
+        f"`exports/a.{format}`: is not UTF-8 text (byte 0xe9 at position 8); save or export "
+        "it as UTF-8"
+    )
+
+
+@pytest.mark.parametrize(
+    "data",
+    [b"x,y\n1,2\n", b"\xef\xbb\xbfx,y\n1,2\n"],
+    ids=["starts-with-x", "byte-order-mark"],
+)
+def test_a_csv_that_only_looks_compressed_is_read(data: bytes) -> None:
+    """`x` is zlib's first byte: a header starting with it is text, and a BOM is fine.
+
+    Only `x` followed by a zlib level byte (01, 5e, 9c, da) is taken for zlib, as polars itself
+    takes it (polars reads `x^y` as an empty zlib stream).
+    """
+    frame = _formats.parse(data, name="exports/a.csv", format="csv")
+
+    assert frame.height >= 1
+
+
 @pytest.mark.parametrize("format", ["json", "ndjson"])
 @pytest.mark.parametrize("encoding", ["utf-16-le", "utf-16", "utf-32"])
 def test_json_in_another_encoding_than_utf_8_is_a_shape_error(format: str, encoding: str) -> None:
