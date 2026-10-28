@@ -605,7 +605,7 @@ def _deploy_mentions(tree: ast.AST) -> Counter[str]:
     """Count the mentions of the `DEPLOY` action per enclosing function, by qualified name.
 
     A mention is an attribute ``.DEPLOY`` of anything but `DeployKind` (whose ``DEPLOY`` is a kind
-    of run, not the action), or the text ``"DEPLOY"``.
+    of run, not the action) and `RunTrigger` (what started a run), or the text ``"DEPLOY"``.
 
     Parameters
     ----------
@@ -632,7 +632,11 @@ def _deploy_mentions(tree: ast.AST) -> Counter[str]:
         if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
             where = (*where, node.name)
         action = isinstance(node, ast.Attribute) and node.attr == "DEPLOY"
-        if action and isinstance(node.value, ast.Name) and node.value.id == "DeployKind":
+        if (
+            action
+            and isinstance(node.value, ast.Name)
+            and node.value.id in {"DeployKind", "RunTrigger"}
+        ):
             action = False
         if action or (isinstance(node, ast.Constant) and node.value == "DEPLOY"):
             found[".".join(where) or "<module>"] += 1
@@ -687,7 +691,7 @@ class DeployService:
     assert _deploy_mentions(ast.parse(other_class)) == Counter(
         {"DeployService.get": 2, "Other.get": 1}
     )
-    kind = "def f():\n    return DeployKind.DEPLOY, 'DEPLOY'\n"
+    kind = "def f():\n    return DeployKind.DEPLOY, RunTrigger.DEPLOY, 'DEPLOY'\n"
     assert _deploy_mentions(ast.parse(kind)) == Counter({"f": 1})
 
 

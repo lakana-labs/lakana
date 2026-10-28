@@ -3011,7 +3011,9 @@ class DeployService:
         # The jobs start only when the deploy made another project version current: deploying the
         # commit that is already current changes nothing, so it starts nothing.
         run.job_starts_json = (
-            pending_job_starts(manifest) if previous is None or previous.id != version.id else None
+            pending_job_starts(version.manifest_json)
+            if previous is None or previous.id != version.id
+            else None
         )
         finished = datetime.now(UTC)
         run.warnings_json = self._sync_job_schedules(

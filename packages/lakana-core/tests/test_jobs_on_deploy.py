@@ -27,7 +27,10 @@ from lakana_core.models import (
     DeployRun,
     DeployStatus,
     Environment,
+    EnvironmentDeployment,
     JobSchedule,
+    Principal,
+    PrincipalType,
     Run,
     RunStatus,
     RunTrigger,
@@ -594,3 +597,41 @@ def test_an_outcome_for_a_deploy_that_is_gone_writes_nothing(
     on_deploy_module._write_outcome(session, plain.id, outcome)
     session.expire_all()
     assert session.get(DeployRun, plain.id).job_starts_json is None  # ty: ignore
+
+
+def test_a_deployer_deactivated_meanwhile_starts_nothing_even_with_a_bound_account(
+    session: Session, env: None, principal: PrincipalRef
+) -> None:
+    """A protected environment runs as the bound account, but the requester must still be active."""
+    deployer = _person(session, "leaver", admin=True)
+    run = _deployed_jobs(session, deployer, _repo(session), "a" * 40, _REFRESH)
+    account = Principal(
+        id=uuid.uuid4(), type=PrincipalType.SERVICE_ACCOUNT, name="etl", is_active=True
+    )
+    session.add(account)
+    session.execute(update(Environment).values(is_protected=True))
+    session.execute(update(EnvironmentDeployment).values(run_as_principal_id=account.id))
+    session.execute(update(Principal).where(Principal.id == deployer.id).values(is_active=False))
+    session.commit()
+
+    (outcome,) = _start(session, run, deployer)
+
+    assert (outcome.outcome, outcome.reason) == (OUTCOME_NOT_STARTED, REASON_REFUSED)
+    assert outcome.message == (
+        "job `refresh` was not started: leaver is no longer active. Start it with "
+        "`lakana job run refresh --repo analytics --env dev`."
+    )
+    assert _runs(session) == []
+
+
+def test_the_jobs_come_from_the_project_version_made_current(
+    session: Session, env: None, principal: PrincipalRef
+) -> None:
+    """A commit deployed before keeps its stored manifest, so its jobs are the ones started."""
+    repo = _repo(session)
+    _deployed_jobs(session, principal, repo, "a" * 40, _REFRESH)
+    _deployed_jobs(session, principal, repo, "b" * 40, {"daily": _job()})
+
+    back = _deployed_jobs(session, principal, repo, "a" * 40, {"daily": _job()})
+
+    assert back.job_starts_json == [{"job": "refresh", "outcome": OUTCOME_PENDING}]

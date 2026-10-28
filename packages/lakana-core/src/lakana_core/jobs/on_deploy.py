@@ -22,7 +22,14 @@ from sqlalchemy.orm import Session
 from lakana_core.auth import AuthorizationService, PrincipalRef
 from lakana_core.errors import ConflictError, NotFoundError, PermissionDenied, ValidationError
 from lakana_core.jobs.service import JobService
-from lakana_core.models import DeployRun, DeployStatus, Environment, Repository, RunTrigger
+from lakana_core.models import (
+    DeployRun,
+    DeployStatus,
+    Environment,
+    Principal,
+    Repository,
+    RunTrigger,
+)
 from lakana_core.projects.deploy_jobs import (
     OUTCOME_NOT_STARTED,
     OUTCOME_PENDING,
@@ -172,7 +179,9 @@ def start_jobs_after_deploy(
     is started all the same. Each outcome is written to the deploy run as soon as it is known; one
     that cannot be written is logged and its entry stays ``pending`` (shown as lost once the run
     lease has passed). Only an entry still ``pending`` is started, so a second call starts nothing
-    twice.
+    twice. A deployer deactivated since the deploy was claimed starts nothing, also where the run
+    would write as a bound service account, as a waiting start of a deactivated requester is
+    dropped.
 
     Parameters
     ----------
@@ -212,11 +221,25 @@ def start_jobs_after_deploy(
     repository = session.execute(
         select(Repository.name).where(Repository.id == run.repository_id)
     ).scalar_one()
+    deployer = session.get(Principal, p.id)
+    active = deployer is not None and deployer.is_active
     session.commit()
     jobs = JobService(session, authz, caps=caps)
     outcomes: list[DeployJobStart] = []
     for job in pending:
-        outcome = _start_one(session, jobs, p, environment, repository, job)
+        outcome = (
+            _start_one(session, jobs, p, environment, repository, job)
+            if active
+            else DeployJobStart(
+                job=job,
+                outcome=OUTCOME_NOT_STARTED,
+                reason=REASON_REFUSED,
+                message=(
+                    f"job `{job}` was not started: {p.name} is no longer active. Start it with "
+                    f"{run_it_yourself(job, repository, environment)}."
+                ),
+            )
+        )
         outcomes.append(outcome)
         try:
             _write_outcome(session, run_id, outcome)
