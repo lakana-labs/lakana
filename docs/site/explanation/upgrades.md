@@ -144,7 +144,7 @@ connections needs `MANAGE_CONNECTION` on the environment, which `ADMIN` and `DAT
 existing grants need no change. An asset names the connections it reads
 (`@asset(connections=["crm-db"])`), a deploy refuses a name its environment does not have, and a
 running task fetches the credential with its own token, never from a variable or a file; every
-fetch is audited (`lakana audit --kind connection`). A project whose asset declares a connection
+fetch is audited (`lakana audit list --kind connection`). A project whose asset declares a connection
 gets manifest version 7, which a worker of an earlier release refuses: upgrade the workers before
 you deploy one. [Load data from a source](../how-to/load-data-from-a-source.md) walks through a
 first one.
@@ -201,7 +201,8 @@ release's, and run `docker compose up -d --wait`. A bundle whose `.env` lacks th
 Storage), so a project locked earlier runs `uv lock --upgrade-package lakana` to pick them up.
 `lakana.ingest.files.read` and `files.list` read CSV, Parquet, JSON and spreadsheet files from
 `s3`, `gcs`, `azure`, `http` and `directory` connections, through the task's egress proxy under
-the Docker runner; see [the ingest helpers](../reference/ingest.md).
+the Docker runner; see [the ingest helpers](../reference/ingest.md). CSV, JSON and NDJSON files
+must be uncompressed UTF-8: a compressed one is refused before it is parsed.
 
 ### Read databases with `lakana.ingest.sql`
 
