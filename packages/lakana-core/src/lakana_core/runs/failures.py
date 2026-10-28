@@ -58,7 +58,7 @@ class FailureCode(enum.StrEnum):
     WORKER_LOST = "worker_lost"
     """The worker running the task stopped before it finished."""
     CONFLICT = "conflict"
-    """Another writer changed the table at the same time."""
+    """Another writer changed the table, or a Python task's table holds no write of its own."""
     INTERNAL = "internal"
     """Anything else: the platform failed in a way it did not expect."""
 
@@ -167,7 +167,8 @@ FAILURES: Mapping[FailureCode, tuple[str, str]] = {
         "Run again; if it repeats, ask the operator to check the worker's log and memory limit.",
     ),
     FailureCode.CONFLICT: (
-        "Another writer changed the table at the same time.",
+        "Another writer changed the table at the same time, or a Python task's table holds no "
+        "write of its own (another writer, a server older than the worker, or maintenance).",
         "Run again; if it repeats, find what else writes this table.",
     ),
     FailureCode.INTERNAL: (

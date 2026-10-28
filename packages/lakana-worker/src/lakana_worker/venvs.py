@@ -233,21 +233,26 @@ _NO_PLATFORM = re.compile(
 """uv's report of a locked package with neither a wheel for this platform nor an sdist."""
 _NETWORK = re.compile(
     r"Failed to fetch|Failed to download|error sending request|tcp connect error|dns error|"
-    r"Connection refused|Connection reset|Connection aborted|timed out|\btimeout\b|"
+    r"Connection refused|Connection reset|Connection aborted|timed out|"
+    r"(?:SSL connection|connect|connection|read) timeout|"
     r"HTTP status server error|HTTP Error 5\d\d|Temporary failure|Network is unreachable|"
-    r"Name or service not known|No route to host|getaddrinfo|Could not resolve host|"
-    r"Max retries exceeded|RemoteDisconnected|Remote end closed connection|ECONNRESET|EAI_AGAIN",
+    r"Name or service not known|No route to host|getaddrinfo failed|Could not resolve host|"
+    r"Max retries exceeded|RemoteDisconnected|Remote end closed connection|"
+    r"\[Errno (?:ECONNRESET|EAI_AGAIN)\]",
     re.IGNORECASE,
 )
-"""Anything in uv's output that says the network failed: then a retry may succeed."""
+"""What a failed network says in uv's output: then a retry may succeed.
+
+Only the shapes of error messages, not bare identifiers: a compiler's command lines and quoted
+source lines in the tail name files such as ``getaddrinfo.c`` (review R2-N1)."""
 
 
-_NO_DISK = re.compile(r"No space left on device|Disk quota exceeded|ENOSPC|Errno 28\]")
+_NO_DISK = re.compile(r"No space left on device|Disk quota exceeded|\[Errno 28\]")
 """The build's machine ran out of disk space."""
 _NO_MEMORY = re.compile(
-    r"Killed signal|MemoryError|Cannot allocate memory|out of memory|exit status: 137|"
-    r"signal: 9\b|SIGKILL|\bKilled\b",
-    re.IGNORECASE,
+    r"Killed signal|^\s*MemoryError\b|Cannot allocate memory|: out of memory|"
+    r"exit status: 137|signal: 9\b|^\s*Killed\s*$",
+    re.IGNORECASE | re.MULTILINE,
 )
 """The build's machine ran out of memory, or something killed the build."""
 _DISK_HINT = (

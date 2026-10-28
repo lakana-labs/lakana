@@ -1169,11 +1169,11 @@ def _write_as_admin(world: World, rows: int = 1, *, append: bool = False) -> Non
 
 _NOT_ITS_WRITE = (
     "the task reported success, but gold.scores holds no write of this attempt: another writer "
-    "changed it. If something else writes gold.scores (the audit log shows who: `lakana audit "
-    "list --env dev`), stop it and run again. If the server runs an older release than this "
+    "changed it. If something else writes gold.scores, stop it and run again; the audit log "
+    "shows who wrote (`lakana audit list --env dev`, which needs READ_AUDIT_LOG: ask an "
+    "administrator if you do not hold it). If the server runs an older release than this "
     "worker, upgrade the server and the workers together. If table maintenance expired "
-    "snapshots while the task ran, run again. If the asset writes the result file itself, "
-    "return the DataFrame from the asset function instead"
+    "snapshots while the task ran, run again"
 )
 
 

@@ -261,11 +261,11 @@ _NO_WRITE = (
 )
 _NOT_ITS_WRITE = (
     "the task reported success, but {table} holds no write of this attempt: another writer "
-    "changed it. If something else writes {table} (the audit log shows who: `lakana audit list "
-    "--env {environment}`), stop it and run again. If the server runs an older release than this "
-    "worker, upgrade the server and the workers together. If table maintenance expired snapshots "
-    "while the task ran, run again. If the asset writes the result file itself, return the "
-    "DataFrame from the asset function instead"
+    "changed it. If something else writes {table}, stop it and run again; the audit log shows "
+    "who wrote (`lakana audit list --env {environment}`, which needs READ_AUDIT_LOG: ask an "
+    "administrator if you do not hold it). If the server runs an older release than this "
+    "worker, upgrade the server and the workers together. If table maintenance expired "
+    "snapshots while the task ran, run again"
 )
 _NO_VERSION = (
     "the task reported success without storing a version of its artifact; return the path from "

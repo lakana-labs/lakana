@@ -1513,3 +1513,17 @@ def test_a_build_that_ran_out_of_disk_or_memory_is_retried_and_says_so(
     assert message.startswith("environment build failed: uv exited with status 1: the build ")
     assert cause in message
     assert "uv lock" not in message
+
+
+def test_identifiers_in_compiler_lines_do_not_veto_a_broken_build(fake: Fake) -> None:
+    """Review R2-N1: `getaddrinfo.c` or a quoted `SIGKILL` is source code, not a failure cause."""
+    compiler = (
+        "      gcc -O2 -fPIC -c src/unix/getaddrinfo.c -o build/getaddrinfo.o\n"
+        "      gcc -O2 -fPIC -c src/ares_getaddrinfo.c -o build/ares_getaddrinfo.o\n"
+        "      src/unix/process.c:42:5: note: kill(pid, SIGKILL); /* Killed on timeout */\n"
+        '      src/errors.c:7:1: note: return "out of memory"; /* ECONNRESET EAI_AGAIN */\n'
+        "      src/unix/core.c:99:10: fatal error: linux/io_uring.h: No such file or directory\n"
+    )
+    fake.behave(mode="fail", code=1, output=_BACKEND_FAILED + compiler)
+    with pytest.raises(VenvBuildBroken):
+        fake.acquire()
