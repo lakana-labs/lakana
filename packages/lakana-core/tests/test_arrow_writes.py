@@ -14,8 +14,8 @@ import pytest
 from core_test_helpers import ActionAllowList
 from pyiceberg.schema import Schema
 from pyiceberg.table import StaticTable
-from pyiceberg.types import LongType, NestedField
 from pyiceberg.table.update import TableRequirement, TableUpdate
+from pyiceberg.types import LongType, NestedField
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 

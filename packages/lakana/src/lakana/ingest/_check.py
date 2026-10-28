@@ -1218,7 +1218,8 @@ def _postgresql_credentials(body: Mapping[str, Any], routing: Mapping[str, Any],
             f"{PG_LOGIN_HINT}",
         ) from None
     try:
-        database.cursor().execute("SELECT 1")
+        with database.cursor() as cursor:
+            cursor.execute("SELECT 1")
     except pg.Error as exc:
         raise _Found(
             "failed", f"PostgreSQL accepted the login but not SELECT 1 ({_said(str(exc))})"

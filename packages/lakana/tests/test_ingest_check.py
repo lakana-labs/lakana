@@ -1689,6 +1689,12 @@ def _fake_postgres(
     seen: list[str] = []
 
     class Cursor:
+        def __enter__(self) -> Cursor:
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            seen.append("cursor closed")
+
         def execute(self, statement: str) -> None:
             if refuse_select is not None:
                 raise _PgError(refuse_select)
@@ -1751,7 +1757,7 @@ def test_postgresql_credentials_log_in_and_execute_select_1(
         "ok",
         f"reachable: `localhost:{port}`, TLS verified, credentials accepted",
     )
-    info, executed, closed = seen
+    info, executed, cursor_closed, closed = seen
     assert info.startswith(
         f"host='localhost' port='{port}' dbname='crm' user='reader' password='{SECRET}' "
     )
@@ -1759,7 +1765,7 @@ def test_postgresql_credentials_log_in_and_execute_select_1(
         "sslmode='verify-full'" in info and "options='-c default_transaction_read_only=on'" in info
     )
     assert "sslrootcert='/" in info
-    assert (executed, closed) == ("executed: SELECT 1", "closed")
+    assert (executed, cursor_closed, closed) == ("executed: SELECT 1", "cursor closed", "closed")
 
 
 @pytest.mark.parametrize(
