@@ -36,6 +36,8 @@ import re
 import socket
 import ssl
 import stat
+import threading
+import time
 import types
 from collections.abc import Generator, Iterable, Mapping
 from typing import TYPE_CHECKING
@@ -69,8 +71,15 @@ BATCH_ROWS = 10_000
 """Rows fetched at a time from MariaDB."""
 BATCH_BYTES = 16 * 1024 * 1024
 """The size ADBC aims at for one batch of a PostgreSQL result read without parameters."""
+_OPEN_WINDOW = threading.Lock()
+"""Held while one read walks to its file, lists `/dev/fd`, lets SQLite open the file and lists
+`/dev/fd` again: a read on another thread would otherwise open its walker's descriptor or its own
+SQLite file inside this window, and the comparison would count it as a file SQLite opened instead
+of the checked one. Only that window is held, never the query."""
 _OPEN_ATTEMPTS = 3
 """How often a SQLite file is opened before a mismatch with the checked file is refused."""
+_OPEN_BACKOFF_SECONDS = 0.05
+"""The wait before the second attempt, doubled before the third."""
 _SERVICE_VARIABLES = ("PGSERVICE", "PGSERVICEFILE", "PGSYSCONFDIR")
 """What would make libpq fill unset keywords from a service file (``~/.pg_service.conf``); its
 bundled build has no ``servicefile`` keyword to point elsewhere, so they are out while it
@@ -661,19 +670,25 @@ def _open_sqlite(
     """
     # Always a file: URI, so mode=ro applies (a plain path would be created read-write).
     uri = "file:" + quote(f"{root_dir.rstrip('/')}/{path.strip('/')}") + "?mode=ro"
-    for _ in range(_OPEN_ATTEMPTS):
-        handle = _walked(conn, root_dir, path)
-        try:
-            seen = os.fstat(handle)
-            before = _open_files()
+    for attempt in range(_OPEN_ATTEMPTS):
+        if attempt:
+            # Another thread's file activity comes in bursts (a scan of /proc, a batch of
+            # writes): the next attempt waits it out rather than meet it again.
+            time.sleep(_OPEN_BACKOFF_SECONDS * attempt)
+        with _OPEN_WINDOW:
+            handle = _walked(conn, root_dir, path)
             try:
-                database = lite.connect(uri)
-            except lite.Error as exc:
-                raise SourceError(f"`{conn.name}`: {_said(str(exc), None)}") from None
-            after = _open_files()
-        finally:
-            os.close(handle)
-        if _opened_only((seen.st_dev, seen.st_ino), handle, before, after):
+                seen = os.fstat(handle)
+                before = _open_files()
+                try:
+                    database = lite.connect(uri)
+                except lite.Error as exc:
+                    raise SourceError(f"`{conn.name}`: {_said(str(exc), None)}") from None
+                after = _open_files()
+                matched = _opened_only((seen.st_dev, seen.st_ino), handle, before, after)
+            finally:
+                os.close(handle)
+        if matched:
             return database
         database.close()
     raise SourceError(

@@ -4107,7 +4107,7 @@ secret's values, and the only way a secret reaches a Python asset (#23). User re
   path; the regular files the process opened meanwhile, read from `/dev/fd` and compared by
   device and inode, must include that file and nothing else that is still open (another
   thread's passing read is closed again by then, SQLite's file is not). A mismatch is walked and
-  opened again, three times at most, then `SourceError`: a swap for a link between the check and
+  opened again, three times at most, then `SourceError`. The window from the walk to the second `/dev/fd` listing is held by one lock per process (`sql._OPEN_WINDOW`), never the query, and a retry waits 50 ms, then 100 ms, so another thread's burst of file activity (a scan of `/proc`) is not met three times, so reads of other files on other threads are not mistaken for a swap (PR #361 review): a swap for a link between the check and
   SQLite's open is refused (M6 review M8, #359). SQLite cannot be handed the walker's descriptor: given
   `file:/proc/self/fd/N` it reads the link and opens the name it holds, and a file unlinked and
   replaced by a link named `<name> (deleted)` was read, measured with SQLite through

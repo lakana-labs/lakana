@@ -8,6 +8,7 @@ import os
 import socket
 import sqlite3
 import sys
+import threading
 import types
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
@@ -995,6 +996,49 @@ def test_sqlite_refuses_a_link_swapped_in_between_the_check_and_the_open(
 
     assert type(caught.value) is SourceError
     assert len(checks) == 3
+
+
+def test_sqlite_reads_of_different_files_on_threads_do_not_see_each_others_files(
+    tmp_path: Path,
+) -> None:
+    """One read's descriptors are not another's mismatch: the /dev/fd window is serialised."""
+    root = tmp_path / "shared"
+    root.mkdir()
+    names = [f"db{i}" for i in range(4)]
+    bodies: dict[str, dict[str, object]] = {}
+    routing: dict[str, dict[str, object]] = {}
+    for name in names:
+        _sqlite(root / f"{name}.db", ["CREATE TABLE t(a)", "INSERT INTO t VALUES (1)"])
+        bodies[name] = {
+            "name": name,
+            "kind": "sqlite-file",
+            "address": {"root": "shared", "path": f"{name}.db"},
+            "settings": {},
+            "endpoints": [],
+            "secret": None,
+        }
+        routing[name] = {"kind": "sqlite-file", "root_dir": str(root), "path": f"{name}.db"}
+    _task(bodies, routing)
+    for name in names:  # fetched once, before the threads
+        sql.read(name, "SELECT a FROM t")
+    failures: list[BaseException] = []
+    start = threading.Barrier(len(names))
+
+    def reads(name: str) -> None:
+        start.wait()
+        for _ in range(15):
+            try:
+                sql.read(name, "SELECT a FROM t")
+            except SourceError as exc:
+                failures.append(exc)
+
+    threads = [threading.Thread(target=reads, args=(name,)) for name in names]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert failures == []
 
 
 def test_sqlite_reads_a_file_replaced_in_place_on_the_next_attempt(
