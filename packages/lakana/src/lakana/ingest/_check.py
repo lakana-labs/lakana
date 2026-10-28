@@ -110,7 +110,8 @@ PG_LOGIN_HINT = (
 libpq keeps no SQLSTATE for a refused login, so a server whose ``lc_messages`` is not English
 refuses in words Lakana does not read; `sql.read` adds the same hint."""
 _SERVER_WORDS = 700
-"""The most characters of a server's words a failed login keeps, so the hint is never cut."""
+"""The most characters of a server's words a failed login keeps (masked first, then cut), so
+the hint is never cut."""
 
 TCP_OK = "reachable; Lakana does not check the protocol, TLS or credentials of a tcp connection"
 
@@ -1213,7 +1214,8 @@ def _postgresql_credentials(body: Mapping[str, Any], routing: Mapping[str, Any],
         # (its lc_messages) lands here, so the message says what to check (a known limit).
         raise _Found(
             "failed",
-            f"the PostgreSQL login failed ({_said(text)[:_SERVER_WORDS]}); {PG_LOGIN_HINT}",
+            f"the PostgreSQL login failed ({_mask(_said(text), secret)[:_SERVER_WORDS]}); "
+            f"{PG_LOGIN_HINT}",
         ) from None
     try:
         database.cursor().execute("SELECT 1")

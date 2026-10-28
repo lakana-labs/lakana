@@ -270,8 +270,8 @@ def relay(
 def _task_environment(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """Resolve ``lakana-relay`` to the in-process relay; leave no task state behind.
 
-    libpq's ``hostaddr`` comes from ``gethostbyname``; the check's own sockets (the connection
-    test, `_check.postgres_refusal`) dial the name with ``create_connection``.
+    libpq's ``hostaddr`` comes from ``gethostbyname``; the connection test's own sockets (its
+    MariaDB check) dial the name with ``create_connection``.
 
     Parameters
     ----------

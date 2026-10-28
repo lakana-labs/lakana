@@ -4130,8 +4130,15 @@ secret's values, and the only way a secret reaches a Python asset (#23). User re
   user's `~/.postgresql/postgresql.crt` and key to a declared host, and `sslrootcert` (unless
   `verify-full` names the trust bundle), `sslcrl` and `passfile` point at `/dev/null/nowhere`, a
   path that cannot exist, so `require` never becomes a chain check against
-  `~/.postgresql/root.crt` and `~/.pgpass` is never consulted. This mattered under the local
-  runner, where the worker is a developer's or an operator's own account (M6 review M9, #360).
+  `~/.postgresql/root.crt` and `~/.pgpass` is never consulted. A service file
+  (`~/.pg_service.conf`, `$PGSYSCONFDIR/pg_service.conf`) is read by libpq when `PGSERVICE` is
+  set, and the bundled libpq has no `servicefile` keyword (measured: "invalid connection
+  option"), so `sql.read` connects inside `_stores.without_variables` with `PGSERVICE`,
+  `PGSERVICEFILE` and `PGSYSCONFDIR` out of `os.environ` (the lock and residuals of the cloud
+  variables apply); the local runner's task environment never holds them anyway, and the
+  connection test's subprocess gets only `LAKANA_CA_BUNDLE`. This mattered under the local
+  runner, where the worker is a developer's or an operator's own account (M6 review M9, #360;
+  Batch A review M-3).
   **Residuals, accepted:** PyMySQL interpolates values client-side with its own escaping (no
   server-side prepared statement), so the wire text holds them, though the asset's SQL never
   does; and read-only is a property of the transaction, so a source user with write rights could

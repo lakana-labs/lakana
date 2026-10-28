@@ -622,8 +622,10 @@ server whose messages are not in English, check the user and password". Check th
 sql.read never uses files of the user the worker runs as: it presents no client certificate
 (not even `~/.postgresql/postgresql.crt`, which libpq would otherwise send to any server that
 asks), `tls: require` does not turn into a certificate check against `~/.postgresql/root.crt`,
-and `~/.pgpass` is not read. The connection test behaves the same. This matters with the local
-runner, where the worker may run as your own account.
+`~/.pgpass` is not read, and neither is a service file (`~/.pg_service.conf`): sql.read connects
+with `PGSERVICE`, `PGSERVICEFILE` and `PGSYSCONFDIR` taken out of its environment. The
+connection test behaves the same (its process gets none of the worker's variables). This matters
+with the local runner, where the worker may run as your own account.
 
 A MariaDB connection with `tls: verify-full` or `require` never falls back to a plain
 connection: a server without TLS fails the read, and is not retried. MySQL 8's default `caching_sha2_password`

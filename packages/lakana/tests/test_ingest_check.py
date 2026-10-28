@@ -1800,6 +1800,20 @@ def test_a_refused_postgresql_login_is_its_outcome(
     assert (_check.PG_LOGIN_HINT in message) == (outcome == "failed")
 
 
+def test_a_secret_across_the_cut_of_a_failed_login_is_masked_whole(
+    authority: Authority, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The server's words are masked first and cut after, so no part of the password stays."""
+    _fake_postgres(monkeypatch, refuse="FATAL:  " + "x" * 680 + SECRET + "y" * 100)
+    with listening(tls_server(authority, tmp_path)) as port:
+        found, message = _check.check(_pg_body(port, authority), {}, timeout=FAST)
+
+    assert found == "failed"
+    assert SECRET[:4] not in message
+    assert "x***y" in message
+    assert message.endswith(_check.PG_LOGIN_HINT)
+
+
 def test_a_login_refused_in_another_language_is_failed_with_the_hint(
     authority: Authority, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

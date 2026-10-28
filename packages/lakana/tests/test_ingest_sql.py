@@ -239,6 +239,10 @@ class _Database:
         self.closed = True
 
 
+_SERVICE_VARIABLES = ("PGSERVICE", "PGSERVICEFILE", "PGSYSCONFDIR")
+"""What would make libpq read a service file (``~/.pg_service.conf`` among them)."""
+
+
 @dataclass
 class _Driver:
     """A fake ``adbc_driver_postgresql.dbapi``: records the connection string."""
@@ -247,6 +251,7 @@ class _Driver:
     refuse: Exception | None = None
     seen: list[str] = field(default_factory=list)
     roots: list[str] = field(default_factory=list)
+    services: list[dict[str, str]] = field(default_factory=list)
     Error: type[Exception] = _Error
     database: _Database | None = None
 
@@ -269,6 +274,7 @@ class _Driver:
             The configured refusal.
         """
         self.seen.append(conninfo)
+        self.services.append({k: v for k, v in os.environ.items() if k in _SERVICE_VARIABLES})
         for part in conninfo.split("' "):
             if part.startswith("sslrootcert='") and _check.NOWHERE not in part:
                 path = part.removeprefix("sslrootcert='").rstrip("'")
@@ -380,6 +386,20 @@ def test_require_and_disable_name_no_root_certificates(
     assert f"sslmode='{mode}'" in driver.seen[0]
     assert f"sslrootcert='{_check.NOWHERE}'" in driver.seen[0]
     assert "sslcertmode='disable'" in driver.seen[0]
+
+
+def test_libpq_reads_no_service_file_the_environment_names(
+    driver: _Driver, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """``PGSERVICE`` would fill unset keywords from ``~/.pg_service.conf``: out while connecting."""
+    for name in _SERVICE_VARIABLES:
+        monkeypatch.setenv(name, str(tmp_path / name))
+    _postgres(relay=False)
+
+    sql.read("crm-db", "SELECT 1")
+
+    assert driver.services == [{}]
+    assert os.environ["PGSERVICE"] == str(tmp_path / "PGSERVICE")
 
 
 def test_a_database_name_cannot_add_a_keyword(driver: _Driver) -> None:

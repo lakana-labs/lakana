@@ -53,6 +53,7 @@ from lakana.ingest._errors import (
     task_environment,
 )
 from lakana.ingest._params import code_text, translate
+from lakana.ingest._stores import without_variables
 from lakana.ingest._types import mariadb_batch, mariadb_schema, normalize_postgres, postgres_schema
 from lakana.ingest.files import DEFAULT_MAX_BYTES, DEFAULT_MAX_ROWS, _positive
 
@@ -70,6 +71,10 @@ BATCH_BYTES = 16 * 1024 * 1024
 """The size ADBC aims at for one batch of a PostgreSQL result read without parameters."""
 _OPEN_ATTEMPTS = 3
 """How often a SQLite file is opened before a mismatch with the checked file is refused."""
+_SERVICE_VARIABLES = ("PGSERVICE", "PGSERVICEFILE", "PGSYSCONFDIR")
+"""What would make libpq fill unset keywords from a service file (``~/.pg_service.conf``); its
+bundled build has no ``servicefile`` keyword to point elsewhere, so they are out while it
+connects."""
 _MESSAGE = 1000
 """The most characters of a database's own message kept in an error."""
 _OTHER_HELPER = {
@@ -363,7 +368,8 @@ def _read_postgres(
         with _check.root_certificates(own if isinstance(own, str) else None) as roots:
             if tls == "verify-full":
                 parts["sslrootcert"] = roots
-            database = pg.connect(_check.conninfo(parts))
+            with without_variables(_SERVICE_VARIABLES):
+                database = pg.connect(_check.conninfo(parts))
     except _check.BundleUnreadable:
         raise UsageError(
             f"the trust bundle `{os.environ.get('LAKANA_CA_BUNDLE')}` (LAKANA_CA_BUNDLE) cannot "
