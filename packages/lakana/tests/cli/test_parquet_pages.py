@@ -103,7 +103,7 @@ def test_a_header_reads_its_sizes_past_any_other_field(extra: bytes) -> None:
     """Every compact type is skipped; the sizes and the header's end are found."""
     header = _SIZES + extra + b"\x00"
 
-    assert page_header(header + b"page", 0) == (100, 10, len(header))
+    assert page_header(header + b"page", 0) == (100, 10, 0, len(header))
 
 
 @pytest.mark.parametrize(
@@ -151,9 +151,39 @@ def test_a_chunk_adds_its_pages_up() -> None:
     second = _i32(0) + _i32(5) + _i32(20) + b"\x00"
     buf = first + b"dict" + second + b"x" * 20
 
-    assert chunk_pages(buf, 0, len(buf)) == load_module._parquet_pages.ChunkPages(320, 300)
+    assert chunk_pages(buf, 0, len(buf), 0) == load_module._parquet_pages.ChunkPages(320, 300)
     with pytest.raises(PageHeaderError, match="starts at -1"):
-        chunk_pages(buf, -1, len(buf))
+        chunk_pages(buf, -1, len(buf), 0)
+
+
+def _data_page(values: int, size: int) -> bytes:
+    """Encode a v1 data page header and its page.
+
+    Parameters
+    ----------
+    values
+        The page's values (DataPageHeader field 1).
+    size
+        Its stored and uncompressed size.
+
+    Returns
+    -------
+    bytes
+        The header and `size` bytes of page.
+    """
+    header = _i32(0) + _i32(size) + _i32(size) + bytes([0x2C]) + _i32(values) + b"\x00\x00"
+    return header + b"p" * size
+
+
+def test_a_chunk_walks_past_its_end_while_values_are_missing() -> None:
+    """Review I4: the reader goes up to 100 bytes past a chunk for the values it still needs."""
+    first, second = _data_page(2, 5), _data_page(2, 40)
+    buf = first + second + b"\xff" * 8
+
+    assert page_header(_data_page(3, 1), 0).values == 3
+    assert chunk_pages(buf, 0, len(first), 4) == load_module._parquet_pages.ChunkPages(45, 40)
+    assert chunk_pages(buf, 0, len(first), 2) == load_module._parquet_pages.ChunkPages(5, 5)
+    assert chunk_pages(first + second, 0, len(first) + len(second), 9).total == 45
 
 
 def test_the_largest_page_bounds_a_repeated_value(tmp_path: Path) -> None:
@@ -320,7 +350,7 @@ def test_a_header_with_a_huge_map_is_refused_at_once(tmp_path: Path, value: int)
     pq.write_table(pa.table({"n": [1, 2, 3]}), path, use_dictionary=False)
     data = path.read_bytes()
     start = pq.read_metadata(path).row_group(0).column(0).data_page_offset
-    stop = page_header(data, start)[2] - 1
+    stop = page_header(data, start).end - 1
     entry = bytes([0x0B, 0x28]) + b"\xff" * 8 + bytes([0x3F, value])
     path.write_bytes(data[:stop] + entry + data[stop:])
 
@@ -347,7 +377,7 @@ def test_an_uncompressed_page_counts_its_stored_bytes(
         width += 1
     data[size_at : size_at + width] = bytes([0x94] + [0x80] * (width - 2) + [0x00])
     path.write_bytes(bytes(data))
-    assert page_header(bytes(data), start)[0] == 10
+    assert page_header(bytes(data), start).uncompressed == 10
     yielded = _yielded(monkeypatch)
 
     result = invoke(make_state(tmp_path, _api(1024 * 1024)), "load", str(path), "t", "--env", "dev")
@@ -355,3 +385,69 @@ def test_an_uncompressed_page_counts_its_stored_bytes(
     assert result.exit_code == 2, result.output
     assert "is larger than one upload may be (1 MiB)" in result.output
     assert sum(yielded) <= 32
+
+
+def _varint_in(value: int, width: int) -> bytes:
+    """Encode a variable-length integer in exactly `width` bytes, padded with zero groups.
+
+    Parameters
+    ----------
+    value
+        The value.
+    width
+        The bytes it must take (at least its shortest encoding).
+
+    Returns
+    -------
+    bytes
+        The encoding.
+    """
+    raw = bytearray(_varint(value))
+    if len(raw) < width:
+        raw[-1] |= 0x80
+        raw += b"\x80" * (width - len(raw) - 1) + b"\x00"
+    return bytes(raw)
+
+
+def test_an_old_parquet_mr_file_is_bounded_by_the_pages_read_past_its_chunk(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Review I4: for parquet-mr before 1.2.9 the reader reads up to 100 bytes past a chunk.
+
+    The footer claims the chunk ends after its first page (1,024 short values); the second page,
+    1,024 copies of a 64 KiB value in a few bytes, lies in that padding. It bounds the rows too.
+    """
+    path = tmp_path / "old.parquet"
+    pq.write_table(
+        pa.table({"s": ["a"] * 1024 + ["x" * 65536] * 1024}),
+        path,
+        compression="brotli",
+        use_dictionary=False,
+        column_encoding={"s": "DELTA_BYTE_ARRAY"},
+        data_page_size=1,
+        write_batch_size=1024,
+    )
+    metadata = pq.read_metadata(path)
+    column = metadata.row_group(0).column(0)
+    data = bytearray(path.read_bytes())
+    first = page_header(bytes(data), column.data_page_offset)
+    length = first.end + first.compressed - column.data_page_offset
+    footer = len(data) - 8 - int.from_bytes(data[-8:-4], "little")
+    sizes = [column.total_uncompressed_size, column.total_compressed_size]
+    old = b"".join(b"\x16" + _varint(size << 1) for size in sizes)
+    new = b"".join(b"\x16" + _varint_in(length << 1, len(_varint(size << 1))) for size in sizes)
+    at = data.index(old, footer)
+    data[at : at + len(old)] = new
+    writer = metadata.created_by.encode()
+    claimed = b"parquet-mr version 1.2.8 ("
+    at = data.index(writer, footer)
+    data[at : at + len(writer)] = claimed + b"a" * (len(writer) - len(claimed) - 1) + b")"
+    path.write_bytes(bytes(data))
+    assert pq.read_table(path).num_rows == 2048
+    yielded = _yielded(monkeypatch)
+
+    result = invoke(make_state(tmp_path, _api(1024 * 1024)), "load", str(path), "t", "--env", "dev")
+
+    assert result.exit_code == 2, result.output
+    assert "is larger than one upload may be (1 MiB)" in result.output
+    assert sum(yielded) <= 1100

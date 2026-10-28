@@ -566,7 +566,8 @@ def _page_headers(path: Path, metadata: pq.FileMetaData) -> list[list[_parquet_p
     """Read the page headers of every column chunk, as the reader will find them.
 
     A chunk starts at its dictionary page if it has one, else at its first data page, and
-    spans its compressed size.
+    spans its compressed size, plus up to 100 bytes while values are missing, as the reader
+    reads the files of old writers (`_parquet_pages.chunk_pages`).
 
     Parameters
     ----------
@@ -589,7 +590,11 @@ def _page_headers(path: Path, metadata: pq.FileMetaData) -> list[list[_parquet_p
                 start = column.data_page_offset
                 if column.has_dictionary_page and column.dictionary_page_offset:
                     start = min(start, column.dictionary_page_offset)
-                chunks.append(_parquet_pages.chunk_pages(buf, start, column.total_compressed_size))
+                chunks.append(
+                    _parquet_pages.chunk_pages(
+                        buf, start, column.total_compressed_size, column.num_values
+                    )
+                )
             found.append(chunks)
         return found
 
