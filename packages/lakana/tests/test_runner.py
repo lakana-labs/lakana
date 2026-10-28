@@ -689,10 +689,10 @@ def test_a_changed_output_schema_is_a_permanent_failure_that_names_the_remedy(
     assert record["retryable"] is False
     message = str(record["message"])
     assert "dropped region" in message
-    assert "drop gold.scores" in message
+    assert "add evolve_schema=True to the asset's @asset(...)" in message
 
 
-def test_the_schema_message_drops_the_servers_advice_a_python_asset_cannot_follow(
+def test_the_schema_message_names_the_decorators_option_not_the_servers(
     world: _World,
 ) -> None:
     world.client.tables.outcome = ValidationError(
@@ -703,9 +703,10 @@ def test_the_schema_message_drops_the_servers_advice_a_python_asset_cannot_follo
     )
     assert _failing(world, "return obs")["message"] == (
         "the asset's output no longer matches the schema of gold.scores. Server detail: The "
-        "result does not match gold.scores's schema (dropped region). Restore the columns and "
-        "types the table has, or drop gold.scores and run the asset again so it is recreated "
-        "with the new schema. A Python asset cannot pass evolve_schema."
+        "result does not match gold.scores's schema (dropped region). To let gold.scores take "
+        "the new schema, add evolve_schema=True to the asset's @asset(...) and deploy again (a "
+        "column the output no longer has is then removed from the table); otherwise restore "
+        "the columns and types the table has."
     )
 
 
@@ -1063,8 +1064,8 @@ def test_a_schema_mismatch_is_recognised_by_its_type_not_by_the_servers_prose(
     assert record["retryable"] is False
     message = str(record["message"])
     assert "dropped region" in message
-    assert "drop gold.scores" in message
-    assert "cannot pass evolve_schema" in message
+    assert "add evolve_schema=True" in message
+    assert "--evolve-schema" not in message
 
 
 def test_a_rebound_asset_name_is_refused_not_run(world: _World) -> None:
@@ -3735,6 +3736,38 @@ def _v3(
 
 
 _WATERMARK_ID = {"column": "id", "value": "long:41"}
+
+
+def test_an_asset_that_opted_in_replaces_with_evolve_schema(world: _World) -> None:
+    world.result_path.parent.mkdir(exist_ok=True)
+    assert world.run(evolve_schema=True) == 0
+    (call,) = world.client.tables.calls
+    assert call["method"] == "replace"
+    assert call["evolve_schema"] is True
+    assert world.record() == {"status": "succeeded", "snapshot_id": 42, "rows": 2}
+
+
+def test_evolve_schema_is_off_unless_the_description_says_so(world: _World) -> None:
+    assert parse_description(world.description()).evolve_schema is False
+    assert parse_description(world.description(evolve_schema=False)).evolve_schema is False
+    assert parse_description(world.description(evolve_schema=True)).evolve_schema is True
+
+
+@pytest.mark.parametrize("value", ["true", 1, None])
+def test_an_evolve_schema_that_is_not_a_boolean_is_refused(world: _World, value: object) -> None:
+    with pytest.raises(ValueError) as raised:
+        parse_description(world.description(evolve_schema=value))
+    assert str(raised.value) == "task description: evolve_schema must be true or false"
+
+
+def test_the_first_run_of_an_append_never_evolves(world: _World) -> None:
+    """The worker sends `evolve_schema` only for a replace; the harness checks it too."""
+    _write_asset(world, "return obs")
+    overrides = _v3(watermark={"column": "id", "value": None}, expected="none")
+    assert world.run(**overrides, evolve_schema=True) == 0
+    (call,) = world.client.tables.calls
+    assert call["method"] == "replace"
+    assert call["evolve_schema"] is False
 
 
 def test_append_first_run_replaces_with_expected_none(world: _World) -> None:

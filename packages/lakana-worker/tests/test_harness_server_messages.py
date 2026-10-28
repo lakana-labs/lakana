@@ -2,10 +2,10 @@
 
 The harness (`lakana.runner`, in the SDK) rewords the server's refusal of a
 changed output schema: it keeps the server's description of what differs and
-cuts the server's advice to pass ``evolve_schema``, which a Python asset
-cannot follow. It finds that advice by its opening words. The SDK must not
-import core, so this test lives here: if the server's message is reworded,
-it fails without needing a real run.
+cuts the server's advice to pass ``evolve_schema`` (or ``--evolve-schema``), which a
+Python asset gives as ``@asset(evolve_schema=True)`` instead. It finds that advice by its
+opening words. The SDK must not import core, so this test lives here: if the server's
+message is reworded, it fails without needing a real run.
 
 The SDK's artifact client compares the server's answers with three more texts, and this file
 pins two of them: `_UPLOAD_GONE` and `_NOT_STORED`. The third, `_BUSY_TYPE`, names a server
@@ -31,9 +31,10 @@ def test_the_harness_cuts_exactly_the_advice_the_server_really_gives() -> None:
     refusal = ValidationError(text, status=422, error_type=type(server).__name__)
     assert runner._upload_message(refusal, "gold.scores") == (
         "the asset's output no longer matches the schema of gold.scores. Server detail: The "
-        f"result does not match gold.scores's schema ({diff.describe()}). Restore the columns "
-        "and types the table has, or drop gold.scores and run the asset again so it is "
-        "recreated with the new schema. A Python asset cannot pass evolve_schema."
+        f"result does not match gold.scores's schema ({diff.describe()}). To let gold.scores "
+        "take the new schema, add evolve_schema=True to the asset's @asset(...) and deploy "
+        "again (a column the output no longer has is then removed from the table); otherwise "
+        "restore the columns and types the table has."
     )
 
 

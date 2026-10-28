@@ -38,6 +38,13 @@ MAX_CONNECTIONS = 16
 WRITE_CHOICES = ("replace", "append", "merge")
 """The values of `write`; deploy accepts the same three (a parity test pins both)."""
 
+EVOLVE_NEEDS_REPLACE = (
+    'evolve_schema=True works with write="replace" (the default) only; remove evolve_schema, '
+    "or replace the table instead of appending or merging"
+)
+"""Why `evolve_schema` is refused with an append or a merge; deploy says the same (a parity
+test pins both)."""
+
 _UNSAFE_CATEGORIES = ("Cc", "Cf", "Cs", "Zl", "Zp")
 _IDENTIFIER_MESSAGE = (
     "must not contain a control, format or surrogate character or a line separator"
@@ -130,6 +137,8 @@ class AssetSpec:
     watermark
         The column whose largest value the next run starts after, for ``append`` (and
         optionally ``merge``).
+    evolve_schema
+        Whether a ``replace`` lets the table take the schema the function returns.
     """
 
     inputs: dict[str, str]
@@ -148,6 +157,7 @@ class AssetSpec:
     write: str = "replace"
     key: tuple[str, ...] = ()
     watermark: str | None = None
+    evolve_schema: bool = False
 
 
 def _unsafe(text: str) -> bool:
@@ -322,6 +332,7 @@ def asset(
     write: str = "replace",
     key: Iterable[str] = (),
     watermark: str | None = None,
+    evolve_schema: bool | None = False,
 ) -> Callable[[F], F]:
     """Declare a Python asset; returns the function unchanged with its metadata attached.
 
@@ -384,6 +395,14 @@ def asset(
     watermark
         The column whose largest value in the table the next run starts after: needed by
         ``write="append"``, optional for ``merge``.
+    evolve_schema
+        ``False`` (the default): a run whose result has other columns or types than the table
+        fails, and the table stays as it is. ``True``: each run's replace lets the table take
+        the schema the function returns: new columns are added, a column whose type widens
+        (``Int32`` to ``Int64``, ``Float32`` to ``Float64``) keeps its data, a column whose
+        type changes otherwise becomes a new column (its earlier values read as null), and a
+        column the result no longer has is removed from the table. Only with
+        ``write="replace"``; `None` means ``False``.
 
     Returns
     -------
@@ -400,8 +419,9 @@ def asset(
         and a `keep_versions` that is not an integer from 1 to 2147483647 or
         that is given without ``output="artifact"``, a `decimals` other than
         ``float`` or ``exact``, a `connections` that is not a list of valid,
-        distinct names or holds more than 16, and a `write`, `key` or `watermark` deploy
-        would refuse (also any of them on an artifact asset).
+        distinct names or holds more than 16, a `write`, `key` or `watermark` deploy
+        would refuse (also any of them on an artifact asset), and an `evolve_schema` that is
+        not a boolean, or is ``True`` on an artifact asset or with an append or a merge.
     """
     if function is not None:
         raise TypeError(_PARENTHESES)
@@ -422,6 +442,9 @@ def asset(
             "decimals must be 'float' (Python floats, the default) or 'exact' "
             f"(decimal.Decimal values), got {shown}"
         )
+    evolves = False if evolve_schema is None else evolve_schema
+    if not isinstance(evolves, bool):
+        raise ValueError("evolve_schema must be True or False")
     if output == "artifact":
         for name, given in (
             ("materialize", materialize),
@@ -429,6 +452,7 @@ def asset(
             ("write", None if write in (None, "replace") else write),
             ("key", key or None),
             ("watermark", watermark),
+            ("evolve_schema", evolves or None),
         ):
             if given is not None:
                 raise ValueError(f"{name} does not apply to an artifact asset; remove it")
@@ -444,6 +468,8 @@ def asset(
         raise ValueError(f"a Python asset supports only 'table', got {materialize!r}")
     declared = _check_connections(connections)
     mode, key_columns, watermark_column = _check_write(write, key, watermark)
+    if evolves and mode != "replace":
+        raise ValueError(EVOLVE_NEEDS_REPLACE)
     spec = AssetSpec(
         inputs=dict(inputs) if inputs is not None else {},
         description=description,
@@ -461,6 +487,7 @@ def asset(
         write=mode,
         key=key_columns,
         watermark=watermark_column,
+        evolve_schema=evolves,
     )
 
     def decorate(target: F) -> F:

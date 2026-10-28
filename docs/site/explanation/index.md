@@ -14,6 +14,7 @@ Pages:
 - [Artifacts: what they are and what they are not](artifacts.md): what a stored model is, who can read and write it, and what deleting removes.
 
 - [Python assets: what they are for and how far they are trusted](python-assets.md): why SQL first, and why one instance is one trust domain.
+- [When a table's columns change](when-columns-change.md): what `evolve_schema` does to a table, and what a removed column means for queries, views, downstream assets and old snapshots.
 - [Known gaps of the Compose bundle](compose-known-gaps.md): what the bundle does not do or protect, and why.
 - [Security overview](security.md): who may do what, where secrets live, what the audit log records and how a query is kept inside its limits.
 

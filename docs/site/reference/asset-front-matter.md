@@ -49,7 +49,8 @@ Unknown keys are errors. YAML anchors, aliases, `<<` merge keys and duplicate ke
 (the error names the file and line); `evolve_schema` and `column_docs` must be real booleans, not
 quoted strings or numbers. `evolve_schema` that changes a column's type (other than widening it)
 makes the column a new one: the rows written before read as NULL in it, and the row filters and
-column masks that use it must be created again, as reads under them are refused until then. Each block is at most 64 KiB, and it ends at the first `*/`, even
+column masks that use it must be created again, as reads under them are refused until then
+([When a table's columns change](../explanation/when-columns-change.md)). Each block is at most 64 KiB, and it ends at the first `*/`, even
 inside a string or scalar (when the leftover text then fails to parse, the error says so).
 `materialize: table` (the default) makes the asset a table, written as its `write:` says (below);
 `materialize: view` makes it a view, which takes no `write:`.
@@ -105,7 +106,12 @@ the second run added both rows and kept the first ones:
 ```
 
 `evolve_schema: true` lets an append change the table's schema when the result's columns change;
-it works with `write: append` only.
+it works with `write: append` only. A column the result no longer has is removed from the table,
+and every query, view and downstream asset that names it fails: see
+[When a table's columns change](../explanation/when-columns-change.md). A Python asset takes
+`evolve_schema=True` the other way round, with `write="replace"` only, and accepts
+`evolve_schema=False` with every `write` (see
+[When the output changes shape](python-assets.md#when-the-output-changes-shape)).
 
 ### `merge`
 

@@ -67,6 +67,9 @@ limits lie is in [Python assets: what they are for and how far they are trusted]
   ``a Python asset appends with write="append" and watermark="<column>", not materialize='incremental'``.
   A project version in which an asset appends or merges has manifest version 8: a worker of an
   earlier release refuses it instead of replacing the table.
+- **Schema changes.** `evolve_schema=True` lets a replace give the table the columns the
+  function returns, a removed column included; without it, a changed schema fails the run. See
+  [When the output changes shape](#when-the-output-changes-shape).
 - **Output.** The function returns a `polars.DataFrame` or a `pyarrow.Table`; both get the same
   checks of their columns. It is written into the asset's table in one snapshot, as `write` says.
   Zero rows are fine: a replace empties the table, and an append or a merge whose source had
@@ -92,6 +95,54 @@ limits lie is in [Python assets: what they are for and how far they are trusted]
   shown under that name. A table created later under the same name is a new table:
   a grant on it does not show the old one. It is counted in `hidden_nodes` instead. To let a
   colleague see the history, grant them read on the namespace.
+
+## When the output changes shape
+
+By default a run whose result has other columns or types than the table fails, is not retried,
+and leaves the table as it was:
+``the asset's output no longer matches the schema of gold.scores. Server detail: The result does not match gold.scores's schema (dropped region (string)). To let gold.scores take the new schema, add evolve_schema=True to the asset's @asset(...) and deploy again (a column the output no longer has is then removed from the table); otherwise restore the columns and types the table has.``
+
+`evolve_schema=True` lets each run's replace give the table the schema of what the function
+returns, with the rules a SQL asset's `evolve_schema` follows:
+
+```python
+import polars as pl
+from lakana import asset
+
+
+@asset(inputs={"orders": "silver.orders"}, evolve_schema=True)
+def order_totals(orders: pl.DataFrame) -> pl.DataFrame:
+    return orders.group_by("customer_id").agg(total=pl.col("amount").sum())
+```
+
+- A new column is added; a column whose type widens (`Int32` to `Int64`, `Float32` to
+  `Float64`) keeps its data; a column whose type changes in any other way becomes a new column
+  of the same name; a column the function no longer returns is removed from the table.
+- A removed column is gone for everyone who reads the table: a query, a view or a downstream
+  asset that names it fails, and a row filter or column mask on it stops the reads it applies
+  to. A column whose type changes without widening is a new column: a row filter or column
+  mask that uses it refuses the reads it applies to until an administrator creates it again.
+  Its values stay in the table's older snapshots until maintenance removes them. Read
+  [When a table's columns change](../explanation/when-columns-change.md) before you remove or
+  retype a column others read.
+- The first run after a deploy adopted an existing table (the diff shows it as `adopted`) removes
+  every column of that table the function does not return.
+- A run that returns no rows works the same way: the table is emptied and takes the result's
+  columns.
+- Only with `write="replace"`, the default. An asset that appends or merges cannot change its
+  table's schema; `evolve_schema=True` there fails the deploy with
+  ``evolve_schema=True works with write="replace" (the default) only; remove evolve_schema, or replace the table instead of appending or merging``.
+  It does not apply to an artifact asset either.
+- It must be `True`, `False` or `None`, written out; `None` means `False`, the default.
+  `evolve_schema=False` is accepted with every `write`, and on an artifact asset.
+- Without it, add `evolve_schema=True`, or restore the columns and types the table has. Do not
+  drop the table so that the next run creates it: the new table has none of the old table's
+  grants, row filters or column masks, and its readers would see every row and column until an
+  administrator creates them again.
+- The harness that reads the option is the `lakana` package in the project's own environment.
+  Deploy requires the locked `lakana` to have the instance's minor version, so it has the
+  option; from 1.0 on, an older `lakana` in the lock fails the run at import, with a `TypeError`
+  that names `evolve_schema`.
 
 ## The asset's context
 
@@ -182,9 +233,6 @@ Spilling to disk, the one thing Polars 2 does that can use the worker's disk, is
 - Table inputs and a table output are whole DataFrames in memory. There is no streaming (#22), so
   the worker needs memory for your inputs, your output and your own work. An artifact is a file on
   disk and is not held in memory by Lakana.
-- A changed output schema is a permanent failure: the asset cannot pass `evolve_schema`. Restore
-  the columns and types the table has, or drop the table (`lakana table delete`) and run the
-  asset again, so it is created with the new schema.
 - No `async def`.
 - `@asset(...)` must be the only decorator on the function. To wrap behaviour, do it inside the
   function.
@@ -227,6 +275,7 @@ there is one, the line, as `path:line: message`. Fix the cause and deploy again.
 | ``a Python asset appends with write="append" and watermark="<column>", not materialize='incremental'`` | `materialize="incremental"`. | Write `write="append", watermark="<column>"`. |
 | `a Python asset supports only materialize 'table', got …` | `materialize` is neither `table` nor `incremental`. | Remove the argument, or write a SQL asset. |
 | ``write must be one of replace, append, merge; got '…'``, ``` `write: append` needs `watermark:` … ```, ``` `write: merge` needs `key:` … ```, ``` `write: replace` takes neither `key:` nor `watermark:` ```, ``key column `id` is listed twice`` | A wrong write model. | See [Write modes](asset-front-matter.md#write-modes); the rules are the same as in SQL front-matter. |
+| ``evolve_schema=True works with write="replace" (the default) only; …``, `argument 'evolve_schema' must be True or False`, `argument 'evolve_schema' does not apply to an artifact asset; remove it` | `evolve_schema=True` on an asset that appends or merges, or on an artifact asset, or a value that is not `True` or `False`. | Remove it, or write the asset with `write="replace"`. See [When the output changes shape](#when-the-output-changes-shape). |
 | `` `ctx` is the asset's context; give the input another parameter name `` | `inputs` names a parameter `ctx`. | Rename the parameter and its entry in `inputs`. |
 | `assets/a.sql and assets/a.py both produce table 'a'` | A SQL file and a Python file for one table. | Keep one. |
 | `every .py file under assets/ is an asset; put helper code outside assets/ …` | `__init__.py` or a helper module under `assets/`. | Move helper code to the repository root or `src/`. |
@@ -296,7 +345,7 @@ attempt (see [Run](../how-to/projects.md#run)).
 | A Python asset raises `MemoryError` | Fails with `MemoryError. The task ran out of memory: use less data …, or run it on a machine or in a container with more memory.` Not retried. The machine or container itself had no memory left: narrow the inputs with an upstream SQL asset, work in smaller pieces, or give the worker's machine or container more memory. |
 | A Python asset's function raises `TypeError` | Fails with `TypeError: <the exception's text>` and a second line: `This error is almost always a mistake in the asset's code, so it is not retried. Fix the function, deploy, and run again.` Not retried: a wrong type is almost always a mistake in the code, and every attempt repeats it. If the cause can be transient (a library raising `TypeError` on a value an HTTP call did not return this time, for example), catch it in the function and raise another exception type, such as `RuntimeError`, which is retried. This holds for a `TypeError` (or a subclass) raised out of the function itself, not for one raised while the file is imported. Any other exception of the function (`ValueError`, `KeyError`, `NameError`, a failed network call, ...) is retried until `retries` runs out, because it can depend on the data or on the moment. |
 | A return value that cannot become a table | Fails and is not retried: `the asset returned a polars LazyFrame; call .collect() …`, `… a pandas DataFrame; return pl.from_pandas(df)`, ``… a pyarrow RecordBatchReader; read it with `.read_all()` and return the table``, `… a DataFrame without columns` (`… a table without columns` for a `pyarrow.Table`), or `column 'x' has type …, which cannot be stored in a table`. A column of type `Int128` or `UInt128` is refused by name, with the way out: `cast it to Int64 (pl.col('x').cast(pl.Int64)), or to a decimal such as pl.Decimal(38, 0) if the values do not fit into 64 bits` (Polars 2 gives `Int128` when you add a signed and an unsigned integer column). An `Extension` column (an Arrow extension type Polars does not know) is refused with `take its stored values with pl.col('x').ext.storage() and cast them to a type a table stores`. A table stores no list, struct or map either: such a column is refused as `Column 'x' has an unsupported Arrow type: …`. |
-| The output schema changed | Fails and is not retried: `the asset's output no longer matches the schema of <table> …`, with the remedy. |
+| The output schema changed | Without `evolve_schema=True`: fails and is not retried, `the asset's output no longer matches the schema of <table> …`, with the remedy (see [When the output changes shape](#when-the-output-changes-shape)). |
 | An append or merge's first run returns no columns | ``the asset returned no columns, so there is nothing to create <table> from; …``. Not retried. Run it again once its source has data. |
 | The watermark column is missing or has another type | ``watermark column `ts` is not a column of what the asset returned; return it, or change the asset's watermark=`` or ``watermark column `name` is a string; it must be one of int, long, decimal, date, timestamp, timestamptz``. Not retried. |
 | A merge's rows repeat a key, or a key of several columns has more than 5,000 rows | ``key `id` repeats in 4 rows of what the asset returned; return one row per key, for example with `df.unique(subset=['id'], keep='last')` `` or ``a merge on a key of several columns takes at most 5,000 rows per run, and the asset returned 12,000. …``, which says to merge on one key column or to return only the rows past `ctx.watermark()`. Not retried; nothing is written. |

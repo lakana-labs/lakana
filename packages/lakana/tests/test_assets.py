@@ -327,3 +327,48 @@ def test_a_wrong_write_model_is_refused(arguments: dict[str, Any], message: str)
     with pytest.raises(ValueError) as caught:
         lakana.asset(**arguments)
     assert str(caught.value) == message
+
+
+_EVOLVE_NEEDS_REPLACE = (
+    'evolve_schema=True works with write="replace" (the default) only; remove evolve_schema, '
+    "or replace the table instead of appending or merging"
+)
+
+
+def test_evolve_schema_defaults_to_off_and_is_stored() -> None:
+    @lakana.asset()
+    def plain() -> None:
+        return None
+
+    assert getattr(plain, ASSET_ATTRIBUTE).evolve_schema is False
+
+    @lakana.asset(evolve_schema=True)
+    def evolving() -> None:
+        return None
+
+    assert getattr(evolving, ASSET_ATTRIBUTE).evolve_schema is True
+
+    @lakana.asset(write="append", watermark="ts", evolve_schema=False)
+    def appending() -> None:
+        return None
+
+    assert getattr(appending, ASSET_ATTRIBUTE).evolve_schema is False
+
+
+@pytest.mark.parametrize(
+    ("arguments", "message"),
+    [
+        ({"write": "append", "watermark": "ts", "evolve_schema": True}, _EVOLVE_NEEDS_REPLACE),
+        ({"write": "merge", "key": ["id"], "evolve_schema": True}, _EVOLVE_NEEDS_REPLACE),
+        ({"evolve_schema": "yes"}, "evolve_schema must be True or False"),
+        ({"evolve_schema": 1}, "evolve_schema must be True or False"),
+        (
+            {"output": "artifact", "evolve_schema": True},
+            "evolve_schema does not apply to an artifact asset; remove it",
+        ),
+    ],
+)
+def test_a_wrong_evolve_schema_is_refused(arguments: dict[str, Any], message: str) -> None:
+    with pytest.raises(ValueError) as caught:
+        lakana.asset(**arguments)
+    assert str(caught.value) == message

@@ -103,4 +103,5 @@ nav:
       - explanation/security.md
       - explanation/artifacts.md
       - explanation/python-assets.md
+      - explanation/when-columns-change.md
       - explanation/compose-known-gaps.md

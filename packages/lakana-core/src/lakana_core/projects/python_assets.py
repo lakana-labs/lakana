@@ -21,6 +21,7 @@ from lakana_core.identifiers import TableRef
 from lakana_core.projects.asset_model import (
     DECIMALS_MODES,
     DEFAULT_DECIMALS,
+    EVOLVE_NEEDS_REPLACE,
     MAX_CONNECTIONS,
     MAX_KEEP_VERSIONS,
     WATERMARK_MESSAGE,
@@ -60,6 +61,7 @@ _KNOWN = (
     "write",
     "key",
     "watermark",
+    "evolve_schema",
 )
 _SHAPES: dict[str, tuple[type, str]] = {
     "inputs": (dict, "a dict of strings"),
@@ -74,9 +76,16 @@ _SHAPES: dict[str, tuple[type, str]] = {
     "write": (str, "a string"),
     "key": (list, "a list of strings"),
     "watermark": (str, "a string"),
+    "evolve_schema": (bool, "True or False"),
 }
-_DEFAULTS: dict[str, tuple[object, ...]] = {"write": ("replace",), "key": ([],)}
+_DEFAULTS: dict[str, tuple[object, ...]] = {
+    "write": ("replace",),
+    "key": ([],),
+    "evolve_schema": (False,),
+}
 """Values of the write model that an artifact asset may still give: they change nothing."""
+_NOT_FOR_ARTIFACTS = ("materialize", "columns", "write", "key", "watermark", "evolve_schema")
+"""Arguments that describe a table, refused on an artifact asset unless `_DEFAULTS` has them."""
 CONTEXT_PARAMETER = "ctx"
 """The parameter that receives the asset's context: never an input."""
 _CONTEXT_IS_NOT_AN_INPUT = "`ctx` is the asset's context; give the input another parameter name"
@@ -432,10 +441,10 @@ def _output(
         # `write="replace"` and `key=[]` say what an artifact asset does anyway.
         given = {
             name
-            for name in ("materialize", "columns", "write", "key", "watermark")
+            for name in _NOT_FOR_ARTIFACTS
             if name in values and values[name] not in _DEFAULTS.get(name, ())
         }
-        for name in ("materialize", "columns", "write", "key", "watermark"):
+        for name in _NOT_FOR_ARTIFACTS:
             if name in given:
                 issues.append(
                     ProjectIssue(
@@ -529,6 +538,10 @@ def _write_model(
 ) -> tuple[str | None, tuple[str, ...], str | None]:
     """Read how a run writes the asset's table, with the rules a SQL block follows.
 
+    One rule is the decorator's own: ``evolve_schema=True`` needs ``write="replace"``, because
+    only the upload that replaces the table can change its schema (a SQL block's
+    ``evolve_schema`` is for ``write: append``).
+
     Parameters
     ----------
     values
@@ -561,6 +574,8 @@ def _write_model(
         messages.extend(
             write_rule_issues(write, key, watermark, materialize="table", evolve_schema=None)
         )
+    if values.get("evolve_schema") is True and (write or "replace") != "replace":
+        messages.append(EVOLVE_NEEDS_REPLACE)
     issues.extend(ProjectIssue(path, line, message) for message in messages)
     if messages:
         return None, (), None  # the issues stand; nothing unsafe reaches the metadata
@@ -663,6 +678,7 @@ def _metadata(
         raw["watermark"] = watermark
     if artifact:
         raw.pop("columns", None)
+        raw.pop("evolve_schema", None)
     materialize = values.get("materialize", "table")
     if artifact:
         pass

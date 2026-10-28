@@ -653,6 +653,9 @@ class _Prepared:
     plan
         Where the declared connections let the task go (`ConnectionPlan`); its `routing` is
         `connections`.
+    evolve_schema
+        Whether the replace lets the table take the result's schema: the manifest entry says
+        ``true`` and the asset replaces a table.
     """
 
     environment: str
@@ -675,6 +678,7 @@ class _Prepared:
     key: tuple[str, ...] = ()
     watermark_column: str | None = None
     plan: ConnectionPlan = field(default_factory=lambda: ConnectionPlan())
+    evolve_schema: bool = False
 
     @property
     def connections(self) -> dict[str, dict[str, object]]:
@@ -1486,6 +1490,7 @@ class PythonRuntime:
                     relay=prepared.plan.relay,
                     roots=prepared.plan.roots,
                     root_users=prepared.plan.root_users,
+                    evolve_schema=prepared.evolve_schema,
                 ),
                 sink,
                 stop,
@@ -1992,6 +1997,10 @@ class PythonRuntime:
             key=key,
             watermark_column=watermark_column,
             plan=plan,
+            # Deploy allows it only on a replace; an entry that says otherwise never evolves.
+            evolve_schema=output == "table"
+            and write == "replace"
+            and entry.get("evolve_schema") is True,
         )
         return prepared, tarball
 

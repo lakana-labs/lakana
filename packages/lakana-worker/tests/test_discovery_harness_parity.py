@@ -31,6 +31,7 @@ from lakana import runner
 from lakana.assets import ASSET_ATTRIBUTE
 from lakana_core.connections.kinds import NAME
 from lakana_core.projects.asset_model import (
+    EVOLVE_NEEDS_REPLACE,
     MAX_CONNECTIONS,
     MAX_KEEP_VERSIONS,
     WRITE_CHOICES,
@@ -324,6 +325,17 @@ _ARGUMENT_CASES: dict[str, str] = {
     "key-tuple": 'write="merge", key=("id",)',
     "key-unsafe": 'write="merge", key=["i\\u200bd"]',
     "watermark-unsafe": 'write="append", watermark="t\\u2028s"',
+    "evolve-schema-true": "evolve_schema=True",
+    "evolve-schema-false": "evolve_schema=False",
+    "evolve-schema-none": "evolve_schema=None",
+    "evolve-schema-string": 'evolve_schema="yes"',
+    "evolve-schema-number": "evolve_schema=1",
+    "evolve-schema-on-replace": 'write="replace", evolve_schema=True',
+    "evolve-schema-on-append": 'write="append", watermark="ts", evolve_schema=True',
+    "evolve-schema-off-on-append": 'write="append", watermark="ts", evolve_schema=False',
+    "evolve-schema-on-merge": 'write="merge", key=["id"], evolve_schema=True',
+    "evolve-schema-on-artifact": 'output="artifact", evolve_schema=True',
+    "evolve-schema-off-on-artifact": 'output="artifact", evolve_schema=False',
     "watermark-a-list": "write=\"append\", watermark=['ts']",
     "write-on-artifact": 'output="artifact", write="append", watermark="ts"',
     "key-on-artifact": 'output="artifact", key=["id"]',
@@ -388,6 +400,15 @@ def test_the_decorator_records_the_write_model_on_its_spec() -> None:
     exec(compile(source, _PATH, "exec"), namespace)  # nosec B102 -- the test's own literal
     spec = getattr(namespace["scores"], ASSET_ATTRIBUTE)
     assert (spec.write, spec.key, spec.watermark) == ("merge", ("id", "region"), None)
+
+
+def test_the_evolve_schema_rule_reads_the_same_in_core_and_the_sdk() -> None:
+    assert sdk_assets.EVOLVE_NEEDS_REPLACE == EVOLVE_NEEDS_REPLACE
+    assert sdk_assets.AssetSpec.__dataclass_fields__["evolve_schema"].default is False
+    refusal = _call(
+        _PLAIN.replace("@asset()", '@asset(write="merge", key=["id"], evolve_schema=True)')
+    )
+    assert refusal == EVOLVE_NEEDS_REPLACE
 
 
 def test_the_retention_bound_is_the_same_in_core_and_the_sdk() -> None:

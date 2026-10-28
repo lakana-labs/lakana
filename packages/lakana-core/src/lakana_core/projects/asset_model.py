@@ -43,6 +43,12 @@ REPLACE_TAKES_NEITHER = "`write: replace` takes neither `key:` nor `watermark:`"
 VIEW_TAKES_NO_WRITE = "`materialize: view` cannot take `write:`"
 USE_ONE_SPELLING = "use one: `write: append` with `watermark:` replaces `materialize: incremental`"
 EVOLVE_NEEDS_APPEND = "`evolve_schema` works with `write: append` only"
+EVOLVE_NEEDS_REPLACE = (
+    'evolve_schema=True works with write="replace" (the default) only; remove evolve_schema, '
+    "or replace the table instead of appending or merging"
+)
+"""A Python asset evolves its schema only when it replaces its table: its upload of an append
+or a merge cannot change the schema."""
 KEY_COLUMN_MESSAGE = f"a key column {IDENTIFIER_MESSAGE}"
 WATERMARK_MESSAGE = f"watermark {IDENTIFIER_MESSAGE}"
 
