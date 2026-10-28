@@ -1493,6 +1493,8 @@ def test_no_new_catalog_method_builds_a_loaded_table_without_a_decision() -> Non
         )
     )
     assert callers == [
+        # A writer's: it reads only the snapshot id, to refuse a create pin on a table that has one.
+        "_check_can_write_or_create",
         # `describe_table` reads through it, then adds the descriptions.
         "_describe_row",
         "append",

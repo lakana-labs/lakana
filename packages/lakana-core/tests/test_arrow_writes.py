@@ -247,6 +247,13 @@ def test_a_table_that_appears_during_the_precheck_is_a_conflict(
         catalog.check_can_replace(principal, _ref("gold.t"))
 
 
+def test_a_create_pin_on_a_table_that_has_a_snapshot_is_refused_before_any_data_is_read(
+    catalog: CatalogService, principal: PrincipalRef
+) -> None:
+    with pytest.raises(ConflictError, match=r"gold\.t changed during the write; retry\."):
+        catalog.check_can_replace(principal, _ref("gold.t"), expected_snapshot_id="none")
+
+
 def test_a_replace_on_an_external_table_says_replace(
     catalog: CatalogService, principal: PrincipalRef, monkeypatch: pytest.MonkeyPatch
 ) -> None:

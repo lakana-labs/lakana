@@ -5119,6 +5119,13 @@ class CatalogService:
             raise ValidationError(artifact_refusal(ref.dotted(), artifact_operation))
         if row.table_type is not TableType.ICEBERG:
             raise ValidationError(unmanaged)
+        if (
+            expected_snapshot_id == "none"
+            and self._to_loaded_table(ref, row).metadata.current_snapshot_id is not None
+        ):
+            # "Create it" cannot succeed on a table that already has a snapshot: refuse now
+            # (from the small metadata file), not after the caller sent the whole body.
+            raise ConflictError(target_changed_message(ref.dotted()))
         return row
 
     def check_can_load(
