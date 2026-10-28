@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Iterator
 from datetime import timedelta
 from pathlib import Path
 
@@ -14,6 +15,37 @@ from lakana_core.db import db_now
 from lakana_core.models import Environment, Worker
 from lakana_server.app import create_app
 from lakana_server.settings import ReadinessConfig, Settings
+
+_PATIENT_SECONDS = 30.0
+"""The longest time limit the settings accept, for the tests that read the real database.
+
+These tests check which checks the route names, not how fast the database answers. Under the
+default 2 s limit a starved test process failed them: on a busy CI runner the first read of a
+fresh app (one connection, SQLAlchemy compiling its statements, a few queries, all under
+coverage) took longer than 2 s, and the route named `database` too (#322). Locally, with the test
+process held to 1 % of one CPU, that read took 3.2 and 4.6 s and both tests failed as in CI. The
+time limit itself is tested with fakes in `test_readiness.py`."""
+
+
+@pytest.fixture
+def patient(settings: Settings) -> Iterator[TestClient]:
+    """Provide a client whose readiness check waits `_PATIENT_SECONDS` for each check.
+
+    Parameters
+    ----------
+    settings
+        Configuration pointed at an isolated database.
+
+    Yields
+    ------
+    TestClient
+        A client for the running app.
+    """
+    slow = settings.model_copy(
+        update={"readiness": ReadinessConfig(timeout_seconds=_PATIENT_SECONDS)}
+    )
+    with TestClient(create_app(slow)) as client:
+        yield client
 
 
 def _add_worker(client: TestClient, age_seconds: int = 0) -> None:
@@ -83,26 +115,24 @@ def test_readyz_answers_200_when_no_check_failed(
     assert response.headers["cache-control"] == "no-store"
 
 
-@pytest.mark.quarantine(issue=322)
 def test_readyz_answers_200_without_credentials_when_everything_answers(
-    client: TestClient, tmp_path: Path
+    patient: TestClient, tmp_path: Path
 ) -> None:
-    _add_environment(client, f"file://{tmp_path}/lake")
-    _add_worker(client)
+    _add_environment(patient, f"file://{tmp_path}/lake")
+    _add_worker(patient)
 
-    response = client.get("/readyz")
+    response = patient.get("/readyz")
 
     assert response.status_code == 200
     assert response.json() == {"status": "ready"}
     assert response.headers["cache-control"] == "no-store"
 
 
-@pytest.mark.quarantine(issue=322)
-def test_readyz_names_the_failed_check_and_nothing_else(client: TestClient) -> None:
-    _add_environment(client, "file:///nowhere", secret="s3-keys")
-    _add_worker(client, age_seconds=600)
+def test_readyz_names_the_failed_check_and_nothing_else(patient: TestClient) -> None:
+    _add_environment(patient, "file:///nowhere", secret="s3-keys")
+    _add_worker(patient, age_seconds=600)
 
-    response = client.get("/readyz")
+    response = patient.get("/readyz")
 
     assert response.status_code == 503
     assert response.json() == {"status": "not_ready", "failed": ["storage", "worker"]}
@@ -135,7 +165,8 @@ def test_the_readiness_settings_refuse_values_that_would_make_the_route_unsafe(
 
 
 def test_only_the_named_environments_count(settings: Settings, tmp_path: Path) -> None:
-    named = settings.model_copy(update={"readiness": ReadinessConfig(environments=["prod"])})
+    readiness = ReadinessConfig(environments=["prod"], timeout_seconds=_PATIENT_SECONDS)
+    named = settings.model_copy(update={"readiness": readiness})
     with TestClient(create_app(named)) as client:
         _add_environment(client, f"file://{tmp_path}/lake")
         _add_worker(client)
