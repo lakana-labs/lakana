@@ -4122,7 +4122,18 @@ secret's values, and the only way a secret reaches a Python asset (#23). User re
   must pass `same_origin` with the base URL (no userinfo), else `SourceRefused` before it is
   requested; a cursor, link or records hash an earlier page gave stops the read (`UsageError`),
   and `max_pages`, `max_bytes` (counted as bytes arrive, chunked bodies included) and `max_rows`
-  bound it. Retries are classified by type and status only (408/429/500/502/503/504, httpx's
+  bound it. Every `http` client asks for `Accept-Encoding: gzip, deflate`, and `_http.read_capped`
+  (the REST pages, `files.read` over `http`, the OAuth2 token answer) counts the raw bytes against
+  the cap and decodes them itself with `zlib.decompressobj().decompress(data, 64 KiB)`, counting
+  each step against the cap too. After the end of a stream a gzip body starts a fresh decoder (a
+  further member), and anything else is `SourceRefused` (not retried, as a body not of its
+  encoding is): zlib would otherwise pile the bytes into `unused_data` uncounted and copy them
+  quadratically (Batch A review I-1: a 27-byte member and a 32 MiB trailer passed a 1 MiB cap). A
+  body that ends inside its stream is an `httpx.DecodingError` (retried), never a short body read
+  as whole; `deflate` falls back to raw deflate at its first bytes, as httpx did. Any other
+  `Content-Encoding` (zstd, br, a chain) is `SourceRefused` unread. httpx decoded a whole
+  network chunk before the cap saw it: a 32 KiB zstd body became 1 GiB at a 1 MiB cap (M6 review
+  M1, #356). Retries are classified by type and status only (408/429/500/502/503/504, httpx's
   timeout, network, remote-protocol and decoding errors, the egress proxy's 502/503/504; never a
   certificate refusal), within `retries` attempts and `retry_budget_seconds`, honouring
   `Retry-After`; a non-2xx body is never read. An OAuth2 401 calls
@@ -4134,14 +4145,43 @@ secret's values, and the only way a secret reaches a Python asset (#23). User re
   parameters of `:name` placeholders (`_params.translate`, a tokenizer that skips literals,
   comments and `::`), never formatted into the asset's SQL. Every read is read-only at the
   source: PostgreSQL with `default_transaction_read_only=on`, SQLite on a `file:` URI with
-  `mode=ro` (`ATTACH` and `DETACH` refused: SQLite would create the named file), MariaDB and MySQL
+  `mode=ro` (`ATTACH` and `DETACH` refused: SQLite would create the named file; the file is
+  opened by the walker with `O_NOFOLLOW` per component and held open while SQLite opens it by
+  path; the regular files the process opened meanwhile, read from `/dev/fd` and compared by
+  device and inode, must include that file and nothing else that is still open (another
+  thread's passing read is closed again by then, SQLite's file is not). A mismatch is walked and
+  opened again, three times at most, then `SourceError`. The window from the walk to the second `/dev/fd` listing is held by one lock per process (`sql._OPEN_WINDOW`), never the query, and a retry waits 50 ms, then 100 ms, so another thread's burst of file activity (a scan of `/proc`) is not met three times, so reads of other files on other threads are not mistaken for a swap (PR #361 review): a swap for a link between the check and
+  SQLite's open is refused (M6 review M8, #359). SQLite cannot be handed the walker's descriptor: given
+  `file:/proc/self/fd/N` it reads the link and opens the name it holds, and a file unlinked and
+  replaced by a link named `<name> (deleted)` was read, measured with SQLite through
+  adbc-driver-sqlite 1.13), MariaDB and MySQL
   with `SET SESSION TRANSACTION READ ONLY` and `START TRANSACTION READ ONLY`. MariaDB commits
   before DDL, outside that transaction, so it gets only a statement whose first keyword is
   `SELECT`, `WITH`, `VALUES` or `TABLE`, never `INTO OUTFILE`/`DUMPFILE`; its tokenizer follows the
   session's `sql_mode` (an unknown mode, or a mode and server status that disagree about
   backslashes, sends nothing) and its values are plain scalars. Under the Docker runner libpq
   dials the relay (`hostaddr`) while `host` stays the connection's, so `verify-full` checks the
-  real name; PyMySQL gets a socket to the relay and a TLS context for the real host.
+  real name; PyMySQL gets a socket to the relay and a TLS context for the real host. A query
+  error is classified by SQLSTATE (MariaDB by error number). **Known limit, accepted (#357):** a
+  refused PostgreSQL login is recognised by libpq's English words only, because libpq keeps no
+  SQLSTATE for it (ADBC's error has none at connect, measured with 1.13); a server with a
+  non-English `lc_messages` makes it a retried `SourceError` (the connection test: `failed`)
+  whose message ends with `_check.PG_LOGIN_HINT`, never `credentials`. A login of Lakana's own to
+  read the code was rejected as too much protocol code for the gain. libpq never
+  reads the files of the user it runs as (`_check.conninfo`, also for the connection test): a
+  connection carries no client certificate, so `sslcertmode=disable` never presents the worker
+  user's `~/.postgresql/postgresql.crt` and key to a declared host, and `sslrootcert` (unless
+  `verify-full` names the trust bundle), `sslcrl` and `passfile` point at `/dev/null/nowhere`, a
+  path that cannot exist, so `require` never becomes a chain check against
+  `~/.postgresql/root.crt` and `~/.pgpass` is never consulted. A service file
+  (`~/.pg_service.conf`, `$PGSYSCONFDIR/pg_service.conf`) is read by libpq when `PGSERVICE` is
+  set, and the bundled libpq has no `servicefile` keyword (measured: "invalid connection
+  option"), so `sql.read` connects inside `_stores.without_variables` with `PGSERVICE`,
+  `PGSERVICEFILE` and `PGSYSCONFDIR` out of `os.environ` (the lock and residuals of the cloud
+  variables apply); the local runner's task environment never holds them anyway, and the
+  connection test's subprocess gets only `LAKANA_CA_BUNDLE`. This mattered under the local
+  runner, where the worker is a developer's or an operator's own account (M6 review M9, #360;
+  Batch A review M-3).
   **Residuals, accepted:** PyMySQL interpolates values client-side with its own escaping (no
   server-side prepared statement), so the wire text holds them, though the asset's SQL never
   does; and read-only is a property of the transaction, so a source user with write rights could

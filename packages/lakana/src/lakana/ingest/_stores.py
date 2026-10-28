@@ -17,7 +17,7 @@ import json
 import os
 import ssl
 import threading
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Generator, Iterable
 from typing import TYPE_CHECKING, Any, TypeVar
 from urllib.parse import urlsplit
 
@@ -109,16 +109,23 @@ def client_options(conn: Connection, url: str) -> ClientConfig:
 
 
 @contextlib.contextmanager
-def _without_cloud_environment() -> Generator[None]:
-    """Take obstore's variables out of the environment while a store is built.
+def without_variables(names: Iterable[str] = (), prefixes: tuple[str, ...] = ()) -> Generator[None]:
+    """Take variables out of the environment while a client reads it.
 
-    One store is built at a time (a lock), and every variable is put back afterwards, even
+    One client is built at a time (a lock), and every variable is put back afterwards, even
     after an interrupt, so the task's own code sees its environment unchanged.
 
     Limits, accepted (only the task's own code could exploit them, and it is trusted): what is
     removed is what `os.environ` shows, so a variable set with `os.putenv` or by native code
-    stays; another thread that reads one of these variables while a store is built does not
-    see it, and one that writes one then has its value replaced by the earlier one.
+    stays; another thread that reads one of these variables meanwhile does not see it, and one
+    that writes one then has its value replaced by the earlier one.
+
+    Parameters
+    ----------
+    names
+        The variables.
+    prefixes
+        Every variable starting with one of these too.
 
     Yields
     ------
@@ -128,15 +135,25 @@ def _without_cloud_environment() -> Generator[None]:
     with _ENVIRONMENT:
         taken: dict[str, str] = {}
         try:
-            for name in [n for n in os.environ if n.startswith(_CLOUD_PREFIXES)] + [
-                n for n in _CLOUD_NAMES if n in os.environ
-            ]:
-                taken[name] = os.environ[name]
-                del os.environ[name]
+            prefixed = [n for n in os.environ if prefixes and n.startswith(prefixes)]
+            for name in prefixed + [n for n in names if n in os.environ and n not in prefixed]:
+                taken[name] = os.environ.pop(name)
             yield
         finally:
             for name, value in taken.items():
                 os.environ[name] = value
+
+
+def _without_cloud_environment() -> contextlib.AbstractContextManager[None]:
+    """Take obstore's variables out of the environment while a store is built.
+
+    Returns
+    -------
+    contextlib.AbstractContextManager
+        `without_variables` of the ``AWS_``, ``GOOGLE_`` and ``AZURE_`` variables and the
+        metadata endpoints.
+    """
+    return without_variables(_CLOUD_NAMES, _CLOUD_PREFIXES)
 
 
 def _build(conn: Connection, make: Callable[[], _Store], fix: str) -> _Store:

@@ -760,6 +760,8 @@ class _HttpSource:
         ------
         CapExceeded
             When it is larger than `max_bytes`.
+        SourceRefused
+            When it arrives in a ``Content-Encoding`` Lakana did not ask for.
         SourceError
             When the request fails or the answer is not 200.
         """
@@ -768,17 +770,14 @@ class _HttpSource:
         try:
             with self.client.stream("GET", self._url(path)) as response:
                 self._check(response, path)
-                chunks, total = [], 0
-                for chunk in response.iter_bytes():
-                    total += len(chunk)
-                    if total > max_bytes:
-                        raise CapExceeded(
-                            f"{_quoted(path)} is more than max_file_bytes ({max_bytes})"
-                        )
-                    chunks.append(chunk)
+                content = _http.read_capped(response, max_bytes, self.name)
+        except OverflowError:
+            raise CapExceeded(
+                f"{_quoted(path)} is more than max_file_bytes ({max_bytes})"
+            ) from None
         except httpx.HTTPError as exc:
             _refuse(self.name, self.environment, exc, certificate=_http.certificate_refused(exc))
-        return b"".join(chunks)
+        return content
 
     def close(self) -> None:
         """Close the client and its connections."""

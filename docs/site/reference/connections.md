@@ -117,7 +117,11 @@ For an `http` connection with an OAuth2 `token_url` the token host is checked th
 base URL, and the test is not `ok` unless both pass; the message names the host that failed.
 Then, for a connection with a secret, the credentials:
 
-- `postgresql`: a login, with `SELECT 1` run in a read-only transaction.
+- `postgresql`: a login, with `SELECT 1` run in a read-only transaction. Known limit: a refused
+  login is recognised by PostgreSQL's English words only (libpq does not keep its error code), so
+  a server whose messages are in another language makes a wrong password `failed`, not
+  `credentials`; the message then ends with "if this is a refused login on a server whose
+  messages are not in English, check the user and password".
 - `mariadb`: a login over TLS as the connection's `tls` says (`verify-full` checks the certificate,
   `require` uses TLS without checking it, `disable` uses none; a server without TLS is `tls`, never
   a quiet fallback to plain text), with `SELECT 1` in a read-only transaction. A `mariadb`

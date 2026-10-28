@@ -1774,6 +1774,11 @@ def test_postgresql_credentials_log_in_and_execute_select_1(
             "failed",
             'the PostgreSQL login failed (FATAL: database "crm"',
         ),
+        (
+            "FATAL:  Passwort-Authentifizierung für Benutzer »reader« fehlgeschlagen",
+            "failed",
+            "the PostgreSQL login failed (FATAL: Passwort-Authentifizierung",
+        ),
     ],
 )
 def test_a_refused_postgresql_login_is_its_outcome(
@@ -1792,6 +1797,57 @@ def test_a_refused_postgresql_login_is_its_outcome(
     assert found == outcome
     assert fragment in message
     assert SECRET not in message
+    assert (_check.PG_LOGIN_HINT in message) == (outcome == "failed")
+
+
+def test_a_secret_across_the_cut_of_a_failed_login_is_masked_whole(
+    authority: Authority, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The server's words are masked first and cut after, so no part of the password stays."""
+    _fake_postgres(monkeypatch, refuse="FATAL:  " + "x" * 680 + SECRET + "y" * 100)
+    with listening(tls_server(authority, tmp_path)) as port:
+        found, message = _check.check(_pg_body(port, authority), {}, timeout=FAST)
+
+    assert found == "failed"
+    assert SECRET[:4] not in message
+    assert "x***y" in message
+    assert message.endswith(_check.PG_LOGIN_HINT)
+
+
+def test_a_login_refused_in_another_language_is_failed_with_the_hint(
+    authority: Authority, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The known limit: only libpq's English words mark a refusal, so German ones are `failed`.
+
+    The message then says what to check (docs/site/reference/connections.md says the same).
+    """
+    _fake_postgres(monkeypatch, refuse="FATAL:  Passwort-Authentifizierung fehlgeschlagen")
+    with listening(tls_server(authority, tmp_path)) as port:
+        found, message = _check.check(_pg_body(port, authority), {}, timeout=FAST)
+
+    assert found == "failed"
+    assert message.endswith(
+        "if this is a refused login on a server whose messages are not in English, check the "
+        "user and password"
+    )
+
+
+def test_conninfo_never_lets_libpq_read_the_worker_users_home_directory() -> None:
+    """No client certificate, and no root file, CRL or password file from ``~/.postgresql/``."""
+    info = _check.conninfo({"host": "db.example.com", "sslmode": "require"})
+
+    assert "sslcertmode='disable'" in info
+    for option in ("sslrootcert", "sslcrl", "passfile"):
+        assert f"{option}='{_check.NOWHERE}'" in info
+    assert not Path(_check.NOWHERE).exists()
+    assert not Path(_check.NOWHERE).parent.is_dir()
+
+
+def test_conninfo_keeps_the_root_file_a_caller_names() -> None:
+    info = _check.conninfo({"host": "db.example.com", "sslrootcert": "system"})
+
+    assert "sslrootcert='system'" in info
+    assert info.count("sslrootcert=") == 1
 
 
 def test_postgresql_credentials_through_the_relay_dial_its_address(
@@ -1810,7 +1866,8 @@ def test_postgresql_credentials_through_the_relay_dial_its_address(
     _check._postgresql_credentials(body, {"relay_port": 15001}, FAST)
 
     assert seen[0].startswith("host='db.example.com' port='15001' hostaddr='10.207.0.3' ")
-    assert "sslrootcert" not in seen[0]
+    assert f"sslrootcert='{_check.NOWHERE}'" in seen[0]
+    assert "sslcertmode='disable'" in seen[0]
 
 
 def test_without_the_driver_a_postgresql_test_fails_saying_what_to_install(

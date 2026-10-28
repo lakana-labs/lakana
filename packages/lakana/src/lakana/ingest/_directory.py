@@ -484,8 +484,8 @@ def walk(root_dir: str, base: str, pattern: str, *, max_files: int) -> Listing:
     return listing
 
 
-def regular_file(root_dir: str, path: str) -> None:
-    """Check that a path below the root is a regular file, opening no link on the way.
+def regular_file(root_dir: str, path: str) -> int:
+    """Open a regular file below the root for reading, opening no link on the way.
 
     Parameters
     ----------
@@ -493,6 +493,11 @@ def regular_file(root_dir: str, path: str) -> None:
         The ingestion root.
     path
         The file's path below it (a ``sqlite-file`` connection's path).
+
+    Returns
+    -------
+    int
+        The open file's descriptor; the caller closes it.
 
     Raises
     ------
@@ -513,11 +518,10 @@ def regular_file(root_dir: str, path: str) -> None:
             raise failure from None
     finally:
         os.close(fd)
-    try:
-        if not stat.S_ISREG(os.fstat(handle).st_mode):
-            raise DirectoryError(f"{path!r} is not a regular file")
-    finally:
+    if not stat.S_ISREG(os.fstat(handle).st_mode):
         os.close(handle)
+        raise DirectoryError(f"{path!r} is not a regular file")
+    return handle
 
 
 def read(root_dir: str, base: str, relative: str, *, max_bytes: int) -> bytes:
