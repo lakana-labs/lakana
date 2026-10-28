@@ -192,7 +192,7 @@ Create a Lakana project that deploys unchanged.
 | `--repo` | text | none | Repository name (default: the directory name). |
 | `--sample` / `--no-sample` | flag | none | Write a small sample to build and query (default: yes for a local instance). |
 | `--ci-auth` | one of `oidc`, `pat` | `oidc` | How the CI files sign in: oidc exchanges the CI job's ID token, so nothing secret is stored in CI; pat reads a stored Lakana token. |
-| `--template` | one of `ingest-files`, `ingest-sql`, `ingest-rest` | none | Start from one asset that ingests from a source: ingest-files, ingest-sql or ingest-rest (the sample is then left out). |
+| `--template` | one of `python`, `ingest-files`, `ingest-sql`, `ingest-rest` | none | Start from a template. python: the sample plus one Python asset, locked with `uv lock` (needs network access and a few more minutes). ingest-files, ingest-sql or ingest-rest: one asset that ingests from a source, instead of the sample. |
 
 ## `lakana profile`
 

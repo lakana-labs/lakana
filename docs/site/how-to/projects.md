@@ -28,12 +28,20 @@ downloaded), two assets built from it (`assets/silver/station_temperatures.sql` 
 without writing a line; "Getting started" walks through it. It is written unless your default
 profile (or `--url` or `LAKANA_URL`) points at an instance on another machine; `--sample` and
 `--no-sample` decide it either way. The sample has no Python asset, because one needs the lock
-described below. `lakana init` ends with the next steps: commit, register,
+described below; `lakana init --template python` writes the sample with one (below). `lakana init` ends with the next steps: commit, register,
 `lakana deploy --env dev`, `lakana run --env dev` and a query of the result. If git cannot find a name and email from the new directory (a fresh
 machine), `init` adds one line with the two `git config` commands, worded as a condition: use it
 only if `git commit` says it does not know who you are. A per-directory identity (git's
 `includeIf`) is not visible until the repository exists, so you may see the line and not need it.
 With an identity found, `init` says nothing about git.
+
+`lakana init --template python` writes the sample, one Python asset built from two of its tables
+(`assets/gold/temperature_anomalies.py`), a `pyproject.toml` that depends on `lakana[assets]`, and
+`uv.lock`: it runs `uv lock` itself. It says so first, because the lock needs network access to
+the public package index and a few minutes; without `uv` on your `PATH`, or when the lock fails,
+it stops with the cause and the next step and leaves nothing behind. `--sample` and `--no-sample`
+are refused with it. The tutorial [Build a table with Python](../tutorials/python-sample.md)
+walks through it.
 
 `lakana init --template ingest-files` (or `ingest-sql`, `ingest-rest`) writes, instead of the
 sample, one Python asset that reads a source system, a `pyproject.toml` that already depends on

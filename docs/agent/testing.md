@@ -671,6 +671,14 @@ for each run; the bearer token is generated for each run too, so no secret is in
 `ingest-generic` reuses those two scripts. Under the local runner a task reaches `127.0.0.1`
 directly.
 
+The example `python-sample` runs `lakana init --template python`, which runs `uv lock` itself, so
+the pin cannot be swapped between writing and locking. Instead `run.sh` puts the wheel into
+`~/weather/wheelhouse` before `lakana init` and exports `UV_FIND_LINKS=wheelhouse`: uv takes lakana
+from that folder and the lock names it as `registry = "wheelhouse"`, which the deploy accepts. The
+wheel must be the CLI's own version (`run.sh` checks it): build it from the commit the workspace
+was synced at. `test_project_init.py` fakes `uv` (`shutil.which` and `subprocess.run`), so its tests
+need neither uv nor the network.
+
 ## CI runners
 
 CI jobs run on the runner named by the repository variable `CI_RUNNER`; when the variable is not

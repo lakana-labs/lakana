@@ -2670,6 +2670,41 @@ def test_each_ingestion_template_asset_passes_the_deploy_rules(template: str) ->
     assert len(parsed.connections) == 1
 
 
+def test_the_project_of_the_python_template_deploys_with_its_python_asset(
+    session: Session, principal: PrincipalRef, world: World
+) -> None:
+    """`lakana init --template python` writes a project that deploys: SQL feeds Python."""
+    from lakana.cli import project_init
+    from lakana.cli._sample import SAMPLE
+
+    version = package_version("lakana-worker")
+    files = {
+        relative: text.format(repo="analytics", version=version)
+        for relative, text in project_init.TEMPLATES.items()
+    } | SAMPLE
+    files["pyproject.toml"] = project_init._PYPROJECT_ASSETS.format(
+        repo="analytics", version=version
+    )
+    files.update(project_init.PYTHON_TEMPLATE)
+    files["README.md"] = files["README.md"].format(repo="analytics")
+    files["uv.lock"] = _lock_text()
+    commit(world.repo_path, files)
+
+    run = _submit_and_run(session, principal, world, settings=_python_settings(world))
+
+    assert (run.status, run.error_message) == (DeployStatus.SUCCEEDED, None)
+    job_version = session.get(JobVersion, run.job_version_id)
+    assert job_version is not None
+    by_table = {entry["table"]: entry for entry in job_version.manifest_json["assets"]}
+    anomalies = by_table["gold.temperature_anomalies"]
+    assert anomalies["kind"] == "python"
+    assert anomalies["inputs"] == {
+        "readings": "bronze.readings",
+        "stations": "silver.station_temperatures",
+    }
+    assert set(anomalies["metadata"]["columns"]) == {"station_id", "day", "temp_c", "anomaly_c"}
+
+
 _JOBS_YAML = (
     'repo: analytics\njobs:\n  daily:\n    select: ["silver.*"]\n'
     '    schedule: { cron: "0 6 * * *", timezone: Europe/Berlin }\n'

@@ -6,12 +6,15 @@ import os
 import re
 import subprocess
 import tomllib
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import IO
+from typing import IO, Any
+from unittest import mock
 
 import pytest
 import yaml
 from conftest import FakeApi, invoke, make_state, write_profile_file
+from typer.testing import Result
 
 from lakana import __version__
 from lakana.cli._sample import SAMPLE
@@ -796,7 +799,7 @@ def test_the_files_template_readme_says_the_operator_names_the_root(tmp_path: Pa
     assert "LAKANA_INGESTION_ROOTS in the Compose bundle's .env" in readme
 
 
-def test_an_unknown_template_lists_the_three(tmp_path: Path) -> None:
+def test_an_unknown_template_lists_every_template(tmp_path: Path) -> None:
     """Exit 2, naming every template."""
     result = invoke(
         make_state(tmp_path, FakeApi()), "init", str(tmp_path / "p"), "--template", "ingest-xml"
@@ -804,7 +807,7 @@ def test_an_unknown_template_lists_the_three(tmp_path: Path) -> None:
 
     assert result.exit_code == 2
     text = " ".join(result.output.split())
-    for name in _TEMPLATE_ASSETS:
+    for name in [*_TEMPLATE_ASSETS, "python"]:
         assert name in text
     assert not (tmp_path / "p").exists()
 
@@ -837,3 +840,318 @@ def test_the_template_project_test_parses_its_asset(tmp_path: Path) -> None:
     check = namespace["test_every_python_asset_parses"]
     assert callable(check)
     check()
+
+
+_PYTHON_ASSET = "assets/gold/temperature_anomalies.py"
+_PYTHON_FILES = {_PYTHON_ASSET, "README.md", "uv.lock"}
+
+
+@dataclass
+class _Uv:
+    """What the fake `uv` saw and how it answers.
+
+    Parameters
+    ----------
+    returncode
+        The exit status `uv lock` returns.
+    stderr
+        What it prints on standard error.
+    raises
+        An exception `subprocess.run` raises instead of running it.
+    calls
+        Each `uv` command line, with its working directory.
+    """
+
+    returncode: int = 0
+    stderr: str = "Resolved 31 packages in 327ms\n"
+    raises: BaseException | None = None
+    calls: list[tuple[list[str], Path]] = field(default_factory=list)
+
+
+@pytest.fixture
+def uv(monkeypatch: pytest.MonkeyPatch) -> _Uv:
+    """Put a fake `uv` on the PATH: `uv lock` writes a lock unless told to fail.
+
+    Parameters
+    ----------
+    monkeypatch
+        Pytest's monkeypatch.
+
+    Returns
+    -------
+    _Uv
+        The fake's settings and record.
+    """
+    fake = _Uv()
+    real_run = subprocess.run
+
+    def run(argv: list[str], **options: Any) -> subprocess.CompletedProcess[str]:  # ruff: ignore[any-type]
+        if argv[0] != "/opt/uv/bin/uv":
+            return real_run(argv, **options)
+        fake.calls.append((list(argv), Path(options["cwd"])))
+        if fake.raises is not None:
+            raise fake.raises
+        if fake.returncode == 0:
+            (Path(options["cwd"]) / "uv.lock").write_text("version = 1\n")
+        return subprocess.CompletedProcess(argv, fake.returncode, "", fake.stderr)
+
+    monkeypatch.setattr("lakana.cli.project_init.subprocess.run", run)
+    monkeypatch.setattr(
+        "lakana.cli.project_init.shutil.which",
+        lambda name: "/opt/uv/bin/uv" if name == "uv" else None,
+    )
+    return fake
+
+
+def _init_python(tmp_path: Path, *extra: str) -> Result:
+    """Run `lakana init p --template python` in `tmp_path`.
+
+    Parameters
+    ----------
+    tmp_path
+        Pytest's per-test directory.
+    *extra
+        More options.
+
+    Returns
+    -------
+    Result
+        The CLI's result.
+    """
+    return invoke(
+        make_state(tmp_path, FakeApi()), "init", str(tmp_path / "p"), "--template", "python", *extra
+    )
+
+
+def test_the_python_template_writes_the_sample_a_python_asset_and_a_lock(
+    tmp_path: Path, uv: _Uv
+) -> None:
+    """The SQL sample, one Python asset built from two of its tables, lakana[assets] and uv.lock."""
+    result = _init_python(tmp_path)
+
+    assert result.exit_code == 0, result.output
+    root = tmp_path / "p"
+    assert _files(root) == _EXPECTED | _PYTHON_FILES
+    for name, text in SAMPLE.items():
+        assert (root / name).read_text() == text
+    pyproject = tomllib.loads((root / "pyproject.toml").read_text())
+    assert pyproject["project"]["dependencies"] == [f"lakana[assets]=={__version__}"]
+    asset = (root / _PYTHON_ASSET).read_text()
+    assert '"readings": "bronze.readings"' in asset
+    assert '"stations": "silver.station_temperatures"' in asset
+    assert "readings: pl.DataFrame, stations: pl.DataFrame" in asset
+    assert uv.calls == [(["/opt/uv/bin/uv", "lock"], root)]
+    assert (root / "uv.lock").read_text() == "version = 1\n"
+
+
+def test_the_python_template_says_up_front_why_it_needs_the_network(
+    tmp_path: Path, uv: _Uv
+) -> None:
+    """The first line names the network, the minutes and the reason; the steps follow the lock."""
+    result = _init_python(tmp_path)
+
+    lines = result.stdout.splitlines()
+    first = " ".join(lines[0].split())
+    assert "network access" in first
+    assert "a few minutes" in first
+    assert "uv lock" in first
+    assert "resolves" in first and "uv.lock" in first
+    text = " ".join(result.stdout.split())
+    assert text.index("network access") < text.index("Created a Lakana project")
+    assert "commit it with the rest" in text
+    assert "  uv lock" not in result.stdout
+    steps = result.stdout[result.stdout.index("Next:") :]
+    assert "git init && git add -A && git commit -m 'Initial project'" in steps
+    assert "lakana deploy --env dev" in steps
+    assert "lakana run --env dev" in steps
+    assert 'lakana sql "SELECT * FROM gold.temperature_anomalies' in steps
+    assert "first run" in " ".join(steps.split())
+
+
+def test_the_python_template_readme_says_what_it_needed_and_what_comes_next(
+    tmp_path: Path, uv: _Uv
+) -> None:
+    """The README repeats the network, the minutes and why, then the steps to the query."""
+    _init_python(tmp_path)
+
+    readme = (tmp_path / "p" / "README.md").read_text()
+    text = " ".join(readme.split())
+    assert readme.startswith("# p\n")
+    assert "network access" in text
+    assert "a few more minutes" in text
+    assert "resolved" in text and "uv.lock" in text
+    assert "lakana deploy --env dev" in text
+    assert "lakana run --env dev" in text
+    assert "SELECT * FROM gold.temperature_anomalies" in text
+    assert "run `uv lock` again" in text
+
+
+def test_the_python_template_project_test_checks_both_kinds_of_asset(
+    tmp_path: Path, uv: _Uv
+) -> None:
+    """The project's own test runs green on the SQL sample and the Python asset."""
+    _init_python(tmp_path)
+    test_file = tmp_path / "p" / "tests" / "test_example.py"
+    namespace: dict[str, object] = {"__file__": str(test_file)}
+
+    exec(test_file.read_text(), namespace)  # nosec B102
+
+    checks = [namespace[n] for n in namespace if n.startswith("test_")]
+    assert len(checks) == 2
+    for check in checks:
+        assert callable(check)
+        check()
+
+
+def test_the_python_template_without_uv_writes_nothing(tmp_path: Path, uv: _Uv) -> None:
+    """No uv on the PATH: exit 1 before a file is written, naming uv and how to get it."""
+    with mock.patch("lakana.cli.project_init.shutil.which", return_value=None):
+        result = _init_python(tmp_path)
+
+    assert result.exit_code == 1
+    text = " ".join(result.output.split())
+    assert "uv" in text and "PATH" in text
+    assert "https://docs.astral.sh/uv/" in text
+    assert "run the same command again" in text
+    assert not (tmp_path / "p").exists()
+    assert uv.calls == []
+
+
+@pytest.mark.parametrize(
+    "raises",
+    [None, OSError("No such file or directory"), subprocess.TimeoutExpired(["uv"], 600)],
+)
+def test_a_lock_that_fails_leaves_nothing_and_names_the_next_step(
+    tmp_path: Path, uv: _Uv, monkeypatch: pytest.MonkeyPatch, raises: BaseException | None
+) -> None:
+    """Without the network the lock fails: exit 1, uv's reason, the next step, no project left."""
+    monkeypatch.setattr("lakana.cli.project_init.__version__", "1.2.3")
+    uv.returncode = 2
+    uv.stderr = (
+        "Using CPython 3.14.4\n"
+        "error: Failed to fetch: `https://pypi.org/simple/lakana/`\n"
+        "  Caused by: dns error: failed to lookup address information\n"
+    )
+    uv.raises = raises
+    target = tmp_path / "p"
+    target.mkdir()
+    (target / "notes.txt").write_text("mine\n")
+
+    result = _init_python(tmp_path)
+
+    assert result.exit_code == 1, result.output
+    text = " ".join(result.output.split())
+    assert "network access" in text
+    assert "HTTPS_PROXY" in text
+    assert "run the same command again" in text
+    assert "--template" in text and "SQL sample" in text
+    if raises is None:
+        assert "dns error: failed to lookup address information" in text
+    elif isinstance(raises, subprocess.TimeoutExpired):
+        assert "did not finish within 10 minutes" in text
+    else:
+        assert "No such file or directory" in text
+    assert "wheelhouse" not in text
+    assert _files(target) == {"notes.txt"}
+    assert sorted(p.name for p in target.iterdir()) == ["notes.txt"]
+
+
+def test_a_lock_that_fails_on_a_dev_build_says_how_to_lock_from_a_wheel(
+    tmp_path: Path, uv: _Uv, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No index has a development build: the wheel goes into `wheelhouse`, found by uv."""
+    monkeypatch.setattr("lakana.cli.project_init.__version__", "0.7.1.dev3+gabc123")
+    uv.returncode = 1
+    uv.stderr = "error: no version of lakana[assets]==0.7.1.dev3+gabc123\n"
+
+    result = _init_python(tmp_path)
+
+    assert result.exit_code == 1
+    text = " ".join(result.output.split())
+    assert "lakana 0.7.1.dev3+gabc123 is a development build" in text
+    assert "wheelhouse" in text
+    assert "UV_FIND_LINKS=wheelhouse" in text
+
+
+def test_a_python_template_on_a_dev_build_notes_only_the_ci_pin(
+    tmp_path: Path, uv: _Uv, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The lock worked, so the note about `uv lock` and an index does not apply."""
+    monkeypatch.setattr("lakana.cli.project_init.__version__", "0.7.1.dev3+gabc123")
+
+    result = _init_python(tmp_path)
+
+    assert result.exit_code == 0, result.output
+    assert "Note: lakana 0.7.1.dev3+gabc123 is a development build" in result.stdout
+    assert "[[tool.uv.index]]" not in result.stdout
+
+
+def test_an_existing_lock_is_never_overwritten(tmp_path: Path, uv: _Uv) -> None:
+    """A uv.lock in the target counts like any other file in the way: exit 2, nothing run."""
+    target = tmp_path / "p"
+    target.mkdir()
+    (target / "uv.lock").write_text("mine\n")
+
+    result = _init_python(tmp_path)
+
+    assert result.exit_code == 2
+    assert "Refusing to overwrite" in result.output
+    assert (target / "uv.lock").read_text() == "mine\n"
+    assert _files(target) == {"uv.lock"}
+    assert uv.calls == []
+
+
+@pytest.mark.parametrize(
+    ("option", "fragment"), [("--sample", "--sample"), ("--no-sample", "--no-sample")]
+)
+def test_the_python_template_refuses_a_sample_option(
+    tmp_path: Path, uv: _Uv, option: str, fragment: str
+) -> None:
+    """The python template always writes the sample: either option is refused before a write."""
+    result = _init_python(tmp_path, option)
+
+    assert result.exit_code == 2
+    text = " ".join(result.output.split())
+    assert f"leave out {fragment}" in text
+    assert "python" in text
+    assert not (tmp_path / "p").exists()
+    assert uv.calls == []
+
+
+def test_a_symlinked_directory_in_the_target_is_refused(tmp_path: Path) -> None:
+    """A link inside the project would carry a write outside it: exit 3, nothing written."""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    target = tmp_path / "analytics"
+    target.mkdir()
+    (target / "assets").symlink_to(outside, target_is_directory=True)
+
+    result = invoke(make_state(tmp_path, FakeApi()), "init", str(target))
+
+    assert result.exit_code == 3
+    assert "is a symbolic link" in " ".join(result.output.split())
+    assert list(outside.iterdir()) == []
+    assert _files(target) == set()
+
+
+def test_the_python_asset_is_the_one_the_tutorial_shows() -> None:
+    """The tutorial's example runs the asset `lakana init --template python` writes."""
+    from lakana.cli.project_init import PYTHON_TEMPLATE
+
+    example = Path(__file__).resolve().parents[4] / "docs" / "examples" / "python-sample"
+    assert (example / "project" / _PYTHON_ASSET).read_text() == PYTHON_TEMPLATE[_PYTHON_ASSET]
+
+
+@pytest.mark.parametrize(
+    ("stderr", "shown"),
+    [
+        ("Using CPython 3.14.4\nerror: one\n  two\n", "error: one two"),
+        ("".join(f"line {n}\n" for n in range(12)), " ".join(f"line {n}" for n in range(4, 12))),
+        ("\n", "(it printed nothing)"),
+    ],
+)
+def test_the_lock_error_shows_uv_s_reason(stderr: str, shown: str) -> None:
+    """From uv's first `error:` line on, else its last eight lines, else a word that it was mute."""
+    from lakana.cli.project_init import _uv_error
+
+    assert _uv_error(stderr) == shown
