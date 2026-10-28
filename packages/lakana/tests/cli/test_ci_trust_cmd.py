@@ -220,3 +220,35 @@ def test_update_sends_only_what_changes(tmp_path: Path) -> None:
     nothing = invoke(make_state(tmp_path, FakeApi()), "ci-trust", "update", _ID)
     assert nothing.exit_code == 2
     assert "Nothing to change" in nothing.output
+
+
+def test_start_on_deploy_jobs_is_sent_only_when_asked_for(tmp_path: Path) -> None:
+    api = FakeApi()
+    api.on("POST", _BASE, status=201, json={**_RULE, "start_on_deploy_jobs": True})
+    api.on("PATCH", f"{_BASE}/{_ID}", json=_RULE)
+    state = make_state(tmp_path, api)
+    created = invoke(
+        state,
+        "ci-trust",
+        "create",
+        "--issuer",
+        "github",
+        "--env",
+        "prod",
+        "--repo",
+        "analytics",
+        "--principal",
+        "deployer",
+        "--claim",
+        "repository_id=123456",
+        "--claim",
+        "ref=refs/heads/main",
+        "--start-on-deploy-jobs",
+    )
+    assert created.exit_code == 0, created.output
+    assert json.loads(api.requests[0].content)["start_on_deploy_jobs"] is True
+    assert "starts the deploy's on_deploy jobs" in created.stdout.replace("\n", " ")
+    invoke(state, "ci-trust", "update", _ID, "--no-start-on-deploy-jobs")
+    assert json.loads(api.requests[1].content) == {"start_on_deploy_jobs": False}
+    invoke(state, "ci-trust", "update", _ID, "--start-on-deploy-jobs")
+    assert json.loads(api.requests[2].content) == {"start_on_deploy_jobs": True}

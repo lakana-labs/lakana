@@ -177,3 +177,29 @@ def test_an_odd_exchange_answer_is_an_invalid_response(change: dict[str, object]
             repository="analytics",
             http_client=_client({**_TOKEN, **change}),
         )
+
+
+def test_start_on_deploy_jobs_is_read_sent_and_off_from_an_older_server() -> None:
+    assert _rules(_RULE).get("x").start_on_deploy_jobs is False
+    opted = _rules({**_RULE, "start_on_deploy_jobs": True}).get("x")
+    assert opted.start_on_deploy_jobs is True
+    seen: list[httpx.Request] = []
+    _rules(_RULE, seen).update("x", start_on_deploy_jobs=False)
+    assert json.loads(seen[0].content) == {"start_on_deploy_jobs": False}
+    _rules(_RULE, seen).create(
+        issuer="github",
+        principal="deployer",
+        environment="prod",
+        repository="analytics",
+        conditions={"repository_id": "1", "ref": "refs/heads/main"},
+        start_on_deploy_jobs=True,
+    )
+    assert json.loads(seen[1].content)["start_on_deploy_jobs"] is True
+    _rules(_RULE, seen).create(
+        issuer="github",
+        principal="deployer",
+        environment="prod",
+        repository="analytics",
+        conditions={"repository_id": "1", "ref": "refs/heads/main"},
+    )
+    assert "start_on_deploy_jobs" not in json.loads(seen[2].content)

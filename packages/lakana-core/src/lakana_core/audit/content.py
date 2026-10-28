@@ -76,6 +76,8 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         # a connection's address: hosts, ports, URLs, buckets, roots and paths, never a secret
         # value or its CA certificate (`lakana_core.connections.service` writes neither)
         "address",
+        # the opt-in of a CI trust rule that allowed the start of a CI deploy's `on_deploy` job
+        "allowed_by",
         "artifact",
         "artifact_id",
         # the asset (table) of a task attempt, and the attempt's claim counter
@@ -85,6 +87,8 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "check",
         "check_result_id",
         "checks",
+        # the CI trust rule whose opt-in allowed a start (#102)
+        "ci_rule_id",
         "claim",
         # a CI trust rule's claim conditions: claim names and the texts an administrator set
         # (a repository id, a ref, an environment name); configuration, never data.
@@ -128,6 +132,8 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "resumed_from_run_id",
         "role",
         "rule_id",
+        # a CI trust rule's opt-in to starting the `on_deploy` jobs of its deploys (#102)
+        "start_on_deploy_jobs",
         "rule_ids",
         "run_as",
         "run_id",

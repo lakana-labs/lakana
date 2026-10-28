@@ -21,7 +21,7 @@ the list shows without it.
 |---|---|---|---|
 | Repository | `--repo`, `repository` | a repository name; an unknown name is `404` | runs, deploys |
 | Status | `--status`, `status` | runs: `queued`, `running`, `succeeded`, `failed`, `cancelled`. Queries: the same words in any letter case (the list shows them in capitals). Repeat the option or separate the values with commas: `failed,cancelled` | runs, queries |
-| Trigger | `--trigger`, `trigger` | `schedule`, `api`, `manual`; repeat or separate with commas. A run started with `lakana run` has none and matches no trigger | runs |
+| Trigger | `--trigger`, `trigger` | `schedule`, `api`, `manual`, `deploy`; repeat or separate with commas. A run started with `lakana run` has none and matches no trigger | runs |
 | Job | `--job`, `job` | the name of a job | runs |
 | Since | `--since`, `since` | an ISO 8601 time with a time zone, for example `2026-10-18T09:30:00Z`; the run was created at or after it | runs |
 | Submitter | `--submitter`, `submitter` | a principal's name; none of that name's queries is shown to someone who may not see them | queries |

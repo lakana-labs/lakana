@@ -19,6 +19,7 @@
  "python-sample": 26,
  "proprietary-db": 20,
  "run-a-job": 19,
+ "run-after-deploy": 9,
  "train-and-predict": 119,
  "write-modes": 35.7
 }

@@ -2550,3 +2550,65 @@ def test_0050_on_postgres() -> None:
             )
         assert modes == {merged: "APPEND", replaced: "REPLACE"}
         engine.dispose()
+
+
+def test_0051_on_postgres() -> None:
+    """0051 adds `deploy_runs.job_starts_json`; a downgrade names a deploy's run by its starter."""
+    revision_0050 = "b8d4f0a2c3e5"
+    revision_0051 = "c9e5a1b3d4f6"
+    now = datetime.now(UTC)
+
+    with PostgresContainer("postgres:16", driver="pg8000") as pg:
+        url = pg.get_connection_url()
+        migrate.upgrade(url, revision_0050)
+        migrate.upgrade(url, revision_0051)
+        engine = sqlalchemy.create_engine(url)
+        assert _alembic_version(engine) == revision_0051
+        columns = {c["name"]: c for c in sqlalchemy.inspect(engine).get_columns("deploy_runs")}
+        assert columns["job_starts_json"]["nullable"] is True
+        rules = {c["name"]: c for c in sqlalchemy.inspect(engine).get_columns("ci_trust_rules")}
+        assert rules["start_on_deploy_jobs"]["nullable"] is False
+        account, person = uuid.uuid4(), uuid.uuid4()
+        by_account, by_person, scheduled = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+        with engine.begin() as conn:
+            conn.execute(sqlalchemy.text("SET LOCAL session_replication_role = replica"))
+            for principal_id, kind in ((account, "SERVICE_ACCOUNT"), (person, "USER")):
+                conn.execute(
+                    sqlalchemy.text(
+                        "INSERT INTO principals (id, type, name, is_active, created_at, "
+                        "updated_at) VALUES (:id, :type, :name, true, :now, :now)"
+                    ),
+                    {"id": principal_id, "type": kind, "name": str(principal_id), "now": now},
+                )
+            for run_id, trigger, by in (
+                (by_account, "DEPLOY", account),
+                (by_person, "DEPLOY", person),
+                (scheduled, "SCHEDULE", account),
+            ):
+                conn.execute(
+                    sqlalchemy.text(
+                        "INSERT INTO runs (id, environment_id, repository_id, job_version_id, "
+                        "kind, selection_json, status, cancel_requested, created_at, "
+                        "triggered_by, job, trigger) VALUES (:id, :a, :b, :c, 'FULL', '{}', "
+                        "'SUCCEEDED', false, now(), :by, 'refresh', :trigger)"
+                    ),
+                    {
+                        "id": run_id,
+                        "a": uuid.uuid4(),
+                        "b": uuid.uuid4(),
+                        "c": uuid.uuid4(),
+                        "by": by,
+                        "trigger": trigger,
+                    },
+                )
+
+        migrate.downgrade(url, revision_0050)
+        assert _alembic_version(engine) == revision_0050
+        columns = {c["name"] for c in sqlalchemy.inspect(engine).get_columns("deploy_runs")}
+        assert "job_starts_json" not in columns
+        rules = {c["name"] for c in sqlalchemy.inspect(engine).get_columns("ci_trust_rules")}
+        assert "start_on_deploy_jobs" not in rules
+        with engine.connect() as conn:
+            triggers = dict(conn.execute(sqlalchemy.text("SELECT id, trigger FROM runs")).all())
+        assert triggers == {by_account: "API", by_person: "MANUAL", scheduled: "SCHEDULE"}
+        engine.dispose()

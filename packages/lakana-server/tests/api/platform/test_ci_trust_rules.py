@@ -80,6 +80,24 @@ def test_create_list_show_update_enable_disable_delete(rules_client: TestClient)
     assert rules_client.get(rule, headers=AUTH_HEADER).status_code == 404
 
 
+def test_start_on_deploy_jobs_is_off_by_default_and_set_by_an_administrator(
+    rules_client: TestClient,
+) -> None:
+    created = rules_client.post(_RULES, headers=AUTH_HEADER, json=_RULE).json()
+    assert created["start_on_deploy_jobs"] is False
+    rule = f"{_RULES}/{created['id']}"
+    other = _token_for(rules_client, "someone")
+    refused = rules_client.patch(rule, headers=other, json={"start_on_deploy_jobs": True})
+    assert refused.status_code == 403
+    patched = rules_client.patch(rule, headers=AUTH_HEADER, json={"start_on_deploy_jobs": True})
+    assert patched.status_code == 200, patched.text
+    assert patched.json()["start_on_deploy_jobs"] is True
+    opted = rules_client.post(
+        _RULES, headers=AUTH_HEADER, json={**_RULE, "start_on_deploy_jobs": True}
+    )
+    assert opted.json()["start_on_deploy_jobs"] is True
+
+
 def test_a_rule_without_the_numeric_id_or_a_ref_is_a_422(rules_client: TestClient) -> None:
     for conditions, needle in (
         ({"ref": "refs/heads/main", "event_name": "push"}, "repository_id"),

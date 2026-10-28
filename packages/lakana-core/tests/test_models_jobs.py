@@ -211,8 +211,8 @@ def test_a_run_has_no_job_and_no_trigger_unless_it_is_given_one(session: Session
     assert (job.trigger, job.scheduled_for, job.missed) == (RunTrigger.SCHEDULE, NOW, 4)
 
 
-def test_the_triggers_are_schedule_api_and_manual() -> None:
-    assert {t.value for t in RunTrigger} == {"schedule", "api", "manual"}
+def test_the_triggers_are_schedule_api_manual_and_deploy() -> None:
+    assert {t.value for t in RunTrigger} == {"schedule", "api", "manual", "deploy"}
 
 
 def test_a_cleared_waiting_start_is_sql_null_not_a_json_null(session: Session) -> None:

@@ -11,6 +11,7 @@ from lakana._http import NEXT_CURSOR_HEADER, HttpTransport, query_params
 from lakana._models import (
     Deploy,
     DeployAccepted,
+    DeployJobStart,
     Deployment,
     DeployPage,
     Orphan,
@@ -36,6 +37,29 @@ def _when(value: str | None) -> datetime | None:
         The parsed value.
     """
     return datetime.fromisoformat(value) if value is not None else None
+
+
+def job_start_from_json(item: dict[str, Any]) -> DeployJobStart:
+    """Build a `DeployJobStart` from a `DeployJobStartOut` body.
+
+    Parameters
+    ----------
+    item
+        The decoded entry.
+
+    Returns
+    -------
+    DeployJobStart
+        The entry.
+    """
+    return DeployJobStart(
+        job=item["job"],
+        outcome=item["outcome"],
+        run_id=item.get("run_id"),
+        waits_for_run_id=item.get("waits_for_run_id"),
+        reason=item.get("reason"),
+        message=item.get("message"),
+    )
 
 
 def deploy_from_json(data: dict[str, Any]) -> Deploy:
@@ -71,6 +95,7 @@ def deploy_from_json(data: dict[str, Any]) -> Deploy:
         checks=data.get("checks"),
         warnings=tuple(data.get("warnings", ())),
         waiting_for=waiting_for_from_json(data.get("waiting_for")),
+        job_starts=tuple(job_start_from_json(item) for item in data.get("job_starts", ())),
     )
 
 
@@ -272,7 +297,11 @@ class Deploys:
         max_interval: float = 2.0,
         on_update: Callable[[Deploy], None] | None = None,
     ) -> Deploy:
-        """Poll a run until it succeeds or fails.
+        """Poll a run until it succeeds or fails, and until the jobs it starts are started.
+
+        A deploy that starts jobs (`on_deploy: true`) is returned only once each start is
+        recorded (no `job_starts` entry is ``pending``), so the result says what became of
+        every job.
 
         Parameters
         ----------
@@ -296,7 +325,7 @@ class Deploys:
         Returns
         -------
         Deploy
-            The run, once `succeeded`.
+            The run, once `succeeded` and its job starts are recorded.
 
         Raises
         ------
@@ -311,11 +340,17 @@ class Deploys:
             deploy = self.get(environment, deploy_id)
             if on_update is not None:
                 on_update(deploy)
-            if deploy.status == "succeeded":
+            starting = any(start.outcome == "pending" for start in deploy.job_starts)
+            if deploy.status == "succeeded" and not starting:
                 return deploy
             if deploy.status == "failed":
                 raise DeployFailed(deploy.error_message or "deploy failed", deploy)
             if deadline is not None and time.monotonic() >= deadline:
+                if deploy.status == "succeeded":
+                    raise TimeoutError(
+                        f"Deploy {deploy_id} succeeded, but its job starts are not recorded yet "
+                        f"after {timeout}s"
+                    )
                 raise TimeoutError(f"Deploy {deploy_id} still {deploy.status} after {timeout}s")
             time.sleep(interval)
             interval = min(interval * 2, max_interval)

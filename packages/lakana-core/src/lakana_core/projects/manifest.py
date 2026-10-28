@@ -181,7 +181,7 @@ def _entry(asset: ParsedAsset, caps: RunCaps, artifacts: frozenset[str]) -> dict
     return entry
 
 
-def _unset_notify(job: JobConfig) -> set[str]:
+def _unset_fields(job: JobConfig) -> set[str]:
     """Name the job fields a manifest entry leaves out.
 
     Parameters
@@ -193,9 +193,11 @@ def _unset_notify(job: JobConfig) -> set[str]:
     -------
     set of str
         ``notify`` when the job has none, so that a manifest of a project without notifications
-        keeps the shape of version 5.
+        keeps the shape of version 5, and ``on_deploy`` when it is off, so that a project that does
+        not use it keeps its manifest as it was.
     """
-    return set() if job.notify is not None else {"notify"}
+    unset = set() if job.notify is not None else {"notify"}
+    return unset if job.on_deploy else unset | {"on_deploy"}
 
 
 def _version(
@@ -299,8 +301,8 @@ def build_manifest(
     }
     if config.jobs:
         manifest["jobs"] = {
-            # `notify` only when set, so a project without one keeps the version 5 shape
-            name: job.model_dump(mode="json", exclude=_unset_notify(job))
+            # `notify` and `on_deploy` only when set, so a project without them keeps its shape
+            name: job.model_dump(mode="json", exclude=_unset_fields(job))
             for name, job in sorted(config.jobs.items())
         }
     if lock_sha256 is not None:
@@ -404,6 +406,23 @@ def job_schedule(entry: Mapping[str, Any]) -> tuple[str, str] | None:
         zone = schedule.get("timezone")
         return schedule["cron"], zone if isinstance(zone, str) else "UTC"
     return None
+
+
+def job_on_deploy(entry: Mapping[str, Any]) -> bool:
+    """Say whether a manifest's job entry starts after each deploy.
+
+    Parameters
+    ----------
+    entry
+        The job's entry; untrusted, like a stored one.
+
+    Returns
+    -------
+    bool
+        `True` only for the boolean ``on_deploy: true``; anything else, a damaged value included,
+        is off.
+    """
+    return entry.get("on_deploy") is True
 
 
 @dataclass(frozen=True)

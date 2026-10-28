@@ -248,7 +248,8 @@ class Runs:
             Only runs in this status or one of these (``queued``, ``running``, ``succeeded``,
             ``failed``, ``cancelled``).
         trigger
-            Only runs started this way or one of these (``schedule``, ``api``, ``manual``).
+            Only runs started this way or one of these (``schedule``, ``api``, ``manual``,
+            ``deploy``).
         job
             Only runs of this job.
         since
@@ -304,7 +305,8 @@ class Runs:
             Only runs in this status or one of these (``queued``, ``running``, ``succeeded``,
             ``failed``, ``cancelled``).
         trigger
-            Only runs started this way or one of these (``schedule``, ``api``, ``manual``).
+            Only runs started this way or one of these (``schedule``, ``api``, ``manual``,
+            ``deploy``).
         job
             Only runs of this job.
         since

@@ -288,7 +288,19 @@ def test_explain_accepts_the_documented_claims_of_a_deploy(
 
 @pytest.mark.slow
 def test_disabling_a_rule_ends_its_ci_tokens(app: TestClient, tmp_path: Path) -> None:
+    """Also: the documented opt-in to starting the deploy's jobs turns the setting on."""
     state = _create_the_documented_rules(app, tmp_path, ("accounts", "github"))
+    [prod] = [
+        r
+        for r in app.get("/api/v1/ci-trust-rules", headers=AUTH_HEADER).json()
+        if r["environment"] == "prod"
+    ]
+    assert prod["start_on_deploy_jobs"] is False
+    [words] = _region_commands("start-jobs")
+    opted = _run(state, *[prod["id"] if word == "RULE_ID" else word for word in words])
+    assert opted.exit_code == 0, opted.stderr
+    shown = app.get(f"/api/v1/ci-trust-rules/{prod['id']}", headers=AUTH_HEADER).json()
+    assert shown["start_on_deploy_jobs"] is True
     id_token = _sign(_claims(environment="prod"))
     issued = app.post(
         "/api/v1/auth/oidc/token",
