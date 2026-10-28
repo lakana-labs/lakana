@@ -2653,7 +2653,7 @@ def test_run_one_reads_a_secret_backed_environment_and_never_leaks_it_on_write_f
     `storage_secret_ref`, so `resolved_storage.config.options` in `run_one`
     genuinely contains the decrypted value (real crypto, real
     `EnvKeyProvider`, real `StorageResolver.for_environment` call) -- only
-    the final `Storage.write` call is patched to fail, standing in for a
+    the call that opens the result's stream (`Storage.open_write`) is patched to fail, standing in for a
     real backend (S3, credential rejected, endpoint unreachable) echoing a
     credential back in its exception text. `update_environment_storage`
     only ever changes `storage_secret_ref`/`storage_options`, never
@@ -2663,7 +2663,7 @@ def test_run_one_reads_a_secret_backed_environment_and_never_leaks_it_on_write_f
     succeeds against local disk, and `fsspec`'s local filesystem silently
     ignores unrecognised S3-shaped kwargs rather than erroring on them, so
     the write cannot be made to fail for real without a live S3-compatible
-    backend. Patching `Storage.write` is what forces a failure at exactly
+    backend. Patching `Storage.open_write` is what forces a failure at exactly
     the point this task's fix instruments, deterministically and without
     Docker, while every value up to that point -- including the secret
     ending up in `resolved_storage.config.options` -- is produced by the
@@ -2696,10 +2696,10 @@ def test_run_one_reads_a_secret_backed_environment_and_never_leaks_it_on_write_f
     query_service = QueryService(session, AllowAllAuthorization())
     run = query_service.submit_query(principal, "dev", "SELECT id FROM gold.sales")
 
-    def _failing_write(self: FsspecStorage, path: str, data: bytes) -> None:
+    def _failing_write(self: FsspecStorage, path: str) -> None:
         raise RuntimeError("Write failed: secret_access_key=MARKER_VALUE_MUST_NOT_LEAK")
 
-    with mock.patch.object(FsspecStorage, "write", _failing_write):
+    with mock.patch.object(FsspecStorage, "open_write", _failing_write):
         run_one(session, run.id, AllowAllAuthorization(), provider)
 
     session.refresh(run)
@@ -3370,7 +3370,7 @@ def test_run_one_allows_no_spill_and_no_location_when_storage_is_not_local(
         mock.patch(
             "lakana_worker.pipeline.execute_query", return_value=pa.table({"x": [1]})
         ) as execute_mock,
-        mock.patch.object(FsspecStorage, "write"),
+        mock.patch.object(FsspecStorage, "open_write"),
     ):
         run_one(session, run.id, AllowAllAuthorization())
 
