@@ -491,7 +491,9 @@ def _arrow(path: Path, limit: int | None) -> pa.Table:
 def _parquet(path: Path, limit: int | None) -> pa.Table:
     """Read a Parquet file row group by row group, bounded by its metadata and page headers.
 
-    The whole file is first estimated from them. Then each row group is read in batches of only
+    A column with more than one value a row (a nested type, or an extension type stored as
+    one, such as a tensor) is refused first: a table stores none, and its rows have no bound.
+    The whole file is then estimated from them. Then each row group is read in batches of only
     as many rows as fit in what is left of the limit, counting each row at its worst: a text
     column's value at the size of its largest page, which no value decodes larger than (one
     value repeated by a dictionary or by shared prefixes takes only a few bytes in the file).
@@ -510,8 +512,19 @@ def _parquet(path: Path, limit: int | None) -> pa.Table:
     """
     with pq.ParquetFile(path) as parquet:
         schema = _plain(parquet.schema_arrow)
-        _storable(path, pa.schema([f for f in schema if pa.types.is_nested(f.type)]).empty_table())
         metadata = parquet.metadata
+        repeated = [
+            metadata.schema.column(i).path
+            for i in range(metadata.num_columns)
+            if metadata.schema.column(i).max_repetition_level > 0
+        ]
+        nested = [
+            field
+            for field in schema
+            if pa.types.is_nested(field.type)
+            or any(leaf == field.name or leaf.startswith(f"{field.name}.") for leaf in repeated)
+        ]
+        _storable(path, pa.schema(nested).empty_table())
         pages = _page_headers(path, metadata)
         widths = [_width(field) for field in schema]
         text = [

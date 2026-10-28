@@ -242,6 +242,26 @@ def test_a_nested_column_is_refused_before_any_row_is_read(
     assert "nested.parquet: Column 'l' has an unsupported Arrow type" in result.output
 
 
+def test_an_extension_column_with_nested_storage_is_refused_before_any_row_is_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Review I3: a tensor column holds many values per row; it is refused before it is read."""
+    path = tmp_path / "tensor.parquet"
+    kind = pa.fixed_shape_tensor(pa.float32(), [1024])
+    storage = pa.FixedSizeListArray.from_arrays(pa.array([0.0] * 1024 * 64, pa.float32()), 1024)
+    pq.write_table(pa.table({"t": pa.ExtensionArray.from_storage(kind, storage)}), path)
+
+    def never(*args: object, **kwargs: object) -> Iterator[pa.RecordBatch]:
+        raise AssertionError("the rows were read")
+
+    monkeypatch.setattr(pq.ParquetFile, "iter_batches", never)
+
+    result = invoke(make_state(tmp_path, _api(1024 * 1024)), "load", str(path), "t", "--env", "dev")
+
+    assert result.exit_code == 8, result.output
+    assert "tensor.parquet: Column 't' has an unsupported Arrow type" in result.output
+
+
 @pytest.mark.parametrize(
     ("values", "size"),
     [
