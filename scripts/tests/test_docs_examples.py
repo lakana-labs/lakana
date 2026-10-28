@@ -76,6 +76,52 @@ def test_the_runner_refuses_an_unknown_example() -> None:
     assert "docs/examples" in result.stderr
 
 
+def _runner(*names: str, **env: str) -> subprocess.CompletedProcess[str]:
+    """Run the real runner of this checkout with these extra variables.
+
+    Parameters
+    ----------
+    *names
+        The examples named on the command line.
+    **env
+        Extra environment variables.
+
+    Returns
+    -------
+    subprocess.CompletedProcess
+        The finished runner.
+    """
+    return subprocess.run(
+        ["bash", str(ROOT / "scripts" / "run_docs_examples.sh"), *names],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+        env={**os.environ, **env},
+    )
+
+
+def test_a_shard_and_named_examples_together_are_refused() -> None:
+    """Which examples run must have one answer: the names, or the shard."""
+    result = _runner("getting-started", LAKANA_DOCS_SHARD="1/3")
+    assert result.returncode == 2
+    assert "LAKANA_DOCS_SHARD" in result.stderr
+    assert "getting-started" not in result.stdout
+
+
+def test_a_shard_that_is_not_one_is_refused_before_anything_starts() -> None:
+    result = _runner(LAKANA_DOCS_SHARD="4/3")
+    assert result.returncode == 2
+    assert "LAKANA_DOCS_SHARD='4/3' is not a shard" in result.stderr
+    assert "==" not in result.stdout
+
+
+def test_the_runner_asks_the_shard_module_which_examples_to_run() -> None:
+    """The selection itself is tested in test_docs_example_shards.py."""
+    text = RUNNER.read_text(encoding="utf-8")
+    assert "python3 -m scripts.docs_example_shards select" in text
+
+
 RUNNER = ROOT / "scripts" / "run_docs_examples.sh"
 _STUB = """#!/usr/bin/env bash
 # A stand-in for `lakana`: what it was asked is appended to $STUB_CALLS.
@@ -498,11 +544,10 @@ def test_each_example_keeps_its_uv_caches_in_its_own_home(tmp_path: Path) -> Non
     assert record.read_text().split() == ["uv=unset", "link=no"]
 
 
-def test_the_docs_examples_job_restores_no_uv_cache() -> None:
+@pytest.mark.parametrize("name", ["docs-examples", "docs-examples-shard"])
+def test_the_docs_examples_jobs_restore_no_uv_cache(name: str) -> None:
     """No `actions/cache` step and no cache variable: the shared cache is gone for good."""
-    job = yaml.safe_load((ROOT / ".github" / "workflows" / "ci.yml").read_text())["jobs"][
-        "docs-examples"
-    ]
+    job = yaml.safe_load((ROOT / ".github" / "workflows" / "ci.yml").read_text())["jobs"][name]
 
     assert not [s for s in job["steps"] if "actions/cache@" in str(s.get("uses", ""))]
     assert "DOCS_UV_CACHE" not in str(job)

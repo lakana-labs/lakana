@@ -202,7 +202,7 @@ change pays off for a `--basetemp` on a real disk, as the agents' capped runs us
 ## Pull requests that change documentation only
 
 A pull request that changes nothing but documentation skips the heavy jobs: `lint`, the `unit`
-shards, `integration` and its jobs, `five-minute`, `compose-smoke`, `docs-examples`, the macOS
+shards, `integration` and its jobs, `five-minute`, `compose-smoke`, `docs-examples` and its shards, the macOS
 jobs, `quarantined tests` and `static`. The `test` job still
 runs on both Python versions, but only `scripts/tests`, which holds every test that reads the
 documentation (the legacy-name check among them). `docs` (the block check, the strict build and the
@@ -243,7 +243,7 @@ every missing output of it means "run everything".
 
 | Event | Runs |
 |---|---|
-| Pull request, **draft** | `lint`, `docs`, `docs-examples`, the 3.14 `unit` shards and `test (3.14)` (with coverage and the ratchets), `quarantined tests`, `time budgets` |
+| Pull request, **draft** | `lint`, `docs`, `docs-examples` (with its three shards), the 3.14 `unit` shards and `test (3.14)` (with coverage and the ratchets), `quarantined tests`, `time budgets` |
 | Pull request, **ready for review** (also the moment it leaves draft) | everything: the above plus the 3.11 shards and `test (3.11)`, the macOS shards and `test (macos)` (they test only if the pull request touches `packages/`), the `integration` jobs, `five-minute`, `compose-smoke` |
 | Dependabot's pull requests | everything (they are never drafts) |
 | Documentation-only pull request | see the section above; a draft also lacks `test (3.11)` |
@@ -261,7 +261,7 @@ every missing output of it means "run everything".
   is the tree of the pull request's head commit, which CI has just tested. On a push to `main`
   the `changes` job runs `scripts/ci_already_tested.py` (fetched from the pushed commit), and if
   it proves that, `unit`, `test`, the `integration` jobs, `five-minute`, `compose-smoke`,
-  `docs-examples` and `quarantined tests` skip. It says "already tested" only if the commit has exactly one pull request, merged with
+  `docs-examples` (with its shards) and `quarantined tests` skip. It says "already tested" only if the commit has exactly one pull request, merged with
   this very commit into the repository's default branch, whose base was never changed (no
   `base_ref_changed` or `base_ref_force_pushed` event: a run made against another branch
   proves nothing about `main`) and whose head commit no other pull request shares (runs are
@@ -461,9 +461,10 @@ lakana sql "SELECT * FROM gold.station_ranking ORDER BY warmth_rank"
 - **The checker compares.** `scripts/docs_blocks.py --captured DIR` (or the same variable)
   compares each tied block with its file after both are masked (below); a mismatch names the
   page and line and prints a diff of the masked texts. Without a capture it checks only that the
-  region exists in `run.sh` and says that the comparison was skipped. CI's `docs-examples` job
-  runs the examples with the variable set, compares after them, and uploads the captures as the
-  artifact `docs-captures` even when a step failed.
+  region exists in `run.sh` and says that the comparison was skipped. CI's `docs-examples (N/3)`
+  shards run the examples with the variable set and upload their captures as `docs-captures-N`,
+  even when a step failed; the `docs-examples` job merges them, compares, and uploads the merged
+  captures as the artifact `docs-captures`, also when the comparison failed.
 - **`--fix` refreshes.** `uv run python scripts/docs_blocks.py --fix --captured DIR` rewrites only
   the tied blocks that differ, and only the lines that differ after masking: a line that equals
   the run's after masking keeps the page's text (a page may show its own identifier). Run it
@@ -599,6 +600,7 @@ uv run --group docs zensical build --strict     # build into site-build/ (a trac
 uv run python scripts/check_built_site.py site-build   # external resources, missing files and URLs outside /lakana/
 uv run --group docs zensical serve              # preview on http://localhost:8000
 uv run bash scripts/run_docs_examples.sh        # every example, or name one: ... getting-started
+LAKANA_DOCS_SHARD=2/3 uv run bash scripts/run_docs_examples.sh   # only what CI's shard 2 runs
 uv run pytest scripts/tests                     # the tests that read the site and the workflows
 ```
 
@@ -617,7 +619,7 @@ output, not part of the instance's log. It is best effort: at most 30 s, one lin
 command that fails, and the example's exit status is unchanged. In CI the `docs` job runs the
 block check (without `--fix`), the generated-reference check, the
 strict build and the built-site check, and uploads `site-build` as the `docs-site` artifact
-(kept 7 days); `docs-examples` builds the `lakana` wheel of the commit (`uv build --package lakana
+(kept 7 days); each `docs-examples (N/3)` shard builds the `lakana` wheel of the commit (`uv build --package lakana
 --wheel --out-dir DIR`) and runs the runner with `LAKANA_TEST_WHEELHOUSE=DIR`. The example
 `train-and-predict` runs Python assets that train and load a scikit-learn model, and ends with a job on
 `* * * * *` that must fire on the real clock: its `run.sh` polls `lakana runs list` for up to 150 s for a
@@ -629,6 +631,28 @@ for the worker's first build. Run it locally the same way: build the wheel into 
 memory scope. The runner's private `HOME` hides uv's cache and the Pythons uv downloaded; the
 example sets `UV_PYTHON` to the interpreter that runs it, and the worker builds with its own cache.
 `docs-examples` is a required check; `docs` is not.
+
+**Shards (#363).** The examples run in three jobs side by side, `docs-examples (1/3)` to
+`(3/3)`, because one after another they took 12.5 to 12.8 minutes against a 15-minute budget.
+`LAKANA_DOCS_SHARD=I/N`, with no example named, makes the runner ask
+`python3 -m scripts.docs_example_shards select I/N` which examples are shard I: the longest first,
+each to the shard with the least time so far, by the seconds in
+`scripts/docs-example-durations.json` (an example without an entry counts 30 s). Every shard
+computes the same split from the same directory, so each example runs exactly once; a shard and
+example names together are refused. The required check `docs-examples` waits for the three,
+fails for any shard that did not succeed (that shard's log names the example), and compares the
+pages with the merged captures, which needs all of them. `scripts/tests/test_docs_example_shards.py`
+fails for a new example without a recorded time, and for an entry whose example is gone. Record
+the time the runner printed for it (each shard's log ends with a table `| example | N s |`), or
+refresh the whole file from a run's logs when the shards drift apart:
+
+```bash
+gh run view RUN_ID --log > ~/.cache/lakana-docs-examples.log
+uv run python -m scripts.docs_example_shards durations \
+  --output scripts/docs-example-durations.json ~/.cache/lakana-docs-examples.log
+```
+
+`durations` writes the mean seconds per example over every row it finds.
 
 The ingestion recipes of "Load data from a source" (`ingest-files`, `ingest-sql`, `ingest-rest`,
 `ingest-generic`) are Python assets set up the same way: `lakana init --template` writes the

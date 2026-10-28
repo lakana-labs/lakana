@@ -22,6 +22,7 @@ SKIPPED_JOBS = {
         "five-minute",
         "compose-smoke",
         "docs-examples",
+        "docs-examples-shard",
         "unit-macos",
         "test-macos",
         "quarantine",
@@ -228,7 +229,7 @@ def test_the_docs_job_checks_the_blocks_and_builds_the_site_strictly() -> None:
     assert all("if" not in step for step in job["steps"])
 
 
-@pytest.mark.parametrize("name", ["docs", "docs-examples"])
+@pytest.mark.parametrize("name", ["docs", "docs-examples", "docs-examples-shard"])
 def test_no_step_of_a_documentation_job_can_fail_quietly(name: str) -> None:
     """``continue-on-error`` and ``|| true`` turn a failing check into a green one."""
     job = _jobs("ci.yml")[name]
@@ -242,14 +243,14 @@ def test_no_step_of_a_documentation_job_can_fail_quietly(name: str) -> None:
 
 def test_the_examples_job_runs_the_runner() -> None:
     """The example projects run end to end unless the change is documentation only."""
-    job = _jobs("ci.yml")["docs-examples"]
+    job = _jobs("ci.yml")["docs-examples-shard"]
     assert any("scripts/run_docs_examples.sh" in step.get("run", "") for step in job["steps"])
     assert job["timeout-minutes"] <= 25
 
 
 def test_the_examples_job_builds_the_lakana_wheel_before_it_runs_the_examples() -> None:
     """The Python-asset example carries the lakana wheel in its project; without it, it fails."""
-    steps = _jobs("ci.yml")["docs-examples"]["steps"]
+    steps = _jobs("ci.yml")["docs-examples-shard"]["steps"]
     build = next(
         i for i, s in enumerate(steps) if "uv build --package lakana --wheel" in s.get("run", "")
     )
@@ -264,7 +265,7 @@ def test_the_examples_job_builds_the_lakana_wheel_before_it_runs_the_examples() 
     assert int(env["LAKANA_DOCS_EXAMPLE_BUDGET"]) >= 240
 
 
-@pytest.mark.parametrize("name", ["docs", "docs-examples"])
+@pytest.mark.parametrize("name", ["docs", "docs-examples", "docs-examples-shard"])
 def test_the_documentation_jobs_sync_from_the_lock_file(name: str) -> None:
     """A job that syncs without ``--locked`` may test other versions than the lock file says."""
     syncs = [

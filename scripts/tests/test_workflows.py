@@ -762,7 +762,16 @@ HEAVY_ON_READY = (
     "five-minute",
     "compose-smoke",
 )
-DRAFT_RUNS = ("lint", "unit", "docs-examples", "test", "docs", "quarantine", "budgets")
+DRAFT_RUNS = (
+    "lint",
+    "unit",
+    "docs-examples",
+    "docs-examples-shard",
+    "test",
+    "docs",
+    "quarantine",
+    "budgets",
+)
 
 
 @pytest.mark.parametrize("name", HEAVY_ON_READY)
@@ -815,6 +824,7 @@ SKIPPED_WHEN_TESTED = (
     "five-minute",
     "compose-smoke",
     "docs-examples",
+    "docs-examples-shard",
     "quarantine",
 )
 TESTED_TERM = "needs.changes.outputs.already_tested != 'true'"
@@ -955,6 +965,7 @@ _FULL_RUN = {
     "test-macos",
     "docs",
     "docs-examples",
+    "docs-examples-shard",
     "integration",
     "integration-services",
     "integration-docker",
@@ -965,7 +976,16 @@ _FULL_RUN = {
     "budgets",
 }
 WHAT_RUNS = {
-    "push to a draft": {"lint", "unit", "test", "docs", "docs-examples", "quarantine", "budgets"},
+    "push to a draft": {
+        "lint",
+        "unit",
+        "test",
+        "docs",
+        "docs-examples",
+        "docs-examples-shard",
+        "quarantine",
+        "budgets",
+    },
     "ready or later push": _FULL_RUN,
     "documentation only, draft": {"test", "docs", "budgets"},
     "documentation only, ready": {"test", "docs", "budgets"},
@@ -2146,6 +2166,8 @@ def test_every_ci_job_has_a_time_budget() -> None:
     assert "unit (3.14, 3/3)" in names
     assert "test (3.11)" in names
     assert "integration (services, 2/2)" in names
+    assert "docs-examples (3/3)" in names
+    assert "docs-examples" in names
     errors, _ = check_jobs([JobTime(name, 0.0) for name in names], budgets)
     assert errors == []
 
@@ -2186,3 +2208,52 @@ def test_the_quarantine_job_runs_only_quarantined_tests_and_never_fails_the_run(
     for name, other in _jobs("ci.yml").items():
         if name != "quarantine":
             assert "LAKANA_TEST_QUARANTINED" not in str(other), name
+
+
+def test_the_documentation_examples_run_in_three_shards_balanced_by_their_seconds() -> None:
+    """Each shard runs the examples ``scripts/docs_example_shards.py`` gives it (#363)."""
+    job = _jobs("ci.yml")["docs-examples-shard"]
+    assert job["name"] == "docs-examples (${{ matrix.shard }}/3)"
+    assert job["strategy"] == {"fail-fast": False, "matrix": {"shard": [1, 2, 3]}}
+    assert job["needs"] == "changes"
+    assert job["timeout-minutes"] <= 25
+    step = next(s for s in job["steps"] if "scripts/run_docs_examples.sh" in s.get("run", ""))
+    assert step["env"]["LAKANA_DOCS_SHARD"] == "${{ matrix.shard }}/3"
+    assert step["run"] == "uv run bash scripts/run_docs_examples.sh"  # no names: the shard picks
+    upload = next(s for s in job["steps"] if "upload-artifact@" in str(s.get("uses", "")))
+    assert upload["if"] == "always()"
+    assert upload["with"]["name"] == "docs-captures-${{ matrix.shard }}"
+    assert upload["with"]["path"] == step["env"]["LAKANA_DOCS_CAPTURE"]
+    # The comparison needs every example's capture, so only the collecting job runs it.
+    assert "docs_blocks.py" not in str(job)
+
+
+def test_the_required_docs_examples_check_collects_every_shard_and_compares_the_pages() -> None:
+    """``docs-examples`` is a required check: it fails for a failed shard, then compares."""
+    jobs = _jobs("ci.yml")
+    job = jobs["docs-examples"]
+    assert job["needs"] == ["changes", "docs-examples-shard"]
+    assert job["if"] == jobs["docs-examples-shard"]["if"]
+    assert "strategy" not in job
+    assert "name" not in job  # the check keeps the name branch protection requires
+    first = job["steps"][0]
+    assert first["env"] == {"RESULT": "${{ needs.docs-examples-shard.result }}"}
+    assert '[ "$RESULT" != "success" ]' in first["run"]
+    assert "exit 1" in first["run"]
+    names = [s.get("name") for s in job["steps"]]
+    download = job["steps"][names.index("Download what every shard's examples printed")]
+    assert download["with"] == {
+        "pattern": "docs-captures-*",
+        "path": "${{ runner.temp }}/docs-captures",
+        "merge-multiple": True,
+    }
+    compare = job["steps"][
+        names.index("Compare the pages' output blocks with what the examples printed")
+    ]
+    assert compare["run"] == "uv run python scripts/docs_blocks.py"
+    assert compare["env"] == {"LAKANA_DOCS_CAPTURE": "${{ runner.temp }}/docs-captures"}
+    assert names.index("Download what every shard's examples printed") < names.index(
+        "Compare the pages' output blocks with what the examples printed"
+    )
+    upload = job["steps"][names.index("Upload what the examples printed")]
+    assert upload["with"]["name"] == "docs-captures"
