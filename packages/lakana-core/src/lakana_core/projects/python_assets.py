@@ -109,31 +109,75 @@ def _quoted(value: object) -> str:
     return f"'{shown(value)}'"
 
 
-def _bindings(tree: ast.Module) -> tuple[bool, bool]:
-    """Find how the module's top level imports the decorator.
+def _bound_names(node: ast.stmt) -> set[str]:
+    """Find the names a top-level statement binds, outside nested functions and classes.
 
     Parameters
     ----------
-    tree
-        The parsed module.
+    node
+        One statement of the module's top level.
+
+    Returns
+    -------
+    set of str
+        The names it assigns, defines, imports or loops over, however deep inside the
+        statement's own blocks (an ``if`` or ``try`` body counts; a function body does not).
+    """
+    names: set[str] = set()
+    pending: list[ast.AST] = [node]
+    while pending:
+        current = pending.pop()
+        if isinstance(current, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.add(current.name)
+            continue
+        if isinstance(current, ast.Name) and isinstance(current.ctx, (ast.Store, ast.Del)):
+            names.add(current.id)
+        elif isinstance(current, (ast.Import, ast.ImportFrom)):
+            for alias in current.names:
+                top = alias.name.split(".")[0]
+                # `import lakana.sub` binds `lakana` to the same module: not a rebinding.
+                same_module = isinstance(current, ast.Import) and alias.asname is None
+                if not (same_module and top == "lakana"):
+                    names.add(alias.asname or top)
+        elif isinstance(current, ast.ExceptHandler) and current.name is not None:
+            names.add(current.name)
+        pending.extend(ast.iter_child_nodes(current))
+    return names
+
+
+def _bindings(node: ast.stmt, name_bound: bool, module_bound: bool) -> tuple[bool, bool]:
+    """Update how the module imports the decorator after one top-level statement.
+
+    Parameters
+    ----------
+    node
+        The statement just executed.
+    name_bound
+        Whether `asset` was bound to `lakana.asset` before it.
+    module_bound
+        Whether `lakana` was bound to the module before it.
 
     Returns
     -------
     tuple of bool
         Whether ``from lakana import asset`` binds `asset`, and whether
-        ``import lakana`` binds `lakana`. An ``as`` alias binds neither.
+        ``import lakana`` binds `lakana`, now. An ``as`` alias binds neither, and a later
+        statement that binds the same name to anything else (an assignment, a ``def``, another
+        import) takes the binding away.
     """
-    name_bound = False
-    module_bound = False
-    for node in tree.body:
-        if isinstance(node, ast.ImportFrom) and node.module == "lakana" and node.level == 0:
-            name_bound = name_bound or any(
-                alias.name == "asset" and alias.asname in (None, "asset") for alias in node.names
-            )
-        elif isinstance(node, ast.Import):
-            module_bound = module_bound or any(
-                alias.name == "lakana" and alias.asname in (None, "lakana") for alias in node.names
-            )
+    rebound = _bound_names(node)
+    if "asset" in rebound:
+        name_bound = False
+    if "lakana" in rebound:
+        module_bound = False
+    if isinstance(node, ast.ImportFrom) and node.module == "lakana" and node.level == 0:
+        name_bound = name_bound or any(
+            alias.name == "asset" and alias.asname in (None, "asset") for alias in node.names
+        )
+    elif isinstance(node, ast.Import):
+        module_bound = module_bound or any(
+            alias.name == "lakana" and alias.asname in (None, "lakana") for alias in node.names
+        )
     return name_bound, module_bound
 
 
@@ -732,11 +776,12 @@ def _find(tree: ast.Module, path: str) -> tuple[_Function, ast.expr] | list[Proj
     tuple or list of ProjectIssue
         The function and its decorator, or the issues.
     """
-    name_bound, module_bound = _bindings(tree)
+    name_bound = module_bound = False
     issues: list[ProjectIssue] = []
     found: list[tuple[_Function, ast.expr]] = []
     for node in tree.body:
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            name_bound, module_bound = _bindings(node, name_bound, module_bound)
             continue
         ours = []
         others = []
@@ -754,6 +799,7 @@ def _find(tree: ast.Module, path: str) -> tuple[_Function, ast.expr] | list[Proj
             issues.append(ProjectIssue(path, node.lineno, "more than one @asset decorator"))
         if ours:
             found.append((node, ours[0]))
+        name_bound, module_bound = _bindings(node, name_bound, module_bound)
     if len(found) > 1:
         issues.append(
             ProjectIssue(

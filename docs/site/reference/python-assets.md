@@ -199,7 +199,7 @@ there is one, the line, as `path:line: message`. Fix the cause and deploy again.
 
 | The deploy says | Cause | Next step |
 |---|---|---|
-| `no function decorated with @asset; the decorator must be lakana.asset: …` | The file has no `@asset(...)` function, or the decorator is written another way (an alias, a re-export). | Write `from lakana import asset` and `@asset(...)`, or `import lakana` and `@lakana.asset(...)`. |
+| `no function decorated with @asset; the decorator must be lakana.asset: …` | The file has no `@asset(...)` function, or the decorator is written another way (an alias, a re-export, or a name `asset` or `lakana` that the file assigns to something else after the import). | Write `from lakana import asset` and `@asset(...)`, or `import lakana` and `@lakana.asset(...)`. |
 | `more than one @asset function; one file is one asset` | Two decorated functions. | Move one into its own file. |
 | `write @asset(...) with parentheses` | `@asset` without `(...)`. | Write `@asset(inputs={...})`; use `@asset()` for none. |
 | `the asset function must have @asset(...) as its only decorator` | Another decorator sits on the function. | Remove it, or call the wrapped code inside the function. |

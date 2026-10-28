@@ -146,6 +146,24 @@ def test_the_module_attribute_form_and_no_inputs() -> None:
     assert parsed.metadata.description is None
 
 
+def test_a_submodule_import_and_a_later_rebinding_do_not_unbind_the_decorator() -> None:
+    parsed = _parsed(
+        """\
+        import lakana
+        import lakana.sub
+        from lakana import asset
+
+        @lakana.asset()
+        def load():
+            return None
+
+        lakana = None
+        asset = None
+        """
+    )
+    assert parsed.inputs == ()
+
+
 def test_an_explicit_description_beats_the_docstring() -> None:
     parsed = _parsed(
         '''\
@@ -225,6 +243,26 @@ _HEAD = "from lakana import asset\n"
             "aliases and re-exports are not resolved",
         ),
         ("@asset()\ndef f():\n    pass\n", 1, "aliases and re-exports are not resolved"),
+        (
+            _HEAD + "asset = print\n@asset()\ndef f():\n    pass\n",
+            3,
+            "aliases and re-exports are not resolved",
+        ),
+        (
+            _HEAD + "from os import path as asset\n@asset()\ndef f():\n    pass\n",
+            3,
+            "aliases and re-exports are not resolved",
+        ),
+        (
+            _HEAD + "if True:\n    asset = print\n@asset()\ndef f():\n    pass\n",
+            4,
+            "aliases and re-exports are not resolved",
+        ),
+        (
+            "import lakana\nlakana = object()\n@lakana.asset()\ndef f():\n    pass\n",
+            3,
+            "aliases and re-exports are not resolved",
+        ),
         (
             _HEAD + "@asset()\ndef f():\n    pass\n@asset()\ndef g():\n    pass\n",
             6,
