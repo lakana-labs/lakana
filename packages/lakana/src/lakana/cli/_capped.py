@@ -2,17 +2,21 @@
 
 A small Parquet or Arrow file can decode to far more than its size, and its metadata can say
 otherwise, so no estimate made before reading bounds what one batch takes. The child process
-that reads it therefore gets an operating-system limit on its address space
-(`RLIMIT_AS`): what it has mapped once its imports are done, plus twice the upload limit (the
-rows kept, and one batch being decoded), plus `HEADROOM` for the allocator. A file that needs
-more fails to allocate there and is refused as larger than one upload; the CLI's own process is
-never capped, so a refusal cannot break anything else. The rows come back as an Arrow stream on
-the child's standard output. The child uses the system allocator, whose use of address space
-grows with what it holds; pyarrow's default (mimalloc) reserves large regions up front and
-failed reads under a cap that left it room.
+that reads it therefore gets an operating-system limit on its private writable memory
+(`RLIMIT_DATA`): what it holds once its imports are done, plus twice the upload limit (the rows
+kept, and one batch being decoded), plus `HEADROOM`. A file that needs more fails to allocate
+there and is refused as larger than one upload; the CLI's own process is never capped, so a
+refusal cannot break anything else. The rows come back as an Arrow stream on the child's
+standard output.
 
-Only Linux enforces the limit. Elsewhere the file is read in the CLI's process, bounded by its
-metadata and the decoded size of each batch.
+`RLIMIT_DATA` (Linux 4.7 and later) counts memory written, not address space reserved, so the
+memory-mapped Arrow file and the 64 MiB a malloc arena reserves per thread do not count; under
+`RLIMIT_AS` they did, and ordinary wide files were refused on machines with many cores. The
+child also uses the system allocator, at most two malloc arenas and `THREADS` threads per pyarrow
+pool, so what it holds does not depend on the machine.
+
+Only Linux enforces the limit. Elsewhere, and where `/proc` cannot be read, the file is read
+without a cap, bounded by its metadata and the decoded size of each batch.
 """
 
 from __future__ import annotations
@@ -29,28 +33,32 @@ import pyarrow.ipc as ipc
 from lakana.cli import _output
 from lakana.cli._state import CliError
 
-HEADROOM = 512 * 1024 * 1024
-"""Address space the child may map beyond twice the limit, for decoding and the allocator.
+HEADROOM = 256 * 1024 * 1024
+"""Private writable memory the child may hold beyond twice the limit, for decoding.
 
-Measured with the system allocator under a 256 MiB limit: reading a 248 MiB Parquet table
-mapped at most 689 MiB beyond what the child had mapped before (it fails below 576 MiB), a
-233 MiB table of text 694 MiB, and a 247 MiB Arrow file 455 MiB. The cap there is 1,024 MiB,
-over 300 MiB above the largest."""
+Measured under a 256 MiB limit, as the least memory beyond the child's own that let the read
+pass: a 248 MiB Parquet table and a 233 MiB table of text 352 MiB (320 MiB failed), a 180 MiB
+table of 48 columns in 30 row groups 256 MiB, a 247 MiB Arrow file 224 MiB or less. The cap
+there is 768 MiB, 416 MiB above the largest, whatever the thread count (128 asked for)."""
+THREADS = 2
+"""Threads in each of the child's pyarrow pools, so its memory does not grow with the cores."""
 REFUSED = 3
 """The child's exit code for a refusal, described as JSON on its standard error."""
 OUT_OF_MEMORY = 4
 """The child's exit code when the read ran out of the memory it may take."""
+_LOADER = 127
+"""The exit code of the C library's loader when it aborts, e.g. out of thread-local memory."""
 _CAPPED = frozenset({"parquet", "arrow"})
 """Formats read in the child; text is checked against the limit by its size before."""
 
 
 def enforced() -> bool:
-    """Say whether this system enforces a limit on a process's address space.
+    """Say whether this system enforces a limit on a process's memory.
 
     Returns
     -------
     bool
-        True on Linux; macOS and Windows do not enforce `RLIMIT_AS`.
+        True on Linux; macOS and Windows do not enforce `RLIMIT_DATA`.
     """
     return sys.platform == "linux"
 
@@ -96,7 +104,12 @@ def read(
         "limit": limit,
     }
     command = [sys.executable, "-I", "-m", "lakana.cli._capped", json.dumps(request)]
-    environment = {**os.environ, "ARROW_DEFAULT_MEMORY_POOL": "system"}
+    environment = {
+        **os.environ,
+        "ARROW_DEFAULT_MEMORY_POOL": "system",
+        "MALLOC_ARENA_MAX": "2",
+        "OMP_NUM_THREADS": str(THREADS),
+    }
     with subprocess.Popen(  # nosec B603 -- this interpreter and module, no shell
         command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=environment
     ) as child:
@@ -130,15 +143,18 @@ def failure(path: Path, limit: int, code: int, stderr: bytes) -> CliError:
     Returns
     -------
     CliError
-        The child's own refusal; the size refusal (exit 2) when it ran out of memory or was
-        killed; else an unreadable file (exit 8) with the last line it wrote.
+        The child's own refusal; the size refusal (exit 2) when it ran out of memory, was
+        killed, or could not start a thread under the cap (the C library then aborts with exit
+        127 and says so; the only case told by its words, as no type crosses a process); else an
+        unreadable file (exit 8) with the last line it wrote.
     """
     from lakana.cli.load import too_large
 
     if code == REFUSED:
         refused = json.loads(stderr)
         return CliError(refused["message"], refused["exit_code"], kind=refused["kind"])
-    if code == OUT_OF_MEMORY or code < 0:
+    thread = code == _LOADER and b"cannot allocate memory" in stderr
+    if code == OUT_OF_MEMORY or code < 0 or thread:
         return too_large(path, limit)
     last = stderr.decode("utf-8", "replace").strip().rsplit("\n", 1)[-1]
     return CliError(
@@ -149,20 +165,28 @@ def failure(path: Path, limit: int, code: int, stderr: bytes) -> CliError:
     )
 
 
-def _mapped() -> int:
-    """Give the bytes of address space this process has mapped.
+def _held() -> int | None:
+    """Give the private writable memory this process holds, as `RLIMIT_DATA` counts it.
 
     Returns
     -------
-    int
-        The size from `/proc/self/statm`.
+    int or None
+        `VmData` from `/proc/self/status` in bytes, or `None` where it cannot be read.
     """
-    with open("/proc/self/statm", encoding="ascii") as statm:
-        return int(statm.read().split()[0]) * os.sysconf("SC_PAGE_SIZE")
+    try:
+        with open("/proc/self/status", encoding="ascii") as status:
+            for line in status:
+                if line.startswith("VmData:"):
+                    return int(line.split()[1]) * 1024
+    except OSError:
+        return None
+    return None
 
 
 def main(argv: list[str]) -> int:
     """Read the file a request names under a memory cap and write its rows to standard output.
+
+    Without `/proc` to measure from, no cap is set: the documented residual of other systems.
 
     Parameters
     ----------
@@ -180,10 +204,14 @@ def main(argv: list[str]) -> int:
     from lakana.cli.load import read_file
 
     request = json.loads(argv[0])
-    cap = _mapped() + 2 * request["limit"] + HEADROOM
-    hard = resource.getrlimit(resource.RLIMIT_AS)[1]
-    soft = cap if hard == resource.RLIM_INFINITY else min(cap, hard)
-    resource.setrlimit(resource.RLIMIT_AS, (soft, hard))
+    pa.set_cpu_count(THREADS)
+    pa.set_io_thread_count(THREADS)
+    held = _held()
+    if held is not None:
+        cap = held + 2 * request["limit"] + HEADROOM
+        hard = resource.getrlimit(resource.RLIMIT_DATA)[1]
+        soft = cap if hard == resource.RLIM_INFINITY else min(cap, hard)
+        resource.setrlimit(resource.RLIMIT_DATA, (soft, hard))
     try:
         table = read_file(
             Path(request["path"]),

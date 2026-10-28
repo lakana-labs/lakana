@@ -38,7 +38,7 @@ What the command does, in order:
 
    A crafted file can understate its size in its metadata, so on Linux the command reads a
    Parquet or Arrow file in a separate process whose memory the operating system caps at twice
-   the limit plus 512 MiB (1 GiB for the default limit). A file that needs more is refused as
+   the limit plus 256 MiB (768 MiB for the default limit), whatever the number of cores. A file that needs more is refused as
    larger than one upload, with the same next step, and the command itself is never short of
    memory. macOS and Windows do not enforce that cap: there the file is read in the command's
    own process, bounded by the metadata and the measurements above, and a crafted file can still
