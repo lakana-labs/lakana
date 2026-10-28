@@ -1,5 +1,65 @@
 # Changelog
 
+## [0.21.0](https://github.com/lakana-labs/lakana/compare/v0.20.0...v0.21.0) (2026-10-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* **core:** a job's `triggers` (`GET .../jobs`, `GET .../jobs/{job}`, and the pause and resume answers) may now contain `{"kind": "deploy"}`, between `schedule` and `on_demand`, for a job with `on_deploy: true`. A REST client that reads every trigger kind must ignore a kind it does not know, as the Jobs reference asks, or handle `deploy`, which has no other fields. The SDK of every release ignores unknown kinds; this release's SDK reads `deploy`.
+* **security:** under the local runner (`lakana local` or `LAKANA_RUN__RUNNER=local`), `lakana connection test` for postgresql, mariadb and sqlite-file connections now needs the database drivers next to the worker; install `lakana[assets]` in the worker's environment. Without them the test fails with a message saying what to install, where it used to report "credentials not checked yet". Under the Docker runner nothing changes: the task image brings the drivers.
+* **security:** builds and tasks no longer reach any Docker network's gateway or the Docker host's well-known names (host.docker.internal and similar); a package index or source on the Docker host must be reached by an address that is not refused, or moved off the host. List every address of the Docker host (LAN, VPN, virbr0, 192.168.65.0/24 on Docker Desktop) in LAKANA_LAUNCHER__EGRESS_REFUSED (LAKANA_EGRESS_REFUSED in the Compose bundle's .env). The launcher's run request gains the required fields `egress` and `relay`: upgrade the launcher and the workers together.
+* **worker:** a LAKANA_RUN__CA_BUNDLE without a certificate, with a private key, with TRUSTED CERTIFICATE blocks, with a damaged, cut-off or non-plain (e.g. X509 CERTIFICATE) block, or larger than 1 MiB now stops the worker under either runner, and the local runner refuses a cache directory other users can write to; only the file's certificates are used. Local builds and tasks trust Mozilla's roots plus that file; local tasks used the host's system store before, so a company CA installed only in the system store must be added to the file. Fix the file (plain certificates, at most 1 MiB) before upgrading. The launcher's run and build requests gain a required `trust` field, so upgrade the launcher and the workers together.
+* **sdk:** a Python asset's function parameter named `ctx` now receives the asset's context and is never an input; an asset that reads a table through a parameter called `ctx` fails to deploy. Rename the parameter and its key in `inputs={...}`, then deploy again.
+
+### Features
+
+* **catalog:** connections per environment, declared by assets and checked at deploy ([#320](https://github.com/lakana-labs/lakana/issues/320)) ([560877b](https://github.com/lakana-labs/lakana/commit/560877b5bd33896345139d033949d3eb3a8f17d9)), closes [#85](https://github.com/lakana-labs/lakana/issues/85) [#321](https://github.com/lakana-labs/lakana/issues/321)
+* **cli:** lakana connection test checks that a connection is reachable ([#339](https://github.com/lakana-labs/lakana/issues/339)) ([66e16b7](https://github.com/lakana-labs/lakana/commit/66e16b7856a3512fcd526ab1d9f4eb14e4b79220))
+* **cli:** lakana init --template for files, SQL and REST ingestion, with tested recipes ([#354](https://github.com/lakana-labs/lakana/issues/354)) ([facb5ea](https://github.com/lakana-labs/lakana/commit/facb5ead579104805473add0dd345fa149bebbd7)), closes [#56](https://github.com/lakana-labs/lakana/issues/56)
+* **cli:** lakana init --template python writes a Python sample with its lock ([#366](https://github.com/lakana-labs/lakana/issues/366)) ([75ce996](https://github.com/lakana-labs/lakana/commit/75ce996246f264de1f3c4329a9b8582f716eab02)), closes [#131](https://github.com/lakana-labs/lakana/issues/131)
+* **cli:** lakana load writes a local file into the bronze layer, checked by the server ([#352](https://github.com/lakana-labs/lakana/issues/352)) ([024768a](https://github.com/lakana-labs/lakana/commit/024768a6be8f23364153319abb619507d9c1a1da)), closes [#29](https://github.com/lakana-labs/lakana/issues/29)
+* **cli:** the Compose bundle mounts ingestion roots, and its smoke test proves M6 ([#355](https://github.com/lakana-labs/lakana/issues/355)) ([5480f7d](https://github.com/lakana-labs/lakana/commit/5480f7d03cdce1a6c2bec7f06d4fdd6681a9d6cb))
+* **core:** start a job after each deploy with on_deploy: true ([9d70148](https://github.com/lakana-labs/lakana/commit/9d7014845791d45cc192655cbafb32a1f5ddc6de))
+* **sdk:** fetch connection credentials at run time; write: append and merge ([7abf9b0](https://github.com/lakana-labs/lakana/commit/7abf9b0e524eab3252efcef434b43fb2d741df26))
+* **sdk:** let a Python asset's table adopt a new schema with evolve_schema ([#378](https://github.com/lakana-labs/lakana/issues/378)) ([bbd9d2e](https://github.com/lakana-labs/lakana/commit/bbd9d2e24394c5c21eb8b3e96ba298ac3c7c59ac)), closes [#50](https://github.com/lakana-labs/lakana/issues/50)
+* **sdk:** OAuth2 for http connections, sent to their own host only and checked by the test ([#348](https://github.com/lakana-labs/lakana/issues/348)) ([acfcc6a](https://github.com/lakana-labs/lakana/commit/acfcc6ab502dcaf2646b59317a7498e6de4db2ec))
+* **sdk:** read CSV, Parquet, JSON and spreadsheets from directory connections ([#343](https://github.com/lakana-labs/lakana/issues/343)) ([d4dc136](https://github.com/lakana-labs/lakana/commit/d4dc136f032fc8d469c4ff53e6d176b77230d7f3))
+* **sdk:** read files from S3, GCS, Azure and HTTPS connections through the task's proxy ([#345](https://github.com/lakana-labs/lakana/issues/345)) ([be93a01](https://github.com/lakana-labs/lakana/commit/be93a01838252ef69da8e264bff36cf5484cc015)), closes [#26](https://github.com/lakana-labs/lakana/issues/26)
+* **sdk:** read PostgreSQL, MariaDB and SQLite connections with sql.read ([#346](https://github.com/lakana-labs/lakana/issues/346)) ([081e6e2](https://github.com/lakana-labs/lakana/commit/081e6e2e1ca4ff0c2f2358caf9d91fb53bca784c))
+* **sdk:** read REST APIs with pagination, auth and retries through rest.read ([#349](https://github.com/lakana-labs/lakana/issues/349)) ([d31f762](https://github.com/lakana-labs/lakana/commit/d31f7622bdb546a4d9b2bae92f7c9b56efdc6318)), closes [#28](https://github.com/lakana-labs/lakana/issues/28)
+* **security:** check database and GCS credentials in the connection test ([4539251](https://github.com/lakana-labs/lakana/commit/45392513f7915eb0c9f338469f920aed6b95f5ff))
+* **security:** connection tests run in a container under a task's own network rules ([#342](https://github.com/lakana-labs/lakana/issues/342)) ([8e2ce8f](https://github.com/lakana-labs/lakana/commit/8e2ce8fd086612c42dc2484e9e4ea81d1c7216ab)), closes [#308](https://github.com/lakana-labs/lakana/issues/308)
+* **security:** the launcher gives tasks an egress token and a relay to declared hosts ([34b8767](https://github.com/lakana-labs/lakana/commit/34b8767fac2bffc47703a3614e7177af596f062c))
+* **worker:** build and task containers trust a private certificate authority ([b14717f](https://github.com/lakana-labs/lakana/commit/b14717f6f7059c5c4eae24d8a1403410550ae526))
+* **worker:** route each task to exactly the connections its asset declares ([#335](https://github.com/lakana-labs/lakana/issues/335)) ([4fd4ccf](https://github.com/lakana-labs/lakana/commit/4fd4ccfd391489411f9e9ed9731e150da9890dab))
+
+
+### Bug Fixes
+
+* **ci:** give the slow-test ratchet's confirm rerun a margin ([#331](https://github.com/lakana-labs/lakana/issues/331)) ([e5af51e](https://github.com/lakana-labs/lakana/commit/e5af51eba669626111bffbf7bb7b5291541d6974))
+* **cli:** refuse non-UTF-8 CSV everywhere, clean stdin secrets, bound Parquet batches ([#362](https://github.com/lakana-labs/lakana/issues/362)) ([57a42fd](https://github.com/lakana-labs/lakana/commit/57a42fd81c573ad844d921092f24cc6c5b9d04b9)), closes [#351](https://github.com/lakana-labs/lakana/issues/351) [#353](https://github.com/lakana-labs/lakana/issues/353) [#358](https://github.com/lakana-labs/lakana/issues/358)
+* hardening follow-ups for query results, asset discovery and secrets ([#370](https://github.com/lakana-labs/lakana/issues/370)) ([65b5056](https://github.com/lakana-labs/lakana/commit/65b5056ed4ea75771f4b5eac04ddbfd3abcf411e)), closes [#10](https://github.com/lakana-labs/lakana/issues/10) [#51](https://github.com/lakana-labs/lakana/issues/51) [#65](https://github.com/lakana-labs/lakana/issues/65)
+* **query:** keep standard PIVOT, refuse operators by name, safe date filters, stable lineage ([#316](https://github.com/lakana-labs/lakana/issues/316)) ([03e51a9](https://github.com/lakana-labs/lakana/commit/03e51a9b4d4b114f93ca5c1f33b5f0d0e14f4628)), closes [#280](https://github.com/lakana-labs/lakana/issues/280) [#293](https://github.com/lakana-labs/lakana/issues/293) [#178](https://github.com/lakana-labs/lakana/issues/178) [#53](https://github.com/lakana-labs/lakana/issues/53)
+* **security:** batch 11 — launcher owner checks, egress caps and ports, stoppable builds ([#315](https://github.com/lakana-labs/lakana/issues/315)) ([4ce8a60](https://github.com/lakana-labs/lakana/commit/4ce8a60c48c5ea95a99f393960e74a295d7a76f2)), closes [#305](https://github.com/lakana-labs/lakana/issues/305) [#302](https://github.com/lakana-labs/lakana/issues/302) [#301](https://github.com/lakana-labs/lakana/issues/301) [#291](https://github.com/lakana-labs/lakana/issues/291)
+* **security:** bound compressed bodies, keep libpq out of home, refuse a swapped sqlite file ([#361](https://github.com/lakana-labs/lakana/issues/361)) ([f48033c](https://github.com/lakana-labs/lakana/commit/f48033c4b3fe90e9c248c7c323ba6877b906debe)), closes [#356](https://github.com/lakana-labs/lakana/issues/356) [#357](https://github.com/lakana-labs/lakana/issues/357) [#359](https://github.com/lakana-labs/lakana/issues/359) [#360](https://github.com/lakana-labs/lakana/issues/360)
+* **worker:** prove a Python task's write and fail unfixable venv builds for good ([#372](https://github.com/lakana-labs/lakana/issues/372)) ([227ffa3](https://github.com/lakana-labs/lakana/commit/227ffa3b18f84a7fe2416da9ab345403326b5246)), closes [#48](https://github.com/lakana-labs/lakana/issues/48) [#49](https://github.com/lakana-labs/lakana/issues/49)
+* **worker:** report a task killed by SIGKILL without Docker's OOMKilled flag as out of memory ([#312](https://github.com/lakana-labs/lakana/issues/312)) ([dddfb95](https://github.com/lakana-labs/lakana/commit/dddfb95dffe858098c426494081a10f3d5dabe71))
+
+
+### Documentation
+
+* move data modelling and the web interface before the public beta ([#324](https://github.com/lakana-labs/lakana/issues/324)) ([2802cc9](https://github.com/lakana-labs/lakana/commit/2802cc94919d9df6457f102ea8cf2c946ec6224e))
+* record what 0.20.0 shipped and the M6 design in the scope and roadmap pages ([#309](https://github.com/lakana-labs/lakana/issues/309)) ([373a669](https://github.com/lakana-labs/lakana/commit/373a669556cbbba122329e884aad0299bf62eef4))
+
+
+### Dependencies
+
+* bump astral-sh/uv from 0.13.1 to 0.13.5 in the images group across 1 directory ([#296](https://github.com/lakana-labs/lakana/issues/296)) ([227f063](https://github.com/lakana-labs/lakana/commit/227f0631a56d74c5c38b6b69467931e3eb1c3680))
+* bump ruff from 0.17.0 to 0.17.1 ([#299](https://github.com/lakana-labs/lakana/issues/299)) ([7bacac0](https://github.com/lakana-labs/lakana/commit/7bacac0045c425f08f14c982a105bd324cdd15ea))
+* bump the python group across 1 directory with 2 updates ([#330](https://github.com/lakana-labs/lakana/issues/330)) ([23e789c](https://github.com/lakana-labs/lakana/commit/23e789c3f3f82766248b395d185be7b5e21d0d28))
+* bump the python group with 3 updates ([#297](https://github.com/lakana-labs/lakana/issues/297)) ([893093b](https://github.com/lakana-labs/lakana/commit/893093bcb522e64cf8f501b6c297d1bc2673241e))
+* bump ty from 0.0.88 to 0.0.89 ([#298](https://github.com/lakana-labs/lakana/issues/298)) ([51cb440](https://github.com/lakana-labs/lakana/commit/51cb440b7962013a974c2b15efa9564f5727403c))
+
 ## [0.20.0](https://github.com/lakana-labs/lakana/compare/v0.19.0...v0.20.0) (2026-10-23)
 
 
