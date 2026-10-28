@@ -322,14 +322,18 @@ def test_a_waiting_start_is_dropped_once_the_rule_no_longer_allows_it(
     assert len(_runs(session)) == 1
 
 
-def test_a_waiting_start_whose_token_is_gone_is_dropped(session: Session, world: CiWorld) -> None:
+@pytest.mark.parametrize("stored", ["missing", "not a uuid"])
+def test_a_waiting_start_whose_token_is_gone_is_dropped(
+    session: Session, world: CiWorld, stored: str
+) -> None:
     add_rule(session, world, start_on_deploy_jobs=True)
     ci, first = _ci_deploy(session)
     _start(session, ci, first)
     ci_again, second = _ci_deploy(session, sha="1" * 40)
     _start(session, ci_again, second)
     row = session.scalars(select(JobSchedule).where(JobSchedule.job == "refresh")).one()
-    row.pending_start = {**row.pending_start, "ci_token_id": str(uuid.uuid4())}  # ty: ignore
+    token_id = str(uuid.uuid4()) if stored == "missing" else stored
+    row.pending_start = {**row.pending_start, "ci_token_id": token_id}  # ty: ignore
     session.execute(update(Run).values(status=RunStatus.SUCCEEDED))
     session.commit()
 
