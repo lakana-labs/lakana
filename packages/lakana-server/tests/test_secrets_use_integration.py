@@ -15,14 +15,15 @@ captured log are searched for the key pair afterwards. A hit means a value leake
 Covered: an environment that uses a secret, table create and append, the Iceberg
 configuration, namespace, list-tables and load-table routes, a query run by the worker code
 (its result stored through the secret and fetched through the route), every GET route with a
-path parameter, rotating a secret to a value the storage refuses (an error raised by storage
-after the secret was resolved) and revoking a secret an environment still refers to.
+path parameter (read with the ids of a real run, task log, deploy and project version),
+rotating a secret to a value the storage refuses (an error raised by storage after the secret
+was resolved) and revoking a secret an environment still refers to. The log search includes
+uvicorn's own loggers, and a 5xx answer fails the test unless the call is meant to fail.
 """
 
 from __future__ import annotations
 
 import base64
-import contextlib
 import io
 import json
 import logging
@@ -43,7 +44,21 @@ from lakana_core.config import DatabaseConfig, SecretsConfig
 from lakana_core.db import create_engine
 from lakana_core.grants.authorization import GrantAuthorization
 from lakana_core.log_setup import LEVEL_FOLLOWING_LOGGERS
-from lakana_core.models import Base, QueryRun, QueryRunStatus, Secret
+from lakana_core.models import (
+    Base,
+    Environment,
+    JobVersion,
+    Principal,
+    QueryRun,
+    QueryRunStatus,
+    Repository,
+    Run,
+    RunKind,
+    RunStatus,
+    Secret,
+    TaskRun,
+    TaskStatus,
+)
 from lakana_core.secrets.crypto import decrypt_secret_row
 from lakana_core.secrets.keys import EnvKeyProvider
 from lakana_server.app import create_app
@@ -85,6 +100,9 @@ class _Stack:
         Every log line, formatted.
     needles
         Every value that was ever stored in the secret.
+    ids
+        The ids of the real objects the GET sweep reads: a run, its task's asset, a deploy and a
+        project version.
     """
 
     http: httpx.Client
@@ -96,6 +114,7 @@ class _Stack:
     bodies: list[str] = field(default_factory=list)
     log: list[str] = field(default_factory=list)
     needles: set[str] = field(default_factory=set)
+    ids: dict[str, str] = field(default_factory=dict)
 
     def seen(self, response: httpx.Response) -> httpx.Response:
         """Record a response for the final search.
@@ -124,6 +143,7 @@ class _Stack:
         json: object = None,
         content: bytes | None = None,
         headers: dict[str, str] | None = None,
+        allow_5xx: bool = False,
     ) -> httpx.Response:
         """Send a request with the bootstrap token and record the answer.
 
@@ -139,6 +159,9 @@ class _Stack:
             A raw body.
         headers
             More headers.
+        allow_5xx
+            The call is meant to fail inside the server (an error raised by storage); any other
+            5xx is a bug and fails the test at once.
 
         Returns
         -------
@@ -146,7 +169,13 @@ class _Stack:
             The answer.
         """
         sent = {**_BOOTSTRAP, **(headers or {})}
-        return self.seen(self.http.request(method, path, json=json, content=content, headers=sent))
+        response = self.seen(
+            self.http.request(method, path, json=json, content=content, headers=sent)
+        )
+        assert allow_5xx or response.status_code < 500, (
+            f"{method} {path} answered {response.status_code}: {response.text[:300]}"
+        )
+        return response
 
     def store_secret_values(self, access_key: str, secret_key: str, *, rotate: bool) -> None:
         """Create or rotate the environment's storage secret.
@@ -170,18 +199,14 @@ class _Stack:
             answer = self.call("POST", base, json={"name": _SECRET, "values": values})
             assert answer.status_code == 201, answer.text
 
-    def parameters(self, query_id: str) -> dict[str, str]:
+    def parameters(self) -> dict[str, str]:
         """Name a value for every path parameter the GET routes use.
-
-        Parameters
-        ----------
-        query_id
-            A real query's id.
 
         Returns
         -------
         dict of str to str
-            Parameter name to a value; an id that does not exist where no real one is at hand.
+            Parameter name to a value: a real object's id where the stack made one, an id that
+            does not exist for the rest.
         """
         return {
             "env": _ENV,
@@ -190,39 +215,35 @@ class _Stack:
             "path": "bronze",
             "namespace": "bronze",
             "table": "t",
-            "query_id": query_id,
-            "asset": "gold.x",
             "sha256": "0" * 64,
             "version": "1",
             "job": "j",
             "connection_name": "c",
+            **self.ids,
         }
 
-    def sweep(self, query_id: str) -> int:
+    def sweep(self, *, allow_5xx: bool = False) -> dict[str, int]:
         """Send a GET to every route that has path parameters, with values this stack knows.
 
         Parameters
         ----------
-        query_id
-            A real query's id.
+        allow_5xx
+            The storage is meant to fail, so a route may answer 5xx.
 
         Returns
         -------
-        int
-            How many routes answered below 500 (an answer of 5xx is not asserted here: an error
-            raised by storage is one of the things this module searches).
+        dict of str to int
+            The status each route template answered.
         """
-        values = self.parameters(query_id)
-        answered = 0
+        values = self.parameters()
+        statuses: dict[str, int] = {}
         for template, operations in self.openapi.items():
             if "get" not in operations or "{" not in template:
                 continue
             path = _fill(template, values)
-            if path is None:
-                continue
-            if self.call("GET", path).status_code < 500:
-                answered += 1
-        return answered
+            if path is not None:
+                statuses[template] = self.call("GET", path, allow_5xx=allow_5xx).status_code
+        return statuses
 
     def raw_rows(self) -> list[bytes]:
         """Read what the database holds, as bytes to search.
@@ -379,6 +400,11 @@ def stack(tmp_path_factory: pytest.TempPathFactory) -> Generator[_Stack, None, N
         app = create_app(settings)
         db = create_engine(settings.database)
         root_logger.addHandler(collector)
+        # uvicorn's loggers do not propagate to the root logger, and "Exception in ASGI
+        # application" with its traceback is logged there: capture them as well.
+        uvicorn_loggers = [logging.getLogger(n) for n in ("uvicorn", "uvicorn.access")]
+        for uvicorn_logger in uvicorn_loggers:
+            uvicorn_logger.addHandler(collector)
         for name in LEVEL_FOLLOWING_LOGGERS:
             logging.getLogger(name).setLevel(logging.DEBUG)
         try:
@@ -421,12 +447,85 @@ def stack(tmp_path_factory: pytest.TempPathFactory) -> Generator[_Stack, None, N
                     json={"secret_ref": _SECRET},
                 )
                 assert attached.status_code == 200, attached.text
+                _seed(state)
                 yield state
         finally:
             root_logger.removeHandler(collector)
+            for uvicorn_logger in uvicorn_loggers:
+                uvicorn_logger.removeHandler(collector)
             for name, level in previous.items():
                 logging.getLogger(name).setLevel(level)
             db.dispose()
+
+
+def _seed(stack: _Stack) -> None:
+    """Make the real objects the GET sweep reads: a deploy, a run with a task, a project version.
+
+    Parameters
+    ----------
+    stack
+        The stack; its `ids` are filled.
+    """
+    repository = stack.call(
+        "POST",
+        "/api/v1/repositories",
+        json={"name": "crm", "kind": "https", "url": "https://example.invalid/crm.git"},
+    )
+    assert repository.status_code == 201, repository.text
+    deploy = stack.call("POST", f"/api/v1/environments/{_ENV}/deploys", json={"repository": "crm"})
+    assert deploy.status_code == 202, deploy.text
+    stack.ids["deploy_id"] = deploy.json()["id"]
+    with Session(stack.db) as session:
+        env = session.scalars(select(Environment).where(Environment.name == _ENV)).one()
+        owner = session.scalars(select(Principal)).first()
+        repo = session.scalars(select(Repository).where(Repository.name == "crm")).one()
+        assert owner is not None
+        version = JobVersion(
+            id=uuid.uuid4(),
+            repository_id=repo.id,
+            environment_id=env.id,
+            commit_sha="a" * 40,
+            manifest_json={
+                "version": 3,
+                "assets": [{"table": "gold.scores", "kind": "sql", "inputs": {}, "sql": ""}],
+                "edges": [],
+            },
+            code_uri="file:///x",
+            code_sha256="0" * 64,
+        )
+        session.add(version)
+        session.flush()
+        run = Run(
+            id=uuid.uuid4(),
+            environment_id=env.id,
+            repository_id=repo.id,
+            job_version_id=version.id,
+            run_as_principal_id=owner.id,
+            kind=RunKind.FULL,
+            status=RunStatus.RUNNING,
+            selection_json={},
+        )
+        session.add(run)
+        session.flush()
+        session.add(
+            TaskRun(
+                id=uuid.uuid4(),
+                run_id=run.id,
+                asset="gold.scores",
+                status=TaskStatus.RUNNING,
+                claim_count=1,
+                attempt=1,
+                lease_owner="w1",
+                max_attempts=3,
+                timeout_seconds=60,
+                retry_delay_seconds=0,
+                upstream_json=[],
+            )
+        )
+        session.commit()
+        stack.ids.update(
+            run_id=str(run.id), project_version_id=str(version.id), asset="gold.scores"
+        )
 
 
 def _ipc(table: pa.Table) -> bytes:
@@ -466,6 +565,7 @@ def _run_query(stack: _Stack, sql: str) -> tuple[str, QueryRunStatus]:
     submitted = stack.call("POST", f"/api/v1/environments/{_ENV}/queries", json={"sql": sql})
     assert submitted.status_code == 202, submitted.text
     query_id = submitted.json()["query_id"]
+    stack.ids["query_id"] = query_id
     with Session(stack.db) as session:
         run_one(
             session,
@@ -519,7 +619,20 @@ def test_an_environment_that_uses_a_secret_shows_no_value(stack: _Stack) -> None
     with pyarrow.ipc.open_file(io.BytesIO(result.content)) as reader:
         assert reader.read_all().column("id").to_pylist() == [1, 2, 3]
 
-    assert stack.sweep(query_id) >= 20
+    statuses = stack.sweep()
+    # Real objects: these routes answered with a resource, not a 404.
+    for route in (
+        "/api/v1/environments/{name}",
+        "/api/v1/environments/{env}/queries/{query_id}/result",
+        "/api/v1/environments/{env}/runs/{run_id}",
+        "/api/v1/environments/{env}/runs/{run_id}/tasks/{asset}/log",
+        "/api/v1/environments/{env}/deploys/{deploy_id}",
+        "/api/v1/environments/{env}/project-versions/{project_version_id}",
+        "/v1/{prefix}/namespaces/{namespace}/tables/{table}",
+        "/api/v1/environments/{env}/namespaces/{path}/tables/{name}",
+    ):
+        assert statuses.get(route) == 200, (route, statuses.get(route))
+    assert sum(1 for status in statuses.values() if status == 200) >= 12, statuses
 
     # Control: the stored secret decrypts to the keys the store accepted.
     with Session(stack.db) as session:
@@ -545,15 +658,16 @@ def test_an_error_raised_by_storage_after_the_secret_was_resolved_shows_no_value
             f"/api/v1/environments/{_ENV}/namespaces/bronze/tables/t/data",
             content=_ipc(pa.table({"id": pa.array([9], pa.int64())})),
             headers={"Content-Type": "application/vnd.apache.arrow.stream"},
+            allow_5xx=True,
         ),
-        stack.call("GET", f"/v1/{_ENV}/namespaces/bronze/tables/t"),
-        stack.call("GET", f"/api/v1/environments/{_ENV}/orphaned-locations"),
+        stack.call("GET", f"/v1/{_ENV}/namespaces/bronze/tables/t", allow_5xx=True),
+        stack.call("GET", f"/api/v1/environments/{_ENV}/orphaned-locations", allow_5xx=True),
     ]
     # Control: the storage refused the call, so the failing path ran with the wrong keys.
     assert any(answer.status_code >= 400 for answer in refused), [a.status_code for a in refused]
-    query_id, status = _run_query(stack, "SELECT id FROM bronze.t")
+    _, status = _run_query(stack, "SELECT id FROM bronze.t")
     assert status == QueryRunStatus.FAILED
-    stack.sweep(query_id)
+    stack.sweep(allow_5xx=True)
 
     stack.assert_nothing_leaked(expect_log=True)
 
@@ -568,19 +682,19 @@ def test_revoking_a_secret_an_environment_still_refers_to_shows_no_value(stack: 
     assert revoked.status_code == 204, revoked.text
 
     answers = [
-        stack.call("GET", f"/v1/{_ENV}/namespaces/bronze/tables/t"),
+        stack.call("GET", f"/v1/{_ENV}/namespaces/bronze/tables/t", allow_5xx=True),
         stack.call(
             "POST",
             f"/api/v1/environments/{_ENV}/namespaces/bronze/tables/t/data",
             content=_ipc(pa.table({"id": pa.array([9], pa.int64())})),
             headers={"Content-Type": "application/vnd.apache.arrow.stream"},
+            allow_5xx=True,
         ),
     ]
     assert all(answer.status_code >= 400 for answer in answers), [a.status_code for a in answers]
-    query_id, status = _run_query(stack, "SELECT id FROM bronze.t")
+    _, status = _run_query(stack, "SELECT id FROM bronze.t")
     assert status == QueryRunStatus.FAILED
-    stack.sweep(query_id)
-    with contextlib.suppress(Exception):
-        stack.call("GET", f"/api/v1/environments/{_ENV}/secrets")
+    stack.sweep(allow_5xx=True)
+    stack.call("GET", f"/api/v1/environments/{_ENV}/secrets")
 
     stack.assert_nothing_leaked()
