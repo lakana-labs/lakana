@@ -109,7 +109,8 @@ the second run added both rows and kept the first ones:
 it works with `write: append` only. A column the result no longer has is removed from the table,
 and every query, view and downstream asset that names it fails: see
 [When a table's columns change](../explanation/when-columns-change.md). A Python asset takes
-`evolve_schema=True` the other way round, with `write="replace"` only (see
+`evolve_schema=True` the other way round, with `write="replace"` only, and accepts
+`evolve_schema=False` with every `write` (see
 [When the output changes shape](python-assets.md#when-the-output-changes-shape)).
 
 ### `merge`

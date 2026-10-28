@@ -23,7 +23,7 @@ every column an id of its own, and Lakana reads the data by that id, never by th
 | has a column the table lacks | The column is added. Rows written before read as NULL in it. |
 | has a column in a wider type: `int` to `long`, `float` to `double`, a decimal with more digits at the same scale | The column widens and keeps its data. |
 | has a column in a narrower type: `int` where the table has `long`, `float` where it has `double` | Nothing changes: the values are stored in the table's wider type. |
-| has a column in a type that does not widen, such as `string` where the table has `long` | The column becomes a **new column** of the same name. Rows written before read as NULL in it, never as the old values. |
+| has a column in a type that does not widen, such as `string` where the table has `long` | The column becomes a **new column** of the same name. Rows written before read as NULL in it, never as the old values. A row filter or column mask that uses the column refuses the reads it applies to until an administrator creates it again (below). |
 | lacks a column the table has | The column is **removed** from the table. |
 | has a column of another name | Lakana does not rename on its own: the old column is removed and a new one is added. |
 
@@ -49,12 +49,24 @@ everything that reads all columns quietly gets one fewer.
   after it in that run ends `upstream_failed`. A SQL asset on `SELECT *` loses the column from
   its own result; a SQL asset that replaces its table cannot change its schema, so it fails with
   ``The result does not match <table>'s schema (dropped gone …)``. List the columns it needs
-  instead of `*`, or drop its table so the next run creates it again. A Python asset gets its
+  instead of `*`. Do not drop its table so that the next run creates it again: the new table has
+  none of the old table's grants, row filters or column masks, and its readers would see every
+  row and column until an administrator creates them again. A Python asset gets its
   input without the column, and code that uses the column fails in the function.
 - **A check whose SQL names it** errors, like any query that names it.
 - **A row filter or a column mask on it** stops the reads of the people it applies to. See
   [Filters and dropped columns](../how-to/filter-rows.md#filters-and-dropped-columns) and the end
   of [When Lakana refuses](../how-to/mask-a-column.md#when-lakana-refuses) for masks.
+
+## What a retyped column means for row filters and column masks
+
+A column whose type changes in a way that does not widen is a new column under the old name. A row
+filter or column mask that uses it was made for the old column, so a read of the table by the
+people it applies to is refused, and nothing is shown: ``` `gold.payments` has a row filter or column mask that uses column `amount`, and a column was renamed or replaced since the policy was created, so the policy may now cover a different column. Nothing is shown. An administrator must review … ```.
+An administrator creates the filter or mask again for the new column, then revokes the old one
+([After a rename](../how-to/filter-rows.md#after-a-rename) has the order). A widened column keeps
+its policies: it is the same column. Before an asset with `evolve_schema` changes a column's type,
+ask whoever manages the table's policies, so the reads do not stop by surprise.
 
 Adding the column back does not bring its data back: it returns as a new column, empty in every row
 written before.
@@ -66,8 +78,9 @@ wrote, and the snapshots from before the change still hold the column in their d
 
 - Lakana's own queries always read the current snapshot. They cannot reach the old one: a query
   with `AT (...)` is refused.
-- An engine that reads the table through Lakana's Iceberg REST catalog can read an older
-  snapshot, with that snapshot's columns, as long as the table keeps it.
+- An engine that reads the table through Lakana's Iceberg REST catalog, with storage credentials
+  of its own (the catalog hands out none), can read an older snapshot, with that snapshot's
+  columns, as long as the table keeps it.
 - A blocking check that fails after the run sets the table back to the snapshot before it, and the
   columns with it ([Checks](../reference/checks.md)).
 - `lakana table maintain` removes snapshots older than seven days by default, but always keeps the

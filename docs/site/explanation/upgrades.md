@@ -160,7 +160,9 @@ A Python asset that replaces its table may say `@asset(evolve_schema=True)`: eac
 the table the columns the function returns, with the rules of a SQL asset's `evolve_schema`, and a
 column it no longer returns is removed from the table. Without it nothing changes: a changed
 output schema fails the run as before, and the message now names `evolve_schema=True` as the
-next step. It needs this release's `lakana` in the project's lock. Before you remove a column others
+next step. It needs this release's `lakana` in the project's lock. A column whose type changes
+without widening is a new column, so a row filter or column mask that uses it refuses its reads
+until an administrator creates it again. Before you remove a column others
 read, see [When a table's columns change](when-columns-change.md).
 
 ### Connections: name each source once per environment

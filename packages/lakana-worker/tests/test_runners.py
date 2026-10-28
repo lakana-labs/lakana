@@ -848,7 +848,7 @@ def test_a_replace_without_connections_keeps_description_version_2(harness: Harn
 
 
 def test_an_evolving_replace_says_so_and_keeps_description_version_2(harness: Harness) -> None:
-    """A harness of the previous release ignores the key and refuses the changed schema."""
+    """The key rides on a version 2 document: an evolving replace needs no version 3 field."""
     description = _description(harness, evolve_schema=True)
     assert description["version"] == 2
     assert description["evolve_schema"] is True

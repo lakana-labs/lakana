@@ -755,8 +755,9 @@ def task_description(
         The JSON document: version `_WRITES_DESCRIPTION_VERSION` for an asset that appends,
         merges or declares a connection, else version `_DESCRIPTION_VERSION`, unchanged, so a
         harness of the previous release still runs every other asset. ``evolve_schema`` is
-        sent only when it is on, in either version: an older harness ignores it and refuses
-        a changed schema, as it always did.
+        sent only when it is on, in either version. A harness without the option never gets
+        it: its `asset()` lacks the argument, so the asset fails at import, and before 1.0 a
+        deploy refuses a lock with another minor version anyway.
     """
     document: dict[str, object] = {
         "version": _DESCRIPTION_VERSION,

@@ -120,21 +120,29 @@ def order_totals(orders: pl.DataFrame) -> pl.DataFrame:
   of the same name; a column the function no longer returns is removed from the table.
 - A removed column is gone for everyone who reads the table: a query, a view or a downstream
   asset that names it fails, and a row filter or column mask on it stops the reads it applies
-  to. Its values stay in the table's older snapshots until maintenance removes them. Read
-  [When a table's columns change](../explanation/when-columns-change.md) before you remove a
-  column others read.
+  to. A column whose type changes without widening is a new column: a row filter or column
+  mask that uses it refuses the reads it applies to until an administrator creates it again.
+  Its values stay in the table's older snapshots until maintenance removes them. Read
+  [When a table's columns change](../explanation/when-columns-change.md) before you remove or
+  retype a column others read.
+- The first run after a deploy adopted an existing table (the diff shows it as `adopted`) removes
+  every column of that table the function does not return.
 - A run that returns no rows works the same way: the table is emptied and takes the result's
   columns.
 - Only with `write="replace"`, the default. An asset that appends or merges cannot change its
   table's schema; `evolve_schema=True` there fails the deploy with
   ``evolve_schema=True works with write="replace" (the default) only; remove evolve_schema, or replace the table instead of appending or merging``.
   It does not apply to an artifact asset either.
-- It must be `True` or `False`, written out; `evolve_schema=False` is the default.
-- Without it, restore the columns and types the table has, or drop the table
-  (`lakana table delete`) so the next run creates it with the new schema.
-- The harness that reads the option is the `lakana` package in the project's own environment:
-  lock the project with this release's `lakana`. With an older one the run fails at import, with
-  a `TypeError` that names `evolve_schema`.
+- It must be `True`, `False` or `None`, written out; `None` means `False`, the default.
+  `evolve_schema=False` is accepted with every `write`, and on an artifact asset.
+- Without it, add `evolve_schema=True`, or restore the columns and types the table has. Do not
+  drop the table so that the next run creates it: the new table has none of the old table's
+  grants, row filters or column masks, and its readers would see every row and column until an
+  administrator creates them again.
+- The harness that reads the option is the `lakana` package in the project's own environment.
+  Deploy requires the locked `lakana` to have the instance's minor version, so it has the
+  option; from 1.0 on, an older `lakana` in the lock fails the run at import, with a `TypeError`
+  that names `evolve_schema`.
 
 ## The asset's context
 
