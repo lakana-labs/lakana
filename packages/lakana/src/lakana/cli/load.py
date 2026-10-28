@@ -24,7 +24,7 @@ import pyarrow.parquet as pq
 import typer
 
 from lakana._arrow import cast_timestamp_ns_columns_to_us, normalize_view_columns, schema_to_columns
-from lakana.cli import _output
+from lakana.cli import _files, _output
 from lakana.cli._break_glass import BREAK_GLASS, REASON, break_glass_reason
 from lakana.cli._state import CliError, confirm, resolve_environment, state_of
 from lakana.errors import NotFound, ValidationError
@@ -106,39 +106,6 @@ def _format(path: Path, given: str | None) -> str:
     return found
 
 
-def _utf8(path: Path, data: bytes) -> bytes:
-    """Hold text to the helpers' strict UTF-8 rule, dropping a byte order mark.
-
-    Parameters
-    ----------
-    path
-        The file, for messages.
-    data
-        Its bytes.
-
-    Returns
-    -------
-    bytes
-        The bytes without a byte order mark.
-
-    Raises
-    ------
-    CliError
-        For bytes that are not UTF-8 (exit 8).
-    """
-    data = data.removeprefix(b"\xef\xbb\xbf")
-    try:
-        data.decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise CliError(
-            f"{_output.inline(path.name)} is not UTF-8 (byte {data[exc.start]:#04x} at position "
-            f"{exc.start}); save it as UTF-8 and load it again",
-            8,
-            kind="FileError",
-        ) from None
-    return data
-
-
 def _csv(path: Path, header_row: int) -> pa.Table:
     """Read a CSV file with pyarrow, inferring each column's type over the whole file.
 
@@ -157,7 +124,7 @@ def _csv(path: Path, header_row: int) -> pa.Table:
     pa.Table
         The rows.
     """
-    data = _utf8(path, path.read_bytes())
+    data = _files.strict_utf8(path, path.read_bytes())
     read = pacsv.ReadOptions(
         skip_rows=max(header_row - 1, 0), autogenerate_column_names=not header_row
     )
@@ -192,7 +159,7 @@ def _ndjson(path: Path, data: bytes) -> pa.Table:
     """
     from lakana.ingest._formats import MAX_NESTING, nested_deeper
 
-    data = _utf8(path, data)
+    data = _files.strict_utf8(path, data)
     if nested_deeper(data):
         raise CliError(
             f"{_output.inline(path.name)} nests arrays and objects deeper than {MAX_NESTING} "

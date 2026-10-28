@@ -873,7 +873,8 @@ def append(
     The table's schema is fetched first. A CSV is parsed straight into the
     table's column types; Parquet and Arrow are cast to them. Nullability is
     checked too, and a column that doesn't fit fails here, before anything
-    is sent.
+    is sent. A CSV must be UTF-8 (a byte order mark is dropped); one in
+    another encoding is refused (exit 8): save it as UTF-8 and try again.
 
     Parameters
     ----------

@@ -16,6 +16,7 @@ import pyarrow.parquet as pq
 
 from lakana._arrow import json_to_arrow_type
 from lakana._models import Column
+from lakana.cli._output import inline
 from lakana.cli._state import CliError
 from lakana.errors import ValidationError
 
@@ -172,6 +173,39 @@ def _csv_error(path: Path, exc: pa.ArrowInvalid, columns: Sequence[Column]) -> C
     return CliError(f"Could not read {path} as csv: {exc}", 8, kind="FileError")
 
 
+def strict_utf8(path: Path, data: bytes) -> bytes:
+    """Hold text to the helpers' strict UTF-8 rule, dropping a byte order mark.
+
+    Parameters
+    ----------
+    path
+        The file, for messages.
+    data
+        Its bytes.
+
+    Returns
+    -------
+    bytes
+        The bytes without a byte order mark.
+
+    Raises
+    ------
+    CliError
+        For bytes that are not UTF-8 (exit 8).
+    """
+    data = data.removeprefix(b"\xef\xbb\xbf")
+    try:
+        data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise CliError(
+            f"{inline(path.name)} is not UTF-8 (byte {data[exc.start]:#04x} at position "
+            f"{exc.start}); save it as UTF-8 and load it again",
+            8,
+            kind="FileError",
+        ) from None
+    return data
+
+
 def read_table(path: Path, fmt: str, csv_columns: Sequence[Column] | None = None) -> pa.Table:
     """Read a Parquet, CSV or Arrow IPC file.
 
@@ -208,8 +242,9 @@ def read_table(path: Path, fmt: str, csv_columns: Sequence[Column] | None = None
                 strings_can_be_null=True,
                 null_values=[""],
             )
+            data = strict_utf8(path, path.read_bytes())
             try:
-                return pacsv.read_csv(path, convert_options=convert_options)
+                return pacsv.read_csv(pa.BufferReader(data), convert_options=convert_options)
             except pa.ArrowInvalid as exc:
                 error = _csv_error(path, exc, csv_columns or [])
                 raise error from exc

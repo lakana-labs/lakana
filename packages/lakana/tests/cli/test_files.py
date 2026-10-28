@@ -554,12 +554,14 @@ def test_read_table_quotes_pyarrow_when_the_header_cannot_be_reread(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """If the header can't be read back to name column #N, pyarrow's message is quoted."""
+    path = tmp_path / "gone.csv"
+    path.write_text("id\nx\n")
 
     def fail(*args: object, **kwargs: object) -> pa.Table:
+        path.unlink()
         raise pa.ArrowInvalid("In CSV column #0: CSV conversion error to int64: invalid value 'x'")
 
     monkeypatch.setattr(_files.pacsv, "read_csv", fail)
-    path = tmp_path / "gone.csv"
 
     with pytest.raises(CliError) as caught:
         _files.read_table(path, "csv", [Column("id", "long", False)])
