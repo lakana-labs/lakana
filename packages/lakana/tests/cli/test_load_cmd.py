@@ -793,3 +793,89 @@ def test_a_missing_file_is_named(tmp_path: Path) -> None:
     assert result.exit_code == 8, result.output
     assert "No such file" in result.output
     assert _loads(api) == []
+
+
+@pytest.mark.parametrize("fmt", ["arrow", "parquet"])
+def test_dictionary_values_count_decoded_and_the_read_stops_early(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fmt: str
+) -> None:
+    """One 2 KiB value behind small indices is counted as the values it decodes to."""
+    import lakana.cli.load as load_module
+
+    indices = pa.array([0] * 200_000, pa.int8())
+    values = pa.DictionaryArray.from_arrays(indices, pa.array(["x" * 2048]))
+    table = pa.table({"v": values})
+    path = tmp_path / f"dict.{fmt}"
+    if fmt == "arrow":
+        with pyarrow.ipc.new_file(str(path), table.schema) as writer:
+            writer.write_table(table)
+    else:
+        pq.write_table(table, path)
+    assert path.stat().st_size < 1024 * 1024
+    decoded: list[int] = []
+    decode = load_module._decoded
+
+    def counted(batch: pa.RecordBatch) -> pa.RecordBatch:
+        decoded.append(batch.num_rows)
+        return decode(batch)
+
+    monkeypatch.setattr(load_module, "_decoded", counted)
+    api = _api(limit=1024 * 1024)
+
+    result = invoke(make_state(tmp_path, api), "load", str(path), "d", "--env", "dev", "--yes")
+
+    assert result.exit_code == 2, result.output
+    assert "is larger than one upload may be (1 MiB)" in result.output
+    assert decoded == [1024]
+    assert _loads(api) == []
+
+
+def _late(name: str) -> bytes:
+    """Write a file whose second column only shows its type after the first MiB.
+
+    Parameters
+    ----------
+    name
+        `late.csv`, `latenull.csv`, `late.ndjson` or `latenull.ndjson`.
+
+    Returns
+    -------
+    bytes
+        The file's content.
+    """
+    rows = 400_000
+    if name == "late.csv":
+        return b"a,b\n" + b"1,2\n" * rows + b"x,2\n"
+    if name == "latenull.csv":
+        return b"a,b\n" + b"1,\n" * rows + b"1,note\n"
+    if name == "late.ndjson":
+        return b'{"a": 1}\n' * rows + b'{"a": 1, "b": "note"}\n'
+    return b'{"a": 1, "b": null}\n' * rows + b'{"a": 1, "b": "note"}\n'
+
+
+@pytest.mark.parametrize(
+    ("name", "column", "kind"),
+    [
+        ("late.csv", "a", pa.string()),
+        ("latenull.csv", "b", pa.string()),
+        ("late.ndjson", "b", pa.string()),
+        ("latenull.ndjson", "b", pa.string()),
+    ],
+)
+def test_a_type_that_shows_after_the_first_mib_is_inferred_from_the_whole_file(
+    tmp_path: Path, name: str, column: str, kind: pa.DataType
+) -> None:
+    """Text files are typed over every row, as `lakana table append` types them."""
+    path = tmp_path / name
+    path.write_bytes(_late(name))
+    assert path.stat().st_size > 1024 * 1024
+    api = _api()
+
+    result = invoke(
+        make_state(tmp_path, api), "load", str(path), "customers", "--env", "dev", "--yes"
+    )
+
+    assert result.exit_code == 0, result.output
+    sent = _rows_sent(_loads(api)[-1])
+    assert sent.num_rows == 400_001
+    assert sent.schema.field(column).type == kind

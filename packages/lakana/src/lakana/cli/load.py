@@ -51,8 +51,9 @@ _WITH_EXTRA = frozenset({"json", "xlsx", "xlsm", "xlsb", "xls", "ods"})
 """Read by the files helper's reader, which needs the assets extra."""
 _SPREADSHEETS = frozenset({"xlsx", "xlsm", "xlsb", "xls", "ods"})
 _MIB = 1024 * 1024
-_PARQUET_BATCH_ROWS = 1024
-"""Rows decoded at a time from a Parquet file, so a read stops soon after the limit."""
+_BATCH_ROWS = 1024
+"""Rows decoded at a time from a Parquet file, and from a batch with a dictionary column, so a
+read stops soon after the limit."""
 
 
 def bronze_name(table: str) -> str:
@@ -138,17 +139,18 @@ def _utf8(path: Path, data: bytes) -> bytes:
     return data
 
 
-def _csv(path: Path, header_row: int, limit: int | None) -> pa.Table:
-    """Read a CSV file with pyarrow block by block, inferring each column's type.
+def _csv(path: Path, header_row: int) -> pa.Table:
+    """Read a CSV file with pyarrow, inferring each column's type over the whole file.
+
+    As `lakana table append` reads it. Text decodes to about its own size, and the file's size
+    is checked against the upload limit before it is read, so it is read whole.
 
     Parameters
     ----------
     path
-        The file; its size is bounded by the upload limit before it is read.
+        The file.
     header_row
         The 1-based row of the column names; ``0`` for none (columns ``column_1``, ...).
-    limit
-        The upload limit the decoded rows must stay within, or `None`.
 
     Returns
     -------
@@ -160,15 +162,16 @@ def _csv(path: Path, header_row: int, limit: int | None) -> pa.Table:
         skip_rows=max(header_row - 1, 0), autogenerate_column_names=not header_row
     )
     convert = pacsv.ConvertOptions(strings_can_be_null=True, null_values=[""])
-    reader = pacsv.open_csv(pa.BufferReader(data), read_options=read, convert_options=convert)
-    table = _bounded(path, reader.schema, reader, limit)
+    table = pacsv.read_csv(pa.BufferReader(data), read_options=read, convert_options=convert)
     if not header_row:
         table = table.rename_columns([f"column_{i + 1}" for i in range(table.num_columns)])
     return table
 
 
-def _ndjson(path: Path, data: bytes, limit: int | None) -> pa.Table:
+def _ndjson(path: Path, data: bytes) -> pa.Table:
     """Read newline-delimited JSON with pyarrow, after the helpers' encoding and depth checks.
+
+    Each field's type is inferred over the whole file; like a CSV file, it is read whole.
 
     Parameters
     ----------
@@ -176,8 +179,6 @@ def _ndjson(path: Path, data: bytes, limit: int | None) -> pa.Table:
         The file, for messages.
     data
         Its bytes.
-    limit
-        The upload limit the decoded rows must stay within, or `None`.
 
     Returns
     -------
@@ -199,8 +200,7 @@ def _ndjson(path: Path, data: bytes, limit: int | None) -> pa.Table:
             8,
             kind="FileError",
         )
-    reader = pajson.open_json(pa.BufferReader(data))
-    return _bounded(path, reader.schema, reader, limit)
+    return pajson.read_json(pa.BufferReader(data))
 
 
 def _with_extra(path: Path, data: bytes, fmt: str, sheet: str | None, header_row: int) -> pa.Table:
@@ -257,10 +257,58 @@ def _with_extra(path: Path, data: bytes, fmt: str, sheet: str | None, header_row
     return frame.to_arrow()
 
 
+def _decoded(batch: pa.RecordBatch) -> pa.RecordBatch:
+    """Replace each dictionary column of a batch by its values, which a table stores.
+
+    Parameters
+    ----------
+    batch
+        A few rows.
+
+    Returns
+    -------
+    pa.RecordBatch
+        The rows with plain columns.
+    """
+    return pa.RecordBatch.from_arrays(
+        [
+            column.cast(column.type.value_type) if pa.types.is_dictionary(column.type) else column
+            for column in batch.columns
+        ],
+        names=batch.schema.names,
+    )
+
+
+def _pieces(batch: pa.RecordBatch) -> Iterable[pa.RecordBatch]:
+    """Split a batch with a dictionary column into decoded pieces of a few rows.
+
+    A dictionary column takes little room encoded and may take far more decoded (one long
+    value behind many small indices), so it is decoded a few rows at a time.
+
+    Parameters
+    ----------
+    batch
+        The batch as read.
+
+    Returns
+    -------
+    Iterable[pa.RecordBatch]
+        The batch itself when it has no dictionary column, else its decoded pieces.
+    """
+    if not any(pa.types.is_dictionary(kind) for kind in batch.schema.types):
+        return (batch,)
+    return (
+        _decoded(batch.slice(start, _BATCH_ROWS)) for start in range(0, batch.num_rows, _BATCH_ROWS)
+    )
+
+
 def _bounded(
     path: Path, schema: pa.Schema, batches: Iterable[pa.RecordBatch], limit: int | None
 ) -> pa.Table:
     """Collect decoded batches, stopping as soon as they pass the upload limit.
+
+    Dictionary columns are decoded before they are counted, so the count is of the values the
+    table will hold.
 
     Parameters
     ----------
@@ -278,13 +326,20 @@ def _bounded(
     pa.Table
         The rows.
     """
+    plain = pa.schema(
+        [
+            field.with_type(field.type.value_type) if pa.types.is_dictionary(field.type) else field
+            for field in schema
+        ]
+    )
     kept: list[pa.RecordBatch] = []
     size = 0
     for batch in batches:
-        size += batch.nbytes
-        _check_size(path, size, limit)
-        kept.append(batch)
-    return pa.Table.from_batches(kept, schema)
+        for piece in _pieces(batch):
+            size += piece.nbytes
+            _check_size(path, size, limit)
+            kept.append(piece)
+    return pa.Table.from_batches(kept, plain)
 
 
 def _slot(buf: bytes, table: int, index: int) -> int | None:
@@ -424,9 +479,7 @@ def _parquet(path: Path, limit: int | None) -> pa.Table:
     """
     _check_size(path, _parquet_size(path), limit)
     with pq.ParquetFile(path) as parquet:
-        return _bounded(
-            path, parquet.schema_arrow, parquet.iter_batches(_PARQUET_BATCH_ROWS), limit
-        )
+        return _bounded(path, parquet.schema_arrow, parquet.iter_batches(_BATCH_ROWS), limit)
 
 
 def _parquet_size(path: Path) -> int:
@@ -479,8 +532,9 @@ def read_file(
     header_row
         `--header-row` (CSV and spreadsheets only).
     limit
-        The server's upload limit: reading stops, refused, as soon as the decoded rows pass it
-        (a Parquet file is first estimated from its metadata).
+        The server's upload limit: a Parquet or Arrow file is read in pieces and refused as soon
+        as its decoded rows pass it (a Parquet file is first estimated from its metadata); a
+        text file, whose size was checked before, is measured once read, by the caller.
 
     Returns
     -------
@@ -505,13 +559,13 @@ def read_file(
         raise CliError("--header-row is the 1-based row of the column names, or 0 for none")
     try:
         if fmt == "csv":
-            table = _csv(path, header_row, limit)
+            table = _csv(path, header_row)
         elif fmt == "parquet":
             table = _parquet(path, limit)
         elif fmt == "arrow":
             table = _arrow(path, limit)
         elif fmt == "ndjson":
-            table = _ndjson(path, path.read_bytes(), limit)
+            table = _ndjson(path, path.read_bytes())
         else:
             table = _with_extra(path, path.read_bytes(), fmt, sheet, header_row)
     except (pa.ArrowException, OSError, struct.error) as exc:
@@ -553,13 +607,6 @@ def read_file(
                 8,
                 kind="FileError",
             )
-    table = pa.table(
-        [
-            column.cast(column.type.value_type) if pa.types.is_dictionary(column.type) else column
-            for column in table.columns
-        ],
-        names=table.column_names,
-    )
     table = normalize_view_columns(cast_timestamp_ns_columns_to_us(table))
     try:
         schema_to_columns(table.schema)

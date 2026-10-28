@@ -28,9 +28,11 @@ What the command does, in order:
 1. It refuses a protected environment without `--yes`, `--break-glass` and `--reason`, before it
    reads the file: recurring loads into production belong in an asset.
 2. It asks the server how large one upload may be (`LAKANA_APPEND__MAX_BYTES`, 256 MiB by
-   default) and refuses a larger file before it reads it. A small file can hold far more rows
-   than its size suggests, so it then reads the file a piece at a time and stops, refused, as
-   soon as the rows read pass the limit; a Parquet file is first measured from its metadata.
+   default) and refuses a larger file before it reads it. A small Parquet or Arrow file can
+   hold far more rows than its size suggests, so the command reads it a piece at a time and stops,
+   refused, as soon as the rows read pass the limit (a Parquet file is first measured from its
+   metadata). A CSV or JSON file is read whole, so each column's type is inferred from every
+   row, and its rows are measured before they are sent.
 3. It reads the file and checks with the server, without sending a row, that the load would
    succeed: the layer, your rights, the namespace, and the columns of a table that exists.
 4. It shows the columns and the row count and asks.
