@@ -371,7 +371,7 @@ is recorded. If that worker stops in between (it crashed, or its machine went do
 stays succeeded and nothing tries again. The deploy's record then shows the job with the reason
 `lost`, and `lakana deploy` prints a warning. The worker may have stopped after it started the
 job and before it recorded that, so look for the job's run first, as the warning says
-(`lakana runs list --trigger deploy --job JOB`), and start it by hand only if there is none.
+(`lakana runs list --repo REPO --trigger deploy --job JOB`), and start it by hand only if there is none.
 
 ## When the project is busy
 

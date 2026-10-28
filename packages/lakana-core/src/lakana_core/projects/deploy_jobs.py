@@ -136,8 +136,8 @@ def lost_message(job: str, repository: str, environment: str) -> str:
     """
     return (
         f"job `{job}` may not have been started: the worker stopped before it recorded the "
-        f"start. Look for its run first with `lakana runs list --env {environment} --trigger "
-        f"deploy --job {job}`; if there is none, start it with "
+        f"start. Look for its run first with `lakana runs list --env {environment} --repo "
+        f"{repository} --trigger deploy --job {job}`; if there is none, start it with "
         f"{run_it_yourself(job, repository, environment)}."
     )
 

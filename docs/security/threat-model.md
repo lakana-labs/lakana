@@ -542,10 +542,11 @@ OIDC exchange and CI tokens (#15)"; the user's view is
    the project version. The token gets no other run: the widening applies only while the worker
    starts that deploy's jobs (`CiScope.starting_deploy_jobs`, never set from a request), and the
    protected-environment rules of a start by hand still apply (the bound run principal writes;
-   without one the start is refused). Every start, the one right after the deploy and one that
-   waited, resolves the token again when it begins, against the same rule revision and the
-   rule's repository, so a rule changed or disabled meanwhile, even during the deploy, starts
-   nothing; and the job must still be `on_deploy` in the project version it runs, so a deploy by
+   without one the start is refused). The token is resolved again after the deploy is recorded,
+   once, before the deploy's jobs start, and again when a start that waited begins, against the
+   same rule revision and the rule's repository, so a rule changed or disabled during the deploy
+   or while a start waits starts nothing (a change in the seconds the start loop takes still lets
+   that deploy's remaining jobs start); and the job must still be `on_deploy` in the project version it runs, so a deploy by
    hand that moved the pointer meanwhile cannot have its jobs run under the rule.
 
 ## Explicitly not defended
