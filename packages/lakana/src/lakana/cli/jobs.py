@@ -28,7 +28,10 @@ _NOTIFY_POLLS = 30
 _DELIVERY_ID = Annotated[str, typer.Argument(help="The delivery id `job notify-test` printed.")]
 
 job_app = typer.Typer(
-    help="Jobs: named selections of a project, started by hand, by the API or by a schedule.",
+    help=(
+        "Jobs: named selections of a project, started by hand, by the API, by a schedule or "
+        "after each deploy."
+    ),
     no_args_is_help=True,
 )
 
@@ -44,10 +47,13 @@ def _trigger(trigger: Trigger) -> str:
     Returns
     -------
     str
-        ``schedule 0 6 * * * Europe/Berlin`` with `` (paused)`` when paused, or ``on demand``.
+        ``schedule 0 6 * * * Europe/Berlin`` with `` (paused)`` when paused, ``after each
+        deploy`` or ``on demand``.
     """
     if trigger.kind == "on_demand":
         return "on demand"
+    if trigger.kind == "deploy":
+        return "after each deploy"
     paused = " (paused)" if trigger.paused else ""
     return f"schedule {trigger.cron} {trigger.timezone}{paused}"
 
@@ -86,6 +92,8 @@ def _triggers_detail(job: Job) -> str:
     for trigger in job.triggers:
         if trigger.kind == "on_demand":
             lines.append(f"on demand: lakana job run {_output.inline(job.name)}")
+        elif trigger.kind == "deploy":
+            lines.append("after each deploy: starts as the deployer")
         elif trigger.paused:
             resume = f"lakana job resume {_output.inline(job.name)}"
             lines.append(f"{_trigger(trigger)}; resume it with '{resume}'")

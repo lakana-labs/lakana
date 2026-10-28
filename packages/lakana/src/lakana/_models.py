@@ -1660,6 +1660,37 @@ class DeployAccepted:
 
 
 @dataclass(frozen=True)
+class DeployJobStart:
+    """What a deploy did with one job that starts after each deploy (`on_deploy: true`).
+
+    Parameters
+    ----------
+    job
+        The job's name.
+    outcome
+        ``pending`` (the worker has not started it yet), ``started``, ``waiting`` (the project
+        was busy; the start waits for the active run) or ``not_started``.
+    run_id
+        For ``started``, the queued run; follow it with `client.runs.wait`.
+    waits_for_run_id
+        For ``waiting``, the active run the start waits for.
+    reason
+        For ``not_started``: ``lacks_run`` (the deployer may not `RUN` in the environment),
+        ``refused`` (refused as a start by hand would be), ``error`` or ``lost`` (the worker
+        stopped before it started the job).
+    message
+        For ``not_started``, one sentence that names the cause and the next step.
+    """
+
+    job: str
+    outcome: str
+    run_id: str | None = None
+    waits_for_run_id: str | None = None
+    reason: str | None = None
+    message: str | None = None
+
+
+@dataclass(frozen=True)
 class Deploy:
     """A deploy, dry run or rollback and its outcome.
 
@@ -1707,6 +1738,9 @@ class Deploy:
         Why a queued deploy has not started (the codes `no_worker`, `no_worker_of_kind`,
         `workers_busy` and `starting`); `None` when it is not waiting, in a listing, and from
         a server that predates the field.
+    job_starts
+        The jobs with `on_deploy: true` the deploy started, by name; empty for a run that
+        starts no job and from a server that predates the field.
     """
 
     id: str
@@ -1728,6 +1762,7 @@ class Deploy:
     checks: dict[str, list[dict[str, str]]] | None = None
     warnings: tuple[str, ...] = ()
     waiting_for: WaitingFor | None = None
+    job_starts: tuple[DeployJobStart, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -2119,8 +2154,8 @@ class Run:
         The job the run belongs to; `None` for an ad-hoc run (and from a server that predates
         jobs).
     trigger
-        ``schedule``, ``api`` (a service account called the API) or ``manual``; `None` for an
-        ad-hoc run.
+        ``schedule``, ``api`` (a service account called the API), ``manual`` or ``deploy`` (a
+        deploy started the job as its deployer); `None` for an ad-hoc run.
     scheduled_for
         For a scheduled run, the time the schedule named.
     missed
@@ -2165,9 +2200,10 @@ class Trigger:
     Parameters
     ----------
     kind
-        ``schedule`` (the job starts at the times a cron expression names) or ``on_demand``
-        (a start through the API, the SDK or the CLI, which every job has). A newer server may
-        add kinds; the SDK leaves out one it does not know.
+        ``schedule`` (the job starts at the times a cron expression names), ``deploy`` (it
+        starts after each deploy that changes the project version) or ``on_demand`` (a start
+        through the API, the SDK or the CLI, which every job has). A newer server may add
+        kinds; the SDK leaves out one it does not know.
     cron
         For ``schedule``, the cron expression; `None` otherwise.
     timezone
@@ -2267,7 +2303,7 @@ class WaitingStart:
     waits_for_run_id
         The active run it waits for.
     trigger
-        ``schedule``, ``api`` or ``manual``.
+        ``schedule``, ``api``, ``manual`` or ``deploy``.
     requested_at
         When it was requested.
     requested_by

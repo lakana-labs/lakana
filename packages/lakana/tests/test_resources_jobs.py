@@ -242,6 +242,13 @@ def test_a_job_reads_its_triggers_and_ignores_a_kind_it_does_not_know() -> None:
     assert len(job.triggers) == 2
 
 
+def test_a_job_reads_the_deploy_trigger() -> None:
+    body = {**_JOB, "triggers": [_TRIGGERS[0], {"kind": "deploy"}, _TRIGGERS[1]]}
+    job = _jobs(200, [body]).list("dev")[0]
+    assert [trigger.kind for trigger in job.triggers] == ["schedule", "deploy", "on_demand"]
+    assert (job.triggers[1].cron, job.triggers[1].paused) == (None, None)
+
+
 def test_a_job_from_an_older_server_has_no_triggers() -> None:
     assert _jobs(200, [_JOB]).list("dev")[0].triggers == ()
 

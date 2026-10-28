@@ -178,6 +178,20 @@ def test_show_lists_each_trigger_with_its_next_run(tmp_path: Path) -> None:
     assert "on demand" in out and "lakana job run daily" in out
 
 
+def test_list_and_show_name_the_deploy_trigger(tmp_path: Path) -> None:
+    api = FakeApi()
+    triggers = [{"kind": "deploy"}, {"kind": "on_demand"}]
+    api.on("GET", _JOBS, json=[_job("refresh", triggers=triggers)])
+    api.on("GET", f"{_JOBS}/refresh", json=_job("refresh", triggers=triggers))
+    listed = invoke(
+        make_state(tmp_path, api), "job", "list", "--env", "dev", env={"COLUMNS": "200"}
+    )
+    assert "after each deploy" in _plain(listed.stdout)
+    shown = invoke(make_state(tmp_path, api), "job", "show", "refresh", "--env", "dev")
+    assert shown.exit_code == 0, shown.output
+    assert "after each deploy: starts as the deployer" in _plain(shown.stdout)
+
+
 def test_show_of_a_waiting_job_says_why_it_waits(tmp_path: Path) -> None:
     api = FakeApi()
     waiting = {"code": "job_waits", "message": "A start waits for run X."}

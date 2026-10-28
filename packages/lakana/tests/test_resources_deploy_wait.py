@@ -123,3 +123,69 @@ def test_an_exception_in_on_update_ends_the_wait() -> None:
 
     with pytest.raises(RuntimeError, match="display broke"):
         _deploys([_BODY]).wait("dev", _BODY["id"], on_update=on_update)
+
+
+_STARTS: list[dict[str, Any]] = [
+    {
+        "job": "refresh",
+        "outcome": "started",
+        "run_id": "00000000-0000-0000-0000-0000000000a1",
+        "waits_for_run_id": None,
+        "reason": None,
+        "message": None,
+    },
+    {
+        "job": "nightly",
+        "outcome": "not_started",
+        "run_id": None,
+        "waits_for_run_id": None,
+        "reason": "lacks_run",
+        "message": "job `nightly` was not started: ci may not RUN in `dev`.",
+    },
+]
+
+
+def test_a_deploy_reads_its_job_starts_and_an_older_server_has_none() -> None:
+    deploy = deploy_from_json({**_BODY, "status": "succeeded", "job_starts": _STARTS})
+    started, refused = deploy.job_starts
+    assert (started.job, started.outcome, started.run_id) == (
+        "refresh",
+        "started",
+        "00000000-0000-0000-0000-0000000000a1",
+    )
+    assert (refused.outcome, refused.reason, refused.message) == (
+        "not_started",
+        "lacks_run",
+        "job `nightly` was not started: ci may not RUN in `dev`.",
+    )
+    assert deploy_from_json(_BODY).job_starts == ()
+
+
+def test_wait_returns_once_the_job_starts_are_known(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A succeeded deploy whose starts are still pending is polled again, not returned."""
+    monkeypatch.setattr("lakana.resources.deploys.time.sleep", lambda seconds: None)
+    pending = [{"job": "refresh", "outcome": "pending"}]
+    deploys = _deploys(
+        [
+            {**_BODY, "status": "succeeded", "job_starts": pending},
+            {**_BODY, "status": "succeeded", "job_starts": _STARTS},
+        ]
+    )
+    seen: list[tuple[str, ...]] = []
+
+    result = deploys.wait(
+        "dev",
+        _BODY["id"],
+        on_update=lambda deploy: seen.append(tuple(s.outcome for s in deploy.job_starts)),
+    )
+
+    assert [s.outcome for s in result.job_starts] == ["started", "not_started"]
+    assert seen == [("pending",), ("started", "not_started")]
+
+
+def test_wait_gives_up_on_pending_starts_at_its_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("lakana.resources.deploys.time.sleep", lambda seconds: None)
+    pending = [{"job": "refresh", "outcome": "pending"}]
+    deploys = _deploys([{**_BODY, "status": "succeeded", "job_starts": pending}])
+    with pytest.raises(TimeoutError, match="its job starts are not recorded yet"):
+        deploys.wait("dev", _BODY["id"], timeout=0)
