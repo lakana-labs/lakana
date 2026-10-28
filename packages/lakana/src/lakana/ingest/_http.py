@@ -71,7 +71,12 @@ other, so no answer is ever decoded faster than the cap counts it."""
 DECODE_STEP = 64 * 1024
 """The most decoded bytes one step of `read_capped` produces."""
 _WBITS = {"gzip": 16 + zlib.MAX_WBITS, "x-gzip": 16 + zlib.MAX_WBITS, "deflate": zlib.MAX_WBITS}
-"""The zlib window of each encoding `read_capped` decodes (deflate is the zlib format)."""
+"""The zlib window of each encoding `read_capped` decodes (deflate: the zlib format first)."""
+
+
+class _CutShort(Exception):
+    """A gzip or deflate body that ends before its compressed stream does."""
+
 
 _HEADER_SAFE = re.compile(r"[\x20-\x7e]+")
 _PROXY_STATUS = re.compile(r"\A(\d{3})\b")
@@ -269,15 +274,48 @@ def transport_failure(name: str, host: str, error: httpx.HTTPError) -> IngestErr
     return SourceError(f"`{name}`: the request to `{shown}` failed ({type(error).__name__})")
 
 
-def _inflated(raw: Iterable[bytes], wbits: int) -> Generator[bytes]:
-    """Decode a gzip or deflate body in steps of at most `DECODE_STEP` bytes.
+def _counted(raw: Iterable[bytes], limit: int) -> Generator[bytes]:
+    """Pass a body's raw bytes on, refusing more than `limit` of them.
 
     Parameters
     ----------
     raw
         The body as it arrives.
-    wbits
-        The zlib window of its encoding.
+    limit
+        The most bytes.
+
+    Yields
+    ------
+    bytes
+        Each chunk.
+
+    Raises
+    ------
+    OverflowError
+        Past `limit` raw bytes (as ``Content-Length`` is checked, the encoded size).
+    """
+    total = 0
+    for chunk in raw:
+        total += len(chunk)
+        if total > limit:
+            raise OverflowError(limit)
+        yield chunk
+
+
+def _inflated(raw: Iterable[bytes], encoding: str) -> Generator[bytes]:
+    """Decode a gzip or deflate body in steps of at most `DECODE_STEP` bytes.
+
+    A gzip body may hold several members, each decoded by a fresh decoder; any other byte after
+    the end of the stream is refused, so nothing is kept beside the decoder uncounted. A
+    ``deflate`` body is the zlib format, or raw deflate when its first bytes are no zlib header
+    (as httpx read it).
+
+    Parameters
+    ----------
+    raw
+        The body as it arrives.
+    encoding
+        ``gzip``, ``x-gzip`` or ``deflate``.
 
     Yields
     ------
@@ -287,17 +325,33 @@ def _inflated(raw: Iterable[bytes], wbits: int) -> Generator[bytes]:
     Raises
     ------
     zlib.error
-        When the bytes are not of the encoding.
+        When the bytes are not of the encoding, or bytes follow a deflate stream.
+    _CutShort
+        When the body ends inside a stream.
     """
+    wbits = _WBITS[encoding]
     inflater = zlib.decompressobj(wbits)
+    first = True
     for data in raw:
-        while True:
-            decoded = inflater.decompress(data, DECODE_STEP)
+        decoded = b""
+        while data or (len(decoded) == DECODE_STEP and not inflater.eof):
+            if data and inflater.eof:
+                if encoding == "deflate":
+                    raise zlib.error("bytes after the end of the compressed stream")
+                inflater = zlib.decompressobj(wbits)  # the next gzip member
+            try:
+                decoded = inflater.decompress(data, DECODE_STEP)
+            except zlib.error:
+                if not (first and encoding == "deflate"):
+                    raise
+                wbits = -zlib.MAX_WBITS
+                inflater = zlib.decompressobj(wbits)
+                decoded = inflater.decompress(data, DECODE_STEP)
+            first = False
             yield decoded
-            data = inflater.unconsumed_tail
-            # A full step may leave decoded bytes inside zlib although no input is left.
-            if not data and len(decoded) < DECODE_STEP:
-                break
+            data = inflater.unconsumed_tail or inflater.unused_data
+    if not first and not inflater.eof:  # no byte at all is an empty body, not a cut one
+        raise _CutShort(encoding)
 
 
 def _within(body: bytes, limit: int) -> bytes:
@@ -328,11 +382,12 @@ def _within(body: bytes, limit: int) -> bytes:
 def read_capped(response: httpx.Response, limit: int, name: str) -> bytes:
     """Read a streamed answer's body, refusing one larger than `limit` before and while reading.
 
-    ``Content-Length`` is checked first (with a content encoding it is the encoded size, which
-    is never larger than the decoded one). Then the raw bytes are decoded here, not by httpx, in
-    steps of at most `DECODE_STEP` bytes, and counted as each step produces them: a small
-    compressed body that decodes to far more stops at the limit, holding at most one step more.
-    Only the encodings of `ACCEPT_ENCODING` are decoded; any other is refused.
+    ``Content-Length`` is checked first (with a content encoding it is the encoded size). Then
+    the raw bytes are counted against `limit` as they arrive, and decoded here, not by httpx, in
+    steps of at most `DECODE_STEP` bytes, each counted against `limit` as it is produced: a small
+    compressed body that decodes to far more stops at the limit holding at most one step more,
+    and bytes after the end of a compressed stream are never piled up uncounted. Only the
+    encodings of `ACCEPT_ENCODING` are decoded; any other is refused.
 
     Parameters
     ----------
@@ -354,9 +409,10 @@ def read_capped(response: httpx.Response, limit: int, name: str) -> bytes:
         When the body is larger than `limit`; the caller names its own cap.
     SourceRefused
         When the answer is in a ``Content-Encoding`` Lakana did not ask for (``zstd``, ``br``,
-        or more than one).
+        or more than one), or its body is not of its encoding (bytes after a deflate stream or
+        that start no gzip member included): every attempt would read the same.
     httpx.DecodingError
-        When the body is not of its ``Content-Encoding`` (retried, as httpx's own).
+        When the body ends inside its compressed stream (retried: a cut is usually transient).
     """
     length = response.headers.get("content-length", "")
     if length.isdigit() and int(length) > limit:
@@ -373,8 +429,8 @@ def read_capped(response: httpx.Response, limit: int, name: str) -> bytes:
         # An answer built in memory (httpx's MockTransport) was decoded whole when it was built;
         # an answer from the network is a stream, decoded only here.
         return _within(response.content, limit)
-    raw = response.iter_raw()
-    chunks = _inflated(raw, _WBITS[encoding]) if encoding in _WBITS else raw
+    raw = _counted(response.iter_raw(), limit)
+    chunks = _inflated(raw, encoding) if encoding in _WBITS else raw
     kept: list[bytes] = []
     total = 0
     try:
@@ -384,9 +440,15 @@ def read_capped(response: httpx.Response, limit: int, name: str) -> bytes:
                 raise OverflowError(limit)
             kept.append(chunk)
     except zlib.error as exc:
+        raise SourceRefused(
+            f"`{name}`: the answer's body is not valid {encoding} ({exc}); every attempt would "
+            "read the same bytes, so it is not retried: have the server send a well-formed body, "
+            "or none encoded"
+        ) from None
+    except _CutShort:
         raise httpx.DecodingError(
-            f"the body is not {encoding} ({exc})", request=response.request
-        ) from exc
+            f"the {encoding} body ends before its compressed stream does", request=response.request
+        ) from None
     return b"".join(kept)
 
 

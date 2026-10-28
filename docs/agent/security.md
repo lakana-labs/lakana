@@ -4080,9 +4080,15 @@ secret's values, and the only way a secret reaches a Python asset (#23). User re
   requested; a cursor, link or records hash an earlier page gave stops the read (`UsageError`),
   and `max_pages`, `max_bytes` (counted as bytes arrive, chunked bodies included) and `max_rows`
   bound it. Every `http` client asks for `Accept-Encoding: gzip, deflate`, and `_http.read_capped`
-  (the REST pages, `files.read` over `http`, the OAuth2 token answer) decodes the raw body itself
-  with `zlib.decompressobj().decompress(data, 64 KiB)`, counting each step against the cap; any
-  other `Content-Encoding` (zstd, br, a chain) is `SourceRefused` unread. httpx decoded a whole
+  (the REST pages, `files.read` over `http`, the OAuth2 token answer) counts the raw bytes against
+  the cap and decodes them itself with `zlib.decompressobj().decompress(data, 64 KiB)`, counting
+  each step against the cap too. After the end of a stream a gzip body starts a fresh decoder (a
+  further member), and anything else is `SourceRefused` (not retried, as a body not of its
+  encoding is): zlib would otherwise pile the bytes into `unused_data` uncounted and copy them
+  quadratically (Batch A review I-1: a 27-byte member and a 32 MiB trailer passed a 1 MiB cap). A
+  body that ends inside its stream is an `httpx.DecodingError` (retried), never a short body read
+  as whole; `deflate` falls back to raw deflate at its first bytes, as httpx did. Any other
+  `Content-Encoding` (zstd, br, a chain) is `SourceRefused` unread. httpx decoded a whole
   network chunk before the cap saw it: a 32 KiB zstd body became 1 GiB at a 1 MiB cap (M6 review
   M1, #356). Retries are classified by type and status only (408/429/500/502/503/504, httpx's
   timeout, network, remote-protocol and decoding errors, the egress proxy's 502/503/504; never a

@@ -393,9 +393,13 @@ Each page is turned into Arrow before the next is read, so the records of one pa
 memory as Python objects at a time. The caps count the bytes and the records as they arrive; an
 answer without `Content-Length` is read only up to `max_bytes`. A compressed answer counts what it
 decodes to: Lakana asks for gzip or deflate and decodes them itself, at most 64 KiB at a time,
-so the read stops within 64 KiB of the cap however small the compressed answer was. An answer in
-any other `Content-Encoding` (zstd, br, or two encodings at once) is refused (`SourceRefused`)
-before it is decoded.
+and counts the compressed bytes as they arrive as well, so the read stops within 64 KiB of the
+cap however small the compressed answer was. Every member of a gzip answer is read; bytes after
+the end of the compressed data that start no gzip member, or a body that is not of its encoding,
+are refused (`SourceRefused`, not retried); a body that ends inside its compressed data is a
+`SourceError` and retried. `deflate` is read in the zlib format or as raw deflate. An answer in any
+other `Content-Encoding` (zstd, br, or two encodings at once) is refused (`SourceRefused`) before
+it is decoded.
 
 ### Errors of rest.read
 
@@ -412,6 +416,7 @@ The classes are those of [files.read](#errors):
 | Message starts or contains | Cause | Next step |
 |---|---|---|
 | ``...: the server answered in Content-Encoding `zstd`, which Lakana does not ask for`` | The server, or a proxy before it, ignores `Accept-Encoding: gzip, deflate`. | Have the server send gzip, deflate or no encoding. |
+| `...: the answer's body is not valid gzip (...)` (or `deflate`) | The body is not what its `Content-Encoding` says, or bytes follow the compressed data. | Have the server send a well-formed body, or none encoded. |
 | `rest.read reads http connections; ... is s3: use files.read` | The connection is of another kind. | Use the helper the message names. |
 | `path= is relative to the connection's base URL` | `path` is an absolute URL or `//host`. | Pass the part below the base URL. |
 | `params= since is None, which would send an empty value` | A `None` value, usually the first run's watermark. | Pass `ctx.watermark(default=...)`. |
