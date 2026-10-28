@@ -2434,6 +2434,36 @@ class DeployAccepted(BaseModel):
     status: str
 
 
+class DeployJobStartOut(BaseModel):
+    """What a deploy did with one job that starts after each deploy (`on_deploy: true`).
+
+    Parameters
+    ----------
+    job
+        The job's name.
+    outcome
+        ``pending`` (the worker has not started it yet), ``started``, ``waiting`` (the project
+        was busy; the start waits) or ``not_started``.
+    run_id
+        For ``started``, the queued run.
+    waits_for_run_id
+        For ``waiting``, the active run the start waits for.
+    reason
+        For ``not_started``: ``lacks_run`` (the deployer may not `RUN` in the environment),
+        ``refused`` (refused as a start by hand would be), ``error`` or ``lost`` (the worker
+        stopped before it started the job).
+    message
+        For ``not_started``, one sentence that names the cause and the next step.
+    """
+
+    job: str
+    outcome: Literal["pending", "started", "waiting", "not_started"]
+    run_id: uuid.UUID | None = None
+    waits_for_run_id: uuid.UUID | None = None
+    reason: str | None = None
+    message: str | None = None
+
+
 class DeployOut(BaseModel):
     """Response body for a deploy run.
 
@@ -2481,6 +2511,10 @@ class DeployOut(BaseModel):
         Why a queued deploy has not started: a stable `code`, one sentence in `message` that
         names the next step, and the numbers it uses; null when it is not waiting. Set on the
         single read (`GET .../deploys/{id}`) only, null in the history.
+    job_starts
+        The jobs with `on_deploy: true` that a successful deploy started, by name, each with
+        what came of its start; empty for a run that starts no job (a dry run, a rollback, a
+        failed deploy, a deploy of the commit already current).
     """
 
     id: uuid.UUID
@@ -2508,6 +2542,7 @@ class DeployOut(BaseModel):
             "`message`, and the numbers the sentence uses."
         ),
     )
+    job_starts: list[DeployJobStartOut] = Field(default_factory=list)
 
 
 class DeploymentOut(BaseModel):
@@ -2922,8 +2957,8 @@ class RunOut(BaseModel):
     job
         The job the run belongs to; null for an ad-hoc run.
     trigger
-        ``schedule``, ``api`` (a service account called the API) or ``manual``; null for an
-        ad-hoc run.
+        ``schedule``, ``api`` (a service account called the API), ``manual`` or ``deploy`` (a
+        deploy started the job as its deployer); null for an ad-hoc run.
     scheduled_for
         For a scheduled run, the time the schedule named.
     missed
@@ -2984,7 +3019,7 @@ class WaitingStartOut(BaseModel):
     waits_for_run_id
         The active run it waits for.
     trigger
-        ``schedule``, ``api`` or ``manual``.
+        ``schedule``, ``api``, ``manual`` or ``deploy``.
     requested_at
         When it was requested.
     requested_by
@@ -3049,6 +3084,18 @@ class ScheduleTriggerOut(BaseModel):
     next_run_at: datetime | None
 
 
+class DeployTriggerOut(BaseModel):
+    """A trigger that starts the job after each deploy that changes the project version.
+
+    Parameters
+    ----------
+    kind
+        Always ``deploy``.
+    """
+
+    kind: Literal["deploy"] = "deploy"
+
+
 class OnDemandTriggerOut(BaseModel):
     """The trigger every job has: a start through the API, the SDK or the CLI.
 
@@ -3061,7 +3108,9 @@ class OnDemandTriggerOut(BaseModel):
     kind: Literal["on_demand"] = "on_demand"
 
 
-TriggerOut = Annotated[ScheduleTriggerOut | OnDemandTriggerOut, Field(discriminator="kind")]
+TriggerOut = Annotated[
+    ScheduleTriggerOut | DeployTriggerOut | OnDemandTriggerOut, Field(discriminator="kind")
+]
 """One way a job starts. A client must ignore a ``kind`` it does not know: kinds may be added."""
 
 
@@ -3112,7 +3161,8 @@ class JobOut(BaseModel):
         When it was created.
     triggers
         How the job starts, schedule first: a ``schedule`` trigger when the job has a schedule
-        in this environment, and the ``on_demand`` trigger every job has. Kinds may be added.
+        in this environment, a ``deploy`` trigger when it starts after each deploy here, and the
+        ``on_demand`` trigger every job has, last. Kinds may be added.
     """
 
     name: str

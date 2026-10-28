@@ -19,6 +19,7 @@ from lakana_core.notifications.views import DeliveryView
 from lakana_server.api.platform.runs import run_out
 from lakana_server.api.platform.schemas import (
     DeliveryOut,
+    DeployTriggerOut,
     JobOut,
     JobRunRequest,
     JobStartOut,
@@ -55,9 +56,10 @@ def _job_out(view: JobView) -> JobOut:
         The body.
     """
     fields = dataclasses.asdict(view)
+    del fields["on_deploy"]
     fields["select"] = list(view.select)
     fields["waiting_for"] = None if view.waiting_for is None else view.waiting_for.to_json()
-    triggers: list[ScheduleTriggerOut | OnDemandTriggerOut] = []
+    triggers: list[ScheduleTriggerOut | DeployTriggerOut | OnDemandTriggerOut] = []
     if view.cron is not None and view.timezone is not None:
         triggers.append(
             ScheduleTriggerOut(
@@ -67,6 +69,8 @@ def _job_out(view: JobView) -> JobOut:
                 next_run_at=None if view.paused else view.next_run_at,
             )
         )
+    if view.on_deploy:
+        triggers.append(DeployTriggerOut())
     triggers.append(OnDemandTriggerOut())
     return JobOut(**fields, triggers=triggers)
 

@@ -103,6 +103,20 @@ def test_runs_filter_by_status_trigger_job_and_since(client: TestClient) -> None
     assert ids(status="failed", job="nightly") == []
 
 
+def test_runs_filter_by_the_trigger_deploy(client: TestClient) -> None:
+    _deploy(client)
+    by_deploy, _ = _make_runs(
+        client,
+        [
+            _Spec(minutes=1, trigger=RunTrigger.DEPLOY, job="refresh"),
+            _Spec(minutes=2, trigger=RunTrigger.MANUAL, job="refresh"),
+        ],
+    )
+    response = client.get(_RUNS, headers=AUTH_HEADER, params={"trigger": "deploy"})
+    assert response.status_code == 200, response.text
+    assert [(r["id"], r["trigger"]) for r in response.json()] == [(by_deploy, "deploy")]
+
+
 def test_runs_page_with_a_header_cursor(client: TestClient) -> None:
     _deploy(client)
     made = _make_runs(client, [_Spec(minutes=5)] * 3 + [_Spec(minutes=1), _Spec(minutes=9)])
