@@ -26,6 +26,7 @@ from lakana.ingest import (
     UsageError,
     _check,
     _connections,
+    _directory,
     _types,
     sql,
 )
@@ -912,6 +913,118 @@ def test_sqlite_refuses_a_link_at_the_file_path(lite: Path, tmp_path: Path) -> N
 
     with pytest.raises(DirectoryError, match="symbolic link"):
         sql.read("local-db", "SELECT * FROM t")
+
+
+def test_sqlite_refuses_a_link_swapped_in_between_the_check_and_the_open(
+    lite: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The file SQLite opened is compared with the one the walker found; a swap is refused."""
+    _sqlite(lite, ["CREATE TABLE t(v TEXT)", "INSERT INTO t VALUES ('inside')"])
+    elsewhere = tmp_path / "elsewhere.db"
+    _sqlite(elsewhere, ["CREATE TABLE t(v TEXT)", "INSERT INTO t VALUES ('outside')"])
+    moved = lite.with_name("moved.db")
+    checked = _directory.regular_file
+    checks: list[str] = []
+
+    def check_then_swap(root_dir: str, path: str) -> int:
+        if lite.is_symlink():  # the attacker puts the file back for each check
+            lite.unlink()
+            moved.rename(lite)
+        found = checked(root_dir, path)
+        checks.append(path)
+        lite.rename(moved)
+        lite.symlink_to(elsewhere)
+        return found
+
+    monkeypatch.setattr(_directory, "regular_file", check_then_swap)
+
+    with pytest.raises(SourceError, match=r"`local-db`: 'data/app.db' changed while") as caught:
+        sql.read("local-db", "SELECT v FROM t")
+
+    assert type(caught.value) is SourceError
+    assert len(checks) == 3
+
+
+def test_sqlite_reads_a_file_replaced_in_place_on_the_next_attempt(
+    lite: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An export that renames a new file over the old one while it is opened is read anew."""
+    _sqlite(lite, ["CREATE TABLE t(v TEXT)", "INSERT INTO t VALUES ('old')"])
+    fresh = lite.with_name("fresh.db")
+    _sqlite(fresh, ["CREATE TABLE t(v TEXT)", "INSERT INTO t VALUES ('new')"])
+    checked = _directory.regular_file
+
+    def check_then_replace(root_dir: str, path: str) -> int:
+        found = checked(root_dir, path)
+        if fresh.exists():
+            fresh.replace(lite)
+        return found
+
+    monkeypatch.setattr(_directory, "regular_file", check_then_replace)
+
+    assert sql.read("local-db", "SELECT v FROM t").column("v").to_pylist() == ["new"]
+
+
+def test_sqlite_reads_with_no_descriptor_of_the_file_left_open(lite: Path) -> None:
+    _sqlite(lite, ["CREATE TABLE t(a)"])
+    seen = os.stat(lite)
+
+    sql.read("local-db", "SELECT a FROM t")
+
+    assert (seen.st_dev, seen.st_ino) not in sql._open_files().values()
+
+
+def test_sqlite_refuses_when_this_process_cannot_list_its_open_files(
+    lite: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Without ``/dev/fd`` the file SQLite opened cannot be compared: strict, not a silent pass."""
+    _sqlite(lite, ["CREATE TABLE t(a)"])
+
+    def missing(path: str) -> list[str]:
+        raise FileNotFoundError(2, "No such file or directory", path)
+
+    monkeypatch.setattr(sql.os, "listdir", missing)
+
+    with pytest.raises(UsageError, match=r"/dev/fd"):
+        sql.read("local-db", "SELECT a FROM t")
+
+
+def test_only_the_checked_file_counts_as_the_one_sqlite_opened(tmp_path: Path) -> None:
+    """Another file still open is a mismatch; one closed again (another thread's) is not."""
+    checked, earlier = (1, 10), (1, 12)
+    walker = {4: checked}
+    other = tmp_path / "other.db"
+    other.write_bytes(b"")
+    with contextlib.ExitStack() as stack:
+        held = os.open(other, os.O_RDONLY)
+        stack.callback(os.close, held)
+        foreign = sql._identity(held)
+        assert foreign is not None
+        closed = held + 1000  # no descriptor this high is open
+
+        assert sql._opened_only(checked, 4, walker, {**walker, 5: checked})
+        assert sql._opened_only(checked, 4, {**walker, 5: earlier}, {**walker, 5: checked})
+        assert sql._opened_only(checked, 4, {**walker, 5: checked}, {**walker, 5: checked})
+        assert sql._opened_only(checked, 4, walker, {**walker, 5: checked, closed: foreign})
+        assert not sql._opened_only(checked, 4, walker, {**walker, 5: checked, held: foreign})
+        assert not sql._opened_only(checked, 4, walker, {**walker, held: foreign})
+        assert not sql._opened_only(checked, 4, walker, walker)
+
+
+def test_open_files_name_regular_files_only(tmp_path: Path) -> None:
+    regular = tmp_path / "a.db"
+    regular.write_bytes(b"")
+    with contextlib.ExitStack() as stack:
+        file_fd = os.open(regular, os.O_RDONLY)
+        stack.callback(os.close, file_fd)
+        directory_fd = os.open(tmp_path, os.O_RDONLY)
+        stack.callback(os.close, directory_fd)
+
+        found = sql._open_files()
+
+    seen = os.stat(regular)
+    assert found[file_fd] == (seen.st_dev, seen.st_ino)
+    assert directory_fd not in found
 
 
 def test_sqlite_names_a_column_that_changes_type_within_the_result(lite: Path) -> None:

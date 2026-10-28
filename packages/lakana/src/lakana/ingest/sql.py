@@ -35,6 +35,8 @@ import os
 import re
 import socket
 import ssl
+import stat
+import types
 from collections.abc import Generator, Iterable, Mapping
 from typing import TYPE_CHECKING
 from urllib.parse import quote
@@ -56,6 +58,7 @@ from lakana.ingest.files import DEFAULT_MAX_BYTES, DEFAULT_MAX_ROWS, _positive
 
 if TYPE_CHECKING:
     import pyarrow as pa
+    from adbc_driver_manager.dbapi import Connection as AdbcConnection
 
 KINDS = ("postgresql", "mariadb", "sqlite-file")
 """The connection kinds `read` reads."""
@@ -65,6 +68,8 @@ BATCH_ROWS = 10_000
 """Rows fetched at a time from MariaDB."""
 BATCH_BYTES = 16 * 1024 * 1024
 """The size ADBC aims at for one batch of a PostgreSQL result read without parameters."""
+_OPEN_ATTEMPTS = 3
+"""How often a SQLite file is opened before a mismatch with the checked file is refused."""
 _MESSAGE = 1000
 """The most characters of a database's own message kept in an error."""
 _OTHER_HELPER = {
@@ -454,7 +459,8 @@ def _read_sqlite(
     UsageError
         When the task description has no root for the connection, or the query fails.
     SourceError
-        When the driver cannot open the file.
+        When the driver cannot open the file, or it opened another file than the one checked
+        (retried: a file replaced in place passes next time).
     """
     _plain_values(params, conn.kind)
     sql, values = translate(query, params, style="qmark")
@@ -473,24 +479,7 @@ def _read_sqlite(
         import adbc_driver_sqlite.dbapi as lite
     except ImportError:
         raise UsageError(_NEEDS_ASSETS) from None
-    try:
-        _directory.regular_file(root_dir, path)
-    except _directory.RootUnavailable:
-        root = str(conn.routing.get("root", conn.address.get("root", "")))
-        missing = _directory.RootUnavailable(
-            _check.MISSING_ROOT.format(connection=conn.name, root=root)
-        )
-        raise missing from None
-    except _directory.DirectoryError as exc:
-        # The same class, so its `retryable` survives (an I/O error may pass).
-        named = type(exc)(f"`{conn.name}`: {exc}")
-        raise named from None
-    # Always a file: URI, so mode=ro applies (a plain path would be created read-write).
-    uri = "file:" + quote(f"{root_dir.rstrip('/')}/{path.strip('/')}") + "?mode=ro"
-    try:
-        database = lite.connect(uri)
-    except lite.Error as exc:
-        raise SourceError(f"`{conn.name}`: {_said(str(exc), None)}") from None
+    database = _open_sqlite(conn, lite, root_dir, path)
     try:
         cursor = database.cursor()
         try:
@@ -503,6 +492,179 @@ def _read_sqlite(
             raise failure from None
     finally:
         database.close()
+
+
+def _walked(conn: FetchedConnection, root_dir: str, path: str) -> int:
+    """Open a ``sqlite-file`` connection's file through the walker.
+
+    Parameters
+    ----------
+    conn
+        The connection.
+    root_dir
+        The ingestion root.
+    path
+        The file's path below it.
+
+    Returns
+    -------
+    int
+        The walker's descriptor of the regular file; the caller closes it.
+
+    Raises
+    ------
+    RootUnavailable
+        When this worker does not have the root.
+    DirectoryError
+        When the path holds a link, is missing, or is not a regular file.
+    """
+    try:
+        return _directory.regular_file(root_dir, path)
+    except _directory.RootUnavailable:
+        root = str(conn.routing.get("root", conn.address.get("root", "")))
+        missing = _directory.RootUnavailable(
+            _check.MISSING_ROOT.format(connection=conn.name, root=root)
+        )
+        raise missing from None
+    except _directory.DirectoryError as exc:
+        # The same class, so its `retryable` survives (an I/O error may pass).
+        named = type(exc)(f"`{conn.name}`: {exc}")
+        raise named from None
+
+
+def _identity(fd: int) -> tuple[int, int] | None:
+    """Name the regular file a descriptor has open.
+
+    Parameters
+    ----------
+    fd
+        The descriptor.
+
+    Returns
+    -------
+    tuple or None
+        Its device and inode; `None` for a number not open, or not a regular file.
+    """
+    try:
+        seen = os.fstat(fd)
+    except OSError:
+        return None
+    return (seen.st_dev, seen.st_ino) if stat.S_ISREG(seen.st_mode) else None
+
+
+def _open_files() -> dict[int, tuple[int, int]]:
+    """Identify the regular files this process has open.
+
+    Returns
+    -------
+    dict
+        Descriptor to the file's device and inode (`_identity`).
+
+    Raises
+    ------
+    UsageError
+        When ``/dev/fd`` cannot be listed.
+    """
+    try:
+        names = os.listdir("/dev/fd")
+    except OSError:
+        raise UsageError(
+            "sql.read cannot list this process's open files (/dev/fd), so it cannot check which "
+            "file SQLite opened; run the worker on Linux or macOS with /dev/fd"
+        ) from None
+    found = {int(name): _identity(int(name)) for name in names}
+    return {fd: ident for fd, ident in found.items() if ident is not None}
+
+
+def _opened_only(
+    expected: tuple[int, int],
+    handle: int,
+    before: dict[int, tuple[int, int]],
+    after: dict[int, tuple[int, int]],
+) -> bool:
+    """Say whether SQLite opened the checked file and nothing else.
+
+    Parameters
+    ----------
+    expected
+        The device and inode of the walker's descriptor.
+    handle
+        The walker's descriptor.
+    before
+        `_open_files` before SQLite opened the database.
+    after
+        `_open_files` after.
+
+    Returns
+    -------
+    bool
+        True when a descriptor besides the walker's names the checked file, and every other
+        descriptor that is new, or now names another file (a number closed meanwhile and
+        reused), was closed again by now: another thread's passing read (SQLite keeps its file
+        open). A descriptor of the same file left by an earlier read and closed by the garbage
+        collector meanwhile can hand SQLite its number unchanged, so that counts too.
+    """
+    if expected not in {ident for fd, ident in after.items() if fd != handle}:
+        return False
+    changed = (fd for fd, ident in after.items() if before.get(fd) != ident != expected)
+    return all(_identity(fd) != after[fd] for fd in changed)
+
+
+def _open_sqlite(
+    conn: FetchedConnection, lite: types.ModuleType, root_dir: str, path: str
+) -> AdbcConnection:
+    """Open the file the walker finds, and refuse another file SQLite opened instead.
+
+    SQLite opens by path and resolves links itself (given ``file:/proc/self/fd/N`` it opens the
+    name the link holds), so the walker's descriptor cannot be handed over. The regular files
+    this process opened while SQLite opened the database are compared with it instead, and it
+    stays open until then, so its inode is not reused. A mismatch is tried again, up to
+    `_OPEN_ATTEMPTS` times: a file replaced in place, or another thread's file, passes then.
+
+    Parameters
+    ----------
+    conn
+        The connection.
+    lite
+        ``adbc_driver_sqlite.dbapi``.
+    root_dir
+        The ingestion root.
+    path
+        The file's path below it.
+
+    Returns
+    -------
+    adbc_driver_manager.dbapi.Connection
+        The database, read-only.
+
+    Raises
+    ------
+    SourceError
+        When the driver cannot open the file, or SQLite opened another file each time.
+    UsageError
+        When this process cannot list its open files.
+    """
+    # Always a file: URI, so mode=ro applies (a plain path would be created read-write).
+    uri = "file:" + quote(f"{root_dir.rstrip('/')}/{path.strip('/')}") + "?mode=ro"
+    for _ in range(_OPEN_ATTEMPTS):
+        handle = _walked(conn, root_dir, path)
+        try:
+            seen = os.fstat(handle)
+            before = _open_files()
+            try:
+                database = lite.connect(uri)
+            except lite.Error as exc:
+                raise SourceError(f"`{conn.name}`: {_said(str(exc), None)}") from None
+            after = _open_files()
+        finally:
+            os.close(handle)
+        if _opened_only((seen.st_dev, seen.st_ino), handle, before, after):
+            return database
+        database.close()
+    raise SourceError(
+        f"`{conn.name}`: {safe_name(repr(path.strip('/')))} changed while SQLite opened it "
+        "(replaced, or swapped for a link); sql.read reads only the file it checked"
+    )
 
 
 def _sqlite_error(conn: FetchedConnection, exc: Exception, schema: pa.Schema | None) -> Exception:

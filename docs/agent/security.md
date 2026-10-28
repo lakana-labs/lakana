@@ -4096,7 +4096,16 @@ secret's values, and the only way a secret reaches a Python asset (#23). User re
   parameters of `:name` placeholders (`_params.translate`, a tokenizer that skips literals,
   comments and `::`), never formatted into the asset's SQL. Every read is read-only at the
   source: PostgreSQL with `default_transaction_read_only=on`, SQLite on a `file:` URI with
-  `mode=ro` (`ATTACH` and `DETACH` refused: SQLite would create the named file), MariaDB and MySQL
+  `mode=ro` (`ATTACH` and `DETACH` refused: SQLite would create the named file; the file is
+  opened by the walker with `O_NOFOLLOW` per component and held open while SQLite opens it by
+  path; the regular files the process opened meanwhile, read from `/dev/fd` and compared by
+  device and inode, must include that file and nothing else that is still open (another
+  thread's passing read is closed again by then, SQLite's file is not). A mismatch is walked and
+  opened again, three times at most, then `SourceError`: a swap for a link between the check and
+  SQLite's open is refused (M6 review M8, #359). SQLite cannot be handed the walker's descriptor: given
+  `file:/proc/self/fd/N` it reads the link and opens the name it holds, and a file unlinked and
+  replaced by a link named `<name> (deleted)` was read, measured with SQLite through
+  adbc-driver-sqlite 1.13), MariaDB and MySQL
   with `SET SESSION TRANSACTION READ ONLY` and `START TRANSACTION READ ONLY`. MariaDB commits
   before DDL, outside that transaction, so it gets only a statement whose first keyword is
   `SELECT`, `WITH`, `VALUES` or `TABLE`, never `INTO OUTFILE`/`DUMPFILE`; its tokenizer follows the
