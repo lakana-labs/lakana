@@ -453,7 +453,7 @@ read-only, and sends MariaDB only a statement that starts with `SELECT`, `WITH`,
 read with [`rest.read`](ingest.md#restread), from `http` connections, page by page, never
 sending the credential to another host than the base URL's. A `tcp` connection has no helper; use `connections.get` with your own client, as the recipe
 [Anything else: your own client](../how-to/load-data-from-a-source.md#anything-else-your-own-client)
-does.
+does, and for SQL Server the recipe [Read from a SQL Server database](../how-to/read-from-a-sql-server-database.md).
 
 ### What a task reaches, and how
 
@@ -466,7 +466,7 @@ local runner connects directly.
 | Kind | Docker runner | Local runner |
 |---|---|---|
 | `http`, `s3`, `gcs`, `azure` | `proxy_url` is the egress proxy; give it to your HTTPS client (`files.read` does). It holds the task's proxy token, so it is left out of the connection's `repr` and shown as `***` in the task's log. `relay_address` and `root_path` are `None`. | Every field is `None`: connect to `address` directly. |
-| `postgresql`, `mariadb`, `tcp` | `relay_address` is `lakana-relay:<port>` (ports from 15001, in the order the asset declares its connections); connect there instead of `address["host"]`. TLS still checks the real host name. | `relay_address` is `None`: connect to `address` directly. |
+| `postgresql`, `mariadb`, `tcp` | `relay_address` is `lakana-relay:<port>` (ports from 15001, in the order the asset declares its connections); connect there instead of `address["host"]`. The helpers' TLS still checks the real host name; your own client of a `tcp` connection checks it only if it takes the host name apart from the address it dials ([the SQL Server recipe](../how-to/read-from-a-sql-server-database.md#tls) shows one). | `relay_address` is `None`: connect to `address` directly. |
 | `directory`, `sqlite-file` | `root_path` is `/ingest/<root>/<path>`, read-only. | `root_path` is `<directory>/<path>`, where `<directory>` is the root's entry in `LAKANA_RUN__INGESTION_ROOTS`. |
 
 An asset declares at most 16 connections (the deploy refuses more), and a connection has at most

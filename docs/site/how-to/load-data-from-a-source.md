@@ -446,6 +446,8 @@ def items():
     return pa.Table.from_pylist(rows)
 ```
 
+- For SQL Server, [Read from a SQL Server database](read-from-a-sql-server-database.md) is a tested
+  recipe of this kind, with its driver, TLS and types.
 - Pass `proxy_url` to your client: under the Docker runner it is the only way out of the task,
   and `trust_env=False` keeps a proxy or certificate from the environment out of it. A database
   client connects to `relay_address` instead of the host (see

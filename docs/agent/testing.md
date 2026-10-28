@@ -1315,6 +1315,41 @@ The Docker E2E case `test_sql_read_reaches_postgresql_through_the_relay_with_ver
 `test_docker_task_egress_integration.py` runs the same image on the sources' network (alias
 `db.lakana.test`) and adds its address to `relay_reachable` for that case only.
 
+**SQL Server (the recipe of #56).** `test_docker_proprietary_db_integration.py` (`docker`,
+`integration`, `slow`) runs the two assets of `docs/examples/proprietary-db/project/` under the
+worker's `DockerRunner`, through the relay of a `tcp` connection, against
+`mcr.microsoft.com/mssql/server:2022-latest@sha256:cf8f0ab2ebe61feec2eed2629061a07d247f791c2a8ddda74a4ac9f06a291718`
+(SQL Server 2022 Developer edition, build 16.0.4305.5, Ubuntu 22.04, linux/amd64 only, about
+1.7 GB; the module skips on another architecture). Its terms are *Microsoft Software License
+Terms, Microsoft SQL Server 2022 Developer, Express, Evaluation* (October 21, 2022), section 1.a.i:
+"You may install and use copies of the software on any device, including third party shared
+devices, to design, develop, test and demonstrate your programs. You may not use the software in
+a production environment." Testing our recipe on CI runners is that use, so the module sets
+`ACCEPT_EULA=Y` (maintainer decision of 2026-10-27; the check is on #56). Section 5 forbids
+publishing benchmark results without Microsoft's approval: no timings of it anywhere. Like the
+other images it is a test container only, never part of a Lakana artifact.
+
+- It reuses the egress module's stack (`sources = egress_cases.sources`, `worker_side` likewise:
+  pytest finds a fixture by the name it is bound to in the module) and adds the server's /32 to
+  `relay_reachable` per case. It pulls the image by digest before `create`.
+- `mssql.conf` (put in as uid 10001 with the module authority's leaf for `erp-db.lakana.test`)
+  sets `forceencryption = 1` and TLS 1.2. The second alias `erp-db-2.lakana.test` is a name the
+  certificate does not hold. Passwords are generated per run; `reader.sql` of the example makes
+  the read-only login, run by `sqlcmd` with the password from the environment.
+- The task's environment is the wheelhouse's `lakana[assets]` plus the example's driver pins from
+  the public index (`--no-deps --only-binary=:all:`, exact versions), so the case needs the
+  network and `LAKANA_TEST_WHEELHOUSE`. `test_the_driver_pins_are_the_examples` keeps the pins
+  equal to the example's `pyproject.toml`.
+- Each case runs a probe asset that loads the example's file next to it and calls its function:
+  the full read, the incremental read and its second run with a watermark, a refused login, a
+  closed port (the relay's line), no trust bundle, a bundle of another authority, and the other
+  name. `python-tds` 1.17.1 with pyOpenSSL 26.2 or newer refuses a name that is not the
+  certificate's CN with an `AttributeError` (the fix is merged upstream, not released); the case
+  asserts that text, so a driver release changes it.
+- `docs/examples/proprietary-db/run.sh` (the docs-examples job, no Docker) creates and tests the
+  connection, locks the project with the driver, deploys it, and checks that the asset refuses to
+  connect without a trust bundle.
+
 ## Python assets in the two tiers (M5c2a)
 
 **Unit tier.** `uv` is a scripted stand-in (`packages/lakana-worker/tests/test_venvs.py`), the
