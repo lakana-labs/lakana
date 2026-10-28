@@ -54,6 +54,7 @@ http.server.ThreadingHTTPServer.__init__(server, ("0.0.0.0", {_PORT}), _Handler)
 server.credentials, server.refusal, server.challenge_everything = {{}}, 401, False
 server.redirect_files_to, server.seen = None, []
 context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+context.minimum_version = ssl.TLSVersion.TLSv1_2
 context.load_cert_chain({APP!r} + "/leaf.pem", {APP!r} + "/leaf.key")
 server.socket = context.wrap_socket(server.socket, server_side=True)
 server.serve_forever()
@@ -63,6 +64,7 @@ server.serve_forever()
 _PROBE = r"""
 import errno, json, os, socket, ssl, threading
 server_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+server_context.minimum_version = ssl.TLSVersion.TLSv1_2
 server_context.load_cert_chain("/code/leaf.pem", "/code/leaf.key")
 listener = socket.create_server(("127.0.0.1", 0))
 port = listener.getsockname()[1]
