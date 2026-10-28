@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import io
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
 import httpx
 import pytest
 from conftest import FakeApi, invoke, make_state
+
+from lakana.cli.connections import _secret_values
 
 _BASE = "/api/v1/environments/prod/connections"
 _VALUE = "s3cr3t-value"
@@ -116,6 +120,46 @@ def test_password_stdin_strips_one_newline_and_keeps_the_rest(tmp_path: Path) ->
     (body,) = _sent(api, "POST")
     assert body["address"] == {"host": "db.example.com", "port": 1521}
     assert body["secret_values"] == {"password": "pw \n"}
+
+
+@pytest.mark.parametrize(
+    ("given", "stored"),
+    [
+        (f"\ufeff{_VALUE}\r\n", _VALUE),
+        (f"{_VALUE}\r", _VALUE),
+        (f"{_VALUE}\r\n", _VALUE),
+        (f"\ufeff{_VALUE}", _VALUE),
+        (f"{_VALUE}\r\n\r\n", f"{_VALUE}\r\n"),
+        (f"\ufeff\ufeff{_VALUE}\n", f"\ufeff{_VALUE}"),
+        (f"{_VALUE}\n\r", f"{_VALUE}\n"),
+        (_VALUE, _VALUE),
+    ],
+    ids=["bom-crlf", "cr", "crlf", "bom", "two-crlf", "two-boms", "lf-cr", "none"],
+)
+def test_password_stdin_strips_one_bom_and_one_line_ending(
+    monkeypatch: pytest.MonkeyPatch, given: str, stored: str
+) -> None:
+    """#358: a Windows editor's byte order mark and CR LF are not part of the secret."""
+    monkeypatch.setattr(sys, "stdin", io.StringIO(given, newline=""))
+
+    assert _secret_values("postgresql", "none", True, False) == {"password": stored}
+
+
+def test_values_stdin_reads_json_after_a_byte_order_mark(monkeypatch: pytest.MonkeyPatch) -> None:
+    """#358: JSON saved by a Windows editor starts with a byte order mark; it is dropped."""
+    text = json.dumps({"secret_access_key": _VALUE})
+    monkeypatch.setattr(sys, "stdin", io.StringIO(f"\ufeff{text}\r\n", newline=""))
+
+    assert _secret_values("s3", "none", False, True) == {"secret_access_key": _VALUE}
+
+
+def test_stdin_help_says_what_is_stripped(tmp_path: Path) -> None:
+    """The help names what is dropped from standard input, for create and update alike."""
+    for command in ("create", "update"):
+        result = invoke(make_state(tmp_path, FakeApi()), "connection", command, "--help")
+        text = " ".join(result.stdout.replace("│", " ").split())
+        assert "less one leading byte order mark and one trailing line ending" in text
+        assert "(a leading byte order mark is dropped)" in text
 
 
 def test_password_stdin_uses_the_key_of_the_http_auth(tmp_path: Path) -> None:

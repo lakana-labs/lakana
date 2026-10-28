@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import codecs
 import csv
 import re
 import uuid
@@ -16,10 +17,14 @@ import pyarrow.parquet as pq
 
 from lakana._arrow import json_to_arrow_type
 from lakana._models import Column
+from lakana.cli._output import inline
 from lakana.cli._state import CliError
 from lakana.errors import ValidationError
 
 FORMATS = ("parquet", "csv", "arrow")
+_BOM = b"\xef\xbb\xbf"
+_PIECE = 1024 * 1024
+"""Bytes checked at a time for UTF-8."""
 _EXTENSIONS = {
     ".parquet": "parquet",
     ".pq": "parquet",
@@ -172,6 +177,43 @@ def _csv_error(path: Path, exc: pa.ArrowInvalid, columns: Sequence[Column]) -> C
     return CliError(f"Could not read {path} as csv: {exc}", 8, kind="FileError")
 
 
+def strict_utf8(path: Path, data: bytes) -> None:
+    """Hold text to the helpers' strict UTF-8 rule; a byte order mark is allowed.
+
+    The bytes are checked a piece at a time and nothing decoded is kept, so a large file is
+    not held twice. pyarrow's CSV and JSON readers skip a byte order mark themselves.
+
+    Parameters
+    ----------
+    path
+        The file, for messages.
+    data
+        Its bytes.
+
+    Raises
+    ------
+    CliError
+        For bytes that are not UTF-8 (exit 8), naming the first bad byte and its position after
+        any byte order mark.
+    """
+    text = memoryview(data)
+    if text[:3] == _BOM:
+        text = text[3:]
+    decoder = codecs.getincrementaldecoder("utf-8")()
+    for start in range(0, len(text), _PIECE):
+        held = len(decoder.getstate()[0])
+        try:
+            decoder.decode(text[start : start + _PIECE], final=start + _PIECE >= len(text))
+        except UnicodeDecodeError as exc:
+            position = start - held + exc.start
+            raise CliError(
+                f"{inline(path.name)} is not UTF-8 (byte {text[position]:#04x} at position "
+                f"{position}); convert it to UTF-8 and run the command again",
+                8,
+                kind="FileError",
+            ) from None
+
+
 def read_table(path: Path, fmt: str, csv_columns: Sequence[Column] | None = None) -> pa.Table:
     """Read a Parquet, CSV or Arrow IPC file.
 
@@ -208,8 +250,10 @@ def read_table(path: Path, fmt: str, csv_columns: Sequence[Column] | None = None
                 strings_can_be_null=True,
                 null_values=[""],
             )
+            data = path.read_bytes()
+            strict_utf8(path, data)
             try:
-                return pacsv.read_csv(path, convert_options=convert_options)
+                return pacsv.read_csv(pa.BufferReader(data), convert_options=convert_options)
             except pa.ArrowInvalid as exc:
                 error = _csv_error(path, exc, csv_columns or [])
                 raise error from exc

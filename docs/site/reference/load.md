@@ -30,9 +30,23 @@ What the command does, in order:
 2. It asks the server how large one upload may be (`LAKANA_APPEND__MAX_BYTES`, 256 MiB by
    default) and refuses a larger file before it reads it. A small Parquet or Arrow file can
    hold far more rows than its size suggests, so the command reads it a piece at a time and stops,
-   refused, as soon as the rows read pass the limit (a Parquet file is first measured from its
-   metadata). A CSV or JSON file is read whole, so each column's type is inferred from every
-   row, and its rows are measured before they are sent.
+   refused, as soon as the rows read pass the limit. A Parquet file is first measured from its
+   metadata, and each piece holds about as many rows as fit in what is left of the limit. A
+   column with a dictionary, or of text views, is measured before it is unpacked. A column that
+   holds several values a row (a list, a struct, a tensor) is refused before any row is read,
+   because a table stores none.
+
+   A crafted file can understate its size in its metadata, so on Linux the command reads a
+   Parquet or Arrow file in a separate process whose memory the operating system caps at twice
+   the limit plus 256 MiB (768 MiB for the default limit), whatever the number of cores. A file that needs more is refused as
+   larger than one upload, with the same next step, and the command itself is never short of
+   memory. macOS and Windows do not enforce that cap: there the file is read in the command's
+   own process, bounded by the metadata and the measurements above, and a crafted file can still
+   take far more memory than the limit before it is refused. Load files you did not make on
+   Linux, or with an asset.
+
+   A CSV or JSON file is read whole, so each column's type is inferred from every row, and its
+   rows are measured before they are sent.
 3. It reads the file and checks with the server, without sending a row, that the load would
    succeed: the layer, your rights, the namespace, and the columns of a table that exists.
 4. It shows the columns and the row count and asks.
@@ -127,9 +141,10 @@ is audited; the dry run checks this too, so nothing is uploaded before the refus
 | `422`, exit 8 | the file's columns do not fit the existing table | the column that differs, as for an append |
 | exit 2 | a protected environment without `--yes`, `--break-glass` and `--reason` | `` `prod` is protected: a load there needs --yes --break-glass --reason REASON (MANAGE_ENVIRONMENT, audited); recurring loads belong in an asset `` |
 | exit 2 | a file larger than one upload may be | `big.parquet (300000000 bytes) is larger than one upload may be (256 MiB); load it with a Python asset and a directory or object-store connection` |
+| exit 2 | a Parquet or Arrow file that needs more memory to read than the cap allows (Linux) | `bomb.parquet is larger than one upload may be (256 MiB) once read; load it with a Python asset and a directory or object-store connection` |
 | exit 2 | a JSON array or spreadsheet without the `assets` extra | `reading .xlsx needs the assets extra: pip install 'lakana[assets]'` |
 | exit 2 | you answer no | `Aborted.` |
-| exit 8 | a CSV or NDJSON file that is not UTF-8 | `data.csv is not UTF-8 (byte 0xfc at position 6); save it as UTF-8 and load it again` |
+| exit 8 | a CSV or NDJSON file that is not UTF-8 | `data.csv is not UTF-8 (byte 0xfc at position 6); convert it to UTF-8 and run the command again` |
 | exit 8 | a file without columns (such as a JSON file `[]`) | `empty.json has no columns; a load needs at least one column and one row: add them and load it again` |
 | exit 8 | a CSV, JSON or spreadsheet without rows (only a header) | `hdr.csv has no rows, so there is nothing to load and no column types to infer; add rows and load it again` |
 | exit 8 | a column that is empty in every row | ``nullcol.csv: column `b` has no values in any row, so its type cannot be inferred; fill it or drop it, then load it again`` |

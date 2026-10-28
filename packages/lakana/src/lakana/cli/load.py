@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Annotated
 
 import pyarrow as pa
+import pyarrow.compute as pc
 import pyarrow.csv as pacsv
 import pyarrow.ipc as ipc
 import pyarrow.json as pajson
@@ -24,7 +25,7 @@ import pyarrow.parquet as pq
 import typer
 
 from lakana._arrow import cast_timestamp_ns_columns_to_us, normalize_view_columns, schema_to_columns
-from lakana.cli import _output
+from lakana.cli import _capped, _files, _output
 from lakana.cli._break_glass import BREAK_GLASS, REASON, break_glass_reason
 from lakana.cli._state import CliError, confirm, resolve_environment, state_of
 from lakana.errors import NotFound, ValidationError
@@ -52,8 +53,7 @@ _WITH_EXTRA = frozenset({"json", "xlsx", "xlsm", "xlsb", "xls", "ods"})
 _SPREADSHEETS = frozenset({"xlsx", "xlsm", "xlsb", "xls", "ods"})
 _MIB = 1024 * 1024
 _BATCH_ROWS = 1024
-"""Rows decoded at a time from a Parquet file, and from a batch with a dictionary column, so a
-read stops soon after the limit."""
+"""The most rows decoded at a time from a Parquet file, so a read stops soon after the limit."""
 
 
 def bronze_name(table: str) -> str:
@@ -106,39 +106,6 @@ def _format(path: Path, given: str | None) -> str:
     return found
 
 
-def _utf8(path: Path, data: bytes) -> bytes:
-    """Hold text to the helpers' strict UTF-8 rule, dropping a byte order mark.
-
-    Parameters
-    ----------
-    path
-        The file, for messages.
-    data
-        Its bytes.
-
-    Returns
-    -------
-    bytes
-        The bytes without a byte order mark.
-
-    Raises
-    ------
-    CliError
-        For bytes that are not UTF-8 (exit 8).
-    """
-    data = data.removeprefix(b"\xef\xbb\xbf")
-    try:
-        data.decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise CliError(
-            f"{_output.inline(path.name)} is not UTF-8 (byte {data[exc.start]:#04x} at position "
-            f"{exc.start}); save it as UTF-8 and load it again",
-            8,
-            kind="FileError",
-        ) from None
-    return data
-
-
 def _csv(path: Path, header_row: int) -> pa.Table:
     """Read a CSV file with pyarrow, inferring each column's type over the whole file.
 
@@ -157,7 +124,8 @@ def _csv(path: Path, header_row: int) -> pa.Table:
     pa.Table
         The rows.
     """
-    data = _utf8(path, path.read_bytes())
+    data = path.read_bytes()
+    _files.strict_utf8(path, data)
     read = pacsv.ReadOptions(
         skip_rows=max(header_row - 1, 0), autogenerate_column_names=not header_row
     )
@@ -192,7 +160,7 @@ def _ndjson(path: Path, data: bytes) -> pa.Table:
     """
     from lakana.ingest._formats import MAX_NESTING, nested_deeper
 
-    data = _utf8(path, data)
+    _files.strict_utf8(path, data)
     if nested_deeper(data):
         raise CliError(
             f"{_output.inline(path.name)} nests arrays and objects deeper than {MAX_NESTING} "
@@ -279,67 +247,149 @@ def _decoded(batch: pa.RecordBatch) -> pa.RecordBatch:
     )
 
 
-def _pieces(batch: pa.RecordBatch) -> Iterable[pa.RecordBatch]:
-    """Split a batch with a dictionary column into decoded pieces of a few rows.
-
-    A dictionary column takes little room encoded and may take far more decoded (one long
-    value behind many small indices), so it is decoded a few rows at a time.
+def _plain(schema: pa.Schema) -> pa.Schema:
+    """Give each dictionary column of a schema its values' type, which a table stores.
 
     Parameters
     ----------
-    batch
-        The batch as read.
-
-    Returns
-    -------
-    Iterable[pa.RecordBatch]
-        The batch itself when it has no dictionary column, else its decoded pieces.
-    """
-    if not any(pa.types.is_dictionary(kind) for kind in batch.schema.types):
-        return (batch,)
-    return (
-        _decoded(batch.slice(start, _BATCH_ROWS)) for start in range(0, batch.num_rows, _BATCH_ROWS)
-    )
-
-
-def _bounded(
-    path: Path, schema: pa.Schema, batches: Iterable[pa.RecordBatch], limit: int | None
-) -> pa.Table:
-    """Collect decoded batches, stopping as soon as they pass the upload limit.
-
-    Dictionary columns are decoded before they are counted, so the count is of the values the
-    table will hold.
-
-    Parameters
-    ----------
-    path
-        The file, for the message.
     schema
-        The batches' schema.
-    batches
-        The batches, decoded one at a time.
-    limit
-        The upload limit, or `None` when the server does not say.
+        The schema as read.
 
     Returns
     -------
-    pa.Table
-        The rows.
+    pa.Schema
+        The schema with plain columns.
     """
-    plain = pa.schema(
+    return pa.schema(
         [
             field.with_type(field.type.value_type) if pa.types.is_dictionary(field.type) else field
             for field in schema
         ]
     )
-    kept: list[pa.RecordBatch] = []
-    size = 0
-    for batch in batches:
-        for piece in _pieces(batch):
-            size += piece.nbytes
-            _check_size(path, size, limit)
-            kept.append(piece)
-    return pa.Table.from_batches(kept, plain)
+
+
+def _column_size(column: pa.Array) -> int:
+    """Count the bytes a column takes once its dictionary is decoded, without decoding it.
+
+    A dictionary column takes little room encoded and may take far more decoded (one long
+    value behind many small indices), so its decoded size is added up from its values' lengths.
+
+    Parameters
+    ----------
+    column
+        A column of a batch.
+
+    Returns
+    -------
+    int
+        Its size in bytes; a text view column as plain text; any other column as it is.
+    """
+    if pa.types.is_string_view(column.type) or pa.types.is_binary_view(column.type):
+        return _view_size(column)
+    if not pa.types.is_dictionary(column.type):
+        return column.nbytes
+    values = column.dictionary
+    rows = len(column)
+    bitmap = (rows + 7) // 8
+    if pa.types.is_large_string(values.type) or pa.types.is_large_binary(values.type):
+        offsets = 8 * (rows + 1)
+    elif pa.types.is_string(values.type) or pa.types.is_binary(values.type):
+        offsets = 4 * (rows + 1)
+    else:
+        try:
+            return rows * max(values.type.bit_width // 8, 1) + bitmap
+        except ValueError:
+            return rows * values.nbytes + bitmap
+    lengths = pc.take(pc.binary_length(values), column.indices)  # ty: ignore[unresolved-attribute]
+    return (pc.sum(lengths).as_py() or 0) + offsets + bitmap  # ty: ignore[unresolved-attribute]
+
+
+def _view_size(column: pa.Array) -> int:
+    """Count the bytes a text view column takes once converted to plain text.
+
+    Many views can point at one long value, which the buffers hold once, so the lengths are
+    read from the views themselves (each 16 bytes, starting with its value's length).
+
+    Parameters
+    ----------
+    column
+        A `string_view` or `binary_view` column.
+
+    Returns
+    -------
+    int
+        Its values' lengths added up, with offsets and a validity bitmap.
+    """
+    rows = len(column)
+    views = pa.Array.from_buffers(
+        pa.int32(), 4 * rows, [None, column.buffers()[1]], offset=4 * column.offset
+    )
+    lengths = pc.if_else(column.is_valid(), views[::4], 0)  # ty: ignore[unresolved-attribute]
+    total = pc.sum(lengths).as_py() or 0  # ty: ignore[unresolved-attribute]
+    return total + 4 * (rows + 1) + (rows + 7) // 8
+
+
+class _Budget:
+    """Decoded rows read so far, refused as soon as they pass the upload limit.
+
+    Parameters
+    ----------
+    path
+        The file, for the message.
+    limit
+        The upload limit, or `None` when the server does not say.
+    """
+
+    def __init__(self, path: Path, limit: int | None) -> None:
+        self.path = path
+        self.limit = limit
+        self.size = 0
+        self.kept: list[pa.RecordBatch] = []
+
+    def rows(self, per_row: int) -> int:
+        """Say how many rows a batch may hold so that, at worst, it fits in what is left.
+
+        Parameters
+        ----------
+        per_row
+            The most bytes one row can take once decoded.
+
+        Returns
+        -------
+        int
+            Between 1 and `_BATCH_ROWS`; `_BATCH_ROWS` without a limit.
+        """
+        if self.limit is None:
+            return _BATCH_ROWS
+        return min(max((self.limit - self.size) // per_row, 1), _BATCH_ROWS)
+
+    def add(self, batch: pa.RecordBatch) -> None:
+        """Count a batch, refusing it before its dictionary columns are decoded if it can't fit.
+
+        Parameters
+        ----------
+        batch
+            The rows as read.
+        """
+        size = sum(map(_column_size, batch.columns))
+        _check_size(self.path, self.size + size, self.limit)
+        self.size += size
+        self.kept.append(_decoded(batch))
+
+    def table(self, schema: pa.Schema) -> pa.Table:
+        """Join the rows read.
+
+        Parameters
+        ----------
+        schema
+            The batches' schema as read.
+
+        Returns
+        -------
+        pa.Table
+            The rows, with plain columns.
+        """
+        return pa.Table.from_batches(self.kept, _plain(schema))
 
 
 def _slot(buf: bytes, table: int, index: int) -> int | None:
@@ -459,11 +509,21 @@ def _arrow(path: Path, limit: int | None) -> pa.Table:
             source.seek(0)
             reader = ipc.open_stream(source)
             batches = reader
-        return _bounded(path, reader.schema, batches, limit)
+        budget = _Budget(path, limit)
+        for batch in batches:
+            budget.add(batch)
+        return budget.table(reader.schema)
 
 
 def _parquet(path: Path, limit: int | None) -> pa.Table:
-    """Read a Parquet file a few rows at a time, after an estimate from its metadata.
+    """Read a Parquet file row group by row group, in batches its metadata says will fit.
+
+    A column with more than one value a row (a nested type, or an extension type stored as
+    one, such as a tensor) is refused first: a table stores none. The whole file is then
+    estimated from its metadata, and each row group is read in batches of about as many rows
+    as fit in what is left of the limit, at the group's average row size. The metadata of a
+    crafted file can understate its rows; what bounds the memory then is the cap on the
+    process that reads it (`_capped`).
 
     Parameters
     ----------
@@ -477,43 +537,67 @@ def _parquet(path: Path, limit: int | None) -> pa.Table:
     pa.Table
         The rows.
     """
-    _check_size(path, _parquet_size(path), limit)
     with pq.ParquetFile(path) as parquet:
-        return _bounded(path, parquet.schema_arrow, parquet.iter_batches(_BATCH_ROWS), limit)
+        schema = _plain(parquet.schema_arrow)
+        metadata = parquet.metadata
+        repeated = [
+            metadata.schema.column(i).path
+            for i in range(metadata.num_columns)
+            if metadata.schema.column(i).max_repetition_level > 0
+        ]
+        nested = [
+            field
+            for field in schema
+            if pa.types.is_nested(field.type)
+            or any(leaf == field.name or leaf.startswith(f"{field.name}.") for leaf in repeated)
+        ]
+        _storable(path, pa.schema(nested).empty_table())
+        width = sum(_width(field) for field in schema)
+        groups = [metadata.row_group(i) for i in range(metadata.num_row_groups)]
+        _check_size(path, max([metadata.num_rows * width, *map(_group_size, groups)]), limit)
+        budget = _Budget(path, limit)
+        for index, group in enumerate(groups):
+            size = max(_group_size(group), group.num_rows * width)
+            per_row = max(-(-size // max(group.num_rows, 1)), 1)
+            for batch in parquet.iter_batches(budget.rows(per_row), row_groups=[index]):
+                budget.add(batch)
+        return budget.table(parquet.schema_arrow)
 
 
-def _parquet_size(path: Path) -> int:
-    """Estimate, from a Parquet file's metadata, how many bytes its rows take once read.
-
-    A small file can hold many rows of repeated values, which its encoding and compression
-    shrink to almost nothing; reading it would build the whole table in memory. The estimate is
-    the larger of the column chunks' uncompressed sizes and the rows times the columns' widths
-    (a column without a fixed width counted at 4 bytes a row, its offsets).
+def _group_size(group: pq.RowGroupMetaData) -> int:
+    """Give the bytes a row group's metadata says its rows take once read.
 
     Parameters
     ----------
-    path
-        The file.
+    group
+        The row group's metadata.
 
     Returns
     -------
     int
-        The estimated size in bytes.
+        The larger of its `total_byte_size` and its column chunks' uncompressed sizes.
     """
-    metadata = pq.read_metadata(path)
-    schema = metadata.schema.to_arrow_schema()
-    width = 0
-    for field in schema:
-        try:
-            width += max(field.type.bit_width // 8, 1)
-        except ValueError:
-            width += 4
-    chunks = sum(
-        group.column(index).total_uncompressed_size
-        for group in (metadata.row_group(i) for i in range(metadata.num_row_groups))
-        for index in range(group.num_columns)
-    )
-    return max(chunks, metadata.num_rows * width)
+    chunks = sum(group.column(i).total_uncompressed_size for i in range(group.num_columns))
+    return max(group.total_byte_size, chunks)
+
+
+def _width(field: pa.Field) -> int:
+    """Give the bytes a row of a column takes at least: its width, or 4 (offsets) for text.
+
+    Parameters
+    ----------
+    field
+        The column, with a plain type.
+
+    Returns
+    -------
+    int
+        The bytes.
+    """
+    try:
+        return max(field.type.bit_width // 8, 1)
+    except ValueError:
+        return 4
 
 
 def read_file(
@@ -547,6 +631,8 @@ def read_file(
         For an option the format does not take, an unreadable, compressed Arrow or empty file,
         rows over the limit, a repeated column name, an empty column, or a column type a table
         cannot store.
+    MemoryError
+        When reading takes more memory than the process may have; `_capped` reports it.
     """
     if sheet is not None and fmt not in _SPREADSHEETS:
         raise CliError(f"--sheet applies to spreadsheets; {_output.inline(path.name)} is {fmt}")
@@ -568,6 +654,8 @@ def read_file(
             table = _ndjson(path, path.read_bytes())
         else:
             table = _with_extra(path, path.read_bytes(), fmt, sheet, header_row)
+    except MemoryError:
+        raise
     except (pa.ArrowException, OSError, struct.error) as exc:
         raise CliError(
             f"Could not read {_output.inline(path.name)} as {fmt}: {_output.inline(str(exc))}",
@@ -607,6 +695,29 @@ def read_file(
                 8,
                 kind="FileError",
             )
+    return _storable(path, table)
+
+
+def _storable(path: Path, table: pa.Table) -> pa.Table:
+    """Convert view and nanosecond columns, and refuse a column type a table cannot store.
+
+    Parameters
+    ----------
+    path
+        The file, for the message.
+    table
+        The rows.
+
+    Returns
+    -------
+    pa.Table
+        The rows with view and nanosecond columns converted.
+
+    Raises
+    ------
+    CliError
+        For a column type a table cannot store (exit 8).
+    """
     table = normalize_view_columns(cast_timestamp_ns_columns_to_us(table))
     try:
         schema_to_columns(table.schema)
@@ -639,10 +750,34 @@ def _check_size(path: Path, size: int, limit: int | None) -> None:
     """
     if limit is None or size <= limit:
         return
+    error = too_large(path, limit, size)
+    raise error
+
+
+def too_large(path: Path, limit: int, size: int | None = None) -> CliError:
+    """Say that a file is larger than one upload may be, and how to load it instead.
+
+    Parameters
+    ----------
+    path
+        The file.
+    limit
+        The server's upload limit.
+    size
+        Its size in bytes, or `None` when it ran out of the memory its reading may take.
+
+    Returns
+    -------
+    CliError
+        Exit 2.
+    """
     shown = f"{limit / _MIB:g} MiB" if limit % _MIB == 0 else f"{limit} bytes"
-    raise CliError(
-        f"{_output.inline(path.name)} ({size} bytes) is larger than one upload may be "
-        f"({shown}); load it with a Python asset and a directory or object-store connection"
+    name = _output.inline(path.name)
+    what = f"{name} is larger than one upload may be ({shown}) once read"
+    if size is not None:
+        what = f"{name} ({size} bytes) is larger than one upload may be ({shown})"
+    return CliError(
+        f"{what}; load it with a Python asset and a directory or object-store connection"
     )
 
 
@@ -756,7 +891,7 @@ def load(
     limit = client.tables.upload_limit()
     size = file.stat().st_size
     _check_size(file, size, limit)
-    data = read_file(file, fmt, sheet=sheet, header_row=header_row, limit=limit)
+    data = _capped.read(file, fmt, sheet=sheet, header_row=header_row, limit=limit)
     if limit is not None:
         _check_size(file, _ipc_size(data), limit)
     try:

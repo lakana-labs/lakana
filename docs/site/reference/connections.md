@@ -239,10 +239,11 @@ each kind are those of the table above: `--host`, `--port`, `--database`, `--url
 address; `--user`, `--tls`, `--ca-file` (a PEM file, read into `ca_certificate`), `--auth`,
 `--username`, `--api-key-name`, `--api-key-in`, `--client-id`, `--token-url`, `--scope`,
 `--access-key-id` and `--prefix` for the settings. `--password-stdin` stores standard input, less
-one trailing line break, under the kind's single key (`password`, `token`, `api_key`,
+one leading UTF-8 byte order mark and one trailing line break (`\n`, `\r\n` or `\r`, as a Windows
+editor writes them), under the kind's single key (`password`, `token`, `api_key`,
 `client_secret`, `secret_access_key`, `service_account_json` or `account_key`); `--values-stdin`
 reads a JSON object of several keys, such as `{"secret_access_key": "...", "session_token":
-"..."}`.
+"..."}`, and drops a leading byte order mark too.
 
 List and show:
 

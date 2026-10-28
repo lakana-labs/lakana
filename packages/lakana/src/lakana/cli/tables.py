@@ -873,7 +873,9 @@ def append(
     The table's schema is fetched first. A CSV is parsed straight into the
     table's column types; Parquet and Arrow are cast to them. Nullability is
     checked too, and a column that doesn't fit fails here, before anything
-    is sent.
+    is sent. A CSV must be UTF-8 (a byte order mark is dropped); one in
+    another encoding is refused (exit 8): convert it to UTF-8 and run the
+    command again.
 
     Parameters
     ----------
@@ -932,7 +934,8 @@ def replace(
 
     Without --evolve-schema the file is conformed to the table's columns
     first, exactly as `table append` does. With it, the file is sent as it
-    is and the table takes its schema.
+    is and the table takes its schema. A CSV must be UTF-8 either way, as
+    for `table append`.
 
     Parameters
     ----------
@@ -1003,7 +1006,8 @@ def merge(
 
     A row whose key the table has replaces that row; any other row is added; nothing is
     deleted, all in one snapshot. The file is conformed to the table's columns first, exactly
-    as `table append` does. The file must not repeat a key and no key may be empty.
+    as `table append` does. The file must not repeat a key and no key may be empty. A CSV must
+    be UTF-8 (a byte order mark is dropped); one in another encoding is refused (exit 8).
 
     Parameters
     ----------
