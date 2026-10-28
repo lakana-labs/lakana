@@ -73,6 +73,7 @@ _SIZES = _i32(0) + _i32(100) + _i32(10)
         bytes([0x19, 0x1C]) + b"\x00",
         bytes([0x1B]) + _varint(2) + bytes([0x85]) + (_varint(1) + b"k" + _varint(2)) * 2,
         bytes([0x1B]) + _varint(0),
+        bytes([0x1B]) + _varint(1) + bytes([0x13]) + b"\x01\x05",
         bytes([0x1C]) + _i32(7) + b"\x00",
         bytes([0x1D]) + bytes(16),
         bytes([0x05]) + _varint(80) + _varint(14),
@@ -92,6 +93,7 @@ _SIZES = _i32(0) + _i32(100) + _i32(10)
         "structs",
         "map",
         "empty-map",
+        "bool-map",
         "struct",
         "uuid",
         "long-field-id",
@@ -112,6 +114,10 @@ def test_a_header_reads_its_sizes_past_any_other_field(extra: bytes) -> None:
         (bytes([0x15]) + b"\x80" * 11, "longer than 10 bytes"),
         (_SIZES[:-1], "ends early"),
         (_SIZES + bytes([0x18]) + _varint(1000) + b"\x00", "ends early"),
+        (_SIZES + bytes([0x1B]) + _varint(2**62) + bytes([0x11]) + b"\x00", "more entries than"),
+        (_SIZES + bytes([0x1B]) + _varint(2**62) + bytes([0x1D]) + b"\x00", "more entries than"),
+        (_SIZES + bytes([0x19, 0xF7]) + _varint(2**40) + b"\x00", "more entries than"),
+        (_SIZES + bytes([0x17]), "ends early"),
         (_i32(0) + b"\x00", "lacks its type or sizes"),
         (_i32(0) + _i32(-1) + _i32(10) + b"\x00", "lacks its type or sizes"),
     ],
@@ -121,6 +127,10 @@ def test_a_header_reads_its_sizes_past_any_other_field(extra: bytes) -> None:
         "long-varint",
         "truncated",
         "past-end",
+        "bool-map-of-2-62",
+        "uuid-map-of-2-62",
+        "double-list-of-2-40",
+        "double-past-end",
         "no-sizes",
         "negative",
     ],
@@ -132,12 +142,16 @@ def test_a_header_that_cannot_be_read_is_refused(header: bytes, message: str) ->
 
 
 def test_a_chunk_adds_its_pages_up() -> None:
-    """Each page is skipped by its compressed size; the largest is kept."""
-    first = _i32(2) + _i32(300) + _i32(4) + b"\x00"
-    second = _i32(0) + _i32(50) + _i32(2) + b"\x00"
-    buf = first + b"dict" + second + b"ab"
+    """Each page is skipped by its compressed size; the largest is kept.
 
-    assert chunk_pages(buf, 0, len(buf)) == load_module._parquet_pages.ChunkPages(350, 300)
+    A page counts at least its stored bytes: an uncompressed page is read as it is stored,
+    whatever its header says it decompresses to.
+    """
+    first = _i32(2) + _i32(300) + _i32(4) + b"\x00"
+    second = _i32(0) + _i32(5) + _i32(20) + b"\x00"
+    buf = first + b"dict" + second + b"x" * 20
+
+    assert chunk_pages(buf, 0, len(buf)) == load_module._parquet_pages.ChunkPages(320, 300)
     with pytest.raises(PageHeaderError, match="starts at -1"):
         chunk_pages(buf, -1, len(buf))
 
@@ -252,3 +266,72 @@ def test_without_a_limit_a_row_group_is_read_in_full_batches(tmp_path: Path) -> 
     budget = load_module._Budget(tmp_path / "f.parquet", None)
 
     assert budget.rows(10**9) == load_module._BATCH_ROWS
+
+
+def _yielded(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    """Record the rows of every batch the Parquet reader yields.
+
+    Parameters
+    ----------
+    monkeypatch
+        Pytest's monkeypatch.
+
+    Returns
+    -------
+    list of int
+        Filled with each batch's row count as the batches are read.
+    """
+    yielded: list[int] = []
+    iter_batches = pq.ParquetFile.iter_batches
+
+    def counted(self: pq.ParquetFile, *args: object, **kwargs: object) -> Iterator[pa.RecordBatch]:
+        for batch in iter_batches(self, *args, **kwargs):
+            yielded.append(batch.num_rows)
+            yield batch
+
+    monkeypatch.setattr(pq.ParquetFile, "iter_batches", counted)
+    return yielded
+
+
+@pytest.mark.parametrize("value", [0x11, 0x1D], ids=["bool-bool", "bool-uuid"])
+def test_a_header_with_a_huge_map_is_refused_at_once(tmp_path: Path, value: int) -> None:
+    """Review I1: a map of 2**62 fixed-size entries in a page header hung the reader."""
+    path = tmp_path / "map.parquet"
+    pq.write_table(pa.table({"n": [1, 2, 3]}), path, use_dictionary=False)
+    data = path.read_bytes()
+    start = pq.read_metadata(path).row_group(0).column(0).data_page_offset
+    stop = page_header(data, start)[2] - 1
+    entry = bytes([0x0B, 0x28]) + b"\xff" * 8 + bytes([0x3F, value])
+    path.write_bytes(data[:stop] + entry + data[stop:])
+
+    result = invoke(make_state(tmp_path, _api(None)), "load", str(path), "t", "--env", "dev")
+
+    assert result.exit_code == 8, result.output
+    assert "Could not read map.parquet as parquet: a page header holds a list or map" in (
+        " ".join(result.output.split())
+    )
+
+
+def test_an_uncompressed_page_counts_its_stored_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Review I2: an uncompressed dictionary page that claims 10 bytes still bounds the rows."""
+    path = tmp_path / "raw.parquet"
+    pq.write_table(pa.table({"s": ["x" * 65536] * 1024}), path, compression="none")
+    data = bytearray(path.read_bytes())
+    start = pq.read_metadata(path).row_group(0).column(0).dictionary_page_offset
+    assert data[start] == 0x15 and data[start + 2] == 0x15
+    size_at = start + 3
+    width = 1
+    while data[size_at + width - 1] & 0x80:
+        width += 1
+    data[size_at : size_at + width] = bytes([0x94] + [0x80] * (width - 2) + [0x00])
+    path.write_bytes(bytes(data))
+    assert page_header(bytes(data), start)[0] == 10
+    yielded = _yielded(monkeypatch)
+
+    result = invoke(make_state(tmp_path, _api(1024 * 1024)), "load", str(path), "t", "--env", "dev")
+
+    assert result.exit_code == 2, result.output
+    assert "is larger than one upload may be (1 MiB)" in result.output
+    assert sum(yielded) <= 32

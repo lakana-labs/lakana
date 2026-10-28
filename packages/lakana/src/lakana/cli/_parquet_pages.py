@@ -1,13 +1,17 @@
 """Read the page headers of a Parquet column chunk, never its pages.
 
-A page's header says how large the page is once decompressed, and the reader decompresses it
-to exactly that size, so the headers bound what decoding a column chunk can take: no value is
-larger than the page it is decoded from, a dictionary page included. That holds whatever the
+A page's header says how large the page is once decompressed, and the reader decompresses a
+compressed page to exactly that size; an uncompressed page it reads as stored, whatever the
+header says, so a page counts the larger of the two sizes. The headers so bound what decoding a
+column chunk can take: no value is larger than the page it is decoded from, a dictionary page
+included. That holds whatever the
 encoding: a dictionary or shared prefixes (`DELTA_BYTE_ARRAY`) can make 1,024 rows of a large
 value out of a few bytes, but never one value larger than its page.
 
 Headers are Thrift structs in the compact protocol: `PageHeader` field 1 is the page type,
 field 2 its uncompressed size and field 3 its compressed size, all `i32`; the rest is skipped.
+A list or map may announce no more entries than the bytes left could hold and nesting stops at
+16 levels, so reading a header takes work in proportion to its size.
 """
 
 from __future__ import annotations
@@ -39,9 +43,9 @@ class ChunkPages:
     Parameters
     ----------
     total
-        The pages' uncompressed sizes added up.
+        The pages' sizes added up, each the larger of its uncompressed and its stored size.
     largest
-        The largest page's uncompressed size: no value decodes larger.
+        The largest page's size, counted the same way: no value decodes larger.
     """
 
     total: int
@@ -94,6 +98,67 @@ def _zigzag(value: int) -> int:
     return (value >> 1) ^ -(value & 1)
 
 
+def _within(buf: Buffer, at: int) -> int:
+    """Check that a position is still inside the bytes.
+
+    Parameters
+    ----------
+    buf
+        The bytes.
+    at
+        The position after a value.
+
+    Returns
+    -------
+    int
+        `at`.
+
+    Raises
+    ------
+    PageHeaderError
+        When the value ran past the end.
+    """
+    if at > len(buf):
+        raise PageHeaderError("a page header ends early")
+    return at
+
+
+def _count(buf: Buffer, at: int, size: int, entry: int) -> int:
+    """Refuse a list or map with more entries than the bytes left could hold.
+
+    Every entry takes at least `entry` bytes, so a larger count is malformed; refusing it keeps
+    the work of reading a header within its size.
+
+    Parameters
+    ----------
+    buf
+        The bytes.
+    at
+        Where the first entry starts.
+    size
+        The entries the header announces.
+    entry
+        The fewest bytes one entry takes.
+
+    Returns
+    -------
+    int
+        `size`.
+
+    Raises
+    ------
+    PageHeaderError
+        For more entries than the bytes left.
+    """
+    left = len(buf) - at
+    if size * entry > left:
+        raise PageHeaderError(
+            f"a page header holds a list or map of {size} entries, more entries than the "
+            f"{left} bytes left"
+        )
+    return size
+
+
 def _skip(buf: Buffer, at: int, kind: int, depth: int) -> int:
     """Skip one value of a compact type.
 
@@ -116,65 +181,61 @@ def _skip(buf: Buffer, at: int, kind: int, depth: int) -> int:
     Raises
     ------
     PageHeaderError
-        For an unknown type or nesting deeper than 16 levels.
+        For an unknown type, nesting deeper than 16 levels, or a value past the end.
     """
     if depth > _MAX_DEPTH:
         raise PageHeaderError(f"a page header nests deeper than {_MAX_DEPTH} levels")
     if kind in _FIXED:
-        return at + _FIXED[kind]
+        return _within(buf, at + _FIXED[kind])
     if kind in _VARINT:
         return _varint(buf, at)[1]
     if kind == _BINARY:
         size, at = _varint(buf, at)
-        return at + size
+        return _within(buf, at + size)
     if kind in _LIST:
         head = buf[at]
         size, at = head >> 4, at + 1
         if size == 15:
             size, at = _varint(buf, at)
-        return _skip_many(buf, at, head & 0x0F, size, depth)
+        for _ in range(_count(buf, at, size, 1)):
+            at = _element(buf, at, head & 0x0F, depth + 1)
+        return at
     if kind == _MAP:
         size, at = _varint(buf, at)
         if not size:
             return at
         head, at = buf[at], at + 1
-        for _ in range(size):
-            at = _skip(buf, at, head >> 4, depth + 1)
-            at = _skip(buf, at, head & 0x0F, depth + 1)
+        for _ in range(_count(buf, at, size, 2)):
+            at = _element(buf, at, head >> 4, depth + 1)
+            at = _element(buf, at, head & 0x0F, depth + 1)
         return at
     if kind == _STRUCT:
         return _fields(buf, at, depth + 1)[1]
     raise PageHeaderError(f"a page header holds an unknown field type {kind}")
 
 
-def _skip_many(buf: Buffer, at: int, kind: int, size: int, depth: int) -> int:
-    """Skip the elements of a list or a set.
+def _element(buf: Buffer, at: int, kind: int, depth: int) -> int:
+    """Skip one element of a list, a set or a map, where a boolean takes one byte.
 
     Parameters
     ----------
     buf
         The bytes.
     at
-        Where the first element starts.
+        Where the element starts.
     kind
-        The elements' compact type.
-    size
-        How many there are.
+        Its compact type.
     depth
-        How deeply the list is nested.
+        How deeply it is nested.
 
     Returns
     -------
     int
-        The position after the last element.
+        The position after it.
     """
     if kind in (1, 2):
-        return at + size
-    if kind in _FIXED:
-        return at + size * _FIXED[kind]
-    for _ in range(size):
-        at = _skip(buf, at, kind, depth + 1)
-    return at
+        return _within(buf, at + 1)
+    return _skip(buf, at, kind, depth)
 
 
 def _fields(buf: Buffer, at: int, depth: int) -> tuple[dict[int, int], int]:
@@ -273,6 +334,7 @@ def chunk_pages(buf: Buffer, start: int, length: int) -> ChunkPages:
     while at < start + length:
         uncompressed, compressed, at = page_header(buf, at)
         at += compressed
-        total += uncompressed
-        largest = max(largest, uncompressed)
+        size = max(uncompressed, compressed)
+        total += size
+        largest = max(largest, size)
     return ChunkPages(total, largest)
