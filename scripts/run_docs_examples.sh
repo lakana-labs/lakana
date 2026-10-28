@@ -25,6 +25,11 @@
 # `<!-- output: EXAMPLE#NAME -->` blocks of the pages with those files, and `--fix` copies them in.
 # A region that runs twice keeps its last run. There is no default directory: unset, nothing is
 # captured.
+# All examples of one run share one uv cache, outside their private HOMEs: UV_CACHE_DIR for what
+# run.sh runs (`uv lock`), and the worker's own (<cache>/lakana-worker/uv, a link), so each package
+# is downloaded and built once per run, not once per example. Environments are never shared.
+# LAKANA_DOCS_UV_CACHE names a directory to keep it in (CI restores and saves it); unset, it is a
+# temporary directory removed at the end.
 # The instance is stopped and the directories removed on success, failure, timeout or ^C.
 set -euo pipefail
 
@@ -57,6 +62,15 @@ if ! command -v lakana >/dev/null 2>&1; then
 fi
 
 summary=$(mktemp)
+own_uv=""
+if [ -n "${LAKANA_DOCS_UV_CACHE:-}" ]; then
+  mkdir -p "$LAKANA_DOCS_UV_CACHE"
+  uv_shared=$(cd "$LAKANA_DOCS_UV_CACHE" && pwd -P)
+else
+  uv_shared=$(mktemp -d)
+  own_uv=$uv_shared
+fi
+mkdir -p -m 0700 "$uv_shared/uv" "$uv_shared/worker-uv"
 # Sourced by the bash that runs an example's run.sh (and only by that one, DOCS_RUN_SCRIPT): when a
 # command fails, print which line it was, so a silent check (`test -f ...`) names itself. It also
 # defines what the markers of a region become when the output is captured (see run_one): the
@@ -118,7 +132,7 @@ cleanup() {
     base=""
   fi
 }
-trap 'cleanup; rm -f "$summary" "$tracer"' EXIT
+trap 'cleanup; rm -f "$summary" "$tracer"; if [ -n "$own_uv" ]; then rm -rf "$own_uv"; fi' EXIT
 trap 'exit 130' INT TERM
 
 # A free port, so a leftover instance (or anything else on 8765) cannot break this run.
@@ -200,6 +214,10 @@ run_one() {
   # No git identity: a machine's own would leak in. Unset, so the example proves its own steps.
   unset GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL EMAIL
   export GIT_CONFIG_NOSYSTEM=1
+  # The run's shared uv caches (see the top): the worker of the instance finds its own by HOME.
+  export UV_CACHE_DIR="$uv_shared/uv"
+  mkdir -p "$HOME/.cache/lakana-worker"
+  ln -s "$uv_shared/worker-uv" "$HOME/.cache/lakana-worker/uv"
   # Git's own defaults, as a newcomer has them; stable English output.
   export LC_ALL=C
   export EXAMPLE_DIR="$examples_dir/$name" WORK="$base/home/work"
