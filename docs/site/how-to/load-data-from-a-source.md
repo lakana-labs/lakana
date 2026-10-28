@@ -32,7 +32,8 @@ LAKANA_RUN__INGESTION_ROOTS="{\"landing\": \"$HOME/landing\"}" lakana server sta
 ```
 
 With the Docker runner, the operator sets `LAKANA_LAUNCHER__INGESTION_ROOTS` instead
-([Ingestion roots](run-python-tasks-in-containers.md#ingestion-roots)).
+([Ingestion roots](run-python-tasks-in-containers.md#ingestion-roots)); in the Compose bundle that
+is `LAKANA_INGESTION_ROOTS` in `.env` ([Files on this host](deploy-with-compose.md#files-on-this-host)).
 
 ## 1. Create the connection
 

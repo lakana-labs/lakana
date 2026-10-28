@@ -36,6 +36,11 @@ _ENV_COMMENTS = {
         "Address ranges no task, build or connection may reach, comma-separated CIDRs or "
         "addresses: add this host's own LAN address or subnet, such as 192.168.1.0/24."
     ),
+    "LAKANA_INGESTION_ROOTS": (
+        "JSON object of root name to absolute host directory, such as "
+        '{"exports": "/srv/exports"}; mounted read-only into each task with a directory or '
+        "sqlite-file connection that names the root; the launcher refuses system directories."
+    ),
     "LAKANA_WORKER_MEMORY": (
         "Memory limit of each worker container; the worker stops itself at 90% of it "
         "(it is a limit per replica: LAKANA_WORKERS + LAKANA_WORKERS_INTERACTIVE + "
@@ -152,6 +157,7 @@ def generate_env(
         "LAKANA_DOCKER_SOCKET": "/var/run/docker.sock",
         "LAKANA_EGRESS_UPSTREAM_PROXY": "",
         "LAKANA_EGRESS_REFUSED": "",
+        "LAKANA_INGESTION_ROOTS": "{}",
         "LAKANA_BIND": bind,
         "LAKANA_PORT": str(port),
         "LAKANA_WORKERS": str(workers),

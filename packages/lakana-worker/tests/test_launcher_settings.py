@@ -255,6 +255,22 @@ def _roots(path: str) -> dict[str, str]:
     return {**_BASE, _ROOTS: json.dumps({"landing": path})}
 
 
+@pytest.mark.parametrize("value", [None, "", "{}"])
+def test_no_ingestion_roots_from_what_the_bundle_passes_by_default(value: str | None) -> None:
+    """Unset, blank (a bundle `.env` without `LAKANA_INGESTION_ROOTS`) or `{}`: no roots.
+
+    Parameters
+    ----------
+    value
+        The variable's value, or `None` for unset.
+    """
+    environ = dict(_BASE)
+    if value is not None:
+        environ[_ROOTS] = value
+
+    assert load_settings(environ).ingestion_roots == {}
+
+
 @pytest.mark.parametrize(
     ("environ", "message"),
     [

@@ -513,7 +513,8 @@ INGEST_TEMPLATES: dict[str, dict[str, str]] = {
             "--path <directory below it>",
             root="""
    `<root>` is an ingestion root: a directory the operator gives the worker by name, in
-   LAKANA_RUN__INGESTION_ROOTS (or LAKANA_LAUNCHER__INGESTION_ROOTS with the Docker runner).
+   LAKANA_RUN__INGESTION_ROOTS (or LAKANA_LAUNCHER__INGESTION_ROOTS with the Docker runner,
+   which is LAKANA_INGESTION_ROOTS in the Compose bundle's .env).
 """,
             how="only the files changed after the newest one it loaded",
         ),
