@@ -47,10 +47,14 @@ directory.
 `uv.lock`: it runs `uv lock` itself. It says so first, because the lock needs network access to
 the public package index and a few minutes; without `uv` on your `PATH`, or when the lock fails,
 it stops with the cause and the next step and leaves nothing behind, also when you interrupt it.
-Its `pyproject.toml` holds an empty `[tool.uv.workspace]` table, so the project is its own root for
-uv even inside a uv workspace of a monorepo: `uv lock` writes `uv.lock` in the project and never
-changes the monorepo's lock. `--sample` and `--no-sample` are refused with it. The tutorial [Build a table with Python](../tutorials/python-sample.md)
-walks through it.
+Inside a uv workspace (a monorepo whose `pyproject.toml` has `[tool.uv.workspace]`) whose
+`members` take in the new folder, `uv lock` would lock the monorepo instead, so `init` refuses
+before it writes anything: it names the workspace's `pyproject.toml` and tells you to add the folder
+to that workspace's `exclude`, or to run `lakana init` outside the workspace. With the folder
+excluded, the project and the monorepo each lock on their own. Should uv still write no `uv.lock`
+in the project, `init` fails and puts the monorepo's lock back as it was. `--sample` and
+`--no-sample` are refused with it. The tutorial
+[Build a table with Python](../tutorials/python-sample.md) walks through it.
 
 `lakana init --template ingest-files` (or `ingest-sql`, `ingest-rest`) writes, instead of the
 sample, one Python asset that reads a source system, a `pyproject.toml` that already depends on

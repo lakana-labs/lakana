@@ -1207,25 +1207,27 @@ def test_a_reason_that_ends_a_sentence_gets_one_full_stop(tmp_path: Path, uv: _U
     assert ".." not in text
 
 
-def test_the_python_pyproject_keeps_the_project_its_own_uv_root(tmp_path: Path, uv: _Uv) -> None:
-    """An empty workspace table stops uv at the project; the comment says when to lock again."""
+def test_the_python_pyproject_says_when_to_lock_again(tmp_path: Path, uv: _Uv) -> None:
+    """No workspace table (a monorepo would refuse a nested one); the comment says when to lock."""
     _init_python(tmp_path)
 
     text = (tmp_path / "p" / "pyproject.toml").read_text()
-    assert tomllib.loads(text)["tool"]["uv"]["workspace"] == {}
+    assert "tool" not in tomllib.loads(text)
     flat = " ".join(line.lstrip("# ") for line in text.splitlines())
     assert "`lakana init` ran `uv lock`" in flat
     assert "run `uv lock` again" in flat
     assert "before the first commit" not in flat
 
 
-def _workspace(root: Path) -> bytes:
-    """Make `root` a uv workspace whose members are every folder below it, with its lock.
+def _workspace(root: Path, table: str = 'members = ["packages/*"]') -> bytes:
+    """Make `root` a uv workspace, with its lock.
 
     Parameters
     ----------
     root
         The folder.
+    table
+        The body of its `[tool.uv.workspace]` table; by default the project is not a member.
 
     Returns
     -------
@@ -1235,7 +1237,7 @@ def _workspace(root: Path) -> bytes:
     root.mkdir(parents=True, exist_ok=True)
     (root / "pyproject.toml").write_text(
         '[project]\nname = "mono"\nversion = "0.1.0"\nrequires-python = ">=3.11"\n'
-        'dependencies = []\n\n[tool.uv.workspace]\nmembers = ["*"]\n'
+        "dependencies = []\n\n[tool.uv.workspace]\n" + table + "\n"
     )
     (root / "uv.lock").write_text("version = 1\n# the monorepo's lock\n")
     return (root / "uv.lock").read_bytes()
@@ -1310,32 +1312,104 @@ def test_a_lock_uv_created_above_the_project_is_removed_again(tmp_path: Path) ->
     assert not (mono / "uv.lock").exists()
 
 
-@pytest.mark.skipif(shutil.which("uv") is None, reason="needs uv on the PATH")
-def test_a_parent_workspace_s_lock_stays_byte_identical_with_a_real_uv(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Real uv, offline: the project is its own root, so the monorepo's lock is not touched.
+def _offline_template(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict[str, str]:
+    """Make the python template lock with no package at all, and uv run offline on a cold cache.
 
-    The template's dependency is left out, so uv resolves without the network; without the
-    empty workspace table uv would add the project to the monorepo's lock instead.
+    Parameters
+    ----------
+    monkeypatch
+        Pytest's monkeypatch.
+    tmp_path
+        Pytest's per-test directory; the uv cache goes below it.
+
+    Returns
+    -------
+    dict of str to str
+        The environment for uv and for `lakana init`.
     """
     from lakana.cli import project_init
 
-    monkeypatch.setattr(
-        project_init,
-        "_PYPROJECT_PYTHON",
-        project_init._PYPROJECT_PYTHON.replace(
-            'dependencies = ["lakana[assets]=={version}"]', "dependencies = []"
-        ),
+    text = project_init._PYPROJECT_PYTHON.replace(
+        'dependencies = ["lakana[assets]=={version}"]', "dependencies = []"
+    ).replace('dev = ["pytest>=8"]', "dev = []")
+    parsed = tomllib.loads(text.format(repo="p", version="0"))
+    assert parsed["project"]["dependencies"] == []
+    assert parsed["dependency-groups"]["dev"] == []
+    monkeypatch.setattr(project_init, "_PYPROJECT_PYTHON", text)
+    return {
+        "UV_OFFLINE": "1",
+        "UV_NO_PROGRESS": "1",
+        "UV_CACHE_DIR": str(tmp_path / "uv-cache"),
+        "UV_PYTHON": sys.executable,
+    }
+
+
+def _uv_lock(folder: Path, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    """Run the real `uv lock` in `folder`.
+
+    Parameters
+    ----------
+    folder
+        The project or workspace.
+    env
+        Variables on top of this process's environment.
+
+    Returns
+    -------
+    subprocess.CompletedProcess
+        Its result, output captured.
+    """
+    return subprocess.run(
+        ["uv", "lock", "-q"],
+        cwd=folder,
+        env=os.environ | env,
+        capture_output=True,
+        text=True,
+        check=False,
     )
+
+
+_REAL_UV = pytest.mark.skipif(shutil.which("uv") is None, reason="needs uv on the PATH")
+
+
+@_REAL_UV
+def test_a_workspace_whose_members_include_the_project_is_refused_with_a_real_uv(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Nothing is written, the next step is named, and the monorepo still locks afterwards."""
+    env = _offline_template(monkeypatch, tmp_path)
     mono = tmp_path / "mono"
-    mono.mkdir()
-    (mono / "pyproject.toml").write_text(
-        '[project]\nname = "mono"\nversion = "0.1.0"\nrequires-python = ">=3.11"\n'
-        'dependencies = []\n\n[tool.uv.workspace]\nmembers = ["*"]\n'
+    _workspace(mono, 'members = ["*"]')
+    (mono / "uv.lock").unlink()
+    assert _uv_lock(mono, env).returncode == 0
+    before = (mono / "uv.lock").read_bytes()
+
+    result = invoke(
+        make_state(tmp_path, FakeApi()), "init", str(mono / "p"), "--template", "python", env=env
     )
-    env = {"UV_OFFLINE": "1", "UV_NO_PROGRESS": "1", "UV_PYTHON": sys.executable}
-    subprocess.run(["uv", "lock", "-q"], cwd=mono, check=True, env=os.environ | env)
+
+    assert result.exit_code == 2, result.output
+    text = " ".join(result.output.split())
+    assert str(mono / "pyproject.toml") in text
+    assert '`exclude = ["p"]`' in text
+    assert "outside the workspace" in text
+    assert "network access" not in text
+    assert not (mono / "p").exists()
+    after = _uv_lock(mono, env)
+    assert after.returncode == 0, after.stderr
+    assert (mono / "uv.lock").read_bytes() == before
+
+
+@_REAL_UV
+def test_a_workspace_that_excludes_the_project_lets_both_lock_with_a_real_uv(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With the folder excluded, init locks the project and the monorepo still locks as before."""
+    env = _offline_template(monkeypatch, tmp_path)
+    mono = tmp_path / "mono"
+    _workspace(mono, 'members = ["*"]\nexclude = ["p"]')
+    (mono / "uv.lock").unlink()
+    assert _uv_lock(mono, env).returncode == 0
     before = (mono / "uv.lock").read_bytes()
 
     result = invoke(
@@ -1344,7 +1418,42 @@ def test_a_parent_workspace_s_lock_stays_byte_identical_with_a_real_uv(
 
     assert result.exit_code == 0, result.output
     assert (mono / "p" / "uv.lock").is_file()
+    after = _uv_lock(mono, env)
+    assert after.returncode == 0, after.stderr
     assert (mono / "uv.lock").read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    ("table", "relative", "included"),
+    [
+        ('members = ["*"]', "p", True),
+        ('members = ["packages/*"]', "packages/p", True),
+        ('members = ["packages/*"]', "p", False),
+        ('members = ["packages/*"]', "packages/a/p", False),
+        ('members = ["**"]', "a/b/p", True),
+        ('members = ["packages/**/p"]', "packages/a/b/p", True),
+        ('members = ["./p"]', "p", True),
+        ('members = ["p?"]', "p", False),
+        ('members = ["[pq]"]', "p", True),
+        ('members = ["*"]\nexclude = ["p"]', "p", False),
+        ('members = ["packages/*"]\nexclude = ["packages/*"]', "packages/p", False),
+        ('members = ["**"]\nexclude = ["a/*"]', "a/b/p", False),
+        ("", "p", False),
+        ('members = "p"', "p", False),
+        ("members = [1]", "p", False),
+    ],
+)
+def test_the_members_and_exclude_globs_match_as_uv_does(
+    tmp_path: Path, table: str, relative: str, included: bool
+) -> None:
+    """Members match folder by folder (`*` in one folder, `**` across); exclude may span."""
+    from lakana.cli.project_init import _workspace_including
+
+    _workspace(tmp_path / "mono", table)
+
+    found = _workspace_including(tmp_path / "mono" / relative)
+
+    assert found == ((tmp_path / "mono" / "pyproject.toml") if included else None)
 
 
 def test_ctrl_c_during_the_lock_leaves_nothing(tmp_path: Path, uv: _Uv) -> None:

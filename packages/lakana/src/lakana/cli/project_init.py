@@ -6,6 +6,7 @@ what is written is exactly what is reviewed here.
 
 from __future__ import annotations
 
+import fnmatch
 import os
 import re
 import shlex
@@ -405,10 +406,6 @@ dependencies = ["lakana[assets]=={version}"]
 
 [dependency-groups]
 dev = ["pytest>=8"]
-
-# Keeps this project its own root for uv, also inside another uv workspace (a monorepo): `uv lock`
-# then writes uv.lock here and never changes a lock file above this directory.
-[tool.uv.workspace]
 """
 
 _TEST_PYTHON = '''\
@@ -739,6 +736,29 @@ def _uv_error(stderr: str) -> str:
     return " ".join(picked[:12]) or "(it printed nothing)"
 
 
+def _workspace_table(folder: Path) -> dict[str, object] | None:
+    """Read the `[tool.uv.workspace]` table of a folder's `pyproject.toml`.
+
+    Parameters
+    ----------
+    folder
+        The folder.
+
+    Returns
+    -------
+    dict or None
+        The table; `None` if the file is missing, unreadable or declares no workspace.
+    """
+    try:
+        data = tomllib.loads((folder / "pyproject.toml").read_text())
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
+        return None
+    tool = data.get("tool")
+    uv = tool.get("uv") if isinstance(tool, dict) else None
+    table = uv.get("workspace") if isinstance(uv, dict) else None
+    return table if isinstance(table, dict) else None
+
+
 def _workspace_above(directory: Path) -> Path | None:
     """Find the uv workspace a folder lies in, if any.
 
@@ -753,16 +773,89 @@ def _workspace_above(directory: Path) -> Path | None:
         The nearest folder above `directory` whose `pyproject.toml` declares
         ``[tool.uv.workspace]``; `None` if there is none or it cannot be read.
     """
-    for folder in directory.parents:
-        try:
-            data = tomllib.loads((folder / "pyproject.toml").read_text())
-        except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
-            continue
-        tool = data.get("tool")
-        uv = tool.get("uv") if isinstance(tool, dict) else None
-        if isinstance(uv, dict) and "workspace" in uv:
-            return folder
-    return None
+    return next((folder for folder in directory.parents if _workspace_table(folder)), None)
+
+
+def _globs(table: dict[str, object], key: str) -> list[str]:
+    """Read a list of glob patterns from a workspace table.
+
+    Parameters
+    ----------
+    table
+        The `[tool.uv.workspace]` table.
+    key
+        ``members`` or ``exclude``.
+
+    Returns
+    -------
+    list of str
+        The patterns, without a leading ``./``; anything that is not a string is left out.
+    """
+    value = table.get(key)
+    items = value if isinstance(value, list) else []
+    return [item.removeprefix("./") for item in items if isinstance(item, str)]
+
+
+def _member_match(parts: tuple[str, ...], pattern: tuple[str, ...]) -> bool:
+    """Match a relative path against a members glob, folder by folder, as uv's glob does.
+
+    ``*``, ``?`` and ``[...]`` stay within one folder name; ``**`` matches any number of folders.
+
+    Parameters
+    ----------
+    parts
+        The path's folder names.
+    pattern
+        The pattern's parts.
+
+    Returns
+    -------
+    bool
+        Whether the path matches.
+    """
+    if not pattern:
+        return not parts
+    if pattern[0] == "**":
+        return any(_member_match(parts[i:], pattern[1:]) for i in range(len(parts) + 1))
+    return (
+        bool(parts)
+        and fnmatch.fnmatchcase(parts[0], pattern[0])
+        and _member_match(parts[1:], pattern[1:])
+    )
+
+
+def _workspace_including(directory: Path) -> Path | None:
+    """Find the uv workspace whose members would take in `directory`.
+
+    uv takes the nearest folder above with ``[tool.uv.workspace]``. A members glob matches folder
+    by folder; an exclude glob matches the whole relative path, where ``*`` also spans folders.
+
+    Parameters
+    ----------
+    directory
+        The project directory (it need not exist yet).
+
+    Returns
+    -------
+    Path or None
+        That workspace's `pyproject.toml` when a members glob matches `directory` and no
+        exclude glob does; `None` otherwise.
+    """
+    root = _workspace_above(directory)
+    if root is None:
+        return None
+    table = _workspace_table(root) or {}
+    relative = directory.relative_to(root)
+    parts = relative.parts
+    member = any(
+        _member_match(parts, tuple(p for p in glob.split("/") if p))
+        for glob in _globs(table, "members")
+    )
+    excluded = any(
+        fnmatch.fnmatchcase(relative.as_posix(), glob.rstrip("/"))
+        for glob in _globs(table, "exclude")
+    )
+    return root / "pyproject.toml" if member and not excluded else None
 
 
 def _lock(directory: Path, uv: str) -> None:
@@ -925,7 +1018,8 @@ def write_project(
     Raises
     ------
     CliError
-        Exit 2 if any target (or, for ``python``, `uv.lock`) exists; exit 3 if a parent is not
+        Exit 2 if any target (or, for ``python``, `uv.lock`) exists or, for ``python``, the
+        directory is a member of a uv workspace above it; exit 3 if a parent is not
         a directory or is a symbolic link (nothing is written in either case); exit 3 on a
         filesystem error and exit 1 if the lock fails. On those, and on an interrupt, what was
         written is removed, with the folders it created.
@@ -948,6 +1042,16 @@ def write_project(
     for relative, text in added.items():
         texts[relative] = text.format(repo=repo) if relative == "README.md" else text
     targets = {directory / relative: text for relative, text in texts.items()}
+    if template == Template.python:
+        workspace = _workspace_including(directory)
+        if workspace is not None:
+            relative = directory.relative_to(workspace.parent).as_posix()
+            raise CliError(
+                f"{directory} lies in the uv workspace of {workspace}, whose members include it, "
+                "so `uv lock` would lock that workspace instead of this project. Add the folder "
+                f'to that workspace\'s `exclude = ["{relative}"]` under [tool.uv.workspace], or '
+                "run `lakana init` outside the workspace; then run the same command again."
+            )
     reserved = [directory / "uv.lock"] if template == Template.python else []
     existing = [str(path) for path in [*targets, *reserved] if os.path.lexists(path)]
     if existing:
