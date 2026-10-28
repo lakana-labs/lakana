@@ -186,6 +186,8 @@ Usage: `lakana init [OPTIONS] [directory]`
 
 Create a Lakana project that deploys unchanged.
 
+Nothing is overwritten: if a file it would write exists, or a folder inside the project is a symbolic link (a write through it could land outside the project), it writes nothing.
+
 | Name | Type | Default | Description |
 |---|---|---|---|
 | `DIRECTORY` | path | `.` | Project directory (default: here). |

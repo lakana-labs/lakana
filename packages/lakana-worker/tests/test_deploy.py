@@ -2682,7 +2682,7 @@ def test_the_project_of_the_python_template_deploys_with_its_python_asset(
         relative: text.format(repo="analytics", version=version)
         for relative, text in project_init.TEMPLATES.items()
     } | SAMPLE
-    files["pyproject.toml"] = project_init._PYPROJECT_ASSETS.format(
+    files["pyproject.toml"] = project_init._PYPROJECT_PYTHON.format(
         repo="analytics", version=version
     )
     files.update(project_init.PYTHON_TEMPLATE)

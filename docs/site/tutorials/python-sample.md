@@ -73,8 +73,8 @@ The CI files deploy without a stored Lakana token: the comment at the top of eac
 Note: lakana 0.20.1.dev34+gf48033c4b is a development build, so the CI install `lakana==0.20.1.dev34+gf48033c4b` can't be installed from PyPI. Ignore this until you use CI; then edit the pinned version in .github/workflows/lakana-deploy.yml and .gitlab-ci.yml, or set LAKANA_INDEX_URL to an index that has it.
 ```
 
-If `lakana init` stops with an error, it wrote nothing, so you can run the same command again
-once the cause is fixed. The error says what went wrong:
+If `lakana init` stops with an error, or you press Ctrl-C while it locks, it leaves nothing
+behind, so you can run the same command again once the cause is fixed. The error says what went wrong:
 
 - `uv` is not on your path: install it, as the error says.
 - `uv lock` failed: most often there is no connection to the public package index. Behind a

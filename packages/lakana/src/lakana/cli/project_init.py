@@ -11,6 +11,8 @@ import re
 import shlex
 import shutil
 import subprocess  # nosec B404 -- `git var` with fixed argv
+import tomllib
+from collections.abc import Callable
 from enum import StrEnum
 from pathlib import Path
 from typing import Annotated
@@ -391,6 +393,24 @@ dependencies = ["lakana[assets]=={version}"]
 dev = ["pytest>=8"]
 """
 
+_PYPROJECT_PYTHON = """\
+[project]
+name = "{repo}"
+version = "0.1.0"
+requires-python = ">=3.11"
+# A Python asset needs lakana[assets] and a lock. `lakana init` ran `uv lock`, which wrote uv.lock:
+# commit it with the code, because the worker builds the asset's environment from it. After you
+# change the dependencies below, run `uv lock` again in this directory and commit both files.
+dependencies = ["lakana[assets]=={version}"]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+# Keeps this project its own root for uv, also inside another uv workspace (a monorepo): `uv lock`
+# then writes uv.lock here and never changes a lock file above this directory.
+[tool.uv.workspace]
+"""
+
 _TEST_PYTHON = '''\
 """Project checks that need no server."""
 
@@ -691,6 +711,10 @@ def _git_lacks_identity(directory: Path) -> bool:
     return False
 
 
+_UV_NOISE = ("Using CPython", "Using Python")
+"""Lines of uv's standard error that say nothing about why it failed."""
+
+
 def _uv_error(stderr: str) -> str:
     """Pick the lines of uv's standard error that say why it failed.
 
@@ -702,12 +726,43 @@ def _uv_error(stderr: str) -> str:
     Returns
     -------
     str
-        From its first ``error:`` line on (or its last lines), at most eight, joined by spaces.
+        From its first ``error:`` or cross (U+00D7) line on (or else its last eight lines), at most
+        twelve whole lines without uv's tree marks, joined by spaces.
     """
-    lines = [line.strip() for line in stderr.splitlines() if line.strip()]
-    start = next((i for i, line in enumerate(lines) if line.startswith("error:")), None)
+    lines = [
+        line.strip().removeprefix("╰─▶").strip()
+        for line in stderr.splitlines()
+        if line.strip() and not line.strip().startswith(_UV_NOISE)
+    ]
+    start = next((i for i, line in enumerate(lines) if line.startswith(("error:", "\u00d7"))), None)
     picked = lines[start:] if start is not None else lines[-8:]
-    return " ".join(picked[:8]) or "(it printed nothing)"
+    return " ".join(picked[:12]) or "(it printed nothing)"
+
+
+def _workspace_above(directory: Path) -> Path | None:
+    """Find the uv workspace a folder lies in, if any.
+
+    Parameters
+    ----------
+    directory
+        The project directory.
+
+    Returns
+    -------
+    Path or None
+        The nearest folder above `directory` whose `pyproject.toml` declares
+        ``[tool.uv.workspace]``; `None` if there is none or it cannot be read.
+    """
+    for folder in directory.parents:
+        try:
+            data = tomllib.loads((folder / "pyproject.toml").read_text())
+        except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
+            continue
+        tool = data.get("tool")
+        uv = tool.get("uv") if isinstance(tool, dict) else None
+        if isinstance(uv, dict) and "workspace" in uv:
+            return folder
+    return None
 
 
 def _lock(directory: Path, uv: str) -> None:
@@ -726,9 +781,12 @@ def _lock(directory: Path, uv: str) -> None:
         Exit 1 if uv cannot be run, fails or takes longer than `_LOCK_TIMEOUT`; the message
         names uv's reason, the network it needs and the next step.
     """
+    workspace = _workspace_above(directory)
+    parent_lock = None if workspace is None else workspace / "uv.lock"
+    saved = _read_bytes(parent_lock)
     try:
         result = subprocess.run(  # nosec B603 -- fixed argv, uv found on the PATH
-            [uv, "lock"],
+            [uv, "lock", "--project", str(directory)],
             cwd=directory,
             capture_output=True,
             text=True,
@@ -740,14 +798,25 @@ def _lock(directory: Path, uv: str) -> None:
     except OSError as exc:
         reason = f"uv could not be run: {exc}"
     else:
-        if result.returncode == 0:
+        if result.returncode == 0 and os.path.lexists(directory / "uv.lock"):
             return
+        if result.returncode == 0:
+            where = ""
+            if parent_lock is not None:
+                _restore(parent_lock, saved)
+                where = f" (it lies in the uv workspace {workspace}, whose uv.lock is as before)"
+            raise CliError(
+                f"uv lock succeeded but wrote no uv.lock in {directory}{where}; nothing was "
+                "left in the project. Run `lakana init` in a folder outside that workspace, or "
+                "add this folder to the workspace's `exclude` and run the same command again.",
+                1,
+            )
         reason = f"uv lock failed: {_uv_error(result.stderr)}"
     message = (
-        f"{reason}. The python template locks its packages from the public package index, so it "
-        "needs network access to it (behind a proxy, set HTTPS_PROXY first). Nothing was written "
-        f"into {directory}. Fix the cause and run the same command again, or leave out "
-        "--template for the SQL sample, which needs no network."
+        f"{reason.rstrip('.')}. The python template locks its packages from the public "
+        "package index, so it needs network access to it (behind a proxy, set HTTPS_PROXY "
+        f"first). Nothing was written into {directory}. Fix the cause and run the same "
+        "command again, or leave out --template for the SQL sample, which needs no network."
     )
     if _is_dev_build(__version__):
         message += (
@@ -757,6 +826,45 @@ def _lock(directory: Path, uv: str) -> None:
             "lock."
         )
     raise CliError(message, 1)
+
+
+def _read_bytes(path: Path | None) -> bytes | None:
+    """Read a file's bytes, if there is one.
+
+    Parameters
+    ----------
+    path
+        The file, or `None`.
+
+    Returns
+    -------
+    bytes or None
+        Its content; `None` when `path` is `None` or cannot be read.
+    """
+    if path is None:
+        return None
+    try:
+        return path.read_bytes()
+    except OSError:
+        return None
+
+
+def _restore(path: Path, saved: bytes | None) -> None:
+    """Put a workspace's lock back as it was before `uv lock` ran.
+
+    Parameters
+    ----------
+    path
+        The workspace's `uv.lock`.
+    saved
+        Its bytes before; `None` if it did not exist (it is then removed).
+    """
+    if _read_bytes(path) == saved:
+        return
+    if saved is None:
+        path.unlink(missing_ok=True)
+    else:
+        path.write_bytes(saved)
 
 
 def _remove(files: list[Path], directories: list[Path]) -> None:
@@ -786,6 +894,7 @@ def write_project(
     ci_auth: str = "oidc",
     template: str | None = None,
     uv: str = "uv",
+    on_checked: Callable[[], None] | None = None,
 ) -> list[Path]:
     """Write every template into `directory`, refusing to overwrite anything.
 
@@ -805,6 +914,8 @@ def write_project(
         locks the project with `uv lock`.
     uv
         The `uv` executable that locks the project of the ``python`` template.
+    on_checked
+        Called once every check has passed, before the first write.
 
     Returns
     -------
@@ -816,7 +927,8 @@ def write_project(
     CliError
         Exit 2 if any target (or, for ``python``, `uv.lock`) exists; exit 3 if a parent is not
         a directory or is a symbolic link (nothing is written in either case); exit 3 on a
-        filesystem error and exit 1 if the lock fails (what was written is removed).
+        filesystem error and exit 1 if the lock fails. On those, and on an interrupt, what was
+        written is removed, with the folders it created.
     """
     templates = TEMPLATES | (PAT_CI_TEMPLATES if ci_auth == "pat" else {})
     texts = {
@@ -831,6 +943,7 @@ def write_project(
         texts["tests/test_example.py"] = _TEST_PYTHON
         added = PYTHON_TEMPLATE if template == Template.python else INGEST_TEMPLATES[template]
     if template == Template.python:
+        texts["pyproject.toml"] = _PYPROJECT_PYTHON.format(repo=repo, version=__version__)
         texts["tests/test_example.py"] = _TEST_PYTHON_SAMPLE
     for relative, text in added.items():
         texts[relative] = text.format(repo=repo) if relative == "README.md" else text
@@ -838,7 +951,10 @@ def write_project(
     reserved = [directory / "uv.lock"] if template == Template.python else []
     existing = [str(path) for path in [*targets, *reserved] if os.path.lexists(path)]
     if existing:
-        raise CliError(f"Refusing to overwrite: {', '.join(existing)}")
+        raise CliError(
+            f"Refusing to overwrite: {', '.join(existing)}. To start over, remove them (or the "
+            "folder, if nothing else in it is yours), or choose another directory."
+        )
     parents = {directory} | {
         directory / parent for relative in texts for parent in Path(relative).parents if parent.name
     }
@@ -854,24 +970,54 @@ def write_project(
             raise CliError(
                 f"Can't write the project into {directory}: {parent} is not a directory", 3
             )
-    created = [parent for parent in sorted(parents) if not os.path.lexists(parent)]
+    above = [folder for folder in directory.parents if not os.path.lexists(folder)]
+    created = [*reversed(above)] + [p for p in sorted(parents) if not os.path.lexists(p)]
+    if on_checked is not None:
+        on_checked()
     written: list[Path] = []
+    done = False
     try:
-        for path, text in targets.items():
-            path.parent.mkdir(parents=True, exist_ok=True)
-            with path.open("x") as handle:
-                handle.write(text)
-            written.append(path)
-    except OSError as exc:
-        _remove(written, created)
-        raise CliError(f"Can't write the project into {directory}: {exc}", 3) from exc
-    if template == Template.python:
         try:
+            for path, text in targets.items():
+                path.parent.mkdir(parents=True, exist_ok=True)
+                with path.open("x") as handle:
+                    handle.write(text)
+                written.append(path)
+        except OSError as exc:
+            raise CliError(f"Can't write the project into {directory}: {exc}", 3) from exc
+        if template == Template.python:
             _lock(directory, uv)
-        except CliError:
-            _remove([*written, directory / "uv.lock"], created)
-            raise
+        done = True
+    finally:
+        if not done:
+            if template == Template.python:
+                written.append(directory / "uv.lock")
+            _remove(written, created)
     return written
+
+
+def _find_uv(target: Path) -> str | None:
+    """Find `uv` on the PATH, never in the current directory or the project.
+
+    Parameters
+    ----------
+    target
+        The project directory, which `uv lock` runs in.
+
+    Returns
+    -------
+    str or None
+        The absolute path of the first `uv` in an absolute PATH entry other than the current
+        directory and `target`; `None` if there is none.
+    """
+    here = Path.cwd().resolve()
+    entries = [
+        entry
+        for entry in os.environ.get("PATH", "").split(os.pathsep)
+        if os.path.isabs(entry) and Path(entry).resolve() not in (here, target)
+    ]
+    found = shutil.which("uv", path=os.pathsep.join(entries))
+    return None if found is None else os.path.abspath(found)
 
 
 def _create_command(readme: str) -> str:
@@ -944,6 +1090,9 @@ def init(
 ) -> None:
     """Create a Lakana project that deploys unchanged.
 
+    Nothing is overwritten: if a file it would write exists, or a folder inside the project is a
+    symbolic link (a write through it could land outside the project), it writes nothing.
+
     Parameters
     ----------
     ctx
@@ -985,8 +1134,9 @@ def init(
             "leave out --sample"
         )
     uv = "uv"
+    announce = None
     if template is Template.python:
-        found = shutil.which("uv")
+        found = _find_uv(target)
         if found is None:
             raise CliError(
                 "--template python locks the project's Python packages with uv, which is not on "
@@ -995,11 +1145,16 @@ def init(
                 1,
             )
         uv = found
-        typer.echo(
-            "The template python locks the project's Python packages with `uv lock` once it is "
-            "written. That needs network access to the public package index and can take a few "
-            "minutes: uv resolves every package the Python asset needs and pins it in uv.lock."
-        )
+
+        def announce() -> None:
+            """Say, before the first write, what the lock needs and why."""
+            typer.echo(
+                "The template python locks the project's Python packages with `uv lock` once it "
+                "is written. That needs network access to the public package index and can take "
+                "a few minutes: uv resolves every package the Python asset needs and pins it in "
+                "uv.lock."
+            )
+
     skipped = template is None and sample is None and _points_off_this_machine(state_of(ctx))
     with_sample = template is None and (sample if sample is not None else not skipped)
     write_project(
@@ -1009,6 +1164,7 @@ def init(
         ci_auth=ci_auth.value,
         template=None if template is None else template.value,
         uv=uv,
+        on_checked=announce,
     )
     setup = [
         f"  cd {shlex.quote(str(target))}",

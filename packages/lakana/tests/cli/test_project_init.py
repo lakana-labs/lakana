@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import subprocess
+import sys
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -898,7 +900,7 @@ def uv(monkeypatch: pytest.MonkeyPatch) -> _Uv:
     monkeypatch.setattr("lakana.cli.project_init.subprocess.run", run)
     monkeypatch.setattr(
         "lakana.cli.project_init.shutil.which",
-        lambda name: "/opt/uv/bin/uv" if name == "uv" else None,
+        lambda name, path=None: "/opt/uv/bin/uv" if name == "uv" else None,
     )
     return fake
 
@@ -940,7 +942,7 @@ def test_the_python_template_writes_the_sample_a_python_asset_and_a_lock(
     assert '"readings": "bronze.readings"' in asset
     assert '"stations": "silver.station_temperatures"' in asset
     assert "readings: pl.DataFrame, stations: pl.DataFrame" in asset
-    assert uv.calls == [(["/opt/uv/bin/uv", "lock"], root)]
+    assert uv.calls == [(["/opt/uv/bin/uv", "lock", "--project", str(root)], root)]
     assert (root / "uv.lock").read_text() == "version = 1\n"
 
 
@@ -1142,12 +1144,48 @@ def test_the_python_asset_is_the_one_the_tutorial_shows() -> None:
     assert (example / "project" / _PYTHON_ASSET).read_text() == PYTHON_TEMPLATE[_PYTHON_ASSET]
 
 
+_UV_NO_SOLUTION = """\
+Using CPython 3.13.15
+  \u00d7 No solution found when resolving dependencies:
+  \u2570\u2500\u25b6 Because there is no version of lakana[assets]==0.20.0 and your project
+      depends on lakana[assets]==0.20.0, we can conclude that your project's
+      requirements are unsatisfiable.
+"""
+"""What uv 0.12 prints when no index has the pinned version (captured from a real run)."""
+
+_UV_NO_SOLUTION_SHOWN = (
+    "\u00d7 No solution found when resolving dependencies: Because there is no version of "
+    "lakana[assets]==0.20.0 and your project depends on lakana[assets]==0.20.0, we can conclude "
+    "that your project's requirements are unsatisfiable."
+)
+
+_UV_OFFLINE = """\
+Using CPython 3.13.15
+error: Request failed after 3 retries in 4.4s
+  Caused by: Failed to fetch: `http://127.0.0.1:9/simple/lakana/`
+  Caused by: error sending request for url (http://127.0.0.1:9/simple/lakana/)
+  Caused by: client error (Connect)
+  Caused by: tcp connect error
+  Caused by: Connection refused (os error 111)
+"""
+"""What uv 0.12 prints when the index cannot be reached (captured from a real run)."""
+
+_UV_OFFLINE_SHOWN = (
+    "error: Request failed after 3 retries in 4.4s Caused by: Failed to fetch: "
+    "`http://127.0.0.1:9/simple/lakana/` Caused by: error sending request for url "
+    "(http://127.0.0.1:9/simple/lakana/) Caused by: client error (Connect) Caused by: tcp "
+    "connect error Caused by: Connection refused (os error 111)"
+)
+
+
 @pytest.mark.parametrize(
     ("stderr", "shown"),
     [
-        ("Using CPython 3.14.4\nerror: one\n  two\n", "error: one two"),
+        (_UV_NO_SOLUTION, _UV_NO_SOLUTION_SHOWN),
+        (_UV_OFFLINE, _UV_OFFLINE_SHOWN),
         ("".join(f"line {n}\n" for n in range(12)), " ".join(f"line {n}" for n in range(4, 12))),
         ("\n", "(it printed nothing)"),
+        ("Using CPython 3.13.15\n", "(it printed nothing)"),
     ],
 )
 def test_the_lock_error_shows_uv_s_reason(stderr: str, shown: str) -> None:
@@ -1155,3 +1193,235 @@ def test_the_lock_error_shows_uv_s_reason(stderr: str, shown: str) -> None:
     from lakana.cli.project_init import _uv_error
 
     assert _uv_error(stderr) == shown
+
+
+def test_a_reason_that_ends_a_sentence_gets_one_full_stop(tmp_path: Path, uv: _Uv) -> None:
+    """The sentence of uv ends with a full stop; the message adds none of its own after it."""
+    uv.returncode = 1
+    uv.stderr = _UV_NO_SOLUTION
+
+    result = _init_python(tmp_path)
+
+    text = " ".join(result.output.split())
+    assert "requirements are unsatisfiable. The python template" in text
+    assert ".." not in text
+
+
+def test_the_python_pyproject_keeps_the_project_its_own_uv_root(tmp_path: Path, uv: _Uv) -> None:
+    """An empty workspace table stops uv at the project; the comment says when to lock again."""
+    _init_python(tmp_path)
+
+    text = (tmp_path / "p" / "pyproject.toml").read_text()
+    assert tomllib.loads(text)["tool"]["uv"]["workspace"] == {}
+    flat = " ".join(line.lstrip("# ") for line in text.splitlines())
+    assert "`lakana init` ran `uv lock`" in flat
+    assert "run `uv lock` again" in flat
+    assert "before the first commit" not in flat
+
+
+def _workspace(root: Path) -> bytes:
+    """Make `root` a uv workspace whose members are every folder below it, with its lock.
+
+    Parameters
+    ----------
+    root
+        The folder.
+
+    Returns
+    -------
+    bytes
+        The workspace's `uv.lock` (a stand-in; uv is not run here).
+    """
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "pyproject.toml").write_text(
+        '[project]\nname = "mono"\nversion = "0.1.0"\nrequires-python = ">=3.11"\n'
+        'dependencies = []\n\n[tool.uv.workspace]\nmembers = ["*"]\n'
+    )
+    (root / "uv.lock").write_text("version = 1\n# the monorepo's lock\n")
+    return (root / "uv.lock").read_bytes()
+
+
+def test_a_lock_that_lands_elsewhere_fails_naming_the_workspace(tmp_path: Path, uv: _Uv) -> None:
+    """The lock succeeded, yet no uv.lock is in the project: exit 1, workspace named."""
+    mono = tmp_path / "mono"
+    before = _workspace(mono)
+    uv.stderr = ""
+
+    def run(argv: list[str], **options: Any) -> subprocess.CompletedProcess[str]:  # ruff: ignore[any-type]
+        uv.calls.append((list(argv), Path(options["cwd"])))
+        (mono / "uv.lock").write_text("version = 1\n# changed by uv\n")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    with mock.patch("lakana.cli.project_init.subprocess.run", run):
+        result = invoke(
+            make_state(tmp_path, FakeApi()), "init", str(mono / "p"), "--template", "python"
+        )
+
+    assert result.exit_code == 1, result.output
+    text = " ".join(result.output.split())
+    assert "no uv.lock" in text
+    assert f"uv workspace {mono}" in text
+    assert not (mono / "p").exists()
+    assert (mono / "uv.lock").read_bytes() == before
+
+
+@pytest.mark.parametrize("above", ["not toml [[[", '[project]\nname = "x"\n', "[tool]\nuv = 1\n"])
+def test_a_lock_that_lands_elsewhere_without_a_workspace_names_none(
+    tmp_path: Path, above: str
+) -> None:
+    """A parent pyproject that is unreadable or has no workspace is not named."""
+    (tmp_path / "pyproject.toml").write_text(above)
+
+    def run(argv: list[str], **options: Any) -> subprocess.CompletedProcess[str]:  # ruff: ignore[any-type]
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    with (
+        mock.patch("lakana.cli.project_init.subprocess.run", run),
+        mock.patch("lakana.cli.project_init._find_uv", return_value="/opt/uv/bin/uv"),
+    ):
+        result = invoke(
+            make_state(tmp_path, FakeApi()), "init", str(tmp_path / "p"), "--template", "python"
+        )
+
+    assert result.exit_code == 1, result.output
+    assert "uv workspace" not in result.output
+    assert not (tmp_path / "p").exists()
+
+
+def test_a_lock_uv_created_above_the_project_is_removed_again(tmp_path: Path) -> None:
+    """A workspace without a lock before gets none from init."""
+    mono = tmp_path / "mono"
+    _workspace(mono)
+    (mono / "uv.lock").unlink()
+
+    def run(argv: list[str], **options: Any) -> subprocess.CompletedProcess[str]:  # ruff: ignore[any-type]
+        (mono / "uv.lock").write_text("version = 1\n")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    with (
+        mock.patch("lakana.cli.project_init.subprocess.run", run),
+        mock.patch("lakana.cli.project_init._find_uv", return_value="/opt/uv/bin/uv"),
+    ):
+        result = invoke(
+            make_state(tmp_path, FakeApi()), "init", str(mono / "p"), "--template", "python"
+        )
+
+    assert result.exit_code == 1
+    assert not (mono / "uv.lock").exists()
+
+
+@pytest.mark.skipif(shutil.which("uv") is None, reason="needs uv on the PATH")
+def test_a_parent_workspace_s_lock_stays_byte_identical_with_a_real_uv(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Real uv, offline: the project is its own root, so the monorepo's lock is not touched.
+
+    The template's dependency is left out, so uv resolves without the network; without the
+    empty workspace table uv would add the project to the monorepo's lock instead.
+    """
+    from lakana.cli import project_init
+
+    monkeypatch.setattr(
+        project_init,
+        "_PYPROJECT_PYTHON",
+        project_init._PYPROJECT_PYTHON.replace(
+            'dependencies = ["lakana[assets]=={version}"]', "dependencies = []"
+        ),
+    )
+    mono = tmp_path / "mono"
+    mono.mkdir()
+    (mono / "pyproject.toml").write_text(
+        '[project]\nname = "mono"\nversion = "0.1.0"\nrequires-python = ">=3.11"\n'
+        'dependencies = []\n\n[tool.uv.workspace]\nmembers = ["*"]\n'
+    )
+    env = {"UV_OFFLINE": "1", "UV_NO_PROGRESS": "1", "UV_PYTHON": sys.executable}
+    subprocess.run(["uv", "lock", "-q"], cwd=mono, check=True, env=os.environ | env)
+    before = (mono / "uv.lock").read_bytes()
+
+    result = invoke(
+        make_state(tmp_path, FakeApi()), "init", str(mono / "p"), "--template", "python", env=env
+    )
+
+    assert result.exit_code == 0, result.output
+    assert (mono / "p" / "uv.lock").is_file()
+    assert (mono / "uv.lock").read_bytes() == before
+
+
+def test_ctrl_c_during_the_lock_leaves_nothing(tmp_path: Path, uv: _Uv) -> None:
+    """An interrupt while uv runs removes what init wrote, so the same command works again."""
+    uv.raises = KeyboardInterrupt()
+
+    result = _init_python(tmp_path)
+
+    assert result.exit_code != 0
+    assert not (tmp_path / "p").exists()
+
+
+def test_a_failed_lock_removes_the_parent_folders_init_made(tmp_path: Path, uv: _Uv) -> None:
+    """`init a/b/p` that fails leaves no `a/` behind."""
+    uv.returncode = 1
+
+    result = invoke(
+        make_state(tmp_path, FakeApi()),
+        "init",
+        str(tmp_path / "a" / "b" / "p"),
+        "--template",
+        "python",
+    )
+
+    assert result.exit_code == 1
+    assert sorted(p.name for p in tmp_path.iterdir() if p.name != "lakana") == []
+
+
+def test_a_refusal_to_overwrite_says_how_to_start_over(tmp_path: Path, uv: _Uv) -> None:
+    """The next step: remove the files or the folder, or choose another; no lock notice."""
+    target = tmp_path / "p"
+    target.mkdir()
+    (target / "lakana.yaml").write_text("mine\n")
+
+    result = _init_python(tmp_path)
+
+    assert result.exit_code == 2
+    text = " ".join(result.output.split())
+    assert "remove them (or the folder" in text
+    assert "choose another directory" in text
+    assert "network access" not in text
+
+
+def test_uv_is_never_taken_from_the_current_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With `.` and an empty entry on PATH, the uv found is the absolute one, never `./uv`."""
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    for folder in (tools, tmp_path):
+        (folder / "uv").write_text("#!/bin/sh\nexit 0\n")
+        (folder / "uv").chmod(0o755)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("PATH", os.pathsep.join([".", "", str(tools)]))
+    seen: list[str] = []
+
+    def run(argv: list[str], **options: Any) -> subprocess.CompletedProcess[str]:  # ruff: ignore[any-type]
+        if argv[1:2] == ["lock"]:
+            seen.append(argv[0])
+            (Path(options["cwd"]) / "uv.lock").write_text("version = 1\n")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    with mock.patch("lakana.cli.project_init.subprocess.run", run):
+        result = invoke(make_state(tmp_path, FakeApi()), "init", "p", "--template", "python")
+
+    assert result.exit_code == 0, result.output
+    assert seen == [str(tools / "uv")]
+
+
+def test_a_lock_uv_left_unchanged_is_not_written_again(tmp_path: Path) -> None:
+    """Putting back a lock that did not change leaves the file alone (same inode, same bytes)."""
+    from lakana.cli.project_init import _restore
+
+    lock = tmp_path / "uv.lock"
+    lock.write_text("version = 1\n")
+    before = lock.stat()
+
+    _restore(lock, b"version = 1\n")
+
+    assert lock.stat().st_mtime_ns == before.st_mtime_ns
