@@ -4,8 +4,8 @@ A GitLab CI pipeline can deploy a Lakana project without a Lakana token stored i
 job declares an OIDC ID token, a signed statement of which project, branch and commit the job runs
 for, and exchanges it with the Lakana server for a short-lived CI token. The CI token may queue
 one deploy, of the job's own commit, or one dry run, and nothing else. The files `lakana init`
-writes work this way. A job with `on_deploy: true` starts after such a deploy only when the rule's
-service account holds `RUN` on the environment ([CI trust rules](../reference/ci-trust-rules.md)).
+writes work this way. Such a deploy starts no job with `on_deploy: true`
+([CI trust rules](../reference/ci-trust-rules.md)).
 
 At the end of this page, merge requests are dry-run against `dev` and every pipeline on `main` is
 deployed to `prod`, with no secret in the project's CI/CD settings.

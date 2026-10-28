@@ -7,10 +7,10 @@ succeeds only when exactly one enabled **CI trust rule** matches the ID token. T
 the rule's service account and may queue one deploy, of the commit the job runs at, or one dry
 run, to one environment, and then follow that run. Nothing secret is stored in CI.
 
-The CI token itself may not start a run. A deploy it queued starts the project's jobs with
-`on_deploy: true` as the rule's service account, by that account's own grants: only when the
-account holds `RUN` on the environment, and otherwise the deploy succeeds and says which job was not
-started ([Start a job after each deploy](../how-to/run-a-job-on-a-schedule.md#start-a-job-after-each-deploy)).
+A CI token may not start a run, and a deploy it queued does not start the project's jobs with
+`on_deploy: true` either, even when the service account holds `RUN`: the deploy succeeds and
+names each job it did not start. Start them in a later step with a stored token that holds `RUN`
+([Start a job after each deploy](../how-to/run-a-job-on-a-schedule.md#start-a-job-after-each-deploy)).
 
 This page lists the exact rules. The operator turns the exchange on with the `LAKANA_CI_OIDC__*`
 settings ([Settings](settings.md)); an administrator manages the rules with `lakana ci-trust`

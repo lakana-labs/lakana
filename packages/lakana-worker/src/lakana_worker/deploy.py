@@ -644,7 +644,9 @@ def run_deploy(
         _fail(service, run, INTERNAL_ERROR_MESSAGE, worker_id)
     else:
         if kind is DeployKind.DEPLOY:
-            _start_jobs(session, authz, run_id, principal, settings.caps)
+            # The starts are checked with the rights the deploy had: a CI token's scope too.
+            requester = dataclasses.replace(principal, ci_scope=ci_scope)
+            _start_jobs(session, authz, run_id, requester, settings.caps)
 
 
 def _start_jobs(
@@ -670,7 +672,9 @@ def _start_jobs(
     run_id
         The deploy run.
     principal
-        The principal that deployed.
+        The principal that deployed, with the scope of the CI token that queued the deploy, if
+        any: the starts have exactly the rights the deploy had, so a CI token (which may only
+        deploy) starts nothing.
     caps
         The operator's maximums for each task's policy.
     """

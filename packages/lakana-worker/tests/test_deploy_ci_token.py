@@ -11,7 +11,7 @@ from typing import Any
 import pytest
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
-from worker_git_helpers import make_repo
+from worker_git_helpers import commit, make_repo
 
 from lakana_core.auth import AllowAllAuthorization, PrincipalRef, SecurableKind
 from lakana_core.catalog.service import CatalogService
@@ -33,6 +33,8 @@ from lakana_core.models import (
     PrincipalType,
     Repository,
     RepositoryKind,
+    Run,
+    RunTrigger,
 )
 from lakana_core.projects.deploys import DeployService
 from lakana_core.projects.repositories import RepositoryService
@@ -289,3 +291,97 @@ def test_a_tampered_ref_of_a_ci_deploy_fails_it(session: Session, ci: Ci) -> Non
     run = _execute(session, ci, view.id)
     assert run.status is DeployStatus.FAILED
     assert run.error_message is not None and ci.sha in run.error_message
+
+
+_ON_DEPLOY_YAML = (
+    "repo: analytics\ndefaults:\n  owner: data-eng\n"
+    "jobs:\n  refresh:\n    select: ['silver.*']\n    on_deploy: true\n"
+)
+
+
+def _signed_on_deploy_commit(session: Session, ci: Ci, tmp_path: Path) -> Ci:
+    """Commit a job with `on_deploy: true` and make it the CI token's signed commit.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    ci
+        The fixture.
+    tmp_path
+        Pytest's per-test directory, which holds the repository.
+
+    Returns
+    -------
+    Ci
+        The fixture, with the principal's scope naming the new commit.
+    """
+    sha = commit(tmp_path / "repos" / "analytics", {"lakana.yaml": _ON_DEPLOY_YAML})
+    session.execute(update(CiToken).values(sha=sha))
+    session.commit()
+    token = session.execute(select(CiToken)).scalar_one()
+    scope = resolve_ci_scope(session, token, now=datetime.now(UTC), require_unexpired=True)
+    assert scope is not None
+    return dataclasses.replace(
+        ci, principal=dataclasses.replace(ci.principal, ci_scope=scope), sha=sha
+    )
+
+
+def _runs(session: Session) -> list[Run]:
+    """Read every run.
+
+    Parameters
+    ----------
+    session
+        Database session.
+
+    Returns
+    -------
+    list of Run
+        The runs.
+    """
+    session.expire_all()
+    return list(session.scalars(select(Run)))
+
+
+def test_a_ci_deploy_starts_no_job_though_its_account_may_run(
+    session: Session, ci: Ci, tmp_path: Path
+) -> None:
+    """The token may only deploy: the start is checked with its scope, so nothing starts."""
+    signed = _signed_on_deploy_commit(session, ci, tmp_path)
+
+    run = _run(session, signed)
+
+    assert run.status is DeployStatus.SUCCEEDED
+    assert _runs(session) == []
+    (entry,) = run.job_starts_json or []
+    assert (entry["job"], entry["outcome"], entry["reason"]) == (
+        "refresh",
+        "not_started",
+        "lacks_run",
+    )
+    assert entry["message"] == (
+        "job `refresh` was not started: deployer deployed with a CI token, which may only "
+        "deploy. Start the job with `lakana job run refresh --repo analytics --env dev`, as a "
+        "person or with a stored token that holds RUN."
+    )
+
+
+def test_the_same_account_without_a_ci_token_starts_the_job(
+    session: Session, ci: Ci, tmp_path: Path
+) -> None:
+    """With a stored token the account's own grants apply, and they hold RUN."""
+    signed = _signed_on_deploy_commit(session, ci, tmp_path)
+    stored = dataclasses.replace(
+        signed, principal=dataclasses.replace(signed.principal, ci_scope=None)
+    )
+
+    run = _run(session, stored)
+
+    assert run.status is DeployStatus.SUCCEEDED
+    (started,) = _runs(session)
+    assert (started.job, started.trigger, started.triggered_by) == (
+        "refresh",
+        RunTrigger.DEPLOY,
+        signed.principal.id,
+    )

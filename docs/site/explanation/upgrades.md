@@ -441,8 +441,8 @@ hidden from a reader of only its earlier namespace.
 ### A job can start after each deploy
 
 A job with `on_deploy: true` in `lakana.yaml` starts after each deploy that makes another
-project version current, as the person or CI account that deployed; runs started this way have
-the trigger `deploy` (`lakana runs list --trigger deploy`). The key is off by default, so existing
+project version current, as whoever deployed (a deploy through a CI token starts none); runs
+started this way have the trigger `deploy` (`lakana runs list --trigger deploy`). The key is off by default, so existing
 jobs do not change, and a project that does not use it keeps its manifest. Migration `0051` adds
 the record of these starts to each deploy (`job_starts` in `GET .../deploys/{id}`). A worker of an
 earlier release refuses a project that uses the key

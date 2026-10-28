@@ -73,6 +73,34 @@ def _lacks_run_message(job: str, principal: str, repository: str, environment: s
     )
 
 
+def _ci_token_message(job: str, principal: str, repository: str, environment: str) -> str:
+    """Say that a deploy through a CI token starts no job, and how to start it.
+
+    A CI token may only deploy, whatever its account's grants, so granting `RUN` would not help.
+
+    Parameters
+    ----------
+    job
+        The job.
+    principal
+        The name of the token's service account.
+    repository
+        The repository.
+    environment
+        The environment.
+
+    Returns
+    -------
+    str
+        The cause and the start by hand.
+    """
+    return (
+        f"job `{job}` was not started: {principal} deployed with a CI token, which may only "
+        f"deploy. Start the job with {run_it_yourself(job, repository, environment)}, as a "
+        "person or with a stored token that holds RUN."
+    )
+
+
 def _start_one(
     session: Session, jobs: JobService, p: PrincipalRef, environment: str, repository: str, job: str
 ) -> DeployJobStart:
@@ -107,7 +135,11 @@ def _start_one(
             job=job,
             outcome=OUTCOME_NOT_STARTED,
             reason=REASON_LACKS_RUN,
-            message=_lacks_run_message(job, p.name, repository, environment),
+            message=(
+                _ci_token_message(job, p.name, repository, environment)
+                if p.ci_scope is not None
+                else _lacks_run_message(job, p.name, repository, environment)
+            ),
         )
     except (ConflictError, NotFoundError, ValidationError) as exc:
         session.rollback()
@@ -192,8 +224,9 @@ def start_jobs_after_deploy(
     run_id
         The deploy run, after `DeployService.record_deploy` committed it.
     p
-        The principal that deployed (without a CI token's scope: the deploy's table checks use the
-        account the same way).
+        The principal that deployed, with the scope of the CI token that queued the deploy, if any:
+        each start is authorized with the rights the deploy request had, so a CI token, which may
+        only deploy, starts nothing.
     caps
         The operator's maximums for each task's policy; `RunCaps()` when `None`.
 

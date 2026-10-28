@@ -502,6 +502,9 @@ OIDC exchange and CI tokens (#15)"; the user's view is
   repository, of a kind its rule allows, never a rollback; a deploy only of the signed `sha`, which
   the worker checks again after the fetch. Afterwards it reads only its own run. Undeploy, job
   pause, resume and test, and delivery reads refuse it. A test enumerates every `DEPLOY` check.
+  The jobs with `on_deploy: true` that its deploy would start (#102) are authorized with the
+  token's scope as well, so they are refused (`RUN`) and the deploy names each one: a CI token
+  causes no run, whatever the account's grants.
 - **Revocation.** Disabling, changing or deleting the rule, deactivating the service account or
   deleting the environment ends the token at its next request (each change raises the rule's
   revision); the worker re-checks a queued run's token, rule and account at claim time.
@@ -530,14 +533,6 @@ OIDC exchange and CI tokens (#15)"; the user's view is
    before the deletion works again.
 6. **The audit row's per-client bucket trusts `request.client.host`**, as `AUTHENTICATION_FAILED`
    does (see "Explicitly not defended"); behind a proxy all clients share one bucket.
-7. **A CI deploy starts the project's `on_deploy: true` jobs by the service account's own
-   grants** (#102). The token stays refused for `RUN`; the worker starts each job after the deploy
-   committed, through `JobService.start` as the account without the token's scope, the way the
-   deploy's table checks already use it. So a holder of a CI token whose account holds `RUN` can
-   cause one start per such job of the signed commit's manifest, of code that same deploy put in
-   place, under the protected-environment rules (the bound run principal writes). An account that
-   should not start runs must not hold `RUN`; without it the deploy succeeds and names the job not
-   started.
 
 ## Explicitly not defended
 

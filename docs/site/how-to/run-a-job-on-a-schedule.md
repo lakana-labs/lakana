@@ -326,9 +326,10 @@ The rules:
   another project version current: the first deploy, a new commit, or a commit you deployed
   before and deploy again over a newer one. Deploying the commit that is already current changes
   nothing and starts nothing. A dry run, a rollback and a deploy that fails start nothing either.
-- **It runs as whoever deployed**, the person or the CI account, with the same rules as if they had
-  run `lakana job run` right after the deploy: they need `RUN` on the environment, and a protected
-  environment needs a bound run principal (the run then writes as that account). The start is in
+- **It runs as whoever deployed**, with the rights the deploy had, as if they had run
+  `lakana job run` right after the deploy: they need `RUN` on the environment, and a protected
+  environment needs a bound run principal (the run then writes as that account). A deploy through
+  a CI token (`LAKANA_OIDC`) starts no job: the token may only deploy. The start is in
   the audit log as `RUN_STARTED` with the trigger `deploy` and the deployer as its actor.
 - **A busy project makes it wait**, like any other start: the deploy prints
   `waits for run RUN_ID; it starts then`, and the job shows as `waiting` in `lakana job list`. When
@@ -362,6 +363,12 @@ Hint: run 'lakana run --env dev' to run what you just deployed.
 Grant the account `RUN` as the warning says, or start the job yourself. Every outcome is also in
 the deploy's record, under `job_starts` in the JSON of the deploy
 ([Jobs reference](../reference/jobs.md#after-a-deploy)).
+
+**A start can be lost.** The worker that ran the deploy starts the jobs right after the deploy
+is recorded. If that worker stops in between (it crashed, or its machine went down), the deploy
+stays succeeded and the job does not start; nothing tries again. The deploy's record then shows
+the job as not started with the reason `lost`, and `lakana deploy` prints the warning. Start the
+job by hand, as the warning says.
 
 ## When the project is busy
 
