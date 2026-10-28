@@ -90,7 +90,9 @@ cd sources
 Each project also gets `lakana.yaml`, the CI files, a `pyproject.toml` that depends on
 `lakana[assets]` at the version that wrote it, a test that checks every Python asset parses, and a
 `README.md` with the next steps for its connection. The command prints the same steps.
-`--template` leaves out the sample project, and `--sample` with it is refused.
+These templates leave out the sample project, and `--sample` with them is refused. (The fourth
+template, `python`, is the sample with a Python asset:
+[Build a table with Python](../tutorials/python-sample.md).)
 
 The asset of `ingest-files`:
 

@@ -95,7 +95,9 @@ DataFrames and returns a polars DataFrame or an Arrow table, which replaces its 
 appended or merged into it; see
 [Projects and deploys](docs/site/how-to/projects.md#python-assets). With `output="artifact"` it
 instead stores a file such as a trained model as a numbered version that another asset reads; see
-[Artifacts](docs/site/reference/artifacts.md).
+[Artifacts](docs/site/reference/artifacts.md). `lakana init --template python` writes the sample
+with one Python asset and its lock, ready to deploy; see
+[Build a table with Python](docs/site/tutorials/python-sample.md).
 
 ```python
 # assets/gold/station_scores.py  ->  table gold.station_scores
