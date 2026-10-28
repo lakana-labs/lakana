@@ -443,11 +443,21 @@ jobs:
       # of this commit in a folder, and every other package comes from the public package index.
       - name: Build the lakana wheel for the Python-asset example
         run: uv build --package lakana --wheel --out-dir "$RUNNER_TEMP/wheelhouse"
+      # The examples share one uv cache (the runner's, and their workers'), kept between runs:
+      # the Python-asset examples lock and build from the public index, and each package is then
+      # downloaded once per cache, not once per example and run.
+      - name: Restore the examples' uv cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6
+        with:
+          path: ${{ runner.temp }}/docs-uv-cache
+          key: docs-uv-${{ runner.os }}-${{ hashFiles('uv.lock', 'docs/examples/*/project/pyproject.toml') }}
+          restore-keys: docs-uv-${{ runner.os }}-
       - name: Run the documentation's example projects
         env:
           LAKANA_TEST_WHEELHOUSE: ${{ runner.temp }}/wheelhouse
           LAKANA_DOCS_EXAMPLE_BUDGET: "240"
           LAKANA_DOCS_CAPTURE: ${{ runner.temp }}/docs-captures
+          LAKANA_DOCS_UV_CACHE: ${{ runner.temp }}/docs-uv-cache
         run: uv run bash scripts/run_docs_examples.sh
       # What each region of an example printed, compared with the `<!-- output: EXAMPLE#REGION -->`
       # blocks of the pages (parts that differ per run masked). A mismatch prints a diff; to repair

@@ -1,0 +1,5 @@
+[
+  {"id": 1, "name": "Anchor", "price": 24.5, "updated_at": "2026-10-01T08:00:00Z"},
+  {"id": 2, "name": "Buoy", "price": 7.25, "updated_at": "2026-10-01T09:00:00Z"},
+  {"id": 3, "name": "Cleat", "price": 3.75, "updated_at": "2026-10-01T10:00:00Z"}
+]

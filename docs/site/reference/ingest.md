@@ -9,6 +9,11 @@ the `lakana[assets]` extra, which a project that runs assets already depends on;
 the ADBC drivers of PostgreSQL and SQLite, and PyMySQL, the client of MariaDB and MySQL.
 `rest` needs nothing more: it uses `httpx`, which `lakana` itself depends on.
 
+`lakana init --template ingest-files`, `ingest-sql` or `ingest-rest` writes a project whose one
+asset uses `files`, `sql` or `rest`. [Load data from a source](../how-to/load-data-from-a-source.md)
+walks through each, with a tested recipe, and shows a source no helper reads, with
+`connections.get` and your own client.
+
 ## files
 
 `lakana.ingest.files` reads flat files (CSV, Parquet, JSON, spreadsheets) and returns a
@@ -44,6 +49,9 @@ from lakana.ingest import files
 def invoices(ctx):
     return files.read("landing", "exports/**/*.parquet", since=ctx.watermark())
 ```
+
+The tested recipe of this asset, from the connection to the schedule:
+[Load data from a source](../how-to/load-data-from-a-source.md#1-create-the-connection).
 
 A `gcs` or `azure` connection is read the same way. An `http` connection reads one file, named
 by its path below the base URL:
@@ -91,8 +99,9 @@ def stations():
   the form body, to that URL only), keeps it until 30 seconds before its `expires_in` ends, and
   sends it as `Bearer`. A token valid for 30 seconds or less is fetched again for every request;
   an answer without `expires_in`, or with one that is not a whole number of seconds, is kept for 5
-  minutes. A token endpoint that answers anything but 200 with a token fails the read; only 408,
-  429 and 5xx are retried. A secret value with a line break, another control character or a
+  minutes. The token answer is JSON in UTF-8, with or without a byte order mark. A token endpoint
+  that answers anything but 200 with a token fails the read; only 408, 429 and 5xx are retried. A
+  secret value with a line break, another control character or a
   character outside ASCII is refused, never sent.
 
 ### files.read
@@ -304,6 +313,9 @@ def customers():
     )
 ```
 
+The tested recipe of an incremental read that merges on a key:
+[A REST API](../how-to/load-data-from-a-source.md#a-rest-api).
+
 ### rest.read
 
 `rest.read(connection, path, *, ...)` sends `GET` requests below the connection's `base_url` and
@@ -435,6 +447,9 @@ def customers(ctx):
         params={"since": ctx.watermark(default=dt.datetime(1970, 1, 1, tzinfo=dt.UTC))},
     )
 ```
+
+The tested recipe of an incremental read that appends by an integer key:
+[A SQL database](../how-to/load-data-from-a-source.md#a-sql-database).
 
 ### sql.read
 

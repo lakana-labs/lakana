@@ -2649,6 +2649,27 @@ def test_the_project_lakana_init_writes_deploys_with_its_check(
     ]
 
 
+@pytest.mark.parametrize("template", ["ingest-files", "ingest-sql", "ingest-rest"])
+def test_each_ingestion_template_asset_passes_the_deploy_rules(template: str) -> None:
+    """The asset `lakana init --template` writes parses with no issue, its header recorded."""
+    from lakana.cli.project_init import INGEST_TEMPLATES
+    from lakana_core.projects.asset_model import ParsedAsset
+    from lakana_core.projects.discovery import DiscoveredAsset
+    from lakana_core.projects.project_config import AssetDefaults
+    from lakana_core.projects.python_assets import parse_python_asset
+
+    (path,) = (p for p in INGEST_TEMPLATES[template] if p.endswith(".py"))
+    table = "bronze." + path.rsplit("/", 1)[1].removesuffix(".py")
+    asset = DiscoveredAsset(
+        path=path, table=table, text=INGEST_TEMPLATES[template][path], kind="python"
+    )
+
+    parsed = parse_python_asset(asset, AssetDefaults())
+
+    assert isinstance(parsed, ParsedAsset), parsed
+    assert len(parsed.connections) == 1
+
+
 _JOBS_YAML = (
     'repo: analytics\njobs:\n  daily:\n    select: ["silver.*"]\n'
     '    schedule: { cron: "0 6 * * *", timezone: Europe/Berlin }\n'

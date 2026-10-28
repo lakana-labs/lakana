@@ -1,5 +1,6 @@
 """Tests for the documentation examples and their runner."""
 
+import json
 import os
 import re
 import subprocess
@@ -205,7 +206,13 @@ time.sleep(60)
 
 
 def _run_with_budget_file(
-    tmp_path: Path, budget_file: str | None, script: str = "exit 0\n", **env: str
+    tmp_path: Path,
+    budget_file: str | None,
+    script: str = "exit 0\n",
+    *,
+    start: str | None = None,
+    stub: str = _START_STUB,
+    **env: str,
 ) -> subprocess.CompletedProcess[str]:
     """Run the runner on a one-example tree and a stub `lakana`; the example just succeeds.
 
@@ -217,6 +224,10 @@ def _run_with_budget_file(
         What the example's `budget` file holds; `None` for no file.
     script
         The example's `run.sh` after its first line.
+    start
+        The example's `start.sh`; `None` for none (the default start command).
+    stub
+        The stand-in `lakana` command.
     **env
         Extra environment variables (`LAKANA_DOCS_EXAMPLE_BUDGET`).
 
@@ -234,13 +245,16 @@ def _run_with_budget_file(
     (example / "run.sh").write_text("#!/usr/bin/env bash\n" + script)
     if budget_file is not None:
         (example / "budget").write_text(budget_file)
-    stub = bin_dir / "lakana"
-    stub.write_text(_START_STUB)
-    stub.chmod(0o755)
+    if start is not None:
+        (example / "start.sh").write_text(start)
+        (scripts / "docs_blocks.py").write_text((ROOT / "scripts" / "docs_blocks.py").read_text())
+    command = bin_dir / "lakana"
+    command.write_text(stub)
+    command.chmod(0o755)
     environment = {
         key: value
         for key, value in os.environ.items()
-        if key not in ("LAKANA_DOCS_EXAMPLE_BUDGET", "LAKANA_DOCS_CAPTURE")
+        if key not in ("LAKANA_DOCS_EXAMPLE_BUDGET", "LAKANA_DOCS_CAPTURE", "LAKANA_DOCS_UV_CACHE")
     }
     environment.update(
         {
@@ -273,6 +287,37 @@ def test_the_longer_of_the_file_and_the_environment_applies(tmp_path: Path) -> N
     assert "budget 240 s" in shorter.stdout, shorter.stdout
     longer = _run_with_budget_file(tmp_path / "b", "300", LAKANA_DOCS_EXAMPLE_BUDGET="240")
     assert "budget 300 s" in longer.stdout, longer.stdout
+
+
+_RECORDING_STUB = _START_STUB.replace(
+    'print("Lakana is running"',
+    "import os, sys\n"
+    "with open(os.environ['STUB_RECORD'], 'w') as f:\n"
+    "    f.write(os.environ.get('LAKANA_RUN__INGESTION_ROOTS', '-') + '\\n')\n"
+    "    f.write(' '.join(sys.argv[1:]) + '\\n')\n"
+    'print("Lakana is running"',
+)
+
+_ROOTS_START = """#!/usr/bin/env bash
+set -euo pipefail
+# docs:start start
+LAKANA_RUN__INGESTION_ROOTS="{\\"landing\\": \\"$HOME/landing\\"}" lakana server start --local
+# docs:end start
+"""
+
+
+def test_a_start_region_may_set_a_variable_from_home(tmp_path: Path) -> None:
+    """The start command runs as the page shows it: a shell assignment, `$HOME` expanded."""
+    record = tmp_path / "record"
+    result = _run_with_budget_file(
+        tmp_path, None, start=_ROOTS_START, stub=_RECORDING_STUB, STUB_RECORD=str(record)
+    )
+
+    assert result.returncode == 0, result.stderr
+    roots, arguments = record.read_text().splitlines()
+    home = json.loads(roots)["landing"].removesuffix("/landing")
+    assert home.endswith("/home"), roots
+    assert re.fullmatch(r"server start --local --port \d+", arguments), arguments
 
 
 def test_a_budget_file_that_is_not_a_number_is_refused_with_its_name(tmp_path: Path) -> None:
@@ -430,3 +475,43 @@ def test_a_pipeline_status_survives_a_region(tmp_path: Path) -> None:
     )
     assert "status=0" in result.stdout
     assert "again=1" in result.stdout
+
+
+_RECORD_CACHES = (
+    'echo "$UV_CACHE_DIR $(cd "$HOME/.cache/lakana-worker/uv" && pwd -P) $HOME" > "$RECORD"\n'
+)
+"""An example that records its `UV_CACHE_DIR`, where its worker's uv cache resolves, and `HOME`."""
+
+
+def test_the_examples_share_one_uv_cache_outside_their_homes(tmp_path: Path) -> None:
+    """Uv's cache and the worker's lie outside the example's HOME, in the run's own directory.
+
+    The runner makes that directory once, before the first example, so every example of the run
+    gets the same one; it is removed when the run ends.
+    """
+    record = tmp_path / "record"
+
+    result = _run_with_budget_file(tmp_path / "t", None, _RECORD_CACHES, RECORD=str(record))
+
+    assert result.returncode == 0, result.stderr
+    uv_cache, worker_cache, home = record.read_text().split()
+    assert Path(uv_cache).parent == Path(worker_cache).parent
+    assert uv_cache != worker_cache
+    assert not uv_cache.startswith(home)
+    assert not worker_cache.startswith(home)
+    assert not Path(uv_cache).parent.exists()
+
+
+def test_lakana_docs_uv_cache_keeps_the_shared_cache(tmp_path: Path) -> None:
+    """`LAKANA_DOCS_UV_CACHE` names a directory that outlives the run, for CI's cache."""
+    record, kept = tmp_path / "record", tmp_path / "kept"
+
+    result = _run_with_budget_file(
+        tmp_path / "t", None, _RECORD_CACHES, RECORD=str(record), LAKANA_DOCS_UV_CACHE=str(kept)
+    )
+
+    assert result.returncode == 0, result.stderr
+    uv_cache, worker_cache, _ = record.read_text().split()
+    assert Path(uv_cache) == kept.resolve() / "uv"
+    assert Path(worker_cache) == kept.resolve() / "worker-uv"
+    assert Path(uv_cache).is_dir()

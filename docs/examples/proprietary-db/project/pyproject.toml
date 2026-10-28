@@ -1,0 +1,10 @@
+[project]
+name = "sources"
+version = "0.1.0"
+requires-python = ">=3.11"
+# The driver is your project's dependency, never Lakana's: python-tds speaks SQL Server's protocol
+# in pure Python (MIT), and pyOpenSSL gives it TLS.
+dependencies = ["lakana[assets]==<version>", "python-tds==1.17.1", "pyopenssl==26.4.0"]
+
+[dependency-groups]
+dev = ["pytest>=8"]

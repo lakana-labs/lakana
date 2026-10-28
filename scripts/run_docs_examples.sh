@@ -12,7 +12,9 @@
 # itself, as its tutorial tells the reader to. `run.sh` starts in WORK; HOME is its parent.
 # The instance is started by the command in the `start` region of the example's start.sh (the
 # one its tutorial shows) with `--port <free port>` appended; without a start.sh the default
-# `lakana server start --local` is used.
+# `lakana server start --local` is used. The command runs in bash as the page shows it, after the
+# private HOME is set, so it may set a variable for the instance (`NAME="$HOME/..." lakana ...`);
+# it must stay one simple command, which bash replaces itself with, so a stop reaches the server.
 # LAKANA_DOCS_EXAMPLE_BUDGET (default 120) is the number of seconds one example may take. An
 # example that needs longer (it waits for a schedule, or builds a Python environment) says so in
 # a file `budget` next to its run.sh, one number of seconds; the longer of the two applies.
@@ -23,6 +25,11 @@
 # `<!-- output: EXAMPLE#NAME -->` blocks of the pages with those files, and `--fix` copies them in.
 # A region that runs twice keeps its last run. There is no default directory: unset, nothing is
 # captured.
+# All examples of one run share one uv cache, outside their private HOMEs: UV_CACHE_DIR for what
+# run.sh runs (`uv lock`), and the worker's own (<cache>/lakana-worker/uv, a link), so each package
+# is downloaded and built once per run, not once per example. Environments are never shared.
+# LAKANA_DOCS_UV_CACHE names a directory to keep it in (CI restores and saves it); unset, it is a
+# temporary directory removed at the end.
 # The instance is stopped and the directories removed on success, failure, timeout or ^C.
 set -euo pipefail
 
@@ -55,6 +62,15 @@ if ! command -v lakana >/dev/null 2>&1; then
 fi
 
 summary=$(mktemp)
+own_uv=""
+if [ -n "${LAKANA_DOCS_UV_CACHE:-}" ]; then
+  mkdir -p "$LAKANA_DOCS_UV_CACHE"
+  uv_shared=$(cd "$LAKANA_DOCS_UV_CACHE" && pwd -P)
+else
+  uv_shared=$(mktemp -d)
+  own_uv=$uv_shared
+fi
+mkdir -p -m 0700 "$uv_shared/uv" "$uv_shared/worker-uv"
 # Sourced by the bash that runs an example's run.sh (and only by that one, DOCS_RUN_SCRIPT): when a
 # command fails, print which line it was, so a silent check (`test -f ...`) names itself. It also
 # defines what the markers of a region become when the output is captured (see run_one): the
@@ -116,7 +132,7 @@ cleanup() {
     base=""
   fi
 }
-trap 'cleanup; rm -f "$summary" "$tracer"' EXIT
+trap 'cleanup; rm -f "$summary" "$tracer"; if [ -n "$own_uv" ]; then rm -rf "$own_uv"; fi' EXIT
 trap 'exit 130' INT TERM
 
 # A free port, so a leftover instance (or anything else on 8765) cannot break this run.
@@ -124,8 +140,8 @@ free_port() {
   python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])'
 }
 
-# The words of the example's start command: the `start` region of its start.sh, read with the
-# documentation's own block checker, or the default.
+# The example's start command: the `start` region of its start.sh, read with the documentation's
+# own block checker, or the default.
 start_command() {
   if [ -f "$1/start.sh" ]; then
     PYTHONPATH="$root" python3 -c '
@@ -181,7 +197,7 @@ for run in runs if isinstance(runs, list) else []:
 }
 
 run_one() {
-  local name=$1 log status=0 port words budget=$default_budget own
+  local name=$1 log status=0 port command budget=$default_budget own
   if [ -f "$examples_dir/$name/budget" ]; then
     own=$(tr -d '[:space:]' < "$examples_dir/$name/budget")
     if ! [[ "$own" =~ ^[0-9]+$ ]]; then
@@ -198,6 +214,10 @@ run_one() {
   # No git identity: a machine's own would leak in. Unset, so the example proves its own steps.
   unset GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL EMAIL
   export GIT_CONFIG_NOSYSTEM=1
+  # The run's shared uv caches (see the top): the worker of the instance finds its own by HOME.
+  export UV_CACHE_DIR="$uv_shared/uv"
+  mkdir -p "$HOME/.cache/lakana-worker"
+  ln -s "$uv_shared/worker-uv" "$HOME/.cache/lakana-worker/uv"
   # Git's own defaults, as a newcomer has them; stable English output.
   export LC_ALL=C
   export EXAMPLE_DIR="$examples_dir/$name" WORK="$base/home/work"
@@ -216,8 +236,8 @@ run_one() {
   fi
   port=$(free_port)
   # Its own process group, so a hard stop reaches the server and worker too.
-  read -ra words <<< "$(start_command "$examples_dir/$name")"
-  setsid "${words[@]}" --port "$port" > "$log" 2>&1 &
+  command=$(start_command "$examples_dir/$name")
+  setsid bash -c "$command --port $port" > "$log" 2>&1 &
   pid=$!
   local ready=0
   for _ in $(seq 1 120); do

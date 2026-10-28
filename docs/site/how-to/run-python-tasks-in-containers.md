@@ -104,8 +104,11 @@ declares (`@asset(connections=["crm-db"])`), and nothing else:
 - **Databases and `tcp`** (`postgresql`, `mariadb` and `tcp` connections) go through a relay of
   the task's own: a small container on the task's network, `lakana-relay`, with one port per
   connection from 15001, each forwarded to that connection's host and port only.
-  `connections.get(...).relay_address` names it. The relay never reads the bytes: TLS checks the
-  real host name, as before.
+  `connections.get(...).relay_address` names it. The relay never reads the bytes, so TLS stays
+  end to end: Lakana's `sql.read` checks the real host name as before. A client of your own checks
+  it only if it takes the host name apart from the address it dials; for a `tcp` connection that
+  is up to its driver ([the SQL Server recipe](read-from-a-sql-server-database.md#tls) shows one
+  that does).
 - **Directories** (`directory` and `sqlite-file` connections) are read-only mounts from
   `LAKANA_LAUNCHER__INGESTION_ROOTS` (see [Ingestion roots](#ingestion-roots)); the task reads its
   connection at `/ingest/<root>/<path>`. The launcher mounts the **whole root**, so a task can

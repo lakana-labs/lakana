@@ -356,6 +356,200 @@ PAT_CI_TEMPLATES: dict[str, str] = {_GITHUB_PATH: _GITHUB_PAT, _GITLAB_PATH: _GI
 """The CI files `lakana init --ci-auth pat` writes instead: they read a stored Lakana token."""
 
 
+class Template(StrEnum):
+    """A starting point `lakana init --template` writes: one asset that ingests from a source."""
+
+    ingest_files = "ingest-files"
+    ingest_sql = "ingest-sql"
+    ingest_rest = "ingest-rest"
+
+
+_PYPROJECT_ASSETS = """\
+[project]
+name = "{repo}"
+version = "0.1.0"
+requires-python = ">=3.11"
+# A Python asset needs lakana[assets] and a lock. Run `uv lock` in this directory before the first
+# commit (it needs the public package index, where lakana comes from too, at exactly the version
+# that wrote this file) and commit uv.lock with the code: the worker builds the asset's
+# environment from it, and a deploy without it names what is missing.
+dependencies = ["lakana[assets]=={version}"]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+"""
+
+_TEST_PYTHON = '''\
+"""Project checks that need no server."""
+
+import ast
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_every_python_asset_parses() -> None:
+    """A syntax error is cheaper to find here than in a deploy."""
+    for path in (ROOT / "assets").rglob("*.py"):
+        ast.parse(path.read_text(), filename=str(path))
+'''
+
+_INGEST_FILES = '''\
+"""Rows of the CSV files a source system exports into a directory."""
+
+from lakana import asset
+from lakana.ingest import files
+
+
+@asset(connections=["exports"], write="append", watermark="_source_modified")
+def exports(ctx):
+    """Rows of the exported CSV files, appended as new files arrive."""
+    # files.read adds `_source_modified`, the time each file was last changed, and with since=
+    # reads only files changed after it. On the first run ctx.watermark() is None, which is
+    # right here: every file is new, so every file is read.
+    return files.read("exports", "*.csv", since=ctx.watermark())
+'''
+
+_INGEST_SQL = '''\
+"""Orders from a source database, merged on their id as new ones arrive."""
+
+from lakana import asset
+from lakana.ingest import sql
+
+# How many ids behind the largest one loaded each run reads again. A row gets its id when it is
+# written but is seen only once its transaction commits, so a row with a smaller id can appear
+# after a run read larger ones; without reading again it would be skipped for good. The merge on
+# `id` keeps one row per id. Make it larger than the ids the source hands out while one of its
+# transactions is open.
+LOOK_BACK = 1000
+
+
+@asset(connections=["source-db"], write="merge", key=["id"], watermark="id")
+def orders(ctx):
+    """Orders from the source database: each run reads from LOOK_BACK ids before the last one."""
+    # For rows that change after they were written, use a change column as the watermark:
+    # watermark="updated_at" with "... WHERE updated_at > :since", a datetime default, and the
+    # look-back as a timedelta.
+    return sql.read(
+        "source-db",
+        "SELECT * FROM orders WHERE id > :since ORDER BY id",
+        params={"since": ctx.watermark(default=0) - LOOK_BACK},
+    )
+'''
+
+_INGEST_REST = '''\
+"""Items from a source REST API, merged on their id as they change."""
+
+from datetime import UTC, datetime, timedelta
+
+import pyarrow as pa
+import pyarrow.compute as pc
+
+from lakana import asset
+from lakana.ingest import rest
+
+# How far behind the newest `updated_at` loaded each run asks again. The source sets updated_at
+# when it writes an item, but the API shows the item only once that write commits, so an item
+# can appear after a run read newer ones; without asking again it would be skipped for good.
+# The merge on `id` keeps one row per item. Make it longer than the source's longest write.
+LOOK_BACK = timedelta(hours=1)
+
+
+@asset(connections=["source-api"], write="merge", key=["id"], watermark="updated_at")
+def items(ctx):
+    """Items changed since LOOK_BACK before the last run's newest, merged on their id."""
+    since = ctx.watermark(default=datetime(2000, 1, 1, tzinfo=UTC)) - LOOK_BACK
+    changed = rest.read(
+        "source-api",
+        "items",
+        params={"updated_since": since},
+        paginate=rest.NextLink(),
+        records="value",
+    )
+    if "updated_at" not in changed.column_names:
+        return changed  # nothing changed since the last run: the run writes nothing
+    # JSON has no timestamp type: the API's ISO 8601 text becomes one, so it can be the watermark.
+    at = changed.schema.get_field_index("updated_at")
+    return changed.set_column(
+        at, "updated_at", pc.cast(changed["updated_at"], pa.timestamp("us", "UTC"))
+    )
+'''
+
+_README = """\
+# {{repo}}
+
+A Lakana project whose asset `{table}` reads {source} through the connection `{connection}`.
+
+1. Create the connection in each environment the project deploys to (here `dev`):
+
+       {create}
+{root}
+2. Lock the project's packages, then commit:
+
+       uv lock
+       git init && git add -A && git commit -m 'Initial project'
+
+3. Register the repository, deploy and run:
+
+       lakana repo add {{repo}} --kind local --url <this directory>
+       lakana deploy --env dev
+       lakana run --env dev
+
+Each run reads {how}.
+
+To run it on a schedule, add a job to lakana.yaml:
+https://lakana-labs.github.io/lakana/how-to/run-a-job-on-a-schedule/
+More: https://lakana-labs.github.io/lakana/how-to/load-data-from-a-source/
+"""
+
+INGEST_TEMPLATES: dict[str, dict[str, str]] = {
+    Template.ingest_files: {
+        "assets/bronze/exports.py": _INGEST_FILES,
+        "README.md": _README.format(
+            table="bronze.exports",
+            source="the CSV files in a directory",
+            connection="exports",
+            create="lakana connection create exports --env dev --kind directory --root <root> "
+            "--path <directory below it>",
+            root="""
+   `<root>` is an ingestion root: a directory the operator gives the worker by name, in
+   LAKANA_RUN__INGESTION_ROOTS (or LAKANA_LAUNCHER__INGESTION_ROOTS with the Docker runner).
+""",
+            how="only the files changed after the newest one it loaded",
+        ),
+    },
+    Template.ingest_sql: {
+        "assets/bronze/orders.py": _INGEST_SQL,
+        "README.md": _README.format(
+            table="bronze.orders",
+            source="a table of a PostgreSQL, MariaDB or SQLite database",
+            connection="source-db",
+            create="lakana connection create source-db --env dev --kind postgresql --host <host> "
+            "--database <database> --user <user> --password-stdin",
+            root="",
+            how="the ids after the largest one it loaded and the 1,000 before it again (LOOK_BACK "
+            "in the asset): a row committed late has a smaller id than rows already read. The "
+            "merge on `id` keeps one row per id",
+        ),
+    },
+    Template.ingest_rest: {
+        "assets/bronze/items.py": _INGEST_REST,
+        "README.md": _README.format(
+            table="bronze.items",
+            source="a JSON REST API",
+            connection="source-api",
+            create="lakana connection create source-api --env dev --kind http "
+            "--url https://<host>/<base path> --auth bearer --password-stdin",
+            root="",
+            how="the items updated after the newest one it loaded, from an hour before it "
+            "(LOOK_BACK in the asset): an item whose change commits late has an older "
+            "`updated_at` than items already read. The merge on `id` keeps one row per item",
+        ),
+    },
+}
+"""What each `--template` adds to the project, by relative path; `{repo}` is substituted."""
+
+
 def _is_dev_build(version: str) -> bool:
     """Report whether `version` is a development or local build no index will have.
 
@@ -406,7 +600,12 @@ def _git_lacks_identity(directory: Path) -> bool:
 
 
 def write_project(
-    directory: Path, repo: str, *, sample: bool = True, ci_auth: str = "oidc"
+    directory: Path,
+    repo: str,
+    *,
+    sample: bool = True,
+    ci_auth: str = "oidc",
+    template: str | None = None,
 ) -> list[Path]:
     """Write every template into `directory`, refusing to overwrite anything.
 
@@ -420,6 +619,9 @@ def write_project(
         Whether to write the sample assets and check as well.
     ci_auth
         ``oidc``: the CI files exchange the job's ID token; ``pat``: they read a stored token.
+    template
+        A `Template` value: its asset and README, a pyproject with ``lakana[assets]`` and a
+        test that parses Python assets; `None` for none.
 
     Returns
     -------
@@ -440,6 +642,11 @@ def write_project(
     }
     if sample:
         texts.update(SAMPLE)
+    if template is not None:
+        texts["pyproject.toml"] = _PYPROJECT_ASSETS.format(repo=repo, version=__version__)
+        texts["tests/test_example.py"] = _TEST_PYTHON
+        for relative, text in INGEST_TEMPLATES[template].items():
+            texts[relative] = text.format(repo=repo) if relative == "README.md" else text
     targets = {directory / relative: text for relative, text in texts.items()}
     existing = [str(path) for path in targets if os.path.lexists(path)]
     if existing:
@@ -464,6 +671,22 @@ def write_project(
             path.unlink(missing_ok=True)
         raise CliError(f"Can't write the project into {directory}: {exc}", 3) from exc
     return written
+
+
+def _create_command(readme: str) -> str:
+    """Find the `lakana connection create` line of a template's README.
+
+    Parameters
+    ----------
+    readme
+        The README's text.
+
+    Returns
+    -------
+    str
+        The command, as the README shows it.
+    """
+    return next(line.strip() for line in readme.splitlines() if "lakana connection create" in line)
 
 
 def _points_off_this_machine(state: CliState) -> bool:
@@ -508,6 +731,14 @@ def init(
             "secret is stored in CI; pat reads a stored Lakana token.",
         ),
     ] = CiAuth.oidc,
+    template: Annotated[
+        Template | None,
+        typer.Option(
+            "--template",
+            help="Start from one asset that ingests from a source: ingest-files, ingest-sql or "
+            "ingest-rest (the sample is then left out).",
+        ),
+    ] = None,
 ) -> None:
     """Create a Lakana project that deploys unchanged.
 
@@ -524,11 +755,14 @@ def init(
         profile points at an instance on another machine.
     ci_auth
         `--ci-auth`: ``oidc`` (the default) or ``pat``.
+    template
+        `--template`: ``ingest-files``, ``ingest-sql`` or ``ingest-rest``.
 
     Raises
     ------
     CliError
-        If the name is not a valid repository name (exit 2).
+        If the name is not a valid repository name, or `--sample` comes with `--template`
+        (exit 2).
     """
     target = directory.resolve()
     name = repo or target.name
@@ -536,15 +770,37 @@ def init(
         raise CliError(
             f"{name!r} is not a valid repository name (letters, digits, '-' and '_'); pass --repo"
         )
-    skipped = sample is None and _points_off_this_machine(state_of(ctx))
-    with_sample = sample if sample is not None else not skipped
-    write_project(target, name, sample=with_sample, ci_auth=ci_auth.value)
+    if template is not None and sample:
+        raise CliError("--template writes its own asset instead of the sample; leave out --sample")
+    skipped = template is None and sample is None and _points_off_this_machine(state_of(ctx))
+    with_sample = template is None and (sample if sample is not None else not skipped)
+    write_project(
+        target,
+        name,
+        sample=with_sample,
+        ci_auth=ci_auth.value,
+        template=None if template is None else template.value,
+    )
     setup = [
         f"  cd {shlex.quote(str(target))}",
         "  git init && git add -A && git commit -m 'Initial project'",
         f"  lakana repo add {name} --kind local --url {shlex.quote(str(target))}",
     ]
-    if with_sample:
+    if template is not None:
+        lines = [
+            f"Created a Lakana project in {target} from the template {template.value}: "
+            f"{next(p for p in INGEST_TEMPLATES[template] if p.endswith('.py'))} reads a source "
+            "through a connection.",
+            "Next (README.md says the same):",
+            f"  cd {shlex.quote(str(target))}",
+            "  " + _create_command(INGEST_TEMPLATES[template]["README.md"]),
+            "  uv lock",
+            "  git init && git add -A && git commit -m 'Initial project'",
+            f"  lakana repo add {name} --kind local --url {shlex.quote(str(target))}",
+            "  lakana deploy --env dev",
+            "  lakana run --env dev",
+        ]
+    elif with_sample:
         lines = [
             f"Created a Lakana project in {target}, with a small sample: generated readings "
             "from three weather stations, three SQL assets built from them, and one check.",
@@ -591,6 +847,13 @@ def init(
             "you use CI; then edit the pinned version in .github/workflows/lakana-deploy.yml "
             "and .gitlab-ci.yml, or set LAKANA_INDEX_URL to an index that has it."
         )
+        if template is not None:
+            lines.append(
+                f"pyproject.toml pins lakana[assets]=={__version__} too, so `uv lock` fails "
+                "until it finds that version: add an index that has it to pyproject.toml "
+                "([[tool.uv.index]], such as a flat folder with the wheel), or pin a released "
+                "version."
+            )
     typer.echo("\n".join(lines))
 
 

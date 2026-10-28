@@ -451,7 +451,9 @@ root. Databases are read with [`sql.read`](ingest.md#sqlread), from `postgresql`
 read-only, and sends MariaDB only a statement that starts with `SELECT`, `WITH`, `VALUES` or
 `TABLE` (MariaDB commits before DDL, which no read-only transaction stops). JSON REST APIs are
 read with [`rest.read`](ingest.md#restread), from `http` connections, page by page, never
-sending the credential to another host than the base URL's. A `tcp` connection has no helper; use `connections.get` with your own client.
+sending the credential to another host than the base URL's. A `tcp` connection has no helper; use `connections.get` with your own client, as the recipe
+[Anything else: your own client](../how-to/load-data-from-a-source.md#anything-else-your-own-client)
+does, and for SQL Server the recipe [Read from a SQL Server database](../how-to/read-from-a-sql-server-database.md).
 
 ### What a task reaches, and how
 
@@ -464,7 +466,7 @@ local runner connects directly.
 | Kind | Docker runner | Local runner |
 |---|---|---|
 | `http`, `s3`, `gcs`, `azure` | `proxy_url` is the egress proxy; give it to your HTTPS client (`files.read` does). It holds the task's proxy token, so it is left out of the connection's `repr` and shown as `***` in the task's log. `relay_address` and `root_path` are `None`. | Every field is `None`: connect to `address` directly. |
-| `postgresql`, `mariadb`, `tcp` | `relay_address` is `lakana-relay:<port>` (ports from 15001, in the order the asset declares its connections); connect there instead of `address["host"]`. TLS still checks the real host name. | `relay_address` is `None`: connect to `address` directly. |
+| `postgresql`, `mariadb`, `tcp` | `relay_address` is `lakana-relay:<port>` (ports from 15001, in the order the asset declares its connections); connect there instead of `address["host"]`. The helpers' TLS still checks the real host name; your own client of a `tcp` connection checks it only if it takes the host name apart from the address it dials ([the SQL Server recipe](../how-to/read-from-a-sql-server-database.md#tls) shows one). | `relay_address` is `None`: connect to `address` directly. |
 | `directory`, `sqlite-file` | `root_path` is `/ingest/<root>/<path>`, read-only. | `root_path` is `<directory>/<path>`, where `<directory>` is the root's entry in `LAKANA_RUN__INGESTION_ROOTS`. |
 
 An asset declares at most 16 connections (the deploy refuses more), and a connection has at most
@@ -486,9 +488,24 @@ failure); the next attempt is given the new address.
 ## Lineage
 
 A table or artifact written by an asset that declares connections shows each connection as a
-source in its lineage. `lakana table lineage` prints it as `connection crm-db (postgresql)`, and
-as `connection crm-db (deleted)` once the connection is gone. In the REST answer and the SDK the
-node has `kind` `CONNECTION`, the connection's name and id, and its kind in `connection_kind`.
+source in its lineage. `lakana table lineage` prints it with its kind, such as
+`connection crm-db (postgresql)`, and as `connection crm-db (deleted)` once the connection is
+gone. The SQL recipe of [Load data from a source](../how-to/load-data-from-a-source.md#a-sql-database)
+reads a SQLite file:
+
+<!-- source: docs/examples/ingest-sql/run.sh#lineage -->
+```bash
+lakana table lineage bronze.orders --env dev
+```
+
+<!-- output: ingest-sql#lineage -->
+```text
+bronze.orders
+└── connection source-db (sqlite-file)
+```
+
+In the REST answer and the SDK the node has `kind` `CONNECTION`, the connection's name and id,
+and its kind in `connection_kind`.
 
 Lakana records these sources itself, from the asset the deploy recorded, when the asset's task
 writes; nothing a task or a client sends can add one. A connection that was deleted after the

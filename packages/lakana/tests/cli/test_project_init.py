@@ -512,6 +512,24 @@ def test_init_notes_after_the_steps_when_the_cli_is_a_dev_or_local_build(
     assert f"lakana=={version}" in (target / ".gitlab-ci.yml").read_text()
 
 
+def test_a_template_on_a_dev_build_notes_that_uv_lock_needs_an_index_with_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A template pins `lakana[assets]` to this version, which `uv lock` cannot find on PyPI."""
+    monkeypatch.setattr("lakana.cli.project_init.__version__", "0.7.1.dev3+gabc123")
+    target = tmp_path / "sources"
+    result = invoke(
+        make_state(tmp_path, FakeApi()), "init", str(target), "--template", "ingest-sql"
+    )
+    assert result.exit_code == 0, result.output
+    text = " ".join(result.stdout.split())
+    note = text[text.index("Note:") :]
+    assert "pyproject.toml" in note
+    assert "uv lock" in note
+    assert "[[tool.uv.index]]" in note
+    assert "lakana[assets]==0.7.1.dev3+gabc123" in (target / "pyproject.toml").read_text()
+
+
 @pytest.mark.parametrize("version", ["1.2.3", "0.7.0", "1.0.0rc1", "2.0.0.post1"])
 def test_init_is_quiet_for_a_release_build(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, version: str
@@ -713,3 +731,108 @@ def test_the_ci_files_name_the_rules_the_how_tos_create(tmp_path: Path) -> None:
     assert len(documented) == 4
     assert _commands(github_text, "#") == documented[:2]
     assert _commands(gitlab_text, "#") == documented[2:]
+
+
+_TEMPLATE_ASSETS = {
+    "ingest-files": "assets/bronze/exports.py",
+    "ingest-sql": "assets/bronze/orders.py",
+    "ingest-rest": "assets/bronze/items.py",
+}
+
+
+@pytest.mark.parametrize(("template", "asset"), sorted(_TEMPLATE_ASSETS.items()))
+def test_a_template_writes_its_asset_readme_and_an_assets_pyproject(
+    tmp_path: Path, template: str, asset: str
+) -> None:
+    """No sample; the asset, a README with the connection command, and lakana[assets] pinned."""
+    result = invoke(
+        make_state(tmp_path, FakeApi()), "init", str(tmp_path / "p"), "--template", template
+    )
+
+    assert result.exit_code == 0, result.output
+    root = tmp_path / "p"
+    files = _files(root)
+    assert asset in files
+    assert "README.md" in files
+    assert not files & _SAMPLE
+    pyproject = tomllib.loads((root / "pyproject.toml").read_text())
+    assert pyproject["project"]["dependencies"] == [f"lakana[assets]=={__version__}"]
+    readme = (root / "README.md").read_text()
+    assert "lakana connection create" in readme
+    assert "uv lock" in readme
+    assert "# p\n" in readme
+    assert "lakana connection create" in result.stdout
+    assert "  uv lock" in result.stdout
+
+
+def test_the_sql_template_reads_new_ids_with_a_first_run_default(tmp_path: Path) -> None:
+    """A parameter, never a None watermark; a merge that reads again behind the largest id."""
+    invoke(make_state(tmp_path, FakeApi()), "init", str(tmp_path / "p"), "--template", "ingest-sql")
+
+    text = (tmp_path / "p" / "assets/bronze/orders.py").read_text()
+
+    assert '@asset(connections=["source-db"], write="merge", key=["id"], watermark="id")' in text
+    assert "WHERE id > :since" in text
+    assert "\nLOOK_BACK = 1000\n" in text
+    assert 'params={"since": ctx.watermark(default=0) - LOOK_BACK}' in text
+    readme = (tmp_path / "p" / "README.md").read_text()
+    assert (
+        "lakana connection create source-db --env dev --kind postgresql --host <host> "
+        "--database <database> --user <user> --password-stdin"
+    ) in readme
+    assert "the 1,000 before it again" in " ".join(readme.split())
+
+
+def test_the_files_template_readme_says_the_operator_names_the_root(tmp_path: Path) -> None:
+    """`--root` names an ingestion root only the operator can give the worker."""
+    invoke(
+        make_state(tmp_path, FakeApi()), "init", str(tmp_path / "p"), "--template", "ingest-files"
+    )
+
+    readme = " ".join((tmp_path / "p" / "README.md").read_text().split())
+
+    assert "LAKANA_RUN__INGESTION_ROOTS" in readme
+    assert "LAKANA_LAUNCHER__INGESTION_ROOTS" in readme
+
+
+def test_an_unknown_template_lists_the_three(tmp_path: Path) -> None:
+    """Exit 2, naming every template."""
+    result = invoke(
+        make_state(tmp_path, FakeApi()), "init", str(tmp_path / "p"), "--template", "ingest-xml"
+    )
+
+    assert result.exit_code == 2
+    text = " ".join(result.output.split())
+    for name in _TEMPLATE_ASSETS:
+        assert name in text
+    assert not (tmp_path / "p").exists()
+
+
+def test_a_template_with_the_sample_is_refused(tmp_path: Path) -> None:
+    """One starting point at a time."""
+    result = invoke(
+        make_state(tmp_path, FakeApi()),
+        "init",
+        str(tmp_path / "p"),
+        "--template",
+        "ingest-files",
+        "--sample",
+    )
+
+    assert result.exit_code == 2
+    assert "leave out --sample" in result.output
+    assert not (tmp_path / "p").exists()
+
+
+def test_the_template_project_test_parses_its_asset(tmp_path: Path) -> None:
+    """The project's own test runs green on what the template wrote."""
+    invoke(
+        make_state(tmp_path, FakeApi()), "init", str(tmp_path / "p"), "--template", "ingest-rest"
+    )
+    namespace: dict[str, object] = {"__file__": str(tmp_path / "p" / "tests" / "test_example.py")}
+
+    exec((tmp_path / "p" / "tests" / "test_example.py").read_text(), namespace)  # nosec B102
+
+    check = namespace["test_every_python_asset_parses"]
+    assert callable(check)
+    check()

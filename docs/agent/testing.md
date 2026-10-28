@@ -571,7 +571,11 @@ To add one:
 
    The page shows the region; the lines between regions are the checks and stay out of it.
 3. If the instance needs a non-default start command, put it in the `start` region of
-   `start.sh`. The runner appends `--port <free port>`.
+   `start.sh`. The runner appends `--port <free port>` and runs the command in bash, after the
+   private `HOME` is set, so it may set a variable for the instance as the page shows it
+   (`LAKANA_RUN__INGESTION_ROOTS="{\"landing\": \"$HOME/landing\"}" lakana server start --local`).
+   Keep it one simple command: bash then replaces itself with it, and the runner's stop reaches
+   the server.
 4. Files a page shows whole live under `project/` and are copied into the work directory by
    `run.sh`; the page syncs the block from the file path.
 5. In the page, put a `source` marker above each block and run `uv run python
@@ -596,6 +600,15 @@ uv run bash scripts/run_docs_examples.sh        # every example, or name one: ..
 uv run pytest scripts/tests                     # the tests that read the site and the workflows
 ```
 
+All examples of one runner call share one uv cache outside their private homes: `UV_CACHE_DIR`
+for what `run.sh` runs (`uv lock`) and, through a link at `$HOME/.cache/lakana-worker/uv`, the
+worker's package cache; the environments themselves are never shared. Unset,
+`LAKANA_DOCS_UV_CACHE` makes it a temporary directory (under `/tmp`, which is RAM on the machines
+this repository is developed on: set it to a directory under `~/.cache` locally); CI's
+`docs-examples` sets it to `$RUNNER_TEMP/docs-uv-cache` and keeps that with `actions/cache`
+between runs (key: `uv.lock` and the examples' `pyproject.toml` files, restored from an older key
+when they change).
+
 The runner needs `git` and a free port, and takes at most `LAKANA_DOCS_EXAMPLE_BUDGET` seconds
 (default 120) per example; an example that needs longer holds a number of seconds in a file `budget` next to its
 `run.sh` (`train-and-predict` waits for a cron schedule and has 300), and the longer of the two applies. When an example fails, the runner prints the instance's log and then,
@@ -618,6 +631,24 @@ for the worker's first build. Run it locally the same way: build the wheel into 
 memory scope. The runner's private `HOME` hides uv's cache and the Pythons uv downloaded; the
 example sets `UV_PYTHON` to the interpreter that runs it, and the worker builds with its own cache.
 `docs-examples` is a required check; `docs` is not.
+
+The ingestion recipes of "Load data from a source" (`ingest-files`, `ingest-sql`, `ingest-rest`,
+`ingest-generic`) are Python assets set up the same way: `lakana init --template` writes the
+project (the asset under test is the one the CLI wrote; `run.sh` diffs it against
+`project/assets`, and `test_ingest_templates.py` compares those files with `INGEST_TEMPLATES`), and
+`ingest-files/use_wheelhouse.py`, which all four call, swaps the template's pin for the wheel. Their
+sources are stand-ins that need neither Docker nor a server: the files and the SQLite database lie
+below an ingestion root of the example's private `HOME`, named in the `start` region of
+`start.sh`; the SQLite file is made with Python's `sqlite3` (`ingest-sql/orders_db.py`). It holds orders 1, 2 and 4 for
+the first run and gets 3 and 5 before the second: 3 stands for a row committed late, which the
+template's merge reads again behind its watermark (`LOOK_BACK`). The REST
+API is `ingest-rest/stand_in.py`, an OData-style `http.server` behind TLS 1.2 or newer, with a CA
+and a certificate for `localhost` and `127.0.0.1` that `make_certs.py` makes with `cryptography`
+for each run; the bearer token is generated for each run too, so no secret is in the tree.
+`run.sh` starts the stand-in in the background, waits for the port it writes, and stops it on exit.
+`ingest-generic` reuses those two scripts. Under the local runner a task reaches `127.0.0.1`
+directly.
+
 ## CI runners
 
 CI jobs run on the runner named by the repository variable `CI_RUNNER`; when the variable is not
@@ -1295,6 +1326,46 @@ digest.
 The Docker E2E case `test_sql_read_reaches_postgresql_through_the_relay_with_verify_full` in
 `test_docker_task_egress_integration.py` runs the same image on the sources' network (alias
 `db.lakana.test`) and adds its address to `relay_reachable` for that case only.
+
+**SQL Server (the recipe of #56).** `test_docker_proprietary_db_integration.py` (`docker`,
+`integration`, `slow`) runs the two assets of `docs/examples/proprietary-db/project/` under the
+worker's `DockerRunner`, through the relay of a `tcp` connection, against
+`mcr.microsoft.com/mssql/server:2022-latest@sha256:cf8f0ab2ebe61feec2eed2629061a07d247f791c2a8ddda74a4ac9f06a291718`
+(SQL Server 2022 Developer edition, build 16.0.4305.5, Ubuntu 22.04, linux/amd64 only, about
+1.7 GB; the module skips on another architecture). Its terms are *Microsoft Software License
+Terms, Microsoft SQL Server 2022 Developer, Express, Evaluation* (October 21, 2022), section 1.a.i:
+"You may install and use copies of the software on any device, including third party shared
+devices, to design, develop, test and demonstrate your programs. You may not use the software in
+a production environment." Testing our recipe on CI runners is that use, so the module sets
+`ACCEPT_EULA=Y` (maintainer decision of 2026-10-27; the check is on #56). Section 5 forbids
+publishing benchmark results without Microsoft's approval: no timings of it anywhere. Like the
+other images it is a test container only, never part of a Lakana artifact.
+
+- It reuses the egress module's stack (`sources = egress_cases.sources`, `worker_side` likewise:
+  pytest finds a fixture by the name it is bound to in the module) and adds the server's /32 to
+  `relay_reachable` per case. It pulls the image by digest before `create`.
+- `mssql.conf` (put in as uid 10001 with the module authority's leaf for `erp-db.lakana.test`)
+  sets `forceencryption = 1` and TLS 1.2. The second alias `erp-db-2.lakana.test` is a name the
+  certificate does not hold. Passwords are generated per run; `reader.sql` of the example makes
+  the read-only login, run by `sqlcmd` with the password from the environment.
+- The task's environment is the wheelhouse's `lakana[assets]` plus the example's driver and its
+  tree from the public index, installed from `_DRIVER_REQUIREMENTS` with `--require-hashes
+  --no-deps --only-binary=:all:` (the SHA-256 of each linux x86-64 wheel; cffi's cover CPython
+  3.11 to 3.14, so another Python fails the install, naming the hash it lacks). The case needs the
+  network and `LAKANA_TEST_WHEELHOUSE`; the fixture checks the wheelhouse before it pulls the
+  image. `test_the_driver_pins_are_the_examples` keeps the direct pins equal to the example's
+  `pyproject.toml`.
+- Each case runs a probe asset that loads the example's file next to it and calls its function:
+  the full read; the incremental read by `rowversion` below `MIN_ACTIVE_ROWVERSION()` and its
+  second run from the first run's largest `row_version`, after an order with a smaller id was
+  inserted (a late commit) and another changed; a refused login; a closed port (the relay's line);
+  no trust bundle; a bundle of another authority; and the other name. `python-tds` 1.17.1 with
+  pyOpenSSL 26.2 or newer refuses a name that is not the certificate's CN with an
+  `AttributeError` (the fix is merged upstream, not released); the case asserts that text, so
+  bumping the pin to a release with the fix turns it red, and the page changes with it.
+- `docs/examples/proprietary-db/run.sh` (the docs-examples job, no Docker) creates and tests the
+  connection, locks the project with the driver, deploys it, and checks that the asset refuses to
+  connect without a trust bundle.
 
 ## Python assets in the two tiers (M5c2a)
 
