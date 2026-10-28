@@ -1794,6 +1794,24 @@ def test_a_refused_postgresql_login_is_its_outcome(
     assert SECRET not in message
 
 
+def test_conninfo_never_lets_libpq_read_the_worker_users_home_directory() -> None:
+    """No client certificate, and no root file, CRL or password file from ``~/.postgresql/``."""
+    info = _check.conninfo({"host": "db.example.com", "sslmode": "require"})
+
+    assert "sslcertmode='disable'" in info
+    for option in ("sslrootcert", "sslcrl", "passfile"):
+        assert f"{option}='{_check.NOWHERE}'" in info
+    assert not Path(_check.NOWHERE).exists()
+    assert not Path(_check.NOWHERE).parent.is_dir()
+
+
+def test_conninfo_keeps_the_root_file_a_caller_names() -> None:
+    info = _check.conninfo({"host": "db.example.com", "sslrootcert": "system"})
+
+    assert "sslrootcert='system'" in info
+    assert info.count("sslrootcert=") == 1
+
+
 def test_postgresql_credentials_through_the_relay_dial_its_address(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1810,7 +1828,8 @@ def test_postgresql_credentials_through_the_relay_dial_its_address(
     _check._postgresql_credentials(body, {"relay_port": 15001}, FAST)
 
     assert seen[0].startswith("host='db.example.com' port='15001' hostaddr='10.207.0.3' ")
-    assert "sslrootcert" not in seen[0]
+    assert f"sslrootcert='{_check.NOWHERE}'" in seen[0]
+    assert "sslcertmode='disable'" in seen[0]
 
 
 def test_without_the_driver_a_postgresql_test_fails_saying_what_to_install(

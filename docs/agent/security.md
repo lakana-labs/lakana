@@ -4103,7 +4103,14 @@ secret's values, and the only way a secret reaches a Python asset (#23). User re
   session's `sql_mode` (an unknown mode, or a mode and server status that disagree about
   backslashes, sends nothing) and its values are plain scalars. Under the Docker runner libpq
   dials the relay (`hostaddr`) while `host` stays the connection's, so `verify-full` checks the
-  real name; PyMySQL gets a socket to the relay and a TLS context for the real host.
+  real name; PyMySQL gets a socket to the relay and a TLS context for the real host. libpq never
+  reads the files of the user it runs as (`_check.conninfo`, also for the connection test): a
+  connection carries no client certificate, so `sslcertmode=disable` never presents the worker
+  user's `~/.postgresql/postgresql.crt` and key to a declared host, and `sslrootcert` (unless
+  `verify-full` names the trust bundle), `sslcrl` and `passfile` point at `/dev/null/nowhere`, a
+  path that cannot exist, so `require` never becomes a chain check against
+  `~/.postgresql/root.crt` and `~/.pgpass` is never consulted. This mattered under the local
+  runner, where the worker is a developer's or an operator's own account (M6 review M9, #360).
   **Residuals, accepted:** PyMySQL interpolates values client-side with its own escaping (no
   server-side prepared statement), so the wire text holds them, though the asset's SQL never
   does; and read-only is a property of the transaction, so a source user with write rights could

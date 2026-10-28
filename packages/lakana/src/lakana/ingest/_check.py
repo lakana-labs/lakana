@@ -996,12 +996,30 @@ class BundleUnreadable(OSError):
     """The file `LAKANA_CA_BUNDLE` names cannot be read, or is not ASCII."""
 
 
+NOWHERE = "/dev/null/nowhere"
+"""A path that cannot exist (``/dev/null`` is no directory), for the libpq file options."""
+_OWN_FILES_OFF = {
+    "sslcertmode": "disable",
+    "sslrootcert": NOWHERE,
+    "sslcrl": NOWHERE,
+    "passfile": NOWHERE,
+}
+"""What keeps libpq out of the worker user's ``~/.postgresql/`` and ``~/.pgpass``."""
+
+
 def conninfo(parts: Mapping[str, str]) -> str:
     r"""Write a libpq connection string, every value quoted.
 
     The ADBC driver takes only a connection string. Each value is single-quoted with ``\`` and
     ``'`` escaped, so a database or user name can never add a keyword of its own. `sql.read`
     uses the same function.
+
+    libpq would otherwise read files of the user it runs as: it would present
+    ``~/.postgresql/postgresql.crt`` and its key to any server that asks, turn ``require`` into a
+    chain check against ``~/.postgresql/root.crt``, apply ``root.crl``, and look a missing
+    password up in ``~/.pgpass``. A connection carries no client certificate, so
+    ``sslcertmode=disable`` never sends one, and the other file options point at `NOWHERE`
+    unless `parts` names its own (``sslrootcert`` for ``verify-full``).
 
     Parameters
     ----------
@@ -1011,13 +1029,14 @@ def conninfo(parts: Mapping[str, str]) -> str:
     Returns
     -------
     str
-        Such as ``host='db' port='5432'``.
+        Such as ``host='db' port='5432' sslcertmode='disable' ...``.
     """
 
     def quoted(value: str) -> str:
         return "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"
 
-    return " ".join(f"{key}={quoted(value)}" for key, value in parts.items())
+    full = {**parts, **{key: value for key, value in _OWN_FILES_OFF.items() if key not in parts}}
+    return " ".join(f"{key}={quoted(value)}" for key, value in full.items())
 
 
 @contextlib.contextmanager

@@ -269,7 +269,7 @@ class _Driver:
         """
         self.seen.append(conninfo)
         for part in conninfo.split("' "):
-            if part.startswith("sslrootcert='"):
+            if part.startswith("sslrootcert='") and _check.NOWHERE not in part:
                 path = part.removeprefix("sslrootcert='").rstrip("'")
                 self.roots.append(Path(path).read_text() if path.startswith("/") else path)
         if self.refuse is not None:
@@ -333,7 +333,8 @@ def test_under_docker_libpq_dials_the_relay_and_verifies_the_real_host(driver: _
     assert driver.seen == [
         "host='db.example.com' port='15001' hostaddr='10.207.0.3' dbname='crm' user='reader' "
         f"password='{_PASSWORD}' sslmode='verify-full' connect_timeout='10' "
-        f"options='-c default_transaction_read_only=on' sslrootcert='{bundle}'"
+        f"options='-c default_transaction_read_only=on' sslrootcert='{bundle}' "
+        f"sslcertmode='disable' sslcrl='{_check.NOWHERE}' passfile='{_check.NOWHERE}'"
     ]
     assert driver.cursor.executed == [("SELECT id FROM customers",)]
     assert driver.database is not None and driver.database.closed
@@ -358,7 +359,7 @@ def test_a_connection_ca_is_trusted_next_to_the_bundle_and_its_file_removed(
     sql.read("crm-db", "SELECT 1")
 
     assert driver.roots == ["BUNDLE\n\nOWN CA\n"]
-    path = driver.seen[0].split("sslrootcert='")[1].rstrip("'")
+    path = driver.seen[0].split("sslrootcert='")[1].split("'")[0]
     assert not Path(path).exists()
 
 
@@ -366,13 +367,18 @@ def test_a_connection_ca_is_trusted_next_to_the_bundle_and_its_file_removed(
 def test_require_and_disable_name_no_root_certificates(
     driver: _Driver, tls: str, mode: str
 ) -> None:
-    """The ``require`` of libpq would verify the chain if it got a root file; ours must not."""
+    """The ``require`` of libpq would verify the chain if it got a root file; ours must not.
+
+    Not even ``~/.postgresql/root.crt`` of the worker's user: the root file is a path that
+    cannot exist, and no client certificate is ever presented.
+    """
     _postgres(relay=False, settings={"user": "reader", "tls": tls})
 
     sql.read("crm-db", "SELECT 1")
 
     assert f"sslmode='{mode}'" in driver.seen[0]
-    assert "sslrootcert" not in driver.seen[0]
+    assert f"sslrootcert='{_check.NOWHERE}'" in driver.seen[0]
+    assert "sslcertmode='disable'" in driver.seen[0]
 
 
 def test_a_database_name_cannot_add_a_keyword(driver: _Driver) -> None:
@@ -627,7 +633,7 @@ def test_without_a_trust_bundle_libpq_uses_the_system_roots(
 
     sql.read("crm-db", "SELECT 1")
 
-    assert driver.seen[0].endswith("sslrootcert='system'")
+    assert "sslrootcert='system'" in driver.seen[0]
 
 
 def test_a_relay_that_does_not_resolve_is_retried(

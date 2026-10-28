@@ -605,6 +605,12 @@ the task trusts the workers' trust bundle (`LAKANA_RUN__CA_BUNDLE`) and the conn
 `ca_certificate`; without either, the system's CAs. `tls: require` encrypts without checking the
 certificate, `tls: disable` does not encrypt. A connection takes at most 10 seconds.
 
+sql.read never uses files of the user the worker runs as: it presents no client certificate
+(not even `~/.postgresql/postgresql.crt`, which libpq would otherwise send to any server that
+asks), `tls: require` does not turn into a certificate check against `~/.postgresql/root.crt`,
+and `~/.pgpass` is not read. The connection test behaves the same. This matters with the local
+runner, where the worker may run as your own account.
+
 A MariaDB connection with `tls: verify-full` or `require` never falls back to a plain
 connection: a server without TLS fails the read, and is not retried. MySQL 8's default `caching_sha2_password`
 needs the `cryptography` package over a connection without TLS; use `tls: verify-full`, or add
