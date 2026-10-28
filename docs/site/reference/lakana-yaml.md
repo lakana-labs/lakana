@@ -54,9 +54,9 @@ version's first release (`>=3.12`, or `==3.12.*`). A worker that runs tasks with
 
 ## Jobs
 
-A **job** is a name for a selection of assets, with an optional schedule. It lives in
-`lakana.yaml`, so it is reviewed, versioned and rolled back with the code, and a deploy swaps the
-jobs together with the assets.
+A **job** is a name for a selection of assets, with an optional schedule, that can also start
+after each deploy. It lives in `lakana.yaml`, so it is reviewed, versioned and rolled back with the
+code, and a deploy swaps the jobs together with the assets.
 
 A schedule starts the job at the times its `cron:` names, in its time zone. The scheduler checks
 about once a second, so a run usually starts within a few seconds of the time; a busy scheduler or
@@ -97,10 +97,16 @@ jobs:
     schedule: { cron: "15 * * * *" }
   by_hand:
     select: ["bronze.*"]         # no schedule: started by hand or through the API
+  refresh:
+    select: ["silver.*"]
+    on_deploy: true              # also starts after each deploy; default false
 environments:
   dev:
     jobs:
       daily_gold: { schedule: null, notify: null }   # no schedule and no notification in dev
+  prod:
+    jobs:
+      refresh: { on_deploy: false }                  # not after a deploy in prod
 ```
 
 - `jobs:` is optional. A job without `schedule:` has no timer.
@@ -116,9 +122,16 @@ environments:
 - Quote `cron:` in YAML. A value that contains `*` or starts with `@` is a YAML error unless it is
   in quotes: write `cron: "0 6 * * *"` and `cron: "@daily"`.
 - `timezone:` is an IANA name such as `Europe/Berlin` or `America/New_York`. `UTC` is the default.
+- `on_deploy:` is `true` or `false` (the default). With `true` the job starts after each deploy that
+  makes another project version current in the environment (a new commit, or an earlier one
+  deployed again over a newer one), as the person or CI account that deployed, who needs `RUN`
+  there. A deploy of the commit already current, a dry run, a rollback and a failed deploy start
+  nothing. [Start a job after each deploy](../how-to/run-a-job-on-a-schedule.md#start-a-job-after-each-deploy)
+  has the rest.
 - A job name follows the rules of a segment of an asset name: no dot, no slash, not empty.
-- An environment can change a job the file declares, with the same keys; the rest of the job is
-  kept, and `schedule: null` or `notify: null` removes its schedule or its notification there.
+- An environment can change a job the file declares, with the same keys (`on_deploy` too); the rest
+  of the job is kept, and `schedule: null` or `notify: null` removes its schedule or its
+  notification there.
   It cannot add a job.
 
 Every problem comes back with the file, the line, the cause and the next step, for example

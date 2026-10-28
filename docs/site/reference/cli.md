@@ -1814,7 +1814,7 @@ A long list prints a "More results" line with the command that shows the next pa
 | `--env` | text | none | Environment (default: the profile's). |
 | `--repo` | text | none | Only this repository. |
 | `--status` | text, repeatable | none | Only runs in this status: queued, running, succeeded, failed or cancelled. Repeat the option or separate the values with commas. |
-| `--trigger` | text, repeatable | none | Only runs started this way: schedule, api or manual. Repeat the option or separate the values with commas. |
+| `--trigger` | text, repeatable | none | Only runs started this way: schedule, api, manual or deploy. Repeat the option or separate the values with commas. |
 | `--job` | text | none | Only runs of this job. |
 | `--since` | text | none | Only runs created at or after this date or time, such as 2026-10-18 or 2026-10-18T09:30:00Z. Without a time zone it is read in yours. |
 | `--limit` | whole number, 1 to 200 | none | Most runs to list (default 100). |
@@ -1896,7 +1896,7 @@ A worker is alive while its heartbeat is recent and lost after that; a lost work
 
 Usage: `lakana job [OPTIONS] COMMAND [ARGS]...`
 
-Jobs: named selections of a project, started by hand, by the API or by a schedule.
+Jobs: named selections of a project, started by hand, by the API, by a schedule or after each deploy.
 
 ### `lakana job list`
 

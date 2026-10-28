@@ -6,13 +6,14 @@ it: the fields, each kind of trigger, the route, the commands and the SDK. For t
 
 ## Triggers
 
-Every job has a list `triggers`, the ways it starts. The list is read-only: a schedule is
-declared in `lakana.yaml` and changed by a deploy, and pausing it is a separate call
-(`lakana job pause`). Schedule comes first.
+Every job has a list `triggers`, the ways it starts. The list is read-only: a schedule and
+`on_deploy` are declared in `lakana.yaml` and changed by a deploy, and pausing a schedule is a
+separate call (`lakana job pause`). Schedule comes first, on demand last.
 
 | `kind` | Present | Fields |
 |---|---|---|
 | `schedule` | when the job has a schedule in this environment | `cron`, `timezone` (IANA), `paused` (true or false), `next_run_at` (UTC; `null` while paused) |
+| `deploy` | when the job has `on_deploy: true` in this environment: it starts after each deploy that makes another project version current, as the deployer | none |
 | `on_demand` | always: every job can be started through the API, the SDK or the CLI | none |
 
 `next_run_at` is the time the scheduler will fire next, the same value as the job's `next_run_at`;
@@ -42,7 +43,7 @@ do.
 
 | Command | Shows |
 |---|---|
-| `lakana job list [--env ENV] [--repo REPO]` | one row per job with a `triggers` column that holds each trigger on its own line, for example `schedule 0 6 * * * Europe/Berlin` and `on demand`; a paused schedule reads `schedule 0 6 * * * Europe/Berlin (paused)` |
+| `lakana job list [--env ENV] [--repo REPO]` | one row per job with a `triggers` column that holds each trigger on its own line, for example `schedule 0 6 * * * Europe/Berlin`, `after each deploy` and `on demand`; a paused schedule reads `schedule 0 6 * * * Europe/Berlin (paused)` |
 | `lakana job show NAME [--env ENV] [--repo REPO]` | the job's state, selection and last run, and each trigger on its own line with the next run of a schedule |
 
 With `--output json` both print the whole body, `triggers` included.
@@ -51,3 +52,26 @@ With `--output json` both print the whole body, `triggers` included.
 `Job` objects whose `triggers` is a tuple of `Trigger` (`kind`, `cron`, `timezone`, `paused`,
 `next_run_at`; the fields a kind does not have are `None`). From a server that does not send
 triggers the tuple is empty.
+
+## After a deploy
+
+A deploy that makes another project version current starts each job with `on_deploy: true`, as
+the principal that deployed, through the same call as `POST .../jobs/{job}/runs`. The run's
+`trigger` is `deploy`; `lakana runs list --trigger deploy` and `GET .../runs?trigger=deploy` find
+these runs. The deploy records what came of each start in `job_starts`, a list by job name in the
+body of `GET /api/v1/environments/{env}/deploys/{id}` and of the deploy history. It is empty for a
+dry run, a rollback, a deploy that failed and a deploy of the commit already current.
+
+| Field | Meaning |
+|---|---|
+| `job` | the job's name |
+| `outcome` | `pending` (the worker has not started it yet), `started`, `waiting` (the project was busy; the start waits for the active run) or `not_started` |
+| `run_id` | for `started`, the run |
+| `waits_for_run_id` | for `waiting`, the active run the start waits for |
+| `reason` | for `not_started`: `lacks_run` (the deployer may not `RUN` in the environment), `refused` (refused as a start by hand would be: no run principal in a protected environment, an inactive one, a selection that matches nothing), `error` (the worker's log has it) or `lost` (the worker stopped before it started the job; shown once the deploy is older than the run lease, `LAKANA_RUN__LEASE_SECONDS`) |
+| `message` | for `not_started`, one sentence with the cause and the next step |
+
+`lakana deploy` waits until no start is `pending`, then prints the runs and the waiting starts
+under `Jobs started after the deploy:` and a `warning:` line on stderr for each job not started.
+The deploy itself succeeded either way: its exit code is 0. `client.deploys.wait` waits the same
+way, and `Deploy.job_starts` is a tuple of `DeployJobStart` with the fields above.

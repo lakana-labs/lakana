@@ -12848,7 +12848,7 @@
               "default": [],
               "title": "Trigger"
             },
-            "description": "Only runs started this way (`schedule`, `api`, `manual`); repeat or separate with commas."
+            "description": "Only runs started this way (`schedule`, `api`, `manual`, `deploy`); repeat or separate with commas."
           },
           {
             "name": "job",
@@ -18249,6 +18249,77 @@
         "title": "DeployCreate",
         "description": "Request body for a deploy, dry run or rollback.\n\nParameters\n----------\nrepository\n    Registered repository name.\nkind\n    ``deploy`` (default), ``dry_run`` or ``rollback``.\nref\n    Deploy/dry run: ref or full SHA; default the repository's default ref, else ``HEAD``.\nto_sha\n    Rollback: a full SHA already deployed to this environment.\nto_previous\n    Rollback: the project version current before the present one."
       },
+      "DeployJobStartOut": {
+        "properties": {
+          "job": {
+            "type": "string",
+            "title": "Job"
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "started",
+              "waiting",
+              "not_started"
+            ],
+            "title": "Outcome"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "waits_for_run_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Waits For Run Id"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "job",
+          "outcome"
+        ],
+        "title": "DeployJobStartOut",
+        "description": "What a deploy did with one job that starts after each deploy (`on_deploy: true`).\n\nParameters\n----------\njob\n    The job's name.\noutcome\n    ``pending`` (the worker has not started it yet), ``started``, ``waiting`` (the project\n    was busy; the start waits) or ``not_started``.\nrun_id\n    For ``started``, the queued run.\nwaits_for_run_id\n    For ``waiting``, the active run the start waits for.\nreason\n    For ``not_started``: ``lacks_run`` (the deployer may not `RUN` in the environment),\n    ``refused`` (refused as a start by hand would be), ``error`` or ``lost`` (the worker\n    stopped before it started the job).\nmessage\n    For ``not_started``, one sentence that names the cause and the next step."
+      },
       "DeployOut": {
         "properties": {
           "id": {
@@ -18431,6 +18502,13 @@
             ],
             "title": "Waiting For",
             "description": "Why this is waiting, or null when it is not: a stable `code`, one sentence in `message`, and the numbers the sentence uses."
+          },
+          "job_starts": {
+            "items": {
+              "$ref": "#/components/schemas/DeployJobStartOut"
+            },
+            "type": "array",
+            "title": "Job Starts"
           }
         },
         "type": "object",
@@ -18452,7 +18530,20 @@
           "finished_at"
         ],
         "title": "DeployOut",
-        "description": "Response body for a deploy run.\n\nParameters\n----------\nid\n    The run's id.\nenvironment\n    Environment name.\nrepository\n    Repository name.\nkind\n    ``deploy``, ``dry_run`` or ``rollback``.\nstatus\n    ``queued``, ``running``, ``succeeded`` or ``failed``.\nrequested_ref\n    Ref or SHA asked for.\nresolved_sha\n    The commit fetched.\nrollback_to_project_version_id\n    A rollback's target.\nerror_message\n    Why it failed.\ndiff\n    Table names per change category.\nproject_version_id\n    The project version it made current.\nprincipal_id\n    Who submitted it.\ncreated_at\n    Queued at.\nstarted_at\n    Claimed at.\nfinished_at\n    Finished at.\nhidden_adopted\n    Adopted tables left out of `diff` because the caller may not read them.\nchecks\n    The checks the project has, table to ``[{\"check\", \"on_failure\"}]``; `None` for a run\n    without checks.\nwarnings\n    What the deploy leaves for its owner to act on, as sentences (a removed asset whose\n    table is kept after a failed check).\nwaiting_for\n    Why a queued deploy has not started: a stable `code`, one sentence in `message` that\n    names the next step, and the numbers it uses; null when it is not waiting. Set on the\n    single read (`GET .../deploys/{id}`) only, null in the history."
+        "description": "Response body for a deploy run.\n\nParameters\n----------\nid\n    The run's id.\nenvironment\n    Environment name.\nrepository\n    Repository name.\nkind\n    ``deploy``, ``dry_run`` or ``rollback``.\nstatus\n    ``queued``, ``running``, ``succeeded`` or ``failed``.\nrequested_ref\n    Ref or SHA asked for.\nresolved_sha\n    The commit fetched.\nrollback_to_project_version_id\n    A rollback's target.\nerror_message\n    Why it failed.\ndiff\n    Table names per change category.\nproject_version_id\n    The project version it made current.\nprincipal_id\n    Who submitted it.\ncreated_at\n    Queued at.\nstarted_at\n    Claimed at.\nfinished_at\n    Finished at.\nhidden_adopted\n    Adopted tables left out of `diff` because the caller may not read them.\nchecks\n    The checks the project has, table to ``[{\"check\", \"on_failure\"}]``; `None` for a run\n    without checks.\nwarnings\n    What the deploy leaves for its owner to act on, as sentences (a removed asset whose\n    table is kept after a failed check).\nwaiting_for\n    Why a queued deploy has not started: a stable `code`, one sentence in `message` that\n    names the next step, and the numbers it uses; null when it is not waiting. Set on the\n    single read (`GET .../deploys/{id}`) only, null in the history.\njob_starts\n    The jobs with `on_deploy: true` that a successful deploy started, by name, each with\n    what came of its start; empty for a run that starts no job (a dry run, a rollback, a\n    failed deploy, a deploy of the commit already current)."
+      },
+      "DeployTriggerOut": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "deploy",
+            "title": "Kind",
+            "default": "deploy"
+          }
+        },
+        "type": "object",
+        "title": "DeployTriggerOut",
+        "description": "A trigger that starts the job after each deploy that changes the project version.\n\nParameters\n----------\nkind\n    Always ``deploy``."
       },
       "DeploymentOut": {
         "properties": {
@@ -19361,12 +19452,16 @@
                   "$ref": "#/components/schemas/ScheduleTriggerOut"
                 },
                 {
+                  "$ref": "#/components/schemas/DeployTriggerOut"
+                },
+                {
                   "$ref": "#/components/schemas/OnDemandTriggerOut"
                 }
               ],
               "discriminator": {
                 "propertyName": "kind",
                 "mapping": {
+                  "deploy": "#/components/schemas/DeployTriggerOut",
                   "on_demand": "#/components/schemas/OnDemandTriggerOut",
                   "schedule": "#/components/schemas/ScheduleTriggerOut"
                 }
@@ -19399,7 +19494,7 @@
           "triggers"
         ],
         "title": "JobOut",
-        "description": "One job and the platform's state for it.\n\nParameters\n----------\nname\n    The job's name.\nenvironment\n    Environment name.\nrepository\n    Repository name.\nselect\n    The selection's patterns.\nupstream\n    Whether ancestors are added.\ndownstream\n    Whether descendants are added.\ncron\n    The cron expression, or null for a job without a schedule here.\ntimezone\n    The schedule's IANA zone, or null without a schedule.\nstate\n    ``scheduled``, ``paused``, ``waiting`` (a start waits for the active run),\n    ``waiting to start`` (a start waits and the project is free), ``no schedule``,\n    ``no run principal`` or ``run principal unusable``.\npaused\n    Whether the schedule is paused.\nnext_run_at\n    The next scheduled time (UTC), or null.\nnext_run_local\n    The same moment in the job's zone, ISO 8601 with the offset.\nwaiting_for\n    Why a start waits (`job_waits`, `job_starts_soon`) or why the schedule cannot start\n    (`no_run_principal`, `run_principal_unusable`): a stable `code` and one sentence in\n    `message`; null otherwise.\nwaits_for_run_id\n    For ``waiting``, the run it waits for.\nlast_run_id\n    The job's latest run, if any.\nlast_run_status\n    Its status.\nlast_run_trigger\n    What started it.\nlast_run_at\n    When it was created.\ntriggers\n    How the job starts, schedule first: a ``schedule`` trigger when the job has a schedule\n    in this environment, and the ``on_demand`` trigger every job has. Kinds may be added."
+        "description": "One job and the platform's state for it.\n\nParameters\n----------\nname\n    The job's name.\nenvironment\n    Environment name.\nrepository\n    Repository name.\nselect\n    The selection's patterns.\nupstream\n    Whether ancestors are added.\ndownstream\n    Whether descendants are added.\ncron\n    The cron expression, or null for a job without a schedule here.\ntimezone\n    The schedule's IANA zone, or null without a schedule.\nstate\n    ``scheduled``, ``paused``, ``waiting`` (a start waits for the active run),\n    ``waiting to start`` (a start waits and the project is free), ``no schedule``,\n    ``no run principal`` or ``run principal unusable``.\npaused\n    Whether the schedule is paused.\nnext_run_at\n    The next scheduled time (UTC), or null.\nnext_run_local\n    The same moment in the job's zone, ISO 8601 with the offset.\nwaiting_for\n    Why a start waits (`job_waits`, `job_starts_soon`) or why the schedule cannot start\n    (`no_run_principal`, `run_principal_unusable`): a stable `code` and one sentence in\n    `message`; null otherwise.\nwaits_for_run_id\n    For ``waiting``, the run it waits for.\nlast_run_id\n    The job's latest run, if any.\nlast_run_status\n    Its status.\nlast_run_trigger\n    What started it.\nlast_run_at\n    When it was created.\ntriggers\n    How the job starts, schedule first: a ``schedule`` trigger when the job has a schedule\n    in this environment, a ``deploy`` trigger when it starts after each deploy here, and the\n    ``on_demand`` trigger every job has, last. Kinds may be added."
       },
       "JobRunRequest": {
         "properties": {
@@ -21386,7 +21481,7 @@
           "tasks"
         ],
         "title": "RunOut",
-        "description": "One run.\n\nParameters\n----------\nid\n    Run id.\nenvironment\n    Environment name.\nrepository\n    Repository name.\nproject_version_id\n    The project version it runs.\ncommit_sha\n    Its commit.\nkind\n    ``full``, ``selection`` or ``resume``.\nstatus\n    Run status.\ncancel_requested\n    Whether a cancel was requested.\ntriggered_by\n    Who started it.\nrun_as\n    Who it writes as.\nresumed_from_run_id\n    The run a resume continues.\nselection\n    Patterns and flags.\nerror_message\n    Run-level failure.\ncreated_at\n    Created.\nstarted_at\n    Started.\nfinished_at\n    Finished.\ntasks\n    Task runs (empty in listings).\njob\n    The job the run belongs to; null for an ad-hoc run.\ntrigger\n    ``schedule``, ``api`` (a service account called the API) or ``manual``; null for an\n    ad-hoc run.\nscheduled_for\n    For a scheduled run, the time the schedule named.\nmissed\n    How many earlier scheduled times this run stands in for.\nnotifications\n    The notifications the run queued, oldest first (empty in listings).\nfailed_tasks\n    How many tasks ended ``failed`` (not ``upstream_failed`` or ``cancelled``); also in\n    listings."
+        "description": "One run.\n\nParameters\n----------\nid\n    Run id.\nenvironment\n    Environment name.\nrepository\n    Repository name.\nproject_version_id\n    The project version it runs.\ncommit_sha\n    Its commit.\nkind\n    ``full``, ``selection`` or ``resume``.\nstatus\n    Run status.\ncancel_requested\n    Whether a cancel was requested.\ntriggered_by\n    Who started it.\nrun_as\n    Who it writes as.\nresumed_from_run_id\n    The run a resume continues.\nselection\n    Patterns and flags.\nerror_message\n    Run-level failure.\ncreated_at\n    Created.\nstarted_at\n    Started.\nfinished_at\n    Finished.\ntasks\n    Task runs (empty in listings).\njob\n    The job the run belongs to; null for an ad-hoc run.\ntrigger\n    ``schedule``, ``api`` (a service account called the API), ``manual`` or ``deploy`` (a\n    deploy started the job as its deployer); null for an ad-hoc run.\nscheduled_for\n    For a scheduled run, the time the schedule named.\nmissed\n    How many earlier scheduled times this run stands in for.\nnotifications\n    The notifications the run queued, oldest first (empty in listings).\nfailed_tasks\n    How many tasks ended ``failed`` (not ``upstream_failed`` or ``cancelled``); also in\n    listings."
       },
       "ScheduleTriggerOut": {
         "properties": {
@@ -23151,7 +23246,7 @@
           "message"
         ],
         "title": "WaitingStartOut",
-        "description": "A start of a job that waits for the active run of its project.\n\nParameters\n----------\njob\n    The job.\nwaits_for_run_id\n    The active run it waits for.\ntrigger\n    ``schedule``, ``api`` or ``manual``.\nrequested_at\n    When it was requested.\nrequested_by\n    Who asked, if that principal still exists; null for a scheduled start.\nscheduled_for\n    For a scheduled start, the time the schedule named.\nmissed\n    How many earlier scheduled times the start stands in for.\nmerged\n    How many starts it stands for.\nmessage\n    One sentence for a person: what it waits for and that it starts then."
+        "description": "A start of a job that waits for the active run of its project.\n\nParameters\n----------\njob\n    The job.\nwaits_for_run_id\n    The active run it waits for.\ntrigger\n    ``schedule``, ``api``, ``manual`` or ``deploy``.\nrequested_at\n    When it was requested.\nrequested_by\n    Who asked, if that principal still exists; null for a scheduled start.\nscheduled_for\n    For a scheduled start, the time the schedule named.\nmissed\n    How many earlier scheduled times the start stands in for.\nmerged\n    How many starts it stands for.\nmessage\n    One sentence for a person: what it waits for and that it starts then."
       },
       "WhoamiOut": {
         "properties": {
