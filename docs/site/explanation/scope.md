@@ -73,9 +73,13 @@ How the larger pieces are meant to work:
   column, not a computed metric (#255). The metadata forms a graph with lineage, impact and
   join-path queries (#374), which the MCP server offers to agents, and a business glossary links
   terms to tables, columns and measures (#375). All of it comes before the web interface and the public beta (epic #249), so that nobody builds projects on Lakana before the rules exist and the interface shows model metadata from its first version.
-- **Data quality.** A check is a SQL file that must return no rows. It either blocks (the table is
-  set back to what it was before the run, and what reads it is not built) or only warns, and its
-  results are kept as a history. Nothing more elaborate than that. See
+- **Data quality.** A check is a SQL file that must return no rows. It has one of three modes.
+  `block` sets the table back to what it was before the run, and what reads it is not built.
+  `warn` only reports. `keep` leaves the data, marks the table as kept and stops what reads it.
+  A project default in `lakana.yaml` sets the mode of a check that names none, and the results
+  are kept as a history. Checks stay at these three modes until v1.0.0; the checks generated from
+  model metadata use them too. Table-health signals only warn, through the notifications: they
+  never fail a run, set a table back or mark it kept. See
   [Check your data](../how-to/check-your-data.md).
 - **Model artifacts.** A Python asset can store a file or a directory, such as a trained model, as
   numbered versions tied to the commit of the run, and another asset reads it. Access follows the
