@@ -270,3 +270,35 @@ def test_mutual_references_are_a_cycle_and_a_self_reference_is_not() -> None:
         "gold.e", metadata=AssetMetadata(materialize="table", references={"m": "gold.e"})
     )
     assert validate_project([me], ResolvedProjectConfig()) == []
+
+
+def _referencing(references: dict[str, str]) -> AssetMetadata:
+    """Build the metadata of a table asset that declares references.
+
+    Parameters
+    ----------
+    references
+        Column to target.
+
+    Returns
+    -------
+    AssetMetadata
+        The metadata.
+    """
+    return AssetMetadata(materialize="table", references=references)
+
+
+def test_the_reference_hint_names_a_reference_cycle_beside_a_sql_cycle() -> None:
+    """The hint depends on the cycle reported, not on whether a SQL cycle exists elsewhere."""
+    a = make_asset("a.x", metadata=_referencing({"y_id": "a.y"}))
+    b = make_asset("a.y", ("a.x",))
+    sql_one = make_asset("z.p", ("z.q",))
+    sql_two = make_asset("z.q", ("z.p",))
+    issues = validate_project([a, b, sql_one, sql_two], ResolvedProjectConfig())
+    assert [i.message for i in issues] == [
+        "cycle: a.x -> a.y -> a.x (a reference in `references:` counts as a dependency: "
+        "the target is built first)"
+    ]
+    assert [i.message for i in validate_project([sql_one, sql_two], ResolvedProjectConfig())] == [
+        "cycle: z.p -> z.q -> z.p"
+    ]

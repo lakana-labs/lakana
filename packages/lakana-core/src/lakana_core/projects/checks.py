@@ -674,6 +674,7 @@ def check_issues(
     reads = set(graph.external_inputs)
     issues: list[ProjectIssue] = []
     per_table: dict[str, list[ParsedCheck]] = {}
+    refused_families: set[tuple[str, str]] = set()
     for check in sorted(checks, key=lambda c: c.path):
         per_table.setdefault(check.table, []).append(check)
         if check.table in artifacts:
@@ -699,6 +700,12 @@ def check_issues(
         elif check.on_failure == "keep" and materialize.get(check.table) in _KEEP_REFUSED:
             # The project's default is never `keep`, so this is the check's own value.
             refusal = _KEEP_REFUSED[cast("str", materialize[check.table])]
+            if check.generated is not None:
+                # One header setting, however many checks its family generates: one issue.
+                family = (check.table, check.generated.family)
+                if family in refused_families:
+                    continue
+                refused_families.add(family)
             issues.append(_keep_refused(check, refusal))
     for table, members in per_table.items():
         if len(members) > limits.max_checks_per_table:

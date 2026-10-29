@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass
+from itertools import pairwise
 
 from lakana_core.projects.issues import ProjectIssue
 from lakana_core.projects.model import project_reference_target
@@ -182,7 +183,9 @@ def validate_project(
     cycle = find_cycle(assets)
     if cycle is not None:
         first = by_table[cycle[0]]
-        hint = _REFERENCE_HINT if find_cycle(assets, with_references=False) is None else ""
+        steps = pairwise(cycle)
+        closed_by_reference = any(up not in by_table[down].references for down, up in steps)
+        hint = _REFERENCE_HINT if closed_by_reference else ""
         issues.append(
             ProjectIssue(first.path, first.body_line, "cycle: " + " -> ".join(cycle) + hint)
         )

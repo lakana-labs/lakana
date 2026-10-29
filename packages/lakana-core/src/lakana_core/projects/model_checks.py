@@ -12,6 +12,7 @@ from collections.abc import Mapping, Sequence
 from lakana_core.identifiers import shown
 from lakana_core.projects.asset_model import ParsedAsset, ResolvedReference, key_columns
 from lakana_core.projects.checks import GeneratedFrom, ParsedCheck
+from lakana_core.projects.discovery import _fold
 from lakana_core.projects.issues import ProjectIssue
 
 KEY_UNIQUE = "key_unique"
@@ -226,7 +227,8 @@ def generated_name_issues(
     """Refuse a hand-written check whose name its own table's header generates.
 
     A hand-written check named ``key_unique`` or ``ref_x`` is fine as long as the header of its
-    table generates no check of that name.
+    table generates no check of that name. Names are compared as discovery compares two check
+    files (`_fold`), so ``Key_Unique.sql`` collides with a generated ``key_unique`` too.
 
     Parameters
     ----------
@@ -240,7 +242,7 @@ def generated_name_issues(
     list of ProjectIssue
         One per colliding hand-written check, at its file, in path order.
     """
-    names = {check.name for check in generated}
+    names = {_fold(check.name) for check in generated}
     return [
         ProjectIssue(
             check.path,
@@ -249,5 +251,5 @@ def generated_name_issues(
             f"rename `{check.path}`.",
         )
         for check in sorted(hand, key=lambda c: c.path)
-        if check.name in names
+        if _fold(check.name) in names
     ]

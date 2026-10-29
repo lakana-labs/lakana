@@ -223,13 +223,11 @@ def test_the_keep_refusal_of_a_generated_check_names_the_header_setting() -> Non
     )
     append = _fact(write="append", watermark="date", checks={"key": "keep"})
     generated = generated_checks([append], {}, default_on_failure="block")
-    issues = check_issues(generated, [append], build_graph([append]))
-    assert len(issues) == 2
-    assert all(
-        i.message.startswith("`checks: key: keep` cannot be used on `gold.fact_sales`: it is an")
-        and "Use `checks: key: block`" in i.message
-        for i in issues
+    (issue,) = check_issues(generated, [append], build_graph([append]))
+    assert issue.message.startswith(
+        "`checks: key: keep` cannot be used on `gold.fact_sales`: it is an"
     )
+    assert "Use `checks: key: block`" in issue.message
 
 
 def test_keep_on_a_table_asset_is_accepted_for_a_generated_check() -> None:
@@ -254,3 +252,32 @@ def test_the_limit_directory_comes_from_a_hand_written_check_when_there_is_one()
     )
     (issue,) = check_issues(only_generated, [asset], graph, limits=limits)
     assert issue.path == "assets/gold/fact_sales.sql"
+
+
+def test_a_hand_written_check_whose_name_differs_only_in_case_is_refused() -> None:
+    """Discovery treats `Key_Unique.sql` and `key_unique.sql` as one check; so does this rule."""
+    generated = generated_checks(
+        [_fact()], {"gold.fact_sales": (_REF,)}, default_on_failure="block"
+    )
+    hands = [_hand("Key_Unique"), _hand("REF_STORE_ID")]
+    assert [i.message for i in generated_name_issues(hands, generated)] == [
+        "A check named `Key_Unique` is generated for `gold.fact_sales`; rename "
+        "`checks/gold/fact_sales/Key_Unique.sql`.",
+        "A check named `REF_STORE_ID` is generated for `gold.fact_sales`; rename "
+        "`checks/gold/fact_sales/REF_STORE_ID.sql`.",
+    ]
+
+
+def test_keep_on_a_family_is_refused_once_however_many_checks_it_generates() -> None:
+    merge = _fact(
+        write="merge",
+        checks={"key": "keep", "references": "keep"},
+        references={"store_id": "gold.dim_store", "date": "gold.dim_date"},
+    )
+    refs = (_REF, ResolvedReference("date", "gold.dim_date", "date"))
+    generated = generated_checks([merge], {"gold.fact_sales": refs}, default_on_failure="block")
+    messages = [i.message for i in check_issues(generated, [merge], build_graph([merge]))]
+    assert [m.split(" cannot")[0] for m in messages] == [
+        "`checks: key: keep`",
+        "`checks: references: keep`",
+    ]
