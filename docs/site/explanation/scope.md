@@ -76,7 +76,7 @@ How the larger pieces are meant to work:
 - **Data quality.** A check is a SQL file that must return no rows. It has one of three modes.
   `block` sets the table back to what it was before the run, and what reads it is not built.
   `warn` only reports. `keep` leaves the data, marks the table as kept and stops what reads it.
-  A project default in `lakana.yaml` sets the mode of a check that names none, and the results
+  A project default in `lakana.yaml`, `block` or `warn`, sets the mode of a check that names none, and the results
   are kept as a history. Checks stay at these three modes until v1.0.0; the checks generated from
   model metadata use them too. Table-health signals only warn, through the notifications: they
   never fail a run, set a table back or mark it kept. See
