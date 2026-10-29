@@ -1706,6 +1706,21 @@ def test_table_health_shows_maintenance_checks_and_readers(tmp_path: Path) -> No
     assert "ada" in plain and "5" in plain
 
 
+def test_table_health_marks_a_generated_check(tmp_path: Path) -> None:
+    generated = {
+        **_HEALTH["checks"][0],
+        "name": "bronze.sales/key_unique",
+        "check": "key_unique",
+        "generated": True,
+    }
+    _, result = _health(tmp_path, {**_HEALTH, "checks": [generated, *_HEALTH["checks"][1:]]})
+
+    assert result.exit_code == 0, result.stderr
+    plain = _plain(result.stdout)
+    assert "key_unique (generated)" in plain
+    assert "positive (generated)" not in plain
+
+
 def test_table_health_says_when_there_is_nothing_yet_and_when_readers_are_hidden(
     tmp_path: Path,
 ) -> None:

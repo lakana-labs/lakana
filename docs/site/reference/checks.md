@@ -63,8 +63,67 @@ together.
 | `table 'TABLE' is neither built nor read by this project. A check belongs to a table that an asset of this project produces or selects from. This project builds: ... It reads: ...` | No asset builds the table or reads it. A common cause is a deleted asset whose check is still there. | Move the check to a table the lists name, or add the asset, or delete the check. |
 | `'TABLE' is an artifact; a check needs a table. Check a table the artifact is built from instead.` | The directory names an artifact. | Check the table the artifact is built from. |
 | `more than 50 checks of table 'TABLE'; combine checks or split the table` | The directory has too many files. | Combine checks. |
+| ``more than 50 checks of table 'TABLE' (2 of them generated from the asset's header); remove or combine hand-written checks, or split the table`` | The hand-written checks and the [generated checks](#generated-checks) of the table together are more than 50. | Remove or combine hand-written checks. |
+| ``A check name may not end in ` (generated)`, which marks a check generated from an asset's header; rename `checks/…`.`` | A file under `checks/` is named like `unique_id (generated).sql`, in any letter case. `lakana check list` would show it as a generated check. | Rename the file. |
 
 A project without `checks/` deploys and runs as before.
+
+## Generated checks
+
+An asset's header can declare `key:` and `references:`
+([Model fields](asset-front-matter.md#model-fields-kind-grain-key-and-references)). A deploy turns
+them into checks of the asset's table, with no file under `checks/`:
+
+| Check | From | Returns |
+|---|---|---|
+| `TABLE/key_unique` | `key:` | Every row whose key, all key columns together, appears in more than one row. |
+| `TABLE/key_not_null` | `key:` | Every row with a null in any key column. |
+| `TABLE/ref_COLUMN` | each entry of `references:` | Every row whose `COLUMN` is not null and has no match in the target's key column. A null is allowed; a reference that is required is also in `key:`. |
+
+`key: none` generates nothing. Apart from where they come from, they are checks like any other:
+they run after the table is written, end as the outcomes below, set the table back when they
+block, and `lakana check rows RUN TABLE/key_unique --env ENV` shows the rows they found.
+
+| Rule | Value |
+|---|---|
+| The source | The asset's file and the line of its header, for example `assets/gold/fact_orders.sql:1`. A result's `path` holds it where a hand-written check's holds `checks/…`. |
+| `on_failure` | `checks: key:` or `checks: references:` in the asset's header, then `checks.on_failure` in `lakana.yaml`, then `block` (as in [The default of `on_failure`](#the-default-of-on_failure)). `keep` follows the rules of a hand-written check: never on a view, an append or a merge. |
+| The most | They count toward the 50 checks of a table, so a table near the limit can be refused when its header gains `key:` or `references:`. The message says how many of them the header generated: ``more than 50 checks of table 'gold.fact_orders' (3 of them generated from the asset's header); remove or combine hand-written checks, or split the table``. |
+| Names | A hand-written check of the same table may not take a generated name: ``A check named `key_unique` is generated for `gold.fact_orders`; rename `checks/gold/fact_orders/key_unique.sql`.`` Rename the file. A hand-written `key_unique` of a table that declares no `key:` is fine. |
+| The mark | `lakana check list` and `lakana table health` show `key_unique (generated)`; REST and the SDK have `generated: true` on the result (`false` on a hand-written check, and in the SDK `false` from an older server). |
+
+### A reference sets the run order
+
+A reference target that the project builds is built before the table that references it, like a
+table its `SELECT` reads:
+
+- `lakana run --select gold.fact_orders --upstream` also builds the tables `gold.fact_orders`
+  references.
+- When the target fails, or a blocking check sets it back, the tables that reference it are not
+  built; they end `upstream_failed`, as after any failed table.
+- This holds whatever `checks: references:` says: with `warn`, a failed reference check does not
+  stop the table, but a failed target still does, because the table is built after it.
+- Two assets that reference each other, directly or through others, are a cycle, and the deploy
+  refuses it; remove one of the references, or check it with a hand-written check under
+  `checks/`, which adds no step to the run.
+
+A target the project does not build adds no step to the run; its check reads it as it is.
+
+### Before a generated check counts
+
+A deploy does not know the types of a table's columns, and it does not know the columns of a
+`SELECT *` or a Python asset at all. So before it counts a generated check, the worker compares
+the columns and their types in the catalog, as `lakana table get` shows them. A problem makes the
+check `errored`, with one of these texts in `error`; a `block` check that errored sets the table
+back, as a failed one does.
+
+| `error` says | The cause | What to do |
+|---|---|---|
+| ``Key column `id` is not a column of `gold.fact_orders`; fix `key:` in assets/gold/fact_orders.sql:1 and deploy again.`` | The written table has no such column. When it has one that differs only in letter case, the text adds ``Column names match exactly; the table has `ID`.`` | Fix `key:`, or the `SELECT`, and deploy again. |
+| ``Key column `price` is double, a floating-point type, so it cannot identify a row; cast it in the asset, for example to DECIMAL, BIGINT or VARCHAR, and deploy again.`` | A key column is `float` or `double`. A merge on such a key ran in earlier releases; its key checks now error at every run. | Cast the column in the asset (in SQL, `CAST(price AS DECIMAL(18, 4))`, `BIGINT` or `VARCHAR`), or key on another column, and deploy again. |
+| ``Reference column `store_id` is not a column of `gold.fact_orders`; fix `references:` in assets/gold/fact_orders.sql:1 and deploy again.`` | The written table has no such column (the letter-case hint as above). | Fix `references:`, or the `SELECT`, and deploy again. |
+| ``The reference `store_id` at `assets/gold/fact_orders.sql:1` cannot be checked: its target is missing, not readable by the run's principal, or no longer has the key column; fix the reference or the grant and deploy again.`` | The target table is gone, the run's principal may not read it, or it no longer has the referenced column. The text does not say which, so that it tells nothing about a table its reader may not read. | Check that the target exists and has the column, and grant the run's principal `READ_TABLE` on it. |
+| ``The reference `store_id` at `assets/gold/fact_orders.sql:1` has a type that differs from its target key column's; make the types match and deploy again.`` | The two columns have different types. Only `int` and `long` match each other; every other type must be the same, so `decimal(10,2)` against `decimal(12,2)`, or `string` against `long`, differ. The text names neither type. | Cast the column in the `SELECT` to the type that `lakana table get` shows for the target column. |
 
 ## What a check can end as
 
@@ -210,7 +269,8 @@ Lists check results, newest first.
 | `--limit N` | At most N results, 1 to 1000. Default 50. |
 
 The columns are `run` (the first 8 characters of the run id), `table`, `check`, `outcome`, `rows`,
-`on_failure` and `finished_at`; a narrow terminal leaves `on_failure` and `run` out first, and the
+`on_failure` and `finished_at`; `check` reads `key_unique (generated)` for a
+[generated check](#generated-checks); a narrow terminal leaves `on_failure` and `run` out first, and the
 line under the table says so. `--output json` has every field, including the whole run id, the
 error, the rollback outcome and the note about policies. A run without results prints
 `Run RUN_ID has no check results.`
@@ -405,7 +465,8 @@ to 200 (default 50). Send the same `table` with every page.
 
 A result has these fields: `run_id`, `task`, `name`, `check`, `path`, `table`, `table_id`,
 `on_failure`, `outcome`, `failing_rows`, `error`, `checked_snapshot_id`, `rollback_outcome`,
-`policy_applied`, `policy_note`, `query_run_id`, `started_at` and `finished_at`. A result holds
+`policy_applied`, `policy_note`, `query_run_id`, `started_at`, `finished_at` and `generated`
+(`true` for a [generated check](#generated-checks)). A result holds
 a count and never a row of the table.
 
 Other objects carry checks, too: a run's tasks have `kind` (`asset`, or `source_check` for a

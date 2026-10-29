@@ -169,9 +169,22 @@ def test_a_shorter_table_with_unknown_columns_reads_two_ways() -> None:
 
 
 def test_project_reference_target_prefers_the_whole_name() -> None:
-    assert project_reference_target("gold.dim_store", {"gold.dim_store"}) == "gold.dim_store"
-    assert project_reference_target("gold.dim_store.id", {"gold.dim_store"}) == "gold.dim_store"
-    assert project_reference_target("gold.other", {"gold.dim_store"}) is None
+    built: dict[str, tuple[str, ...] | None] = {"gold.dim_store": ("id",)}
+    assert project_reference_target("gold.dim_store", built) == "gold.dim_store"
+    assert project_reference_target("gold.dim_store.id", built) == "gold.dim_store"
+    assert project_reference_target("gold.dim_store.id", {"gold.dim_store": None}) == (
+        "gold.dim_store"
+    )
+    assert project_reference_target("gold.other", built) is None
+
+
+def test_project_reference_target_reads_a_name_as_the_deploy_does() -> None:
+    """A table part whose known columns lack the last part is not the target, as in `_split`."""
+    assert project_reference_target("gold.dim_store.nope", {"gold.dim_store": ("id",)}) is None
+    both: dict[str, tuple[str, ...] | None] = {"a.b": ("x",), "a.b.store_id": ("id",)}
+    assert project_reference_target("a.b.store_id", both) == "a.b.store_id"
+    unknown: dict[str, tuple[str, ...] | None] = {"a.b": None, "a.b.store_id": ("id",)}
+    assert project_reference_target("a.b.store_id", unknown) == "a.b.store_id"
 
 
 def test_key_and_reference_columns_must_be_in_an_explicit_select() -> None:
@@ -219,3 +232,17 @@ def test_the_long_form_resolves_to_the_named_column() -> None:
 
 def test_key_and_reference_columns_the_select_returns_pass() -> None:
     assert project_model_issues([_fact({"store_id": "gold.dim_store"})]) == []
+
+
+def test_an_artifact_is_no_reference_target_in_either_form() -> None:
+    """An artifact has no rows, so nothing points at it; the deployer may read it: it is named."""
+    artifact = TargetInfo(kind=None, key=(), key_none=False, columns=None, artifact=True)
+    for raw in ("gold.model", "gold.model.id"):
+        resolved, issues = resolve_references(
+            [_fact({"store_id": raw})], _lookup({"gold.model": artifact}), environment="dev"
+        )
+        assert resolved == {}
+        assert [i.message for i in issues] == [
+            f"Reference `store_id: {raw}`: `gold.model` is an artifact, not a table, so no "
+            "column can point at it; point the reference at a table."
+        ]

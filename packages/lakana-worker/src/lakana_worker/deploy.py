@@ -68,6 +68,7 @@ from lakana_core.projects.lockfile import (
 )
 from lakana_core.projects.manifest import build_manifest, manifest_tables
 from lakana_core.projects.model import project_model_issues
+from lakana_core.projects.model_checks import generated_checks, generated_name_issues
 from lakana_core.projects.package_indexes import registered_indexes
 from lakana_core.projects.package_sources import KnownSources, RegisteredIndex
 from lakana_core.projects.parse import ParsedAsset, parse_assets
@@ -785,6 +786,8 @@ def _deploy(
         resolved, reference_issues = service.resolve_model_references(
             principal, environment_name, repository_id, assets
         )
+        generated = generated_checks(assets, resolved, default_on_failure=config.checks.on_failure)
+        every_check = [*checks, *generated]
         has_python = any(asset.kind == "python" for asset in assets)
         sources = KnownSources(registered_indexes(session), settings.index_url)
         used = used_indexes(checkout.lock, sources) if has_python else ()
@@ -815,7 +818,8 @@ def _deploy(
             + service.validate_against_environment(
                 principal, environment_name, repository_id, assets, graph
             )
-            + check_issues(checks, assets, graph, limits=limits)
+            + check_issues(every_check, assets, graph, limits=limits)
+            + generated_name_issues(checks, generated)
             + service.validate_checks_against_environment(
                 principal, environment_name, repository_id, checks, assets
             )
@@ -834,7 +838,7 @@ def _deploy(
             python=project.python,
             lock_sha256=lock_digest(checkout.lock) if checkout.lock is not None else None,
             package_indexes=[index.name for index in used],
-            checks=checks,
+            checks=every_check,
             references=resolved,
             artifacts=service.artifact_inputs(
                 principal, environment_name, graph, repository_id=repository_id
@@ -857,7 +861,7 @@ def _deploy(
                 run,
                 diff=diff,
                 worker_id=worker_id,
-                checks=checks_listing(checks) or None,
+                checks=checks_listing(every_check) or None,
                 manifest=manifest,
             )
             return
@@ -905,7 +909,7 @@ def _deploy(
                 diff=diff,
                 expected_job_version_id=current.id if current is not None else None,
                 worker_id=worker_id,
-                checks=checks_listing(checks) or None,
+                checks=checks_listing(every_check) or None,
                 code_bytes=code_bytes,
             )
             if uploaded is not None:

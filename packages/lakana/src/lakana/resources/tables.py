@@ -168,6 +168,7 @@ def _health_from_json(data: dict[str, Any]) -> TableHealth:
                 kept=c["kept"],
                 not_published=c["not_published"],
                 finished_at=datetime.fromisoformat(c["finished_at"]),
+                generated=c.get("generated", False),
             )
             for c in data["checks"]
         ],

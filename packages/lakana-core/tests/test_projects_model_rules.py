@@ -71,12 +71,14 @@ def test_the_kind_rules(metadata: AssetMetadata, expected: list[str]) -> None:
     assert model_issues(metadata, table=_T) == expected
 
 
-def test_a_key_has_at_most_eight_columns_unless_it_merges() -> None:
-    """`key_issues` alone holds the cap; a merge key keeps the previous release's rule (no cap)."""
+def test_a_key_has_at_most_eight_columns_a_merge_key_too() -> None:
+    """`key_issues` alone holds the cap; since generated key checks, a merge key has it too."""
     nine = tuple(f"c{i}" for i in range(9))
-    too_many = "a key has at most 8 columns; `key:` lists 9"
+    too_many = (
+        "a key has at most 8 columns, and `key:` lists 9; shorten it to the columns that "
+        "identify one row"
+    )
     assert key_issues(nine) == [too_many]
-    assert key_issues(nine, merge=True) == []
     assert key_issues(nine[:8]) == []
     assert key_issues("none") == []
     replaced = AssetMetadata(materialize="table", key=nine)
@@ -84,13 +86,13 @@ def test_a_key_has_at_most_eight_columns_unless_it_merges() -> None:
     assert messages.count(too_many) == 1
     merged = AssetMetadata(materialize="table", write="merge", key=nine)
     messages = [i.message for i in consistency_issues(merged, path="assets/gold/f.sql", line=1)]
-    assert too_many not in messages
+    assert messages.count(too_many) == 1
 
 
 def test_a_key_column_must_not_be_empty() -> None:
     empty = "a key column must not be empty; write the name of a column of the asset"
     assert key_issues(("",)) == [empty]
-    assert key_issues(("id", ""), merge=True) == [empty]
+    assert key_issues(("id", "")) == [empty]
 
 
 @pytest.mark.parametrize(

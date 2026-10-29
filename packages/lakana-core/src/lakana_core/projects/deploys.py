@@ -1921,7 +1921,8 @@ class DeployService:
         referenced table; otherwise they are removed and
         `hidden_references` counts the unreadable references, and the edges
         into such an asset are dropped (counted in `hidden_edges`) since they
-        would reveal what its SQL reads. Unreadable
+        would reveal what its SQL reads; so are edges from a table `p` may not read,
+        which a `references:` target alone can make. Unreadable
         `external_inputs` are removed and counted in
         `hidden_external_inputs`. A check's `sql` and `references` follow
         the asset rule, judged on the tables its SQL names (`_visible_checks`). The reference
@@ -1982,7 +1983,14 @@ class DeployService:
         if "checks" in manifest:
             manifest["checks"] = self._visible_checks(p, environment, manifest["checks"])
         edges = manifest.get("edges", [])
-        manifest["edges"] = [edge for edge in edges if edge[1] not in hidden_assets]
+        # An edge into a hidden asset reveals what its SQL reads; an edge from a table the
+        # reader may not read can come from `references:` alone, and reveals the target that
+        # `_visible_model` withholds.
+        manifest["edges"] = [
+            edge
+            for edge in edges
+            if edge[1] not in hidden_assets and self._may_read(p, environment, edge[0])
+        ]
         manifest["hidden_edges"] = len(edges) - len(manifest["edges"])
         inputs = manifest.get("external_inputs", [])
         visible = [name for name in inputs if self._may_read(p, environment, name)]
@@ -2054,8 +2062,9 @@ class DeployService:
             One copy per check entry. A check whose SQL names a table `p` may not read, or
             whose tables cannot be listed, loses `sql` and `references`, and
             `hidden_references` counts the unreadable names (1 when they cannot be listed);
-            name, table, check, path, on_failure and description stay. A value that is not a
-            list, and an entry that is not a mapping, show as nothing.
+            name, table, check, path, on_failure and description stay, and a generated check's
+            `generated` keeps only its family and columns. A value that is not a list, and an
+            entry that is not a mapping, show as nothing.
         """
         if not isinstance(checks, list):
             return []
@@ -2073,6 +2082,12 @@ class DeployService:
             if names is None or hidden:
                 entry.pop("sql", None)
                 entry.pop("references", None)
+                generated = entry.get("generated")
+                if isinstance(generated, Mapping):
+                    # A reference check's source names its target, as its SQL does.
+                    entry["generated"] = {
+                        key: generated[key] for key in ("family", "columns") if key in generated
+                    }
             else:
                 entry["references"] = list(names)
             entry["hidden_references"] = hidden
@@ -2295,19 +2310,26 @@ class DeployService:
             Returns
             -------
             TargetInfo or None
-                The info of a project asset, or of an existing table `p` may read; `None` for
-                anything else.
+                The info of a project asset, or of an existing table `p` may read, an artifact
+                marked as one; `None` for anything else.
             """
             if name in by_table:
                 asset = by_table[name]
                 meta = asset.metadata
                 return TargetInfo(
-                    meta.kind, key_columns(meta.key), meta.key == KEY_NONE, asset.columns
+                    meta.kind,
+                    key_columns(meta.key),
+                    meta.key == KEY_NONE,
+                    asset.columns,
+                    artifact=asset.output == "artifact",
                 )
             # Another repository's table counts only once it exists and `p` may read it, so an
             # unreadable target never reaches the manifest or catalog metadata below.
-            if not self._readable_table(p, environment, name):
+            table_type = self._readable_type(p, environment, name)
+            if table_type is None:
                 return None
+            if table_type is TableType.ARTIFACT:
+                return TargetInfo(None, (), False, None, artifact=True)
             columns = self._catalog_columns(environment, name)
             entry = elsewhere.get(name)
             if entry is None:

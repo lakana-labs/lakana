@@ -302,6 +302,7 @@ def _check(
     on_failure: str = "block",
     rollback: RollbackOutcome | None = None,
     table_id: uuid.UUID | None = None,
+    generated: bool = False,
 ) -> CheckResult:
     """Persist one check result of `silver.orders` on a task run of its own.
 
@@ -323,6 +324,8 @@ def _check(
         What the rollback did.
     table_id
         The checked table; `silver.orders` when `None`.
+    generated
+        Whether the check came from the asset's header.
 
     Returns
     -------
@@ -347,6 +350,7 @@ def _check(
         rollback_outcome=rollback,
         started_at=finished_at - timedelta(seconds=5),
         finished_at=finished_at,
+        generated=generated,
     )
     session.add(row)
     session.commit()
@@ -438,6 +442,22 @@ def test_a_kept_mark_needs_a_failure_of_a_keep_check(
     )
     (only,) = latest_checks(session, _orders_id(session))
     assert only.kept is False
+
+
+def test_a_generated_result_reads_back_with_its_mark(
+    session: Session, principal: PrincipalRef, catalog_with_orders: CatalogService
+) -> None:
+    _check(
+        session,
+        principal,
+        "key_unique",
+        outcome=CheckOutcome.PASSED,
+        finished_at=_NOW,
+        generated=True,
+    )
+    _check(session, principal, "unique_id", outcome=CheckOutcome.PASSED, finished_at=_NOW)
+    found = {c.check: c.generated for c in latest_checks(session, _orders_id(session))}
+    assert found == {"key_unique": True, "unique_id": False}
 
 
 def test_two_results_with_the_same_finish_time_give_one_row_per_check(

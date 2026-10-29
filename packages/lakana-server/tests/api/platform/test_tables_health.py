@@ -349,6 +349,7 @@ def test_the_last_maintenance_and_the_checks_are_shown(client: TestClient) -> No
                     failing_rows=2 if outcome is CheckOutcome.FAILED else 0,
                     started_at=finished,
                     finished_at=finished,
+                    generated=name == "a",
                 )
             )
         session.commit()
@@ -373,6 +374,7 @@ def test_the_last_maintenance_and_the_checks_are_shown(client: TestClient) -> No
     assert by_check["b"]["not_published"] is False
     assert by_check["b"]["run_id"] == run["id"]
     assert by_check["b"]["name"] == "gold.t/b"
+    assert (by_check["a"]["generated"], by_check["b"]["generated"]) == (True, False)
 
 
 def _second_task(session: Session, first: TaskRun) -> uuid.UUID:

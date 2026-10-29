@@ -226,3 +226,100 @@ def test_a_cycle_through_a_python_asset_is_found_and_named() -> None:
     assert find_cycle(assets) == ["a.x", "a.z", "a.y", "a.x"]
     messages = [issue.message for issue in validate_project(assets, ResolvedProjectConfig())]
     assert "cycle: a.x -> a.z -> a.y -> a.x" in messages
+
+
+def test_a_reference_orders_the_target_first() -> None:
+    dim = make_asset("gold.dim_store")
+    fact = make_asset(
+        "gold.fact",
+        columns=("store_id",),
+        metadata=AssetMetadata(materialize="table", references={"store_id": "gold.dim_store"}),
+    )
+    assert ("gold.dim_store", "gold.fact") in build_graph([dim, fact]).edges
+
+
+def test_a_long_form_reference_orders_its_table_first_and_an_outside_target_is_no_input() -> None:
+    """The long form's table part is the edge; a target no asset builds adds nothing."""
+    dim = make_asset("gold.dim_store", columns=("id",))
+    fact = make_asset(
+        "gold.fact",
+        metadata=AssetMetadata(
+            materialize="table",
+            references={"store_id": "gold.dim_store.id", "region": "ref.regions.code"},
+        ),
+    )
+    graph = build_graph([dim, fact])
+    assert graph.edges == (("gold.dim_store", "gold.fact"),)
+    assert graph.external_inputs == ()
+
+
+def test_a_long_form_edge_follows_the_reading_the_deploy_resolves() -> None:
+    """`gold.dim.store` reads as the column `store` of `gold.dim` only when `gold.dim` may have it.
+
+    When the explicit SELECT of `gold.dim` has no column `store`, the deploy reads the name as the
+    table `gold.dim.store` (or refuses it), so `gold.dim` is no upstream of the fact.
+    """
+    fact = make_asset(
+        "gold.fact",
+        metadata=AssetMetadata(materialize="table", references={"store_id": "gold.dim.store"}),
+    )
+    without = make_asset("gold.dim", columns=("id",))
+    assert build_graph([without, fact]).edges == ()
+    with_column = make_asset("gold.dim", columns=("store",))
+    assert build_graph([with_column, fact]).edges == (("gold.dim", "gold.fact"),)
+    star = make_asset("gold.dim", columns=None)
+    assert build_graph([star, fact]).edges == (("gold.dim", "gold.fact"),)
+    both = make_asset("gold.dim.store")
+    assert build_graph([without, both, fact]).edges == (("gold.dim.store", "gold.fact"),)
+
+
+def test_mutual_references_are_a_cycle_and_a_self_reference_is_not() -> None:
+    a = make_asset(
+        "gold.a", metadata=AssetMetadata(materialize="table", references={"b_id": "gold.b"})
+    )
+    b = make_asset(
+        "gold.b", metadata=AssetMetadata(materialize="table", references={"a_id": "gold.a"})
+    )
+    issues = validate_project([a, b], ResolvedProjectConfig())
+    assert [i.message for i in issues] == [
+        "cycle: gold.a -> gold.b -> gold.a (a reference in `references:` counts as a dependency: "
+        "the target is built first); remove one of the references, or check it with a "
+        "hand-written check under `checks/`"
+    ]
+    me = make_asset(
+        "gold.e", metadata=AssetMetadata(materialize="table", references={"m": "gold.e"})
+    )
+    assert validate_project([me], ResolvedProjectConfig()) == []
+
+
+def _referencing(references: dict[str, str]) -> AssetMetadata:
+    """Build the metadata of a table asset that declares references.
+
+    Parameters
+    ----------
+    references
+        Column to target.
+
+    Returns
+    -------
+    AssetMetadata
+        The metadata.
+    """
+    return AssetMetadata(materialize="table", references=references)
+
+
+def test_the_reference_hint_names_a_reference_cycle_beside_a_sql_cycle() -> None:
+    """The hint depends on the cycle reported, not on whether a SQL cycle exists elsewhere."""
+    a = make_asset("a.x", metadata=_referencing({"y_id": "a.y"}))
+    b = make_asset("a.y", ("a.x",))
+    sql_one = make_asset("z.p", ("z.q",))
+    sql_two = make_asset("z.q", ("z.p",))
+    issues = validate_project([a, b, sql_one, sql_two], ResolvedProjectConfig())
+    assert [i.message for i in issues] == [
+        "cycle: a.x -> a.y -> a.x (a reference in `references:` counts as a dependency: "
+        "the target is built first); remove one of the references, or check it with a "
+        "hand-written check under `checks/`"
+    ]
+    assert [i.message for i in validate_project([sql_one, sql_two], ResolvedProjectConfig())] == [
+        "cycle: z.p -> z.q -> z.p"
+    ]

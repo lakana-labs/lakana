@@ -37,6 +37,7 @@ from lakana_core.projects.asset_model import (
     MODEL_KINDS,
     WRITE_CHOICES,
     ParsedAsset,
+    key_issues,
 )
 from lakana_core.projects.deploys import ARTIFACT_PARAMETER, _artifact_parameter_issues
 from lakana_core.projects.discovery import DiscoveredAsset
@@ -482,11 +483,10 @@ _BOTH_REFUSE = (
     "key-empty-column",
     "key-none-on-merge",
     "key-nine-columns",
+    "key-nine-columns-on-merge",
 )
-"""Cases that must be refused, not merely agreed on: an unsafe or empty name, `none` on a merge."""
-
-_BOTH_ACCEPT = ("key-nine-columns-on-merge",)
-"""A merge key keeps the rule of the previous release: no column limit (the cap comes later)."""
+"""Cases that must be refused, not merely agreed on: an unsafe or empty name, `none` on a merge,
+a key of more than 8 columns, a merge's included."""
 
 
 @pytest.mark.parametrize("name", _BOTH_REFUSE)
@@ -498,11 +498,11 @@ def test_deploy_and_the_decorator_both_refuse(name: str) -> None:
     assert "\n" not in refusal and "\x07" not in refusal and "\u202e" not in refusal
 
 
-@pytest.mark.parametrize("name", _BOTH_ACCEPT)
-def test_deploy_and_the_decorator_both_accept(name: str) -> None:
+@pytest.mark.parametrize("name", ["key-nine-columns", "key-nine-columns-on-merge"])
+def test_deploy_and_the_decorator_refuse_a_long_key_with_one_text(name: str) -> None:
+    """A merge key has the 8-column cap too; both sides say how to fix it in the same words."""
     source = _PLAIN.replace("@asset()", f"@asset({_ARGUMENT_CASES[name]})")
-    assert _discovered(source) is not None
-    assert _call(source) is None
+    assert _call(source) == key_issues(tuple("abcdefghi"))[0]
 
 
 @pytest.mark.parametrize("name", sorted(_ACCEPTED))

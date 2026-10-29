@@ -46,6 +46,7 @@ def check_result_from_json(data: dict[str, Any]) -> CheckResult:
         query_run_id=data["query_run_id"],
         started_at=datetime.fromisoformat(data["started_at"]),
         finished_at=datetime.fromisoformat(data["finished_at"]),
+        generated=data.get("generated", False),
     )
 
 

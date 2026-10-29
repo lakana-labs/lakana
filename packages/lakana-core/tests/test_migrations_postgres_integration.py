@@ -2612,3 +2612,57 @@ def test_0051_on_postgres() -> None:
             triggers = dict(conn.execute(sqlalchemy.text("SELECT id, trigger FROM runs")).all())
         assert triggers == {by_account: "API", by_person: "MANUAL", scheduled: "SCHEDULE"}
         engine.dispose()
+
+
+def test_0052_on_postgres() -> None:
+    """0052 adds `check_results.generated`, false on an older result, and drops it down."""
+    revision_0051 = "c9e5a1b3d4f6"
+    revision_0052 = "d1f6b2c4e5a7"
+    now = datetime.now(UTC)
+    result_id = uuid.uuid4()
+
+    with PostgresContainer("postgres:16", driver="pg8000") as pg:
+        url = pg.get_connection_url()
+        migrate.upgrade(url, revision_0051)
+        engine = sqlalchemy.create_engine(url)
+        with engine.begin() as conn:
+            conn.execute(sqlalchemy.text("SET LOCAL session_replication_role = replica"))
+            conn.execute(
+                sqlalchemy.text(
+                    "INSERT INTO check_results (id, run_id, task_run_id, environment_id, "
+                    "check_name, check_path, table_name, on_failure, outcome, started_at, "
+                    "finished_at) VALUES (:id, :run, :task, :env, 'silver.o/c', "
+                    "'checks/silver/o/c.sql', 'silver.o', 'block', 'PASSED', :now, :now)"
+                ),
+                {
+                    "id": result_id,
+                    "run": uuid.uuid4(),
+                    "task": uuid.uuid4(),
+                    "env": uuid.uuid4(),
+                    "now": now,
+                },
+            )
+
+        migrate.upgrade(url, revision_0052)
+        assert _alembic_version(engine) == revision_0052
+        columns = {c["name"]: c for c in sqlalchemy.inspect(engine).get_columns("check_results")}
+        assert columns["generated"]["nullable"] is False
+        with engine.connect() as conn:
+            assert (
+                conn.execute(
+                    sqlalchemy.text("SELECT generated FROM check_results WHERE id = :id"),
+                    {"id": result_id},
+                ).scalar_one()
+                is False
+            )
+
+        migrate.downgrade(url, revision_0051)
+        assert _alembic_version(engine) == revision_0051
+        names = {c["name"] for c in sqlalchemy.inspect(engine).get_columns("check_results")}
+        assert "generated" not in names
+        with engine.connect() as conn:
+            assert (
+                conn.execute(sqlalchemy.text("SELECT count(*) FROM check_results")).scalar_one()
+                == 1
+            )
+        engine.dispose()

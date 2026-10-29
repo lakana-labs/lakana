@@ -870,6 +870,20 @@ silver.station_temperatures   warned   8 of 8 checks passed
   unique_key                  passed
 ```
 
+## Checks from the asset's header
+
+The unique key and the key that exists in another table need no file of their own. Declare
+`key: [station_id]` in the header of `assets/silver/station_temperatures.sql`, and each deploy adds
+the checks `key_unique` and `key_not_null`; declare `references:` and it adds a `ref_<column>`
+check for each entry, and builds a referenced table of the project before the table that
+references it. `lakana check list` shows them as `key_unique (generated)`, a result's path is the
+asset's file and its header's line (`assets/silver/station_temperatures.sql:1`), and
+`lakana check rows` shows their rows like those of any check. They block unless `checks:` in the
+header or the project's default says otherwise. Their names, the run order, the texts of a check
+whose columns or types do not fit and what to do about each are in
+[Generated checks](../reference/checks.md#generated-checks); the header's fields are in
+[Model fields](../reference/asset-front-matter.md#model-fields-kind-grain-key-and-references).
+
 ## Block, keep or warn
 
 `on_failure` says what a check does when it finds rows. It has three values:

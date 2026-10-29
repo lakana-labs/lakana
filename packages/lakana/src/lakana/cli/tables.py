@@ -17,6 +17,7 @@ from lakana.cli import _files, _output, _retention
 from lakana.cli._break_glass import BREAK_GLASS, REASON, break_glass_reason
 from lakana.cli._state import CliError, CliState, confirm, resolve_environment, state_of
 from lakana.cli.artifacts import human_size
+from lakana.cli.checks import check_shown
 
 if TYPE_CHECKING:
     import pyarrow as pa
@@ -547,7 +548,7 @@ def health(
             state,
             found.checks,
             columns=["check", "state", "failing_rows", "finished_at"],
-            derived={"state": _check_state},
+            derived={"check": check_shown, "state": _check_state},
         )
     else:
         _output.emit(state, "Checks: none recorded.")

@@ -186,6 +186,8 @@ Dry run of analytics in dev at abcc6826166c7e41e9bbed945192487e8ef38035
 ┡━━━━━━━━╇━━━━━━━━━━━━━━━━━━━┩
 │ added  │ silver.orders_log │
 └────────┴───────────────────┘
+Checks:
+  silver.customers: key_not_null, key_unique
 hint: silver.orders_log: `materialize: incremental` is now written `write: append` with `watermark: order_id`; both work
 ```
 
@@ -215,9 +217,9 @@ checks:
 |---|---|---|
 | `kind` | `fact`: events or measurements at a grain. `dimension`: the things facts refer to. `wide`: a denormalised table for consumption. `staging`: an intermediate step, not for consumers. | One of the four. Without `kind`, no rule of the table below applies. |
 | `grain` | One sentence saying what exactly one row stands for. It is for people. | One line, not empty, at most 300 characters. |
-| `key` | The columns that identify one row; usually the grain written as columns. It is also the key `write: merge` matches rows on: there is one key, not a second one for merging. | Distinct, non-empty columns of the `SELECT`, at most 8 unless the asset merges on them, or `none` where the kind allows it (below). Allowed with every write mode. |
+| `key` | The columns that identify one row; usually the grain written as columns. It is also the key `write: merge` matches rows on: there is one key, not a second one for merging. | Distinct, non-empty columns of the `SELECT`, at most 8 (a merge key too), or `none` where the kind allows it (below). Allowed with every write mode. |
 | `references` | For each column, the table its values point at. A null in a reference column is allowed; a reference that is required is also in `key`. | The column is a column of the `SELECT`; the target is checked as "References" below says. |
-| `checks` | How the checks generated from `key` and `references` fail: `block`, `warn` or `keep`, with the rules of a check's `on_failure` (`keep` never on a view, an append or a merge). | Only `key` and `references`, and only for a field the asset declares. Lakana does not generate these checks yet: a deploy checks the value and records it. |
+| `checks` | How the checks generated from `key` and `references` fail: `block`, `warn` or `keep`, with the rules of a check's `on_failure` (`keep` never on a view, an append or a merge). | Only `key` and `references`, and only for a field the asset declares. A deploy turns `key` into the checks `key_unique` and `key_not_null`, and each reference into `ref_<column>`; they count toward the 50 checks of a table, a hand-written check of the same table may not use their names, and a referenced table the project builds is built first. See [Generated checks](checks.md#generated-checks). |
 
 ### Rules for each kind
 
@@ -262,7 +264,10 @@ the deploy refuses the reference unless it knows that `a.b` has no column `c`; r
 two tables.
 
 A `SELECT *` or a Python asset has no columns at deploy, so its key and reference columns are
-checked when it runs.
+checked when it runs. Column types are checked only then, for every asset: a key column may not be
+`float` or `double`, and a reference column must have its target column's type, where only `int`
+and `long` match each other. A problem makes the generated check `errored`; the texts and what to
+do about each are in [Before a generated check counts](checks.md#before-a-generated-check-counts).
 
 ### Errors
 
@@ -277,7 +282,7 @@ Each of these fails the deploy with an issue at the block's line:
 | ``Asset `gold.dim_customer` is a dimension and needs `key:`; `key: none` is not allowed for a dimension, because nothing could refer to it.`` | A dimension without a key, or with `key: none`. |
 | ``` `key: none` is for a fact or a wide table whose rows no columns identify; declare `kind: fact` or `kind: wide`, or remove `key: none` ``` | `key: none` on another kind, or without `kind`. |
 | ``` `write: merge` needs key columns; `key: none` says that no columns identify a row, so there is nothing to merge on ``` | `write: merge` with `key: none`. |
-| ``a key has at most 8 columns; `key:` lists 9`` | A key of more than 8 columns on an asset that does not merge. A merge key has no such limit in this release. |
+| ``a key has at most 8 columns, and `key:` lists 9; shorten it to the columns that identify one row`` | A key of more than 8 columns, a merge key's included. List only the columns that identify one row. |
 | ``a key column must not be empty; write the name of a column of the asset`` | `key: ""` or an empty name in the list. |
 | ``Key column `id` is not a column of `gold.fact_orders`'s SELECT; add it to the SELECT, or change `key:`.`` | A key column the `SELECT` does not return. |
 | ``Reference column `store_id` is not a column of `gold.fact_orders`'s SELECT; add it to the SELECT, or remove the reference.`` | A reference column the `SELECT` does not return. |
@@ -291,6 +296,10 @@ Each of these fails the deploy with an issue at the block's line:
 | ``Reference target `dim.store` cannot be read by `svc-etl`, the run principal bound to this repository in `prod`, so its runs could not check it; grant it READ_TABLE on `dim.store`, or bind another run principal with `lakana deployments set-run-as`.`` | You may read the target, but the run principal bound to the repository may not. |
 | ``` `gold.fact_orders` (a fact) references `staging.orders_clean`, a staging table; point it at a modelled table. ``` | A `fact`, `dimension` or `wide` table references a `staging` table. |
 | ``Reference `store_id: a.b.store_id`: `a.b.store_id` is a table, and so is `a.b`, which has a column `store_id`; rename one of them so that the reference names one thing.`` | A target that reads two ways (above). When the deploy does not know the columns of `a.b`, the message says ``which would read `store_id` as its column``. |
+| ``Reference `model_id: models.churn`: `models.churn` is an artifact, not a table, so no column can point at it; point the reference at a table.`` | The target is an artifact, of the project or of the environment. |
+| ``` cycle: gold.a -> gold.b -> gold.a (a reference in `references:` counts as a dependency: the target is built first); remove one of the references, or check it with a hand-written check under `checks/` ``` | Two assets of the project reference each other, directly or through others. A target the project builds is built before the table that references it, so such references cannot all hold; remove one of them. |
+| ``A check named `key_unique` is generated for `gold.fact_orders`; rename `checks/gold/fact_orders/key_unique.sql`.`` | A hand-written check of a table has the name of a check that table's header generates (`key_unique`, `key_not_null`, `ref_<column>`). Rename the file. |
+| ``` `checks: key: keep` cannot be used on `gold.fact_orders`: it is written with `write: merge`, … Use `checks: key: block`: … ``` | `keep` for a generated check of a view, an append or a merge, as for a hand-written check's `on_failure`. |
 | ``checks: takes only key and references``, ``checks: key must be block, keep or warn`` | Another check family or failure mode. |
 | ``` `checks: key` sets how the key checks fail, but the asset declares no `key:`; declare `key:`, or remove `checks: key` ``` | A `checks` family for a field the asset does not declare (`references` likewise). |
 

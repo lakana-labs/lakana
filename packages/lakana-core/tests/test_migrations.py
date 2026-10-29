@@ -4370,3 +4370,73 @@ def test_0051_adds_the_job_starts_and_maps_deploy_runs_down_by_their_starter(
         assert triggers == {by_account: "API", by_person: "MANUAL", scheduled: "SCHEDULE"}
     finally:
         engine.dispose()
+
+
+_REVISION_0052 = "d1f6b2c4e5a7"
+
+
+@pytest.mark.usefixtures("_without_fsync")
+def test_0052_adds_check_results_generated_false_on_old_rows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Revision `0052`: `check_results.generated`, false on a result recorded before it.
+
+    Parameters
+    ----------
+    tmp_path
+        Holds the throwaway SQLite file.
+    monkeypatch
+        Points `lakana_core.config.Settings` at that file.
+    """
+    db_path = tmp_path / "migrated.db"
+    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    config = Config(str(ALEMBIC_INI))
+    command.upgrade(config, _REVISION_0051)
+    engine = create_engine(f"sqlite:///{db_path}")
+    result_id = uuid.uuid4().hex
+    try:
+        assert "generated" not in {c["name"] for c in inspect(engine).get_columns("check_results")}
+        with engine.begin() as connection:
+            connection.execute(sa.text("PRAGMA foreign_keys=OFF"))
+            connection.execute(
+                sa.text(
+                    "INSERT INTO check_results (id, run_id, task_run_id, environment_id,"
+                    " check_name, check_path, table_name, on_failure, outcome, started_at,"
+                    " finished_at) VALUES (:id, :run, :task, :env, 'silver.o/c',"
+                    " 'checks/silver/o/c.sql', 'silver.o', 'block', 'PASSED', :t, :t)"
+                ),
+                {
+                    "id": result_id,
+                    "run": uuid.uuid4().hex,
+                    "task": uuid.uuid4().hex,
+                    "env": uuid.uuid4().hex,
+                    "t": _utc_text(),
+                },
+            )
+    finally:
+        engine.dispose()
+
+    command.upgrade(config, _REVISION_0052)
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        (column,) = [
+            c for c in inspect(engine).get_columns("check_results") if c["name"] == "generated"
+        ]
+        assert column["nullable"] is False
+        with engine.connect() as connection:
+            assert connection.execute(
+                sa.text("SELECT generated FROM check_results WHERE id = :id"), {"id": result_id}
+            ).scalar_one() in (0, False)
+    finally:
+        engine.dispose()
+
+    command.downgrade(config, _REVISION_0051)
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        assert "generated" not in {c["name"] for c in inspect(engine).get_columns("check_results")}
+        with engine.connect() as connection:
+            assert connection.execute(sa.text("SELECT id FROM check_results")).scalars().all() == [
+                result_id
+            ]
+    finally:
+        engine.dispose()

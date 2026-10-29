@@ -68,6 +68,7 @@ from lakana_core.projects.manifest import (
     manifest_assets,
     manifest_tables,
 )
+from lakana_core.projects.model_checks import reference_sql
 from lakana_core.projects.parse import ParsedAsset
 from lakana_core.projects.project_config import (
     JobConfig,
@@ -4302,6 +4303,33 @@ def test_a_target_the_deployer_may_not_read_reveals_nothing(
     ]
 
 
+def test_an_artifact_of_the_project_or_the_catalog_is_no_reference_target(
+    session: Session, env: None, principal: PrincipalRef
+) -> None:
+    """A project's artifact asset and a catalog artifact are refused, long form included."""
+    _as_artifact(session, "gold", "scorer")
+    repo = _repo(session)
+    model = _python("models.churn", {}, output="artifact")
+    fact = make_asset(
+        "silver.f",
+        ("bronze.events",),
+        columns=("a", "b"),
+        metadata=AssetMetadata(
+            materialize="table", references={"a": "models.churn.id", "b": "gold.scorer"}
+        ),
+    )
+    resolved, issues = DeployService(session, AllowAllAuthorization()).resolve_model_references(
+        principal, "dev", repo.id, [model, fact]
+    )
+    assert resolved == {}
+    assert [i.message for i in issues] == [
+        "Reference `a: models.churn.id`: `models.churn` is an artifact, not a table, so no "
+        "column can point at it; point the reference at a table.",
+        "Reference `b: gold.scorer`: `gold.scorer` is an artifact, not a table, so no column "
+        "can point at it; point the reference at a table.",
+    ]
+
+
 def _bind_run_as(session: Session, admin: PrincipalRef, repo: Repository, *tables: str) -> str:
     """Bind a run principal to `repo` in `dev` that may read only `tables`.
 
@@ -4472,6 +4500,70 @@ def test_a_project_version_hides_model_references_the_reader_may_not_read(
     full = DeployService(session, AllowAllAuthorization()).job_version(principal, "dev", version.id)
     assert len(full.manifest["assets"][0]["model"]["references"]) == 2
     assert full.manifest["assets"][0]["hidden_model_references"] == 1
+
+
+def test_a_reference_the_reader_may_not_read_leaves_no_edge_and_no_check_target(
+    session: Session, env: None, principal: PrincipalRef
+) -> None:
+    """A reference edge and its `ref_` check name the target as the model does; both withhold it.
+
+    `gold.fact`'s SQL reads only `bronze.events`, so its asset is not hidden; the edge from
+    `gold.dim` exists only because of `references:`. What the reader learns is the hidden counts.
+    """
+    repo = _repo(session)
+    version = _deployed(
+        session,
+        principal,
+        repo,
+        "a" * 40,
+        make_asset("gold.dim", ("bronze.events",)),
+        make_asset("gold.fact", ("bronze.events",)),
+    )
+    manifest = copy.deepcopy(version.manifest_json)
+    fact = next(e for e in manifest["assets"] if e["table"] == "gold.fact")
+    fact["model"] = {
+        "references": [{"column": "store_id", "target": "gold.dim", "target_column": "id"}]
+    }
+    manifest["edges"] = [["gold.dim", "gold.fact"]]
+    manifest["checks"] = [
+        {
+            "name": "gold.fact/ref_store_id",
+            "table": "gold.fact",
+            "check": "ref_store_id",
+            "path": "assets/gold/fact.sql:1",
+            "on_failure": "block",
+            "description": "generated from `references: store_id`",
+            "sql": reference_sql("gold.fact", "store_id", "gold.dim", "id"),
+            "references": ["gold.dim", "gold.fact"],
+            "generated": {
+                "family": "references",
+                "columns": ["store_id"],
+                "target": "gold.dim",
+                "target_column": "id",
+            },
+        }
+    ]
+    version.manifest_json = manifest
+    session.commit()
+    ensure_table(session, "dev", "gold", "fact")
+    reader = _read_environment_only(session, principal, "bronze.events", "gold.fact")
+    view = DeployService(session, GrantAuthorization(session)).job_version(
+        reader, "dev", version.id
+    )
+    shown = view.manifest
+    assert (shown["edges"], shown["hidden_edges"]) == ([], 1)
+    shown_fact = next(e for e in shown["assets"] if e["table"] == "gold.fact")
+    assert (shown_fact["model"]["references"], shown_fact["hidden_model_references"]) == ([], 1)
+    (check,) = shown["checks"]
+    assert check["generated"] == {"family": "references", "columns": ["store_id"]}
+    assert check["hidden_references"] == 1
+    assert "gold.dim" not in str([shown["edges"], shown["checks"], shown_fact])
+    full = DeployService(session, AllowAllAuthorization()).job_version(principal, "dev", version.id)
+    assert (full.manifest["edges"], full.manifest["hidden_edges"]) == (
+        [["gold.dim", "gold.fact"]],
+        0,
+    )
+    assert full.manifest["checks"][0]["generated"]["target"] == "gold.dim"
 
 
 def test_a_merge_target_deployed_before_models_reads_its_merge_key(

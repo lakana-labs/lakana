@@ -302,6 +302,40 @@ def _version(
     return CHECKS_VERSION if has_checks else VERSION_WITHOUT_CHECKS
 
 
+def _check_entry(check: ParsedCheck) -> dict[str, Any]:
+    """Write one check's manifest entry.
+
+    Parameters
+    ----------
+    check
+        The validated check, hand-written or generated.
+
+    Returns
+    -------
+    dict
+        Its entry. A generated check also has ``generated``, the header field it comes from;
+        a hand-written one keeps the shape older readers know.
+    """
+    entry: dict[str, Any] = {
+        "name": check.name,
+        "table": check.table,
+        "check": check.check,
+        "path": check.path,
+        "on_failure": check.on_failure,
+        "description": check.description,
+        "sql": check.sql,
+        "references": list(check.references),
+    }
+    if check.generated is not None:
+        entry["generated"] = {
+            "family": check.generated.family,
+            "columns": list(check.generated.columns),
+            "target": check.generated.target,
+            "target_column": check.generated.target_column,
+        }
+    return entry
+
+
 def build_manifest(
     assets: Sequence[ParsedAsset],
     graph: ProjectGraph,
@@ -385,19 +419,7 @@ def build_manifest(
     if package_indexes:
         manifest["package_indexes"] = sorted(package_indexes)
     if checks or config.jobs or version in (CONNECTIONS_VERSION, WRITES_VERSION, MODEL_VERSION):
-        manifest["checks"] = [
-            {
-                "name": check.name,
-                "table": check.table,
-                "check": check.check,
-                "path": check.path,
-                "on_failure": check.on_failure,
-                "description": check.description,
-                "sql": check.sql,
-                "references": list(check.references),
-            }
-            for check in sorted(checks, key=lambda c: c.name)
-        ]
+        manifest["checks"] = [_check_entry(check) for check in sorted(checks, key=lambda c: c.name)]
     return manifest
 
 
