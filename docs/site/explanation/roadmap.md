@@ -107,7 +107,7 @@ interface and sign-in, a small private test round on a hosted instance, M7c (the
 #33), M8, M8b, M8c, M9, M10 and v1.0.0.
 
 After 0.20.0, M6, ingestion (#1), was built; it ships with the next release (see the
-[notes for the next release](upgrades.md#notes-for-the-next-release)). An administrator registers
+[notes for 0.21.0](upgrades.md#notes-for-0210)). An administrator registers
 a source once per environment as a named connection (#85), and `lakana connection test` checks
 its address and credentials; a Python asset declares the connections it reads, fetches their
 credentials at run time (#23), and under the docker runner its task reaches exactly their
@@ -169,7 +169,9 @@ beta ships with the ingestion helpers and named connections.
     header (#250); translated labels and descriptions with a main language (#251); layer rules,
     first opt-in and then enforced (#252); the write mode `history` (SCD type 2) (#253); `merge`
     (upsert) came earlier, with M6; a template and a guide (#254); and measures as
-    metadata only, with no metrics layer (#255). Done when a new team can start from the
+    metadata only, with no metrics layer (#255). Decided on 2026-10-28: the model metadata as a
+    graph, with lineage, impact and join-path queries (#374), and a business glossary of terms
+    linked to tables, columns and measures (#375). Done when a new team can start from the
     template, build a star schema with a history dimension, and see its layers and labels in the
     catalog.
 6. **M7, web interface and sign-in.** Comes after M8d, so the interface shows model metadata
@@ -197,7 +199,8 @@ beta ships with the ingestion helpers and named connections.
     version. Done when a model can be traced to the
     exact code, data and parameters that produced it.
 9. **M8b, agents.** An MCP server so AI agents can operate Lakana under the same authorization
-    and audit as a person. Done when an agent can run a deploy and a query and both appear in
+    and audit as a person. The server exposes the graph queries of M8d (lineage, impact and
+    join paths) as tools. Done when an agent can run a deploy and a query and both appear in
     the audit log under its own identity.
 10. **M8c, BI tools.** A read-only governed SQL endpoint over the PostgreSQL wire protocol, with
     a token as the password. A service account is refused on a table that has a row filter or
