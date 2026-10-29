@@ -44,7 +44,7 @@ PostgreSQL, so that a small team gets them in one install instead of assembling 
 | Area | What Lakana covers |
 |---|---|
 | Analytics | SQL assets, incremental tables, lineage, governed queries |
-| Data modelling | Medallion layers and Kimball-lite star schemas, the history write mode (`merge` shipped with ingestion in M6), translated metadata, measures as metadata (milestone M8d, built after ingestion and before the web interface and the public beta, #249) |
+| Data modelling | Medallion layers and Kimball-lite star schemas, the history write mode (`merge` shipped with ingestion in M6), translated metadata, measures as metadata, a metadata graph and a business glossary (milestone M8d, built after ingestion and before the web interface and the public beta, #249) |
 | Data science | Python assets, reproducible environments, exploration through the SDK (including from your own notebook) |
 | ML | Training and batch scoring as assets, versioned model artifacts, experiment tracking, a feature store |
 | Operations | Runs, schedules, retries, audit, secrets, access policies, table and environment retention (0.17.0, #87), deploys from CI without a stored secret (0.18.0, #15), health checks and stable log codes (0.18.0, #205, #207), queries on DuckDB 2.0 with a hardened sandbox (0.19.0, #96), each Python task in a container of its own (0.20.0, #38), scheduled and incremental ingestion from files, SQL databases and REST APIs through named connections, each task reaching only the sources its asset declares (M6, #1) |
@@ -70,7 +70,9 @@ How the larger pieces are meant to work:
   translated with a main language (#251), and layer rules are opt-in first and enforced later
   (#252). The write mode `history` (SCD type 2) builds tables whose rows
   change (#253); `merge` (upsert) came earlier, with ingestion in M6, and a template and a guide start a new team (#254). A measure is metadata on a
-  column, not a computed metric (#255). All of it comes before the web interface and the public beta (epic #249), so that nobody builds projects on Lakana before the rules exist and the interface shows model metadata from its first version.
+  column, not a computed metric (#255). The metadata forms a graph with lineage, impact and
+  join-path queries (#374), which the MCP server offers to agents, and a business glossary links
+  terms to tables, columns and measures (#375). All of it comes before the web interface and the public beta (epic #249), so that nobody builds projects on Lakana before the rules exist and the interface shows model metadata from its first version.
 - **Data quality.** A check is a SQL file that must return no rows. It either blocks (the table is
   set back to what it was before the run, and what reads it is not built) or only warns, and its
   results are kept as a history. Nothing more elaborate than that. See

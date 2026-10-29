@@ -48,11 +48,18 @@ rebuild rather than to trust a graph built on another branch.
 
 `graphify hook install` writes `post-commit` and `post-checkout` hooks into
 `.git/hooks/`, which is not tracked, so this is per-clone and optional — but
-run it. The AST refresh is `graphify update .`: about a second, no model calls.
+run it. The AST refresh is `graphify update .`: about 40 s, no model calls.
 Semantic re-extraction is the slow pass; run that at milestone
 close, not per commit.
 
 `graphify-out/` is gitignored. It is a local cache, not an artifact.
+
+## Worktrees
+
+The graph lives in the main clone's `graphify-out/`. A linked worktree has none, so pass
+`--graph <main clone>/graphify-out/graph.json`. That graph describes main, not the branch's own
+changes. Rebuild it with `graphify update .` in the main clone after merges and releases; it
+takes about 40 s and makes no model calls.
 
 ## Do not commit `.gitattributes` for it
 
