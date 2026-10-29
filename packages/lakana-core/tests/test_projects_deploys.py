@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import copy
 import dataclasses
 import uuid
 from datetime import UTC, datetime
@@ -4299,3 +4300,206 @@ def test_a_target_the_deployer_may_not_read_reveals_nothing(
         "Reference target `dim.store` does not exist in environment `dev`, or you may not read "
         "it; build it first, or ask for READ_TABLE on it."
     ]
+
+
+def _bind_run_as(session: Session, admin: PrincipalRef, repo: Repository, *tables: str) -> str:
+    """Bind a run principal to `repo` in `dev` that may read only `tables`.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    admin
+        Grants the access and deploys the repository once, which makes its deployment row.
+    repo
+        The repository.
+    *tables
+        Dotted table names the run principal may read.
+
+    Returns
+    -------
+    str
+        The run principal's name.
+    """
+    svc = _principal(session, "svc-etl")
+    grants = GrantService(session, AllowAllAuthorization())
+    for dotted in tables:
+        namespace, table = dotted.split(".")
+        grants.grant(
+            admin,
+            principal="svc-etl",
+            action=Action.READ_TABLE,
+            kind=SecurableKind.TABLE,
+            environment="dev",
+            namespace=namespace,
+            table=table,
+        )
+    _deployed(session, admin, repo, "b" * 40, make_asset("silver.seed"))
+    session.execute(
+        update(EnvironmentDeployment)
+        .where(EnvironmentDeployment.repository_id == repo.id)
+        .values(run_as_principal_id=svc.id)
+    )
+    session.commit()
+    return svc.name
+
+
+def test_a_target_the_bound_run_principal_may_not_read_is_refused_by_name(
+    session: Session, env: None, principal: PrincipalRef
+) -> None:
+    """The deployer may read the target, so naming it reveals nothing; the runs could not."""
+    other = _repo(session, "other")
+    dim = make_asset(
+        "dim.store",
+        ("bronze.events",),
+        columns=("store_id",),
+        metadata=AssetMetadata(materialize="table", kind="dimension", grain="g", key=("store_id",)),
+    )
+    _deployed(session, principal, other, "a" * 40, dim)
+    ensure_table(session, "dev", "dim", "store")
+    repo = _repo(session)
+    run_as = _bind_run_as(session, principal, repo, "bronze.events")
+    reader = _read_environment_only(session, principal, "bronze.events", "dim.store")
+    fact = make_asset(
+        "silver.f",
+        ("bronze.events",),
+        columns=("store_id",),
+        metadata=AssetMetadata(materialize="table", references={"store_id": "dim.store"}),
+    )
+    resolved, issues = DeployService(session, GrantAuthorization(session)).resolve_model_references(
+        reader, "dev", repo.id, [fact]
+    )
+    assert [i.message for i in issues] == [
+        f"Reference target `dim.store` cannot be read by `{run_as}`, the run principal bound to "
+        "this repository in `dev`, so its runs could not check it; grant it READ_TABLE on "
+        "`dim.store`, or bind another run principal with `lakana deployments set-run-as`."
+    ]
+    assert resolved == {}
+
+
+def test_a_run_principal_that_may_read_the_target_lets_the_reference_through(
+    session: Session, env: None, principal: PrincipalRef
+) -> None:
+    repo = _repo(session)
+    _bind_run_as(session, principal, repo, "bronze.events")
+    reader = _read_environment_only(session, principal, "bronze.events")
+    fact = make_asset(
+        "silver.f",
+        ("bronze.events",),
+        columns=("event_id",),
+        metadata=AssetMetadata(materialize="table", references={"event_id": "bronze.events.id"}),
+    )
+    resolved, issues = DeployService(session, GrantAuthorization(session)).resolve_model_references(
+        reader, "dev", repo.id, [fact]
+    )
+    assert issues == []
+    assert resolved["silver.f"] == (ResolvedReference("event_id", "bronze.events", "id"),)
+
+
+def test_a_project_target_or_a_deployer_who_is_the_run_principal_needs_no_second_check(
+    session: Session, env: None, principal: PrincipalRef
+) -> None:
+    """The runs build a project's own target; a deployer bound as run principal was checked."""
+    repo = _repo(session)
+    _bind_run_as(session, principal, repo)
+    dim = make_asset(
+        "silver.dim",
+        ("bronze.events",),
+        columns=("id",),
+        metadata=AssetMetadata(materialize="table", kind="dimension", grain="g", key=("id",)),
+    )
+    fact = make_asset(
+        "silver.f",
+        ("bronze.events",),
+        columns=("id",),
+        metadata=AssetMetadata(materialize="table", references={"id": "silver.dim"}),
+    )
+    service = DeployService(session, GrantAuthorization(session))
+    reader = _read_environment_only(session, principal, "bronze.events")
+    resolved, issues = service.resolve_model_references(reader, "dev", repo.id, [dim, fact])
+    assert issues == []
+    assert resolved["silver.f"] == (ResolvedReference("id", "silver.dim", "id"),)
+    svc = session.execute(select(Principal).where(Principal.name == "svc-etl")).scalar_one()
+    as_run_principal = PrincipalRef(id=svc.id, name=svc.name, type=svc.type)
+    fact_on_events = make_asset(
+        "silver.g",
+        ("bronze.events",),
+        columns=("id",),
+        metadata=AssetMetadata(materialize="table", references={"id": "bronze.events.id"}),
+    )
+    _, issues = service.resolve_model_references(as_run_principal, "dev", repo.id, [fact_on_events])
+    assert [i.message for i in issues] == [
+        "Reference target `bronze.events.id` does not exist in environment `dev`, or you may not "
+        "read it; build it first, or ask for READ_TABLE on it."
+    ]
+
+
+def test_a_project_version_hides_model_references_the_reader_may_not_read(
+    session: Session, env: None, principal: PrincipalRef
+) -> None:
+    """A reference target names a table, as the SQL's references do; unreadable ones are counted."""
+    repo = _repo(session)
+    version = _deployed(
+        session,
+        principal,
+        repo,
+        "a" * 40,
+        make_asset(
+            "silver.f",
+            ("bronze.events",),
+            metadata=AssetMetadata(materialize="table", key=("a",)),
+        ),
+    )
+    manifest = copy.deepcopy(version.manifest_json)
+    (entry,) = manifest["assets"]
+    entry["model"]["references"] = [
+        {"column": "a", "target": "bronze.events", "target_column": "id"},
+        {"column": "b", "target": "restricted.dim_customer", "target_column": "customer_sk"},
+        "damaged",
+    ]
+    version.manifest_json = {**manifest, "assets": [entry]}
+    session.commit()
+    reader = _read_environment_only(session, principal, "bronze.events")
+    view = DeployService(session, GrantAuthorization(session)).job_version(
+        reader, "dev", version.id
+    )
+    (shown_entry,) = view.manifest["assets"]
+    assert shown_entry["model"]["references"] == [
+        {"column": "a", "target": "bronze.events", "target_column": "id"}
+    ]
+    assert shown_entry["hidden_model_references"] == 2
+    assert "restricted" not in str(view.manifest)
+    full = DeployService(session, AllowAllAuthorization()).job_version(principal, "dev", version.id)
+    assert len(full.manifest["assets"][0]["model"]["references"]) == 2
+    assert full.manifest["assets"][0]["hidden_model_references"] == 1
+
+
+def test_a_merge_target_deployed_before_models_reads_its_merge_key(
+    session: Session, env: None, principal: PrincipalRef
+) -> None:
+    """A version 8 entry has no `model`; its merge key still identifies a row."""
+    other = _repo(session, "other")
+    dim = make_asset(
+        "dim.store",
+        ("bronze.events",),
+        columns=("store_id",),
+        metadata=AssetMetadata(materialize="table", write="merge", key=("store_id",)),
+    )
+    version = _deployed(session, principal, other, "a" * 40, dim)
+    manifest = copy.deepcopy(version.manifest_json)
+    del manifest["assets"][0]["model"]
+    version.manifest_json = manifest
+    session.commit()
+    ensure_table(session, "dev", "dim", "store")
+    repo = _repo(session)
+    fact = make_asset(
+        "silver.f",
+        ("bronze.events",),
+        columns=("store_id",),
+        metadata=AssetMetadata(materialize="table", references={"store_id": "dim.store"}),
+    )
+    resolved, issues = DeployService(session, AllowAllAuthorization()).resolve_model_references(
+        principal, "dev", repo.id, [fact]
+    )
+    assert issues == []
+    assert resolved["silver.f"] == (ResolvedReference("store_id", "dim.store", "store_id"),)

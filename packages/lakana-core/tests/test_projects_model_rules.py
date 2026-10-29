@@ -54,12 +54,15 @@ _T = "gold.fact_orders"
             AssetMetadata(checks={"references": "warn"}),
             [
                 "`checks: references` sets how the reference checks fail, but the asset "
-                "declares no `references:`"
+                "declares no `references:`; declare `references:`, or remove `checks: references`"
             ],
         ),
         (
             AssetMetadata(checks={"key": "warn"}),
-            ["`checks: key` sets how the key checks fail, but the asset declares no `key:`"],
+            [
+                "`checks: key` sets how the key checks fail, but the asset declares no `key:`; "
+                "declare `key:`, or remove `checks: key`"
+            ],
         ),
     ],
 )
@@ -68,16 +71,26 @@ def test_the_kind_rules(metadata: AssetMetadata, expected: list[str]) -> None:
     assert model_issues(metadata, table=_T) == expected
 
 
-def test_a_key_has_at_most_eight_columns() -> None:
-    """`key_issues` alone holds the cap; a merge with nine columns reports it once."""
+def test_a_key_has_at_most_eight_columns_unless_it_merges() -> None:
+    """`key_issues` alone holds the cap; a merge key keeps the previous release's rule (no cap)."""
     nine = tuple(f"c{i}" for i in range(9))
     too_many = "a key has at most 8 columns; `key:` lists 9"
     assert key_issues(nine) == [too_many]
+    assert key_issues(nine, merge=True) == []
     assert key_issues(nine[:8]) == []
     assert key_issues("none") == []
+    replaced = AssetMetadata(materialize="table", key=nine)
+    messages = [i.message for i in consistency_issues(replaced, path="assets/gold/f.sql", line=1)]
+    assert messages.count(too_many) == 1
     merged = AssetMetadata(materialize="table", write="merge", key=nine)
     messages = [i.message for i in consistency_issues(merged, path="assets/gold/f.sql", line=1)]
-    assert messages.count(too_many) == 1
+    assert too_many not in messages
+
+
+def test_a_key_column_must_not_be_empty() -> None:
+    empty = "a key column must not be empty; write the name of a column of the asset"
+    assert key_issues(("",)) == [empty]
+    assert key_issues(("id", ""), merge=True) == [empty]
 
 
 @pytest.mark.parametrize(

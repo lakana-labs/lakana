@@ -3160,11 +3160,11 @@ def test_a_deploy_refuses_a_reference_it_cannot_resolve_and_a_key_the_select_lac
     assert run.error_message is not None
     assert (
         "assets/gold/fact_visits.sql:1: Key column `visit_id` is not a column of "
-        "`gold.fact_visits`'s SELECT." in run.error_message
+        "`gold.fact_visits`'s SELECT; add it to the SELECT, or change `key:`." in run.error_message
     )
     assert (
         "assets/gold/fact_visits.sql:1: Reference `id: bronze.events`: `bronze.events` declares "
-        "no key. Declare `key:` in its asset, or name the column: `id: bronze.events.id`."
+        "no key. Declare `key:` in its asset, or name the column: `id: bronze.events.<column>`."
         in run.error_message
     )
     assert session.query(JobVersion).count() == 0

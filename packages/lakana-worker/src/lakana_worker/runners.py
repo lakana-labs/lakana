@@ -782,7 +782,9 @@ def task_description(
     if task.write != "replace" or task.connections:
         document["version"] = _WRITES_DESCRIPTION_VERSION
         document["write"] = task.write
-        document["key"] = list(task.key)
+        # A model's key on an append or a replace only identifies a row; the harness of the
+        # `lakana` a project pinned takes a key for a merge only.
+        document["key"] = list(task.key) if task.write == "merge" else []
         document["watermark"] = (
             None
             if task.watermark_column is None

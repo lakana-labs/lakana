@@ -82,7 +82,7 @@ def test_a_target_without_a_key_needs_the_long_form() -> None:
     )
     assert [i.message for i in issues] == [
         "Reference `store_id: gold.dim_store`: `gold.dim_store` declares no key. Declare `key:` "
-        "in its asset, or name the column: `store_id: gold.dim_store.id`."
+        "in its asset, or name the column: `store_id: gold.dim_store.<column>`."
     ]
 
 
@@ -106,7 +106,8 @@ def test_the_long_form_names_a_column_the_target_has() -> None:
         environment="dev",
     )
     assert [i.message for i in issues] == [
-        "Reference `store_id: gold.dim_store.nope`: `gold.dim_store` has no column `nope`."
+        "Reference `store_id: gold.dim_store.nope`: `gold.dim_store` has no column `nope`; name "
+        "one of its columns, or use the short form to point at its key."
     ]
 
 
@@ -176,8 +177,10 @@ def test_project_reference_target_prefers_the_whole_name() -> None:
 def test_key_and_reference_columns_must_be_in_an_explicit_select() -> None:
     asset = _fact({"region_id": "gold.dim_region"}, columns=("store_id",))
     assert [i.message for i in project_model_issues([asset])] == [
-        "Key column `id` is not a column of `gold.fact_orders`'s SELECT.",
-        "Reference column `region_id` is not a column of `gold.fact_orders`'s SELECT.",
+        "Key column `id` is not a column of `gold.fact_orders`'s SELECT; add it to the SELECT, "
+        "or change `key:`.",
+        "Reference column `region_id` is not a column of `gold.fact_orders`'s SELECT; add it to "
+        "the SELECT, or remove the reference.",
     ]
 
 

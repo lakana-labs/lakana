@@ -432,6 +432,12 @@ def test_key_none_is_the_escape_and_a_listed_none_is_a_column() -> None:
     assert _meta("key: id").key == ("id",)
 
 
+_UNSAFE_TARGET = (
+    "references: reference `a` names a target that must not contain a control, format or "
+    "surrogate character or a line separator"
+)
+
+
 @pytest.mark.parametrize(
     ("block", "message"),
     [
@@ -444,6 +450,10 @@ def test_key_none_is_the_escape_and_a_listed_none_is_a_column() -> None:
         ("references:\n  store_id: dim_store", "references: reference `store_id: dim_store`"),
         ('grain: "a\\u202eb"', "grain: must not contain a surrogate"),
         ('references:\n  "a\\u200bb": gold.dim_store', "references: a reference column must not"),
+        ('references:\n  "": gold.dim_store', "references: a reference column must not be empty"),
+        ('references:\n  a: "gold.x\\nassets/y.sql:1: ok"', _UNSAFE_TARGET),
+        ('references:\n  a: "gold.x\\a"', _UNSAFE_TARGET),
+        ('references:\n  a: "gold.x\\u202ey"', _UNSAFE_TARGET),
     ],
 )
 def test_bad_model_values_are_refused(block: str, message: str) -> None:
@@ -451,6 +461,8 @@ def test_bad_model_values_are_refused(block: str, message: str) -> None:
     with pytest.raises(ProjectValidationError) as info:
         _meta(block)
     assert message in info.value.issues[0].message
+    rendered = "\n".join(issue.render() for issue in info.value.issues)
+    assert "assets/y.sql" not in rendered and "\u202e" not in rendered and "\a" not in rendered
 
 
 def test_a_one_line_grain_written_as_a_block_scalar_is_one_line() -> None:

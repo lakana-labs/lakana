@@ -299,8 +299,13 @@ class AssetMetadata(SafeTextModel):
             a table name.
         """
         for column, target in value.items():
+            if not column:
+                raise ValueError("a reference column must not be empty")
             if unsafe_identifier(column):
                 raise ValueError(f"a reference column {IDENTIFIER_MESSAGE}")
+            if unsafe_identifier(target):
+                # Before any message shows the target: it could forge a line of the issues.
+                raise ValueError(f"reference `{column}` names a target that {IDENTIFIER_MESSAGE}")
             try:
                 validate_path_component(f"ref_{column}", what="Check name")
             except ValidationError as exc:
@@ -673,7 +678,7 @@ def consistency_issues(
             materialize=metadata.materialize,
             evolve_schema=metadata.evolve_schema,
         ),
-        *key_issues(metadata.key),
+        *key_issues(metadata.key, merge=metadata.write == "merge"),
     ]
     issues.extend(ProjectIssue(path, line, message) for message in rules)
     return issues

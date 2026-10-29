@@ -81,6 +81,7 @@ from lakana_core.projects.lookups import deployment_row, environment_by_name, re
 from lakana_core.projects.manifest import (
     entry_model,
     entry_output,
+    entry_write,
     job_notify,
     job_schedule,
     manifest_assets,
@@ -1923,7 +1924,9 @@ class DeployService:
         would reveal what its SQL reads. Unreadable
         `external_inputs` are removed and counted in
         `hidden_external_inputs`. A check's `sql` and `references` follow
-        the asset rule, judged on the tables its SQL names (`_visible_checks`).
+        the asset rule, judged on the tables its SQL names (`_visible_checks`). The reference
+        targets of an asset's `model` name tables too: each one `p` may not read is removed and
+        counted in the entry's `hidden_model_references` (`_visible_model`).
 
         Parameters
         ----------
@@ -1970,6 +1973,10 @@ class DeployService:
                 hidden_assets.add(entry["table"])
             else:
                 entry["hidden_references"] = 0
+            if isinstance(entry.get("model"), Mapping):
+                entry["model"], entry["hidden_model_references"] = self._visible_model(
+                    p, environment, entry["model"]
+                )
             assets.append(entry)
         manifest["assets"] = assets
         if "checks" in manifest:
@@ -1992,6 +1999,37 @@ class DeployService:
             created_at=version.created_at,
             manifest=manifest,
         )
+
+    def _visible_model(
+        self, p: PrincipalRef, environment: str, model: Mapping[str, Any]
+    ) -> tuple[dict[str, Any], int]:
+        """Withhold the reference targets of an asset's model that the reader may not read.
+
+        Parameters
+        ----------
+        p
+            The reader.
+        environment
+            Environment name.
+        model
+            The entry's `model`; untrusted, like a stored manifest.
+
+        Returns
+        -------
+        tuple
+            The model with only the references whose target `p` may read, and how many were
+            removed; an item that is not a mapping with a string `target` is removed too.
+        """
+        items = model.get("references")
+        listed = items if isinstance(items, list) else []
+        visible = [
+            item
+            for item in listed
+            if isinstance(item, Mapping)
+            and isinstance(item.get("target"), str)
+            and self._may_read(p, environment, item["target"])
+        ]
+        return {**model, "references": visible}, len(listed) - len(visible)
 
     def _visible_checks(
         self, p: PrincipalRef, environment: str, checks: object
@@ -2216,10 +2254,17 @@ class DeployService:
         is missing and one `p` may not read get the same message, which names nothing of the
         table.
 
+        Both principals are checked. The deployer decides what the messages may reveal, so a
+        more privileged run principal cannot be used to probe tables. When a run principal is
+        bound to the repository in the environment, and it is not the deployer, every target
+        the deployer resolved outside the project must also be readable by it, as its runs read
+        the target; naming the target in that refusal reveals nothing the deployer may not see.
+
         Parameters
         ----------
         p
-            The deploying principal: the run-as principal of the deploy.
+            The deploying principal; the bound run principal, if any, is read from the
+            repository's deployment row.
         environment
             Environment name.
         repository_id
@@ -2265,8 +2310,7 @@ class DeployService:
                 return None
             columns = self._catalog_columns(environment, name)
             entry = elsewhere.get(name)
-            model = entry_model(entry) if entry is not None else None
-            if entry is None or model is None:
+            if entry is None:
                 return TargetInfo(None, (), False, columns)
             stored = entry.get("columns")
             listed = (
@@ -2274,9 +2318,73 @@ class DeployService:
                 if isinstance(stored, list) and all(isinstance(c, str) for c in stored)
                 else None
             )
+            model = entry_model(entry)
+            if model is None:
+                # A manifest from before models: a merge's key still identifies a row.
+                write, merge_key, _ = entry_write(entry)
+                key = merge_key if write == "merge" else ()
+                return TargetInfo(None, key, False, columns or listed)
             return TargetInfo(model.kind, model.key, model.key_none, columns or listed)
 
-        return resolve_references(assets, lookup, environment=environment)
+        resolved, issues = resolve_references(assets, lookup, environment=environment)
+        run_as = self._bound_run_as(env.id, repository_id)
+        if run_as is None or run_as.id == p.id:
+            return resolved, issues
+        kept: dict[str, tuple[ResolvedReference, ...]] = {}
+        for asset in sorted(assets, key=lambda a: a.path):
+            readable = []
+            for reference in resolved.get(asset.table, ()):
+                if reference.target in by_table or self._readable_table(
+                    run_as, environment, reference.target
+                ):
+                    readable.append(reference)
+                    continue
+                issues.append(
+                    ProjectIssue(
+                        asset.path,
+                        asset.block_line or asset.body_line,
+                        f"Reference target `{reference.target}` cannot be read by "
+                        f"`{shown(run_as.name)}`, the run principal bound to this repository in "
+                        f"`{environment}`, so its runs could not check it; grant it READ_TABLE "
+                        f"on `{reference.target}`, or bind another run principal with "
+                        "`lakana deployments set-run-as`.",
+                    )
+                )
+            if readable:
+                kept[asset.table] = tuple(readable)
+        return kept, issues
+
+    def _bound_run_as(
+        self, environment_id: uuid.UUID, repository_id: uuid.UUID
+    ) -> PrincipalRef | None:
+        """Find the run principal bound to a repository in an environment.
+
+        Parameters
+        ----------
+        environment_id
+            The environment.
+        repository_id
+            The repository.
+
+        Returns
+        -------
+        PrincipalRef or None
+            The bound principal; `None` when none is bound.
+        """
+        row = self._session.execute(
+            select(Principal)
+            .join(
+                EnvironmentDeployment,
+                EnvironmentDeployment.run_as_principal_id == Principal.id,
+            )
+            .where(
+                EnvironmentDeployment.environment_id == environment_id,
+                EnvironmentDeployment.repository_id == repository_id,
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            return None
+        return PrincipalRef(id=row.id, name=row.name, type=row.type)
 
     def validate_against_environment(
         self,

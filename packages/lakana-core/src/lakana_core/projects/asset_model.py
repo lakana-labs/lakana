@@ -91,8 +91,10 @@ _DIMENSION_KEY = (
 )
 _ARTICLE = {"fact": "a fact", "dimension": "a dimension", "wide": "a wide table"}
 _FAMILY_UNUSED = (
-    "`checks: {family}` sets how the {what} checks fail, but the asset declares no `{field}:`"
+    "`checks: {family}` sets how the {what} checks fail, but the asset declares no `{field}:`; "
+    "declare `{field}:`, or remove `checks: {family}`"
 )
+EMPTY_KEY_COLUMN = "a key column must not be empty; write the name of a column of the asset"
 KEY_COLUMN_MESSAGE = f"a key column {IDENTIFIER_MESSAGE}"
 WATERMARK_MESSAGE = f"watermark {IDENTIFIER_MESSAGE}"
 
@@ -185,29 +187,35 @@ def write_choice_message(write: str) -> str:
     return f"write must be one of {', '.join(WRITE_CHOICES)}; got '{write}'"
 
 
-def key_issues(key: Sequence[str] | str) -> list[str]:
-    """Check the columns of a merge key on their own.
+def key_issues(key: Sequence[str] | str, *, merge: bool = False) -> list[str]:
+    """Check the columns of a key on their own.
 
     Parameters
     ----------
     key
         The key columns as given, or `KEY_NONE`.
+    merge
+        Whether the asset merges on the key. A merge key keeps the rule of the release before
+        model fields: no column limit.
 
     Returns
     -------
     list of str
-        One message for a column with an unsafe character (the first), one per column listed
-        twice, and one for more than `MAX_KEY_COLUMNS` columns; empty when the key is fine.
+        One message for a column with an unsafe character (the first), one for an empty column,
+        one per column listed twice, and, unless the asset merges, one for more than
+        `MAX_KEY_COLUMNS` columns; empty when the key is fine.
     """
     if key == KEY_NONE:
         return []
     issues = [KEY_COLUMN_MESSAGE] if any(unsafe_identifier(column) for column in key) else []
+    if any(not column for column in key):
+        issues.append(EMPTY_KEY_COLUMN)
     seen: set[str] = set()
     for column in key:
-        if column in seen and not unsafe_identifier(column):
+        if column in seen and column and not unsafe_identifier(column):
             issues.append(f"key column `{column}` is listed twice")
         seen.add(column)
-    if len(key) > MAX_KEY_COLUMNS:
+    if not merge and len(key) > MAX_KEY_COLUMNS:
         issues.append(f"a key has at most {MAX_KEY_COLUMNS} columns; `key:` lists {len(key)}")
     return issues
 

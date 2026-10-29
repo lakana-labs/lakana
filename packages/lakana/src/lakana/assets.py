@@ -226,7 +226,8 @@ def _check_write(
     ------
     ValueError
         For a value of the wrong type or with a character deploy refuses, a `write` outside
-        `WRITE_CHOICES`, a key column listed twice, a key of more than 8 columns, ``append``
+        `WRITE_CHOICES`, an empty key column, a key column listed twice, a key of more than 8
+        columns unless it is a merge's, ``append``
         without a watermark, ``merge`` without a key or with ``key="none"``, and ``replace``
         with a watermark.
     """
@@ -246,6 +247,8 @@ def _check_write(
         raise ValueError("watermark must be a string")
     if any(_unsafe(column) for column in columns):
         raise ValueError(f"a key column {_IDENTIFIER_MESSAGE}")
+    if any(not column for column in columns):
+        raise ValueError("a key column must not be empty; write the name of a column of the asset")
     if watermark is not None and _unsafe(watermark):
         raise ValueError(f"watermark {_IDENTIFIER_MESSAGE}")
     seen: set[str] = set()
@@ -253,7 +256,7 @@ def _check_write(
         if column in seen:
             raise ValueError(f"key column `{column}` is listed twice")
         seen.add(column)
-    if len(columns) > 8:
+    if mode != "merge" and len(columns) > 8:  # a merge key keeps the earlier rule: no limit
         raise ValueError(f"a key has at most 8 columns; `key:` lists {len(columns)}")
     if mode == "append" and watermark is None:
         raise ValueError(
@@ -375,8 +378,12 @@ def _check_model(
             )
     refs = dict(references) if isinstance(references, Mapping) else {}
     for column, target in refs.items():
+        if not column:
+            raise ValueError("a reference column must not be empty")
         if _unsafe(column):
             raise ValueError(f"a reference column {_IDENTIFIER_MESSAGE}")
+        if _unsafe(target):
+            raise ValueError(f"reference `{column}` names a target that {_IDENTIFIER_MESSAGE}")
         if not _component_ok(f"ref_{column}"):
             raise ValueError(
                 f"reference column `{column}` cannot name its check `ref_{column}`: a check "
@@ -444,11 +451,14 @@ def _check_kind_rules(
             "declare `kind: fact` or `kind: wide`, or remove `key: none`"
         )
     if "key" in checks and (not key or key == _KEY_NONE):
-        raise ValueError("checks: key sets how the key checks fail, but the asset declares no key")
+        raise ValueError(
+            "checks: key sets how the key checks fail, but the asset declares no key; declare "
+            "key=, or remove checks: key"
+        )
     if "references" in checks and not references:
         raise ValueError(
             "checks: references sets how the reference checks fail, but the asset declares "
-            "no references"
+            "no references; declare references=, or remove checks: references"
         )
 
 

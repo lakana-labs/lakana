@@ -593,7 +593,7 @@ def _write_model(
         key = tuple(listed)
     marked = values.get("watermark")
     watermark = marked if isinstance(marked, str) else None
-    messages = key_issues(key)
+    messages = key_issues(key, merge=write == "merge")
     if watermark is not None and unsafe_identifier(watermark):
         messages.append(WATERMARK_MESSAGE)
     if write is not None and write not in WRITE_CHOICES:

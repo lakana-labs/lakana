@@ -340,8 +340,9 @@ def test_a_wrong_write_model_is_refused(arguments: dict[str, Any], message: str)
 def test_a_key_is_accepted_with_every_write_mode() -> None:
     assert callable(lakana.asset(key=["id"]))
     assert callable(lakana.asset(write="append", watermark="ts", key=["id"]))
+    assert callable(lakana.asset(write="merge", key=[f"c{i}" for i in range(9)]))
     with pytest.raises(ValueError) as caught:
-        lakana.asset(write="merge", key=[f"c{i}" for i in range(9)])
+        lakana.asset(write="replace", key=[f"c{i}" for i in range(9)])
     assert str(caught.value) == "a key has at most 8 columns; `key:` lists 9"
 
 
@@ -451,12 +452,14 @@ UNSAFE_GRAIN = (
         ),
         (
             {"checks": {"key": "warn"}},
-            "checks: key sets how the key checks fail, but the asset declares no key",
+            "checks: key sets how the key checks fail, but the asset declares no key; declare "
+            "key=, or remove checks: key",
         ),
         (
             {"checks": {"references": "warn"}},
             "checks: references sets how the reference checks "
-            "fail, but the asset declares no references",
+            "fail, but the asset declares no references; declare references=, or remove "
+            "checks: references",
         ),
         (
             {"references": {"a\u200bb": "gold.t"}},
@@ -477,6 +480,22 @@ UNSAFE_GRAIN = (
             "reference `a: gold.a/b` must name a table as `ns.table` or `ns.table.column`",
         ),
         ({"key": ["a"] * 2, "kind": "staging"}, "key column `a` is listed twice"),
+        ({"key": ""}, "a key column must not be empty; write the name of a column of the asset"),
+        (
+            {"key": ["id", ""], "write": "merge"},
+            "a key column must not be empty; write the name of a column of the asset",
+        ),
+        ({"references": {"": "gold.t"}}, "a reference column must not be empty"),
+        (
+            {"references": {"a": "gold.t\nx"}},
+            "reference `a` names a target that must not contain a control, format or surrogate "
+            "character or a line separator",
+        ),
+        (
+            {"references": {"a": "gold.t\u202ex"}},
+            "reference `a` names a target that must not contain a control, format or surrogate "
+            "character or a line separator",
+        ),
         ({"key": [str(n) for n in range(9)]}, "a key has at most 8 columns; `key:` lists 9"),
         (
             {"output": "artifact", "kind": "fact"},

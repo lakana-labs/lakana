@@ -231,10 +231,11 @@ def _resolve_one(
     where = f"Reference `{column}: {raw}`: `{target}`"
     if target_column is None:
         if info.key_none or not info.key:
-            example = info.columns[0] if info.columns else "<column>"
+            # `<column>`, never one of the target's columns: the deploy's error reaches every
+            # reader of the environment, not only those who may read the target.
             messages.append(
                 f"{where} declares no key. Declare `key:` in its asset, or name the column: "
-                f"`{column}: {target}.{example}`."
+                f"`{column}: {target}.<column>`."
             )
             return None, messages
         if len(info.key) > 1:
@@ -245,7 +246,10 @@ def _resolve_one(
             return None, messages
         target_column = info.key[0]
     elif info.columns is not None and target_column not in info.columns:
-        messages.append(f"{where} has no column `{target_column}`.")
+        messages.append(
+            f"{where} has no column `{target_column}`; name one of its columns, or use the short "
+            "form to point at its key."
+        )
     if messages:
         return None, messages
     return ResolvedReference(column, target, target_column), []
@@ -321,7 +325,8 @@ def project_model_issues(assets: Sequence[ParsedAsset]) -> list[ProjectIssue]:
                     ProjectIssue(
                         asset.path,
                         line,
-                        f"Key column `{column}` is not a column of `{asset.table}`'s SELECT.",
+                        f"Key column `{column}` is not a column of `{asset.table}`'s SELECT; "
+                        "add it to the SELECT, or change `key:`.",
                     )
                 )
         for column in sorted(asset.metadata.references):
@@ -330,7 +335,8 @@ def project_model_issues(assets: Sequence[ParsedAsset]) -> list[ProjectIssue]:
                     ProjectIssue(
                         asset.path,
                         line,
-                        f"Reference column `{column}` is not a column of `{asset.table}`'s SELECT.",
+                        f"Reference column `{column}` is not a column of `{asset.table}`'s "
+                        "SELECT; add it to the SELECT, or remove the reference.",
                     )
                 )
     return issues

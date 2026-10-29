@@ -930,6 +930,27 @@ def test_the_sdk_parses_a_version_3_description(harness: Harness) -> None:
     assert parsed.expected_snapshot_id == 17
 
 
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"write": "append", "key": ("id",), "watermark_column": "ts"},
+        {"write": "replace", "key": ("id",), "connections": {"crm-db": {"kind": "postgresql"}}},
+    ],
+    ids=["append", "replace-with-connections"],
+)
+def test_the_sdk_accepts_a_key_that_only_identifies_a_row(
+    harness: Harness, fields: dict[str, object]
+) -> None:
+    """A model's `key:` on an append or a replace stays out of the description.
+
+    The harness of the `lakana` a project pinned takes a key only for a merge, so the runner sends
+    none for any other write.
+    """
+    harness.fields = fields
+    parsed = _real_parse(harness)
+    assert (parsed.write, parsed.key) == (fields["write"], ())
+
+
 def test_the_secret_values_to_hide_stay_out_of_the_repr(harness: Harness) -> None:
     assert "s3cr3t" not in repr(harness.task(hidden=("s3cr3t",)))
 
