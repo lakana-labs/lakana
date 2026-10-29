@@ -9,10 +9,13 @@ columns of tables that existed before search are filled in. For the steps, see
 
 | Kind | Matched against | `matched` is |
 |---|---|---|
-| `table` | the table's name, its name with the namespace (`silver.orders`), its shown description | `name` or `description` |
-| `column` | the column's name, its shown description | `name` or `description` |
+| `table` | the table's name, its name with the namespace (`silver.orders`), its shown description, its declared grain | `name`, `description` or `grain` |
+| `column` | the column's name, its shown description, its declared grain | `name`, `description` or `grain` |
 | `run` | the run's id (four hex characters or more, with or without dashes), its job, its repository | `id`, `job` or `repository` |
 | `principal` | the principal's name | `name` |
+
+The *grain* is the sentence the table's asset header declares (`grain:`); a table that declares none
+has no grain to match. Key columns are found as columns.
 
 A table is a managed table, an external table, a view or an artifact, as in the table listing
 (`table_kind` is `TABLE`, `EXTERNAL`, `VIEW` or `ARTIFACT`). An artifact has no columns and no
@@ -27,7 +30,7 @@ text is trimmed and must be 1 to 200 characters.
 ## Ranking and paging
 
 Results are ordered by: how well the name matched (0 exact, 1 starts with, 2 contains, 3 only the
-description matched), then the kind (tables, columns, runs, principals), then the name. A page has
+description matched), then the kind (tables, columns, runs, principals), then the name. A match in a grain ranks as a match in the description. A page has
 `limit` results (1 to 100, 20 by default) after `offset` (0 or more). Both count only what you may
 read.
 
@@ -39,7 +42,7 @@ read.
 | run | `READ_ENVIRONMENT` |
 | principal | the right to list principals: `MANAGE_PRINCIPAL`, which the `ADMIN` role holds |
 
-A result you may not see is left out, never refused. A description is shown, even as a snippet, only
+A result you may not see is left out, never refused. A description, a grain and a kind are shown, even as a snippet, only
 for a table you may read. An environment that does not exist is `404` for a caller who may read
 environments; for anyone else the answer is an empty page, as for an environment that exists.
 
@@ -48,12 +51,13 @@ a few of very many matches may miss some; a longer or more exact text finds them
 
 ## REST
 
-`GET /api/v1/environments/{env}/search?q=TEXT&kind=&limit=&offset=`
+`GET /api/v1/environments/{env}/search?q=TEXT&kind=&model_kind=&limit=&offset=`
 
 | Parameter | Meaning |
 |---|---|
 | `q` | Required. The text, 1 to 200 characters after trimming. |
 | `kind` | Optional: `table`, `column`, `run` or `principal`. |
+| `model_kind` | Optional: `fact`, `dimension`, `wide` or `staging`. Only tables whose asset header declares this kind; columns, runs and principals are left out. Another value is `422`. |
 | `limit` | Results per page, 1 to 100 (20). |
 | `offset` | Results to skip (0). |
 
@@ -63,18 +67,18 @@ The answer is `{"results": [...], "limit": N, "offset": N, "has_more": true|fals
 
 | Kind | Further fields |
 |---|---|
-| `table` | `namespace`, `table`, `table_kind` |
+| `table` | `namespace`, `table`, `table_kind`, `model_kind` (the declared kind, else `null`) |
 | `column` | `namespace`, `table`, `column`, `column_type` |
 | `run` | `run_id`, `job`, `repository`, `status` |
 | `principal` | `principal`, `principal_type` |
 
-`snippet` is set when `matched` is `description`: at most 160 characters of the description around
+`snippet` is set when `matched` is `description` or `grain`: at most 160 characters of that text around
 the first hit. A bad `q`, `limit`, `offset` or `kind` is `422` and says the range.
 
 ## Command and SDK
 
-`lakana search TEXT [--kind KIND] [--limit N] [--offset N] [--env ENV]` shows one page and, when more follow, the command for the next; with `--output json`
-it prints the whole answer. `client.search(environment, q, kind=None, limit=20, offset=0)` returns a
+`lakana search TEXT [--kind KIND] [--model-kind MODEL_KIND] [--limit N] [--offset N] [--env ENV]` shows one page and, when more follow, the command for the next; a table that declares a kind shows it as `name [kind]`; with `--output json`
+it prints the whole answer. `client.search(environment, q, kind=None, model_kind=None, limit=20, offset=0)` returns a
 `SearchPage` with `results` (`SearchHit` objects with the fields above), `limit`, `offset` and
 `has_more`.
 

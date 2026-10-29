@@ -203,3 +203,51 @@ def test_an_unknown_environment_is_404_and_a_missing_token_is_401(client: TestCl
     assert missing.status_code == 404, missing.text
     assert "nope" in missing.text
     assert client.get(_SEARCH, params={"q": "o"}).status_code == 401
+
+
+def _declare(client: TestClient, table: str, kind: str, grain: str) -> None:
+    """Write a declared kind and grain on `silver.<table>`, as a deploy does.
+
+    Parameters
+    ----------
+    client
+        The test client.
+    table
+        The table's name.
+    kind
+        The declared kind.
+    grain
+        The declared grain.
+    """
+    with Session(client.app.state.engine) as session:
+        row = session.scalars(select(Table).where(Table.name == table)).one()
+        row.model_kind = kind
+        row.model_grain = grain
+        session.commit()
+
+
+def test_model_kind_filters_and_each_hit_carries_its_kind(client: TestClient) -> None:
+    _setup(client)
+    _declare(client, "orders", "dimension", "One row per order.")
+    _declare(client, "payroll", "fact", "One row per order line.")
+
+    hits = client.get(
+        _SEARCH, headers=AUTH_HEADER, params={"q": "order", "model_kind": "dimension"}
+    ).json()["results"]
+    assert [(h["name"], h["model_kind"]) for h in hits] == [("silver.orders", "dimension")]
+    columns = client.get(_SEARCH, headers=AUTH_HEADER, params={"q": "order_id"}).json()["results"]
+    assert [h["model_kind"] for h in columns] == [None]
+    refused = client.get(_SEARCH, headers=AUTH_HEADER, params={"q": "x", "model_kind": "cube"})
+    assert refused.status_code == 422
+
+
+def test_a_grain_of_a_table_the_caller_may_not_read_is_not_found(client: TestClient) -> None:
+    _setup(client)
+    _declare(client, "payroll", "fact", "One row per secret bonus.")
+    alice = _person(client, "alice", table="orders")
+
+    assert client.get(_SEARCH, headers=alice, params={"q": "secret bonus"}).json()["results"] == []
+    hits = client.get(_SEARCH, headers=AUTH_HEADER, params={"q": "secret bonus"}).json()["results"]
+    assert [(h["name"], h["matched"], h["snippet"]) for h in hits] == [
+        ("silver.payroll", "grain", "One row per secret bonus.")
+    ]

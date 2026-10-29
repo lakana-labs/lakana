@@ -5027,7 +5027,7 @@
           "search"
         ],
         "summary": "Search an environment",
-        "description": "Finds tables, columns, runs, jobs, repositories and principals whose names or descriptions contain `q` (1 to 200 characters, case-insensitive; run ids need four characters or more), one page at a time. What the caller may not read is left out of the hits, not refused: tables and columns need `READ_TABLE`, runs `READ_ENVIRONMENT`, principals the right to list them. Needs `READ_ENVIRONMENT`. Answers 404 when the environment does not exist and 422 for a `q` or paging value out of range.",
+        "description": "Finds tables, columns, runs, jobs, repositories and principals whose names or descriptions, or a table's declared grain, contain `q` (1 to 200 characters, case-insensitive; run ids need four characters or more), one page at a time. What the caller may not read is left out of the hits, not refused: tables and columns need `READ_TABLE`, runs `READ_ENVIRONMENT`, principals the right to list them. Needs `READ_ENVIRONMENT`. Answers 404 when the environment does not exist and 422 for a `q`, `model_kind` or paging value out of range.",
         "operationId": "search_api_v1_environments__env__search_get",
         "parameters": [
           {
@@ -5068,6 +5068,24 @@
               "title": "Kind"
             },
             "description": "Only this kind of hit."
+          },
+          {
+            "name": "model_kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only tables whose asset header declares this kind: fact, dimension, wide or staging.",
+              "title": "Model Kind"
+            },
+            "description": "Only tables whose asset header declares this kind: fact, dimension, wide or staging."
           },
           {
             "name": "limit",
@@ -21855,6 +21873,7 @@
             "enum": [
               "name",
               "description",
+              "grain",
               "id",
               "job",
               "repository"
@@ -21904,6 +21923,17 @@
               }
             ],
             "title": "Table Kind"
+          },
+          "model_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Kind"
           },
           "column": {
             "anyOf": [
@@ -22004,6 +22034,7 @@
           "namespace",
           "table",
           "table_kind",
+          "model_kind",
           "column",
           "column_type",
           "run_id",
@@ -22014,7 +22045,7 @@
           "principal_type"
         ],
         "title": "SearchHitOut",
-        "description": "One search hit.\n\nParameters\n----------\nkind\n    What was found: ``table``, ``column``, ``run`` or ``principal``.\nname\n    A display name: ``namespace.table``, ``namespace.table.column``, the run id or the\n    principal's name.\nmatched\n    The field that matched: ``name``, ``description``, ``id``, ``job`` or ``repository``.\nsnippet\n    For a description match, at most 160 characters of the description around the hit.\nnamespace\n    For a table or column, its namespace, dotted.\ntable\n    For a table or column, the table's name.\ntable_kind\n    For a table, ``TABLE``, ``EXTERNAL``, ``VIEW`` or ``ARTIFACT``.\ncolumn\n    For a column, its name.\ncolumn_type\n    For a column, its type.\nrun_id\n    For a run, its id.\njob\n    For a run, its job, if it has one.\nrepository\n    For a run, its repository.\nstatus\n    For a run, its status.\nprincipal\n    For a principal, its name.\nprincipal_type\n    For a principal, ``USER`` or ``SERVICE_ACCOUNT``."
+        "description": "One search hit.\n\nParameters\n----------\nkind\n    What was found: ``table``, ``column``, ``run`` or ``principal``.\nname\n    A display name: ``namespace.table``, ``namespace.table.column``, the run id or the\n    principal's name.\nmatched\n    The field that matched: ``name``, ``description``, ``grain``, ``id``, ``job`` or\n    ``repository``.\nsnippet\n    For a description or grain match, at most 160 characters of the text around the hit.\nnamespace\n    For a table or column, its namespace, dotted.\ntable\n    For a table or column, the table's name.\ntable_kind\n    For a table, ``TABLE``, ``EXTERNAL``, ``VIEW`` or ``ARTIFACT``.\nmodel_kind\n    For a table whose asset header declares one, its ``kind``: ``fact``, ``dimension``,\n    ``wide`` or ``staging``.\ncolumn\n    For a column, its name.\ncolumn_type\n    For a column, its type.\nrun_id\n    For a run, its id.\njob\n    For a run, its job, if it has one.\nrepository\n    For a run, its repository.\nstatus\n    For a run, its status.\nprincipal\n    For a principal, its name.\nprincipal_type\n    For a principal, ``USER`` or ``SERVICE_ACCOUNT``."
       },
       "SearchKind": {
         "type": "string",

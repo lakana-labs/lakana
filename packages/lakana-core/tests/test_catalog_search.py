@@ -596,3 +596,70 @@ def test_the_authorization_is_asked_once_per_table(world: World) -> None:
 
     asked = [c.args[1] for c in permits.call_args_list]
     assert asked.count(Action.READ_TABLE) == 2
+
+
+def _set_model(world: World, name: str, *, kind: str, grain: str) -> None:
+    """Write the declared kind and grain on a table's row, as a deploy does.
+
+    Parameters
+    ----------
+    world
+        The fixture.
+    name
+        The table's name.
+    kind
+        The declared kind.
+    grain
+        The declared grain.
+    """
+    row = world.session.scalars(select(Table).where(Table.name == name)).one()
+    row.model_kind = kind
+    row.model_grain = grain
+    world.session.commit()
+
+
+def test_a_grain_matches_and_shows_its_snippet(world: World) -> None:
+    _set_model(world, "orders", kind="fact", grain="One row per store and calendar day.")
+    (hit,) = world.search(world.bob, "calendar day").results
+    assert (hit.name, hit.matched, hit.model_kind) == ("silver.orders", "grain", "fact")
+    assert "calendar day" in (hit.snippet or "")
+
+
+def test_a_name_or_description_match_still_shows_the_kind(world: World) -> None:
+    _set_model(world, "orders", kind="fact", grain="One row per order.")
+    hit = world.search(world.bob, "orders", kind=SearchKind.TABLE).results[0]
+    assert (hit.matched, hit.model_kind) == ("name", "fact")
+    assert world.search(world.bob, "customers").results[0].matched == "description"
+
+
+def test_a_table_without_a_model_has_no_kind(world: World) -> None:
+    assert world.search(world.bob, "orders").results[0].model_kind is None
+
+
+def test_model_kind_keeps_only_tables_of_that_kind(world: World) -> None:
+    _set_model(world, "orders", kind="dimension", grain="One row per order.")
+    _set_model(world, "payroll", kind="fact", grain="One row per order line.")
+    page = CatalogSearch(world.session, AllowAllAuthorization()).search(
+        world.admin, "dev", "order", model_kind="dimension"
+    )
+    assert [h.name for h in page.results] == ["silver.orders"]
+
+
+def test_a_bad_model_kind_is_refused(world: World) -> None:
+    with pytest.raises(ValidationError, match="model_kind must be one of fact, dimension"):
+        CatalogSearch(world.session, AllowAllAuthorization()).search(
+            world.admin, "dev", "x", model_kind="cube"
+        )
+
+
+def test_the_grain_and_kind_of_a_table_the_reader_may_not_read_never_appear(world: World) -> None:
+    _set_model(world, "payroll", kind="fact", grain="One row per secret bonus.")
+    _set_model(world, "orders", kind="fact", grain="One row per order; see silver.payroll.")
+    assert world.search(world.alice, "secret bonus").results == []
+    assert world.search(world.alice, "bonus", kind=SearchKind.TABLE).results == []
+    assert world.search(world.alice, "payroll").results[0].name == "silver.orders"
+    only = CatalogSearch(world.session, GrantAuthorization(world.session)).search(
+        world.alice, "dev", "fact", model_kind="fact"
+    )
+    assert only.results == []
+    assert [h.name for h in world.search(world.bob, "secret bonus").results] == ["silver.payroll"]

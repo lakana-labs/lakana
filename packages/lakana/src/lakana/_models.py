@@ -2886,15 +2886,19 @@ class SearchHit:
         A display name: ``namespace.table``, ``namespace.table.column``, the run id or the
         principal's name.
     matched
-        The field that matched: ``name``, ``description``, ``id``, ``job`` or ``repository``.
+        The field that matched: ``name``, ``description``, ``grain``, ``id``, ``job`` or
+        ``repository``.
     snippet
-        For a description match, at most 160 characters of the description around the hit.
+        For a description or grain match, at most 160 characters of the text around the hit.
     namespace
         For a table or column, its namespace, dotted.
     table
         For a table or column, the table's name.
     table_kind
         For a table, ``TABLE``, ``EXTERNAL``, ``VIEW`` or ``ARTIFACT``.
+    model_kind
+        For a table whose asset header declares one, its ``kind``: ``fact``, ``dimension``,
+        ``wide`` or ``staging``.
     column
         For a column, its name.
     column_type
@@ -2920,6 +2924,7 @@ class SearchHit:
     namespace: str | None = None
     table: str | None = None
     table_kind: str | None = None
+    model_kind: str | None = None
     column: str | None = None
     column_type: str | None = None
     run_id: str | None = None

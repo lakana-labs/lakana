@@ -29,6 +29,7 @@ from sqlalchemy import (
     func,
     literal,
     literal_column,
+    not_,
     null,
     or_,
     select,
@@ -55,6 +56,7 @@ from lakana_core.models import (
 )
 from lakana_core.models.table import table_kind
 from lakana_core.pagination import escape_like
+from lakana_core.projects.asset_model import require_model_kind
 
 MAX_QUERY_LENGTH = 200
 """The most characters a query may have."""
@@ -130,16 +132,20 @@ class SearchHit:
         The display name: ``namespace.table`` for a table, ``namespace.table.column`` for a
         column, the id for a run, the name for a principal.
     matched
-        The field that matched: ``name``, ``description``, ``id``, ``job`` or ``repository``.
+        The field that matched: ``name``, ``description``, ``grain``, ``id``, ``job`` or
+        ``repository``.
     snippet
-        For a description match, at most `SNIPPET_LENGTH` characters of the description around the
-        hit.
+        For a description or grain match, at most `SNIPPET_LENGTH` characters of the text around
+        the hit.
     namespace
         For a table or column, its namespace, dotted.
     table
         For a table or column, the table's name.
     table_kind
         For a table, ``TABLE``, ``EXTERNAL``, ``VIEW`` or ``ARTIFACT``.
+    model_kind
+        For a table whose asset header declares one, its ``kind``: ``fact``, ``dimension``,
+        ``wide`` or ``staging``.
     column
         For a column, its name.
     column_type
@@ -165,6 +171,7 @@ class SearchHit:
     namespace: str | None = None
     table: str | None = None
     table_kind: str | None = None
+    model_kind: str | None = None
     column: str | None = None
     column_type: str | None = None
     run_id: uuid.UUID | None = None
@@ -435,6 +442,7 @@ class CatalogSearch:
         q: str,
         *,
         kind: SearchKind | None = None,
+        model_kind: str | None = None,
         limit: int = 20,
         offset: int = 0,
     ) -> SearchPage:
@@ -454,6 +462,9 @@ class CatalogSearch:
             The text, case-insensitive; trimmed, 1 to 200 characters.
         kind
             Only this kind of hit.
+        model_kind
+            Only tables whose asset header declares this ``kind``: ``fact``, ``dimension``,
+            ``wide`` or ``staging``. Columns, runs and principals have none, so they are left out.
         limit
             The page size, 1 to 100.
         offset
@@ -467,12 +478,14 @@ class CatalogSearch:
         Raises
         ------
         ValidationError
-            If the text, `limit` or `offset` is out of range.
+            If the text, `limit` or `offset` is out of range, or `model_kind` is not a kind.
         NotFoundError
             If the environment does not exist and `p` may read environments. A caller who may
             not gets an empty page, as for an environment that exists.
         """
         needle = _normalized_query(q)
+        if model_kind is not None:
+            require_model_kind(model_kind)
         if not 1 <= limit <= MAX_LIMIT:
             raise ValidationError(f"limit must be between 1 and {MAX_LIMIT}; got {limit}.")
         if offset < 0:
@@ -491,9 +504,11 @@ class CatalogSearch:
             return SearchPage([], limit, offset, False)
         match = _Match(needle)
         wanted = {kind} if kind is not None else set(SearchKind)
+        if model_kind is not None:
+            wanted &= {SearchKind.TABLE}
         selects: list[_Candidates] = []
         if SearchKind.TABLE in wanted:
-            selects.append(_tables(match, environment_id))
+            selects.append(_tables(match, environment_id, model_kind))
         if SearchKind.COLUMN in wanted:
             selects.append(_columns(match, environment_id))
         if SearchKind.RUN in wanted and may_read_environment:
@@ -605,7 +620,7 @@ class CatalogSearch:
         return readable[key]
 
 
-def _tables(match: _Match, environment_id: uuid.UUID) -> _Candidates:
+def _tables(match: _Match, environment_id: uuid.UUID, model_kind: str | None) -> _Candidates:
     """Select the tables, views, external tables and artifacts that match.
 
     Parameters
@@ -614,32 +629,43 @@ def _tables(match: _Match, environment_id: uuid.UUID) -> _Candidates:
         The comparisons.
     environment_id
         The environment.
+    model_kind
+        Keep only tables that declare this kind, or `None` for every table.
 
     Returns
     -------
     Select
-        The candidates.
+        The candidates. Grain and kind are in the row, so they are read out only after the
+        caller's `READ_TABLE` on the table has been checked, like a description.
     """
     qualified = (
         func.replace(Namespace.path, NAMESPACE_SEPARATOR, ".").concat(".").concat(Table.name)
     )
     shown = func.coalesce(Table.description_edited, Table.description_project)
     named = or_(match.contains(Table.name), match.contains(qualified))
-    return (
+    in_description = match.contains(shown)
+    in_grain = match.contains(func.coalesce(Table.model_grain, ""))
+    matched = case(
+        (named, _text("name")), (in_description, _text("description")), else_=_text("grain")
+    )
+    text = case((and_(not_(named), not_(in_description)), Table.model_grain), else_=shown)
+    query = (
         _row(
             SearchKind.TABLE,
             match.rank([Table.name, qualified], otherwise=3),
             func.lower(Table.name),
             cast(Table.id, String),
-            case((named, _text("name")), else_=_text("description")),
+            matched,
             Namespace.path,
             Table.name,
             cast(Table.table_type, String),
-            shown,
+            text,
+            Table.model_kind,
         )
         .join(Namespace, Namespace.id == Table.namespace_id)
-        .where(Namespace.environment_id == environment_id, or_(named, match.contains(shown)))
+        .where(Namespace.environment_id == environment_id, or_(named, in_description, in_grain))
     )
+    return query.where(Table.model_kind == model_kind) if model_kind is not None else query
 
 
 def _columns(match: _Match, environment_id: uuid.UUID) -> _Candidates:
@@ -782,7 +808,7 @@ def _hit(row: _Candidate, needle: str) -> SearchHit:
     kind = next(k for k, order in _KIND_ORDER.items() if order == row.kind_order)
     snippet = (
         _snippet(row.f4, needle)
-        if row.matched == "description"
+        if row.matched in ("description", "grain")
         and kind
         in (
             SearchKind.TABLE,
@@ -800,6 +826,7 @@ def _hit(row: _Candidate, needle: str) -> SearchHit:
             namespace=namespace,
             table=row.f2,
             table_kind=table_kind(TableType[row.f3]),
+            model_kind=row.f5,
         )
     if kind is SearchKind.COLUMN:
         namespace = str(NamespacePath.parse(row.f1))

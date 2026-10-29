@@ -3799,15 +3799,19 @@ class SearchHitOut(BaseModel):
         A display name: ``namespace.table``, ``namespace.table.column``, the run id or the
         principal's name.
     matched
-        The field that matched: ``name``, ``description``, ``id``, ``job`` or ``repository``.
+        The field that matched: ``name``, ``description``, ``grain``, ``id``, ``job`` or
+        ``repository``.
     snippet
-        For a description match, at most 160 characters of the description around the hit.
+        For a description or grain match, at most 160 characters of the text around the hit.
     namespace
         For a table or column, its namespace, dotted.
     table
         For a table or column, the table's name.
     table_kind
         For a table, ``TABLE``, ``EXTERNAL``, ``VIEW`` or ``ARTIFACT``.
+    model_kind
+        For a table whose asset header declares one, its ``kind``: ``fact``, ``dimension``,
+        ``wide`` or ``staging``.
     column
         For a column, its name.
     column_type
@@ -3830,11 +3834,12 @@ class SearchHitOut(BaseModel):
 
     kind: Literal["table", "column", "run", "principal"]
     name: str
-    matched: Literal["name", "description", "id", "job", "repository"]
+    matched: Literal["name", "description", "grain", "id", "job", "repository"]
     snippet: str | None
     namespace: str | None
     table: str | None
     table_kind: str | None
+    model_kind: str | None
     column: str | None
     column_type: str | None
     run_id: uuid.UUID | None

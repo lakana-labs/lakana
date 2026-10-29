@@ -397,7 +397,7 @@ no text inside it, is read out for a caller who may not read it.
 
 | Result | Needs | Notes |
 |---|---|---|
-| table, column | `READ_TABLE` on the table | `authz.permits` per table (cached per search), as `CatalogService.can_read_table` asks it. A column's name, type and description and a table's description are in the row only after this check; a snippet is cut from the shown description of a permitted row. |
+| table, column | `READ_TABLE` on the table | `authz.permits` per table (cached per search), as `CatalogService.can_read_table` asks it. A column's name, type and description and a table's description, declared grain (`model_grain`) and kind (`model_kind`) are in the row only after this check; a snippet is cut from the shown description or grain of a permitted row. A grain or kind of a table the caller may not read matches nothing for them. Search does not match reference targets; if it ever does, a hit may name only a target the caller may read. |
 | run | `READ_ENVIRONMENT` | Decided once, before the runs are looked for. |
 | principal | `MANAGE_PRINCIPAL` at instance scope | The principal listing's rule as a yes or no; no results, not an error. |
 
