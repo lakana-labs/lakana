@@ -8,7 +8,7 @@ import logging
 import pytest
 from test_projects_dag import make_asset
 
-from lakana_core.projects.asset_model import deploy_hints
+from lakana_core.projects.asset_model import ResolvedReference, deploy_hints
 from lakana_core.projects.checks import ParsedCheck, read_manifest_checks
 from lakana_core.projects.dag import build_graph
 from lakana_core.projects.frontmatter import AssetMetadata
@@ -17,10 +17,12 @@ from lakana_core.projects.manifest import (
     CONNECTIONS_VERSION,
     JOBS_VERSION,
     MANIFEST_VERSION,
+    MODEL_VERSION,
     NOTIFY_VERSION,
     VERSION_WITHOUT_CHECKS,
     WRITES_VERSION,
     EntryConnections,
+    EntryModel,
     JobNotify,
     asset_kind,
     build_manifest,
@@ -29,6 +31,7 @@ from lakana_core.projects.manifest import (
     entry_input_kinds,
     entry_inputs,
     entry_keep_versions,
+    entry_model,
     entry_output,
     entry_write,
     job_notify,
@@ -529,7 +532,7 @@ def test_a_python_entry_records_decimals_and_the_manifest_version_is_unchanged(
     asset = dataclasses.replace(_python_asset(), decimals=decimals)
     manifest = build_manifest([asset], build_graph([asset]), ResolvedProjectConfig())
     assert manifest["version"] == VERSION_WITHOUT_CHECKS == 3
-    assert MANIFEST_VERSION == 8
+    assert MANIFEST_VERSION == 9
     assert manifest["assets"][0]["decimals"] == decimals
 
 
@@ -857,12 +860,12 @@ _WRITE_KEYS = (
     ],
     ids=["merge", "merge-with-watermark", "append"],
 )
-def test_the_new_write_spelling_is_version_8_with_the_keys_older_readers_know(
+def test_the_new_write_spelling_keeps_the_keys_older_readers_know(
     metadata: AssetMetadata, expected: dict[str, object]
 ) -> None:
     asset = make_asset("silver.customers", ("bronze.raw",), metadata=metadata)
     manifest = build_manifest([asset], build_graph([asset]), ResolvedProjectConfig())
-    assert manifest["version"] == WRITES_VERSION == MANIFEST_VERSION == 8
+    assert manifest["version"] == (MODEL_VERSION if expected["key"] else WRITES_VERSION)
     assert manifest["checks"] == []
     (entry,) = manifest["assets"]
     assert {key: entry[key] for key in _WRITE_KEYS} == expected
@@ -888,7 +891,7 @@ def test_a_project_with_connections_and_new_writes_is_version_8() -> None:
         metadata=AssetMetadata(materialize="table", write="merge", key=("id",)),
     )
     manifest = build_manifest([asset], build_graph([asset]), ResolvedProjectConfig())
-    assert manifest["version"] == 8
+    assert manifest["version"] == MODEL_VERSION == 9
     assert manifest["assets"][0]["connections"] == ["crm-db"]
 
 
@@ -923,3 +926,122 @@ def test_a_version_8_manifest_without_checks_reads_as_damaged() -> None:
     assert (read.specs, read.unplaced) == ((), False)
     damaged = {key: value for key, value in manifest.items() if key != "checks"}
     assert read_manifest_checks(damaged).unplaced is True
+
+
+def _modelled() -> ParsedAsset:
+    """Build a replace asset that declares a model.
+
+    Returns
+    -------
+    ParsedAsset
+        `gold.fact_orders`, a fact keyed on `id`.
+    """
+    return make_asset(
+        "gold.fact_orders",
+        ("gold.dim_store",),
+        columns=("id", "store_id"),
+        metadata=AssetMetadata(
+            materialize="table", kind="fact", grain="One row per order.", key=("id",)
+        ),
+    )
+
+
+def test_an_asset_with_a_model_is_version_9_and_records_it() -> None:
+    asset = _modelled()
+    references = {"gold.fact_orders": (ResolvedReference("store_id", "gold.dim_store", "id"),)}
+    manifest = build_manifest(
+        [asset], build_graph([asset]), ResolvedProjectConfig(), references=references
+    )
+    assert manifest["version"] == MODEL_VERSION == 9
+    assert manifest["checks"] == []
+    (entry,) = manifest["assets"]
+    assert entry["write"] == "replace"
+    assert entry["key"] == ["id"]
+    assert entry["model"] == {
+        "kind": "fact",
+        "grain": "One row per order.",
+        "key_none": False,
+        "references": [{"column": "store_id", "target": "gold.dim_store", "target_column": "id"}],
+        "checks": {},
+    }
+
+
+def test_key_none_and_checks_are_recorded_sorted() -> None:
+    asset = make_asset(
+        "gold.readings",
+        metadata=AssetMetadata(
+            materialize="table",
+            kind="fact",
+            grain="One reading; identical rows are valid.",
+            key="none",
+            references={"meter_id": "gold.dim_meter.id"},
+            checks={"references": "warn", "key": "block"},
+        ),
+    )
+    manifest = build_manifest([asset], build_graph([asset]), ResolvedProjectConfig())
+    (entry,) = manifest["assets"]
+    assert entry["key"] == []
+    assert entry["model"]["key_none"] is True
+    assert entry["model"]["references"] == []
+    assert list(entry["model"]["checks"]) == ["key", "references"]
+
+
+def test_a_project_without_model_fields_keeps_its_version_and_has_no_model() -> None:
+    asset = make_asset("gold.daily", ("bronze.raw",))
+    manifest = build_manifest([asset], build_graph([asset]), ResolvedProjectConfig())
+    assert manifest["version"] == VERSION_WITHOUT_CHECKS
+    assert "model" not in manifest["assets"][0]
+
+
+def test_entry_model_reads_a_stored_entry_back() -> None:
+    asset = _modelled()
+    references = {"gold.fact_orders": (ResolvedReference("store_id", "gold.dim_store", "id"),)}
+    manifest = build_manifest(
+        [asset], build_graph([asset]), ResolvedProjectConfig(), references=references
+    )
+    assert entry_model(manifest["assets"][0]) == EntryModel(
+        kind="fact",
+        grain="One row per order.",
+        key=("id",),
+        key_none=False,
+        references=(ResolvedReference("store_id", "gold.dim_store", "id"),),
+        checks={},
+    )
+
+
+@pytest.mark.parametrize(
+    "entry", [None, "x", {"table": "t"}, {"table": "t", "model": ["kind"]}], ids=repr
+)
+def test_entry_model_is_none_without_a_model(entry: object) -> None:
+    assert entry_model(entry) is None
+
+
+def test_entry_model_drops_what_it_cannot_read() -> None:
+    """A stored manifest is untrusted: malformed values read as absent."""
+    entry = {
+        "write": "replace",
+        "key": ["id", 3],
+        "model": {
+            "kind": "cube",
+            "grain": 7,
+            "key_none": "yes",
+            "references": [
+                {"column": "a", "target": "n.t", "target_column": "id"},
+                {"column": "b", "target": "n.t"},
+                {"column": "c", "target": 1, "target_column": "id"},
+                "d",
+            ],
+            "checks": {"key": "warn", "references": "explode", "other": "block"},
+        },
+    }
+    assert entry_model(entry) == EntryModel(
+        kind=None,
+        grain=None,
+        key=(),
+        key_none=False,
+        references=(ResolvedReference("a", "n.t", "id"),),
+        checks={"key": "warn"},
+    )
+    assert entry_model({"model": {"references": "x", "checks": []}}) == EntryModel(
+        None, None, (), False, (), {}
+    )

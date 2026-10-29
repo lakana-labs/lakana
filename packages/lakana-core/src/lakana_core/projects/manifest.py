@@ -11,8 +11,14 @@ from typing import TYPE_CHECKING, Any, cast
 from lakana_core.connections.kinds import NAME
 from lakana_core.identifiers import NOTIFY_FORMATS
 from lakana_core.projects.asset_model import (
+    CHECK_FAMILIES,
+    CHECK_MODES,
     DEFAULT_DECIMALS,
+    KEY_NONE,
     MAX_KEEP_VERSIONS,
+    MODEL_KINDS,
+    ResolvedReference,
+    key_columns,
     normalized_write,
 )
 from lakana_core.projects.dag import ProjectGraph
@@ -26,8 +32,9 @@ from lakana_core.projects.run_policy import RunCaps, resolve_run_policy
 
 if TYPE_CHECKING:
     from lakana_core.projects.checks import ParsedCheck
+    from lakana_core.projects.frontmatter import AssetMetadata
 
-MANIFEST_VERSION = 8
+MANIFEST_VERSION = 9
 """Bumped when the manifest's shape changes. Version 2 adds `kind` per asset and
 `lock_sha256`; a version-1 manifest is read as all-SQL. Version 3 adds `output`,
 `keep_versions` and `input_kinds` per Python asset; versions 1 and 2 are read as all-table.
@@ -48,6 +55,9 @@ Version 8 is written only when an asset uses `write: append` or `merge` in the n
 merge or an append as a replace; it also carries a `checks` list. Every entry carries `write`,
 `key` and `watermark` (read with `entry_write`), beside the older `materialize`, `write_mode`,
 `first_write_mode` and `incremental_key`; an entry without them reads from those.
+Version 9 is written only when an asset declares a model field (`kind`, `grain`, `key`,
+`references` or `checks`; `MODEL_VERSION`), so that a worker of an earlier release refuses it; such
+an entry carries `model` (read with `entry_model`), and the manifest a `checks` list.
 The `decimals` key is optional and read with a default (`entry_decimals`), so it needed
 no bump: an entry without it means ``float``. The `package_indexes` key is optional in
 the same way: a manifest without it uses no registered package index. The `python` key is
@@ -76,7 +86,13 @@ WRITES_VERSION = 8
 spelling (with or without connections); a worker of an earlier release refuses it instead of
 running the asset as a replace."""
 
-LISTS_CHECKS = (4, 5, 6, 7, 8)
+MODEL_VERSION = 9
+"""The version of a manifest in which an asset declares a model field: `kind`, `grain`, `key`
+(``none`` too), `references` or `checks`. `key:` alone counts, so every project with a merge asset
+is version 9. Written only then, so that a worker of an earlier release refuses it instead of
+running the project without the checks its model generates."""
+
+LISTS_CHECKS = (4, 5, 6, 7, 8, 9)
 """The versions whose manifest always carries a `checks` list (version 4 a non-empty one). A
 tuple, not a set: a stored version may be any JSON value, a list too, and must not raise."""
 
@@ -119,7 +135,35 @@ def _policy(asset: ParsedAsset, caps: RunCaps) -> dict[str, int]:
     }
 
 
-def _entry(asset: ParsedAsset, caps: RunCaps, artifacts: frozenset[str]) -> dict[str, Any]:
+def declares_model(metadata: AssetMetadata) -> bool:
+    """Say whether an asset declares a model field.
+
+    Parameters
+    ----------
+    metadata
+        The asset's merged metadata.
+
+    Returns
+    -------
+    bool
+        `True` for a `kind`, `grain`, `references`, `checks`, or a `key` (columns or ``none``).
+    """
+    return bool(
+        metadata.kind
+        or metadata.grain
+        or metadata.references
+        or metadata.checks
+        or key_columns(metadata.key)
+        or metadata.key == KEY_NONE
+    )
+
+
+def _entry(
+    asset: ParsedAsset,
+    caps: RunCaps,
+    artifacts: frozenset[str],
+    references: Sequence[ResolvedReference] = (),
+) -> dict[str, Any]:
     """Serialize one asset.
 
     Parameters
@@ -130,6 +174,8 @@ def _entry(asset: ParsedAsset, caps: RunCaps, artifacts: frozenset[str]) -> dict
         Supplies the default timeout.
     artifacts
         Names of every artifact the asset may read, for `input_kinds`.
+    references
+        The asset's resolved references, recorded in `model`.
 
     Returns
     -------
@@ -178,6 +224,17 @@ def _entry(asset: ParsedAsset, caps: RunCaps, artifacts: frozenset[str]) -> dict
         }
         if asset.output == "artifact":
             entry["materialize"] = entry["write_mode"] = entry["first_write_mode"] = "artifact"
+    if declares_model(asset.metadata):
+        entry["model"] = {
+            "kind": asset.metadata.kind,
+            "grain": asset.metadata.grain,
+            "key_none": asset.metadata.key == KEY_NONE,
+            "references": [
+                {"column": r.column, "target": r.target, "target_column": r.target_column}
+                for r in references
+            ],
+            "checks": dict(sorted(asset.metadata.checks.items())),
+        }
     return entry
 
 
@@ -206,6 +263,7 @@ def _version(
     has_checks: bool,
     uses_connections: bool,
     uses_new_writes: bool = False,
+    uses_model: bool = False,
 ) -> int:
     """Pick the lowest manifest version that carries everything the project declares.
 
@@ -219,15 +277,20 @@ def _version(
         Whether an asset declares a connection.
     uses_new_writes
         Whether an asset spells `write: append` or `merge`.
+    uses_model
+        Whether an asset declares a model field.
 
     Returns
     -------
     int
-        `WRITES_VERSION` when an asset uses the new write spelling, else `CONNECTIONS_VERSION`
+        `MODEL_VERSION` when an asset declares a model field, else `WRITES_VERSION` when an
+        asset uses the new write spelling, else `CONNECTIONS_VERSION`
         when an asset declares a connection, `NOTIFY_VERSION` when a job notifies,
         `JOBS_VERSION` with jobs, `CHECKS_VERSION` with checks, `VERSION_WITHOUT_CHECKS`
         otherwise.
     """
+    if uses_model:
+        return MODEL_VERSION
     if uses_new_writes:
         return WRITES_VERSION
     if uses_connections:
@@ -250,6 +313,7 @@ def build_manifest(
     package_indexes: Sequence[str] = (),
     checks: Sequence[ParsedCheck] = (),
     python: str | None = None,
+    references: Mapping[str, Sequence[ResolvedReference]] | None = None,
 ) -> dict[str, Any]:
     """Build the manifest stored on a project version.
 
@@ -274,10 +338,14 @@ def build_manifest(
     checks
         The validated checks; the manifest has a `checks` list, sorted by name, and version
         `CHECKS_VERSION` (`JOBS_VERSION` with jobs), only when there are any. A manifest with
-        jobs, connections or the new write spelling carries the list even when it is empty.
+        jobs, connections, the new write spelling or a model carries the list even when it is
+        empty.
     python
         `lakana.yaml`'s `python:`; recorded as `python` only when set, so a project without it
         keeps its manifest.
+    references
+        Table → its resolved references, recorded in the `model` of an asset that declares a
+        model field; `None` when there are none.
 
     Returns
     -------
@@ -285,16 +353,21 @@ def build_manifest(
         JSON-serializable manifest, assets sorted by table.
     """
     caps = caps or RunCaps()
+    resolved = references or {}
     known = artifacts | {asset.table for asset in assets if asset.output == "artifact"}
     version = _version(
         config,
         has_checks=bool(checks),
         uses_connections=any(asset.connections for asset in assets),
         uses_new_writes=any(asset.metadata.write in ("append", "merge") for asset in assets),
+        uses_model=any(declares_model(asset.metadata) for asset in assets),
     )
     manifest: dict[str, Any] = {
         "version": version,
-        "assets": [_entry(asset, caps, known) for asset in sorted(assets, key=lambda a: a.table)],
+        "assets": [
+            _entry(asset, caps, known, resolved.get(asset.table, ()))
+            for asset in sorted(assets, key=lambda a: a.table)
+        ],
         "edges": [list(edge) for edge in graph.edges],
         "external_inputs": list(graph.external_inputs),
         "config": config.model_dump(mode="json", exclude={"jobs"}),
@@ -311,7 +384,7 @@ def build_manifest(
         manifest["python"] = python
     if package_indexes:
         manifest["package_indexes"] = sorted(package_indexes)
-    if checks or config.jobs or version in (CONNECTIONS_VERSION, WRITES_VERSION):
+    if checks or config.jobs or version in (CONNECTIONS_VERSION, WRITES_VERSION, MODEL_VERSION):
         manifest["checks"] = [
             {
                 "name": check.name,
@@ -667,6 +740,76 @@ def entry_write(entry: object) -> tuple[str, tuple[str, ...], str | None]:
     )
     watermark = entry.get("watermark")
     return write, key, watermark if isinstance(watermark, str) else None
+
+
+@dataclass(frozen=True)
+class EntryModel:
+    """What a stored manifest entry says about the asset's model.
+
+    Parameters
+    ----------
+    kind
+        One of `MODEL_KINDS`, or `None`.
+    grain
+        The grain, or `None`.
+    key
+        The key columns (`entry_write`'s key).
+    key_none
+        Whether the asset declares `key: none`.
+    references
+        The resolved references.
+    checks
+        Check family → failure mode.
+    """
+
+    kind: str | None
+    grain: str | None
+    key: tuple[str, ...]
+    key_none: bool
+    references: tuple[ResolvedReference, ...]
+    checks: dict[str, str]
+
+
+def entry_model(entry: object) -> EntryModel | None:
+    """Read an asset's model from a stored manifest entry.
+
+    Parameters
+    ----------
+    entry
+        One element of `manifest_json["assets"]`; untrusted.
+
+    Returns
+    -------
+    EntryModel or None
+        `None` for an entry without a `model` mapping. Otherwise each value that is not what a
+        deploy writes reads as absent: a `kind` outside `MODEL_KINDS`, a `grain` that is not a
+        string, a `key_none` other than `true`, a reference that is not a mapping of three
+        strings, and a check family or mode Lakana does not know.
+    """
+    raw = entry.get("model") if isinstance(entry, Mapping) else None
+    if not isinstance(raw, Mapping):
+        return None
+    kind, grain = raw.get("kind"), raw.get("grain")
+    items = raw.get("references")
+    references = tuple(
+        ResolvedReference(item["column"], item["target"], item["target_column"])
+        for item in (items if isinstance(items, list) else [])
+        if isinstance(item, Mapping)
+        and all(isinstance(item.get(k), str) for k in ("column", "target", "target_column"))
+    )
+    checks = raw.get("checks")
+    return EntryModel(
+        kind=kind if isinstance(kind, str) and kind in MODEL_KINDS else None,
+        grain=grain if isinstance(grain, str) else None,
+        key=entry_write(entry)[1],
+        key_none=raw.get("key_none") is True,
+        references=references,
+        checks={
+            family: mode
+            for family, mode in (checks.items() if isinstance(checks, Mapping) else ())
+            if family in CHECK_FAMILIES and isinstance(mode, str) and mode in CHECK_MODES
+        },
+    )
 
 
 @dataclass(frozen=True)

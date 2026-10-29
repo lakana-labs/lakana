@@ -117,7 +117,7 @@ Each cell is a summary. The page named in the last column has the detail. The ch
 
 | Release | What it asks | Where |
 |---|---|---|
-| Next release | Nothing yet. | This row |
+| Next release | No migration. `key:` is allowed with every write mode and has at most 8 columns. A project that declares `kind`, `grain`, `key`, `references` or `checks` (every project with a `write: merge` asset) deploys a version 9 manifest: upgrade every worker before you deploy it. | [Notes for the next release](#notes-for-the-next-release) |
 | 0.21.0 | Migrations `0049` (connections and their tests, the secret use `connection`), `0050` (the key of a merge run) and `0051` (the record of a deploy's job starts, and the CI trust rule setting `start_on_deploy_jobs`). **Breaking:** a REST client that reads every job trigger kind must ignore or handle the new `{"kind": "deploy"}` (a job with `on_deploy: true` starts after each deploy; CI trust rules opt in with `start_on_deploy_jobs`, off on every existing rule; upgrade the workers before you deploy such a job); a Python asset's parameter `ctx` is its context, never an input (rename such an input); an unusable `LAKANA_RUN__CA_BUNDLE` stops the worker, and local tasks trust Mozilla's roots plus that file instead of the system store; builds and tasks never reach a Docker gateway or `host.docker.internal` (list the host's other addresses in `LAKANA_EGRESS_REFUSED`); under the local runner a database connection test needs `lakana[assets]` next to the worker. Upgrade the launcher, `egress`, the task images (46.7 MB larger each) and the workers together, and the workers before you deploy connections or `write: append`/`merge`. Lock Python projects again: `lakana[assets]` gains six packages (about 19 MB of wheels). An http connection test that gets 5xx or 429 is `failed`. Python tasks need this release's server: a worker of this release next to an older server fails every Python task (`… holds no write of this attempt`). New: connections, task egress, the `lakana.ingest` helpers, `lakana load`, `lakana init --template`, `@asset(evolve_schema=True)` for a Python asset that replaces its table, and `LAKANA_INGESTION_ROOTS` in the bundle's `.env`. | [Notes for 0.21.0](#notes-for-0210), [Load data from a source](../how-to/load-data-from-a-source.md) |
 | 0.20.0 | No migration. **Breaking:** the Compose bundle runs Python tasks in containers: replace `compose.yaml`, add four `.env` lines, Docker Engine 28 or later; budget `LAKANA_RUN__TASK_MEMORY` (2 GB) per worker; with the docker runner `LAKANA_RUN__HTTPS_PROXY`, `LAKANA_RUN__CA_BUNDLE` (accepted again from the next release) and an `http://` `LAKANA_RUN__INDEX_URL` are refused, and a registered index on another port than 443 needs a credential. A protected environment runs Python assets only on workers with `LAKANA_RUN__RUNNER=docker`, so no longer in local mode. | [Notes for 0.20.0](#notes-for-0200), [Run Python tasks in containers](../how-to/run-python-tasks-in-containers.md) |
 | 0.19.0 | No migration. **Security fix**: upgrade the server and every worker. **Breaking:** queries run on DuckDB 2.0: `//` and `%` by zero fail (use `TRY` or `NULLIF`), an untyped `NULL AS x` in a write is refused (add a `CAST`), a table function's alias is its value, `price = 1.1` after a float-to-double widening matches only newer rows, some Parquet files from other writers may not read; the worker needs macOS 10.15 or glibc 2.27. A `PIVOT` lists its values; `CONNECT BY`, DuckDB-internal and sequence functions are refused; a query opens only the tables it reads. The worker stops at start-up on an unusable CA bundle; an unverifiable store certificate fails at once. | [Notes for 0.19.0](#notes-for-0190) |
@@ -135,7 +135,20 @@ Each cell is a summary. The page named in the last column has the detail. The ch
 
 ## Notes for the next release
 
-Nothing yet.
+### Say what a table is in its asset's header
+
+An asset may declare `kind` (`fact`, `dimension`, `wide` or `staging`), `grain`, `key`,
+`references` and `checks`, in its `/* lakana … */` block or as arguments of `@asset(...)`. A deploy
+checks them against the rules of the kind and resolves each reference against the project and the
+environment; a target you may not read gets the same message as one that does not exist. See
+[Model fields](../reference/asset-front-matter.md#model-fields-kind-grain-key-and-references).
+
+- `key:` is now allowed with every write mode: it says which columns identify a row. `write:
+  merge` uses the same key.
+- A key has at most 8 columns; a deploy refuses a longer one.
+- A project that declares a model field deploys a version 9 manifest. `key:` alone counts, so
+  every project with a `write: merge` asset deploys version 9 from this release on: upgrade every
+  worker before you deploy it. A worker of an earlier release refuses the manifest.
 
 ## Notes for 0.21.0
 

@@ -58,6 +58,7 @@ from lakana_core.models.table import Table, TableType
 from lakana_core.projects.deploys import CONFLICT_MESSAGE, DeployService
 from lakana_core.projects.issues import ProjectIssue, ProjectValidationError
 from lakana_core.projects.limits import DeployLimits
+from lakana_core.projects.manifest import manifest_assets
 from lakana_core.projects.package_indexes import PackageIndexService
 from lakana_core.projects.repositories import RepositoryService
 from lakana_core.projects.run_policy import RunCaps
@@ -3109,3 +3110,61 @@ def test_an_error_before_the_starts_leaves_the_deploy_succeeded(
     assert run.job_starts_json == [{"job": "refresh", "outcome": "pending"}]
     (record,) = [r for r in caplog.records if "Could not start the jobs" in r.getMessage()]
     assert getattr(record, "event", None) == LogEvent.INTERNAL_ERROR.value
+
+
+_DIM_STORE = (
+    "/* lakana\nkind: dimension\ngrain: One row per store.\nkey: store_id\n*/\n"
+    "SELECT id AS store_id FROM bronze.events\n"
+)
+
+
+def test_a_deploy_resolves_references_and_records_the_model_as_version_9(
+    session: Session, principal: PrincipalRef, world: World
+) -> None:
+    commit(
+        world.repo_path,
+        {
+            "assets/gold/dim_store.sql": _DIM_STORE,
+            "assets/gold/fact_visits.sql": (
+                "/* lakana\nkind: fact\ngrain: One row per event.\nkey: id\n"
+                "references:\n  store_id: gold.dim_store\n*/\n"
+                "SELECT id, id AS store_id FROM bronze.events\n"
+            ),
+        },
+    )
+    run = _submit_and_run(session, principal, world)
+    assert (run.status, run.error_message) == (DeployStatus.SUCCEEDED, None)
+    version = session.get(JobVersion, run.job_version_id)
+    assert version is not None
+    assert version.manifest_json["version"] == 9
+    fact = manifest_assets(version.manifest_json)["gold.fact_visits"]
+    assert fact["model"]["references"] == [
+        {"column": "store_id", "target": "gold.dim_store", "target_column": "store_id"}
+    ]
+
+
+def test_a_deploy_refuses_a_reference_it_cannot_resolve_and_a_key_the_select_lacks(
+    session: Session, principal: PrincipalRef, world: World
+) -> None:
+    commit(
+        world.repo_path,
+        {
+            "assets/gold/fact_visits.sql": (
+                "/* lakana\nkey: visit_id\nreferences:\n  id: bronze.events\n*/\n"
+                "SELECT id FROM bronze.events\n"
+            ),
+        },
+    )
+    run = _submit_and_run(session, principal, world)
+    assert run.status is DeployStatus.FAILED
+    assert run.error_message is not None
+    assert (
+        "assets/gold/fact_visits.sql:1: Key column `visit_id` is not a column of "
+        "`gold.fact_visits`'s SELECT." in run.error_message
+    )
+    assert (
+        "assets/gold/fact_visits.sql:1: Reference `id: bronze.events`: `bronze.events` declares "
+        "no key. Declare `key:` in its asset, or name the column: `id: bronze.events.id`."
+        in run.error_message
+    )
+    assert session.query(JobVersion).count() == 0

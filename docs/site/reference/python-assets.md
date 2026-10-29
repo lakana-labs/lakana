@@ -49,13 +49,31 @@ limits lie is in [Python assets: what they are for and how far they are trusted]
   was deleted since fails the same way. While a deployed version declares a connection, the
   connection cannot be deleted. An asset without `connections` deploys as before. A project
   version in which an asset declares connections has manifest version 7 (8 when an asset also
-  appends or merges), so a worker of an earlier release refuses its runs instead of running the
+  appends or merges, 9 when an asset declares a model field), so a worker of an earlier release refuses its runs instead of running the
   asset without them: upgrade the workers first. The kinds of connection and the commands that manage them are in
   [Connections](connections.md).
 - **Model fields.** `kind` (`fact`, `dimension`, `wide` or `staging`), `grain`, `key`,
   `references` and `checks` take the same values and follow the same rules as in SQL front
-  matter, and are refused with `output="artifact"`. `key="none"` (a string) says that no
+  matter (see [Model fields](asset-front-matter.md#model-fields-kind-grain-key-and-references)),
+  and are refused with `output="artifact"`. `key="none"` (a string) says that no
   columns identify a row; it is for `kind="fact"` and `kind="wide"`, and a merge refuses it.
+  A Python asset's columns are not known at deploy, so its key and reference columns are
+  checked when it runs; its reference targets are checked at deploy:
+
+  ```python
+  from lakana import asset
+
+
+  @asset(
+      inputs={"orders": "silver.orders"},
+      kind="fact",
+      grain="One row per order.",
+      key="order_id",
+      references={"store_id": "gold.dim_store"},
+  )
+  def fact_orders(orders):
+      return orders
+  ```
 - **Write modes.** `write`, `key` and `watermark` say what a run does to the table, with the
   rules of SQL front-matter (see [Write modes](asset-front-matter.md#write-modes)):
   `write="replace"` (the default) replaces every row with what the function returns;
@@ -69,8 +87,9 @@ limits lie is in [Python assets: what they are for and how far they are trusted]
   (`LAKANA_WORKER__MEMORY_LIMIT`; `LAKANA_RUN__TASK_MEMORY` for a task in a container).
   `materialize="incremental"` is refused with
   ``a Python asset appends with write="append" and watermark="<column>", not materialize='incremental'``.
-  A project version in which an asset appends or merges has manifest version 8: a worker of an
-  earlier release refuses it instead of replacing the table.
+  A project version in which an asset appends or merges has manifest version 8 (9 when an asset
+  declares a model field, a `key` included, so every merge): a worker of an earlier release
+  refuses it instead of replacing the table.
 - **Schema changes.** `evolve_schema=True` lets a replace give the table the columns the
   function returns, a removed column included; without it, a changed schema fails the run. See
   [When the output changes shape](#when-the-output-changes-shape).
@@ -278,7 +297,8 @@ there is one, the line, as `path:line: message`. Fix the cause and deploy again.
 | `the file does not parse: …` | A syntax error. | Fix the line it names. |
 | ``a Python asset appends with write="append" and watermark="<column>", not materialize='incremental'`` | `materialize="incremental"`. | Write `write="append", watermark="<column>"`. |
 | `a Python asset supports only materialize 'table', got …` | `materialize` is neither `table` nor `incremental`. | Remove the argument, or write a SQL asset. |
-| ``write must be one of replace, append, merge; got '…'``, ``` `write: append` needs `watermark:` … ```, ``` `write: merge` needs `key:` … ```, ``` `write: replace` takes no `watermark:`; to add only new rows use `write: append` ```, ``key column `id` is listed twice`` | A wrong write model. | See [Write modes](asset-front-matter.md#write-modes); the rules are the same as in SQL front-matter. |
+| ``write must be one of replace, append, merge; got '…'``, ``` `write: append` needs `watermark:` … ```, ``` `write: merge` needs `key:` … ```, ``` `write: replace` takes no `watermark:`; to add only new rows use `write: append` ```, ``key column `id` is listed twice``, ``a key has at most 8 columns; `key:` lists 9`` | A wrong write model. | See [Write modes](asset-front-matter.md#write-modes); the rules are the same as in SQL front-matter. |
+| ``Asset `gold.fact_orders` is a fact and needs `grain:`: …``, ``Reference target `gold.dim_store` does not exist in environment `dev`, or you may not read it; …``, ``Reference `store_id: gold.dim_store`: `gold.dim_store` declares no key. …`` | A model field breaks a rule of its kind, or a reference target cannot be resolved. | See [Model fields](asset-front-matter.md#model-fields-kind-grain-key-and-references): every text and its fix; the rules are the same as in SQL front-matter. |
 | ``evolve_schema=True works with write="replace" (the default) only; …``, `argument 'evolve_schema' must be True or False`, `argument 'evolve_schema' does not apply to an artifact asset; remove it` | `evolve_schema=True` on an asset that appends or merges, or on an artifact asset, or a value that is not `True` or `False`. | Remove it, or write the asset with `write="replace"`. See [When the output changes shape](#when-the-output-changes-shape). |
 | `` `ctx` is the asset's context; give the input another parameter name `` | `inputs` names a parameter `ctx`. | Rename the parameter and its entry in `inputs`. |
 | `assets/a.sql and assets/a.py both produce table 'a'` | A SQL file and a Python file for one table. | Keep one. |

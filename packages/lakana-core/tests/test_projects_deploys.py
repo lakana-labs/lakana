@@ -49,6 +49,7 @@ from lakana_core.models import (
     Table,
     TableType,
 )
+from lakana_core.projects.asset_model import ResolvedReference
 from lakana_core.projects.checks import ParsedCheck, checks_listing
 from lakana_core.projects.dag import build_graph
 from lakana_core.projects.deploys import (
@@ -4222,3 +4223,79 @@ def test_a_rollback_to_a_version_with_unreadable_connections_is_refused(
     assert [issue.message for issue in info.value.issues] == [_UNREADABLE]
     pointer = session.execute(select(EnvironmentDeployment)).scalar_one()
     assert pointer.current_job_version_id == second.id
+
+
+def test_a_reference_may_point_at_a_table_another_repository_builds(
+    session: Session, env: None, principal: PrincipalRef
+) -> None:
+    """The key comes from the other repository's current manifest, once the table exists."""
+    other = _repo(session, "other")
+    dim = make_asset(
+        "dim.store",
+        ("bronze.events",),
+        columns=("store_id",),
+        metadata=AssetMetadata(materialize="table", kind="dimension", grain="g", key=("store_id",)),
+    )
+    _deployed(session, principal, other, "a" * 40, dim)
+    ensure_table(session, "dev", "dim", "store")
+    repo = _repo(session)
+    fact = make_asset(
+        "silver.f",
+        ("bronze.events",),
+        columns=("store_id",),
+        metadata=AssetMetadata(materialize="table", references={"store_id": "dim.store"}),
+    )
+    resolved, issues = DeployService(session, AllowAllAuthorization()).resolve_model_references(
+        principal, "dev", repo.id, [fact]
+    )
+    assert issues == []
+    assert resolved["silver.f"] == (ResolvedReference("store_id", "dim.store", "store_id"),)
+
+
+def test_a_catalog_table_no_project_builds_needs_the_long_form(
+    session: Session, env: None, principal: PrincipalRef
+) -> None:
+    """`bronze.events` exists in `dev` (the `env` fixture) and declares no key."""
+    repo = _repo(session)
+    fact = make_asset(
+        "silver.f",
+        ("bronze.events",),
+        columns=("event_id",),
+        metadata=AssetMetadata(materialize="table", references={"event_id": "bronze.events"}),
+    )
+    _, issues = DeployService(session, AllowAllAuthorization()).resolve_model_references(
+        principal, "dev", repo.id, [fact]
+    )
+    assert "`bronze.events` declares no key" in issues[0].message
+
+
+def test_a_target_the_deployer_may_not_read_reveals_nothing(
+    session: Session, env: None, principal: PrincipalRef
+) -> None:
+    """Built by another repository and present, but unreadable: the combined text, nothing else."""
+    other = _repo(session, "other")
+    dim = make_asset(
+        "dim.store",
+        ("bronze.events",),
+        columns=("store_id", "region"),
+        metadata=AssetMetadata(
+            materialize="table", kind="dimension", grain="g", key=("store_id", "region")
+        ),
+    )
+    _deployed(session, principal, other, "a" * 40, dim)
+    ensure_table(session, "dev", "dim", "store")
+    reader = _read_environment_only(session, principal, "bronze.events")
+    repo = _repo(session)
+    fact = make_asset(
+        "silver.f",
+        ("bronze.events",),
+        columns=("store_id",),
+        metadata=AssetMetadata(materialize="table", references={"store_id": "dim.store"}),
+    )
+    _, issues = DeployService(session, GrantAuthorization(session)).resolve_model_references(
+        reader, "dev", repo.id, [fact]
+    )
+    assert [i.message for i in issues] == [
+        "Reference target `dim.store` does not exist in environment `dev`, or you may not read "
+        "it; build it first, or ask for READ_TABLE on it."
+    ]
