@@ -26,6 +26,7 @@ from lakana_core.identifiers import NamespacePath, TableRef
 from lakana_core.models import (
     CheckOutcome,
     CheckResult,
+    DeclaredReference,
     Environment,
     JobVersion,
     Principal,
@@ -356,3 +357,40 @@ def test_the_filter_reads_a_runs_project_version_and_a_right_once(star: Star) ->
     only = ReferenceCheckFilter(star.session, GrantAuthorization(star.session), reader, "dev")
     assert only.hides(star.run_id, _REF, True)
     assert only.hides(star.run_id, _REF, True)
+
+
+def test_table_get_withholds_a_result_whose_runs_target_is_hidden_after_the_target_changed(
+    star: Star,
+) -> None:
+    """The run's version pointed `store_id` at `dim_store`; the header now points it elsewhere.
+
+    The newest `ref_store_id` result still says something about `dim_store`, so a reader who may
+    read the new target but not `dim_store` is not shown it in the Model block, as table health
+    does not show it.
+    """
+    fact = star.session.scalars(select(Table).where(Table.name == "fact_sales")).one()
+    fact.model_kind = "fact"
+    fact.model_grain = "One row per store."
+    fact.model_key = ["store_id"]
+    star.session.add(
+        DeclaredReference(
+            id=uuid.uuid4(),
+            environment_id=star.session.scalars(
+                select(Environment.id).where(Environment.name == "dev")
+            ).one(),
+            source_table_id=fact.id,
+            source_column="store_id",
+            target_name="gold.fact_sales",
+            target_column="store_id",
+        )
+    )
+    star.session.commit()
+    reader = star.person(tables=("fact_sales",))
+    model = star.catalog().describe_table(reader, _FACT).model
+    assert model is not None
+    assert [r.id for r in model.references] == [_REF]
+    assert [c.check for c in model.checks] == ["key_unique"]
+    both = star.person(tables=("fact_sales", "dim_store"))
+    shown = star.catalog().describe_table(both, _FACT).model
+    assert shown is not None
+    assert [c.check for c in shown.checks] == ["key_unique", "ref_store_id"]

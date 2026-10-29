@@ -3236,7 +3236,11 @@ class CatalogService:
             expires_at=expires_at,
             expires_soon=expires_soon,
             model=model_view(
-                self._session, row, ref, lambda target: self.can_read_table(p, target)
+                self._session,
+                row,
+                ref,
+                lambda target: self.can_read_table(p, target),
+                ReferenceCheckFilter(self._session, self._authz, p, ref.environment).hides,
             ),
         )
 

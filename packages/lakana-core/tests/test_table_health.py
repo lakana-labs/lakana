@@ -12,7 +12,7 @@ import pytest
 from core_test_helpers import ActionAllowList, _prepared_catalog, python_task_run
 from pyiceberg.schema import Schema
 from pyiceberg.types import LongType, NestedField, StringType
-from sqlalchemy import select
+from sqlalchemy import event, select
 from sqlalchemy.orm import Session
 
 from lakana_core.auth import Action, AllowAllAuthorization, PrincipalRef, SecurableKind
@@ -823,3 +823,40 @@ def test_a_snapshot_time_out_of_range_reads_as_no_time(timestamp_ms: int) -> Non
     stats = snapshot_stats(metadata)  # ty: ignore[invalid-argument-type]
     assert stats.last_write_at is None
     assert stats.row_count == 4
+
+
+def test_only_the_newest_result_of_each_check_is_read(
+    session: Session, principal: PrincipalRef, catalog_with_orders: CatalogService
+) -> None:
+    """A listing of tables asks this per modelled table, so it must not read a whole history."""
+    for hours in range(5):
+        _check(
+            session,
+            principal,
+            "daily",
+            outcome=CheckOutcome.PASSED,
+            finished_at=_NOW + timedelta(hours=hours),
+        )
+    session.expunge_all()
+    table_id = _orders_id(session)
+    loaded: list[object] = []
+
+    def count(_session: Session, instance: object) -> None:
+        """Note an object the query loaded.
+
+        Parameters
+        ----------
+        _session
+            The session.
+        instance
+            The loaded object.
+        """
+        loaded.append(instance)
+
+    event.listen(session, "loaded_as_persistent", count)
+    try:
+        (only,) = latest_checks(session, table_id)
+    finally:
+        event.remove(session, "loaded_as_persistent", count)
+    assert only.finished_at == _NOW + timedelta(hours=4)
+    assert sum(isinstance(row, CheckResult) for row in loaded) == 1

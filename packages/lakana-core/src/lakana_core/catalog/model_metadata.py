@@ -340,6 +340,13 @@ class TableReferences:
 
 
 ReadCheck = Callable[[TableRef], bool]
+
+WithheldCheck = Callable[[uuid.UUID, str, bool], bool]
+"""Whether a check result (its run, its full name, generated or not) is withheld from a reader.
+
+`lakana_core.runs.hidden_checks.ReferenceCheckFilter.hides` is the one implementation: it asks
+about the target the result's run declared, not the target the header declares now.
+"""
 """Whether the reader may read a table, asked by name and without looking it up."""
 
 
@@ -413,9 +420,14 @@ def _outgoing(
 
 
 def model_view(
-    session: Session, row: Table, table: TableRef, may_read: ReadCheck
+    session: Session, row: Table, table: TableRef, may_read: ReadCheck, withheld: WithheldCheck
 ) -> TableModelView | None:
     """Show a table's model to a reader who may read the table.
+
+    A generated check's newest result is shown when the current header still generates the
+    check, its reference is shown, and the reader may read the target the result's own run
+    declared: a target changed since that run leaves the result withheld, as `table health`
+    withholds it.
 
     Parameters
     ----------
@@ -427,6 +439,8 @@ def model_view(
         How it is addressed now.
     may_read
         The reader's read check, asked of each reference's target.
+    withheld
+        Whether a result is withheld from the reader, by the target of its run.
 
     Returns
     -------
@@ -447,7 +461,9 @@ def model_view(
         references=references,
         hidden_references=hidden,
         checks=tuple(
-            c for c in latest_checks(session, row.id) if c.generated and c.check in generated
+            c
+            for c in latest_checks(session, row.id)
+            if c.generated and c.check in generated and not withheld(c.run_id, c.name, True)
         ),
     )
 

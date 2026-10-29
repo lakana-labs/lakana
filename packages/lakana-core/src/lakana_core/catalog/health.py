@@ -290,15 +290,27 @@ def latest_checks(session: Session, table_id: uuid.UUID) -> list[CheckHealth]:
         One per check, by check name. Of two results that ended together, the one with the
         greater id.
     """
+    # Only the newest row of each check is read, not the table's whole check history.
+    ranked = (
+        select(
+            CheckResult.id,
+            func.row_number()
+            .over(
+                partition_by=CheckResult.check_name,
+                order_by=(CheckResult.finished_at.desc(), CheckResult.id.desc()),
+            )
+            .label("position"),
+        )
+        .where(CheckResult.table_id == table_id)
+        .subquery()
+    )
     rows = session.scalars(
         select(CheckResult)
-        .where(CheckResult.table_id == table_id)
-        .order_by(CheckResult.finished_at.desc(), CheckResult.id.desc())
+        .join(ranked, ranked.c.id == CheckResult.id)
+        .where(ranked.c.position == 1)
         .execution_options(populate_existing=True)
     )
-    newest: dict[str, CheckResult] = {}
-    for row in rows:
-        newest.setdefault(row.check_name, row)
+    newest = {row.check_name: row for row in rows}
     return [
         CheckHealth(
             name=row.check_name,

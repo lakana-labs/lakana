@@ -178,7 +178,9 @@ to a table you may not read is not listed: `lakana table get` says how many ther
 (`1 more reference to a table you cannot read`), and so does `hidden_references` in the body.
 The same holds for the tables that reference this one (`3 more from tables you cannot read`,
 `hidden_incoming`). A hidden reference never says whether its target exists, and neither does its
-generated check. The `ref_<column>` check of a reference to a table you may not read is not
+generated check. A result of a `ref_<column>` check is hidden also when the target its run
+checked is one you may not read, even if the header now points the reference at a table you may
+read; the next run replaces it. The `ref_<column>` check of a reference to a table you may not read is not
 shown anywhere: not in the Model block, `lakana table health`, `lakana check list`,
 `lakana runs show` or `lakana run`, nor in their REST and SDK answers. In its place they say how
 many were left out (`1 check of a reference to a table you cannot read is not shown.`;
@@ -195,4 +197,5 @@ until it is dropped; the project builds a new table under the old name, with the
 table restored with `lakana table undrop` gets back the model it had when it was dropped, with its
 references. A deploy while the table was dropped could not write onto it, so the model can be
 older than the header until the next deploy; restored under another name (`--as`), it stays
-as after a rename.
+as after a rename. When no project builds the table any more, nothing replaces the restored model:
+it stays until the table is dropped again.
