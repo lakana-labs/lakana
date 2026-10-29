@@ -455,7 +455,7 @@ def test_bad_model_values_are_refused(block: str, message: str) -> None:
 
 def test_a_one_line_grain_written_as_a_block_scalar_is_one_line() -> None:
     """`grain: |` with one line ends in a newline; the rule reads the stripped text."""
-    assert _meta("grain: |\n  One row per order.").grain is not None
+    assert _meta("grain: |\n  One row per order.").grain == "One row per order."
 
 
 def test_a_reference_column_that_cannot_name_its_check_is_refused() -> None:

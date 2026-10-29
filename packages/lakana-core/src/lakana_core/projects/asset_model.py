@@ -31,8 +31,8 @@ DEFAULT_DECIMALS = "float"
 """What an asset without the option, and a manifest entry without the key, means."""
 
 MODEL_KINDS = ("fact", "dimension", "wide", "staging")
-"""What an asset's `kind:` may say. `lakana.assets.MODEL_KINDS` is the same (a parity test
-pins both)."""
+"""What an asset's `kind:` may say. `lakana.assets.MODEL_KINDS` repeats it (a parity test
+pins both, added with the decorator's arguments)."""
 
 CHECK_FAMILIES = ("key", "references")
 """The generated checks an asset's `checks:` may set the failure mode of."""
@@ -44,7 +44,10 @@ KEY_NONE = "none"
 """`key: none`: the explicit statement that no columns identify a row."""
 
 MAX_KEY_COLUMNS = 8
+"""The most columns a key lists; `lakana.assets` repeats the number, as it may not import core."""
+
 MAX_GRAIN_CHARS = 300
+"""The longest `grain:`, in characters."""
 
 WRITE_CHOICES = ("replace", "append", "merge")
 """What a run does to an asset's table: replace every row, append the rows past the watermark, or

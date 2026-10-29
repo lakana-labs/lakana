@@ -257,7 +257,7 @@ class AssetMetadata(SafeTextModel):
         Returns
         -------
         str or None
-            `value`.
+            `value` without surrounding whitespace.
 
         Raises
         ------
@@ -275,7 +275,7 @@ class AssetMetadata(SafeTextModel):
             raise ValueError(f"must be at most {MAX_GRAIN_CHARS} characters")
         if unsafe_free_text(value):
             raise ValueError(FREE_TEXT_MESSAGE)
-        return value
+        return text
 
     @field_validator("references")
     @classmethod

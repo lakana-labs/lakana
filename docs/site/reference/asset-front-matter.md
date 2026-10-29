@@ -66,7 +66,7 @@ function returns. A Python asset that appends must return only the rows past `ct
 
 | `write:` | What a run does | Needs |
 |---|---|---|
-| `replace` (the default) | Replaces every row of the table with what the `SELECT` returns. | neither `key:` nor `watermark:` (it takes neither) |
+| `replace` (the default) | Replaces every row of the table with what the `SELECT` returns. | no `watermark:` (a `key:` is allowed: it says which columns identify a row) |
 | `append` | The first run creates the table with every row; each later run adds only the rows whose `watermark` column is above the highest value already in the table. | `watermark:` |
 | `merge` | Matches the rows on `key:`: a row whose key the table has replaces that row, any other row is added. Nothing is deleted. With `watermark:`, a run reads only the rows above the highest value in the table. | `key:` (one or more columns); `watermark:` is optional |
 
