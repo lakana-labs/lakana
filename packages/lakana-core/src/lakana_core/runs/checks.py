@@ -1303,11 +1303,15 @@ def withhold_from_message(
     if message is None or not hidden:
         return message
     text = message
-    failing = [r for r in results if r.outcome in {CheckOutcome.FAILED, CheckOutcome.ERRORED}]
+    # The groups the worker words its fragments from (`verdict`, and the `keep` checks without
+    # those refused a kept table), so that a count or an "and N more" is built again too.
+    found = verdict(results)
+    refused = [r for r in found.kept if r.error == ERROR_KEPT]
     groups = [
-        failing,
-        [r for r in failing if r.on_failure == "keep"],
-        [r for r in failing if r.on_failure != "keep"],
+        list(found.blocking),
+        list(found.kept),
+        [r for r in found.kept if r not in refused],
+        sorted([*found.blocking, *found.kept], key=lambda r: r.check_name),
         *([r] for r in results if r.check_name in hidden),
     ]
     for group in groups:
@@ -1323,13 +1327,13 @@ def withhold_from_message(
             " ".join(rows_sentences(group, run_id, environment)),
             " ".join(rows_sentences(rest, run_id, environment)),
         )
-    warned = [r for r in results if r.outcome is CheckOutcome.WARNED]
-    if any(r.check_name in hidden for r in warned):
-        shown_warned = [r for r in warned if r.check_name not in hidden]
+    if any(r.check_name in hidden for r in found.warned):
+        shown_warned = [r for r in found.warned if r.check_name not in hidden]
         text = _replaced(
-            text, warning_note(warned), warning_note(shown_warned) if shown_warned else ""
+            text, warning_note(found.warned), warning_note(shown_warned) if shown_warned else ""
         )
-    text = " ".join(text.split())
+    if text != message:
+        text = " ".join(text.split())
     for name in hidden:
         if shown(name) in text or f"`{shown(name.rpartition('/')[2])}`" in text:
             return WITHHELD_TASK_MESSAGE

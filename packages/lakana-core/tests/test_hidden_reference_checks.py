@@ -45,6 +45,7 @@ from lakana_core.runs.checks import (
     check_not_in_run_message,
     failure_message,
     warning_note,
+    withhold_from_message,
 )
 from lakana_core.runs.hidden_checks import ReferenceCheckFilter
 from lakana_core.runs.service import RunService
@@ -511,3 +512,88 @@ def test_an_attempts_message_in_the_task_log_leaves_out_the_withheld_check(star:
     both = star.person(tables=("fact_sales", "dim_store"))
     (full,) = star.runs().task_log(both, "dev", star.run_id, "gold.fact_sales").attempts
     assert full.error_message == "1 check warned: `ref_store_id` (1 row)."
+
+
+def _result(name: str, outcome: CheckOutcome, on_failure: str, *, rows: int = 3) -> CheckResult:
+    """Build a result of `gold.fact_sales` that is never stored.
+
+    Parameters
+    ----------
+    name
+        The check's short name.
+    outcome
+        Its outcome.
+    on_failure
+        Its failure mode.
+    rows
+        Its failing rows.
+
+    Returns
+    -------
+    CheckResult
+        The result.
+    """
+    return CheckResult(
+        id=uuid.uuid4(),
+        check_name=f"gold.fact_sales/{name}",
+        check_path="assets/gold/fact_sales.sql:2",
+        table_name="gold.fact_sales",
+        on_failure=on_failure,
+        outcome=outcome,
+        failing_rows=None if outcome is CheckOutcome.ERRORED else rows,
+        checked_snapshot_id=42,
+        generated=name.startswith("ref_"),
+    )
+
+
+def test_a_warn_note_of_more_than_five_checks_counts_only_the_shown_ones() -> None:
+    """A `warn` check that could not run is in the note; the withheld one is past the fifth."""
+    warned = [
+        _result(name, CheckOutcome.WARNED, "warn") for name in ("a", "b", "c", "d", "e", "ref_s")
+    ]
+    errored = _result("b0", CheckOutcome.ERRORED, "warn")
+    every = [*warned, errored]
+    stored = warning_note(every)
+    assert stored.startswith("7 checks warned: ") and stored.endswith(" and 2 more.")
+    seen = withhold_from_message(
+        stored, every, {"gold.fact_sales/ref_s"}, run_id=uuid.uuid4(), environment="dev"
+    )
+    assert seen == (
+        "6 checks warned: `a` (3 rows), `b` (3 rows), `b0` (could not run), `c` (3 rows), "
+        "`d` (3 rows) and 1 more."
+    )
+    assert "ref_s" not in seen
+
+
+def test_failed_blocking_checks_past_five_and_an_errored_warn_check_count_only_the_shown() -> None:
+    run_id = uuid.uuid4()
+    blocking = [
+        _result(name, CheckOutcome.FAILED, "block") for name in ("a", "b", "c", "d", "e", "ref_s")
+    ]
+    every = [*blocking, _result("w", CheckOutcome.ERRORED, "warn")]
+    build = partial(
+        failure_message,
+        table="gold.fact_sales",
+        run_id=run_id,
+        environment="dev",
+        rollback=Rollback(RollbackOutcome.ROLLED_BACK),
+    )
+    stored = build(blocking)
+    assert "6 checks of `gold.fact_sales` failed" in stored and " and 1 more." in stored
+    seen = withhold_from_message(
+        stored, every, {"gold.fact_sales/ref_s"}, run_id=run_id, environment="dev"
+    )
+    assert seen == build(blocking[:5])
+    assert seen is not None and "ref_s" not in seen and "more" not in seen
+
+
+def test_a_message_with_nothing_to_withhold_is_returned_as_stored() -> None:
+    every = [
+        _result("a", CheckOutcome.FAILED, "block"),
+        _result("ref_s", CheckOutcome.PASSED, "block"),
+    ]
+    stored = "Something  the worker wrote, with  two spaces."
+    seen = withhold_from_message(
+        stored, every, {"gold.fact_sales/ref_s"}, run_id=uuid.uuid4(), environment="dev"
+    )
+    assert seen == stored

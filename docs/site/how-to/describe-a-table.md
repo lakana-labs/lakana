@@ -188,7 +188,10 @@ many were left out (`1 check of a reference to a table you cannot read is not sh
 and `lakana check rows` for such a check answers as for a check the run does not have. A task's
 message (the `error` column of `lakana runs show` and `lakana run`, and each attempt's message in
 `lakana runs logs`) leaves such a check and its row count out, and says nothing of it when no other
-check is left to mention. Key checks and hand-written checks are shown as before. Still not
+check is left to mention. A message that names such a check in a way that cannot be taken apart
+is replaced by ``This task's message is not shown: it names a check of a reference to a table you
+cannot read. The checks you may see are listed with the task.``; the checks it lists are still in
+`lakana runs show` and `lakana check list`. Key checks and hand-written checks are shown as before. Still not
 filtered: the free-text log of a task, the note of a table that was kept or not published,
 notifications of a failed job and the audit log, which can name such a check with its row count.
 
