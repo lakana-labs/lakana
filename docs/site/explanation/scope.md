@@ -141,10 +141,16 @@ These are choices, not gaps. Each keeps the platform small enough to understand 
   tractable.
 - **Custom roles.** Users cannot define their own roles; the built-in roles and grants stay
   easy to audit.
-- **A plugin ecosystem and registry.** One proven way beats many unvetted ones.
+- **A plugin ecosystem and registry.** One proven way beats many unvetted ones. An extension is
+  a separate package that talks to Lakana only through the public REST API, like any other
+  client, under the same authorization and audit. There is no plugin registry, no in-process
+  plugin API, and no way for an extension to run code inside the server or the worker.
 - **An online feature store.** See the feature store above.
-- **A semantic layer.** Metrics definitions belong in your SQL assets. A measure recorded as
-  metadata (#255) is documentation and is not computed.
+- **A semantic or metrics layer, before v1.0.0.** Metrics definitions belong in your SQL assets.
+  Declared measures (#255) and glossary terms (#375) are metadata on tables and columns: they
+  describe, they do not compute. A layer that defines and computes KPIs (formulas, filters,
+  allowed dimensions) is not built before v1.0.0; after it, it may be reconsidered as a scope
+  change.
 
 **Parked:** unstructured data, meaning governed volumes for files. It may return if teams need it.
 
