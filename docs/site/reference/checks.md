@@ -125,6 +125,11 @@ back, as a failed one does.
 | ``The reference `store_id` at `assets/gold/fact_orders.sql:1` cannot be checked: its target is missing, not readable by the run's principal, or no longer has the key column; fix the reference or the grant and deploy again.`` | The target table is gone, the run's principal may not read it, or it no longer has the referenced column. The text does not say which, so that it tells nothing about a table its reader may not read. | Check that the target exists and has the column, and grant the run's principal `READ_TABLE` on it. |
 | ``The reference `store_id` at `assets/gold/fact_orders.sql:1` has a type that differs from its target key column's; make the types match and deploy again.`` | The two columns have different types. Only `int` and `long` match each other; every other type must be the same, so `decimal(10,2)` against `decimal(12,2)`, or `string` against `long`, differ. The text names neither type. | Cast the column in the `SELECT` to the type that `lakana table get` shows for the target column. |
 
+When the count of a reference check fails under a row filter or column mask, its `error` names the
+checked table only if the filter or mask is on that table; one on the target reads ``… under a row
+filter or column mask on one of the tables; …``, because whoever reads the result may not be
+allowed to read the target.
+
 ## What a check can end as
 
 Each check of a run has one result.

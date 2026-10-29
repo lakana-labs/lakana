@@ -81,6 +81,7 @@ from lakana_core.models import (
     TaskStatus,
     WriteMode,
 )
+from lakana_core.projects.checks import CheckSpec, GeneratedFrom
 from lakana_core.runs.scheduler import COMMITTED_BEFORE_RECORDED_MESSAGE
 from lakana_core.runs.tasks import (
     FailureKind,
@@ -1327,3 +1328,37 @@ def test_a_foreign_check_task_names_its_real_failure_before_the_refusal(
         f"{_refused_text('bronze.events', kept)}"
     )
     assert _task(world, "silver.orders").status is TaskStatus.UPSTREAM_FAILED
+
+
+def _spec(generated: GeneratedFrom | None) -> CheckSpec:
+    """Build a check of `gold.fact_sales`.
+
+    Parameters
+    ----------
+    generated
+        Where it comes from; `None` for a hand-written check.
+
+    Returns
+    -------
+    CheckSpec
+        The check.
+    """
+    return CheckSpec(
+        name="gold.fact_sales/ref_store_id",
+        table="gold.fact_sales",
+        check="ref_store_id",
+        path="assets/gold/fact_sales.sql:6",
+        on_failure="block",
+        description=None,
+        sql="SELECT 1",
+        generated=generated,
+    )
+
+
+def test_only_a_reference_check_keeps_its_error_to_its_own_table() -> None:
+    """Its query reads the target, so the error names no table but the checked one."""
+    reference = GeneratedFrom("references", ("store_id",), "gold.dim_store", "store_id")
+    key = GeneratedFrom("key", ("id",))
+    assert task_checks_module._reads_another_table(_spec(reference)) == "gold.fact_sales"
+    assert task_checks_module._reads_another_table(_spec(key)) is None
+    assert task_checks_module._reads_another_table(_spec(None)) is None

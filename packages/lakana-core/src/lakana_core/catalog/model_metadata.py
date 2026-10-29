@@ -18,7 +18,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import inspect, select
 from sqlalchemy.orm import Session
 
 from lakana_core.catalog.health import CheckHealth, latest_checks
@@ -60,7 +60,10 @@ def write_model_entry(session: Session, row: Table, entry: Mapping[str, Any]) ->
     """Write the model of one manifest entry onto a table and its reference rows.
 
     A reference row the header still declares keeps its id; one it no longer declares is
-    deleted. An entry without a model clears what an earlier deploy wrote. Nothing is committed.
+    deleted. An entry without a model clears what an earlier deploy wrote. A row that is not in
+    the database yet (a run creating its table) has no reference rows, so none are read for it,
+    and the namespace is read only when a row is added: a new table without a model costs no
+    statement. Nothing is committed.
 
     Parameters
     ----------
@@ -75,33 +78,40 @@ def write_model_entry(session: Session, row: Table, entry: Mapping[str, Any]) ->
     row.model_kind = model.kind if model else None
     row.model_grain = model.grain if model else None
     row.model_key = (KEY_NONE if model.key_none else list(model.key) or None) if model else None
-    namespace = session.get(Namespace, row.namespace_id)
-    assert namespace is not None  # nosec B101 -- a table row's namespace is never missing
     wanted = {r.column: r for r in (model.references if model else ())}
-    existing = {
-        r.source_column: r
-        for r in session.scalars(
-            select(DeclaredReference).where(DeclaredReference.source_table_id == row.id)
-        )
-    }
+    state = inspect(row)
+    existing = (
+        {}
+        if state.pending or state.transient
+        else {
+            r.source_column: r
+            for r in session.scalars(
+                select(DeclaredReference).where(DeclaredReference.source_table_id == row.id)
+            )
+        }
+    )
     for column, found in existing.items():
         ref = wanted.get(column)
         if ref is None:
             session.delete(found)
         else:
             found.target_name, found.target_column = ref.target, ref.target_column
-    for column, ref in wanted.items():
-        if column not in existing:
-            session.add(
-                DeclaredReference(
-                    id=uuid.uuid4(),
-                    environment_id=namespace.environment_id,
-                    table=row,
-                    source_column=column,
-                    target_name=ref.target,
-                    target_column=ref.target_column,
-                )
+    added = [ref for column, ref in wanted.items() if column not in existing]
+    if not added:
+        return
+    namespace = session.get(Namespace, row.namespace_id)
+    assert namespace is not None  # nosec B101 -- a table row's namespace is never missing
+    for ref in added:
+        session.add(
+            DeclaredReference(
+                id=uuid.uuid4(),
+                environment_id=namespace.environment_id,
+                table=row,
+                source_column=ref.column,
+                target_name=ref.target,
+                target_column=ref.target_column,
             )
+        )
 
 
 def find_project_table(session: Session, environment_id: uuid.UUID, dotted: str) -> Table | None:

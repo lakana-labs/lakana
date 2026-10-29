@@ -513,8 +513,34 @@ def _count_one(
     return (
         counted,
         CheckOutcome.ERRORED,
-        error_text(counted.error_cause, counted.error_message, principal.name),
+        error_text(
+            counted.error_cause,
+            counted.error_message,
+            principal.name,
+            checked_table=_reads_another_table(spec),
+        ),
     )
+
+
+def _reads_another_table(spec: CheckSpec) -> str | None:
+    """Name the checked table of a check whose query also reads another table, if it is one.
+
+    A generated reference check reads its target, which a reader of the result may not read, so
+    its `error` may name only the checked table (`error_text`).
+
+    Parameters
+    ----------
+    spec
+        The check.
+
+    Returns
+    -------
+    str or None
+        The checked table's dotted name for a generated reference check; `None` otherwise.
+    """
+    if spec.generated is not None and spec.generated.family == "references":
+        return spec.table
+    return None
 
 
 def _set_back(

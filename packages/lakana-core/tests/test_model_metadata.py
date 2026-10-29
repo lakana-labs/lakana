@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 from core_test_helpers import _prepared_catalog
 from pyiceberg.schema import Schema
 from pyiceberg.types import DateType, LongType, NestedField
-from sqlalchemy import select
+from sqlalchemy import event, select
 from sqlalchemy.orm import Session
 from test_projects_dag import make_asset
 
@@ -20,6 +21,7 @@ from lakana_core.catalog.model_metadata import (
     clear_removed_models,
     incoming_references,
     read_table_model,
+    write_model_entry,
 )
 from lakana_core.catalog.service import CatalogService
 from lakana_core.identifiers import NamespacePath, TableRef
@@ -28,6 +30,7 @@ from lakana_core.models import (
     Environment,
     EnvironmentDeployment,
     JobVersion,
+    Namespace,
     Repository,
     RepositoryKind,
     Table,
@@ -296,3 +299,81 @@ def test_clearing_leaves_a_table_of_the_same_name_in_another_environment(
     session.flush()
     assert read_table_model(session, row) == _EXPECTED
     assert incoming_references(session, uuid.uuid4(), "gold.dim_store") == []
+
+
+def _pending_fact(session: Session, catalog: CatalogService) -> Table:
+    """Add a new, unflushed `gold.fact_sales` row, as a run's creation of the table does.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    catalog
+        The catalog, which created `gold`.
+
+    Returns
+    -------
+    Table
+        The pending row.
+    """
+    namespace = session.scalars(select(Namespace).where(Namespace.path == "gold")).one()
+    row = Table(
+        id=uuid.uuid4(), namespace_id=namespace.id, name="fact_sales", table_type=TableType.ICEBERG
+    )
+    session.add(row)
+    return row
+
+
+def _statements_while(session: Session, write: Callable[[], None]) -> list[str]:
+    """Run a write and list the statements it issued.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    write
+        A callable without arguments.
+
+    Returns
+    -------
+    list of str
+        The statements.
+    """
+    seen: list[str] = []
+
+    def record(conn: object, cursor: object, statement: str, *rest: object) -> None:
+        seen.append(statement)
+
+    engine = session.get_bind()
+    event.listen(engine, "before_cursor_execute", record)
+    try:
+        with session.no_autoflush:
+            write()
+    finally:
+        event.remove(engine, "before_cursor_execute", record)
+    return seen
+
+
+def test_a_new_table_without_a_model_costs_no_statement(
+    session: Session, catalog: CatalogService
+) -> None:
+    """A run creating a table that declares no model reads nothing for it: the row is new."""
+    row = _pending_fact(session, catalog)
+    assert _statements_while(session, lambda: write_model_entry(session, row, {})) == []
+    session.commit()
+    assert read_table_model(session, row) is None
+
+
+def test_a_new_table_with_a_model_gets_it_on_creation(
+    session: Session, catalog: CatalogService
+) -> None:
+    """The model and its reference rows are written although nothing old was read."""
+    row = _pending_fact(session, catalog)
+    entry = _manifest()["assets"][0]
+    seen = _statements_while(session, lambda: write_model_entry(session, row, entry))
+    assert not any("table_references" in statement for statement in seen)
+    session.commit()
+    assert read_table_model(session, row) == _EXPECTED
+    assert incoming_references(session, _env_id(session), "gold.dim_store") == [
+        (row.id, "store_id", "store_id")
+    ]

@@ -2013,3 +2013,31 @@ def test_table_references_json_keeps_the_object(tmp_path: Path) -> None:
     result = _references(tmp_path, _REFERENCES, "--output", "json")
     assert result.exit_code == 0, result.stderr
     assert json.loads(result.stdout)["incoming"][0]["id"] == "gold.fact_sales/ref_store_id"
+
+
+def test_table_list_names_the_option_when_the_kind_is_refused(tmp_path: Path) -> None:
+    """The server's refusal names its parameter `model_kind`; the CLI names its option."""
+    api = FakeApi()
+    api.on(
+        "GET",
+        _FACT_BASE,
+        status=422,
+        json={"detail": "model_kind must be one of fact, dimension, wide, staging; got 'cube'"},
+    )
+    result = invoke(
+        make_state(tmp_path, api), "table", "list", "gold", "--model-kind", "cube", "--env", "dev"
+    )
+    assert result.exit_code == 8
+    plain = _plain(result.stderr)
+    assert "--model-kind must be one of fact, dimension, wide, staging; got 'cube'" in plain
+    assert "model_kind" not in plain.replace("--model-kind", "")
+
+
+def test_table_list_passes_any_other_refusal_on(tmp_path: Path) -> None:
+    api = FakeApi()
+    api.on("GET", _FACT_BASE, status=422, json={"detail": "something else"})
+    result = invoke(
+        make_state(tmp_path, api), "table", "list", "gold", "--model-kind", "fact", "--env", "dev"
+    )
+    assert result.exit_code == 8
+    assert "something else" in _plain(result.stderr)

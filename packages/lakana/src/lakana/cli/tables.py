@@ -26,6 +26,7 @@ from lakana.cli._break_glass import BREAK_GLASS, REASON, break_glass_reason
 from lakana.cli._state import CliError, CliState, confirm, resolve_environment, state_of
 from lakana.cli.artifacts import human_size
 from lakana.cli.checks import check_shown
+from lakana.errors import ValidationError
 
 if TYPE_CHECKING:
     import pyarrow as pa
@@ -310,7 +311,7 @@ def list_tables(
             derived={"restorable": _restorable_cell},
         )
         return
-    tables = state.client().tables.list(environment, namespace, model_kind=model_kind)
+    tables = _listed(state, environment, namespace, model_kind)
     columns = ["name", "namespace", "kind", "state", "uuid"]
     if any(table.expires_soon for table in tables):
         columns.insert(4, "expires")
@@ -321,6 +322,49 @@ def list_tables(
         droppable=["kind", "uuid"],
         derived={"state": _state_cell, "expires": _expires_cell},
     )
+
+
+_MODEL_KIND_PARAMETER = "model_kind must be one of "
+"""How the server's refusal of an unknown `model_kind` starts."""
+
+
+def _listed(
+    state: CliState, environment: str, namespace: str, model_kind: str | None
+) -> list[Table]:
+    """List a namespace's tables, naming `--model-kind` when the server refuses the kind.
+
+    Parameters
+    ----------
+    state
+        The CLI state.
+    environment
+        The environment.
+    namespace
+        The dotted namespace.
+    model_kind
+        The kind to keep, if any.
+
+    Returns
+    -------
+    list of Table
+        The tables.
+
+    Raises
+    ------
+    CliError
+        Exit 8, when the server refuses the kind: its text, with the option the reader typed in
+        place of the query parameter it names.
+    ValidationError
+        Any other refusal, unchanged.
+    """
+    try:
+        return state.client().tables.list(environment, namespace, model_kind=model_kind)
+    except ValidationError as exc:
+        if model_kind is None or not str(exc).startswith(_MODEL_KIND_PARAMETER):
+            raise
+        raise CliError(
+            "--model-kind" + str(exc).removeprefix("model_kind"), 8, kind=type(exc).__name__
+        ) from exc
 
 
 def _expires_cell(table: Table) -> str:

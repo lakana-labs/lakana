@@ -34,3 +34,20 @@ def test_a_check_error_keeps_the_message_and_cuts_the_engines_text() -> None:
     assert error_text(
         "invalid_query", "Query failed: Conversion Error: Could not convert 'x'", "runner"
     ).startswith("Conversion Error: the check's query failed")
+
+
+def test_a_reference_check_error_names_no_table_but_its_own() -> None:
+    """A generated reference check reads its target, which a reader of the result may not read.
+
+    The fixed message then names no table, unless the policy is on the checked table itself.
+    """
+    on_target = policy_read_failure("gold.dim_store")
+    on_own = policy_read_failure("gold.fact_sales")
+
+    assert error_text(
+        "invalid_query", on_target, "runner", checked_table="gold.fact_sales"
+    ) == policy_read_failure(None)
+    assert error_text("invalid_query", on_own, "runner", checked_table="gold.fact_sales") == on_own
+    assert "dim_store" not in error_text(
+        "invalid_query", on_target, "runner", checked_table="gold.fact_sales"
+    )

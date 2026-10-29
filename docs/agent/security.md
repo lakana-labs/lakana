@@ -351,7 +351,13 @@ The rows are written only by a deploy, a rollback and a run's table creation
 (`catalog/model_metadata.py`); REST, the SDK and the CLI only read them. References are held by
 name, as the header names its target: a table renamed through the Iceberg REST catalog is no longer
 the target of references to its old name, and a later table of that name is, as the reference's
-generated check reads it. The renamed table keeps its model rows (keyed by its id) under its new
+generated check reads it. A generated reference check's `error` never names the target either:
+the pre-check texts (`runs/model_precheck.py`) name only the asset's path and column, the count's
+refused and missing cases are `ERROR_UNREADABLE`, other failures are the engine's error type or the
+cause in words, and the one fixed text that names a table, the row filter or column mask failure,
+is replaced by its variant that names none unless it names the checked table (`error_text(...,
+checked_table=)`, which the worker passes for a reference check; `test_policy_read_errors.py`).
+The renamed table keeps its model rows (keyed by its id) under its new
 name until it is dropped. Pins: `test_describe_table.py`
 (`test_a_missing_target_and_an_unreadable_target_look_the_same_to_a_reader`,
 `test_incoming_references_count_hidden_sources`, the two rename tests), `test_tables.py` in
