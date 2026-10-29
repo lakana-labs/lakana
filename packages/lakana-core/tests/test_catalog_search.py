@@ -625,6 +625,16 @@ def test_a_grain_matches_and_shows_its_snippet(world: World) -> None:
     assert "calendar day" in (hit.snippet or "")
 
 
+def test_a_grain_matches_on_a_table_without_a_description(world: World) -> None:
+    _set_model(world, "orders", kind="fact", grain="One row per store and calendar day.")
+    row = world.session.scalars(select(Table).where(Table.name == "orders")).one()
+    row.description_project = None
+    world.session.commit()
+    (hit,) = world.search(world.bob, "calendar day").results
+    assert (hit.name, hit.matched) == ("silver.orders", "grain")
+    assert hit.snippet == "One row per store and calendar day."
+
+
 def test_a_name_or_description_match_still_shows_the_kind(world: World) -> None:
     _set_model(world, "orders", kind="fact", grain="One row per order.")
     hit = world.search(world.bob, "orders", kind=SearchKind.TABLE).results[0]
@@ -659,7 +669,7 @@ def test_the_grain_and_kind_of_a_table_the_reader_may_not_read_never_appear(worl
     assert world.search(world.alice, "bonus", kind=SearchKind.TABLE).results == []
     assert world.search(world.alice, "payroll").results[0].name == "silver.orders"
     only = CatalogSearch(world.session, GrantAuthorization(world.session)).search(
-        world.alice, "dev", "fact", model_kind="fact"
+        world.alice, "dev", "bonus", model_kind="fact"
     )
     assert only.results == []
     assert [h.name for h in world.search(world.bob, "secret bonus").results] == ["silver.payroll"]

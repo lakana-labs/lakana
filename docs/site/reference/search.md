@@ -10,12 +10,14 @@ columns of tables that existed before search are filled in. For the steps, see
 | Kind | Matched against | `matched` is |
 |---|---|---|
 | `table` | the table's name, its name with the namespace (`silver.orders`), its shown description, its declared grain | `name`, `description` or `grain` |
-| `column` | the column's name, its shown description, its declared grain | `name`, `description` or `grain` |
+| `column` | the column's name, its shown description | `name` or `description` |
 | `run` | the run's id (four hex characters or more, with or without dashes), its job, its repository | `id`, `job` or `repository` |
 | `principal` | the principal's name | `name` |
 
 The *grain* is the sentence the table's asset header declares (`grain:`); a table that declares none
-has no grain to match. Key columns are found as columns.
+has no grain to match. Key columns are found as columns. The declared kind (`fact`, `dimension`,
+`wide`, `staging`) is not matched as text: to find the tables of one kind, filter with
+`--model-kind` (`model_kind` over REST and in the SDK).
 
 A table is a managed table, an external table, a view or an artifact, as in the table listing
 (`table_kind` is `TABLE`, `EXTERNAL`, `VIEW` or `ARTIFACT`). An artifact has no columns and no

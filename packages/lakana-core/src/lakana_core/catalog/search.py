@@ -29,7 +29,6 @@ from sqlalchemy import (
     func,
     literal,
     literal_column,
-    not_,
     null,
     or_,
     select,
@@ -648,7 +647,8 @@ def _tables(match: _Match, environment_id: uuid.UUID, model_kind: str | None) ->
     matched = case(
         (named, _text("name")), (in_description, _text("description")), else_=_text("grain")
     )
-    text = case((and_(not_(named), not_(in_description)), Table.model_grain), else_=shown)
+    # Ordered like `matched`: a null description makes `in_description` null, never true.
+    text = case((named, shown), (in_description, shown), else_=Table.model_grain)
     query = (
         _row(
             SearchKind.TABLE,
