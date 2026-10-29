@@ -14,7 +14,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TypeVar
 
@@ -38,6 +38,15 @@ MAX_CONNECTIONS = 16
 WRITE_CHOICES = ("replace", "append", "merge")
 """The values of `write`; deploy accepts the same three (a parity test pins both)."""
 
+MODEL_KINDS = ("fact", "dimension", "wide", "staging")
+"""The values of `kind`; the same as `lakana_core.projects.asset_model.MODEL_KINDS` (a parity
+test pins both)."""
+
+_CHECK_FAMILIES = ("key", "references")
+_CHECK_MODES = ("block", "keep", "warn")
+_MAX_GRAIN_CHARS = 300
+_KEY_NONE = "none"
+
 EVOLVE_NEEDS_REPLACE = (
     'evolve_schema=True works with write="replace" (the default) only; remove evolve_schema, '
     "or replace the table instead of appending or merging"
@@ -46,6 +55,9 @@ EVOLVE_NEEDS_REPLACE = (
 test pins both)."""
 
 _UNSAFE_CATEGORIES = ("Cc", "Cf", "Cs", "Zl", "Zp")
+_BIDI_CONTROLS = frozenset("\u061c\u200e\u200f\u202a\u202b\u202c\u202d\u202e") | frozenset(
+    chr(code) for code in range(0x2066, 0x206A)
+)
 _IDENTIFIER_MESSAGE = (
     "must not contain a control, format or surrogate character or a line separator"
 )
@@ -133,12 +145,22 @@ class AssetSpec:
     write
         ``replace``, ``append`` or ``merge``: what a run does to the table.
     key
-        The columns that identify a row, for ``merge``.
+        The columns that identify a row (for ``merge`` too), or ``"none"`` for a fact or wide
+        table whose rows no columns identify.
     watermark
         The column whose largest value the next run starts after, for ``append`` (and
         optionally ``merge``).
     evolve_schema
         Whether a ``replace`` lets the table take the schema the function returns.
+    kind
+        ``fact``, ``dimension``, ``wide`` or ``staging``; `None` when not declared.
+    grain
+        One line saying what one row is; `None` when not declared.
+    references
+        Column of this table → the table it refers to (``ns.table`` or ``ns.table.column``).
+    checks
+        Generated-check family (``key``, ``references``) → what a failure does (``block``,
+        ``keep`` or ``warn``).
     """
 
     inputs: dict[str, str]
@@ -155,9 +177,13 @@ class AssetSpec:
     decimals: str = "float"
     connections: tuple[str, ...] = ()
     write: str = "replace"
-    key: tuple[str, ...] = ()
+    key: tuple[str, ...] | str = ()
     watermark: str | None = None
     evolve_schema: bool = False
+    kind: str | None = None
+    grain: str | None = None
+    references: dict[str, str] = field(default_factory=dict)
+    checks: dict[str, str] = field(default_factory=dict)
 
 
 def _unsafe(text: str) -> bool:
@@ -178,7 +204,7 @@ def _unsafe(text: str) -> bool:
 
 def _check_write(
     write: object, key: object, watermark: object
-) -> tuple[str, tuple[str, ...], str | None]:
+) -> tuple[str, tuple[str, ...] | str, str | None]:
     """Read the decorator's write model with the rules deploy applies.
 
     Parameters
@@ -186,7 +212,8 @@ def _check_write(
     write
         ``replace``, ``append`` or ``merge``; `None` means ``replace``.
     key
-        The merge key: a list or tuple of strings; `None` means none.
+        The key: a list or tuple of strings, one string (a key of one column), or ``"none"``;
+        `None` means none.
     watermark
         The watermark column, or `None`.
 
@@ -200,7 +227,8 @@ def _check_write(
     ValueError
         For a value of the wrong type or with a character deploy refuses, a `write` outside
         `WRITE_CHOICES`, a key column listed twice, a key of more than 8 columns, ``append``
-        without a watermark, ``merge`` without a key, and ``replace`` with a watermark.
+        without a watermark, ``merge`` without a key or with ``key="none"``, and ``replace``
+        with a watermark.
     """
     mode = "replace" if write is None else write
     if not isinstance(mode, str):
@@ -208,11 +236,12 @@ def _check_write(
     if mode not in WRITE_CHOICES:
         shown = ascii(mode)[1:-1][:200]
         raise ValueError(f"write must be one of {', '.join(WRITE_CHOICES)}; got '{shown}'")
-    columns = () if key is None else key
+    key_none = key == _KEY_NONE
+    columns = () if key is None or key_none else (key,) if isinstance(key, str) else key
     if not isinstance(columns, (list, tuple)) or not all(
         isinstance(column, str) for column in columns
     ):
-        raise ValueError("key must be a list of strings")
+        raise ValueError("key must be a list of strings or one string")
     if watermark is not None and not isinstance(watermark, str):
         raise ValueError("watermark must be a string")
     if any(_unsafe(column) for column in columns):
@@ -231,13 +260,196 @@ def _check_write(
             "`write: append` needs `watermark:` — the column whose largest value the next run "
             "starts after"
         )
+    if mode == "merge" and key_none:
+        raise ValueError(
+            "`write: merge` needs key columns; `key: none` says that no columns identify a row, "
+            "so there is nothing to merge on"
+        )
     if mode == "merge" and not columns:
         raise ValueError("`write: merge` needs `key:` — the columns that identify a row")
     if mode == "replace" and watermark is not None:
         raise ValueError(
             "`write: replace` takes no `watermark:`; to add only new rows use `write: append`"
         )
-    return mode, tuple(columns), watermark
+    return mode, _KEY_NONE if key_none else tuple(columns), watermark
+
+
+def _component_ok(part: str) -> bool:
+    """Say whether core's `validate_path_component` would accept one name part.
+
+    Parameters
+    ----------
+    part
+        A namespace or table part, or ``ref_<column>``.
+
+    Returns
+    -------
+    bool
+        False for an empty or blank part, and for one holding a NUL byte, the unit
+        separator, ``/`` or ``.``.
+    """
+    return bool(part.strip()) and not any(c in part for c in ("\x00", "\x1f", "/", "."))
+
+
+def _unsafe_free_text(text: str) -> bool:
+    """Say whether a grain is unsafe to store or render.
+
+    Parameters
+    ----------
+    text
+        The grain.
+
+    Returns
+    -------
+    bool
+        True for a surrogate, a control character other than a newline or tab, a
+        bidirectional control or a line or paragraph separator (core's rule).
+    """
+    for char in text:
+        category = unicodedata.category(char)
+        if category == "Cc":
+            if char not in ("\n", "\t"):
+                return True
+        elif category in ("Cs", "Zl", "Zp") or char in _BIDI_CONTROLS:
+            return True
+    return False
+
+
+def _check_model(
+    kind: object, grain: object, key: tuple[str, ...] | str, references: object, checks: object
+) -> tuple[str | None, str | None, dict[str, str], dict[str, str]]:
+    """Read the decorator's model fields with the rules deploy applies.
+
+    Parameters
+    ----------
+    kind
+        ``fact``, ``dimension``, ``wide`` or ``staging``; `None` for none.
+    grain
+        One line saying what one row is; `None` for none.
+    key
+        `_check_write`'s key: its columns, ``"none"`` or empty.
+    references
+        Column → target table; `None` for none.
+    checks
+        Check family → failure mode; `None` for none.
+
+    Returns
+    -------
+    tuple
+        `kind`, the stripped `grain`, `references` and `checks` as dicts.
+
+    Raises
+    ------
+    ValueError
+        For a value of the wrong type, a `kind` that is not in `MODEL_KINDS`, a `grain` that
+        is empty, long, several lines or unsafe, a reference column or target deploy refuses,
+        a `checks` family or mode that does not exist, a fact, dimension or wide table
+        without what its kind needs, ``key="none"`` where the kind does not allow it, and a
+        `checks` family for which the asset declares nothing.
+    """
+    if kind is not None and not isinstance(kind, str):
+        raise ValueError("kind must be a string")
+    if grain is not None and not isinstance(grain, str):
+        raise ValueError("grain must be a string")
+    for name, mapping in (("references", references), ("checks", checks)):
+        if mapping is not None and (
+            not isinstance(mapping, Mapping)
+            or not all(isinstance(k, str) and isinstance(v, str) for k, v in mapping.items())
+        ):
+            raise ValueError(f"{name} must be a dict of strings")
+    if kind is not None and kind not in MODEL_KINDS:
+        shown = ascii(kind)[1:-1][:200]
+        raise ValueError(f"kind must be one of {', '.join(MODEL_KINDS)}; got '{shown}'")
+    text = None if grain is None else grain.strip()
+    if text is not None:
+        if not text:
+            raise ValueError("grain must not be empty: say in one sentence what one row is")
+        if "\n" in text:
+            raise ValueError("grain must be one line")
+        if len(text) > _MAX_GRAIN_CHARS:
+            raise ValueError(f"grain must be at most {_MAX_GRAIN_CHARS} characters")
+        if _unsafe_free_text(grain or ""):
+            raise ValueError(
+                "grain must not contain a surrogate, a control character other than a newline "
+                "or tab, a bidirectional control or a line separator"
+            )
+    refs = dict(references) if isinstance(references, Mapping) else {}
+    for column, target in refs.items():
+        if _unsafe(column):
+            raise ValueError(f"a reference column {_IDENTIFIER_MESSAGE}")
+        if not _component_ok(f"ref_{column}"):
+            raise ValueError(
+                f"reference column `{column}` cannot name its check `ref_{column}`: a check "
+                "name must not contain '.', '/', a NUL byte or the unit separator"
+            )
+        parts = target.split(".")
+        if len(parts) < 2 or not all(_component_ok(part) for part in parts):
+            raise ValueError(
+                f"reference `{column}: {ascii(target)[1:-1][:200]}` must name a table as "
+                "`ns.table` or `ns.table.column`"
+            )
+    modes = dict(checks) if isinstance(checks, Mapping) else {}
+    for family, mode in modes.items():
+        if family not in _CHECK_FAMILIES:
+            raise ValueError("checks takes only key and references")
+        if mode not in _CHECK_MODES:
+            raise ValueError(f"checks: {family} must be block, keep or warn")
+    _check_kind_rules(kind, text, key, refs, modes)
+    return kind, text, refs, modes
+
+
+def _check_kind_rules(
+    kind: str | None,
+    grain: str | None,
+    key: tuple[str, ...] | str,
+    references: dict[str, str],
+    checks: dict[str, str],
+) -> None:
+    """Apply the rules of each kind to fields that are valid on their own.
+
+    Parameters
+    ----------
+    kind
+        The kind, or `None`.
+    grain
+        The stripped grain, or `None`.
+    key
+        The key's columns, ``"none"`` or empty.
+    references
+        Column → target table.
+    checks
+        Check family → failure mode.
+
+    Raises
+    ------
+    ValueError
+        As `_check_model` says, for the rules between fields.
+    """
+    article = {"fact": "a fact", "wide": "a wide table", "dimension": "a dimension"}.get(kind or "")
+    if article and not grain:
+        raise ValueError(f"{article} needs grain=: say in one sentence what one row is")
+    if kind == "dimension" and key == _KEY_NONE:
+        raise ValueError(
+            'a dimension needs a real key=; key="none" is not allowed for a dimension, '
+            "because nothing could refer to it"
+        )
+    if article and not key:
+        raise ValueError(
+            f"{article} needs key=: list the columns that identify one row, or write "
+            'key="none" and say in grain why no columns are unique'
+        )
+    if key == _KEY_NONE and kind not in ("fact", "wide"):
+        raise ValueError(
+            "`key: none` is for a fact or a wide table whose rows no columns identify; "
+            "declare `kind: fact` or `kind: wide`, or remove `key: none`"
+        )
+    if "key" in checks and (not key or key == _KEY_NONE):
+        raise ValueError("checks: key sets how the key checks fail, but the asset declares no key")
+    if "references" in checks and not references:
+        raise ValueError(
+            "checks: references sets how the reference checks fail, but the asset declares "
+            "no references"
+        )
 
 
 def _check_connections(connections: object) -> tuple[str, ...]:
@@ -330,9 +542,13 @@ def asset(
     decimals: str = "float",
     connections: Iterable[str] = (),
     write: str = "replace",
-    key: Iterable[str] = (),
+    key: Iterable[str] | str = (),
     watermark: str | None = None,
     evolve_schema: bool | None = False,
+    kind: str | None = None,
+    grain: str | None = None,
+    references: Mapping[str, str] | None = None,
+    checks: Mapping[str, str] | None = None,
 ) -> Callable[[F], F]:
     """Declare a Python asset; returns the function unchanged with its metadata attached.
 
@@ -391,7 +607,9 @@ def asset(
         ``merge``: rows whose `key` matches a row of the table update it, the others are
         added; nothing is deleted. Needs `key`.
     key
-        The columns that identify a row, for ``write="merge"``.
+        The columns that identify a row: a list, or one string for a key of one column. It is
+        also the key of ``write="merge"``. ``"none"`` says that no columns identify a row; only
+        for ``kind="fact"`` or ``kind="wide"``, never with ``merge``.
     watermark
         The column whose largest value in the table the next run starts after: needed by
         ``write="append"``, optional for ``merge``.
@@ -403,6 +621,18 @@ def asset(
         type changes otherwise becomes a new column (its earlier values read as null), and a
         column the result no longer has is removed from the table. Only with
         ``write="replace"``; `None` means ``False``.
+    kind
+        ``fact``, ``dimension``, ``wide`` or ``staging``. A fact and a wide table need
+        `grain` and `key`; a dimension needs `grain` and a real `key`; a staging table needs
+        nothing. Not allowed with ``output="artifact"``.
+    grain
+        One line, at most 300 characters, saying what one row is.
+    references
+        Column of this table → the table it refers to, as ``ns.table`` (that table's single
+        key column) or ``ns.table.column``.
+    checks
+        Generated-check family (``key``, ``references``) → ``block``, ``keep`` or ``warn``:
+        what a failure does.
 
     Returns
     -------
@@ -420,8 +650,10 @@ def asset(
         that is given without ``output="artifact"``, a `decimals` other than
         ``float`` or ``exact``, a `connections` that is not a list of valid,
         distinct names or holds more than 16, a `write`, `key` or `watermark` deploy
-        would refuse (also any of them on an artifact asset), and an `evolve_schema` that is
-        not a boolean, or is ``True`` on an artifact asset or with an append or a merge.
+        would refuse (also any of them on an artifact asset), an `evolve_schema` that is
+        not a boolean, or is ``True`` on an artifact asset or with an append or a merge, and a
+        `kind`, `grain`, `references` or `checks` deploy would refuse (also any of them on an
+        artifact asset).
     """
     if function is not None:
         raise TypeError(_PARENTHESES)
@@ -453,6 +685,10 @@ def asset(
             ("key", key or None),
             ("watermark", watermark),
             ("evolve_schema", evolves or None),
+            ("kind", kind),
+            ("grain", grain),
+            ("references", references),
+            ("checks", checks),
         ):
             if given is not None:
                 raise ValueError(f"{name} does not apply to an artifact asset; remove it")
@@ -468,6 +704,7 @@ def asset(
         raise ValueError(f"a Python asset supports only 'table', got {materialize!r}")
     declared = _check_connections(connections)
     mode, key_columns, watermark_column = _check_write(write, key, watermark)
+    model = _check_model(kind, grain, key_columns, references, checks)
     if evolves and mode != "replace":
         raise ValueError(EVOLVE_NEEDS_REPLACE)
     spec = AssetSpec(
@@ -488,6 +725,10 @@ def asset(
         key=key_columns,
         watermark=watermark_column,
         evolve_schema=evolves,
+        kind=model[0],
+        grain=model[1],
+        references=model[2],
+        checks=model[3],
     )
 
     def decorate(target: F) -> F:

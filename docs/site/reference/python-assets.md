@@ -52,13 +52,17 @@ limits lie is in [Python assets: what they are for and how far they are trusted]
   appends or merges), so a worker of an earlier release refuses its runs instead of running the
   asset without them: upgrade the workers first. The kinds of connection and the commands that manage them are in
   [Connections](connections.md).
+- **Model fields.** `kind` (`fact`, `dimension`, `wide` or `staging`), `grain`, `key`,
+  `references` and `checks` take the same values and follow the same rules as in SQL front
+  matter, and are refused with `output="artifact"`. `key="none"` (a string) says that no
+  columns identify a row; it is for `kind="fact"` and `kind="wide"`, and a merge refuses it.
 - **Write modes.** `write`, `key` and `watermark` say what a run does to the table, with the
   rules of SQL front-matter (see [Write modes](asset-front-matter.md#write-modes)):
   `write="replace"` (the default) replaces every row with what the function returns;
   `write="append", watermark="updated_at"` creates the table on the first run and adds the rows
   of each later run; `write="merge", key=["id"]` updates the rows whose key the table has and
-  adds the others, deleting none (`watermark` is optional). A key of several columns takes at
-  most 5,000 rows per run. The platform does not filter what a Python asset returns: an append
+  adds the others, deleting none (`watermark` is optional). A key of one column may be written
+  as a string: `key="id"`. A key of several columns takes at most 5,000 rows per run. The platform does not filter what a Python asset returns: an append
   must return only the rows past `ctx.watermark()` (see [The asset's context](#the-assets-context)),
   or it adds every row again. A merge holds its whole result in memory while it compares it with
   the table, so what it returns counts against the worker's memory limit

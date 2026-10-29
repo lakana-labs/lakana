@@ -34,6 +34,7 @@ from lakana_core.projects.asset_model import (
     EVOLVE_NEEDS_REPLACE,
     MAX_CONNECTIONS,
     MAX_KEEP_VERSIONS,
+    MODEL_KINDS,
     WRITE_CHOICES,
     ParsedAsset,
 )
@@ -337,6 +338,24 @@ _ARGUMENT_CASES: dict[str, str] = {
     "evolve-schema-on-artifact": 'output="artifact", evolve_schema=True',
     "evolve-schema-off-on-artifact": 'output="artifact", evolve_schema=False',
     "watermark-a-list": "write=\"append\", watermark=['ts']",
+    "kind-fact-complete": 'kind="fact", grain="One row per order.", key="id"',
+    "kind-fact-no-grain": 'kind="fact", key="id"',
+    "kind-unknown": 'kind="cube"',
+    "kind-dimension-key-none": 'kind="dimension", grain="g", key="none"',
+    "key-none-without-kind": 'key="none"',
+    "key-nine-columns": 'key=["a","b","c","d","e","f","g","h","i"]',
+    "grain-two-lines": 'grain="a\\nb"',
+    "grain-bell": 'grain="a\\x07b"',
+    "grain-tab": 'grain="a\\tb"',
+    "grain-bidi-override": 'grain="a\\u202eb"',
+    "references-short": 'references={"store_id": "gold.dim_store"}',
+    "references-no-namespace": 'references={"store_id": "dim_store"}',
+    "references-bad-column": 'references={"a/b": "gold.dim_store"}',
+    "references-dotted-column": 'references={"a.b": "gold.dim_store"}',
+    "references-slash-in-target": 'references={"x": "gold.a/b"}',
+    "checks-unknown-family": 'checks={"rows": "warn"}',
+    "checks-bad-mode": 'checks={"key": "loud"}',
+    "checks-without-key": 'checks={"key": "warn"}',
     "write-on-artifact": 'output="artifact", write="append", watermark="ts"',
     "key-on-artifact": 'output="artifact", key=["id"]',
     "replace-and-empty-key-on-artifact": 'output="artifact", write="replace", key=[]',
@@ -552,3 +571,7 @@ def test_the_sdk_routes_the_kinds_the_worker_routes() -> None:
 
     assert {kind.value for kind in PROXY_KINDS} == sdk_connections._PROXY_KINDS
     assert sdk_connections._RELAY_HOST == RELAY_ALIAS
+
+
+def test_the_model_kinds_are_the_same_in_core_and_the_sdk() -> None:
+    assert sdk_assets.MODEL_KINDS == MODEL_KINDS == ("fact", "dimension", "wide", "staging")

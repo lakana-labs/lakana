@@ -1039,7 +1039,7 @@ def test_a_key_is_accepted_with_every_write_mode(arguments: str) -> None:
             "separator",
         ),
         ("write=3", "argument 'write' must be a string"),
-        ('key="id"', "argument 'key' must be a list of strings"),
+        ("key=3", "argument 'key' must be a list of strings or one string"),
         ("watermark=['ts']", "argument 'watermark' must be a string"),
     ],
 )
@@ -1131,3 +1131,49 @@ def test_an_input_named_ctx_is_refused_with_one_issue() -> None:
     assert [(issue.line, issue.message) for issue in issues] == [
         (2, "`ctx` is the asset's context; give the input another parameter name")
     ]
+
+
+def test_the_decorator_takes_the_model_fields() -> None:
+    """kind, grain, key (as a string), references and checks reach the metadata."""
+    parsed = parse_python_asset(
+        _asset(
+            "from lakana import asset\n\n"
+            '@asset(kind="dimension", grain="One row per store.", key="store_id",\n'
+            '       references={"region_id": "gold.dim_region"}, checks={"key": "warn"})\n'
+            "def dim_store():\n    return None\n"
+        ),
+        AssetDefaults(),
+    )
+    assert isinstance(parsed, ParsedAsset)
+    meta = parsed.metadata
+    assert (meta.kind, meta.grain, meta.key) == ("dimension", "One row per store.", ("store_id",))
+    assert meta.references == {"region_id": "gold.dim_region"}
+    assert meta.checks == {"key": "warn"}
+
+
+def test_a_dimension_without_a_key_is_refused_in_a_decorator() -> None:
+    """The kind rules apply to a Python asset, on the decorator's line."""
+    issues = parse_python_asset(
+        _asset(
+            "from lakana import asset\n\n"
+            '@asset(kind="dimension", grain="One row per store.")\n'
+            "def dim_store():\n    return None\n"
+        ),
+        AssetDefaults(),
+    )
+    assert isinstance(issues, list)
+    assert "is a dimension and needs `key:`" in issues[0].message
+
+
+def test_model_fields_are_refused_on_an_artifact_asset() -> None:
+    """An artifact is not a table: it has no kind, key or references."""
+    issues = parse_python_asset(
+        _asset(
+            "from lakana import asset\n\n"
+            '@asset(output="artifact", kind="fact")\n'
+            "def model(ctx):\n    return 'x'\n"
+        ),
+        AssetDefaults(),
+    )
+    assert isinstance(issues, list)
+    assert any("argument 'kind' does not apply to an artifact asset" in i.message for i in issues)
