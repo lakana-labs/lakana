@@ -4440,3 +4440,100 @@ def test_0052_adds_check_results_generated_false_on_old_rows(
             ]
     finally:
         engine.dispose()
+
+
+_REVISION_0053 = "e3a7c5d9f1b2"
+_MODEL_COLUMNS = {"model_kind", "model_grain", "model_key"}
+
+
+@pytest.mark.usefixtures("_without_fsync")
+def test_0053_adds_the_table_model_and_the_references_table(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Revision `0053`: the model columns of `tables`, null on an old row, and `table_references`.
+
+    Parameters
+    ----------
+    tmp_path
+        Holds the throwaway SQLite file.
+    monkeypatch
+        Points `lakana_core.config.Settings` at that file.
+    """
+    db_path = tmp_path / "migrated.db"
+    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    config = Config(str(ALEMBIC_INI))
+    command.upgrade(config, _REVISION_0052)
+    engine = create_engine(f"sqlite:///{db_path}")
+    table_id = uuid.uuid4().hex
+    try:
+        assert not _MODEL_COLUMNS & {c["name"] for c in inspect(engine).get_columns("tables")}
+        with engine.begin() as connection:
+            connection.execute(
+                sa.text(
+                    "INSERT INTO tables (id, namespace_id, name, table_type, created_at,"
+                    " updated_at) VALUES (:id, :ns, 'fact_sales', 'ICEBERG', :t, :t)"
+                ),
+                {"id": table_id, "ns": uuid.uuid4().hex, "t": _utc_text()},
+            )
+    finally:
+        engine.dispose()
+
+    command.upgrade(config, _REVISION_0053)
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        inspector = inspect(engine)
+        found = {c["name"]: c for c in inspector.get_columns("tables")}
+        assert {name: found[name]["nullable"] for name in _MODEL_COLUMNS} == dict.fromkeys(
+            _MODEL_COLUMNS, True
+        )
+        assert "table_references" in inspector.get_table_names()
+        assert {c["name"] for c in inspector.get_columns("table_references")} == {
+            "id",
+            "environment_id",
+            "source_table_id",
+            "source_column",
+            "target_name",
+            "target_column",
+        }
+        assert {
+            tuple(c["column_names"]) for c in inspector.get_unique_constraints("table_references")
+        } == {("source_table_id", "source_column")}
+        assert {
+            (i["name"], tuple(i["column_names"])) for i in inspector.get_indexes("table_references")
+        } == {("ix_table_references_environment_target", ("environment_id", "target_name"))}
+        assert {
+            (tuple(fk["constrained_columns"]), fk["referred_table"], fk["options"].get("ondelete"))
+            for fk in inspector.get_foreign_keys("table_references")
+        } == {
+            (("environment_id",), "environments", "CASCADE"),
+            (("source_table_id",), "tables", "CASCADE"),
+        }
+        with engine.begin() as connection:
+            model = connection.execute(
+                sa.text("SELECT model_kind, model_grain, model_key FROM tables WHERE id = :id"),
+                {"id": table_id},
+            ).one()
+            connection.execute(
+                sa.text(
+                    "INSERT INTO table_references (id, environment_id, source_table_id,"
+                    " source_column, target_name, target_column) VALUES (:id, :env, :table,"
+                    " 'store_id', 'gold.dim_store', 'store_id')"
+                ),
+                {"id": uuid.uuid4().hex, "env": uuid.uuid4().hex, "table": table_id},
+            )
+        assert tuple(model) == (None, None, None)
+    finally:
+        engine.dispose()
+
+    command.downgrade(config, _REVISION_0052)
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        inspector = inspect(engine)
+        assert "table_references" not in inspector.get_table_names()
+        assert not _MODEL_COLUMNS & {c["name"] for c in inspector.get_columns("tables")}
+        with engine.connect() as connection:
+            assert connection.execute(sa.text("SELECT id FROM tables")).scalars().all() == [
+                table_id
+            ]
+    finally:
+        engine.dispose()

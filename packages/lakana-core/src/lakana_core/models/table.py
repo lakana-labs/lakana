@@ -212,6 +212,20 @@ class Table(Base, TimestampMixin):
     changes it.
     """
 
+    model_kind: Mapped[str | None] = mapped_column(String(16), nullable=True, default=None)
+    """The `kind:` the project's asset header declares (``fact``, ``dimension``, ``wide``,
+    ``staging``), or `None`.
+
+    The three model columns and the table's `DeclaredReference` rows are written only by a deploy,
+    a rollback, or the table's creation by a run (`lakana_core.catalog.model_metadata`), never
+    through the API; a deploy that removes the asset clears them.
+    """
+    model_grain: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    """The `grain:` the asset header declares, or `None`."""
+    model_key: Mapped[list[str] | str | None] = mapped_column(JSON, nullable=True, default=None)
+    """The `key:` the asset header declares: a list of columns, the string ``"none"`` for
+    `key: none`, or `None` when it declares no key."""
+
     retention_days: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
     """Days after its last activity this table expires (`lakana table retention --days`).
 

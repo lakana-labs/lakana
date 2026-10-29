@@ -2666,3 +2666,89 @@ def test_0052_on_postgres() -> None:
                 == 1
             )
         engine.dispose()
+
+
+def test_0053_on_postgres() -> None:
+    """0053 adds the model columns, null on an old table, and `table_references`, and drops them."""
+    revision_0052 = "d1f6b2c4e5a7"
+    revision_0053 = "e3a7c5d9f1b2"
+    now = datetime.now(UTC)
+    env_id, ns_id, table_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    insert_reference = sqlalchemy.text(
+        "INSERT INTO table_references (id, environment_id, source_table_id, source_column, "
+        "target_name, target_column) VALUES (:id, :env, :table, 'store_id', 'gold.dim_store', "
+        "'store_id')"
+    )
+
+    with PostgresContainer("postgres:16", driver="pg8000") as pg:
+        url = pg.get_connection_url()
+        migrate.upgrade(url, revision_0052)
+        engine = sqlalchemy.create_engine(url)
+        with engine.begin() as conn:
+            conn.execute(
+                sqlalchemy.text(
+                    "INSERT INTO environments (id, name, storage_root, storage_options, "
+                    "is_protected, properties, created_at, updated_at) "
+                    "VALUES (:id, 'dev', 's3://bucket/dev', '{}', false, '{}', :now, :now)"
+                ),
+                {"id": env_id, "now": now},
+            )
+            conn.execute(
+                sqlalchemy.text(
+                    "INSERT INTO namespaces (id, environment_id, path, properties) "
+                    "VALUES (:id, :env, 'gold', '{}')"
+                ),
+                {"id": ns_id, "env": env_id},
+            )
+            conn.execute(
+                sqlalchemy.text(
+                    "INSERT INTO tables (id, namespace_id, name, table_type, created_at, "
+                    "updated_at) VALUES (:id, :ns, 'fact_sales', 'ICEBERG', :now, :now)"
+                ),
+                {"id": table_id, "ns": ns_id, "now": now},
+            )
+
+        migrate.upgrade(url, revision_0053)
+        assert _alembic_version(engine) == revision_0053
+        inspector = sqlalchemy.inspect(engine)
+        columns = {c["name"]: c for c in inspector.get_columns("tables")}
+        assert {name: columns[name]["nullable"] for name in ("model_kind", "model_grain")} == {
+            "model_kind": True,
+            "model_grain": True,
+        }
+        assert getattr(columns["model_kind"]["type"], "length", None) == 16
+        assert columns["model_key"]["nullable"] is True
+        assert {
+            tuple(c["column_names"]) for c in inspector.get_unique_constraints("table_references")
+        } == {("source_table_id", "source_column")}
+        assert (
+            "ix_table_references_environment_target",
+            ("environment_id", "target_name"),
+        ) in {
+            (i["name"], tuple(i["column_names"])) for i in inspector.get_indexes("table_references")
+        }
+        with engine.begin() as conn:
+            assert conn.execute(
+                sqlalchemy.text("SELECT model_kind, model_grain, model_key FROM tables")
+            ).all() == [(None, None, None)]
+            conn.execute(insert_reference, {"id": uuid.uuid4(), "env": env_id, "table": table_id})
+        with pytest.raises(IntegrityError), engine.begin() as conn:
+            conn.execute(insert_reference, {"id": uuid.uuid4(), "env": env_id, "table": table_id})
+        with engine.begin() as conn:
+            conn.execute(sqlalchemy.text("DELETE FROM tables"))
+            assert (
+                conn.execute(sqlalchemy.text("SELECT count(*) FROM table_references")).scalar_one()
+                == 0
+            )
+
+        migrate.downgrade(url, revision_0052)
+        assert _alembic_version(engine) == revision_0052
+        inspector = sqlalchemy.inspect(engine)
+        assert "table_references" not in inspector.get_table_names()
+        names = {c["name"] for c in inspector.get_columns("tables")}
+        assert not {"model_kind", "model_grain", "model_key"} & names
+
+        migrate.upgrade(url, revision_0053)
+        assert _alembic_version(engine) == revision_0053
+        assert "table_references" in sqlalchemy.inspect(engine).get_table_names()
+        engine.dispose()
