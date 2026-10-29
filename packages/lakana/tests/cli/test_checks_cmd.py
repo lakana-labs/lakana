@@ -52,6 +52,7 @@ def result_body(check: str = "unique_reading", **more: object) -> dict[str, obje
         "query_run_id": None,
         "started_at": "2026-10-11T12:00:00+00:00",
         "finished_at": "2026-10-11T12:00:01+00:00",
+        "generated": False,
         **more,
     }
 
@@ -96,6 +97,32 @@ def test_check_list_shows_results_newest_first(tmp_path: Path) -> None:
     assert re.search(r"failed\s+│ 3\s+│ block", rows[0])
     assert re.search(r"warned\s+│ 12\s+│ warn", rows[1])
     assert api.requests[-1].url.params["limit"] == "50"
+
+
+def test_check_list_marks_a_generated_check(tmp_path: Path) -> None:
+    api = FakeApi()
+    api.on(
+        "GET",
+        _CHECKS,
+        json=_page(result_body("key_unique", generated=True), result_body("unique_reading")),
+    )
+    result = invoke(
+        make_state(tmp_path, api), "check", "list", "--env", "dev", env={"COLUMNS": "200"}
+    )
+    assert result.exit_code == 0, result.stderr
+    rows = [line for line in result.stdout.splitlines() if line.startswith("│")]
+    assert "key_unique (generated)" in rows[0]
+    assert "(generated)" not in rows[1]
+
+
+def test_a_result_from_an_older_server_is_not_marked_generated(tmp_path: Path) -> None:
+    body = result_body("key_unique")
+    del body["generated"]
+    api = FakeApi()
+    api.on("GET", _CHECKS, json=_page(body))
+    result = invoke(make_state(tmp_path, api), "--output", "json", "check", "list", "--env", "dev")
+    (row,) = json.loads(result.stdout)
+    assert row["generated"] is False
 
 
 def test_check_list_of_one_run(tmp_path: Path) -> None:

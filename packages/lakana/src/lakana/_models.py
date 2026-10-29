@@ -495,6 +495,9 @@ class CheckHealth:
         The rollback left the table not published.
     finished_at
         When the check ended.
+    generated
+        Whether the check was generated from the asset's header (``key:``, ``references:``)
+        rather than written under ``checks/``; ``False`` from an older server.
     """
 
     name: str
@@ -508,6 +511,7 @@ class CheckHealth:
     kept: bool
     not_published: bool
     finished_at: datetime
+    generated: bool = False
 
 
 @dataclass(frozen=True)
@@ -1903,6 +1907,9 @@ class CheckResult:
         Start.
     finished_at
         End.
+    generated
+        Whether the check was generated from the asset's header (``key:``, ``references:``)
+        rather than written under ``checks/``; ``False`` from an older server.
     """
 
     run_id: str
@@ -1923,6 +1930,7 @@ class CheckResult:
     query_run_id: str | None
     started_at: datetime
     finished_at: datetime
+    generated: bool = False
 
 
 @dataclass(frozen=True)

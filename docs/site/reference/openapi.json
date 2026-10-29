@@ -16921,6 +16921,11 @@
             "type": "string",
             "format": "date-time",
             "title": "Finished At"
+          },
+          "generated": {
+            "type": "boolean",
+            "title": "Generated",
+            "default": false
           }
         },
         "type": "object",
@@ -16938,7 +16943,7 @@
           "finished_at"
         ],
         "title": "CheckHealthOut",
-        "description": "The newest result of one check of a table, as `CheckHealth` holds it.\n\nParameters\n----------\nname\n    `CheckHealth.name`.\ncheck\n    `CheckHealth.check`.\nrun_id\n    `CheckHealth.run_id`.\noutcome\n    `CheckHealth.outcome`.\non_failure\n    `CheckHealth.on_failure`.\nfailing_rows\n    `CheckHealth.failing_rows`.\nerror\n    `CheckHealth.error`.\nrollback_outcome\n    `CheckHealth.rollback_outcome`.\nkept\n    `CheckHealth.kept`.\nnot_published\n    `CheckHealth.not_published`.\nfinished_at\n    `CheckHealth.finished_at`."
+        "description": "The newest result of one check of a table, as `CheckHealth` holds it.\n\nParameters\n----------\nname\n    `CheckHealth.name`.\ncheck\n    `CheckHealth.check`.\nrun_id\n    `CheckHealth.run_id`.\noutcome\n    `CheckHealth.outcome`.\non_failure\n    `CheckHealth.on_failure`.\nfailing_rows\n    `CheckHealth.failing_rows`.\nerror\n    `CheckHealth.error`.\nrollback_outcome\n    `CheckHealth.rollback_outcome`.\nkept\n    `CheckHealth.kept`.\nnot_published\n    `CheckHealth.not_published`.\nfinished_at\n    `CheckHealth.finished_at`.\ngenerated\n    Whether the check was generated from the asset's header (`key:`, `references:`)\n    rather than written under `checks/`."
       },
       "CheckResultOut": {
         "properties": {
@@ -17067,6 +17072,11 @@
             "type": "string",
             "format": "date-time",
             "title": "Finished At"
+          },
+          "generated": {
+            "type": "boolean",
+            "title": "Generated",
+            "default": false
           }
         },
         "type": "object",
@@ -17091,7 +17101,7 @@
           "finished_at"
         ],
         "title": "CheckResultOut",
-        "description": "The result of one data quality check. It holds a count, never a row of the table.\n\nParameters\n----------\nrun_id\n    The run.\ntask\n    The task (the checked table) it belongs to.\nname\n    ``<table>/<check>``.\ncheck\n    The check's short name.\npath\n    Repository-relative path of the check's file.\ntable\n    The checked table, dotted.\ntable_id\n    The table's id; `None` when it was not resolved.\non_failure\n    ``block`` or ``warn``.\noutcome\n    ``passed``, ``failed``, ``warned`` or ``errored``.\nfailing_rows\n    The count of rows that are wrong, when the check ran.\nerror\n    Why a check could not run.\nchecked_snapshot_id\n    The snapshot it read.\nrollback_outcome\n    What the rollback after a failed blocking check did, if there was one.\npolicy_applied\n    Whether a row filter or column mask applied to the run's principal.\npolicy_note\n    Text saying what that means for the result, or `None`.\nquery_run_id\n    The query that ran the check.\nstarted_at\n    Start.\nfinished_at\n    End."
+        "description": "The result of one data quality check. It holds a count, never a row of the table.\n\nParameters\n----------\nrun_id\n    The run.\ntask\n    The task (the checked table) it belongs to.\nname\n    ``<table>/<check>``.\ncheck\n    The check's short name.\npath\n    Repository-relative path of the check's file.\ntable\n    The checked table, dotted.\ntable_id\n    The table's id; `None` when it was not resolved.\non_failure\n    ``block`` or ``warn``.\noutcome\n    ``passed``, ``failed``, ``warned`` or ``errored``.\nfailing_rows\n    The count of rows that are wrong, when the check ran.\nerror\n    Why a check could not run.\nchecked_snapshot_id\n    The snapshot it read.\nrollback_outcome\n    What the rollback after a failed blocking check did, if there was one.\npolicy_applied\n    Whether a row filter or column mask applied to the run's principal.\npolicy_note\n    Text saying what that means for the result, or `None`.\nquery_run_id\n    The query that ran the check.\nstarted_at\n    Start.\nfinished_at\n    End.\ngenerated\n    Whether the check was generated from the asset's header (`key:`, `references:`)\n    rather than written under `checks/`."
       },
       "CheckResultPage": {
         "properties": {

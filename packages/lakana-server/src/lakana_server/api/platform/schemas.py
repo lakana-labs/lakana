@@ -990,6 +990,9 @@ class CheckHealthOut(BaseModel):
         `CheckHealth.not_published`.
     finished_at
         `CheckHealth.finished_at`.
+    generated
+        Whether the check was generated from the asset's header (`key:`, `references:`)
+        rather than written under `checks/`.
     """
 
     name: str
@@ -1003,6 +1006,7 @@ class CheckHealthOut(BaseModel):
     kept: bool
     not_published: bool
     finished_at: datetime
+    generated: bool = False
 
 
 class ReaderOut(BaseModel):
@@ -2714,6 +2718,9 @@ class CheckResultOut(BaseModel):
         Start.
     finished_at
         End.
+    generated
+        Whether the check was generated from the asset's header (`key:`, `references:`)
+        rather than written under `checks/`.
     """
 
     run_id: uuid.UUID
@@ -2734,6 +2741,7 @@ class CheckResultOut(BaseModel):
     query_run_id: uuid.UUID | None
     started_at: datetime
     finished_at: datetime
+    generated: bool = False
 
 
 class CheckResultPage(BaseModel):

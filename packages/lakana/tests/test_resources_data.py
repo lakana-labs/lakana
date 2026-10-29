@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Iterator, Mapping
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 import httpx
 import polars as pl
@@ -2567,8 +2567,19 @@ def test_tables_health_gets_the_health_route_and_parses_it() -> None:
         False,
     )
     assert check.finished_at == datetime.fromisoformat("2026-10-11T13:00:00+00:00")
+    assert check.generated is False
     assert health.readers is not None
     assert [(r.principal, r.read_count) for r in health.readers] == [("ada", 5)]
+
+
+def test_tables_health_reads_the_generated_mark_of_a_check() -> None:
+    """A check from the asset's header carries `generated`; an older server's body has none."""
+    (check,) = cast("list[dict[str, object]]", _HEALTH_BODY["checks"])
+    body = {**_HEALTH_BODY, "checks": [{**check, "generated": True}]}
+    health = Tables(_transport(lambda _: httpx.Response(200, json=body))).health(
+        "dev", "bronze.sales"
+    )
+    assert [c.generated for c in health.checks] == [True]
 
 
 def test_tables_health_with_nothing_to_show() -> None:

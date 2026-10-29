@@ -255,6 +255,9 @@ class CheckHealth:
         The rollback left the table not published.
     finished_at
         When the check ended.
+    generated
+        Whether the check was generated from the asset's header (`key:`, `references:`)
+        rather than written under `checks/`.
     """
 
     name: str
@@ -268,6 +271,7 @@ class CheckHealth:
     kept: bool
     not_published: bool
     finished_at: datetime
+    generated: bool
 
 
 def latest_checks(session: Session, table_id: uuid.UUID) -> list[CheckHealth]:
@@ -309,6 +313,7 @@ def latest_checks(session: Session, table_id: uuid.UUID) -> list[CheckHealth]:
             and row.outcome in {CheckOutcome.FAILED, CheckOutcome.ERRORED},
             not_published=row.rollback_outcome is RollbackOutcome.UNPUBLISHED,
             finished_at=row.finished_at,
+            generated=row.generated,
         )
         for _, row in sorted(newest.items())
     ]

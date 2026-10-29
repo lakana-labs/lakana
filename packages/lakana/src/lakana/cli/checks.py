@@ -7,7 +7,7 @@ from typing import Annotated
 
 import typer
 
-from lakana._models import CheckResult
+from lakana._models import CheckHealth, CheckResult
 from lakana.cli import _output
 from lakana.cli._state import resolve_environment, state_of
 from lakana.cli.queries import FORMAT, MAX_ROWS, OUT, TIMEOUT, out_format, show_result
@@ -40,6 +40,22 @@ def _run_shown(result: CheckResult) -> str:
         The first characters of the run id; `--output json` has it whole.
     """
     return result.run_id[:_ID_SHOWN]
+
+
+def check_shown(result: CheckResult | CheckHealth) -> str:
+    """Name a check as the CLI shows it.
+
+    Parameters
+    ----------
+    result
+        A listed result, or a check of a table's health.
+
+    Returns
+    -------
+    str
+        Its name, with ``(generated)`` after a check from the asset's header.
+    """
+    return f"{result.check} (generated)" if result.generated else result.check
 
 
 @check_app.command("list")
@@ -92,7 +108,7 @@ def list_checks(
         results,
         columns=_COLUMNS,
         droppable=_DROPPABLE,
-        derived={"run": _run_shown, "rows": lambda r: r.failing_rows},
+        derived={"run": _run_shown, "check": check_shown, "rows": lambda r: r.failing_rows},
         whole=["rows"],
     )
 

@@ -217,7 +217,7 @@ checks:
 | `grain` | One sentence saying what exactly one row stands for. It is for people. | One line, not empty, at most 300 characters. |
 | `key` | The columns that identify one row; usually the grain written as columns. It is also the key `write: merge` matches rows on: there is one key, not a second one for merging. | Distinct, non-empty columns of the `SELECT`, at most 8 (a merge key too), or `none` where the kind allows it (below). Allowed with every write mode. |
 | `references` | For each column, the table its values point at. A null in a reference column is allowed; a reference that is required is also in `key`. | The column is a column of the `SELECT`; the target is checked as "References" below says. |
-| `checks` | How the checks generated from `key` and `references` fail: `block`, `warn` or `keep`, with the rules of a check's `on_failure` (`keep` never on a view, an append or a merge). | Only `key` and `references`, and only for a field the asset declares. A deploy turns `key` into the checks `key_unique` and `key_not_null`, and each reference into `ref_<column>`; they count toward the 50 checks of a table, and a hand-written check of the same table may not use their names. |
+| `checks` | How the checks generated from `key` and `references` fail: `block`, `warn` or `keep`, with the rules of a check's `on_failure` (`keep` never on a view, an append or a merge). | Only `key` and `references`, and only for a field the asset declares. A deploy turns `key` into the checks `key_unique` and `key_not_null`, and each reference into `ref_<column>`; they count toward the 50 checks of a table, a hand-written check of the same table may not use their names, and a referenced table the project builds is built first. See [Generated checks](checks.md#generated-checks). |
 
 ### Rules for each kind
 
@@ -262,7 +262,10 @@ the deploy refuses the reference unless it knows that `a.b` has no column `c`; r
 two tables.
 
 A `SELECT *` or a Python asset has no columns at deploy, so its key and reference columns are
-checked when it runs.
+checked when it runs. Column types are checked only then, for every asset: a key column may not be
+`float` or `double`, and a reference column must have its target column's type, where only `int`
+and `long` match each other. A problem makes the generated check `errored`; the texts and what to
+do about each are in [Before a generated check counts](checks.md#before-a-generated-check-counts).
 
 ### Errors
 

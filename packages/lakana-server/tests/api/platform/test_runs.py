@@ -364,7 +364,9 @@ def test_a_task_that_ended_after_its_set_back_is_not_setting_back(
     assert task_body["setting_back"] is False
 
 
-def _store_checks(client: TestClient, run_id: str, *names: str) -> None:
+def _store_checks(
+    client: TestClient, run_id: str, *names: str, generated: frozenset[str] = frozenset()
+) -> None:
     """Insert one passed check result per name for the run's only task.
 
     Parameters
@@ -375,6 +377,8 @@ def _store_checks(client: TestClient, run_id: str, *names: str) -> None:
         The run.
     *names
         The checks' short names; the n-th ends n minutes after a fixed start.
+    generated
+        The names whose result is marked as generated from the asset's header.
     """
     from datetime import UTC, datetime, timedelta
 
@@ -401,6 +405,7 @@ def _store_checks(client: TestClient, run_id: str, *names: str) -> None:
                     failing_rows=0,
                     started_at=at,
                     finished_at=at,
+                    generated=name in generated,
                 )
             )
         session.commit()
@@ -450,12 +455,27 @@ def test_the_run_checks_route(client: TestClient) -> None:
         "query_run_id",
         "started_at",
         "finished_at",
+        "generated",
     }
     assert (result["name"], result["task"], result["failing_rows"]) == (
         "silver.clean/a",
         "silver.clean",
         0,
     )
+
+
+def test_the_check_routes_mark_a_check_generated_from_the_header(client: TestClient) -> None:
+    """A result from `key:` or `references:` says so; a hand-written one does not."""
+    _deploy(client)
+    run = client.post(_RUNS, headers=AUTH_HEADER, json={"repository": "analytics"}).json()
+    _store_checks(client, run["id"], "key_unique", "a", generated=frozenset({"key_unique"}))
+    of_run = client.get(f"{_RUNS}/{run['id']}/checks", headers=AUTH_HEADER).json()
+    assert {c["check"]: c["generated"] for c in of_run} == {"key_unique": True, "a": False}
+    listed = client.get("/api/v1/environments/dev/checks", headers=AUTH_HEADER).json()
+    assert {c["check"]: c["generated"] for c in listed["items"]} == {
+        "key_unique": True,
+        "a": False,
+    }
 
 
 def test_the_checks_route_pages_and_filters(client: TestClient) -> None:

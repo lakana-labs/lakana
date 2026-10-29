@@ -68,8 +68,10 @@ was removed with its run is not listed.
 | `kept` | boolean | The check failed or errored and its `keep` setting left the data in the table. |
 | `not_published` | boolean | The rollback left the table not published. |
 | `finished_at` | time | When the check ended. |
+| `generated` | boolean | The check was generated from the asset's header (`key:`, `references:`); see [Generated checks](checks.md#generated-checks). |
 
-The marks are the ones the check history shows: `failed (kept)` and `not published`. The data of a
+The marks are the ones the check history shows: `failed (kept)`, `not published`, and
+`(generated)` after the name of a generated check. The data of a
 check is a count, never a row.
 
 ### `readers`
