@@ -1009,19 +1009,25 @@ def test_the_write_model_is_read_from_the_decorator() -> None:
 
 
 @pytest.mark.parametrize(
+    "arguments", ['write="replace", key=["id"]', 'write="append", watermark="ts", key=["id"]']
+)
+def test_a_key_is_accepted_with_every_write_mode(arguments: str) -> None:
+    """A key identifies a row whatever the write mode."""
+    assert _parsed(_GOOD.replace("@asset(", f"@asset({arguments}, ", 1)).metadata.key == ("id",)
+
+
+@pytest.mark.parametrize(
     ("argument", "message"),
     [
         ('write="upsert"', "write must be one of replace, append, merge; got 'upsert'"),
         ('write="append"', _APPEND_NEEDS_WATERMARK),
         ('write="merge"', "`write: merge` needs `key:` — the columns that identify a row"),
         ('write="merge", key=[]', "`write: merge` needs `key:` — the columns that identify a row"),
-        ('write="replace", key=["id"]', "`write: replace` takes neither `key:` nor `watermark:`"),
-        ('watermark="ts"', "`write: replace` takes neither `key:` nor `watermark:`"),
-        ('write="merge", key=["id", "id"]', "key column `id` is listed twice"),
         (
-            'write="append", watermark="ts", key=["id"]',
-            "`write: append` takes no `key:`; to merge rows on a key use `write: merge`",
+            'watermark="ts"',
+            "`write: replace` takes no `watermark:`; to add only new rows use `write: append`",
         ),
+        ('write="merge", key=["id", "id"]', "key column `id` is listed twice"),
         (
             'write="merge", key=["i\\u200bd"]',
             "a key column must not contain a control, format or surrogate character or a line "
@@ -1033,7 +1039,7 @@ def test_the_write_model_is_read_from_the_decorator() -> None:
             "separator",
         ),
         ("write=3", "argument 'write' must be a string"),
-        ('key="id"', "argument 'key' must be a list of strings"),
+        ("key=3", "argument 'key' must be a list of strings or one string"),
         ("watermark=['ts']", "argument 'watermark' must be a string"),
     ],
 )
@@ -1125,3 +1131,49 @@ def test_an_input_named_ctx_is_refused_with_one_issue() -> None:
     assert [(issue.line, issue.message) for issue in issues] == [
         (2, "`ctx` is the asset's context; give the input another parameter name")
     ]
+
+
+def test_the_decorator_takes_the_model_fields() -> None:
+    """kind, grain, key (as a string), references and checks reach the metadata."""
+    parsed = parse_python_asset(
+        _asset(
+            "from lakana import asset\n\n"
+            '@asset(kind="dimension", grain="One row per store.", key="store_id",\n'
+            '       references={"region_id": "gold.dim_region"}, checks={"key": "warn"})\n'
+            "def dim_store():\n    return None\n"
+        ),
+        AssetDefaults(),
+    )
+    assert isinstance(parsed, ParsedAsset)
+    meta = parsed.metadata
+    assert (meta.kind, meta.grain, meta.key) == ("dimension", "One row per store.", ("store_id",))
+    assert meta.references == {"region_id": "gold.dim_region"}
+    assert meta.checks == {"key": "warn"}
+
+
+def test_a_dimension_without_a_key_is_refused_in_a_decorator() -> None:
+    """The kind rules apply to a Python asset, on the decorator's line."""
+    issues = parse_python_asset(
+        _asset(
+            "from lakana import asset\n\n"
+            '@asset(kind="dimension", grain="One row per store.")\n'
+            "def dim_store():\n    return None\n"
+        ),
+        AssetDefaults(),
+    )
+    assert isinstance(issues, list)
+    assert "is a dimension and needs `key:`" in issues[0].message
+
+
+def test_model_fields_are_refused_on_an_artifact_asset() -> None:
+    """An artifact is not a table: it has no kind, key or references."""
+    issues = parse_python_asset(
+        _asset(
+            "from lakana import asset\n\n"
+            '@asset(output="artifact", kind="fact")\n'
+            "def model(ctx):\n    return 'x'\n"
+        ),
+        AssetDefaults(),
+    )
+    assert isinstance(issues, list)
+    assert any("argument 'kind' does not apply to an artifact asset" in i.message for i in issues)

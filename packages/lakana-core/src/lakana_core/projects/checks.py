@@ -21,7 +21,7 @@ from sqlglot import exp
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable
 from lakana_core.errors import ValidationError
 from lakana_core.identifiers import TableRef, shown, validate_path_component
-from lakana_core.projects.asset_model import ParsedAsset, normalized_write
+from lakana_core.projects.asset_model import CHECK_MODES, ParsedAsset, normalized_write
 from lakana_core.projects.dag import ProjectGraph
 from lakana_core.projects.discovery import (
     CHECKS_DIR,
@@ -40,7 +40,7 @@ from lakana_core.projects.project_config import SafeTextModel, pydantic_issues
 from lakana_core.query_rewrite import check_blacklist, extract_table_refs
 from lakana_core.statement_limit import statement_too_long_message
 
-ON_FAILURE: tuple[str, ...] = ("block", "keep", "warn")
+ON_FAILURE: tuple[str, ...] = CHECK_MODES
 """What a failed check does.
 
 ``block`` rolls the table back and stops the run, ``keep`` fails the task and leaves the run's

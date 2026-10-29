@@ -14,9 +14,11 @@ from collections.abc import Sequence
 from sqlalchemy import exists, func, or_, select
 from sqlalchemy.orm import Session
 
+from lakana_core.catalog.identity import resolve_table_id
 from lakana_core.catalog.json_schema import ColumnSpec, from_iceberg_schema
 from lakana_core.catalog.metadata import read_metadata
-from lakana_core.identifiers import shown
+from lakana_core.errors import ValidationError
+from lakana_core.identifiers import TableRef, shown
 from lakana_core.models import Environment, Namespace, Table, TableColumn, TableType
 from lakana_core.storage.resolver import StorageResolver
 
@@ -68,6 +70,43 @@ def sync_table_columns(
         else:
             row.type = column.type
             row.position = position
+
+
+def stored_columns(session: Session, environment: str, dotted: str) -> dict[str, str] | None:
+    """Read the stored columns of a table, without asking whether anyone may read them.
+
+    The caller decides who may see the answer: a deploy calls it only for a table the deployer
+    may read.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    environment
+        The environment's name.
+    dotted
+        The table's dotted name.
+
+    Returns
+    -------
+    dict or None
+        Column name to its type in the catalog's spelling, in schema order; empty for a table
+        whose columns are not stored yet. `None` when the name is malformed or no such table
+        exists.
+    """
+    try:
+        ref = TableRef.from_dotted(environment, dotted)
+    except ValidationError:
+        return None
+    table_id = resolve_table_id(session, environment, ref.namespace.joined(), ref.name)
+    if table_id is None:
+        return None
+    rows = session.execute(
+        select(TableColumn.name, TableColumn.type)
+        .where(TableColumn.table_id == table_id)
+        .order_by(TableColumn.position)
+    )
+    return {name: type_ for name, type_ in rows}
 
 
 def _columns_of(row: Table, storage: StorageResolver, environment: str) -> list[ColumnSpec]:

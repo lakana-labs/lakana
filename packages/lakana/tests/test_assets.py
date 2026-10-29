@@ -318,15 +318,32 @@ def test_the_write_model_defaults_to_replace_and_is_stored() -> None:
             "starts after",
         ),
         ({"write": "merge"}, "`write: merge` needs `key:` — the columns that identify a row"),
-        ({"key": ["id"]}, "`write: replace` takes neither `key:` nor `watermark:`"),
+        (
+            {"watermark": "ts"},
+            "`write: replace` takes no `watermark:`; to add only new rows use `write: append`",
+        ),
         ({"write": "merge", "key": ["id", "id"]}, "key column `id` is listed twice"),
-        ({"write": "merge", "key": "id"}, "key must be a list of strings"),
+        ({"write": "merge", "key": 3}, "key must be a list of strings or one string"),
+        (
+            {"write": "merge", "key": "none"},
+            "`write: merge` needs key columns; `key: none` says that no columns identify a row, "
+            "so there is nothing to merge on",
+        ),
     ],
 )
 def test_a_wrong_write_model_is_refused(arguments: dict[str, Any], message: str) -> None:
     with pytest.raises(ValueError) as caught:
         lakana.asset(**arguments)
     assert str(caught.value) == message
+
+
+def test_a_key_is_accepted_with_every_write_mode() -> None:
+    assert callable(lakana.asset(key=["id"]))
+    assert callable(lakana.asset(write="append", watermark="ts", key=["id"]))
+    assert callable(lakana.asset(write="merge", key=[f"c{i}" for i in range(9)]))
+    with pytest.raises(ValueError) as caught:
+        lakana.asset(write="replace", key=[f"c{i}" for i in range(9)])
+    assert str(caught.value) == "a key has at most 8 columns; `key:` lists 9"
 
 
 _EVOLVE_NEEDS_REPLACE = (
@@ -372,3 +389,126 @@ def test_a_wrong_evolve_schema_is_refused(arguments: dict[str, Any], message: st
     with pytest.raises(ValueError) as caught:
         lakana.asset(**arguments)
     assert str(caught.value) == message
+
+
+def test_a_key_given_as_one_string_is_a_key_of_one_column() -> None:
+    spec = getattr(lakana.asset(write="merge", key="id")(lambda: None), ASSET_ATTRIBUTE)
+    assert spec.key == ("id",)
+
+
+def test_the_model_fields_reach_the_spec() -> None:
+    spec = getattr(
+        lakana.asset(
+            kind="fact",
+            grain="One row per order.",
+            key="none",
+            references={"store_id": "gold.dim_store"},
+            checks={"references": "warn"},
+        )(lambda: None),
+        ASSET_ATTRIBUTE,
+    )
+    assert (spec.kind, spec.grain, spec.key) == ("fact", "One row per order.", "none")
+    assert spec.references == {"store_id": "gold.dim_store"}
+    assert spec.checks == {"references": "warn"}
+
+
+UNSAFE_GRAIN = (
+    "grain must not contain a surrogate, a control character other than a newline or tab, "
+    "a bidirectional control or a line separator"
+)
+
+
+@pytest.mark.parametrize(
+    ("arguments", "message"),
+    [
+        ({"kind": 1}, "kind must be a string"),
+        ({"kind": "cube"}, "kind must be one of fact, dimension, wide, staging; got 'cube'"),
+        ({"grain": 1}, "grain must be a string"),
+        ({"grain": "  "}, "grain must not be empty: say in one sentence what one row is"),
+        ({"grain": "a\nb"}, "grain must be one line"),
+        ({"grain": "a\x07b"}, UNSAFE_GRAIN),
+        ({"grain": "a\u202eb"}, UNSAFE_GRAIN),
+        ({"grain": "x" * 301}, "grain must be at most 300 characters"),
+        ({"references": ["x"]}, "references must be a dict of strings"),
+        ({"references": {"a": 1}}, "references must be a dict of strings"),
+        ({"checks": {"key": 1}}, "checks must be a dict of strings"),
+        ({"checks": {"rows": "warn"}}, "checks takes only key and references"),
+        ({"checks": {"key": "loud"}}, "checks: key must be block, keep or warn"),
+        (
+            {"key": "none"},
+            "`key: none` is for a fact or a wide table whose rows no columns "
+            "identify; declare `kind: fact` or `kind: wide`, or remove `key: none`",
+        ),
+        ({"kind": "fact", "key": "id"}, "a fact needs grain=: say in one sentence what one row is"),
+        (
+            {"kind": "wide", "grain": "g"},
+            "a wide table needs key=: list the columns that "
+            'identify one row, or write key="none" and say in grain why no columns are unique',
+        ),
+        (
+            {"kind": "dimension", "grain": "g", "key": "none"},
+            "a dimension needs a real key=; "
+            'key="none" is not allowed for a dimension, because nothing could refer to it',
+        ),
+        (
+            {"checks": {"key": "warn"}},
+            "checks: key sets how the key checks fail, but the asset declares no key; declare "
+            "key=, or remove checks: key",
+        ),
+        (
+            {"checks": {"references": "warn"}},
+            "checks: references sets how the reference checks "
+            "fail, but the asset declares no references; declare references=, or remove "
+            "checks: references",
+        ),
+        (
+            {"references": {"a\u200bb": "gold.t"}},
+            "a reference column must not contain a control, "
+            "format or surrogate character or a line separator",
+        ),
+        (
+            {"references": {"a.b": "gold.t"}},
+            "reference column `a.b` cannot name its check `ref_a.b`: "
+            "a check name must not contain '.', '/', a NUL byte or the unit separator",
+        ),
+        (
+            {"references": {"a": "t"}},
+            "reference `a: t` must name a table as `ns.table` or `ns.table.column`",
+        ),
+        (
+            {"references": {"a": "gold.a/b"}},
+            "reference `a: gold.a/b` must name a table as `ns.table` or `ns.table.column`",
+        ),
+        ({"key": ["a"] * 2, "kind": "staging"}, "key column `a` is listed twice"),
+        ({"key": ""}, "a key column must not be empty; write the name of a column of the asset"),
+        (
+            {"key": ["id", ""], "write": "merge"},
+            "a key column must not be empty; write the name of a column of the asset",
+        ),
+        ({"references": {"": "gold.t"}}, "a reference column must not be empty"),
+        (
+            {"references": {"a": "gold.t\nx"}},
+            "reference `a` names a target that must not contain a control, format or surrogate "
+            "character or a line separator",
+        ),
+        (
+            {"references": {"a": "gold.t\u202ex"}},
+            "reference `a` names a target that must not contain a control, format or surrogate "
+            "character or a line separator",
+        ),
+        ({"key": [str(n) for n in range(9)]}, "a key has at most 8 columns; `key:` lists 9"),
+        (
+            {"output": "artifact", "kind": "fact"},
+            "kind does not apply to an artifact asset; remove it",
+        ),
+    ],
+)
+def test_a_wrong_model_is_refused(arguments: dict[str, Any], message: str) -> None:
+    with pytest.raises(ValueError) as caught:
+        lakana.asset(**arguments)
+    assert str(caught.value) == message
+
+
+def test_a_grain_may_hold_a_tab_and_is_stripped() -> None:
+    spec = getattr(lakana.asset(grain="  one\trow per order  ")(lambda: None), ASSET_ATTRIBUTE)
+    assert spec.grain == "one\trow per order"

@@ -3679,7 +3679,7 @@ def test_an_output_this_worker_does_not_know_fails_permanently_and_runs_nothing(
     assert _versions(py) == []
 
 
-@pytest.mark.parametrize("version", [9, 99, "3", 3.0, True, [3], 0, -1, 10**30])
+@pytest.mark.parametrize("version", [10, 99, "3", 3.0, True, [3], 0, -1, 10**30])
 def test_a_manifest_this_worker_cannot_read_fails_permanently(py: PyWorld, version: object) -> None:
     py.deploy()
 

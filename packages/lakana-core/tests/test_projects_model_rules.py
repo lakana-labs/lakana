@@ -1,0 +1,147 @@
+"""The rules of `kind`, `key` and the write model, checked on an asset by itself."""
+
+from __future__ import annotations
+
+import pytest
+
+from lakana_core.projects.asset_model import (
+    key_columns,
+    key_issues,
+    model_issues,
+    write_rule_issues,
+)
+from lakana_core.projects.frontmatter import AssetMetadata, consistency_issues
+
+_T = "gold.fact_orders"
+
+
+@pytest.mark.parametrize(
+    ("metadata", "expected"),
+    [
+        (
+            AssetMetadata(kind="fact", key=("id",)),
+            [
+                "Asset `gold.fact_orders` is a fact and needs `grain:`: say in one sentence "
+                "what one row is."
+            ],
+        ),
+        (
+            AssetMetadata(kind="fact", grain="One row per order."),
+            [
+                "Asset `gold.fact_orders` is a fact and needs `key:`: list the columns that "
+                "identify one row (usually the grain's columns), or write `key: none` and say in "
+                "`grain` why no columns are unique."
+            ],
+        ),
+        (
+            AssetMetadata(kind="dimension", grain="One row per customer.", key="none"),
+            [
+                "Asset `gold.fact_orders` is a dimension and needs `key:`; `key: none` is not "
+                "allowed for a dimension, because nothing could refer to it."
+            ],
+        ),
+        (AssetMetadata(kind="wide", grain="One row per order.", key="none"), []),
+        (AssetMetadata(kind="staging"), []),
+        (AssetMetadata(key=("id",)), []),
+        (
+            AssetMetadata(key="none"),
+            [
+                "`key: none` is for a fact or a wide table whose rows no columns identify; "
+                "declare `kind: fact` or `kind: wide`, or remove `key: none`"
+            ],
+        ),
+        (
+            AssetMetadata(checks={"references": "warn"}),
+            [
+                "`checks: references` sets how the reference checks fail, but the asset "
+                "declares no `references:`; declare `references:`, or remove `checks: references`"
+            ],
+        ),
+        (
+            AssetMetadata(checks={"key": "warn"}),
+            [
+                "`checks: key` sets how the key checks fail, but the asset declares no `key:`; "
+                "declare `key:`, or remove `checks: key`"
+            ],
+        ),
+    ],
+)
+def test_the_kind_rules(metadata: AssetMetadata, expected: list[str]) -> None:
+    """The kind rules of the spec, with its fixed texts."""
+    assert model_issues(metadata, table=_T) == expected
+
+
+def test_a_key_has_at_most_eight_columns_unless_it_merges() -> None:
+    """`key_issues` alone holds the cap; a merge key keeps the previous release's rule (no cap)."""
+    nine = tuple(f"c{i}" for i in range(9))
+    too_many = "a key has at most 8 columns; `key:` lists 9"
+    assert key_issues(nine) == [too_many]
+    assert key_issues(nine, merge=True) == []
+    assert key_issues(nine[:8]) == []
+    assert key_issues("none") == []
+    replaced = AssetMetadata(materialize="table", key=nine)
+    messages = [i.message for i in consistency_issues(replaced, path="assets/gold/f.sql", line=1)]
+    assert messages.count(too_many) == 1
+    merged = AssetMetadata(materialize="table", write="merge", key=nine)
+    messages = [i.message for i in consistency_issues(merged, path="assets/gold/f.sql", line=1)]
+    assert too_many not in messages
+
+
+def test_a_key_column_must_not_be_empty() -> None:
+    empty = "a key column must not be empty; write the name of a column of the asset"
+    assert key_issues(("",)) == [empty]
+    assert key_issues(("id", ""), merge=True) == [empty]
+
+
+@pytest.mark.parametrize(
+    ("write", "key", "watermark", "materialize", "expected"),
+    [
+        ("replace", ("id",), None, "table", []),
+        (None, ("id",), None, "table", []),
+        ("append", ("id",), "ts", "table", []),
+        (None, ("id",), None, "view", []),
+        (None, ("id",), None, "incremental", []),
+        (
+            "replace",
+            (),
+            "ts",
+            "table",
+            ["`write: replace` takes no `watermark:`; to add only new rows use `write: append`"],
+        ),
+        (
+            "merge",
+            (),
+            None,
+            "table",
+            ["`write: merge` needs `key:` — the columns that identify a row"],
+        ),
+        (
+            "merge",
+            "none",
+            None,
+            "table",
+            [
+                "`write: merge` needs key columns; `key: none` says that no columns identify a "
+                "row, so there is nothing to merge on"
+            ],
+        ),
+    ],
+)
+def test_the_write_rules_take_the_one_key(
+    write: str | None,
+    key: tuple[str, ...] | str,
+    watermark: str | None,
+    materialize: str,
+    expected: list[str],
+) -> None:
+    """A key identifies a row for every write mode; only a merge needs one."""
+    assert (
+        write_rule_issues(write, key, watermark, materialize=materialize, evolve_schema=None)
+        == expected
+    )
+
+
+def test_key_columns_reads_none_as_no_columns() -> None:
+    """`none` has no columns; a tuple is its columns."""
+    assert key_columns("none") == ()
+    assert key_columns(("a", "b")) == ("a", "b")

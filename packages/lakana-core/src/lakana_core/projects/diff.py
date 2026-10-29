@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, fields, replace
 from typing import Any
 
 from lakana_core.projects.manifest import (
+    EntryModel,
     entry_decimals,
     entry_keep_versions,
+    entry_model,
     entry_output,
     entry_write,
     job_on_deploy,
@@ -17,6 +19,8 @@ from lakana_core.projects.manifest import (
 
 _SELECTION_KEYS = ("select", "upstream", "downstream")
 _MATERIALIZATION_KEYS = ("materialize", "write_mode", "incremental_key", "evolve_schema")
+_NO_MODEL = EntryModel(kind=None, grain=None, key=(), key_none=False, references=(), checks={})
+"""The model of an entry whose only model field is a key."""
 
 
 def _materialization(entry: dict[str, Any]) -> tuple[object, ...]:
@@ -26,8 +30,9 @@ def _materialization(entry: dict[str, Any]) -> tuple[object, ...]:
     read through the manifest readers, not with `get`: an entry deployed before manifest
     version 3 lacks the keys and reads as "table, keep all, float decimals", exactly like a
     version 3 table entry, and one from before `write` reads its write model from
-    `materialize`, so upgrading the platform alone is not a change. A changed write mode or key
-    is a change of how the table is written.
+    `materialize`, so upgrading the platform alone is not a change. A changed write mode, or the
+    changed key of a merge, is a change of how the table is written; the key of any other write
+    only identifies a row, a model change (`_model`).
 
     Parameters
     ----------
@@ -39,13 +44,35 @@ def _materialization(entry: dict[str, Any]) -> tuple[object, ...]:
     tuple
         The values to compare.
     """
+    write, key, watermark = entry_write(entry)
     return (
         *(entry.get(key) for key in _MATERIALIZATION_KEYS),
         entry_output(entry),
         entry_keep_versions(entry),
         entry_decimals(entry),
-        entry_write(entry),
+        (write, key if write == "merge" else (), watermark),
     )
+
+
+def _model(entry: dict[str, Any]) -> tuple[object, ...]:
+    """Collect what the asset declares about its model.
+
+    Parameters
+    ----------
+    entry
+        One manifest entry.
+
+    Returns
+    -------
+    tuple
+        The model as `entry_model` reads it, without its key (`None` when it declares nothing
+        else, as for a merge asset deployed before models), and the key unless the asset merges
+        on it (that is a materialization change).
+    """
+    model = entry_model(entry)
+    declared = replace(model, key=()) if model is not None else None
+    write, key, _ = entry_write(entry)
+    return (None if declared == _NO_MODEL else declared, key if write != "merge" else ())
 
 
 def _job_changes(before: dict[str, Any], after: dict[str, Any]) -> list[str]:
@@ -101,11 +128,14 @@ class DeployDiff:
     adopted
         New in this manifest; the table exists but no project version produces it.
     materialization_changed
-        Materialization, write mode, merge key, watermark or evolve flag changed.
+        Materialization, write mode, the key of a merge, watermark or evolve flag changed.
     sql_changed
         Normalized SQL changed.
     metadata_changed
         Description, owner, tags or column docs changed.
+    model_changed
+        Kind, grain, references, the checks overrides, or the key of an asset that does not
+        merge, changed.
     jobs_added
         Names of jobs this manifest declares and the current one does not.
     jobs_removed
@@ -125,6 +155,7 @@ class DeployDiff:
     materialization_changed: tuple[str, ...] = ()
     sql_changed: tuple[str, ...] = ()
     metadata_changed: tuple[str, ...] = ()
+    model_changed: tuple[str, ...] = ()
     jobs_added: tuple[str, ...] = ()
     jobs_removed: tuple[str, ...] = ()
     jobs_changed: tuple[str, ...] = ()
@@ -214,6 +245,7 @@ def diff_manifests(
         metadata_changed=tuple(
             t for t in common if before[t].get("metadata") != after[t].get("metadata")
         ),
+        model_changed=tuple(t for t in common if _model(before[t]) != _model(after[t])),
         jobs_added=tuple(sorted(set(jobs_after) - set(jobs_before))),
         jobs_removed=tuple(sorted(set(jobs_before) - set(jobs_after))),
         jobs_changed=tuple(

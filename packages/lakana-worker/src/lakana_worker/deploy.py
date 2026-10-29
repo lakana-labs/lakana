@@ -67,6 +67,7 @@ from lakana_core.projects.lockfile import (
     used_indexes,
 )
 from lakana_core.projects.manifest import build_manifest, manifest_tables
+from lakana_core.projects.model import project_model_issues
 from lakana_core.projects.package_indexes import registered_indexes
 from lakana_core.projects.package_sources import KnownSources, RegisteredIndex
 from lakana_core.projects.parse import ParsedAsset, parse_assets
@@ -781,6 +782,9 @@ def _deploy(
             checkout.checks, limits=limits, default_on_failure=config.checks.on_failure
         )
         graph = build_graph(assets)
+        resolved, reference_issues = service.resolve_model_references(
+            principal, environment_name, repository_id, assets
+        )
         has_python = any(asset.kind == "python" for asset in assets)
         sources = KnownSources(registered_indexes(session), settings.index_url)
         used = used_indexes(checkout.lock, sources) if has_python else ()
@@ -815,6 +819,8 @@ def _deploy(
             + service.validate_checks_against_environment(
                 principal, environment_name, repository_id, checks, assets
             )
+            + project_model_issues(assets)
+            + reference_issues
         )
         if issues:
             raise ProjectValidationError(issues)
@@ -829,6 +835,7 @@ def _deploy(
             lock_sha256=lock_digest(checkout.lock) if checkout.lock is not None else None,
             package_indexes=[index.name for index in used],
             checks=checks,
+            references=resolved,
             artifacts=service.artifact_inputs(
                 principal, environment_name, graph, repository_id=repository_id
             ),

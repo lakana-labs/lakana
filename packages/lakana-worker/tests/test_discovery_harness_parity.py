@@ -34,6 +34,7 @@ from lakana_core.projects.asset_model import (
     EVOLVE_NEEDS_REPLACE,
     MAX_CONNECTIONS,
     MAX_KEEP_VERSIONS,
+    MODEL_KINDS,
     WRITE_CHOICES,
     ParsedAsset,
 )
@@ -337,6 +338,34 @@ _ARGUMENT_CASES: dict[str, str] = {
     "evolve-schema-on-artifact": 'output="artifact", evolve_schema=True',
     "evolve-schema-off-on-artifact": 'output="artifact", evolve_schema=False',
     "watermark-a-list": "write=\"append\", watermark=['ts']",
+    "kind-fact-complete": 'kind="fact", grain="One row per order.", key="id"',
+    "kind-fact-no-grain": 'kind="fact", key="id"',
+    "kind-unknown": 'kind="cube"',
+    "kind-dimension-key-none": 'kind="dimension", grain="g", key="none"',
+    "key-none-without-kind": 'key="none"',
+    "key-nine-columns": 'key=["a","b","c","d","e","f","g","h","i"]',
+    "grain-two-lines": 'grain="a\\nb"',
+    "grain-bell": 'grain="a\\x07b"',
+    "grain-tab": 'grain="a\\tb"',
+    "grain-bidi-override": 'grain="a\\u202eb"',
+    "references-short": 'references={"store_id": "gold.dim_store"}',
+    "references-no-namespace": 'references={"store_id": "dim_store"}',
+    "references-bad-column": 'references={"a/b": "gold.dim_store"}',
+    "references-dotted-column": 'references={"a.b": "gold.dim_store"}',
+    "references-slash-in-target": 'references={"x": "gold.a/b"}',
+    "references-newline-in-target": 'references={"x": "gold.a\\nb"}',
+    "references-bell-in-target": 'references={"x": "gold.a\\x07b"}',
+    "references-bidi-in-target": 'references={"x": "gold.a\\u202eb"}',
+    "references-dot-dot-in-target": 'references={"x": "gold..dim_store"}',
+    "references-long-form-dot-dot": 'references={"x": "gold.dim_store.."}',
+    "references-empty-column": 'references={"": "gold.dim_store"}',
+    "key-empty-string": 'key=""',
+    "key-empty-column": 'write="merge", key=[""]',
+    "key-none-on-merge": 'write="merge", key="none"',
+    "key-nine-columns-on-merge": 'write="merge", key=["a","b","c","d","e","f","g","h","i"]',
+    "checks-unknown-family": 'checks={"rows": "warn"}',
+    "checks-bad-mode": 'checks={"key": "loud"}',
+    "checks-without-key": 'checks={"key": "warn"}',
     "write-on-artifact": 'output="artifact", write="append", watermark="ts"',
     "key-on-artifact": 'output="artifact", key=["id"]',
     "replace-and-empty-key-on-artifact": 'output="artifact", write="replace", key=[]',
@@ -440,6 +469,40 @@ def test_deploy_and_the_decorator_accept_and_refuse_the_same_arguments(name: str
     assert deploy_accepts == (refusal is None), refusal
     if refusal is not None:
         assert "9999" not in refusal
+
+
+_BOTH_REFUSE = (
+    "references-newline-in-target",
+    "references-bell-in-target",
+    "references-bidi-in-target",
+    "references-dot-dot-in-target",
+    "references-long-form-dot-dot",
+    "references-empty-column",
+    "key-empty-string",
+    "key-empty-column",
+    "key-none-on-merge",
+    "key-nine-columns",
+)
+"""Cases that must be refused, not merely agreed on: an unsafe or empty name, `none` on a merge."""
+
+_BOTH_ACCEPT = ("key-nine-columns-on-merge",)
+"""A merge key keeps the rule of the previous release: no column limit (the cap comes later)."""
+
+
+@pytest.mark.parametrize("name", _BOTH_REFUSE)
+def test_deploy_and_the_decorator_both_refuse(name: str) -> None:
+    source = _PLAIN.replace("@asset()", f"@asset({_ARGUMENT_CASES[name]})")
+    assert _discovered(source) is None
+    refusal = _call(source)
+    assert refusal is not None
+    assert "\n" not in refusal and "\x07" not in refusal and "\u202e" not in refusal
+
+
+@pytest.mark.parametrize("name", _BOTH_ACCEPT)
+def test_deploy_and_the_decorator_both_accept(name: str) -> None:
+    source = _PLAIN.replace("@asset()", f"@asset({_ARGUMENT_CASES[name]})")
+    assert _discovered(source) is not None
+    assert _call(source) is None
 
 
 @pytest.mark.parametrize("name", sorted(_ACCEPTED))
@@ -552,3 +615,7 @@ def test_the_sdk_routes_the_kinds_the_worker_routes() -> None:
 
     assert {kind.value for kind in PROXY_KINDS} == sdk_connections._PROXY_KINDS
     assert sdk_connections._RELAY_HOST == RELAY_ALIAS
+
+
+def test_the_model_kinds_are_the_same_in_core_and_the_sdk() -> None:
+    assert sdk_assets.MODEL_KINDS == MODEL_KINDS == ("fact", "dimension", "wide", "staging")

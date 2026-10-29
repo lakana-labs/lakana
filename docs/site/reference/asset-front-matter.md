@@ -66,7 +66,7 @@ function returns. A Python asset that appends must return only the rows past `ct
 
 | `write:` | What a run does | Needs |
 |---|---|---|
-| `replace` (the default) | Replaces every row of the table with what the `SELECT` returns. | neither `key:` nor `watermark:` (it takes neither) |
+| `replace` (the default) | Replaces every row of the table with what the `SELECT` returns. | no `watermark:` (a `key:` is allowed: it says which columns identify a row) |
 | `append` | The first run creates the table with every row; each later run adds only the rows whose `watermark` column is above the highest value already in the table. | `watermark:` |
 | `merge` | Matches the rows on `key:`: a row whose key the table has replaces that row, any other row is added. Nothing is deleted. With `watermark:`, a run reads only the rows above the highest value in the table. | `key:` (one or more columns); `watermark:` is optional |
 
@@ -166,8 +166,7 @@ Each of these fails the deploy with an issue at the block's line:
 | ``write: must be one of replace, append, merge; got 'upsert'`` | Another value. |
 | ``` `write: append` needs `watermark:` — the column whose largest value the next run starts after ``` | `append` without `watermark:`. |
 | ``` `write: merge` needs `key:` — the columns that identify a row ``` | `merge` without `key:`. |
-| ``` `write: replace` takes neither `key:` nor `watermark:` ``` | `key:` or `watermark:` without `write: append` or `merge`. |
-| ``` `write: append` takes no `key:`; to merge rows on a key use `write: merge` ``` | `append` with `key:`. |
+| ``` `write: replace` takes no `watermark:`; to add only new rows use `write: append` ``` | `replace` with `watermark:`. |
 | ``key column `id` is listed twice`` | A repeated key column. |
 | ``` `materialize: view` cannot take `write:` ``` | A view with `write:`. |
 | ``` `evolve_schema` works with `write: append` only ``` | `evolve_schema` on any other asset. |
@@ -192,3 +191,111 @@ hint: silver.orders_log: `materialize: incremental` is now written `write: appen
 
 A project version that uses `write: append` or `merge` needs workers of this release or later: a
 worker of an earlier one refuses its manifest instead of running the asset as a replace.
+
+## Model fields: kind, grain, key and references
+
+Five keys say what the asset's table is, so that the people who read it, and the checks that
+guard it, know what one row stands for and which tables it points at. A Python asset takes the
+same names as arguments of `@asset(...)` ([Python assets](python-assets.md)). The keys of an
+asset's block:
+
+```yaml
+kind: fact                            # fact | dimension | wide | staging
+grain: One row per store and calendar day.
+key: [date, store_id]                 # one column may be written as a plain string
+references:
+  store_id: gold.dim_store            # short form: that table's single key column
+  product_sku: gold.dim_product.sku   # long form: a column you name
+checks:
+  key: block                          # block | warn | keep
+  references: warn
+```
+
+| Key | What it says | Rules |
+|---|---|---|
+| `kind` | `fact`: events or measurements at a grain. `dimension`: the things facts refer to. `wide`: a denormalised table for consumption. `staging`: an intermediate step, not for consumers. | One of the four. Without `kind`, no rule of the table below applies. |
+| `grain` | One sentence saying what exactly one row stands for. It is for people. | One line, not empty, at most 300 characters. |
+| `key` | The columns that identify one row; usually the grain written as columns. It is also the key `write: merge` matches rows on: there is one key, not a second one for merging. | Distinct, non-empty columns of the `SELECT`, at most 8 unless the asset merges on them, or `none` where the kind allows it (below). Allowed with every write mode. |
+| `references` | For each column, the table its values point at. A null in a reference column is allowed; a reference that is required is also in `key`. | The column is a column of the `SELECT`; the target is checked as "References" below says. |
+| `checks` | How the checks generated from `key` and `references` fail: `block`, `warn` or `keep`, with the rules of a check's `on_failure` (`keep` never on a view, an append or a merge). | Only `key` and `references`, and only for a field the asset declares. Lakana does not generate these checks yet: a deploy checks the value and records it. |
+
+### Rules for each kind
+
+| `kind` | Requires | Notes |
+|---|---|---|
+| `fact` | `grain` **and** `key` | A fact whose rows really have no unique set of columns (for example raw readings where identical rows are valid) declares `key: none` and says why in `grain`. |
+| `dimension` | `grain` **and** a `key` | `key: none` is refused: a dimension without a key cannot be referenced. |
+| `wide` | `grain` **and** `key` | `key: none` is allowed, as for a fact. |
+| `staging` | nothing | It may still declare `key` and `references`; if it does, they are checked. |
+
+`key: none` needs `kind: fact` or `kind: wide`, and a merge refuses it: there is nothing to merge
+on.
+
+### References
+
+A reference names its target in one of two forms:
+
+- **Short form**, `store_id: gold.dim_store`: the target's key column. The target must declare a
+  key of exactly one column.
+- **Long form**, `product_sku: gold.dim_product.sku`: the column you name. The target need not
+  declare a key, and the column must be one of its columns when the deploy knows them.
+
+A deploy resolves each target against the project first, then against the environment it deploys
+to:
+
+- **A table of the project.** Its block says its key and its columns.
+- **A table another repository builds.** It counts once it exists in the environment and the
+  deploying principal may read it (`READ_TABLE`); its key comes from that repository's current
+  deploy. A table that does not exist yet, and one you may not read, get the same message, which
+  says nothing else about the table: deploy the other repository first, or ask for `READ_TABLE`.
+  When a run principal is bound to the repository in the environment
+  (`lakana deployments set-run-as`), it must be able to read the target as well, since its runs
+  read it; otherwise the deploy names the target and the run principal.
+- **A table no project builds.** It declares no key, so it needs the long form.
+
+A `fact`, `dimension` or `wide` table may not reference a `staging` table: a model points at
+modelled tables.
+
+A namespace may have several levels, so `a.b.c` can read two ways: as the table `a.b.c`, or as the
+column `c` of the table `a.b`. When only one of them is a table, that one is meant. When both are,
+the deploy refuses the reference unless it knows that `a.b` has no column `c`; rename one of the
+two tables.
+
+A `SELECT *` or a Python asset has no columns at deploy, so its key and reference columns are
+checked when it runs.
+
+### Errors
+
+Each of these fails the deploy with an issue at the block's line:
+
+| Issue | Cause |
+|---|---|
+| ``kind: must be one of fact, dimension, wide, staging; got 'cube'`` | Another kind. |
+| ``grain: must not be empty: say in one sentence what one row is``, ``grain: must be one line``, ``grain: must be at most 300 characters`` | A grain that is empty, of several lines or too long. |
+| ``Asset `gold.fact_orders` is a fact and needs `grain:`: say in one sentence what one row is.`` | A `fact`, `dimension` or `wide` table without `grain`. |
+| ``Asset `gold.fact_orders` is a fact and needs `key:`: list the columns that identify one row (usually the grain's columns), or write `key: none` and say in `grain` why no columns are unique.`` | A `fact` or `wide` table without `key`. |
+| ``Asset `gold.dim_customer` is a dimension and needs `key:`; `key: none` is not allowed for a dimension, because nothing could refer to it.`` | A dimension without a key, or with `key: none`. |
+| ``` `key: none` is for a fact or a wide table whose rows no columns identify; declare `kind: fact` or `kind: wide`, or remove `key: none` ``` | `key: none` on another kind, or without `kind`. |
+| ``` `write: merge` needs key columns; `key: none` says that no columns identify a row, so there is nothing to merge on ``` | `write: merge` with `key: none`. |
+| ``a key has at most 8 columns; `key:` lists 9`` | A key of more than 8 columns on an asset that does not merge. A merge key has no such limit in this release. |
+| ``a key column must not be empty; write the name of a column of the asset`` | `key: ""` or an empty name in the list. |
+| ``Key column `id` is not a column of `gold.fact_orders`'s SELECT; add it to the SELECT, or change `key:`.`` | A key column the `SELECT` does not return. |
+| ``Reference column `store_id` is not a column of `gold.fact_orders`'s SELECT; add it to the SELECT, or remove the reference.`` | A reference column the `SELECT` does not return. |
+| ``references: reference `store_id: dim_store`: … Write `ns.table` or `ns.table.column`.`` | A target that is not a table name. |
+| ``references: reference `store_id` names a target that must not contain a control, format or surrogate character or a line separator`` | A target with a line break, a control character or a bidirectional control. |
+| ``references: a reference column must not be empty`` | A reference whose column is `""`. |
+| ``Reference target `gold.dim_store` does not exist in environment `prod`, or you may not read it; build it first, or ask for READ_TABLE on it.`` | The target is neither in the project nor a table of the environment that you may read. |
+| ``Reference `customer_id: gold.dim_customer`: `gold.dim_customer` declares no key. Declare `key:` in its asset, or name the column: `customer_id: gold.dim_customer.<column>`.`` | The short form, for a target without a key (`key: none` too). |
+| ``Reference `store_id: gold.dim_store`: `gold.dim_store` has a key of 2 columns; name the column: `store_id: gold.dim_store.<column>`.`` | The short form, for a target with a key of several columns. |
+| ``Reference `store_id: gold.dim_store.nope`: `gold.dim_store` has no column `nope`; name one of its columns, or use the short form to point at its key.`` | The long form names a column the target does not have. |
+| ``Reference target `dim.store` cannot be read by `svc-etl`, the run principal bound to this repository in `prod`, so its runs could not check it; grant it READ_TABLE on `dim.store`, or bind another run principal with `lakana deployments set-run-as`.`` | You may read the target, but the run principal bound to the repository may not. |
+| ``` `gold.fact_orders` (a fact) references `staging.orders_clean`, a staging table; point it at a modelled table. ``` | A `fact`, `dimension` or `wide` table references a `staging` table. |
+| ``Reference `store_id: a.b.store_id`: `a.b.store_id` is a table, and so is `a.b`, which has a column `store_id`; rename one of them so that the reference names one thing.`` | A target that reads two ways (above). When the deploy does not know the columns of `a.b`, the message says ``which would read `store_id` as its column``. |
+| ``checks: takes only key and references``, ``checks: key must be block, keep or warn`` | Another check family or failure mode. |
+| ``` `checks: key` sets how the key checks fail, but the asset declares no `key:`; declare `key:`, or remove `checks: key` ``` | A `checks` family for a field the asset does not declare (`references` likewise). |
+
+A project version in which an asset declares a model field (`key:` alone counts, so every project
+with a `write: merge` asset) needs workers of this release or later: a worker of an earlier one
+refuses its manifest. A deploy's changes list a table whose `kind`, `grain`, `references`,
+`checks`, or the `key` of an asset that does not merge, changed as `model_changed`; the key of a
+merge stays a change of how the table is written.

@@ -10,8 +10,15 @@ import pydantic
 from pydantic import Field, StrictBool, field_validator
 
 from lakana_core.artifacts.manifest import shown
+from lakana_core.errors import ValidationError
+from lakana_core.identifiers import TableRef, validate_path_component
 from lakana_core.projects.asset_model import (
+    CHECK_FAMILIES,
+    CHECK_MODES,
     KEY_COLUMN_MESSAGE,
+    KEY_NONE,
+    MAX_GRAIN_CHARS,
+    MODEL_KINDS,
     WATERMARK_MESSAGE,
     WRITE_CHOICES,
     key_issues,
@@ -76,8 +83,18 @@ class AssetMetadata(SafeTextModel):
     write
         ``replace``, ``append`` or ``merge``; `None` when the asset does not say (it then
         replaces, or appends for ``materialize: incremental``).
+    kind
+        ``fact``, ``dimension``, ``wide`` or ``staging``; `None` when the asset does not say.
+    grain
+        One line saying what one row of the table is.
     key
-        The columns that identify a row, for ``write: merge``.
+        The columns that identify a row (needed for ``write: merge``), or ``none`` to say that
+        no columns identify one.
+    references
+        Column → the table (``ns.table``, or ``ns.table.column``) its values must exist in.
+    checks
+        Check family (``key``, ``references``) → what a failure does (``block``, ``keep`` or
+        ``warn``).
     watermark
         The column whose largest value the next run starts after, for ``write: append`` (and
         optionally ``merge``).
@@ -98,7 +115,11 @@ class AssetMetadata(SafeTextModel):
     incremental_key: str | None = None
     evolve_schema: StrictBool | None = None
     write: Literal["replace", "append", "merge"] | None = None
-    key: tuple[str, ...] = ()
+    kind: Literal["fact", "dimension", "wide", "staging"] | None = None
+    grain: str | None = None
+    key: tuple[str, ...] | Literal["none"] = ()
+    references: dict[str, str] = Field(default_factory=dict)
+    checks: dict[str, str] = Field(default_factory=dict)
     watermark: str | None = None
     columns: dict[str, str] = Field(default_factory=dict)
     retries: int | None = Field(default=None, ge=0, le=MAX_RETRIES, strict=True)
@@ -153,9 +174,52 @@ class AssetMetadata(SafeTextModel):
             raise ValueError(write_choice_message(shown(value)).removeprefix("write "))
         return value
 
+    @field_validator("kind", mode="before")
+    @classmethod
+    def _kind_is_a_choice(cls, value: object) -> object:
+        """Refuse a `kind` that is not one of `MODEL_KINDS`, naming them.
+
+        Parameters
+        ----------
+        value
+            The field's raw value.
+
+        Returns
+        -------
+        object
+            `value`, for the type check that follows.
+
+        Raises
+        ------
+        ValueError
+            If it is a string that is not a kind.
+        """
+        if isinstance(value, str) and value not in MODEL_KINDS:
+            raise ValueError(f"must be one of {', '.join(MODEL_KINDS)}; got '{shown(value)}'")
+        return value
+
+    @field_validator("key", mode="before")
+    @classmethod
+    def _key_is_one_spelling(cls, value: object) -> object:
+        """Read a single column name as a one-column key; `none` stays the escape.
+
+        Parameters
+        ----------
+        value
+            The field's raw value.
+
+        Returns
+        -------
+        object
+            `value`, or a one-tuple for a string other than `none`.
+        """
+        if isinstance(value, str) and value != KEY_NONE:
+            return (value,)
+        return value
+
     @field_validator("key")
     @classmethod
-    def _key_is_safe(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+    def _key_is_safe(cls, value: tuple[str, ...] | str) -> tuple[str, ...] | str:
         """Refuse a key column with an unsafe character.
 
         A column listed twice is a consistency issue (`consistency_issues`), reported with the
@@ -168,7 +232,7 @@ class AssetMetadata(SafeTextModel):
 
         Returns
         -------
-        tuple of str
+        tuple of str or str
             `value`.
 
         Raises
@@ -176,8 +240,112 @@ class AssetMetadata(SafeTextModel):
         ValueError
             If a column has an unsafe character.
         """
-        if any(unsafe_identifier(column) for column in value):
+        if not isinstance(value, str) and any(unsafe_identifier(column) for column in value):
             raise ValueError(KEY_COLUMN_MESSAGE)
+        return value
+
+    @field_validator("grain")
+    @classmethod
+    def _grain_is_one_line(cls, value: str | None) -> str | None:
+        """Refuse a grain that is empty, long, several lines or has an unsafe character.
+
+        Parameters
+        ----------
+        value
+            The field's value.
+
+        Returns
+        -------
+        str or None
+            `value` without surrounding whitespace.
+
+        Raises
+        ------
+        ValueError
+            If it breaks one of those rules.
+        """
+        if value is None:
+            return value
+        text = value.strip()
+        if not text:
+            raise ValueError("must not be empty: say in one sentence what one row is")
+        if "\n" in text:
+            raise ValueError("must be one line")
+        if len(text) > MAX_GRAIN_CHARS:
+            raise ValueError(f"must be at most {MAX_GRAIN_CHARS} characters")
+        if unsafe_free_text(value):
+            raise ValueError(FREE_TEXT_MESSAGE)
+        return text
+
+    @field_validator("references")
+    @classmethod
+    def _references_are_tables(cls, value: dict[str, str]) -> dict[str, str]:
+        """Refuse a reference column or target that cannot be used.
+
+        Parameters
+        ----------
+        value
+            The field's value.
+
+        Returns
+        -------
+        dict
+            `value`.
+
+        Raises
+        ------
+        ValueError
+            If a column has an unsafe character or cannot name its check, or a target is not
+            a table name.
+        """
+        for column, target in value.items():
+            if not column:
+                raise ValueError("a reference column must not be empty")
+            if unsafe_identifier(column):
+                raise ValueError(f"a reference column {IDENTIFIER_MESSAGE}")
+            if unsafe_identifier(target):
+                # Before any message shows the target: it could forge a line of the issues.
+                raise ValueError(f"reference `{column}` names a target that {IDENTIFIER_MESSAGE}")
+            try:
+                validate_path_component(f"ref_{column}", what="Check name")
+            except ValidationError as exc:
+                raise ValueError(
+                    f"reference column `{column}` cannot name its check `ref_{column}`: {exc}"
+                ) from exc
+            try:
+                TableRef.from_dotted("-", target)
+            except ValidationError as exc:
+                raise ValueError(
+                    f"reference `{column}: {shown(target)}`: {exc} "
+                    "Write `ns.table` or `ns.table.column`."
+                ) from exc
+        return value
+
+    @field_validator("checks")
+    @classmethod
+    def _checks_are_known(cls, value: dict[str, str]) -> dict[str, str]:
+        """Refuse a check family or failure mode that does not exist.
+
+        Parameters
+        ----------
+        value
+            The field's value.
+
+        Returns
+        -------
+        dict
+            `value`.
+
+        Raises
+        ------
+        ValueError
+            If a family is not in `CHECK_FAMILIES` or a mode not in `CHECK_MODES`.
+        """
+        for family, mode in value.items():
+            if family not in CHECK_FAMILIES:
+                raise ValueError("takes only key and references")
+            if mode not in CHECK_MODES:
+                raise ValueError(f"{family} must be block, keep or warn")
         return value
 
     @field_validator("watermark")
@@ -510,7 +678,7 @@ def consistency_issues(
             materialize=metadata.materialize,
             evolve_schema=metadata.evolve_schema,
         ),
-        *key_issues(metadata.key),
+        *key_issues(metadata.key, merge=metadata.write == "merge"),
     ]
     issues.extend(ProjectIssue(path, line, message) for message in rules)
     return issues

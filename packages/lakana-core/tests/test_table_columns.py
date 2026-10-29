@@ -20,7 +20,11 @@ from sqlalchemy.orm import Session
 
 from lakana_core.auth import PrincipalRef
 from lakana_core.catalog import columns
-from lakana_core.catalog.columns import backfill_table_columns, sync_table_columns
+from lakana_core.catalog.columns import (
+    backfill_table_columns,
+    stored_columns,
+    sync_table_columns,
+)
 from lakana_core.catalog.json_schema import ColumnSpec
 from lakana_core.catalog.service import CatalogService
 from lakana_core.identifiers import NamespacePath, TableRef
@@ -175,6 +179,28 @@ def test_sync_keeps_the_rows_it_can_and_is_idempotent(
 
     assert _stored(session, "orders") == [("status", "string", 0), ("id", "long", 1)]
     assert {r.name: r.id for r in session.scalars(select(TableColumn))} == before
+
+
+def test_stored_columns_reads_names_and_types_in_position_order(
+    session: Session, principal: PrincipalRef, silver: CatalogService
+) -> None:
+    """A table's rows in position order, `{}` without rows, `None` for no such table."""
+    silver.create_table(principal, _ORDERS, schema=_SCHEMA)
+    silver.create_table(principal, TableRef("dev", _SILVER, "bare"), schema=_SCHEMA)
+    table_id = session.scalars(select(Table.id).where(Table.name == "orders")).one()
+    sync_table_columns(
+        session, table_id, [ColumnSpec("status", "string", True), ColumnSpec("id", "long", False)]
+    )
+    bare_id = session.scalars(select(Table.id).where(Table.name == "bare")).one()
+    session.execute(delete(TableColumn).where(TableColumn.table_id == bare_id))
+    session.commit()
+
+    stored = stored_columns(session, "dev", "silver.orders")
+    assert stored == {"status": "string", "id": "long"}
+    assert list(stored or {}) == ["status", "id"]
+    assert stored_columns(session, "dev", "silver.bare") == {}
+    assert stored_columns(session, "dev", "silver.missing") is None
+    assert stored_columns(session, "dev", "nodot") is None
 
 
 def test_backfill_fills_a_table_without_rows_and_skips_a_filled_one(

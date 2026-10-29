@@ -30,6 +30,25 @@ MAX_CONNECTIONS = 16
 DEFAULT_DECIMALS = "float"
 """What an asset without the option, and a manifest entry without the key, means."""
 
+MODEL_KINDS = ("fact", "dimension", "wide", "staging")
+"""What an asset's `kind:` may say. `lakana.assets.MODEL_KINDS` repeats it (a parity test
+pins both, added with the decorator's arguments)."""
+
+CHECK_FAMILIES = ("key", "references")
+"""The generated checks an asset's `checks:` may set the failure mode of."""
+
+CHECK_MODES = ("block", "keep", "warn")
+"""What a failed check does; `lakana_core.projects.checks.ON_FAILURE` is this tuple."""
+
+KEY_NONE = "none"
+"""`key: none`: the explicit statement that no columns identify a row."""
+
+MAX_KEY_COLUMNS = 8
+"""The most columns a key lists; `lakana.assets` repeats the number, as it may not import core."""
+
+MAX_GRAIN_CHARS = 300
+"""The longest `grain:`, in characters."""
+
 WRITE_CHOICES = ("replace", "append", "merge")
 """What a run does to an asset's table: replace every row, append the rows past the watermark, or
 merge the rows on a key. `lakana.assets.WRITE_CHOICES` is the same (a parity test pins both)."""
@@ -38,8 +57,6 @@ APPEND_NEEDS_WATERMARK = (
     "`write: append` needs `watermark:` — the column whose largest value the next run starts after"
 )
 MERGE_NEEDS_KEY = "`write: merge` needs `key:` — the columns that identify a row"
-APPEND_TAKES_NO_KEY = "`write: append` takes no `key:`; to merge rows on a key use `write: merge`"
-REPLACE_TAKES_NEITHER = "`write: replace` takes neither `key:` nor `watermark:`"
 VIEW_TAKES_NO_WRITE = "`materialize: view` cannot take `write:`"
 USE_ONE_SPELLING = "use one: `write: append` with `watermark:` replaces `materialize: incremental`"
 EVOLVE_NEEDS_APPEND = "`evolve_schema` works with `write: append` only"
@@ -49,8 +66,109 @@ EVOLVE_NEEDS_REPLACE = (
 )
 """A Python asset evolves its schema only when it replaces its table: its upload of an append
 or a merge cannot change the schema."""
+REPLACE_TAKES_NO_WATERMARK = (
+    "`write: replace` takes no `watermark:`; to add only new rows use `write: append`"
+)
+MERGE_KEY_NONE = (
+    "`write: merge` needs key columns; `key: none` says that no columns identify a row, so "
+    "there is nothing to merge on"
+)
+KEY_NONE_NEEDS_KIND = (
+    "`key: none` is for a fact or a wide table whose rows no columns identify; declare "
+    "`kind: fact` or `kind: wide`, or remove `key: none`"
+)
+_NEEDS_GRAIN = (
+    "Asset `{table}` is {article} and needs `grain:`: say in one sentence what one row is."
+)
+_NEEDS_KEY = (
+    "Asset `{table}` is {article} and needs `key:`: list the columns that identify one row "
+    "(usually the grain's columns), or write `key: none` and say in `grain` why no columns are "
+    "unique."
+)
+_DIMENSION_KEY = (
+    "Asset `{table}` is a dimension and needs `key:`; `key: none` is not allowed for a "
+    "dimension, because nothing could refer to it."
+)
+_ARTICLE = {"fact": "a fact", "dimension": "a dimension", "wide": "a wide table"}
+_FAMILY_UNUSED = (
+    "`checks: {family}` sets how the {what} checks fail, but the asset declares no `{field}:`; "
+    "declare `{field}:`, or remove `checks: {family}`"
+)
+EMPTY_KEY_COLUMN = "a key column must not be empty; write the name of a column of the asset"
 KEY_COLUMN_MESSAGE = f"a key column {IDENTIFIER_MESSAGE}"
 WATERMARK_MESSAGE = f"watermark {IDENTIFIER_MESSAGE}"
+
+
+@dataclass(frozen=True)
+class ResolvedReference:
+    """One declared reference, with its target resolved.
+
+    Parameters
+    ----------
+    column
+        The referencing column of the asset.
+    target
+        The dotted name of the table it points at.
+    target_column
+        The column of the target it must match: the named one (long form), or the target's
+        single key column (short form).
+    """
+
+    column: str
+    target: str
+    target_column: str
+
+
+def key_columns(key: Sequence[str] | str) -> tuple[str, ...]:
+    """Read a declared key as its columns.
+
+    Parameters
+    ----------
+    key
+        A tuple of columns, or `KEY_NONE`.
+
+    Returns
+    -------
+    tuple of str
+        The columns; empty for `KEY_NONE` and for no key.
+    """
+    return () if isinstance(key, str) else tuple(key)
+
+
+def model_issues(metadata: AssetMetadata, *, table: str) -> list[str]:
+    """Check an asset's model fields against the rules of its kind.
+
+    Parameters
+    ----------
+    metadata
+        The asset's merged metadata.
+    table
+        Its dotted table name, for the messages.
+
+    Returns
+    -------
+    list of str
+        The spec's fixed texts for a missing grain or key, a dimension's `key: none`, a
+        `key: none` without a kind that allows it, and a `checks:` family the asset has nothing
+        for; empty when the fields agree.
+    """
+    kind, key = metadata.kind, metadata.key
+    issues: list[str] = []
+    if kind in _ARTICLE and not metadata.grain:
+        issues.append(_NEEDS_GRAIN.format(table=table, article=_ARTICLE[kind]))
+    if kind == "dimension" and key == KEY_NONE:
+        issues.append(_DIMENSION_KEY.format(table=table))
+    elif kind in _ARTICLE and not key:
+        issues.append(_NEEDS_KEY.format(table=table, article=_ARTICLE[kind]))
+    elif key == KEY_NONE and kind not in ("fact", "wide"):
+        issues.append(KEY_NONE_NEEDS_KIND)
+    if "key" in metadata.checks and not key_columns(key):
+        issues.append(_FAMILY_UNUSED.format(family="key", what="key", field="key"))
+    if "references" in metadata.checks and not metadata.references:
+        issues.append(
+            _FAMILY_UNUSED.format(family="references", what="reference", field="references")
+        )
+    return issues
 
 
 def write_choice_message(write: str) -> str:
@@ -69,32 +187,42 @@ def write_choice_message(write: str) -> str:
     return f"write must be one of {', '.join(WRITE_CHOICES)}; got '{write}'"
 
 
-def key_issues(key: Sequence[str]) -> list[str]:
-    """Check the columns of a merge key on their own.
+def key_issues(key: Sequence[str] | str, *, merge: bool = False) -> list[str]:
+    """Check the columns of a key on their own.
 
     Parameters
     ----------
     key
-        The key columns as given.
+        The key columns as given, or `KEY_NONE`.
+    merge
+        Whether the asset merges on the key. A merge key keeps the rule of the release before
+        model fields: no column limit.
 
     Returns
     -------
     list of str
-        One message for a column with an unsafe character (the first), and one per column
-        listed twice; empty when the key is fine.
+        One message for a column with an unsafe character (the first), one for an empty column,
+        one per column listed twice, and, unless the asset merges, one for more than
+        `MAX_KEY_COLUMNS` columns; empty when the key is fine.
     """
+    if key == KEY_NONE:
+        return []
     issues = [KEY_COLUMN_MESSAGE] if any(unsafe_identifier(column) for column in key) else []
+    if any(not column for column in key):
+        issues.append(EMPTY_KEY_COLUMN)
     seen: set[str] = set()
     for column in key:
-        if column in seen and not unsafe_identifier(column):
+        if column in seen and column and not unsafe_identifier(column):
             issues.append(f"key column `{column}` is listed twice")
         seen.add(column)
+    if not merge and len(key) > MAX_KEY_COLUMNS:
+        issues.append(f"a key has at most {MAX_KEY_COLUMNS} columns; `key:` lists {len(key)}")
     return issues
 
 
 def write_rule_issues(
     write: str | None,
-    key: Sequence[str],
+    key: Sequence[str] | str,
     watermark: str | None,
     *,
     materialize: str | None,
@@ -110,7 +238,7 @@ def write_rule_issues(
     write
         ``replace``, ``append``, ``merge``, or `None` when the asset does not say.
     key
-        The merge key; empty when not given.
+        The key columns, `KEY_NONE`, or empty when not given.
     watermark
         The watermark column, or `None`.
     materialize
@@ -123,21 +251,23 @@ def write_rule_issues(
     list of str
         The messages; empty when the model is consistent.
     """
+    key_none = key == KEY_NONE
+    columns = key_columns(key)
     if materialize == "view":
         issues = [VIEW_TAKES_NO_WRITE] if write is not None else []
         return [*issues, EVOLVE_NEEDS_APPEND] if evolve_schema is not None else issues
     if materialize == "incremental":
-        return [USE_ONE_SPELLING] if write is not None or key or watermark is not None else []
+        return [USE_ONE_SPELLING] if write is not None or watermark is not None else []
     issues: list[str] = []
     mode = write or "replace"
     if mode == "append" and watermark is None:
         issues.append(APPEND_NEEDS_WATERMARK)
-    if mode == "append" and key:
-        issues.append(APPEND_TAKES_NO_KEY)
-    if mode == "merge" and not key:
+    if mode == "merge" and key_none:
+        issues.append(MERGE_KEY_NONE)
+    elif mode == "merge" and not columns:
         issues.append(MERGE_NEEDS_KEY)
-    if mode == "replace" and (key or watermark is not None):
-        issues.append(REPLACE_TAKES_NEITHER)
+    if mode == "replace" and watermark is not None:
+        issues.append(REPLACE_TAKES_NO_WATERMARK)
     if evolve_schema is not None and mode != "append":
         issues.append(EVOLVE_NEEDS_APPEND)
     return issues
@@ -157,20 +287,20 @@ def normalized_write(
     -------
     tuple
         ``(write, key, watermark, hint)``. ``materialize: incremental`` with
-        ``incremental_key: k`` is ``("append", (), k, <hint>)``, the hint saying how it is now
+        ``incremental_key: k`` is ``("append", key, k, <hint>)``, the hint saying how it is now
         written; a `write` given is returned as written with no hint; neither is
-        ``("replace", (), None, None)``.
+        ``("replace", key, None, None)``. `key` is the declared key's columns in every case.
     """
     if metadata.write is not None:
-        return metadata.write, tuple(metadata.key), metadata.watermark, None
+        return metadata.write, key_columns(metadata.key), metadata.watermark, None
     if metadata.materialize == "incremental":
         column = metadata.incremental_key
         hint = (
             f"`materialize: incremental` is now written `write: append` with "
             f"`watermark: {column}`; both work"
         )
-        return "append", (), column, hint
-    return "replace", (), None, None
+        return "append", key_columns(metadata.key), column, hint
+    return "replace", key_columns(metadata.key), None, None
 
 
 def deploy_hints(assets: Sequence[ParsedAsset]) -> tuple[str, ...]:

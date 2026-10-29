@@ -22,12 +22,14 @@ from lakana_core.projects.asset_model import (
     DECIMALS_MODES,
     DEFAULT_DECIMALS,
     EVOLVE_NEEDS_REPLACE,
+    KEY_NONE,
     MAX_CONNECTIONS,
     MAX_KEEP_VERSIONS,
     WATERMARK_MESSAGE,
     WRITE_CHOICES,
     ParsedAsset,
     key_issues,
+    model_issues,
     write_choice_message,
     write_rule_issues,
 )
@@ -62,8 +64,12 @@ _KNOWN = (
     "key",
     "watermark",
     "evolve_schema",
+    "kind",
+    "grain",
+    "references",
+    "checks",
 )
-_SHAPES: dict[str, tuple[type, str]] = {
+_SHAPES: dict[str, tuple[type | tuple[type, ...], str]] = {
     "inputs": (dict, "a dict of strings"),
     "columns": (dict, "a dict of strings"),
     "tags": (list, "a list of strings"),
@@ -74,7 +80,11 @@ _SHAPES: dict[str, tuple[type, str]] = {
     "decimals": (str, "a string"),
     "connections": (list, "a list of strings"),
     "write": (str, "a string"),
-    "key": (list, "a list of strings"),
+    "key": ((list, str), "a list of strings or one string"),
+    "kind": (str, "a string"),
+    "grain": (str, "a string"),
+    "references": (dict, "a dict of strings"),
+    "checks": (dict, "a dict of strings"),
     "watermark": (str, "a string"),
     "evolve_schema": (bool, "True or False"),
 }
@@ -84,7 +94,18 @@ _DEFAULTS: dict[str, tuple[object, ...]] = {
     "evolve_schema": (False,),
 }
 """Values of the write model that an artifact asset may still give: they change nothing."""
-_NOT_FOR_ARTIFACTS = ("materialize", "columns", "write", "key", "watermark", "evolve_schema")
+_NOT_FOR_ARTIFACTS = (
+    "materialize",
+    "columns",
+    "write",
+    "key",
+    "watermark",
+    "evolve_schema",
+    "kind",
+    "grain",
+    "references",
+    "checks",
+)
 """Arguments that describe a table, refused on an artifact asset unless `_DEFAULTS` has them."""
 CONTEXT_PARAMETER = "ctx"
 """The parameter that receives the asset's context: never an input."""
@@ -535,7 +556,7 @@ def _connections(
 
 def _write_model(
     values: dict[str, object], path: str, line: int, issues: list[ProjectIssue]
-) -> tuple[str | None, tuple[str, ...], str | None]:
+) -> tuple[str | None, tuple[str, ...] | str, str | None]:
     """Read how a run writes the asset's table, with the rules a SQL block follows.
 
     One rule is the decorator's own: ``evolve_schema=True`` needs ``write="replace"``, because
@@ -556,16 +577,23 @@ def _write_model(
     Returns
     -------
     tuple
-        `write` (`None` when not given), `key` (empty when not given) and `watermark`; all
+        `write` (`None` when not given), `key` (empty when not given, `KEY_NONE` for
+        ``key="none"``, a one-column tuple for a string) and `watermark`; all
         three unset after an issue, so nothing unsafe reaches the metadata.
     """
     given = values.get("write")
     write = given if isinstance(given, str) else None
     listed = values.get("key")
-    key = tuple(listed) if isinstance(listed, list) else ()
+    key: tuple[str, ...] | str = ()
+    if listed == KEY_NONE:
+        key = KEY_NONE
+    elif isinstance(listed, str):
+        key = (listed,)
+    elif isinstance(listed, list):
+        key = tuple(listed)
     marked = values.get("watermark")
     watermark = marked if isinstance(marked, str) else None
-    messages = key_issues(key)
+    messages = key_issues(key, merge=write == "merge")
     if watermark is not None and unsafe_identifier(watermark):
         messages.append(WATERMARK_MESSAGE)
     if write is not None and write not in WRITE_CHOICES:
@@ -630,7 +658,7 @@ def _metadata(
     issues: list[ProjectIssue],
     *,
     artifact: bool,
-    write_model: tuple[str | None, tuple[str, ...], str | None] = (None, (), None),
+    write_model: tuple[str | None, tuple[str, ...] | str, str | None] = (None, (), None),
 ) -> AssetMetadata | None:
     """Validate the decorator's metadata with the front-matter model.
 
@@ -672,7 +700,7 @@ def _metadata(
     write, key, watermark = write_model
     if write is not None:
         raw["write"] = write
-    if key:
+    if key:  # a non-empty tuple or `KEY_NONE`
         raw["key"] = key
     if watermark is not None:
         raw["watermark"] = watermark
@@ -921,6 +949,10 @@ def parse_python_asset(
                 f"an artifact asset cannot read its own artifact ({asset.table}); "
                 "remove it from inputs",
             )
+        )
+    if own is not None:
+        issues.extend(
+            ProjectIssue(path, line, message) for message in model_issues(own, table=asset.table)
         )
     if issues or own is None:
         return issues

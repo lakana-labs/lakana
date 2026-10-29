@@ -11,7 +11,7 @@ from sqlglot import exp
 
 from lakana_core.errors import ValidationError
 from lakana_core.lineage import extract_lineage
-from lakana_core.projects.asset_model import ParsedAsset
+from lakana_core.projects.asset_model import ParsedAsset, model_issues
 from lakana_core.projects.discovery import DiscoveredAsset
 from lakana_core.projects.frontmatter import (
     consistency_issues,
@@ -156,6 +156,10 @@ def _parse_one(
         return list(exc.issues)
     metadata = merge_metadata(defaults, front.metadata)
     issues = consistency_issues(metadata, path=asset.path, line=front.block_line)
+    issues.extend(
+        ProjectIssue(asset.path, front.block_line, message)
+        for message in model_issues(metadata, table=asset.table)
+    )
     sql = front.body.strip()
     line = front.body_line + front.body[: len(front.body) - len(front.body.lstrip())].count("\n")
     if not sql:

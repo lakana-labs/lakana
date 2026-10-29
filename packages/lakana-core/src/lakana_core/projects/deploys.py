@@ -26,6 +26,7 @@ from sqlglot import exp
 
 from lakana_core.audit.service import AuditService
 from lakana_core.auth import Action, AuthorizationService, CiScope, PrincipalRef, Securable
+from lakana_core.catalog.columns import stored_columns
 from lakana_core.catalog.descriptions import sync_project_descriptions
 from lakana_core.catalog.identity import resolve_table_id
 from lakana_core.ci_oidc.exchange import ci_scope_for_run
@@ -64,6 +65,7 @@ from lakana_core.models import (
 )
 from lakana_core.models.run import ACTIVE_RUN_STATUSES
 from lakana_core.pagination import decode_cursor, encode_cursor
+from lakana_core.projects.asset_model import KEY_NONE, ResolvedReference, key_columns
 from lakana_core.projects.checks import ParsedCheck, check_sql_references, may_read_every
 from lakana_core.projects.dag import ProjectGraph
 from lakana_core.projects.deploy_jobs import (
@@ -77,7 +79,9 @@ from lakana_core.projects.git_input import is_full_sha, validate_ref
 from lakana_core.projects.issues import ProjectIssue, ProjectValidationError
 from lakana_core.projects.lookups import deployment_row, environment_by_name, repository_by_name
 from lakana_core.projects.manifest import (
+    entry_model,
     entry_output,
+    entry_write,
     job_notify,
     job_schedule,
     manifest_assets,
@@ -85,6 +89,7 @@ from lakana_core.projects.manifest import (
     manifest_tables,
     read_entry_connections,
 )
+from lakana_core.projects.model import TargetInfo, resolve_references
 from lakana_core.projects.parse import ParsedAsset
 from lakana_core.runs.kept import kept_tables
 from lakana_core.runs.pools import PIPELINE
@@ -875,6 +880,29 @@ class DeployService:
             Table → (repository name, ``table`` or ``artifact``); the kind is the
             producing manifest's, told by `entry_output`.
         """
+        produced: dict[str, tuple[str, str]] = {}
+        for name, manifest in self._current_manifests(environment_id, repository_id):
+            for table, entry in manifest_assets(manifest).items():
+                produced[table] = (name, entry_output(entry))
+        return produced
+
+    def _current_manifests(
+        self, environment_id: uuid.UUID, repository_id: uuid.UUID | None
+    ) -> list[tuple[str, object]]:
+        """Read the current manifest of every other repository deployed to an environment.
+
+        Parameters
+        ----------
+        environment_id
+            The environment.
+        repository_id
+            The repository to exclude, or `None` to include every repository.
+
+        Returns
+        -------
+        list of tuple
+            ``(repository name, manifest)``, ordered by repository name.
+        """
         query = (
             select(Repository.name, JobVersion.manifest_json)
             .join(EnvironmentDeployment, EnvironmentDeployment.repository_id == Repository.id)
@@ -884,11 +912,51 @@ class DeployService:
         )
         if repository_id is not None:
             query = query.where(EnvironmentDeployment.repository_id != repository_id)
-        produced: dict[str, tuple[str, str]] = {}
-        for name, manifest in self._session.execute(query):
+        return [(name, manifest) for name, manifest in self._session.execute(query)]
+
+    def _elsewhere_entries(
+        self, environment_id: uuid.UUID, repository_id: uuid.UUID
+    ) -> dict[str, Mapping[str, Any]]:
+        """Map each table another repository's current project version produces to its entry.
+
+        Parameters
+        ----------
+        environment_id
+            The environment.
+        repository_id
+            The repository being deployed, which is left out.
+
+        Returns
+        -------
+        dict
+            Table → its manifest entry; the first repository by name wins when two claim one
+            table (a deploy refuses that case elsewhere).
+        """
+        entries: dict[str, Mapping[str, Any]] = {}
+        for _, manifest in self._current_manifests(environment_id, repository_id):
             for table, entry in manifest_assets(manifest).items():
-                produced[table] = (name, entry_output(entry))
-        return produced
+                entries.setdefault(table, entry)
+        return entries
+
+    def _catalog_columns(self, environment: str, dotted: str) -> tuple[str, ...] | None:
+        """Read a table's stored column names.
+
+        Call it only for a table the deployer may read (`_readable_table`).
+
+        Parameters
+        ----------
+        environment
+            Environment name.
+        dotted
+            Dotted table name.
+
+        Returns
+        -------
+        tuple of str or None
+            The names in schema order; `None` when the table has none stored.
+        """
+        stored = stored_columns(self._session, environment, dotted)
+        return tuple(stored) if stored else None
 
     def _lock_ownership(self, environment_id: uuid.UUID) -> None:
         """Serialise table-ownership decisions in one environment until the transaction ends.
@@ -1856,7 +1924,9 @@ class DeployService:
         would reveal what its SQL reads. Unreadable
         `external_inputs` are removed and counted in
         `hidden_external_inputs`. A check's `sql` and `references` follow
-        the asset rule, judged on the tables its SQL names (`_visible_checks`).
+        the asset rule, judged on the tables its SQL names (`_visible_checks`). The reference
+        targets of an asset's `model` name tables too: each one `p` may not read is removed and
+        counted in the entry's `hidden_model_references` (`_visible_model`).
 
         Parameters
         ----------
@@ -1903,6 +1973,10 @@ class DeployService:
                 hidden_assets.add(entry["table"])
             else:
                 entry["hidden_references"] = 0
+            if isinstance(entry.get("model"), Mapping):
+                entry["model"], entry["hidden_model_references"] = self._visible_model(
+                    p, environment, entry["model"]
+                )
             assets.append(entry)
         manifest["assets"] = assets
         if "checks" in manifest:
@@ -1925,6 +1999,37 @@ class DeployService:
             created_at=version.created_at,
             manifest=manifest,
         )
+
+    def _visible_model(
+        self, p: PrincipalRef, environment: str, model: Mapping[str, Any]
+    ) -> tuple[dict[str, Any], int]:
+        """Withhold the reference targets of an asset's model that the reader may not read.
+
+        Parameters
+        ----------
+        p
+            The reader.
+        environment
+            Environment name.
+        model
+            The entry's `model`; untrusted, like a stored manifest.
+
+        Returns
+        -------
+        tuple
+            The model with only the references whose target `p` may read, and how many were
+            removed; an item that is not a mapping with a string `target` is removed too.
+        """
+        items = model.get("references")
+        listed = items if isinstance(items, list) else []
+        visible = [
+            item
+            for item in listed
+            if isinstance(item, Mapping)
+            and isinstance(item.get("target"), str)
+            and self._may_read(p, environment, item["target"])
+        ]
+        return {**model, "references": visible}, len(listed) - len(visible)
 
     def _visible_checks(
         self, p: PrincipalRef, environment: str, checks: object
@@ -2133,6 +2238,153 @@ class DeployService:
             If a deploy fetched another commit.
         """
         check_ci_commit(self._authz, dataclasses.replace(p, ci_scope=scope), scope, kind, sha)
+
+    def resolve_model_references(
+        self,
+        p: PrincipalRef,
+        environment: str,
+        repository_id: uuid.UUID,
+        assets: Sequence[ParsedAsset],
+    ) -> tuple[dict[str, tuple[ResolvedReference, ...]], list[ProjectIssue]]:
+        """Resolve each asset's references against the project and the environment.
+
+        A target the project builds is read from its asset. Any other target counts only once
+        it exists and `p` may read it (`_readable_table`); its key comes from the current
+        manifest of the repository that builds it, its columns from the catalog. A target that
+        is missing and one `p` may not read get the same message, which names nothing of the
+        table.
+
+        Both principals are checked. The deployer decides what the messages may reveal, so a
+        more privileged run principal cannot be used to probe tables. When a run principal is
+        bound to the repository in the environment, and it is not the deployer, every target
+        the deployer resolved outside the project must also be readable by it, as its runs read
+        the target; naming the target in that refusal reveals nothing the deployer may not see.
+
+        Parameters
+        ----------
+        p
+            The deploying principal; the bound run principal, if any, is read from the
+            repository's deployment row.
+        environment
+            Environment name.
+        repository_id
+            The repository being deployed.
+        assets
+            The parsed assets.
+
+        Returns
+        -------
+        tuple
+            Table → its resolved references, and the issues (`resolve_references`).
+        """
+        env = self._environment(environment)
+        elsewhere = self._elsewhere_entries(env.id, repository_id)
+        by_table = {asset.table: asset for asset in assets}
+
+        def lookup(name: str) -> TargetInfo | None:
+            """Find what is known about a target.
+
+            `resolve_references` reads a name as a table exactly when this returns info, so the
+            reading of a target and what is shown of it pass the same test.
+
+            Parameters
+            ----------
+            name
+                Dotted name.
+
+            Returns
+            -------
+            TargetInfo or None
+                The info of a project asset, or of an existing table `p` may read; `None` for
+                anything else.
+            """
+            if name in by_table:
+                asset = by_table[name]
+                meta = asset.metadata
+                return TargetInfo(
+                    meta.kind, key_columns(meta.key), meta.key == KEY_NONE, asset.columns
+                )
+            # Another repository's table counts only once it exists and `p` may read it, so an
+            # unreadable target never reaches the manifest or catalog metadata below.
+            if not self._readable_table(p, environment, name):
+                return None
+            columns = self._catalog_columns(environment, name)
+            entry = elsewhere.get(name)
+            if entry is None:
+                return TargetInfo(None, (), False, columns)
+            stored = entry.get("columns")
+            listed = (
+                tuple(stored)
+                if isinstance(stored, list) and all(isinstance(c, str) for c in stored)
+                else None
+            )
+            model = entry_model(entry)
+            if model is None:
+                # A manifest from before models: a merge's key still identifies a row.
+                write, merge_key, _ = entry_write(entry)
+                key = merge_key if write == "merge" else ()
+                return TargetInfo(None, key, False, columns or listed)
+            return TargetInfo(model.kind, model.key, model.key_none, columns or listed)
+
+        resolved, issues = resolve_references(assets, lookup, environment=environment)
+        run_as = self._bound_run_as(env.id, repository_id)
+        if run_as is None or run_as.id == p.id:
+            return resolved, issues
+        kept: dict[str, tuple[ResolvedReference, ...]] = {}
+        for asset in sorted(assets, key=lambda a: a.path):
+            readable = []
+            for reference in resolved.get(asset.table, ()):
+                if reference.target in by_table or self._readable_table(
+                    run_as, environment, reference.target
+                ):
+                    readable.append(reference)
+                    continue
+                issues.append(
+                    ProjectIssue(
+                        asset.path,
+                        asset.block_line or asset.body_line,
+                        f"Reference target `{reference.target}` cannot be read by "
+                        f"`{shown(run_as.name)}`, the run principal bound to this repository in "
+                        f"`{environment}`, so its runs could not check it; grant it READ_TABLE "
+                        f"on `{reference.target}`, or bind another run principal with "
+                        "`lakana deployments set-run-as`.",
+                    )
+                )
+            if readable:
+                kept[asset.table] = tuple(readable)
+        return kept, issues
+
+    def _bound_run_as(
+        self, environment_id: uuid.UUID, repository_id: uuid.UUID
+    ) -> PrincipalRef | None:
+        """Find the run principal bound to a repository in an environment.
+
+        Parameters
+        ----------
+        environment_id
+            The environment.
+        repository_id
+            The repository.
+
+        Returns
+        -------
+        PrincipalRef or None
+            The bound principal; `None` when none is bound.
+        """
+        row = self._session.execute(
+            select(Principal)
+            .join(
+                EnvironmentDeployment,
+                EnvironmentDeployment.run_as_principal_id == Principal.id,
+            )
+            .where(
+                EnvironmentDeployment.environment_id == environment_id,
+                EnvironmentDeployment.repository_id == repository_id,
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            return None
+        return PrincipalRef(id=row.id, name=row.name, type=row.type)
 
     def validate_against_environment(
         self,

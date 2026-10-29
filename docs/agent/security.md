@@ -2465,6 +2465,13 @@ found through a query run of their own that is bound to the check result
   it. `DeployService.job_version` applies the same rule to the manifest's `checks`
   (`_visible_checks`): a check whose SQL names an unreadable table, or whose tables cannot be
   listed, loses `sql` and `references` and carries `hidden_references`, as an asset does.
+  The reference targets of an asset's `model` name tables as well: `_visible_model` keeps only
+  the targets the reader may read and counts the rest in the entry's `hidden_model_references`
+  (`test_a_project_version_hides_model_references_the_reader_may_not_read`). At deploy, a
+  reference target outside the project counts only if the deployer may read it, and a missing
+  and an unreadable target get one text; when a run principal is bound, it must read every
+  target the deployer resolved, and that refusal may name the target
+  (`DeployService.resolve_model_references`).
   `test_only_the_rows_of_a_check_bind_a_query_run_to_a_check_result` (in
   `test_runs_check_rows.py`) enumerates every construction of a `QueryRun` in core, server and
   worker and fails when a new one appears or another one sets the field;

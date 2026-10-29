@@ -6,6 +6,7 @@ from dataclasses import replace
 
 from test_projects_dag import make_asset
 
+from lakana_core.projects.asset_model import ResolvedReference
 from lakana_core.projects.dag import build_graph
 from lakana_core.projects.diff import DeployDiff, diff_manifests
 from lakana_core.projects.frontmatter import AssetMetadata
@@ -65,6 +66,7 @@ def test_each_change_category() -> None:
         "materialization_changed": 1,
         "sql_changed": 1,
         "metadata_changed": 1,
+        "model_changed": 0,
         "jobs_added": 0,
         "jobs_removed": 0,
         "jobs_changed": 0,
@@ -373,6 +375,7 @@ def test_a_changed_merge_key_is_a_materialization_change() -> None:
     diff = diff_manifests(before, after, existing_unowned=set())
     assert diff.materialization_changed == ("s.customers",)
     assert diff.sql_changed == () and diff.metadata_changed == ()
+    assert diff.model_changed == ()
 
 
 def test_a_changed_write_mode_is_a_materialization_change() -> None:
@@ -407,3 +410,69 @@ def test_hints_round_trip_and_are_not_counted_as_changes() -> None:
     assert DeployDiff.from_json(diff.to_json()) == diff
     assert diff.to_json()["hints"] == ["s.customers: a hint"]
     assert "hints" not in diff.counts()
+
+
+def _model(**fields: object) -> ParsedAsset:
+    """Build a fact asset with a model.
+
+    Parameters
+    ----------
+    **fields
+        Metadata fields over a fact keyed on `id`.
+
+    Returns
+    -------
+    ParsedAsset
+        The asset `g.fact`.
+    """
+    values: dict[str, object] = {
+        "materialize": "table",
+        "kind": "fact",
+        "grain": "One row per order.",
+        "key": ("id",),
+        **fields,
+    }
+    return make_asset("g.fact", metadata=AssetMetadata.model_validate(values))
+
+
+def test_a_changed_grain_or_reference_is_a_model_change_only() -> None:
+    before = _manifest(_model())
+    for after in (
+        _manifest(_model(grain="One row per order line.")),
+        build_manifest(
+            [_model()],
+            build_graph([_model()]),
+            ResolvedProjectConfig(),
+            references={"g.fact": (ResolvedReference("store_id", "g.dim", "id"),)},
+        ),
+        _manifest(_model(kind="wide")),
+        _manifest(_model(checks={"key": "warn"})),
+    ):
+        diff = diff_manifests(before, after, existing_unowned=set())
+        assert diff.model_changed == ("g.fact",)
+        assert diff.materialization_changed == ()
+        assert diff.metadata_changed == () and diff.sql_changed == ()
+    assert diff_manifests(before, _manifest(_model()), existing_unowned=set()) == DeployDiff()
+
+
+def test_a_changed_key_of_a_replace_asset_is_a_model_change() -> None:
+    diff = diff_manifests(
+        _manifest(_model()), _manifest(_model(key=("id", "line"))), existing_unowned=set()
+    )
+    assert diff.model_changed == ("g.fact",)
+    assert diff.materialization_changed == ()
+
+
+def test_model_changed_round_trips_and_old_diffs_load_without_it() -> None:
+    diff = DeployDiff(model_changed=("g.fact",))
+    assert DeployDiff.from_json(diff.to_json()) == diff
+    assert diff.counts()["model_changed"] == 1
+    assert DeployDiff.from_json({"added": []}).model_changed == ()
+
+
+def test_a_merge_asset_deployed_before_models_is_no_model_change() -> None:
+    """A version 8 merge entry has no `model`; the same asset now records one with only a key."""
+    stored = _manifest(_written("merge", ("id",)))
+    del stored["assets"][0]["model"]
+    diff = diff_manifests(stored, _manifest(_written("merge", ("id",))), existing_unowned=set())
+    assert diff == DeployDiff()
