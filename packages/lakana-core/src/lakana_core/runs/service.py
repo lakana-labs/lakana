@@ -71,12 +71,12 @@ from lakana_core.projects.deploys import DeployService
 from lakana_core.projects.lookups import deployment_row, environment_by_name, repository_by_name
 from lakana_core.projects.manifest import job_on_deploy, manifest_assets, manifest_jobs
 from lakana_core.projects.run_policy import RunCaps, policy_from_manifest
+from lakana_core.runs.check_message import message_for_reader
 from lakana_core.runs.checks import (
     ASSET,
     SOURCE_CHECK,
     CheckResultView,
     view_of,
-    withhold_from_message,
 )
 from lakana_core.runs.failures import Failure, attempt_failure, task_failure
 from lakana_core.runs.hidden_checks import ReferenceCheckFilter
@@ -1039,10 +1039,12 @@ class RunService:
                     next_attempt_at=task.next_attempt_at,
                     started_at=task.started_at,
                     finished_at=task.finished_at,
-                    error_message=withhold_from_message(
+                    error_message=message_for_reader(
                         task.error_message,
+                        task.check_message_state,
                         every.get(task.id, ()),
                         hidden.get(task.id, set()),
+                        table=task.asset,
                         run_id=run.id,
                         environment=env.name,
                     ),
@@ -2256,8 +2258,14 @@ class RunService:
                 finished_at=a.finished_at,
                 outcome=a.outcome.value if a.outcome is not None else None,
                 rows_written=a.rows_written,
-                error_message=withhold_from_message(
-                    a.error_message, results, hidden, run_id=run.id, environment=env.name
+                error_message=message_for_reader(
+                    a.error_message,
+                    a.check_message_state,
+                    results,
+                    hidden,
+                    table=asset,
+                    run_id=run.id,
+                    environment=env.name,
                 ),
                 failure=attempt_failure(a),
             )

@@ -14,9 +14,10 @@ from __future__ import annotations
 
 import enum
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import Any
 
 from sqlalchemy import case, exists, func, or_, select, update
 from sqlalchemy.orm import Session
@@ -700,6 +701,7 @@ def record_attempt(
     on_committed: str | None = None,
     stopped: bool = False,
     in_transaction: Callable[[Session], None] | None = None,
+    check_message_state: Mapping[str, Any] | None = None,
 ) -> bool:
     """Record how an attempt ended and move the task run on.
 
@@ -771,6 +773,11 @@ def record_attempt(
         run and audits it). Called with the session after the task run and its attempt are
         updated and before the commit, and never when the claim is lost; it must not commit. An
         exception from it rolls the whole record back.
+    check_message_state
+        What the check phase built `error_message` from besides the results
+        (`CheckMessageState.to_json`), stored with the text on the task run and on the attempt;
+        `None` for a text the check phase did not build. A release keeps the task run's, as it
+        keeps its text; a text replaced by `on_committed` gets none.
 
     Returns
     -------
@@ -821,6 +828,7 @@ def record_attempt(
         ).scalar_one_or_none()
         if written is not None:
             kind, error_message, rows_written = None, on_committed, written
+            check_message_state = None
     attempt = task.attempt
     now = db_now(session)
     stored_code = _stored_code(kind, failure_code)
@@ -829,6 +837,7 @@ def record_attempt(
         "lease_expires_at": None,
         "error_message": error_message,
         "failure_code": stored_code,
+        "check_message_state": check_message_state,
     }
     hand_back = not setting_back and _must_be_set_back(session, task, kind, stopped=stopped)
     if hand_back:
@@ -864,6 +873,7 @@ def record_attempt(
             # the stop's); a drain has none of its own. The same holds for its code.
             del values["error_message"]
             del values["failure_code"]
+            del values["check_message_state"]
         else:
             values.update(status=TaskStatus.PENDING, attempt=attempt - 1, next_attempt_at=now)
         outcome = AttemptOutcome.RELEASED
@@ -912,6 +922,7 @@ def record_attempt(
             rows_written=rows_written,
             error_message=error_message,
             failure_code=stored_code,
+            check_message_state=check_message_state,
         )
         .execution_options(synchronize_session=False)
     )

@@ -358,10 +358,16 @@ is looked up, as for a reference. A result whose target cannot be told (no reada
 target that is not a table name) is shown only to a reader with READ_TABLE on the whole
 environment. `key_*` and hand-written checks are not filtered. A task's `error_message`, in
 `RunService.get` and in each attempt of `RunService.task_log`, goes through
-`runs/checks.withhold_from_message`: every fragment the worker built from a group of results that
-holds a withheld one (the first sentence of failed checks, the rows commands, the `warn` note) is
-built again from the group without it, or dropped; a text that still names a withheld check is
-replaced by `WITHHELD_TASK_MESSAGE`. Residual, accepted for now and tracked in #385: a table's
+`runs/check_message.message_for_reader`. The check phase stores, beside the message, the state it
+was built from besides the results (`check_message_state`: the rollback, the kept note's facts, the
+refusals, the branch); `check_message` is the one builder the worker and the reader's view share.
+For a reader with a withheld result, the message is built again from the visible results only,
+after the state was shown to give back the stored text from every result. When it does not (a
+text written over by a later claim, the scheduler or a set-back; an earlier attempt whose results
+were counted again), or the visible results need another kind of message, the reader gets
+`WITHHELD_TASK_MESSAGE`; a text without a state is shown only when it names no withheld check.
+`test_check_message.py` proves, over every outcome, mode and state, that the reader's text is the
+worker's own text from the visible results. Residual, accepted for now and tracked in #385: a table's
 `state_message` (`not_published_message`, kept notes), the task's free-text log (one
 `check ref_<column>: …, N rows` line per check), webhook notifications and the `CHECK_FAILED`
 audit event still name a failed `ref_` check and may carry its row count, which tells how many

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime, timedelta
-from functools import partial
 from pathlib import Path
 
 import pytest
@@ -18,7 +17,7 @@ from lakana_core.auth import (
     PrincipalRef,
     SecurableKind,
 )
-from lakana_core.catalog.service import CatalogService, Rollback
+from lakana_core.catalog.service import CatalogService
 from lakana_core.errors import CheckNotInRunError
 from lakana_core.grants.authorization import GrantAuthorization
 from lakana_core.grants.roles import Role
@@ -33,19 +32,21 @@ from lakana_core.models import (
     JobVersion,
     Principal,
     PrincipalType,
-    RollbackOutcome,
     Run,
     Table,
     TaskAttempt,
     TaskRun,
 )
+from lakana_core.runs.check_message import (
+    BLOCKING,
+    PASSED,
+    CheckMessageState,
+    check_message,
+)
 from lakana_core.runs.check_rows import submit_check_rows
 from lakana_core.runs.checks import (
     WITHHELD_TASK_MESSAGE,
     check_not_in_run_message,
-    failure_message,
-    warning_note,
-    withhold_from_message,
 )
 from lakana_core.runs.hidden_checks import ReferenceCheckFilter
 from lakana_core.runs.service import RunService
@@ -406,8 +407,10 @@ def test_table_get_withholds_a_result_whose_runs_target_is_hidden_after_the_targ
     assert [c.check for c in shown.checks] == ["key_unique", "ref_store_id"]
 
 
-def _set_task_message(star: Star, message: str, *, warned: bool = False) -> None:
-    """Store a task message as the worker would, and mark the reference result warned or not.
+def _set_task_message(
+    star: Star, message: str | None, state: CheckMessageState | None, *, warned: bool = False
+) -> None:
+    """Store a task message and its state as the worker would, and mark the reference result.
 
     Parameters
     ----------
@@ -415,14 +418,21 @@ def _set_task_message(star: Star, message: str, *, warned: bool = False) -> None
         The run.
     message
         The task's `error_message`.
+    state
+        The state stored beside it, or `None`.
     warned
         Whether the reference check is a `warn` check that found one row.
     """
     task = star.session.scalars(select(TaskRun).where(TaskRun.run_id == star.run_id)).one()
     task.error_message = message
+    task.check_message_state = None if state is None else state.to_json()
     if warned:
         ref = star.session.scalars(select(CheckResult).where(CheckResult.check_name == _REF)).one()
         ref.outcome, ref.on_failure, ref.failing_rows = CheckOutcome.WARNED, "warn", 1
+        for other in star.session.scalars(
+            select(CheckResult).where(CheckResult.check_name != _REF)
+        ):
+            other.outcome = CheckOutcome.PASSED
     star.session.commit()
 
 
@@ -448,11 +458,36 @@ def _results(star: Star) -> list[CheckResult]:
     )
 
 
+def _built(star: Star, results: list[CheckResult], state: CheckMessageState) -> str | None:
+    """Build the message the worker would store for these results.
+
+    Parameters
+    ----------
+    star
+        The run.
+    results
+        The results.
+    state
+        The state.
+
+    Returns
+    -------
+    str or None
+        The message.
+    """
+    return check_message(
+        results, state, table="gold.fact_sales", run_id=star.run_id, environment="dev"
+    )
+
+
+_PASSED = CheckMessageState(PASSED)
+_ROLLED_BACK = CheckMessageState(BLOCKING, rollback_outcome="rolled_back")
+
+
 def test_the_task_message_leaves_out_a_withheld_warned_reference_check(star: Star) -> None:
     """The how-to's case: `note: 1 check warned: `ref_sku` (1 row).` names the count."""
-    _set_task_message(star, "", warned=True)
-    (ref,) = [r for r in _results(star) if r.check_name == _REF]
-    _set_task_message(star, warning_note([ref]))
+    _set_task_message(star, None, None, warned=True)
+    _set_task_message(star, _built(star, _results(star), _PASSED), _PASSED)
     reader = star.person(tables=("fact_sales",))
     (task,) = star.runs().get(reader, "dev", star.run_id).tasks
     assert task.error_message is None
@@ -464,34 +499,36 @@ def test_the_task_message_leaves_out_a_withheld_warned_reference_check(star: Sta
 
 def test_the_task_message_of_failed_checks_is_rebuilt_without_the_withheld_one(star: Star) -> None:
     every = _results(star)
-    build = partial(
-        failure_message,
-        table="gold.fact_sales",
-        run_id=star.run_id,
-        environment="dev",
-        rollback=Rollback(RollbackOutcome.ROLLED_BACK),
-    )
-    _set_task_message(star, build(every))
+    _set_task_message(star, _built(star, every, _ROLLED_BACK), _ROLLED_BACK)
     reader = star.person(tables=("fact_sales",))
     (task,) = star.runs().get(reader, "dev", star.run_id).tasks
     visible = [r for r in every if r.check_name != _REF]
-    assert task.error_message == build(visible)
+    assert task.error_message == _built(star, visible, _ROLLED_BACK)
     assert "ref_store_id" not in (task.error_message or "")
     both = star.person(tables=("fact_sales", "dim_store"))
     (full,) = star.runs().get(both, "dev", star.run_id).tasks
-    assert full.error_message == build(every)
+    assert full.error_message == _built(star, every, _ROLLED_BACK)
 
 
 def test_a_task_message_that_names_a_withheld_check_otherwise_is_replaced(star: Star) -> None:
-    _set_task_message(star, "Something about `gold.fact_sales/ref_store_id` the rebuild misses.")
+    _set_task_message(
+        star, "Something about `gold.fact_sales/ref_store_id` the rebuild misses.", None
+    )
+    reader = star.person(tables=("fact_sales",))
+    (task,) = star.runs().get(reader, "dev", star.run_id).tasks
+    assert task.error_message == WITHHELD_TASK_MESSAGE
+
+
+def test_a_state_that_does_not_give_back_the_stored_text_is_not_rebuilt(star: Star) -> None:
+    """The scheduler wrote another text over the check phase's, and left its state."""
+    _set_task_message(star, "The worker was lost while it set the table back.", _ROLLED_BACK)
     reader = star.person(tables=("fact_sales",))
     (task,) = star.runs().get(reader, "dev", star.run_id).tasks
     assert task.error_message == WITHHELD_TASK_MESSAGE
 
 
 def test_an_attempts_message_in_the_task_log_leaves_out_the_withheld_check(star: Star) -> None:
-    _set_task_message(star, "", warned=True)
-    (ref,) = [r for r in _results(star) if r.check_name == _REF]
+    _set_task_message(star, None, None, warned=True)
     task = star.session.scalars(select(TaskRun).where(TaskRun.run_id == star.run_id)).one()
     star.session.add(
         TaskAttempt(
@@ -502,7 +539,8 @@ def test_an_attempts_message_in_the_task_log_leaves_out_the_withheld_check(star:
             started_at=_NOW - timedelta(seconds=2),
             finished_at=_NOW,
             outcome=AttemptOutcome.SUCCEEDED,
-            error_message=warning_note([ref]),
+            error_message=_built(star, _results(star), _PASSED),
+            check_message_state=_PASSED.to_json(),
         )
     )
     star.session.commit()
@@ -512,88 +550,3 @@ def test_an_attempts_message_in_the_task_log_leaves_out_the_withheld_check(star:
     both = star.person(tables=("fact_sales", "dim_store"))
     (full,) = star.runs().task_log(both, "dev", star.run_id, "gold.fact_sales").attempts
     assert full.error_message == "1 check warned: `ref_store_id` (1 row)."
-
-
-def _result(name: str, outcome: CheckOutcome, on_failure: str, *, rows: int = 3) -> CheckResult:
-    """Build a result of `gold.fact_sales` that is never stored.
-
-    Parameters
-    ----------
-    name
-        The check's short name.
-    outcome
-        Its outcome.
-    on_failure
-        Its failure mode.
-    rows
-        Its failing rows.
-
-    Returns
-    -------
-    CheckResult
-        The result.
-    """
-    return CheckResult(
-        id=uuid.uuid4(),
-        check_name=f"gold.fact_sales/{name}",
-        check_path="assets/gold/fact_sales.sql:2",
-        table_name="gold.fact_sales",
-        on_failure=on_failure,
-        outcome=outcome,
-        failing_rows=None if outcome is CheckOutcome.ERRORED else rows,
-        checked_snapshot_id=42,
-        generated=name.startswith("ref_"),
-    )
-
-
-def test_a_warn_note_of_more_than_five_checks_counts_only_the_shown_ones() -> None:
-    """A `warn` check that could not run is in the note; the withheld one is past the fifth."""
-    warned = [
-        _result(name, CheckOutcome.WARNED, "warn") for name in ("a", "b", "c", "d", "e", "ref_s")
-    ]
-    errored = _result("b0", CheckOutcome.ERRORED, "warn")
-    every = [*warned, errored]
-    stored = warning_note(every)
-    assert stored.startswith("7 checks warned: ") and stored.endswith(" and 2 more.")
-    seen = withhold_from_message(
-        stored, every, {"gold.fact_sales/ref_s"}, run_id=uuid.uuid4(), environment="dev"
-    )
-    assert seen == (
-        "6 checks warned: `a` (3 rows), `b` (3 rows), `b0` (could not run), `c` (3 rows), "
-        "`d` (3 rows) and 1 more."
-    )
-    assert "ref_s" not in seen
-
-
-def test_failed_blocking_checks_past_five_and_an_errored_warn_check_count_only_the_shown() -> None:
-    run_id = uuid.uuid4()
-    blocking = [
-        _result(name, CheckOutcome.FAILED, "block") for name in ("a", "b", "c", "d", "e", "ref_s")
-    ]
-    every = [*blocking, _result("w", CheckOutcome.ERRORED, "warn")]
-    build = partial(
-        failure_message,
-        table="gold.fact_sales",
-        run_id=run_id,
-        environment="dev",
-        rollback=Rollback(RollbackOutcome.ROLLED_BACK),
-    )
-    stored = build(blocking)
-    assert "6 checks of `gold.fact_sales` failed" in stored and " and 1 more." in stored
-    seen = withhold_from_message(
-        stored, every, {"gold.fact_sales/ref_s"}, run_id=run_id, environment="dev"
-    )
-    assert seen == build(blocking[:5])
-    assert seen is not None and "ref_s" not in seen and "more" not in seen
-
-
-def test_a_message_with_nothing_to_withhold_is_returned_as_stored() -> None:
-    every = [
-        _result("a", CheckOutcome.FAILED, "block"),
-        _result("ref_s", CheckOutcome.PASSED, "block"),
-    ]
-    stored = "Something  the worker wrote, with  two spaces."
-    seen = withhold_from_message(
-        stored, every, {"gold.fact_sales/ref_s"}, run_id=uuid.uuid4(), environment="dev"
-    )
-    assert seen == stored

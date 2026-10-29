@@ -85,6 +85,7 @@ from lakana_core.models import (
 )
 from lakana_core.policy.read_errors import policy_read_failure
 from lakana_core.projects.checks import CheckSpec, GeneratedFrom
+from lakana_core.runs.check_message import BLOCKING, PASSED, CheckMessageState, check_message
 from lakana_core.runs.scheduler import COMMITTED_BEFORE_RECORDED_MESSAGE
 from lakana_core.runs.tasks import (
     FailureKind,
@@ -138,6 +139,30 @@ def test_a_failed_blocking_check_is_permanent_and_the_build_runs_once(world: Wor
     assert not _exists(world, "gold.report")
     (rolled,) = _events(world, AuditEventType.TABLE_ROLLED_BACK)
     assert (rolled["outcome"], rolled["checks"]) == ("unpublished", ["silver.orders/unique_id"])
+
+
+@pytest.mark.parametrize("on_failure", ["block", "warn"])
+def test_the_stored_state_gives_back_the_stored_message_from_the_results(
+    world: World, on_failure: str
+) -> None:
+    """The worker words its message with the builder a reader's view uses, and stores its state."""
+    _checked(world, _check("unique_id", _DUPLICATE_IDS, on_failure=on_failure))
+    run_id = _start(world)
+    _drain(world)
+
+    task = _task(world, "silver.orders")
+    state = CheckMessageState.from_json(task.check_message_state)
+    assert state is not None
+    assert state.branch == (BLOCKING if on_failure == "block" else PASSED)
+    rebuilt = check_message(
+        _results(world, task.id), state, table="silver.orders", run_id=run_id, environment="dev"
+    )
+    assert rebuilt == task.error_message is not None
+    (attempt,) = _attempts(world, task.id)
+    assert (attempt.error_message, attempt.check_message_state) == (
+        task.error_message,
+        task.check_message_state,
+    )
 
 
 @pytest.mark.slow

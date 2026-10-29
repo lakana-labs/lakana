@@ -4537,3 +4537,52 @@ def test_0053_adds_the_table_model_and_the_references_table(
             ]
     finally:
         engine.dispose()
+
+
+_REVISION_0054 = "f4b8d6e0a2c3"
+
+
+@pytest.mark.usefixtures("_without_fsync")
+def test_0054_adds_the_check_message_state_null_on_old_rows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Revision `0054`: `check_message_state` on task runs and attempts, and back.
+
+    Parameters
+    ----------
+    tmp_path
+        Holds the throwaway SQLite file.
+    monkeypatch
+        Points `lakana_core.config.Settings` at that file.
+    """
+    db_path = tmp_path / "migrated.db"
+    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    config = Config(str(ALEMBIC_INI))
+    command.upgrade(config, _REVISION_0053)
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        for table in ("task_runs", "task_attempts"):
+            assert "check_message_state" not in {
+                c["name"] for c in inspect(engine).get_columns(table)
+            }
+    finally:
+        engine.dispose()
+
+    command.upgrade(config, _REVISION_0054)
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        for table in ("task_runs", "task_attempts"):
+            found = {c["name"]: c for c in inspect(engine).get_columns(table)}
+            assert found["check_message_state"]["nullable"] is True
+    finally:
+        engine.dispose()
+
+    command.downgrade(config, _REVISION_0053)
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        for table in ("task_runs", "task_attempts"):
+            assert "check_message_state" not in {
+                c["name"] for c in inspect(engine).get_columns(table)
+            }
+    finally:
+        engine.dispose()

@@ -10,7 +10,6 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from lakana_core.catalog.service import Rollback
 from lakana_core.models import (
     CheckOutcome,
     CheckResult,
@@ -20,7 +19,8 @@ from lakana_core.models import (
     Table,
     TaskRun,
 )
-from lakana_core.runs.checks import check_not_in_run_message, failure_message
+from lakana_core.runs.check_message import BLOCKING, CheckMessageState, check_message
+from lakana_core.runs.checks import check_not_in_run_message
 from tests.api.platform.test_deployments_run_as import _deploy
 from tests.conftest import AUTH_HEADER
 
@@ -205,14 +205,16 @@ def test_the_run_route_leaves_the_withheld_check_out_of_the_task_message(
         results = list(
             session.scalars(select(CheckResult).where(CheckResult.run_id == task.run_id))
         )
+        state = CheckMessageState(BLOCKING, rollback_outcome=RollbackOutcome.ROLLED_BACK.value)
         build = partial(
-            failure_message,
-            table="silver.clean",
+            check_message,
+            state=state,
+            table=task.asset,
             run_id=task.run_id,
             environment="dev",
-            rollback=Rollback(RollbackOutcome.ROLLED_BACK),
         )
         task.error_message = build(results)
+        task.check_message_state = state.to_json()
         shown = build([r for r in results if r.check_name != _REF])
         whole = task.error_message
         session.commit()

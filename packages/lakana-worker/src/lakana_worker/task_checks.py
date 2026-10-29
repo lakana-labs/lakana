@@ -79,6 +79,14 @@ from lakana_core.models import (
 )
 from lakana_core.projects.checks import CheckSpec, read_manifest_checks
 from lakana_core.projects.manifest import manifest_assets
+from lakana_core.runs.check_message import (
+    BLOCKING,
+    KEPT,
+    PASSED,
+    SOURCE,
+    CheckMessageState,
+    check_message,
+)
 from lakana_core.runs.checks import (
     ERROR_KEPT,
     ERROR_NO_CHECKS,
@@ -92,12 +100,9 @@ from lakana_core.runs.checks import (
     build_failure_message,
     error_of_exception,
     error_text,
-    kept_check_message,
-    kept_failure_message,
     kept_no_checks_error,
     mark_rollback_failed,
     record_result,
-    refused_source_message,
     results_of_task,
     run_stop_message,
     set_back_ending,
@@ -105,9 +110,7 @@ from lakana_core.runs.checks import (
     set_back_result_message,
     unchecked_retry_message,
     verdict,
-    warning_note,
 )
-from lakana_core.runs.checks import failure_message as check_failure_message
 from lakana_core.runs.failures import FailureCode, check_failure_code
 from lakana_core.runs.kept import (
     KeptNote,
@@ -309,12 +312,9 @@ def _landed_rollback(
     outcome = next((r.rollback_outcome for r in blocking if r.rollback_outcome in _LANDED), None)
     if outcome is None:
         return None
-    message = check_failure_message(
-        blocking,
-        table=claimed.asset,
-        run_id=claimed.run_id,
-        environment=environment or "",
-        rollback=Rollback(outcome),
+    state = CheckMessageState(BLOCKING, rollback_outcome=outcome.value)
+    message = check_message(
+        results, state, table=claimed.asset, run_id=claimed.run_id, environment=environment or ""
     )
     return TaskOutcome(
         FailureKind.PERMANENT,
@@ -322,6 +322,7 @@ def _landed_rollback(
         environment,
         checks=(*_check_lines(results), f"  rollback: {outcome.value}"),
         failure_code=check_failure_code(blocking),
+        check_state=state.to_json(),
     )
 
 
@@ -1241,33 +1242,24 @@ def _stand_in(table: str, label: str) -> CheckSpec:
     )
 
 
-def _source_failure(
+def _source_state(
     session: Session,
-    claimed: ClaimedTask,
     phase: _Phase,
-    failing: Sequence[CheckResult],
     noted_table: uuid.UUID | None,
     refused: Mapping[str, str],
-) -> str:
-    """Build the message of a ``source_check`` task whose checks failed.
+) -> CheckMessageState:
+    """Read what the message of a ``source_check`` task whose checks failed is built from.
 
-    A task of a table the project does not build says so. A task of a table the project builds
-    is the check task of a kept table: it says what the note says, and of a check
-    whose count was refused another project's kept table that it could not run, never that the
-    table "still fails". A task of a table the project does not build whose count was refused
-    a kept table says that, with the refusal's own text: the project cannot check a table that
-    another project has to repair.
+    A task of a table the project builds is the check task of a kept table, and its message says
+    what the table's note says; a task of another project's table needs only the refusals
+    (`check_message.source_message`).
 
     Parameters
     ----------
     session
         Database session.
-    claimed
-        The claim.
     phase
         What `_read_phase` read.
-    failing
-        The failed results of the table's checks, blocking or `keep`.
     noted_table
         The table's id when it had a note when the phase began, else `None`.
     refused
@@ -1276,38 +1268,54 @@ def _source_failure(
 
     Returns
     -------
-    str
-        The message.
+    CheckMessageState
+        The state, of branch `SOURCE`.
     """
     if not phase.is_asset:
-        names = sorted(result.check_name for result in failing if result.check_name in refused)
-        if names:
-            return refused_source_message(
-                [result for result in failing if result.check_name not in refused],
-                table=claimed.asset,
-                refusals=list(dict.fromkeys(refused[name] for name in names)),
-            )
-        return check_failure_message(
-            failing,
-            table=claimed.asset,
-            run_id=claimed.run_id,
-            environment=phase.environment,
-            rollback=None,
-        )
+        return CheckMessageState(SOURCE, source=True, refusals=dict(refused))
     kept_run = None if noted_table is None else kept_run_of(session, noted_table)
     unchecked = noted_table is not None and kept_unchecked_of(session, noted_table)
     unknown = noted_table is not None and kept_unknown_of(session, noted_table)
     session.rollback()
-    return kept_check_message(
-        [result for result in failing if result.check_name not in refused],
+    return CheckMessageState(
+        SOURCE,
+        source=True,
+        refusals=dict(refused),
+        is_asset=True,
+        kept_run_id=None if kept_run is None else str(kept_run),
+        unchecked=unchecked,
+        unknown=unknown,
+        without_checks=not phase.specs and not phase.unreadable,
+    )
+
+
+def _message(
+    results: Sequence[CheckResult], state: CheckMessageState, claimed: ClaimedTask, phase: _Phase
+) -> str | None:
+    """Word the task's message from its results and the state of its check phase.
+
+    Parameters
+    ----------
+    results
+        The task's results.
+    state
+        What the phase saw besides them.
+    claimed
+        The claim.
+    phase
+        What `_read_phase` read.
+
+    Returns
+    -------
+    str or None
+        The message (`check_message.check_message`, the builder a reader's view uses too).
+    """
+    return check_message(
+        results,
+        state,
         table=claimed.asset,
         run_id=claimed.run_id,
         environment=phase.environment,
-        kept_run_id=kept_run,
-        without_checks=not phase.specs and not phase.unreadable,
-        refused=[result for result in failing if result.check_name in refused],
-        unchecked=unchecked,
-        unknown=unknown,
     )
 
 
@@ -1508,23 +1516,18 @@ def _checks_under(
             if noted is KeptNote.NOT_HELD:
                 raise LeaseLost
         dropped = noted is KeptNote.GONE
-        message = (
-            _source_failure(session, claimed, phase, found.kept, noted_table, kept_refusals)
+        state = (
+            _source_state(session, phase, noted_table, kept_refusals)
             if source
-            else kept_failure_message(
-                kept=failed,
-                run_id=claimed.run_id,
-                environment=phase.environment,
-                refused=[r for r in found.kept if r.check_name in kept_refusals],
-                dropped=dropped,
-            )
+            else CheckMessageState(KEPT, dropped=dropped, refusals=kept_refusals)
         )
         return dataclasses.replace(
             built,
             kind=FailureKind.PERMANENT,
-            message=message,
+            message=_message(results, state, claimed, phase),
             checks=lines,
             failure_code=check_failure_code(found.kept),
+            check_state=state.to_json(),
         )
     if not found.blocking:
         # The checks passed. The record of the task's success carries what follows, so that it
@@ -1586,14 +1589,18 @@ def _checks_under(
                 record_clean_in_attempt(attempt, clean_table, snapshot)
 
             in_attempt = record_clean
-        note = warning_note(found.warned) if found.warned else built.message
-        return dataclasses.replace(built, message=note, checks=lines, in_transaction=in_attempt)
+        state = CheckMessageState(PASSED, source=source, success_message=built.message)
+        return dataclasses.replace(
+            built,
+            message=_message(results, state, claimed, phase),
+            checks=lines,
+            in_transaction=in_attempt,
+            check_state=state.to_json(),
+        )
     if source:
         # A `keep` check that failed beside the blocking ones is named too: the task writes
         # nothing, so it is the same failure to the reader.
-        message = _source_failure(
-            session, claimed, phase, [*found.blocking, *found.kept], noted_table, kept_refusals
-        )
+        state = _source_state(session, phase, noted_table, kept_refusals)
     else:
         # A build that committed nothing and has no record of an earlier write left the table
         # as it was: there is nothing of this run to set back.
@@ -1619,23 +1626,22 @@ def _checks_under(
             unchanged=unchanged,
         )
         lines = (*lines, f"  rollback: {_rollback_word(rollback, refused)}")
-        message = check_failure_message(
-            found.blocking,
-            table=claimed.asset,
-            run_id=claimed.run_id,
-            environment=phase.environment,
-            rollback=rollback,
-            refused=refused,
+        state = CheckMessageState(
+            BLOCKING,
+            rollback_outcome=rollback.outcome.value,
+            rollback_reason=rollback.reason,
+            rollback_refused=refused,
         )
     session.rollback()
     return dataclasses.replace(
         built,
         kind=FailureKind.PERMANENT,
-        message=message,
+        message=_message(results, state, claimed, phase),
         checks=lines,
         failure_code=check_failure_code(
             [*found.blocking, *found.kept] if source else found.blocking
         ),
+        check_state=state.to_json(),
     )
 
 
