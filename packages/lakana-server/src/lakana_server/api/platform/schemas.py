@@ -908,6 +908,9 @@ class TableOut(BaseModel):
         Whether that is within the server's warning window
         (``LAKANA_TABLES__EXPIRY_WARNING_DAYS``, 7 days by default); always `false` when that
         is 0.
+    model
+        The model the asset header declares (kind, grain, key, references and the checks they
+        generate); `None` for a table whose header declares none.
     """
 
     name: str
@@ -930,6 +933,7 @@ class TableOut(BaseModel):
     file_count: int | None = None
     expires_at: datetime | None = None
     expires_soon: bool = False
+    model: TableModelOut | None = None
 
 
 class LastMaintenanceOut(BaseModel):
@@ -1007,6 +1011,90 @@ class CheckHealthOut(BaseModel):
     not_published: bool
     finished_at: datetime
     generated: bool = False
+
+
+class ModelReferenceOut(BaseModel):
+    """One reference a table's header declares, as `ModelReferenceView` holds it.
+
+    Parameters
+    ----------
+    id
+        ``<ns.table>/ref_<column>``: the name of the reference's generated check.
+    table
+        The dotted name of the table that declares it.
+    column
+        The referencing column.
+    target
+        The dotted name of the table it points at, as the header names it.
+    target_column
+        The column of the target it must match.
+    target_exists
+        Whether a table of that name exists now. A reference whose target the caller may not
+        read is never listed, so this says nothing about such a table.
+    """
+
+    id: str
+    table: str
+    column: str
+    target: str
+    target_column: str
+    target_exists: bool
+
+
+class TableModelOut(BaseModel):
+    """The model a table's asset header declares, as the caller may see it.
+
+    Parameters
+    ----------
+    kind
+        ``fact``, ``dimension``, ``wide`` or ``staging``; `None` when the header names none.
+    grain
+        What one row is, in one sentence; `None` when the header says nothing.
+    key
+        The columns that identify one row; empty for no key and for `key: none`.
+    key_none
+        Whether the header says `key: none`: no columns are unique, and the grain is not
+        checked.
+    references
+        The references whose target the caller may read, by id.
+    hidden_references
+        How many references point at a table the caller may not read; they are not listed.
+    checks
+        The newest result of each check the current header generates, by name.
+    """
+
+    kind: str | None
+    grain: str | None
+    key: list[str]
+    key_none: bool
+    references: list[ModelReferenceOut]
+    hidden_references: int
+    checks: list[CheckHealthOut]
+
+
+class TableReferencesOut(BaseModel):
+    """Response body of `GET .../tables/{name}/references`.
+
+    Parameters
+    ----------
+    table
+        The table's dotted name.
+    outgoing
+        The references its header declares whose target the caller may read, by id.
+    hidden_outgoing
+        How many of its references point at a table the caller may not read.
+    incoming
+        The references other tables' headers declare to it, from tables the caller may read,
+        by id.
+    hidden_incoming
+        How many references to it come from tables the caller may not read; never named.
+    """
+
+    table: str
+    outgoing: list[ModelReferenceOut]
+    hidden_outgoing: int
+    incoming: list[ModelReferenceOut]
+    hidden_incoming: int
 
 
 class ReaderOut(BaseModel):

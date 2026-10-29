@@ -764,13 +764,16 @@ def checks_listing(checks: Sequence[ParsedCheck]) -> dict[str, list[dict[str, st
     -------
     dict
         Table to ``[{"check": name, "on_failure": ...}]``, tables and checks sorted. An entry
-        whose value came from the project's default also has ``"from": "lakana.yaml"``.
+        whose value came from the project's default also has ``"from": "lakana.yaml"``; one the
+        asset's header generated has ``"generated"``: ``"key"`` or ``"references"``.
     """
     listing: dict[str, list[dict[str, str]]] = {}
     for check in sorted(checks, key=lambda c: (c.table, c.check)):
         entry = {"check": check.check, "on_failure": check.on_failure}
         if check.from_default:
             entry["from"] = "lakana.yaml"
+        if check.generated is not None:
+            entry["generated"] = check.generated.family
         listing.setdefault(check.table, []).append(entry)
     return listing
 

@@ -12,7 +12,15 @@ from typing import TYPE_CHECKING, Annotated
 import typer
 
 import lakana
-from lakana._models import CheckHealth, Column, DroppedTable, Lineage, Table, TableHealth
+from lakana._models import (
+    CheckHealth,
+    Column,
+    DroppedTable,
+    Lineage,
+    ModelReference,
+    Table,
+    TableHealth,
+)
 from lakana.cli import _files, _output, _retention
 from lakana.cli._break_glass import BREAK_GLASS, REASON, break_glass_reason
 from lakana.cli._state import CliError, CliState, confirm, resolve_environment, state_of
@@ -261,6 +269,14 @@ def list_tables(
             help="List the dropped tables that can still be restored, and until when.",
         ),
     ] = False,
+    model_kind: Annotated[
+        str | None,
+        typer.Option(
+            "--model-kind",
+            help="Only tables whose asset header declares this kind: fact, dimension, wide or "
+            "staging.",
+        ),
+    ] = None,
     env: _ENV = None,
 ) -> None:
     """List the tables in NAMESPACE, or with --dropped the tables dropped from it.
@@ -268,6 +284,7 @@ def list_tables(
     A dropped table keeps its files until `purge_after` (the server's undo period, 7 days by
     default); until then `lakana table undrop` restores it. A table that its retention lets
     expire within the server's warning window (7 days by default) shows when, in `expires`.
+    With --model-kind, only the tables whose asset header says `kind: <that kind>`.
 
     Parameters
     ----------
@@ -277,6 +294,8 @@ def list_tables(
         The dotted namespace.
     dropped
         List the dropped tables instead.
+    model_kind
+        Only tables whose header declares this kind.
     env
         The environment.
     """
@@ -291,7 +310,7 @@ def list_tables(
             derived={"restorable": _restorable_cell},
         )
         return
-    tables = state.client().tables.list(environment, namespace)
+    tables = state.client().tables.list(environment, namespace, model_kind=model_kind)
     columns = ["name", "namespace", "kind", "state", "uuid"]
     if any(table.expires_soon for table in tables):
         columns.insert(4, "expires")
@@ -408,6 +427,73 @@ def get(ctx: typer.Context, name: str, env: _ENV = None) -> None:
         )
     _emit_description(state, table)
     _emit_columns(state, table)
+    if table.model is not None:
+        _emit_model(state, table)
+
+
+def _hidden_outgoing(count: int) -> str:
+    """Say how many references point at tables the reader may not read.
+
+    Parameters
+    ----------
+    count
+        How many; more than 0.
+
+    Returns
+    -------
+    str
+        The line.
+    """
+    if count == 1:
+        return "1 more reference to a table you cannot read"
+    return f"{count} more references to tables you cannot read"
+
+
+def _reference_line(ref: ModelReference) -> str:
+    """Write one reference as ``column → target.column (exists)``.
+
+    Parameters
+    ----------
+    ref
+        The reference.
+
+    Returns
+    -------
+    str
+        The line, indented, with control characters escaped.
+    """
+    exists = "exists" if ref.target_exists else "missing"
+    return _output.inline(f"  {ref.column} → {ref.target}.{ref.target_column} ({exists})")
+
+
+def _emit_model(state: CliState, table: Table) -> None:
+    """Print the Model block: kind, grain, key, references and the generated checks.
+
+    Parameters
+    ----------
+    state
+        The CLI state.
+    table
+        The table, with `model` set.
+    """
+    model = table.model
+    assert model is not None  # nosec B101 -- the caller checked
+    _output.emit(state, _output.inline(f"Model: {model.kind or '(no kind)'}"))
+    if model.grain:
+        _output.emit(state, _output.inline(f"Grain: {model.grain}", 500))
+    key = "none — grain not checked" if model.key_none else ", ".join(model.key)
+    _output.emit(state, _output.inline(f"Key: {key or '(none declared)'}"))
+    for ref in model.references:
+        _output.emit(state, _reference_line(ref))
+    if model.hidden_references:
+        _output.emit(state, f"  {_hidden_outgoing(model.hidden_references)}")
+    if model.checks:
+        _output.emit(
+            state,
+            list(model.checks),
+            columns=["check", "state", "failing_rows", "finished_at"],
+            derived={"check": check_shown, "state": _check_state},
+        )
 
 
 _DESCRIBE_COLUMNS = ["name", "type", "nullable", "description"]
@@ -1284,6 +1370,45 @@ def lineage(
         _output.emit(state, graph)
         return
     typer.echo("\n".join(lineage_tree(graph)))
+
+
+@table_app.command("references")
+def references(ctx: typer.Context, name: str, env: _ENV = None) -> None:
+    """Show what table NAME's asset header references, and which tables reference it.
+
+    These are the references the model declares (`references:` in the asset header), not
+    lineage: lineage is how data flowed, references are what the model says relates. A
+    reference to or from a table you cannot read is counted, never named.
+
+    Parameters
+    ----------
+    ctx
+        The Typer context.
+    name
+        The qualified table name.
+    env
+        The environment.
+    """
+    state = state_of(ctx)
+    found = state.client().tables.references(resolve_environment(state, env), name)
+    if state.output == "json":
+        _output.emit(state, found)
+        return
+    sections = (
+        ("References", found.outgoing, ["column", "target", "target_column", "target_exists"]),
+        ("Referenced by", found.incoming, ["table", "column", "target_column"]),
+    )
+    for title, listed, columns in sections:
+        if listed:
+            _output.emit(state, f"{title}:")
+            _output.emit(state, list(listed), columns=columns)
+        else:
+            _output.emit(state, f"{title}: none.")
+        if title == "References" and found.hidden_outgoing:
+            _output.emit(state, _hidden_outgoing(found.hidden_outgoing))
+    if found.hidden_incoming:
+        tables = "a table" if found.hidden_incoming == 1 else "tables"
+        _output.emit(state, f"{found.hidden_incoming} more from {tables} you cannot read")
 
 
 @table_app.command("retention")

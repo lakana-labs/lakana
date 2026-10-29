@@ -339,6 +339,24 @@ SQLite alike.
 
 Audited in the same transaction (`TABLE_DESCRIBED`, `COLUMN_DESCRIBED`; `detail`: `table`, `column`, `old_length`, `new_length`, `reset`); the text is never in `detail`. A deploy writes only `description_project` and the project rows of `column_descriptions`; it never touches an edit (`catalog/descriptions.py`). Pins: `test_descriptions.py`.
 
+## A table's model and its references (#250)
+
+| Read | Needs | Notes |
+|---|---|---|
+| `TableOut.model` (`GET .../tables/{name}`, the listing, `lakana table get`) | `READ_TABLE` on the table | `CatalogService.describe_table`, then `model_metadata.model_view`. A reference is shown only when `permits(READ_TABLE)` holds on its target's table scope, asked **before** anything is looked up; otherwise it is counted in `hidden_references`. So a missing and an unreadable target look the same to a reader without the right, and `target_exists` (`true`/`false`) is only ever computed for a target the reader may read. The `ref_<column>` check of a hidden reference is left out with it (its error could name the target). A stored target that is not a table name is counted as hidden. |
+| `?model_kind=` on the listing | as the listing | The filter runs on the described tables the caller may read; `require_model_kind` refuses anything outside `MODEL_KINDS` with one text. |
+| `GET .../tables/{name}/references` | `READ_TABLE` on the table, checked first (403 before the lookup) | `CatalogService.table_references`, `model_metadata.references_view`. Outgoing as above (`hidden_outgoing`). Incoming rows are found by the table's current dotted name (`ix_table_references_environment_target`) and kept only when the caller may read the **source** table; the rest are counted in `hidden_incoming`, never named. |
+
+The rows are written only by a deploy, a rollback and a run's table creation
+(`catalog/model_metadata.py`); REST, the SDK and the CLI only read them. References are held by
+name, as the header names its target: a table renamed through the Iceberg REST catalog is no longer
+the target of references to its old name, and a later table of that name is, as the reference's
+generated check reads it. The renamed table keeps its model rows (keyed by its id) under its new
+name until it is dropped. Pins: `test_describe_table.py`
+(`test_a_missing_target_and_an_unreadable_target_look_the_same_to_a_reader`,
+`test_incoming_references_count_hidden_sources`, the two rename tests), `test_tables.py` in
+lakana-server, `test_undrop_restores_the_model_and_its_references`.
+
 ## Table health: who sees the readers
 
 | Action | Needs | Notes |
@@ -1829,8 +1847,9 @@ landing between the lookup and the delete is in the snapshot, not lost to it), t
 `tombstone`: only for an `ICEBERG` row whose derived root has a record that is `LIVE` **and names
 this table's id**, under `lock_location`: `DROPPED`, `dropped_at = now`, `purge_after = now +
 LAKANA_TABLES__UNDO_DAYS` (`now` for a purge or `UNDO_DAYS=0`), `revoked_policy_ids` = the
-`RevokedPolicy` list, `dropped_table` = every mapped column of the row, of its `column_descriptions`
-and of its `table_columns` (the rows its id cascades to); then `TABLE_DROPPED` and the row delete.
+`RevokedPolicy` list, `dropped_table` = every mapped column of the row, of its `column_descriptions`,
+of its `table_columns` and of its `table_references` (the rows its id cascades to); then
+`TABLE_DROPPED` and the row delete.
 The drop itself deletes no file any more (`purge=True` used to delete the metadata file in the
 request). No tombstone, files kept: an `EXTERNAL` table, a view (no location), a table whose root's
 record names another table (two legacy tables sharing a directory). A `DROPPED` record of another
@@ -1845,7 +1864,8 @@ is refused). It finds the newest `DROPPED` record of the name in the namespace, 
 `purge_started_at` set (409), `db_now >= purge_after` (409), namespace path gone (404), name taken
 (409, `--as`), metadata file gone (409, `FILES_GONE_MESSAGE`). Then, in one transaction: the row from the snapshot (same id and metadata
 location, namespace by path, the new name; an owner or description author deleted since becomes
-`NULL`), its descriptions and columns, `restore_policies`, the record back to `LIVE` (cleared),
+`NULL`), its descriptions and columns, its declared references (with the environment of the
+namespace it comes back into; a tombstone from before #250 has none), `restore_policies`, the record back to `LIVE` (cleared),
 `TABLE_UNDROPPED` with the restored `{kind, id}` list, the guard's `record_pending`, commit. An
 `IntegrityError` (a create won the name between the check and the insert, or the namespace was
 dropped) rolls back and is reported as taken, or as a conflict to retry.

@@ -75,3 +75,107 @@ table's or a column's text also needs the right to read the table. A refusal is 
 other. Every change is recorded as `TABLE_DESCRIBED` or `COLUMN_DESCRIBED`; the record holds the table,
 the column and the length of the edit before and after, not the text. The facts of the routes, the
 SDK and the audit events are in [Descriptions](../reference/descriptions.md).
+
+## See a table's model
+
+A table's model is what the header of the asset that builds it declares: its `kind`, its `grain`,
+its `key` and its `references` (see [Model fields](../reference/asset-front-matter.md#model-fields-kind-grain-key-and-references)).
+Only the header sets it: a deploy writes it, and neither a command nor the REST API changes it.
+Here a fact declares its grain, its key and the dimension its `store_id` points at:
+
+<!-- source: docs/examples/see-a-tables-model/project/assets/gold/fact_sales.sql -->
+```sql
+/* lakana
+description: Sales per store and day.
+kind: fact
+grain: One row per store and day.
+key: [date, store_id]
+references:
+  store_id: gold.dim_store
+*/
+SELECT date, store_id, SUM(amount) AS amount FROM bronze.sales GROUP BY date, store_id
+```
+
+After a deploy and a run, `lakana table get` shows the model after the columns, with the newest
+result of each check the header generates:
+
+<!-- source: docs/examples/see-a-tables-model/run.sh#get -->
+```bash
+lakana table get gold.fact_sales
+```
+
+<!-- output -->
+```text
+Model: fact
+Grain: One row per store and day.
+Key: date, store_id
+  store_id → gold.dim_store.store_id (exists)
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ check                    ┃ state  ┃ failing_rows ┃ finished_at               ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ key_not_null (generated) │ passed │ 0            │ 2026-10-29T15:39:34+00:00 │
+│ key_unique (generated)   │ passed │ 0            │ 2026-10-29T15:39:34+00:00 │
+│ ref_store_id (generated) │ passed │ 0            │ 2026-10-29T15:39:34+00:00 │
+└──────────────────────────┴────────┴──────────────┴───────────────────────────┘
+```
+
+Each reference says whether its target table exists now (`exists` or `missing`). `Key: none —
+grain not checked` stands for `key: none`. A table whose header declares no model has no Model
+block, and `model` is `null` in `--output json`.
+
+`lakana table references` shows both directions: what the table references, and which tables
+reference it. These are the references the model declares, not lineage: lineage is how data
+flowed, references are what the model says relates.
+
+<!-- source: docs/examples/see-a-tables-model/run.sh#references -->
+```bash
+lakana table references gold.dim_store
+```
+
+<!-- output: see-a-tables-model#references -->
+```text
+References: none.
+Referenced by:
+┏━━━━━━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━━━┓
+┃ table           ┃ column   ┃ target_column ┃
+┡━━━━━━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━━━┩
+│ gold.fact_sales │ store_id │ store_id      │
+└─────────────────┴──────────┴───────────────┘
+```
+
+To list only the tables of one kind, add `--model-kind` with `fact`, `dimension`, `wide` or
+`staging`; any other value is refused with the four kinds:
+
+<!-- source: docs/examples/see-a-tables-model/run.sh#list -->
+```bash
+lakana table list gold --model-kind fact
+```
+
+<!-- output: see-a-tables-model#list -->
+```text
+┏━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ name       ┃ namespace ┃ kind  ┃ state     ┃ uuid                                 ┃
+┡━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ fact_sales │ gold      │ TABLE │ published │ 29cfdd97-5629-47e5-a919-d4f3866dd47a │
+└────────────┴───────────┴───────┴───────────┴──────────────────────────────────────┘
+```
+
+In the SDK the same is `client.tables.get(env, name).model`,
+`client.tables.references(env, name)` and `client.tables.list(env, namespace, model_kind="fact")`;
+over REST it is `model` in the table's body, `GET .../tables/{name}/references` and
+`?model_kind=fact` on the listing.
+
+**What you see depends on what you may read.** You need to be able to read the table. A reference
+to a table you may not read is not listed: `lakana table get` says how many there are
+(`1 more reference to a table you cannot read`), and so does `hidden_references` in the body.
+The same holds for the tables that reference this one (`3 more from tables you cannot read`,
+`hidden_incoming`). A hidden reference never says whether its target exists, and neither does its
+generated check, which is left out with it.
+
+**References follow names.** A reference names its target as the header writes it, so it is
+listed with whichever table has that name now, as the reference's generated check reads it. A
+table renamed through the Iceberg REST catalog (an engine's `ALTER TABLE … RENAME`) is no longer
+the target of the references to its old name, and a new table that takes the old name is. The
+renamed table keeps the model its header gave it under the old name, listed under its new name,
+until it is dropped; the project builds a new table under the old name, with the model again. A
+table restored with `lakana table undrop` gets its model and its references back.

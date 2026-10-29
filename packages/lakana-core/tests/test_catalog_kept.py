@@ -880,6 +880,10 @@ _NOTHING_OF_A_KEPT_TABLE = {
     ),
     "describe_table": "the state `kept`, the schema and snapshot ids; no rows, no file locations",
     "can_read_table": "a boolean about a grant",
+    "table_references": (
+        "the names of the tables a header references and that reference it, filtered by read "
+        "rights; no rows, no snapshot, no file location"
+    ),
     "table_health": (
         "the newest result of each check and the last maintenance's counts, which are numbers "
         "and names; no rows, no snapshot, no file location"

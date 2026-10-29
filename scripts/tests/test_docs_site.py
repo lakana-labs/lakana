@@ -18,7 +18,7 @@ EXEMPT = (
     "scripts/tests/test_docs_only.py",
 )
 NOT_TESTED_CEILING = 54
-UNCHECKED_OUTPUT_CEILING = 77
+UNCHECKED_OUTPUT_CEILING = 78
 """Blocks marked as not tested; it only goes down, apart from the rises below.
 
 The artifact pages left six when they were written: the `artifact uploads abort` command,
@@ -120,6 +120,10 @@ since #200, which `compose-smoke` runs, so the count fell by one, to 52.
 The task-container release rose it by two, to 54: the four `.env` lines of the upgrade (input,
 checked by `test_deploy_init.py`) and the launcher's volume removal under "Starting over" (run by
 `scripts/compose_smoke_test.sh`).
+
+`UNCHECKED_OUTPUT_CEILING` rose from 77 to 78 with the Model block of `lakana table get` in
+"See a table's model" (`describe-a-table.md`): the page shows that block only, not the whole
+output, and the example `see-a-tables-model` runs the command and checks the model in its JSON.
 """
 SECTIONS = ("tutorials", "how-to", "reference", "explanation")
 

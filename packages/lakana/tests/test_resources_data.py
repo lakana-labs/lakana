@@ -33,10 +33,12 @@ from lakana._models import (
     LineageNode,
     LoadResult,
     MergeResult,
+    ModelReference,
     Namespace,
     QueryStatus,
     Table,
     TableReference,
+    TableReferences,
     WaitingFor,
     WriteResult,
 )
@@ -2843,3 +2845,110 @@ def test_tables_upload_limit_lets_an_unreachable_server_say_so() -> None:
 
     with pytest.raises(LakanaConnectionError):
         Tables(_transport(down)).upload_limit()
+
+
+# --- Table models and references ---------------------------------------
+
+_MODEL_REFERENCE = {
+    "id": "gold.fact_sales/ref_store_id",
+    "table": "gold.fact_sales",
+    "column": "store_id",
+    "target": "gold.dim_store",
+    "target_column": "store_id",
+    "target_exists": True,
+}
+_EXPECTED_REFERENCE = ModelReference(
+    id="gold.fact_sales/ref_store_id",
+    table="gold.fact_sales",
+    column="store_id",
+    target="gold.dim_store",
+    target_column="store_id",
+    target_exists=True,
+)
+_MODEL_TABLE = {
+    "name": "fact_sales",
+    "namespace": "gold",
+    "uuid": "u1",
+    "metadata_location": "loc1",
+    "schema": [],
+    "model": {
+        "kind": "fact",
+        "grain": "One row per store and day.",
+        "key": ["date", "store_id"],
+        "key_none": False,
+        "references": [_MODEL_REFERENCE],
+        "hidden_references": 1,
+        "checks": [
+            {
+                **cast("list[dict[str, object]]", _HEALTH_BODY["checks"])[0],
+                "name": "gold.fact_sales/key_unique",
+                "check": "key_unique",
+                "generated": True,
+            }
+        ],
+    },
+}
+
+
+def test_tables_get_parses_the_model() -> None:
+    """`model` carries the header's kind, grain, key, references and generated checks."""
+    table = Tables(_transport(lambda _: httpx.Response(200, json=_MODEL_TABLE))).get(
+        "dev", "gold.fact_sales"
+    )
+    assert table.model is not None
+    assert (table.model.kind, table.model.grain) == ("fact", "One row per store and day.")
+    assert (table.model.key, table.model.key_none) == (("date", "store_id"), False)
+    assert table.model.references == (_EXPECTED_REFERENCE,)
+    assert table.model.hidden_references == 1
+    assert [(c.check, c.generated) for c in table.model.checks] == [("key_unique", True)]
+
+
+def test_tables_get_reads_no_model_from_an_older_server() -> None:
+    body = {k: v for k, v in _MODEL_TABLE.items() if k != "model"}
+    table = Tables(_transport(lambda _: httpx.Response(200, json=body))).get(
+        "dev", "gold.fact_sales"
+    )
+    assert table.model is None
+
+
+def test_tables_list_sends_the_model_kind_only_when_given() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json=[_MODEL_TABLE])
+
+    tables = Tables(_transport(handler))
+    tables.list("dev", "gold")
+    (fact,) = tables.list("dev", "gold", model_kind="fact")
+
+    assert [dict(r.url.params) for r in seen] == [{}, {"model_kind": "fact"}]
+    assert fact.model is not None
+
+
+def test_tables_references_gets_the_references_route_and_parses_it() -> None:
+    seen: list[httpx.Request] = []
+    body = {
+        "table": "gold.dim_store",
+        "outgoing": [],
+        "hidden_outgoing": 0,
+        "incoming": [_MODEL_REFERENCE],
+        "hidden_incoming": 2,
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json=body)
+
+    found = Tables(_transport(handler)).references("dev", "gold.dim_store")
+
+    assert [(r.method, r.url.path) for r in seen] == [
+        ("GET", "/api/v1/environments/dev/namespaces/gold/tables/dim_store/references")
+    ]
+    assert found == TableReferences(
+        table="gold.dim_store",
+        outgoing=(),
+        hidden_outgoing=0,
+        incoming=(_EXPECTED_REFERENCE,),
+        hidden_incoming=2,
+    )

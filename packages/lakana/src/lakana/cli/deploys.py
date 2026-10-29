@@ -174,6 +174,7 @@ def _report(state: CliState, deploy: Deploy, verb: str) -> None:
         for table, checks in deploy.checks.items():
             names = ", ".join(
                 _output.inline(check["check"])
+                + (" (generated)" if "generated" in check else "")
                 + (f" ({check['on_failure']})" if check["on_failure"] in {"keep", "warn"} else "")
                 for check in checks
             )

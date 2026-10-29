@@ -13,6 +13,7 @@ from lakana._models import CheckResult, Notification, Run, RunTask, WorkerInfo
 from lakana.cli import _output
 from lakana.cli._paging import more_results, parse_since
 from lakana.cli._state import CliState, resolve_environment, state_of
+from lakana.cli.checks import check_shown
 from lakana.cli.deploys import resolve_repository
 from lakana.cli.environments import cache_size_cell
 from lakana.errors import RunFailed
@@ -435,11 +436,11 @@ def _check_group(task: RunTask) -> list[str]:
     list of str
         The heading (the table, its state, how many checks passed and what the rollback did,
         or that the project does not build the table, or that it was kept after a failed check)
-        and a line per check, by name.
+        and a line per check, by name, marked ``(generated)`` when the asset's header generated it.
     """
     results = sorted(task.checks, key=lambda r: r.name)
     name = _output.inline(task.asset)
-    names = [_output.inline(r.check) for r in results]
+    names = [_output.inline(check_shown(r)) for r in results]
     width = max([len(name), *map(len, names)]) + _NAME_PAD
     passed = sum(r.outcome in {"passed", "warned"} for r in results)
     summary = f"{passed} of {len(results)} checks passed"

@@ -306,6 +306,93 @@ class TableReference:
 
 
 @dataclass(frozen=True)
+class ModelReference:
+    """One reference a table's asset header declares (`references:`).
+
+    Parameters
+    ----------
+    id
+        ``<ns.table>/ref_<column>``: the name of the reference's generated check.
+    table
+        The dotted name of the table that declares it.
+    column
+        The referencing column.
+    target
+        The dotted name of the table it points at, as the header names it.
+    target_column
+        The column of the target it must match.
+    target_exists
+        Whether a table of that name exists now. A reference to a table you may not read is
+        never listed, only counted.
+    """
+
+    id: str
+    table: str
+    column: str
+    target: str
+    target_column: str
+    target_exists: bool
+
+
+@dataclass(frozen=True)
+class TableModel:
+    """The model a table's asset header declares.
+
+    Parameters
+    ----------
+    kind
+        ``fact``, ``dimension``, ``wide`` or ``staging``; `None` when the header names none.
+    grain
+        What one row is, in one sentence; `None` when the header says nothing.
+    key
+        The columns that identify one row; empty for no key and for `key: none`.
+    key_none
+        Whether the header says `key: none`: no columns are unique, and the grain is not checked.
+    references
+        The references whose target you may read.
+    hidden_references
+        How many references point at a table you may not read.
+    checks
+        The newest result of each check the header generates.
+    """
+
+    kind: str | None
+    grain: str | None
+    key: tuple[str, ...] = ()
+    key_none: bool = False
+    references: tuple[ModelReference, ...] = ()
+    hidden_references: int = 0
+    checks: tuple[CheckHealth, ...] = ()
+
+
+@dataclass(frozen=True)
+class TableReferences:
+    """What a table's header says it references, and which tables reference it.
+
+    These are the references the model declares, not lineage.
+
+    Parameters
+    ----------
+    table
+        The table's dotted name.
+    outgoing
+        The references its header declares whose target you may read.
+    hidden_outgoing
+        How many of its references point at a table you may not read.
+    incoming
+        The references other tables' headers declare to it, from tables you may read.
+    hidden_incoming
+        How many references to it come from tables you may not read.
+    """
+
+    table: str
+    outgoing: tuple[ModelReference, ...] = ()
+    hidden_outgoing: int = 0
+    incoming: tuple[ModelReference, ...] = ()
+    hidden_incoming: int = 0
+
+
+@dataclass(frozen=True)
 class Table:
     """A managed (Iceberg) table, an external table, or a view.
 
@@ -361,6 +448,9 @@ class Table:
     expires_soon
         Whether that is within the server's warning window (7 days by default); always
         `False` when the server's window is 0.
+    model
+        The model the asset header declares (kind, grain, key, references and the checks they
+        generate); `None` without one, and from a server older than model metadata.
     """
 
     name: str
@@ -383,6 +473,7 @@ class Table:
     file_count: int | None = None
     expires_at: datetime | None = None
     expires_soon: bool = False
+    model: TableModel | None = None
 
 
 @dataclass(frozen=True)

@@ -43,7 +43,9 @@ from lakana_core.models import (
     AuditEventType,
     ColumnDescription,
     ColumnMask,
+    DeclaredReference,
     Grant,
+    Namespace,
     Principal,
     RowFilter,
     Table,
@@ -294,19 +296,27 @@ def snapshot_table(session: Session, row: Table, namespace: NamespacePath) -> di
     -------
     dict of str to object
         ``namespace`` (the path's parts), ``row`` (every column of the row),
-        ``column_descriptions`` and ``columns`` (their rows without the table id); the rows a
-        table's id cascades to and that only describe it.
+        ``column_descriptions`` and ``columns`` (their rows without the table id) and
+        ``references`` (the model's reference rows without the table and environment ids); the
+        rows a table's id cascades to and that only describe it.
     """
     descriptions = session.scalars(
         select(ColumnDescription).where(ColumnDescription.table_id == row.id)
     ).all()
     columns = session.scalars(select(TableColumn).where(TableColumn.table_id == row.id)).all()
+    references = session.scalars(
+        select(DeclaredReference).where(DeclaredReference.source_table_id == row.id)
+    ).all()
     leave_out = frozenset({"table_id"})
     return {
         "namespace": list(namespace.parts),
         "row": _row_json(row),
         "column_descriptions": [_row_json(d, leave_out=leave_out) for d in descriptions],
         "columns": [_row_json(c, leave_out=leave_out) for c in columns],
+        "references": [
+            _row_json(r, leave_out=frozenset({"source_table_id", "environment_id"}))
+            for r in references
+        ],
     }
 
 
@@ -583,7 +593,7 @@ def _known_principals(session: Session, ids: Iterable[object]) -> set[str]:
 def restore_table(
     session: Session, snapshot: Mapping[str, Any], *, namespace_id: uuid.UUID, name: str
 ) -> Table:
-    """Insert a dropped table's row, column descriptions and columns again, uncommitted.
+    """Insert a dropped table's row, column descriptions, columns and references again, uncommitted.
 
     A principal deleted since the drop (the owner, the author of a description, who set its
     retention) is left out, as the row's foreign key would have done had the row stayed.
@@ -638,6 +648,18 @@ def restore_table(
         )
     for column in snapshot["columns"]:
         session.add(_row_from_json(TableColumn, column, table_id=row.id))
+    namespace = session.get(Namespace, namespace_id)
+    assert namespace is not None  # nosec B101 -- the row above was inserted into it
+    # A tombstone written before references were kept has none.
+    for reference in snapshot.get("references", ()):
+        session.add(
+            _row_from_json(
+                DeclaredReference,
+                reference,
+                source_table_id=row.id,
+                environment_id=namespace.environment_id,
+            )
+        )
     session.flush()
     return row
 

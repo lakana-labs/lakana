@@ -90,7 +90,7 @@ block, and `lakana check rows RUN TABLE/key_unique --env ENV` shows the rows the
 | `on_failure` | `checks: key:` or `checks: references:` in the asset's header, then `checks.on_failure` in `lakana.yaml`, then `block` (as in [The default of `on_failure`](#the-default-of-on_failure)). `keep` follows the rules of a hand-written check: never on a view, an append or a merge. |
 | The most | They count toward the 50 checks of a table, so a table near the limit can be refused when its header gains `key:` or `references:`. The message says how many of them the header generated: ``more than 50 checks of table 'gold.fact_orders' (3 of them generated from the asset's header); remove or combine hand-written checks, or split the table``. |
 | Names | A hand-written check of the same table may not take a generated name: ``A check named `key_unique` is generated for `gold.fact_orders`; rename `checks/gold/fact_orders/key_unique.sql`.`` Rename the file. A hand-written `key_unique` of a table that declares no `key:` is fine. |
-| The mark | `lakana check list` and `lakana table health` show `key_unique (generated)`; REST and the SDK have `generated: true` on the result (`false` on a hand-written check, and in the SDK `false` from an older server). |
+| The mark | `lakana check list`, `lakana table health`, `lakana runs show`, `lakana run` and the Model block of `lakana table get` show `key_unique (generated)`, and the list of checks of `lakana deploy` shows `key_unique (generated)` too; REST and the SDK have `generated: true` on the result (`false` on a hand-written check, and in the SDK `false` from an older server), and a deploy's list of checks has `"generated": "key"` or `"generated": "references"` on such a check. |
 
 ### A reference sets the run order
 
@@ -334,12 +334,13 @@ which cannot tell the two, it ends with `check task`. The state is `FAILED` when
 check) with the error. A `keep` check reads `failed (kept)` with the number of rows, or
 `ERRORED (kept)` with the error; it has no rollback phrase. A result that was counted under a row filter or column mask has a line
 `note: checked under a row filter or column mask of NAME: rows and values it cannot see were not
-checked` under it. A run without checks prints nothing more than it did before.
+checked` under it. A check generated from the asset's header reads `key_unique (generated)`. A run without checks prints nothing more than it did before.
 
 ### Other commands
 
 - `lakana deploy --dry-run` and `lakana deploy` print `Checks:` and, for each table, its checks
-  with `(warn)` after one that only warns and `(keep)` after one that keeps. When
+  with `(generated)` after one generated from the asset's header, `(warn)` after one that only
+  warns and `(keep)` after one that keeps. When
   `lakana.yaml` sets the default of some checks, a line follows: ``2 checks take `on_failure:
   warn` from lakana.yaml.`` (`1 check takes` for one).
 - `lakana table get` and `lakana table list` show a `state` of `published`, `not published` or
@@ -488,7 +489,8 @@ schema, partitioning and sort order, and the commit itself lands all the same. S
 commit once with each table object it holds: its next commit needs a fresh load of the table,
 which requires `READ_TABLE`. A refused commit tells such a caller nothing of the table either
 (below). A deploy's list of checks may carry `"from": "lakana.yaml"` on a check that took its
-`on_failure` from the project's default.
+`on_failure` from the project's default, and `"generated"` (`"key"` or `"references"`) on a check
+generated from the asset's header.
 
 ### When a commit through the Iceberg REST catalog is refused
 

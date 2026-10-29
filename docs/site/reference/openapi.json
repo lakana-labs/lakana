@@ -2243,7 +2243,7 @@
           "tables"
         ],
         "summary": "List the tables of a namespace",
-        "description": "Lists the tables of the namespace that the caller may read. Needs `READ_TABLE` on the namespace; tables the caller may not read are left out. Answers 404 when the namespace does not exist and 503 when the environment's storage cannot be reached (try again after `Retry-After`).",
+        "description": "Lists the tables of the namespace that the caller may read. Needs `READ_TABLE` on the namespace; tables the caller may not read are left out. Answers 404 when the namespace does not exist, 422 for a `model_kind` no header can declare, and 503 when the environment's storage cannot be reached (try again after `Retry-After`).",
         "operationId": "list_tables_api_v1_environments__env__namespaces__path__tables_get",
         "parameters": [
           {
@@ -2265,6 +2265,24 @@
               "title": "Path"
             },
             "description": "Dot-joined namespace path."
+          },
+          {
+            "name": "model_kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only tables whose asset header declares this kind: fact, dimension, wide or staging.",
+              "title": "Model Kind"
+            },
+            "description": "Only tables whose asset header declares this kind: fact, dimension, wide or staging."
           },
           {
             "name": "authorization",
@@ -3092,6 +3110,118 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/LineageOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token is missing, wrong, expired or revoked.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/environments/{env}/namespaces/{path}/tables/{name}/references": {
+      "get": {
+        "tags": [
+          "tables"
+        ],
+        "summary": "Show what a table's header says it references, and which tables reference it",
+        "description": "Needs `READ_TABLE` on the table. A reference whose target, or whose referencing table, the caller may not read is counted in `hidden_outgoing` or `hidden_incoming`, never named. These are the references the model declares, not lineage. Answers 404 when the table does not exist.",
+        "operationId": "get_table_references_api_v1_environments__env__namespaces__path__tables__name__references_get",
+        "parameters": [
+          {
+            "name": "env",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Env"
+            },
+            "description": "Environment name."
+          },
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            },
+            "description": "Dot-joined namespace path."
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            },
+            "description": "Table name."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TableReferencesOut"
                 }
               }
             }
@@ -19882,6 +20012,45 @@
         "title": "MergeOut",
         "description": "Response body for a governed Arrow merge.\n\nParameters\n----------\nsnapshot_id\n    The snapshot the merge committed, or `None` when it changed nothing (no rows, or every\n    row equal to the table's).\nrows_inserted\n    Rows whose key the table did not have.\nrows_updated\n    Rows whose key matched and whose values changed."
       },
+      "ModelReferenceOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "table": {
+            "type": "string",
+            "title": "Table"
+          },
+          "column": {
+            "type": "string",
+            "title": "Column"
+          },
+          "target": {
+            "type": "string",
+            "title": "Target"
+          },
+          "target_column": {
+            "type": "string",
+            "title": "Target Column"
+          },
+          "target_exists": {
+            "type": "boolean",
+            "title": "Target Exists"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "table",
+          "column",
+          "target",
+          "target_column",
+          "target_exists"
+        ],
+        "title": "ModelReferenceOut",
+        "description": "One reference a table's header declares, as `ModelReferenceView` holds it.\n\nParameters\n----------\nid\n    ``<ns.table>/ref_<column>``: the name of the reference's generated check.\ntable\n    The dotted name of the table that declares it.\ncolumn\n    The referencing column.\ntarget\n    The dotted name of the table it points at, as the header names it.\ntarget_column\n    The column of the target it must match.\ntarget_exists\n    Whether a table of that name exists now. A reference whose target the caller may not\n    read is never listed, so this says nothing about such a table."
+      },
       "NamespaceCreate": {
         "properties": {
           "path": {
@@ -22173,6 +22342,73 @@
         "title": "TableHealthOut",
         "description": "A table's health at a glance.\n\nParameters\n----------\ndays\n    The window `readers` covers.\nlast_maintenance\n    The last maintenance that changed the table; `None` if there is none.\nchecks\n    The newest result of each check of the table.\nreaders\n    Who read the table in the window, most reads first; `None` for a caller who may not see\n    the table's grants."
       },
+      "TableModelOut": {
+        "properties": {
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind"
+          },
+          "grain": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Grain"
+          },
+          "key": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Key"
+          },
+          "key_none": {
+            "type": "boolean",
+            "title": "Key None"
+          },
+          "references": {
+            "items": {
+              "$ref": "#/components/schemas/ModelReferenceOut"
+            },
+            "type": "array",
+            "title": "References"
+          },
+          "hidden_references": {
+            "type": "integer",
+            "title": "Hidden References"
+          },
+          "checks": {
+            "items": {
+              "$ref": "#/components/schemas/CheckHealthOut"
+            },
+            "type": "array",
+            "title": "Checks"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "grain",
+          "key",
+          "key_none",
+          "references",
+          "hidden_references",
+          "checks"
+        ],
+        "title": "TableModelOut",
+        "description": "The model a table's asset header declares, as the caller may see it.\n\nParameters\n----------\nkind\n    ``fact``, ``dimension``, ``wide`` or ``staging``; `None` when the header names none.\ngrain\n    What one row is, in one sentence; `None` when the header says nothing.\nkey\n    The columns that identify one row; empty for no key and for `key: none`.\nkey_none\n    Whether the header says `key: none`: no columns are unique, and the grain is not\n    checked.\nreferences\n    The references whose target the caller may read, by id.\nhidden_references\n    How many references point at a table the caller may not read; they are not listed.\nchecks\n    The newest result of each check the current header generates, by name."
+      },
       "TableOut": {
         "properties": {
           "name": {
@@ -22365,6 +22601,16 @@
             "type": "boolean",
             "title": "Expires Soon",
             "default": false
+          },
+          "model": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TableModelOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -22376,7 +22622,7 @@
           "schema"
         ],
         "title": "TableOut",
-        "description": "Response body for a table, external table or view, read-only.\n\nParameters\n----------\nname\n    Table name.\nnamespace\n    Dot-joined namespace path the table lives in.\nuuid\n    The table's id (the Iceberg ``table-uuid`` for a managed table).\nkind\n    ``TABLE``, ``EXTERNAL``, ``VIEW`` or ``ARTIFACT``.\nmetadata_location\n    Absolute URI of the current metadata file; `None` for an external\n    table or a view.\ncolumns\n    The columns, serialized as `schema`.\nsql\n    A view's SELECT. `None` if the caller may not read every reference\n    .\nreferences\n    A view's references. Empty if the caller may not read every\n    reference.\nhidden_references\n    The number of the view's references the caller may not read, and\n    so are withheld from `sql` and `references`.\nsnapshot_id\n    The current snapshot of a managed table; `None`\n    without one, and for a view or an external table.\nstate\n    ``not_published`` for a table whose first build did not finish, or failed a blocking\n    check, and that no later run has published; ``published`` for everything else.\nstate_message\n    Why it is not published, naming the check and the run; `None` otherwise.\ndescription\n    The table's description: the edit when it has one, else the project's text; `None`\n    when there is none.\ndescription_source\n    ``edited`` or ``project``; `None` when there is no description.\nlast_write_at\n    When the current snapshot was committed; `None` without one, and for a view, an\n    external table and an artifact.\nrow_count\n    The rows of the current snapshot, from its summary; `None` when missing.\nsize_bytes\n    The size of its data files, from its summary; `None` when missing.\nfile_count\n    Its data files, from its summary; `None` when missing.\nexpires_at\n    When a managed table's retention makes it expire; `None` when it never does.\nexpires_soon\n    Whether that is within the server's warning window\n    (``LAKANA_TABLES__EXPIRY_WARNING_DAYS``, 7 days by default); always `false` when that\n    is 0."
+        "description": "Response body for a table, external table or view, read-only.\n\nParameters\n----------\nname\n    Table name.\nnamespace\n    Dot-joined namespace path the table lives in.\nuuid\n    The table's id (the Iceberg ``table-uuid`` for a managed table).\nkind\n    ``TABLE``, ``EXTERNAL``, ``VIEW`` or ``ARTIFACT``.\nmetadata_location\n    Absolute URI of the current metadata file; `None` for an external\n    table or a view.\ncolumns\n    The columns, serialized as `schema`.\nsql\n    A view's SELECT. `None` if the caller may not read every reference\n    .\nreferences\n    A view's references. Empty if the caller may not read every\n    reference.\nhidden_references\n    The number of the view's references the caller may not read, and\n    so are withheld from `sql` and `references`.\nsnapshot_id\n    The current snapshot of a managed table; `None`\n    without one, and for a view or an external table.\nstate\n    ``not_published`` for a table whose first build did not finish, or failed a blocking\n    check, and that no later run has published; ``published`` for everything else.\nstate_message\n    Why it is not published, naming the check and the run; `None` otherwise.\ndescription\n    The table's description: the edit when it has one, else the project's text; `None`\n    when there is none.\ndescription_source\n    ``edited`` or ``project``; `None` when there is no description.\nlast_write_at\n    When the current snapshot was committed; `None` without one, and for a view, an\n    external table and an artifact.\nrow_count\n    The rows of the current snapshot, from its summary; `None` when missing.\nsize_bytes\n    The size of its data files, from its summary; `None` when missing.\nfile_count\n    Its data files, from its summary; `None` when missing.\nexpires_at\n    When a managed table's retention makes it expire; `None` when it never does.\nexpires_soon\n    Whether that is within the server's warning window\n    (``LAKANA_TABLES__EXPIRY_WARNING_DAYS``, 7 days by default); always `false` when that\n    is 0.\nmodel\n    The model the asset header declares (kind, grain, key, references and the checks they\n    generate); `None` for a table whose header declares none."
       },
       "TableReferenceOut": {
         "properties": {
@@ -22396,6 +22642,46 @@
         ],
         "title": "TableReferenceOut",
         "description": "One table or view a view references.\n\nParameters\n----------\nid\n    Its id.\nname\n    Its dotted name when the view was created."
+      },
+      "TableReferencesOut": {
+        "properties": {
+          "table": {
+            "type": "string",
+            "title": "Table"
+          },
+          "outgoing": {
+            "items": {
+              "$ref": "#/components/schemas/ModelReferenceOut"
+            },
+            "type": "array",
+            "title": "Outgoing"
+          },
+          "hidden_outgoing": {
+            "type": "integer",
+            "title": "Hidden Outgoing"
+          },
+          "incoming": {
+            "items": {
+              "$ref": "#/components/schemas/ModelReferenceOut"
+            },
+            "type": "array",
+            "title": "Incoming"
+          },
+          "hidden_incoming": {
+            "type": "integer",
+            "title": "Hidden Incoming"
+          }
+        },
+        "type": "object",
+        "required": [
+          "table",
+          "outgoing",
+          "hidden_outgoing",
+          "incoming",
+          "hidden_incoming"
+        ],
+        "title": "TableReferencesOut",
+        "description": "Response body of `GET .../tables/{name}/references`.\n\nParameters\n----------\ntable\n    The table's dotted name.\noutgoing\n    The references its header declares whose target the caller may read, by id.\nhidden_outgoing\n    How many of its references point at a table the caller may not read.\nincoming\n    The references other tables' headers declare to it, from tables the caller may read,\n    by id.\nhidden_incoming\n    How many references to it come from tables the caller may not read; never named."
       },
       "TableRetentionIn": {
         "properties": {

@@ -14,18 +14,21 @@ held by name and resolved in the environment when it is read.
 from __future__ import annotations
 
 import uuid
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from lakana_core.catalog.health import CheckHealth, latest_checks
+from lakana_core.catalog.identity import resolve_table_id
 from lakana_core.errors import ValidationError
-from lakana_core.identifiers import TableRef
+from lakana_core.identifiers import NamespacePath, TableRef
 from lakana_core.models import DeclaredReference, Namespace, Table
 from lakana_core.projects.asset_model import KEY_NONE, ResolvedReference
 from lakana_core.projects.manifest import entry_model, manifest_assets
+from lakana_core.projects.model_checks import KEY_NOT_NULL, KEY_UNIQUE, REF_PREFIX
 
 
 @dataclass(frozen=True)
@@ -234,3 +237,270 @@ def incoming_references(
         .order_by(DeclaredReference.source_table_id, DeclaredReference.source_column)
     )
     return [(table_id, column, target_column) for table_id, column, target_column in rows]
+
+
+@dataclass(frozen=True)
+class ModelReferenceView:
+    """One declared reference as a reader is shown it.
+
+    Parameters
+    ----------
+    id
+        ``<ns.table>/ref_<column>``, with the source table's current name: the name of the
+        reference's generated check.
+    table
+        The dotted name of the table that declares it.
+    column
+        The referencing column.
+    target
+        The dotted name of the table it points at, as the header names it.
+    target_column
+        The column of the target it must match.
+    target_exists
+        Whether a table of that name exists now. Only a reader who may read the target is shown
+        the reference at all, so this never says anything about a table the reader may not read.
+    """
+
+    id: str
+    table: str
+    column: str
+    target: str
+    target_column: str
+    target_exists: bool
+
+
+@dataclass(frozen=True)
+class TableModelView:
+    """The model a table's header declares, filtered for one reader.
+
+    Parameters
+    ----------
+    kind
+        The declared kind, or `None`.
+    grain
+        The declared grain, or `None`.
+    key
+        The declared key columns; empty for no key and for `key: none`.
+    key_none
+        Whether the header declares `key: none`.
+    references
+        The references whose target the reader may read, by id.
+    hidden_references
+        How many references point at a table the reader may not read. A missing target counts
+        here too for such a reader, so a hidden reference never says whether its target exists.
+    checks
+        The newest result of each check the current model generates (`key_unique` and
+        `key_not_null` for a key, `ref_<column>` for each shown reference), by name. A stored
+        result of a generated check the header no longer declares is left out.
+    """
+
+    kind: str | None
+    grain: str | None
+    key: tuple[str, ...]
+    key_none: bool
+    references: tuple[ModelReferenceView, ...]
+    hidden_references: int
+    checks: tuple[CheckHealth, ...]
+
+
+@dataclass(frozen=True)
+class TableReferences:
+    """What a table's header says it references, and which tables reference it.
+
+    Parameters
+    ----------
+    table
+        The table's dotted name.
+    outgoing
+        The references it declares whose target the reader may read, by id.
+    hidden_outgoing
+        How many of its references point at a table the reader may not read.
+    incoming
+        The references other tables declare to it (by its current name) from a table the reader
+        may read, by id.
+    hidden_incoming
+        How many references to it come from a table the reader may not read; never named.
+    """
+
+    table: str
+    outgoing: tuple[ModelReferenceView, ...]
+    hidden_outgoing: int
+    incoming: tuple[ModelReferenceView, ...]
+    hidden_incoming: int
+
+
+ReadCheck = Callable[[TableRef], bool]
+"""Whether the reader may read a table, asked by name and without looking it up."""
+
+
+def reference_id(table: str, column: str) -> str:
+    """Build a reference's canonical id, which is also the name of its generated check.
+
+    Parameters
+    ----------
+    table
+        The dotted name of the table that declares it.
+    column
+        The referencing column.
+
+    Returns
+    -------
+    str
+        ``<ns.table>/ref_<column>``.
+    """
+    return f"{table}/{REF_PREFIX}{column}"
+
+
+def _outgoing(
+    session: Session, table: TableRef, model: TableModel, may_read: ReadCheck
+) -> tuple[tuple[ModelReferenceView, ...], int]:
+    """Keep the references of a model whose target the reader may read.
+
+    The read right is asked before anything is looked up, so a missing target and an
+    unreadable one are both counted as hidden for a reader without the right.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    table
+        The table that declares them.
+    model
+        Its model.
+    may_read
+        The reader's read check.
+
+    Returns
+    -------
+    tuple
+        The shown references, by id, and how many were withheld.
+    """
+    shown: list[ModelReferenceView] = []
+    hidden = 0
+    for ref in model.references:
+        try:
+            target = TableRef.from_dotted(table.environment, ref.target)
+        except ValidationError:
+            target = None
+        if target is None or not may_read(target):
+            hidden += 1
+            continue
+        exists = (
+            resolve_table_id(session, target.environment, target.namespace.joined(), target.name)
+            is not None
+        )
+        shown.append(
+            ModelReferenceView(
+                id=reference_id(table.dotted(), ref.column),
+                table=table.dotted(),
+                column=ref.column,
+                target=ref.target,
+                target_column=ref.target_column,
+                target_exists=exists,
+            )
+        )
+    return tuple(sorted(shown, key=lambda r: r.id)), hidden
+
+
+def model_view(
+    session: Session, row: Table, table: TableRef, may_read: ReadCheck
+) -> TableModelView | None:
+    """Show a table's model to a reader who may read the table.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    row
+        The table.
+    table
+        How it is addressed now.
+    may_read
+        The reader's read check, asked of each reference's target.
+
+    Returns
+    -------
+    TableModelView or None
+        The model, or `None` when the row records none.
+    """
+    model = read_table_model(session, row)
+    if model is None:
+        return None
+    references, hidden = _outgoing(session, table, model, may_read)
+    generated = {KEY_UNIQUE, KEY_NOT_NULL} if model.key else set()
+    generated |= {f"{REF_PREFIX}{r.column}" for r in references}
+    return TableModelView(
+        kind=model.kind,
+        grain=model.grain,
+        key=model.key,
+        key_none=model.key_none,
+        references=references,
+        hidden_references=hidden,
+        checks=tuple(
+            c for c in latest_checks(session, row.id) if c.generated and c.check in generated
+        ),
+    )
+
+
+def references_view(
+    session: Session, row: Table, table: TableRef, may_read: ReadCheck
+) -> TableReferences:
+    """Show a table's references in both directions to a reader who may read the table.
+
+    Incoming references are found by the table's current name, as the headers that declare
+    them name it: a table renamed through the API leaves them with its old name, and a later
+    table of that name gets them, as the reference's generated check does.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    row
+        The table.
+    table
+        How it is addressed now.
+    may_read
+        The reader's read check, asked of each target and each referencing table.
+
+    Returns
+    -------
+    TableReferences
+        The references the reader may see, and how many were withheld in each direction.
+    """
+    model = read_table_model(session, row)
+    outgoing, hidden_outgoing = _outgoing(session, table, model, may_read) if model else ((), 0)
+    namespace = session.get(Namespace, row.namespace_id)
+    assert namespace is not None  # nosec B101 -- a table row's namespace is never missing
+    found = incoming_references(session, namespace.environment_id, table.dotted())
+    sources = {
+        table_id: TableRef(table.environment, NamespacePath.parse(path), name)
+        for table_id, path, name in session.execute(
+            select(Table.id, Namespace.path, Table.name)
+            .join(Namespace, Namespace.id == Table.namespace_id)
+            .where(Table.id.in_({source_id for source_id, _, _ in found}))
+        )
+    }
+    incoming: list[ModelReferenceView] = []
+    hidden_incoming = 0
+    for source_id, column, target_column in found:
+        source = sources[source_id]  # the rows go with their table, so every id has one
+        if not may_read(source):
+            hidden_incoming += 1
+            continue
+        incoming.append(
+            ModelReferenceView(
+                id=reference_id(source.dotted(), column),
+                table=source.dotted(),
+                column=column,
+                target=table.dotted(),
+                target_column=target_column,
+                target_exists=True,
+            )
+        )
+    return TableReferences(
+        table=table.dotted(),
+        outgoing=outgoing,
+        hidden_outgoing=hidden_outgoing,
+        incoming=tuple(sorted(incoming, key=lambda r: r.id)),
+        hidden_incoming=hidden_incoming,
+    )

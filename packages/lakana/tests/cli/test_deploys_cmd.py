@@ -1384,3 +1384,21 @@ def test_a_deploy_prints_each_hint_after_the_diff_and_never_as_a_changed_table(
     )
     assert "No changes." in _plain(alone.stdout)
     assert f"hint: {_HINT}" in _plain(alone.stderr)
+
+
+def test_a_generated_check_is_marked_in_the_list_of_checks(tmp_path: Path) -> None:
+    """A check from the asset's header says so, as `lakana check list` does."""
+    checks = {
+        "gold.fact_sales": [
+            {"check": "key_unique", "on_failure": "block", "generated": "key"},
+            {"check": "ref_store_id", "on_failure": "warn", "generated": "references"},
+            {"check": "positive", "on_failure": "block"},
+        ]
+    }
+    result = invoke(
+        make_state(tmp_path, _api(checks=checks)), "deploy", "analytics", "--env", "dev", env=_CI
+    )
+    assert (
+        "Checks:\n  gold.fact_sales: key_unique (generated), ref_store_id (generated) (warn), "
+        "positive\n"
+    ) in result.stdout

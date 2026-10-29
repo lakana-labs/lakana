@@ -50,6 +50,7 @@ COMMANDS: dict[str, tuple[str, ...]] = {
         "tables.load",
     ),
     "table lineage": ("tables.lineage",),
+    "table references": ("tables.references",),
     "table maintain": ("tables.maintain", "query_run.wait"),
     "artifact upload": ("artifacts.upload",),
     "artifact list": ("artifacts.list",),
