@@ -26,6 +26,7 @@ from lakana._models import (
     SearchPage,
     TaskTokenScope,
     Whoami,
+    known_fields,
 )
 from lakana._routes import ROUTES
 from lakana._tokens import mask_token
@@ -422,7 +423,7 @@ class Client:
             ROUTES["search"], path_params={"env": environment}, params=params
         ).json()
         return SearchPage(
-            results=[SearchHit(**hit) for hit in body["results"]],
+            results=[SearchHit(**known_fields(SearchHit, hit)) for hit in body["results"]],
             limit=body["limit"],
             offset=body["offset"],
             has_more=body["has_more"],

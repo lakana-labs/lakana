@@ -163,43 +163,45 @@ def test_info_returns_the_instances_version() -> None:
         assert client.info() == InstanceInfo(version="1.2.3")
 
 
+_SEARCH_HITS: list[dict[str, str | None]] = [
+    {
+        "kind": "table",
+        "name": "silver.orders",
+        "matched": "description",
+        "snippet": "Purchases",
+        "namespace": "silver",
+        "table": "orders",
+        "table_kind": "TABLE",
+        "column": None,
+        "column_type": None,
+        "run_id": None,
+        "job": None,
+        "repository": None,
+        "status": None,
+        "principal": None,
+        "principal_type": None,
+    },
+    {
+        "kind": "run",
+        "name": "0b0e3c5e-6a7e-4f26-9d1e-0a3f0f5f6a11",
+        "matched": "job",
+        "snippet": None,
+        "namespace": None,
+        "table": None,
+        "table_kind": None,
+        "column": None,
+        "column_type": None,
+        "run_id": "0b0e3c5e-6a7e-4f26-9d1e-0a3f0f5f6a11",
+        "job": "nightly",
+        "repository": "analytics",
+        "status": "succeeded",
+        "principal": None,
+        "principal_type": None,
+    },
+]
+
 _SEARCH_BODY = {
-    "results": [
-        {
-            "kind": "table",
-            "name": "silver.orders",
-            "matched": "description",
-            "snippet": "Purchases",
-            "namespace": "silver",
-            "table": "orders",
-            "table_kind": "TABLE",
-            "column": None,
-            "column_type": None,
-            "run_id": None,
-            "job": None,
-            "repository": None,
-            "status": None,
-            "principal": None,
-            "principal_type": None,
-        },
-        {
-            "kind": "run",
-            "name": "0b0e3c5e-6a7e-4f26-9d1e-0a3f0f5f6a11",
-            "matched": "job",
-            "snippet": None,
-            "namespace": None,
-            "table": None,
-            "table_kind": None,
-            "column": None,
-            "column_type": None,
-            "run_id": "0b0e3c5e-6a7e-4f26-9d1e-0a3f0f5f6a11",
-            "job": "nightly",
-            "repository": "analytics",
-            "status": "succeeded",
-            "principal": None,
-            "principal_type": None,
-        },
-    ],
+    "results": _SEARCH_HITS,
     "limit": 20,
     "offset": 0,
     "has_more": True,
@@ -243,3 +245,23 @@ def test_search_gets_the_search_route_with_only_the_arguments_given_and_parses_i
         "analytics",
         "succeeded",
     )
+
+
+def test_search_ignores_a_field_of_a_hit_it_does_not_know() -> None:
+    """The REST contract adds fields; a client ignores the ones it does not know."""
+    body = {
+        **_SEARCH_BODY,
+        "results": [{**hit, "added_later": "x"} for hit in _SEARCH_HITS],
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=body)
+
+    http = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://x")
+    with Client(url="http://x", token="lakana_pat_k_s", http_client=http) as client:
+        page = client.search("dev", "order")
+    assert [hit.name for hit in page.results] == [
+        "silver.orders",
+        "0b0e3c5e-6a7e-4f26-9d1e-0a3f0f5f6a11",
+    ]
+    assert not hasattr(page.results[0], "added_later")

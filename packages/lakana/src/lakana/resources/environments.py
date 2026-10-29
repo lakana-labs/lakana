@@ -12,6 +12,7 @@ from lakana._models import (
     OrphanedLocation,
     OrphanedLocations,
     UsagePart,
+    known_fields,
 )
 from lakana._routes import ROUTES
 
@@ -369,10 +370,10 @@ class Environments:
         ).json()
         return EnvironmentUsage(
             environment=data["environment"],
-            tables=UsagePart(**data["tables"]),
-            dropped_tables=UsagePart(**data["dropped_tables"]),
-            artifacts=UsagePart(**data["artifacts"]),
-            code_archives=UsagePart(**data["code_archives"]),
+            tables=UsagePart(**known_fields(UsagePart, data["tables"])),
+            dropped_tables=UsagePart(**known_fields(UsagePart, data["dropped_tables"])),
+            artifacts=UsagePart(**known_fields(UsagePart, data["artifacts"])),
+            code_archives=UsagePart(**known_fields(UsagePart, data["code_archives"])),
             total_bytes=data["total_bytes"],
             complete=data["complete"],
         )

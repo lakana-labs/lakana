@@ -7,9 +7,34 @@ response bodies, field for field — the resource modules in
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from datetime import date, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from _typeshed import DataclassInstance
+
+
+def known_fields(model: type[DataclassInstance], data: dict[str, Any]) -> dict[str, Any]:
+    """Keep the keys of an answer that a model has a field for.
+
+    The REST contract adds fields to an answer without notice; a client ignores the ones it does
+    not know, so that an older SDK keeps working against a newer server.
+
+    Parameters
+    ----------
+    model
+        A dataclass of this module.
+    data
+        One decoded JSON object.
+
+    Returns
+    -------
+    dict
+        The keys of `data` that name a field of `model`, with their values.
+    """
+    names = {f.name for f in fields(model)}
+    return {key: value for key, value in data.items() if key in names}
 
 
 @dataclass(frozen=True)
