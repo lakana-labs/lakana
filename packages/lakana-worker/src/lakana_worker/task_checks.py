@@ -118,6 +118,7 @@ from lakana_core.runs.kept import (
     note_kept,
     record_clean_in_attempt,
 )
+from lakana_core.runs.model_precheck import model_problem
 from lakana_core.runs.scheduler import COMMITTED_BEFORE_RECORDED_MESSAGE, LOST_MESSAGE
 from lakana_core.runs.tasks import (
     Baseline,
@@ -1399,6 +1400,20 @@ def _checks_under(
         session.rollback()
         if spec.name in refusals:
             counted, outcome, error = None, CheckOutcome.ERRORED, refusals[spec.name]
+        elif (
+            phase.active
+            and spec.generated is not None
+            and (
+                problem := model_problem(
+                    session, engine.authz_factory(session), principal, phase.environment, spec
+                )
+            )
+            is not None
+        ):
+            # A generated check whose columns or types are wrong is not counted: the count of
+            # a float key would pass, and a join of two types that differ may not compare.
+            session.rollback()
+            counted, outcome, error = None, CheckOutcome.ERRORED, problem
         elif phase.active:
             counted, outcome, error = _count_one(
                 session, engine, claimed, keeper, spec, phase.environment_id, principal

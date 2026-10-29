@@ -48,6 +48,12 @@ class CheckResult(Base):
 
     A result holds a count and, for an error, the error text; never a row of a table.
     `table_id` has no foreign key: a table that was dropped keeps its results.
+
+    Attributes
+    ----------
+    generated : bool
+        Whether the check was generated from the asset's header (`key:`, `references:`)
+        rather than written under `checks/`; false on every result recorded before it existed.
     """
 
     __tablename__ = "check_results"
@@ -77,6 +83,7 @@ class CheckResult(Base):
         SAEnum(RollbackOutcome, native_enum=False, length=16), nullable=True
     )
     policy_applied: Mapped[bool] = mapped_column(Boolean, server_default=false())
+    generated: Mapped[bool] = mapped_column(Boolean, server_default=false(), default=False)
     query_run_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("query_runs.id", ondelete="SET NULL"), nullable=True
     )

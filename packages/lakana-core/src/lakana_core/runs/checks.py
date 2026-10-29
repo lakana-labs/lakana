@@ -410,6 +410,9 @@ class CheckResultView:
         Start.
     finished_at
         End.
+    generated
+        Whether the check was generated from the asset's header rather than written under
+        `checks/`.
     """
 
     run_id: uuid.UUID
@@ -430,6 +433,7 @@ class CheckResultView:
     query_run_id: uuid.UUID | None
     started_at: datetime
     finished_at: datetime
+    generated: bool
 
 
 def policy_note(principal: str | None) -> str:
@@ -488,6 +492,7 @@ def view_of(row: CheckResult, task: str, run_as: str | None) -> CheckResultView:
         query_run_id=row.query_run_id,
         started_at=row.started_at,
         finished_at=row.finished_at,
+        generated=row.generated,
     )
 
 
@@ -1318,6 +1323,7 @@ def record_result(
             checked_snapshot_id=checked_snapshot_id,
             rollback_outcome=None,
             policy_applied=policy_applied,
+            generated=spec.generated is not None,
             query_run_id=query_run_id,
             started_at=started_at,
             finished_at=db_now(session),

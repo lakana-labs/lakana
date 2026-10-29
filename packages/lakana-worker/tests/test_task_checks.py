@@ -306,6 +306,124 @@ class _NoSecret(AllowAllAuthorization):
             raise PermissionDenied("may not read gold.secret")
 
 
+def _generated(name: str, sql: str, generated: dict[str, object]) -> dict[str, object]:
+    """Build the manifest entry of a check generated from the header of `silver.orders`.
+
+    Parameters
+    ----------
+    name
+        The check's short name.
+    sql
+        Its SELECT.
+    generated
+        The stored ``generated`` value: the header field it comes from.
+
+    Returns
+    -------
+    dict
+        The entry, at the asset file and header line.
+    """
+    return {
+        **_check(name, sql),
+        "path": "assets/silver/orders.sql:1",
+        "generated": {"target": None, "target_column": None, **generated},
+    }
+
+
+def test_a_generated_key_check_on_a_float_column_errors_without_a_count(world: World) -> None:
+    """The pre-check reads the written column types; `block` sets the table back."""
+    _checked(
+        world,
+        _generated(
+            "key_unique",
+            "SELECT amount FROM silver.orders GROUP BY amount HAVING count(*) > 1",
+            {"family": "key", "columns": ["amount"]},
+        ),
+        sql="SELECT id, id::DOUBLE AS amount FROM bronze.src",
+    )
+    run_id = _start(world)
+    _drain(world)
+
+    task = _task(world, "silver.orders")
+    error = (
+        "Key column `amount` is double; a floating-point column cannot identify a row. "
+        "Use an integer, decimal, string or date column."
+    )
+    (result,) = _results(world, task.id)
+    assert (result.outcome, result.error, result.failing_rows, result.generated) == (
+        CheckOutcome.ERRORED,
+        error,
+        None,
+        True,
+    )
+    assert result.rollback_outcome is RollbackOutcome.UNPUBLISHED
+    assert _counts(world, task.id) == []
+    assert (task.status, task.failure_code) == (TaskStatus.FAILED, "check_error")
+    assert task.error_message == (
+        "Check `silver.orders/key_unique` could not run (assets/silver/orders.sql:1): "
+        f"{error} Data that could not be checked is not published. {_UNPUBLISHED} "
+        f"{_after(run_id)}"
+    )
+    assert _marker(world, "silver.orders") == run_id
+
+
+def test_a_generated_reference_to_an_unreadable_target_says_gone_or_unreadable(
+    world: World,
+) -> None:
+    """One text for a target that is gone and one the run's principal may not read."""
+    _outside_table(world, "gold.secret", [1])
+    _checked(
+        world,
+        _generated(
+            "ref_id",
+            "SELECT o.id FROM silver.orders o LEFT JOIN gold.secret s ON s.id = o.id "
+            "WHERE o.id IS NOT NULL AND s.id IS NULL",
+            {
+                "family": "references",
+                "columns": ["id"],
+                "target": "gold.secret",
+                "target_column": "id",
+            },
+        ),
+    )
+    _start(world)
+    _drain(world, _engine(world, authz=lambda _s: _NoSecret()))
+
+    task = _task(world, "silver.orders")
+    (result,) = _results(world, task.id)
+    assert (result.outcome, result.error, result.generated) == (
+        CheckOutcome.ERRORED,
+        "Reference target `gold.secret` no longer exists, or the run's principal may not read "
+        "it; fix the reference, or grant READ_TABLE on it, and deploy again.",
+        True,
+    )
+    assert _counts(world, task.id) == []
+    assert task.status is TaskStatus.FAILED
+
+
+def test_a_generated_check_that_passes_the_precheck_is_counted_and_marked(world: World) -> None:
+    """A generated check is counted like any other; only its result's mark differs."""
+    _checked(
+        world,
+        _generated(
+            "key_not_null",
+            "SELECT id FROM silver.orders WHERE id IS NULL",
+            {"family": "key", "columns": ["id"]},
+        ),
+        _check("no_nulls", "SELECT id FROM silver.orders WHERE id IS NULL"),
+    )
+    _start(world)
+    _drain(world)
+
+    task = _task(world, "silver.orders")
+    assert task.status is TaskStatus.SUCCEEDED
+    assert [(r.check_name, r.outcome, r.generated) for r in _results(world, task.id)] == [
+        ("silver.orders/key_not_null", CheckOutcome.PASSED, True),
+        ("silver.orders/no_nulls", CheckOutcome.PASSED, False),
+    ]
+    assert len(_counts(world, task.id)) == 2
+
+
 def test_a_check_the_run_principal_may_not_read_names_the_check(world: World) -> None:
     """The message names the check and the principal, and not the other table."""
     _outside_table(world, "gold.secret", [1])

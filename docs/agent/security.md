@@ -2229,6 +2229,17 @@ result, and nothing may add one. Whoever may read the run may read its results (
 `READ_ENVIRONMENT`); an environment's listing needs `READ_ENVIRONMENT`; neither route is a new
 action.
 
+**What a generated check's error may hold.** A check generated from an asset's header
+(`TABLE/key_unique`, `TABLE/key_not_null`, `TABLE/ref_<column>`; `CheckResult.generated`) is
+pre-checked by the worker right before its count (`lakana_core.runs.model_precheck.model_problem`),
+because a deploy has no output types. The pre-check reads names and types from `table_columns`,
+never a value. A problem makes the check `errored` without a count, so `block` sets the table
+back, and its `error` is one of the module's fixed sentences, filled with the header's column and
+table names, the check's path and the checked table's own column type. It never holds a value and
+never a target column's type: a reader of the run may not be able to read the target. A target
+that is gone and one the run's principal may not read (`READ_TABLE`, asked before the target's
+columns are read) get one text (`TARGET_GONE`), the same rule as `ERROR_UNREADABLE`.
+
 **Who rolls back.** The worker, for a running task on its own asset, with the **claim form** of
 the run context (`RunContext(task_run_id, claim)`, built in `lakana_worker.task_checks._set_back`): the
 third place that builds a run context, beside `pipeline.run_one` (the write run's form) and token

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import inspect
 import re
 import shlex
@@ -33,7 +34,7 @@ from lakana_core.models import (
     TaskRun,
     TaskStatus,
 )
-from lakana_core.projects.checks import CheckSpec
+from lakana_core.projects.checks import CheckSpec, GeneratedFrom
 from lakana_core.runs.checks import (
     ASSET,
     ERROR_KEPT,
@@ -66,6 +67,7 @@ from lakana_core.runs.checks import (
     set_back_result_message,
     unchecked_retry_message,
     verdict,
+    view_of,
     warning_note,
 )
 
@@ -257,6 +259,24 @@ def test_a_result_is_recorded_once_per_check_and_task(
     )
     assert again.id != row.id
     assert session.scalars(select(CheckResult)).all() == [again]
+
+
+def test_a_result_says_whether_its_check_was_generated(session: Session, task: TaskRun) -> None:
+    """The mark follows the spec, also when a second result replaces the first."""
+    generated = dataclasses.replace(_spec("key_unique"), generated=GeneratedFrom("key", ("id",)))
+    assert _record(session, task, generated)
+    assert _record(session, task, _spec())
+    marks = {row.check_name: row.generated for row in results_of_task(session, task.id)}
+    assert marks == {generated.name: True, _spec().name: False}
+
+    assert _record(session, task, dataclasses.replace(generated, generated=None))
+    rows = {row.check_name: row for row in results_of_task(session, task.id)}
+    assert rows[generated.name].generated is False
+    assert _record(session, task, generated)
+    (row,) = [r for r in results_of_task(session, task.id) if r.check_name == generated.name]
+    assert view_of(row, _TABLE, None).generated is True
+    (other,) = [r for r in results_of_task(session, task.id) if r.check_name != generated.name]
+    assert view_of(other, _TABLE, None).generated is False
 
 
 def test_a_failed_blocking_check_is_audited(
