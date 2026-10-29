@@ -170,7 +170,13 @@ to a table you may not read is not listed: `lakana table get` says how many ther
 (`1 more reference to a table you cannot read`), and so does `hidden_references` in the body.
 The same holds for the tables that reference this one (`3 more from tables you cannot read`,
 `hidden_incoming`). A hidden reference never says whether its target exists, and neither does its
-generated check, which is left out with it.
+generated check. The `ref_<column>` check of a reference to a table you may not read is not
+shown anywhere: not in the Model block, `lakana table health`, `lakana check list`,
+`lakana runs show` or `lakana run`, nor in their REST and SDK answers. In its place they say how
+many were left out (`1 check of a reference to a table you cannot read is not shown.`;
+`hidden_checks` on table health and on each task of a run, `hidden` on a page of check results),
+and `lakana check rows` for such a check answers as for a check the run does not have. Key checks
+and hand-written checks are shown as before.
 
 **References follow names.** A reference names its target as the header writes it, so it is
 listed with whichever table has that name now, as the reference's generated check reads it. A
@@ -178,4 +184,7 @@ table renamed through the Iceberg REST catalog (an engine's `ALTER TABLE … REN
 the target of the references to its old name, and a new table that takes the old name is. The
 renamed table keeps the model its header gave it under the old name, listed under its new name,
 until it is dropped; the project builds a new table under the old name, with the model again. A
-table restored with `lakana table undrop` gets its model and its references back.
+table restored with `lakana table undrop` gets back the model it had when it was dropped, with its
+references. A deploy while the table was dropped could not write onto it, so the model can be
+older than the header until the next deploy; restored under another name (`--as`), it stays
+as after a rename.

@@ -1129,12 +1129,16 @@ class TableHealthOut(BaseModel):
     readers
         Who read the table in the window, most reads first; `None` for a caller who may not see
         the table's grants.
+    hidden_checks
+        How many results were left out of `checks`: generated reference checks whose target the
+        caller may not read.
     """
 
     days: int
     last_maintenance: LastMaintenanceOut | None
     checks: list[CheckHealthOut]
     readers: list[ReaderOut] | None
+    hidden_checks: int = 0
 
 
 class DescriptionIn(BaseModel):
@@ -2841,10 +2845,15 @@ class CheckResultPage(BaseModel):
         The results on this page.
     next_cursor
         Pass back as `?cursor=` to fetch the next page; `None` on the last page.
+    hidden
+        How many results of this page were left out: generated reference checks whose target
+        the caller may not read. A page can hold fewer results than `limit` and still have a
+        next one.
     """
 
     items: list[CheckResultOut]
     next_cursor: str | None
+    hidden: int = 0
 
 
 class FailureOut(BaseModel):
@@ -2913,6 +2922,9 @@ class TaskRunOut(BaseModel):
         ``asset`` for a table the run builds, ``source_check`` for a table it only checks.
     checks
         The task's check results, by name.
+    hidden_checks
+        How many results were left out of `checks`: generated reference checks whose target the
+        caller may not read.
     kept_check
         ``true`` for a ``source_check`` task that checks a table the project builds, because
         that table was kept after a failed check; ``false`` for every other task; ``null`` for a
@@ -2945,6 +2957,7 @@ class TaskRunOut(BaseModel):
     )
     kind: str = "asset"
     checks: list[CheckResultOut] = Field(default_factory=list)
+    hidden_checks: int = 0
     kept_check: bool | None = False
     setting_back: bool = False
     failure: FailureOut | None = None

@@ -48,8 +48,8 @@ The table comes back as it was when it was dropped:
 - the same table, with the same id and the same data and history (an engine that kept the table's
   id sees the same table);
 - its description and the descriptions of its columns, and its owner;
-- the model its asset header declared (kind, grain, key and references), as `lakana table get` shows
-  it;
+- the model its asset header declared when it was dropped (kind, grain, key and references), as
+  `lakana table get` shows it; the next deploy brings it up to date with the header;
 - exactly the grants, row filters and column masks that the drop took away. One that was revoked
   before the drop stays revoked.
 

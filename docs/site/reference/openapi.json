@@ -17252,6 +17252,11 @@
               }
             ],
             "title": "Next Cursor"
+          },
+          "hidden": {
+            "type": "integer",
+            "title": "Hidden",
+            "default": 0
           }
         },
         "type": "object",
@@ -17260,7 +17265,7 @@
           "next_cursor"
         ],
         "title": "CheckResultPage",
-        "description": "One page of check results, newest first.\n\nParameters\n----------\nitems\n    The results on this page.\nnext_cursor\n    Pass back as `?cursor=` to fetch the next page; `None` on the last page."
+        "description": "One page of check results, newest first.\n\nParameters\n----------\nitems\n    The results on this page.\nnext_cursor\n    Pass back as `?cursor=` to fetch the next page; `None` on the last page.\nhidden\n    How many results of this page were left out: generated reference checks whose target\n    the caller may not read. A page can hold fewer results than `limit` and still have a\n    next one."
       },
       "CheckRowsRequest": {
         "properties": {
@@ -22330,6 +22335,11 @@
               }
             ],
             "title": "Readers"
+          },
+          "hidden_checks": {
+            "type": "integer",
+            "title": "Hidden Checks",
+            "default": 0
           }
         },
         "type": "object",
@@ -22340,7 +22350,7 @@
           "readers"
         ],
         "title": "TableHealthOut",
-        "description": "A table's health at a glance.\n\nParameters\n----------\ndays\n    The window `readers` covers.\nlast_maintenance\n    The last maintenance that changed the table; `None` if there is none.\nchecks\n    The newest result of each check of the table.\nreaders\n    Who read the table in the window, most reads first; `None` for a caller who may not see\n    the table's grants."
+        "description": "A table's health at a glance.\n\nParameters\n----------\ndays\n    The window `readers` covers.\nlast_maintenance\n    The last maintenance that changed the table; `None` if there is none.\nchecks\n    The newest result of each check of the table.\nreaders\n    Who read the table in the window, most reads first; `None` for a caller who may not see\n    the table's grants.\nhidden_checks\n    How many results were left out of `checks`: generated reference checks whose target the\n    caller may not read."
       },
       "TableModelOut": {
         "properties": {
@@ -23157,6 +23167,11 @@
             "type": "array",
             "title": "Checks"
           },
+          "hidden_checks": {
+            "type": "integer",
+            "title": "Hidden Checks",
+            "default": 0
+          },
           "kept_check": {
             "anyOf": [
               {
@@ -23200,7 +23215,7 @@
           "rows_written"
         ],
         "title": "TaskRunOut",
-        "description": "One task run.\n\nParameters\n----------\nasset\n    Dotted table name.\nstatus\n    Task status.\nattempt\n    Attempts counted.\nmax_attempts\n    Retries + 1.\ntimeout_seconds\n    Per-attempt limit.\nnext_attempt_at\n    When a pending retry may start.\nstarted_at\n    First claim.\nfinished_at\n    Final state.\nerror_message\n    Last failure, as free text: the detail of `failure`.\nquery_run_id\n    The write that executed the last attempt.\nrows_written\n    Rows it wrote.\nfailure\n    Why the task failed, was cancelled or never ran, with its stable code, the cause and the\n    next step (`FailureOut`); `null` for a task with no error. A task that failed before the\n    codes existed has the code `unknown`.\nwaiting_for\n    Why a `pending` or `ready` task of a running run has not started, or `null`: a stable\n    `code` (`upstream`, `retry`, `setting_back`, `no_worker`, `no_worker_of_kind`,\n    `workers_busy` or `starting`), one sentence in `message`, and the numbers or names it\n    uses. A task is pipeline work: `no_worker_of_kind` means workers are running and none\n    takes pipeline work (`workers` is 0, `other_workers` the workers running), and `workers` in\n    `workers_busy` counts the workers that take pipeline work. For `upstream`, `upstream`\n    lists the first 50 unfinished upstream tasks (raw names) and `upstream_count` is how\n    many there are in all; the sentence names five, escaped.\nkind\n    ``asset`` for a table the run builds, ``source_check`` for a table it only checks.\nchecks\n    The task's check results, by name.\nkept_check\n    ``true`` for a ``source_check`` task that checks a table the project builds, because\n    that table was kept after a failed check; ``false`` for every other task; ``null`` for a\n    ``source_check`` task of a run whose project version is gone, which cannot tell.\nsetting_back\n    ``true`` while the task has not ended and its next claim only sets its table back:\n    its worker was lost after it may have written the table, or its run was cancelled\n    while it waited with rows no check had passed. The task is then ``ready``\n    (`waiting_for` has the code `setting_back`), ``running`` with that claim, or\n    ``pending`` again after that claim's worker drained. ``false`` once it has ended."
+        "description": "One task run.\n\nParameters\n----------\nasset\n    Dotted table name.\nstatus\n    Task status.\nattempt\n    Attempts counted.\nmax_attempts\n    Retries + 1.\ntimeout_seconds\n    Per-attempt limit.\nnext_attempt_at\n    When a pending retry may start.\nstarted_at\n    First claim.\nfinished_at\n    Final state.\nerror_message\n    Last failure, as free text: the detail of `failure`.\nquery_run_id\n    The write that executed the last attempt.\nrows_written\n    Rows it wrote.\nfailure\n    Why the task failed, was cancelled or never ran, with its stable code, the cause and the\n    next step (`FailureOut`); `null` for a task with no error. A task that failed before the\n    codes existed has the code `unknown`.\nwaiting_for\n    Why a `pending` or `ready` task of a running run has not started, or `null`: a stable\n    `code` (`upstream`, `retry`, `setting_back`, `no_worker`, `no_worker_of_kind`,\n    `workers_busy` or `starting`), one sentence in `message`, and the numbers or names it\n    uses. A task is pipeline work: `no_worker_of_kind` means workers are running and none\n    takes pipeline work (`workers` is 0, `other_workers` the workers running), and `workers` in\n    `workers_busy` counts the workers that take pipeline work. For `upstream`, `upstream`\n    lists the first 50 unfinished upstream tasks (raw names) and `upstream_count` is how\n    many there are in all; the sentence names five, escaped.\nkind\n    ``asset`` for a table the run builds, ``source_check`` for a table it only checks.\nchecks\n    The task's check results, by name.\nhidden_checks\n    How many results were left out of `checks`: generated reference checks whose target the\n    caller may not read.\nkept_check\n    ``true`` for a ``source_check`` task that checks a table the project builds, because\n    that table was kept after a failed check; ``false`` for every other task; ``null`` for a\n    ``source_check`` task of a run whose project version is gone, which cannot tell.\nsetting_back\n    ``true`` while the task has not ended and its next claim only sets its table back:\n    its worker was lost after it may have written the table, or its run was cancelled\n    while it waited with rows no check had passed. The task is then ``ready``\n    (`waiting_for` has the code `setting_back`), ``running`` with that claim, or\n    ``pending`` again after that claim's worker drained. ``false`` once it has ended."
       },
       "TaskTokenMintIn": {
         "properties": {

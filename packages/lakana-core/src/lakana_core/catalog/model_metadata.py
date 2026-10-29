@@ -493,8 +493,9 @@ def references_view(
     incoming: list[ModelReferenceView] = []
     hidden_incoming = 0
     for source_id, column, target_column in found:
-        source = sources[source_id]  # the rows go with their table, so every id has one
-        if not may_read(source):
+        # A source dropped between the two reads has no name any more: count it, as hidden.
+        source = sources.get(source_id)
+        if source is None or not may_read(source):
             hidden_incoming += 1
             continue
         incoming.append(

@@ -2163,16 +2163,16 @@ def test_list_checks_pages_newest_first_and_filters_by_table(
     cursor = None
     pages = 0
     while True:
-        page, cursor = service.list_checks(principal, "dev", limit=2, cursor=cursor)
+        page, cursor, _ = service.list_checks(principal, "dev", limit=2, cursor=cursor)
         pages += 1
         seen += [v.check for v in page]
         if cursor is None:
             break
     assert (pages, seen) == (3, ["c4", "c3", "c2", "c1", "c0"])
 
-    only, _ = service.list_checks(principal, "dev", table="gold.daily")
+    only, _, _ = service.list_checks(principal, "dev", table="gold.daily")
     assert [v.check for v in only] == ["c4", "c2", "c0"]
-    nothing, nxt = service.list_checks(principal, "dev", table="gold.nothing")
+    nothing, nxt, _ = service.list_checks(principal, "dev", table="gold.nothing")
     assert (nothing, nxt) == ([], None)
     with pytest.raises(ValidationError, match="cursor is not valid"):
         service.list_checks(principal, "dev", cursor="!!not-a-cursor")
@@ -2186,8 +2186,8 @@ def test_list_checks_breaks_a_tie_on_the_time_by_id(
     for n in range(4):
         _result(session, started.id, "gold.daily", f"c{n}", finished_at=at)
     service = _service(session)
-    first, cursor = service.list_checks(principal, "dev", limit=2)
-    second, last = service.list_checks(principal, "dev", limit=2, cursor=cursor)
+    first, cursor, _ = service.list_checks(principal, "dev", limit=2)
+    second, last, _ = service.list_checks(principal, "dev", limit=2, cursor=cursor)
     assert last is None
     assert len({v.name for v in first + second}) == 4
 
@@ -2204,7 +2204,7 @@ def test_a_result_with_a_policy_carries_the_note(
         "rows and values it cannot see were not checked"
     )
     assert views["plain"].policy_note is None
-    listed, _ = _service(session).list_checks(principal, "dev")
+    listed, _, _ = _service(session).list_checks(principal, "dev")
     assert {v.check: v.policy_note is not None for v in listed} == {
         "filtered": True,
         "plain": False,

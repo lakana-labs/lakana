@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from typing import Any
 
 import pytest
@@ -65,6 +66,7 @@ from lakana_core.catalog.service import (
 )
 from lakana_core.errors import (
     PermissionDenied,
+    ValidationError,
 )
 from lakana_core.identifiers import TableRef
 from lakana_core.models import (
@@ -81,6 +83,7 @@ from lakana_core.models import (
     TaskStatus,
     WriteMode,
 )
+from lakana_core.policy.read_errors import policy_read_failure
 from lakana_core.projects.checks import CheckSpec, GeneratedFrom
 from lakana_core.runs.scheduler import COMMITTED_BEFORE_RECORDED_MESSAGE
 from lakana_core.runs.tasks import (
@@ -1362,3 +1365,45 @@ def test_only_a_reference_check_keeps_its_error_to_its_own_table() -> None:
     assert task_checks_module._reads_another_table(_spec(reference)) == "gold.fact_sales"
     assert task_checks_module._reads_another_table(_spec(key)) is None
     assert task_checks_module._reads_another_table(_spec(None)) is None
+
+
+def test_a_reference_checks_policy_failure_on_its_target_names_no_table(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`_count_one` keeps a reference check's error to the checked table, end to end."""
+    _checked(
+        world,
+        _generated(
+            "ref_station",
+            "SELECT id FROM silver.orders WHERE id IS NULL",
+            {
+                "family": "references",
+                "columns": ["id"],
+                "target": "bronze.stations",
+                "target_column": "id",
+            },
+        ),
+        retries=0,
+    )
+    _start(world)
+    claimed = _run_until(world, "silver.orders")
+    real = checks_module.count_check
+
+    def failing_on_the_target(session: Session, **kwargs: object) -> checks_module.Counted:
+        counted = real(session, **kwargs)  # ty: ignore[invalid-argument-type]
+        return dataclasses.replace(
+            counted,
+            rows=None,
+            failure=ValidationError("conversion"),
+            error_message=policy_read_failure("bronze.stations"),
+            error_cause="invalid_query",
+        )
+
+    monkeypatch.setattr(task_checks_module, "model_problem", lambda *a, **k: None)
+    monkeypatch.setattr(checks_module, "count_check", failing_on_the_target)
+
+    run_claimed(_engine(world), claimed)
+
+    (result,) = _results(world, _task(world, "silver.orders").id)
+    assert result.outcome is CheckOutcome.ERRORED
+    assert result.error == policy_read_failure(None)

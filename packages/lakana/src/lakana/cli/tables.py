@@ -25,7 +25,7 @@ from lakana.cli import _files, _output, _retention
 from lakana.cli._break_glass import BREAK_GLASS, REASON, break_glass_reason
 from lakana.cli._state import CliError, CliState, confirm, resolve_environment, state_of
 from lakana.cli.artifacts import human_size
-from lakana.cli.checks import check_shown
+from lakana.cli.checks import check_shown, withheld_line
 from lakana.errors import ValidationError
 
 if TYPE_CHECKING:
@@ -680,8 +680,10 @@ def health(
             columns=["check", "state", "failing_rows", "finished_at"],
             derived={"check": check_shown, "state": _check_state},
         )
-    else:
+    elif not found.hidden_checks:
         _output.emit(state, "Checks: none recorded.")
+    if found.hidden_checks:
+        _output.emit(state, withheld_line(found.hidden_checks))
     if found.readers is None:
         _output.emit(state, "Readers: not shown. Seeing who reads a table needs the ADMIN role.")
     elif found.readers:

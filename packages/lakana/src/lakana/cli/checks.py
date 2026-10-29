@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from itertools import islice
 from typing import Annotated
 
 import typer
@@ -11,6 +10,7 @@ from lakana._models import CheckHealth, CheckResult
 from lakana.cli import _output
 from lakana.cli._state import resolve_environment, state_of
 from lakana.cli.queries import FORMAT, MAX_ROWS, OUT, TIMEOUT, out_format, show_result
+from lakana.resources.checks import Checks
 
 check_app = typer.Typer(
     help="Data quality checks: the results of the checks a run made.", no_args_is_help=True
@@ -58,6 +58,60 @@ def check_shown(result: CheckResult | CheckHealth) -> str:
     return f"{result.check} (generated)" if result.generated else result.check
 
 
+def withheld_line(count: int) -> str:
+    """Say how many generated reference checks are not shown because their target is unreadable.
+
+    Parameters
+    ----------
+    count
+        How many; more than 0.
+
+    Returns
+    -------
+    str
+        The sentence.
+    """
+    if count == 1:
+        return "1 check of a reference to a table you cannot read is not shown."
+    return f"{count} checks of references to tables you cannot read are not shown."
+
+
+def _listed(
+    checks: Checks, environment: str, table: str | None, limit: int
+) -> tuple[list[CheckResult], int]:
+    """Read pages of an environment's check results up to a limit, counting what was left out.
+
+    Parameters
+    ----------
+    checks
+        The SDK's checks resource.
+    environment
+        Environment name.
+    table
+        Only this table's results.
+    limit
+        Most results.
+
+    Returns
+    -------
+    tuple
+        The results, and how many results of the pages read the server left out.
+    """
+    results: list[CheckResult] = []
+    hidden = 0
+    cursor: str | None = None
+    while len(results) < limit:
+        page = checks.list(
+            environment, table=table, limit=min(limit - len(results), _MAX_PAGE), cursor=cursor
+        )
+        results.extend(page.items)
+        hidden += page.hidden
+        if page.next_cursor is None:
+            break
+        cursor = page.next_cursor
+    return results[:limit], hidden
+
+
 @check_app.command("list")
 def list_checks(
     ctx: typer.Context,
@@ -93,15 +147,20 @@ def list_checks(
     if run is not None:
         found = [r for r in checks.for_run(environment, run) if table is None or r.table == table]
         results = found[:limit]
-    else:
-        results = list(
-            islice(checks.iter(environment, table=table, page_size=min(limit, _MAX_PAGE)), limit)
+        hidden = sum(
+            t.hidden_checks
+            for t in state.client().runs.get(environment, run).tasks
+            if table is None or t.asset == table
         )
+    else:
+        results, hidden = _listed(checks, environment, table, limit)
     if not results and state.output != "json":
         if run is not None:
             typer.echo(f"Run {_output.inline(run)} has no check results.")
         else:
             typer.echo(f"No check results in {_output.inline(environment)}.")
+        if hidden:
+            typer.echo(withheld_line(hidden))
         return
     _output.emit(
         state,
@@ -111,6 +170,8 @@ def list_checks(
         derived={"run": _run_shown, "check": check_shown, "rows": lambda r: r.failing_rows},
         whole=["rows"],
     )
+    if hidden and state.output != "json":
+        typer.echo(withheld_line(hidden))
 
 
 @check_app.command("rows")

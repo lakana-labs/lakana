@@ -380,15 +380,19 @@ class TableHealth:
     last_maintenance
         The last maintenance that changed the table, or `None`.
     checks
-        The newest result of each check.
+        The newest result of each check the caller may see.
     readers
         Who read the table; `None` for a caller who may not see the table's grants.
+    hidden_checks
+        How many results were left out of `checks`: generated reference checks whose target the
+        caller may not read.
     """
 
     days: int
     last_maintenance: LastMaintenance | None
     checks: list[CheckHealth]
     readers: list[Reader] | None
+    hidden_checks: int = 0
 
 
 def record_table_reads(

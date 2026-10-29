@@ -149,7 +149,7 @@ COMMANDS: dict[str, tuple[str, ...]] = {
     "job resume": ("jobs.resume",),
     "job notify-test": ("jobs.notify_test", "jobs.delivery"),
     "job notification": ("jobs.delivery",),
-    "check list": ("checks.for_run", "checks.list", "checks.iter"),
+    "check list": ("checks.for_run", "runs.get", "checks.list", "checks.iter"),
     "check rows": ("checks.rows", "query_run.wait", "query_run.result"),
     "scheduler status": ("scheduler.status",),
     "worker list": ("workers.list",),

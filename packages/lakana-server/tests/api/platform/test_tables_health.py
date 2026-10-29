@@ -181,7 +181,13 @@ def test_the_health_of_a_fresh_table_is_empty(client: TestClient) -> None:
     _table(client)
     response = _health(client)
     assert response.status_code == 200, response.text
-    assert response.json() == {"days": 30, "last_maintenance": None, "checks": [], "readers": []}
+    assert response.json() == {
+        "days": 30,
+        "last_maintenance": None,
+        "checks": [],
+        "readers": [],
+        "hidden_checks": 0,
+    }
 
 
 def test_a_query_that_read_the_table_shows_up_among_its_readers(client: TestClient) -> None:
@@ -255,7 +261,7 @@ def test_a_reader_sees_the_health_but_not_the_readers(client: TestClient) -> Non
     shown = _health(client, headers=reader)
     assert shown.status_code == 200, shown.text
     assert shown.json()["readers"] is None
-    assert set(shown.json()) == {"days", "last_maintenance", "checks", "readers"}
+    assert set(shown.json()) == {"days", "last_maintenance", "checks", "readers", "hidden_checks"}
     assert [r["principal"] for r in _health(client).json()["readers"]] == ["admin"]
 
 

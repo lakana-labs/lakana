@@ -1179,11 +1179,19 @@ def test_undrop_restores_the_model_and_its_references(
     ]
 
 
-def test_undrop_of_a_table_dropped_before_references_were_kept_restores_none(
+def test_undrop_of_a_tombstone_from_before_references_restores_the_model_without_them(
     session: Session, catalog: CatalogService, principal: PrincipalRef
 ) -> None:
-    """A tombstone written before this release has no `references` key; the row comes back."""
+    """A tombstone written before this release has no `references` key; the row comes back.
+
+    Its model columns come back with it, and no reference row is made up.
+    """
     table_id = _orders_table(catalog, principal)
+    write_model_entry(session, _fresh(session, Table, table_id), _MODEL_ENTRY)
+    session.commit()
+    environment_id = _fresh(
+        session, Namespace, _fresh(session, Table, table_id).namespace_id
+    ).environment_id
     catalog.drop_table(principal, _ref("gold.orders"))
     record = _record(session, table_id)
     snapshot = dict(record.dropped_table or {})
@@ -1193,4 +1201,7 @@ def test_undrop_of_a_table_dropped_before_references_were_kept_restores_none(
 
     catalog.undrop_table(principal, _ref("gold.orders"))
 
-    assert read_table_model(session, _fresh(session, Table, table_id)) is None
+    model = read_table_model(session, _fresh(session, Table, table_id))
+    assert model is not None
+    assert (model.kind, model.key, model.references) == ("fact", ("id",), ())
+    assert incoming_references(session, environment_id, "gold.regions") == []

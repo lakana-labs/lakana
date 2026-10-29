@@ -259,6 +259,7 @@ def _health_from_json(data: dict[str, Any]) -> TableHealth:
             tags_removed=maintenance["tags_removed"],
         ),
         checks=[_check_from_json(c) for c in data["checks"]],
+        hidden_checks=data.get("hidden_checks", 0),
         readers=None
         if readers is None
         else [

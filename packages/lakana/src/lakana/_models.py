@@ -642,12 +642,16 @@ class TableHealth:
     readers
         Who read the table in the window, most reads first; `None` when the caller may not see
         the table's grants.
+    hidden_checks
+        How many results were left out of `checks`: generated reference checks whose target you
+        may not read; 0 from an older server.
     """
 
     days: int
     last_maintenance: LastMaintenance | None
     checks: list[CheckHealth]
     readers: list[Reader] | None
+    hidden_checks: int = 0
 
 
 @dataclass(frozen=True)
@@ -2034,10 +2038,14 @@ class CheckResultPage:
         The results on this page.
     next_cursor
         Pass back as ``cursor=`` to fetch the next page; ``None`` on the last page.
+    hidden
+        How many results of this page were left out: generated reference checks whose target
+        you may not read; 0 from an older server.
     """
 
     items: list[CheckResult]
     next_cursor: str | None
+    hidden: int = 0
 
 
 @dataclass(frozen=True)
@@ -2124,7 +2132,9 @@ class RunTask:
         ``asset`` for a table the run builds, ``source_check`` for a table it only checks.
     checks
         The task's check results, by name; empty in a listing and for a server that predates
-        checks.
+        checks. A generated reference check whose target you may not read is left out.
+    hidden_checks
+        How many results were left out of `checks` for that reason; 0 from an older server.
     kept_check
         Whether this ``source_check`` task checks a table the project builds, because that table
         was kept after a failed check, rather than a table the project only reads; ``False`` for
@@ -2154,6 +2164,7 @@ class RunTask:
     waiting_for: WaitingFor | None = None
     kind: str = "asset"
     checks: tuple[CheckResult, ...] = ()
+    hidden_checks: int = 0
     kept_check: bool | None = False
     setting_back: bool = False
     failure: Failure | None = None

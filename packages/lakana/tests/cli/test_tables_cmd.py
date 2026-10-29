@@ -2041,3 +2041,20 @@ def test_table_list_passes_any_other_refusal_on(tmp_path: Path) -> None:
     )
     assert result.exit_code == 8
     assert "something else" in _plain(result.stderr)
+
+
+def test_table_health_counts_the_checks_it_does_not_show(tmp_path: Path) -> None:
+    _, result = _health(tmp_path, {**_HEALTH, "hidden_checks": 1})
+    assert result.exit_code == 0, result.stderr
+    assert "1 check of a reference to a table you cannot read is not shown." in _plain(
+        result.stdout
+    )
+    _, plain = _health(tmp_path, _HEALTH)
+    assert "cannot read" not in plain.stdout
+
+
+def test_table_health_with_only_withheld_checks_says_so_and_not_none(tmp_path: Path) -> None:
+    _, result = _health(tmp_path, {**_HEALTH, "checks": [], "hidden_checks": 2})
+    plain = _plain(result.stdout)
+    assert "2 checks of references to tables you cannot read are not shown." in plain
+    assert "none recorded" not in plain

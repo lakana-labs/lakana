@@ -179,6 +179,7 @@ class Checks:
         return CheckResultPage(
             items=[check_result_from_json(item) for item in body["items"]],
             next_cursor=body["next_cursor"],
+            hidden=body.get("hidden", 0),
         )
 
     def iter(

@@ -343,9 +343,24 @@ Audited in the same transaction (`TABLE_DESCRIBED`, `COLUMN_DESCRIBED`; `detail`
 
 | Read | Needs | Notes |
 |---|---|---|
-| `TableOut.model` (`GET .../tables/{name}`, the listing, `lakana table get`) | `READ_TABLE` on the table | `CatalogService.describe_table`, then `model_metadata.model_view`. A reference is shown only when `permits(READ_TABLE)` holds on its target's table scope, asked **before** anything is looked up; otherwise it is counted in `hidden_references`. So a missing and an unreadable target look the same to a reader without the right, and `target_exists` (`true`/`false`) is only ever computed for a target the reader may read. The `ref_<column>` check of a hidden reference is left out with it (its error could name the target). A stored target that is not a table name is counted as hidden. |
+| `TableOut.model` (`GET .../tables/{name}`, the listing, `lakana table get`) | `READ_TABLE` on the table | `CatalogService.describe_table`, then `model_metadata.model_view`. A reference is shown only when `permits(READ_TABLE)` holds on its target's table scope, asked **before** anything is looked up; otherwise it is counted in `hidden_references`. So a missing and an unreadable target look the same to a reader without the right, and `target_exists` (`true`/`false`) is only ever computed for a target the reader may read. The `ref_<column>` check of a hidden reference is left out with it (its outcome and error say something about the target). A stored target that is not a table name is counted as hidden. |
 | `?model_kind=` on the listing | as the listing | The filter runs on the described tables the caller may read; `require_model_kind` refuses anything outside `MODEL_KINDS` with one text. |
 | `GET .../tables/{name}/references` | `READ_TABLE` on the table, checked first (403 before the lookup) | `CatalogService.table_references`, `model_metadata.references_view`. Outgoing as above (`hidden_outgoing`). Incoming rows are found by the table's current dotted name (`ix_table_references_environment_target`) and kept only when the caller may read the **source** table; the rest are counted in `hidden_incoming`, never named. |
+
+**Generated reference checks everywhere else.** `runs/hidden_checks.ReferenceCheckFilter`
+withholds a generated `ref_<column>` result (its outcome, `failing_rows` and `error`) from a reader
+who may not read the reference's target, in `CatalogService.table_health` (`hidden_checks`),
+`RunService.get` (each task's `hidden_checks`), `RunService.checks` and `RunService.list_checks`
+(the page's `hidden`), and `submit_check_rows` answers such a check with `CheckNotInRunError`,
+the text of a check the run does not have. The target is the one the run's project version
+declared for the check (`CheckSpec.generated.target`); the right is asked by name before anything
+is looked up, as for a reference. A result whose target cannot be told (no readable entry, or a
+target that is not a table name) is shown only to a reader with READ_TABLE on the whole
+environment. `key_*` and hand-written checks are not filtered. Residual, accepted for now: the
+task's `error_message`, a table's `state_message` (`not_published_message`, kept notes), webhook
+notifications and the `CHECK_FAILED` audit event still name a failed `ref_` check by its name,
+`<table>/ref_<column>`, which does not name the target. Pins: `test_hidden_reference_checks.py` in
+lakana-core and lakana-server.
 
 The rows are written only by a deploy, a rollback and a run's table creation
 (`catalog/model_metadata.py`); REST, the SDK and the CLI only read them. References are held by

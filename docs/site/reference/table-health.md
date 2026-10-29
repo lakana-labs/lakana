@@ -54,7 +54,9 @@ Nothing is stored apart from the run itself, so it is as old as the run record.
 ### `checks`
 
 Each entry is the most recent result of one check, whichever run it was in. A check whose result
-was removed with its run is not listed.
+was removed with its run is not listed. The result of a generated reference check (`ref_<column>`)
+whose target you may not read is not listed either; `hidden_checks` counts those, and
+`lakana table health` says `1 check of a reference to a table you cannot read is not shown.`
 
 | Field | Type | Meaning |
 |---|---|---|

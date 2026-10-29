@@ -491,7 +491,7 @@ def test_the_checks_route_pages_and_filters(client: TestClient) -> None:
     ).json()
     assert ([c["check"] for c in second["items"]], second["next_cursor"]) == (["a"], None)
     none = client.get(url, headers=AUTH_HEADER, params={"table": "gold.other"}).json()
-    assert none == {"items": [], "next_cursor": None}
+    assert none == {"items": [], "next_cursor": None, "hidden": 0}
     some = client.get(url, headers=AUTH_HEADER, params={"table": "silver.clean"}).json()
     assert len(some["items"]) == 3
     assert client.get(url, headers=AUTH_HEADER, params={"cursor": "!!"}).status_code == 422

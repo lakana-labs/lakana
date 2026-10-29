@@ -1928,3 +1928,11 @@ def test_runs_show_marks_a_generated_check(tmp_path: Path) -> None:
         "  key_unique (generated) passed",
         "  positive               passed",
     ]
+
+
+def test_runs_show_counts_the_checks_it_does_not_show(tmp_path: Path) -> None:
+    block = _show(
+        tmp_path,
+        {**_checked("gold.fact_sales", result_body("positive")), "hidden_checks": 2},
+    )
+    assert block[-1] == "  2 checks of references to tables you cannot read are not shown."

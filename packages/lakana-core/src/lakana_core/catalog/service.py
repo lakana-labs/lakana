@@ -272,6 +272,7 @@ from lakana_core.runs.checks import (
     no_checked_snapshot_message,
     not_published_message,
 )
+from lakana_core.runs.hidden_checks import ReferenceCheckFilter
 from lakana_core.runs.kept import kept_message, refused_message, restore_kept, task_may_read
 from lakana_core.runs.lockdown import (
     OTHER_ASSET_MESSAGE,
@@ -3544,11 +3545,15 @@ class CatalogService:
                 ),
                 config=self._view_audit,
             )
+        withheld = ReferenceCheckFilter(self._session, self._authz, p, ref.environment)
+        every = latest_checks(self._session, row.id)
+        checks = [c for c in every if not withheld.hides(c.run_id, c.name, c.generated)]
         return TableHealth(
             days=days,
             last_maintenance=last_maintenance(self._session, row.id),
-            checks=latest_checks(self._session, row.id),
+            checks=checks,
             readers=shown,
+            hidden_checks=len(every) - len(checks),
         )
 
     def _describe_row(self, p: PrincipalRef, ref: TableRef, row: Table) -> TableDescription:

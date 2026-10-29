@@ -377,3 +377,22 @@ def test_a_new_table_with_a_model_gets_it_on_creation(
     assert incoming_references(session, _env_id(session), "gold.dim_store") == [
         (row.id, "store_id", "store_id")
     ]
+
+
+def test_a_source_dropped_while_references_are_read_is_counted_not_an_error(
+    session: Session,
+    catalog: CatalogService,
+    principal: PrincipalRef,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Incoming rows and source names are two reads; a source gone between them is hidden."""
+    from lakana_core.catalog import model_metadata
+
+    catalog.create_table(principal, _FACT, schema=_SCHEMA)
+    row = session.scalars(select(Table)).one()
+    gone = uuid.uuid4()
+    monkeypatch.setattr(
+        model_metadata, "incoming_references", lambda *a: [(gone, "store_id", "store_id")]
+    )
+    found = model_metadata.references_view(session, row, _FACT, lambda _: True)
+    assert (found.incoming, found.hidden_incoming) == ((), 1)

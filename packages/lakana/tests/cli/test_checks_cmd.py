@@ -73,6 +73,22 @@ def _page(*items: dict[str, object]) -> dict[str, object]:
     return {"items": list(items), "next_cursor": None}
 
 
+def _fake_run(api: FakeApi, hidden: int = 0) -> None:
+    """Answer `GET .../runs/{_RUN}` with a run whose one task left out `hidden` checks.
+
+    Parameters
+    ----------
+    api
+        The fake API.
+    hidden
+        The task's `hidden_checks`.
+    """
+    from test_runs_cmd import _checked, _run
+
+    run = _run("failed", {**_checked("silver.a", result_body("a")), "hidden_checks": hidden})
+    api.on("GET", f"/api/v1/environments/dev/runs/{_RUN}", json={**run, "id": _RUN})
+
+
 def test_check_list_shows_results_newest_first(tmp_path: Path) -> None:
     api = FakeApi()
     api.on(
@@ -128,6 +144,7 @@ def test_a_result_from_an_older_server_is_not_marked_generated(tmp_path: Path) -
 def test_check_list_of_one_run(tmp_path: Path) -> None:
     api = FakeApi()
     api.on("GET", _RUN_CHECKS, json=[result_body("a"), result_body("b")])
+    _fake_run(api)
     result = invoke(
         make_state(tmp_path, api),
         "check",
@@ -141,7 +158,7 @@ def test_check_list_of_one_run(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.stderr
     rows = [line for line in result.stdout.splitlines() if line.startswith("│")]
     assert len(rows) == 2
-    assert [r.url.path for r in api.requests] == [_RUN_CHECKS]
+    assert api.requests[0].url.path == _RUN_CHECKS
 
 
 def test_check_list_filters_by_table(tmp_path: Path) -> None:
@@ -154,6 +171,7 @@ def test_check_list_filters_by_table(tmp_path: Path) -> None:
         _RUN_CHECKS,
         json=[result_body("a"), result_body("b", table="gold.other")],
     )
+    _fake_run(api)
     result = invoke(
         make_state(tmp_path, api),
         "check",
@@ -196,6 +214,7 @@ def test_check_list_says_when_there_is_nothing(tmp_path: Path) -> None:
     api = FakeApi()
     api.on("GET", _CHECKS, json=_page())
     api.on("GET", _RUN_CHECKS, json=[])
+    _fake_run(api)
     state = make_state(tmp_path, api)
     listed = invoke(state, "check", "list", "--env", "dev")
     assert (listed.exit_code, listed.stdout.strip()) == (0, "No check results in dev.")
@@ -412,3 +431,56 @@ def test_check_rows_help_says_what_it_shows_and_what_it_needs(tmp_path: Path) ->
     )
     options = re.findall(r"--[a-z-]+", text.split("╭─ Options")[1])
     assert options == ["--env", "--out", "--format", "--max-rows", "--timeout", "--help"]
+
+
+_WITHHELD = "1 check of a reference to a table you cannot read is not shown."
+
+
+def test_check_list_counts_the_checks_it_does_not_show(tmp_path: Path) -> None:
+    """The server leaves out a reference check of a target the reader may not read."""
+    api = FakeApi()
+    api.on("GET", _CHECKS, json={**_page(result_body("positive")), "hidden": 1})
+    result = invoke(
+        make_state(tmp_path, api), "check", "list", "--env", "dev", env={"COLUMNS": "200"}
+    )
+    assert result.exit_code == 0, result.stderr
+    assert "positive" in result.stdout
+    assert _WITHHELD in result.stdout
+
+
+def test_check_list_of_one_run_counts_the_checks_it_does_not_show(tmp_path: Path) -> None:
+    api = FakeApi()
+    api.on("GET", _RUN_CHECKS, json=[result_body("positive")])
+    _fake_run(api, hidden=1)
+    result = invoke(
+        make_state(tmp_path, api),
+        "check",
+        "list",
+        "--env",
+        "dev",
+        "--run",
+        _RUN,
+        env={"COLUMNS": "200"},
+    )
+    assert result.exit_code == 0, result.stderr
+    assert _WITHHELD in result.stdout
+
+
+def test_check_list_says_nothing_about_withheld_checks_when_there_are_none(
+    tmp_path: Path,
+) -> None:
+    api = FakeApi()
+    api.on("GET", _CHECKS, json=_page(result_body("positive")))
+    result = invoke(make_state(tmp_path, api), "check", "list", "--env", "dev")
+    assert "cannot read" not in result.stdout
+
+
+def test_a_run_whose_every_check_is_withheld_says_so(tmp_path: Path) -> None:
+    api = FakeApi()
+    api.on("GET", _RUN_CHECKS, json=[])
+    _fake_run(api, hidden=2)
+    result = invoke(make_state(tmp_path, api), "check", "list", "--env", "dev", "--run", _RUN)
+    assert result.stdout.splitlines() == [
+        f"Run {_RUN} has no check results.",
+        "2 checks of references to tables you cannot read are not shown.",
+    ]

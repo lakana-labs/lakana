@@ -45,6 +45,7 @@ from lakana._models import (
 from lakana._routes import ROUTES, Route
 from lakana.client import Client
 from lakana.errors import Conflict, LakanaConnectionError, QueryFailed, ValidationError
+from lakana.resources.checks import Checks
 from lakana.resources.environments import Environments
 from lakana.resources.namespaces import Namespaces
 from lakana.resources.queries import Queries, QueryRun, waiting_for_from_json
@@ -2952,3 +2953,80 @@ def test_tables_references_gets_the_references_route_and_parses_it() -> None:
         incoming=(_EXPECTED_REFERENCE,),
         hidden_incoming=2,
     )
+
+
+# --- Withheld reference checks -----------------------------------------
+
+
+def test_withheld_checks_are_counted_and_an_older_server_counts_none() -> None:
+    """`hidden_checks` on a task and on table health, `hidden` on a page of checks."""
+    run = run_from_json(_run_body(_failed_task(hidden_checks=2)))
+    older = run_from_json(_run_body(_failed_task()))
+    assert (run.tasks[0].hidden_checks, older.tasks[0].hidden_checks) == (2, 0)
+
+    body = {**_HEALTH_BODY, "hidden_checks": 1}
+    health = Tables(_transport(lambda _: httpx.Response(200, json=body))).health("dev", "a.b")
+    plain = Tables(_transport(lambda _: httpx.Response(200, json=_HEALTH_BODY))).health(
+        "dev", "a.b"
+    )
+    assert (health.hidden_checks, plain.hidden_checks) == (1, 0)
+
+    page = Checks(
+        _transport(
+            lambda _: httpx.Response(200, json={"items": [], "next_cursor": None, "hidden": 3})
+        )
+    ).list("dev")
+    old = Checks(
+        _transport(lambda _: httpx.Response(200, json={"items": [], "next_cursor": None}))
+    ).list("dev")
+    assert (page.hidden, old.hidden) == (3, 0)
+
+
+def check_body(check: str) -> dict[str, object]:
+    """Build a `CheckResultOut` body of a passed check.
+
+    Parameters
+    ----------
+    check
+        Its short name.
+
+    Returns
+    -------
+    dict
+        The body.
+    """
+    return {
+        "run_id": "r1",
+        "task": "silver.a",
+        "name": f"silver.a/{check}",
+        "check": check,
+        "path": f"checks/silver/a/{check}.sql",
+        "table": "silver.a",
+        "table_id": None,
+        "on_failure": "block",
+        "outcome": "passed",
+        "failing_rows": 0,
+        "error": None,
+        "checked_snapshot_id": 7,
+        "rollback_outcome": None,
+        "policy_applied": False,
+        "policy_note": None,
+        "query_run_id": None,
+        "started_at": "2026-10-11T12:00:00+00:00",
+        "finished_at": "2026-10-11T12:00:01+00:00",
+        "generated": False,
+    }
+
+
+def test_checks_iter_follows_the_cursor_to_the_last_page() -> None:
+    seen: list[httpx.Request] = []
+    pages: dict[str | None, tuple[str, str | None]] = {None: ("c1", "c2"), "c2": ("c2", None)}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        check, next_cursor = pages[request.url.params.get("cursor")]
+        return httpx.Response(200, json={"items": [check_body(check)], "next_cursor": next_cursor})
+
+    found = list(Checks(_transport(handler)).iter("dev", page_size=1))
+    assert [c.check for c in found] == ["c1", "c2"]
+    assert [r.url.params.get("cursor") for r in seen] == [None, "c2"]
