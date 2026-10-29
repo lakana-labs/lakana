@@ -166,8 +166,7 @@ Each of these fails the deploy with an issue at the block's line:
 | ``write: must be one of replace, append, merge; got 'upsert'`` | Another value. |
 | ``` `write: append` needs `watermark:` — the column whose largest value the next run starts after ``` | `append` without `watermark:`. |
 | ``` `write: merge` needs `key:` — the columns that identify a row ``` | `merge` without `key:`. |
-| ``` `write: replace` takes neither `key:` nor `watermark:` ``` | `key:` or `watermark:` without `write: append` or `merge`. |
-| ``` `write: append` takes no `key:`; to merge rows on a key use `write: merge` ``` | `append` with `key:`. |
+| ``` `write: replace` takes no `watermark:`; to add only new rows use `write: append` ``` | `replace` with `watermark:`. |
 | ``key column `id` is listed twice`` | A repeated key column. |
 | ``` `materialize: view` cannot take `write:` ``` | A view with `write:`. |
 | ``` `evolve_schema` works with `write: append` only ``` | `evolve_schema` on any other asset. |

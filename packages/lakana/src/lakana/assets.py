@@ -199,8 +199,8 @@ def _check_write(
     ------
     ValueError
         For a value of the wrong type or with a character deploy refuses, a `write` outside
-        `WRITE_CHOICES`, a key column listed twice, ``append`` without a watermark or with a
-        key, ``merge`` without a key, and ``replace`` with a key or a watermark.
+        `WRITE_CHOICES`, a key column listed twice, a key of more than 8 columns, ``append``
+        without a watermark, ``merge`` without a key, and ``replace`` with a watermark.
     """
     mode = "replace" if write is None else write
     if not isinstance(mode, str):
@@ -224,19 +224,19 @@ def _check_write(
         if column in seen:
             raise ValueError(f"key column `{column}` is listed twice")
         seen.add(column)
+    if len(columns) > 8:
+        raise ValueError(f"a key has at most 8 columns; `key:` lists {len(columns)}")
     if mode == "append" and watermark is None:
         raise ValueError(
             "`write: append` needs `watermark:` — the column whose largest value the next run "
             "starts after"
         )
-    if mode == "append" and columns:
-        raise ValueError(
-            "`write: append` takes no `key:`; to merge rows on a key use `write: merge`"
-        )
     if mode == "merge" and not columns:
         raise ValueError("`write: merge` needs `key:` — the columns that identify a row")
-    if mode == "replace" and (columns or watermark is not None):
-        raise ValueError("`write: replace` takes neither `key:` nor `watermark:`")
+    if mode == "replace" and watermark is not None:
+        raise ValueError(
+            "`write: replace` takes no `watermark:`; to add only new rows use `write: append`"
+        )
     return mode, tuple(columns), watermark
 
 

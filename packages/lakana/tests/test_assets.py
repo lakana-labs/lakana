@@ -318,7 +318,10 @@ def test_the_write_model_defaults_to_replace_and_is_stored() -> None:
             "starts after",
         ),
         ({"write": "merge"}, "`write: merge` needs `key:` — the columns that identify a row"),
-        ({"key": ["id"]}, "`write: replace` takes neither `key:` nor `watermark:`"),
+        (
+            {"watermark": "ts"},
+            "`write: replace` takes no `watermark:`; to add only new rows use `write: append`",
+        ),
         ({"write": "merge", "key": ["id", "id"]}, "key column `id` is listed twice"),
         ({"write": "merge", "key": "id"}, "key must be a list of strings"),
     ],
@@ -327,6 +330,14 @@ def test_a_wrong_write_model_is_refused(arguments: dict[str, Any], message: str)
     with pytest.raises(ValueError) as caught:
         lakana.asset(**arguments)
     assert str(caught.value) == message
+
+
+def test_a_key_is_accepted_with_every_write_mode() -> None:
+    assert callable(lakana.asset(key=["id"]))
+    assert callable(lakana.asset(write="append", watermark="ts", key=["id"]))
+    with pytest.raises(ValueError) as caught:
+        lakana.asset(write="merge", key=[f"c{i}" for i in range(9)])
+    assert str(caught.value) == "a key has at most 8 columns; `key:` lists 9"
 
 
 _EVOLVE_NEEDS_REPLACE = (

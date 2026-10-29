@@ -361,7 +361,10 @@ def test_a_merge_block_parses() -> None:
             "starts after",
         ),
         ("write: merge\n", "`write: merge` needs `key:` — the columns that identify a row"),
-        ("key: [id]\n", "`write: replace` takes neither `key:` nor `watermark:`"),
+        (
+            "watermark: ts\n",
+            "`write: replace` takes no `watermark:`; to add only new rows use `write: append`",
+        ),
         ("write: merge\nkey: [id, id]\n", "key column `id` is listed twice"),
     ],
 )
@@ -390,3 +393,78 @@ def test_a_wrong_write_value_in_a_block_is_refused(block: str, message: str) -> 
     with pytest.raises(ProjectValidationError) as caught:
         _merged(block)
     assert [issue.message for issue in caught.value.issues] == [message]
+
+
+def _meta(block: str) -> AssetMetadata:
+    """Parse a block and return its metadata.
+
+    Parameters
+    ----------
+    block
+        The YAML between the markers.
+
+    Returns
+    -------
+    AssetMetadata
+        The parsed metadata.
+    """
+    return parse_front_matter(f"/* lakana\n{block}\n*/\nSELECT 1 AS id", path=_PATH).metadata
+
+
+def test_the_model_fields_parse() -> None:
+    """kind, grain, key, references and checks are read from the block."""
+    meta = _meta(
+        "kind: fact\ngrain: One row per store and calendar day.\nkey: [date, store_id]\n"
+        "references:\n  store_id: gold.dim_store\n  sku: gold.dim_product.sku\n"
+        "checks:\n  key: block\n  references: warn"
+    )
+    assert meta.kind == "fact"
+    assert meta.grain == "One row per store and calendar day."
+    assert meta.key == ("date", "store_id")
+    assert meta.references == {"store_id": "gold.dim_store", "sku": "gold.dim_product.sku"}
+    assert meta.checks == {"key": "block", "references": "warn"}
+
+
+def test_key_none_is_the_escape_and_a_listed_none_is_a_column() -> None:
+    """`key: none` is the escape; `key: [none]` names a column; `key: id` is one column."""
+    assert _meta("key: none").key == "none"
+    assert _meta("key: [none]").key == ("none",)
+    assert _meta("key: id").key == ("id",)
+
+
+@pytest.mark.parametrize(
+    ("block", "message"),
+    [
+        ("kind: cube", "kind: must be one of fact, dimension, wide, staging; got 'cube'"),
+        ("grain: ''", "grain: must not be empty"),
+        ("grain: |\n  two\n  lines", "grain: must be one line"),
+        ("grain: " + "x" * 301, "grain: must be at most 300 characters"),
+        ("checks:\n  rows: warn", "checks: takes only key and references"),
+        ("checks:\n  key: loud", "checks: key must be block, keep or warn"),
+        ("references:\n  store_id: dim_store", "references: reference `store_id: dim_store`"),
+        ('grain: "a\\u202eb"', "grain: must not contain a surrogate"),
+        ('references:\n  "a\\u200bb": gold.dim_store', "references: a reference column must not"),
+    ],
+)
+def test_bad_model_values_are_refused(block: str, message: str) -> None:
+    """Each refused value names the field and the fix, as `<field>: <message>`."""
+    with pytest.raises(ProjectValidationError) as info:
+        _meta(block)
+    assert message in info.value.issues[0].message
+
+
+def test_a_one_line_grain_written_as_a_block_scalar_is_one_line() -> None:
+    """`grain: |` with one line ends in a newline; the rule reads the stripped text."""
+    assert _meta("grain: |\n  One row per order.").grain is not None
+
+
+def test_a_reference_column_that_cannot_name_its_check_is_refused() -> None:
+    """A reference column must make a valid check name `ref_<column>`."""
+    with pytest.raises(ProjectValidationError) as info:
+        _meta("references:\n  a/b: gold.dim_store")
+    assert "reference column `a/b` cannot name its check `ref_a/b`" in info.value.issues[0].message
+
+
+def test_an_explicit_null_grain_is_no_grain() -> None:
+    """`grain: null` reads as no grain."""
+    assert _meta("grain: null").grain is None

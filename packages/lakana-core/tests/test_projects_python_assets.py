@@ -1009,19 +1009,25 @@ def test_the_write_model_is_read_from_the_decorator() -> None:
 
 
 @pytest.mark.parametrize(
+    "arguments", ['write="replace", key=["id"]', 'write="append", watermark="ts", key=["id"]']
+)
+def test_a_key_is_accepted_with_every_write_mode(arguments: str) -> None:
+    """A key identifies a row whatever the write mode."""
+    assert _parsed(_GOOD.replace("@asset(", f"@asset({arguments}, ", 1)).metadata.key == ("id",)
+
+
+@pytest.mark.parametrize(
     ("argument", "message"),
     [
         ('write="upsert"', "write must be one of replace, append, merge; got 'upsert'"),
         ('write="append"', _APPEND_NEEDS_WATERMARK),
         ('write="merge"', "`write: merge` needs `key:` — the columns that identify a row"),
         ('write="merge", key=[]', "`write: merge` needs `key:` — the columns that identify a row"),
-        ('write="replace", key=["id"]', "`write: replace` takes neither `key:` nor `watermark:`"),
-        ('watermark="ts"', "`write: replace` takes neither `key:` nor `watermark:`"),
-        ('write="merge", key=["id", "id"]', "key column `id` is listed twice"),
         (
-            'write="append", watermark="ts", key=["id"]',
-            "`write: append` takes no `key:`; to merge rows on a key use `write: merge`",
+            'watermark="ts"',
+            "`write: replace` takes no `watermark:`; to add only new rows use `write: append`",
         ),
+        ('write="merge", key=["id", "id"]', "key column `id` is listed twice"),
         (
             'write="merge", key=["i\\u200bd"]',
             "a key column must not contain a control, format or surrogate character or a line "
