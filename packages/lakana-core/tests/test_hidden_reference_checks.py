@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime, timedelta
+from functools import partial
 from pathlib import Path
 
 import pytest
@@ -17,13 +18,14 @@ from lakana_core.auth import (
     PrincipalRef,
     SecurableKind,
 )
-from lakana_core.catalog.service import CatalogService
+from lakana_core.catalog.service import CatalogService, Rollback
 from lakana_core.errors import CheckNotInRunError
 from lakana_core.grants.authorization import GrantAuthorization
 from lakana_core.grants.roles import Role
 from lakana_core.grants.service import GrantService
 from lakana_core.identifiers import NamespacePath, TableRef
 from lakana_core.models import (
+    AttemptOutcome,
     CheckOutcome,
     CheckResult,
     DeclaredReference,
@@ -31,12 +33,19 @@ from lakana_core.models import (
     JobVersion,
     Principal,
     PrincipalType,
+    RollbackOutcome,
     Run,
     Table,
+    TaskAttempt,
     TaskRun,
 )
 from lakana_core.runs.check_rows import submit_check_rows
-from lakana_core.runs.checks import check_not_in_run_message
+from lakana_core.runs.checks import (
+    WITHHELD_TASK_MESSAGE,
+    check_not_in_run_message,
+    failure_message,
+    warning_note,
+)
 from lakana_core.runs.hidden_checks import ReferenceCheckFilter
 from lakana_core.runs.service import RunService
 from lakana_core.storage.resolver import StorageResolver
@@ -394,3 +403,111 @@ def test_table_get_withholds_a_result_whose_runs_target_is_hidden_after_the_targ
     shown = star.catalog().describe_table(both, _FACT).model
     assert shown is not None
     assert [c.check for c in shown.checks] == ["key_unique", "ref_store_id"]
+
+
+def _set_task_message(star: Star, message: str, *, warned: bool = False) -> None:
+    """Store a task message as the worker would, and mark the reference result warned or not.
+
+    Parameters
+    ----------
+    star
+        The run.
+    message
+        The task's `error_message`.
+    warned
+        Whether the reference check is a `warn` check that found one row.
+    """
+    task = star.session.scalars(select(TaskRun).where(TaskRun.run_id == star.run_id)).one()
+    task.error_message = message
+    if warned:
+        ref = star.session.scalars(select(CheckResult).where(CheckResult.check_name == _REF)).one()
+        ref.outcome, ref.on_failure, ref.failing_rows = CheckOutcome.WARNED, "warn", 1
+    star.session.commit()
+
+
+def _results(star: Star) -> list[CheckResult]:
+    """Read the run's results by name.
+
+    Parameters
+    ----------
+    star
+        The run.
+
+    Returns
+    -------
+    list of CheckResult
+        Every result of the run.
+    """
+    return list(
+        star.session.scalars(
+            select(CheckResult)
+            .where(CheckResult.run_id == star.run_id)
+            .order_by(CheckResult.check_name)
+        )
+    )
+
+
+def test_the_task_message_leaves_out_a_withheld_warned_reference_check(star: Star) -> None:
+    """The how-to's case: `note: 1 check warned: `ref_sku` (1 row).` names the count."""
+    _set_task_message(star, "", warned=True)
+    (ref,) = [r for r in _results(star) if r.check_name == _REF]
+    _set_task_message(star, warning_note([ref]))
+    reader = star.person(tables=("fact_sales",))
+    (task,) = star.runs().get(reader, "dev", star.run_id).tasks
+    assert task.error_message is None
+    assert task.hidden_checks == 1
+    both = star.person(tables=("fact_sales", "dim_store"))
+    (full,) = star.runs().get(both, "dev", star.run_id).tasks
+    assert full.error_message == "1 check warned: `ref_store_id` (1 row)."
+
+
+def test_the_task_message_of_failed_checks_is_rebuilt_without_the_withheld_one(star: Star) -> None:
+    every = _results(star)
+    build = partial(
+        failure_message,
+        table="gold.fact_sales",
+        run_id=star.run_id,
+        environment="dev",
+        rollback=Rollback(RollbackOutcome.ROLLED_BACK),
+    )
+    _set_task_message(star, build(every))
+    reader = star.person(tables=("fact_sales",))
+    (task,) = star.runs().get(reader, "dev", star.run_id).tasks
+    visible = [r for r in every if r.check_name != _REF]
+    assert task.error_message == build(visible)
+    assert "ref_store_id" not in (task.error_message or "")
+    both = star.person(tables=("fact_sales", "dim_store"))
+    (full,) = star.runs().get(both, "dev", star.run_id).tasks
+    assert full.error_message == build(every)
+
+
+def test_a_task_message_that_names_a_withheld_check_otherwise_is_replaced(star: Star) -> None:
+    _set_task_message(star, "Something about `gold.fact_sales/ref_store_id` the rebuild misses.")
+    reader = star.person(tables=("fact_sales",))
+    (task,) = star.runs().get(reader, "dev", star.run_id).tasks
+    assert task.error_message == WITHHELD_TASK_MESSAGE
+
+
+def test_an_attempts_message_in_the_task_log_leaves_out_the_withheld_check(star: Star) -> None:
+    _set_task_message(star, "", warned=True)
+    (ref,) = [r for r in _results(star) if r.check_name == _REF]
+    task = star.session.scalars(select(TaskRun).where(TaskRun.run_id == star.run_id)).one()
+    star.session.add(
+        TaskAttempt(
+            id=uuid.uuid4(),
+            task_run_id=task.id,
+            attempt=1,
+            worker="w1",
+            started_at=_NOW - timedelta(seconds=2),
+            finished_at=_NOW,
+            outcome=AttemptOutcome.SUCCEEDED,
+            error_message=warning_note([ref]),
+        )
+    )
+    star.session.commit()
+    reader = star.person(tables=("fact_sales",))
+    (attempt,) = star.runs().task_log(reader, "dev", star.run_id, "gold.fact_sales").attempts
+    assert attempt.error_message is None
+    both = star.person(tables=("fact_sales", "dim_store"))
+    (full,) = star.runs().task_log(both, "dev", star.run_id, "gold.fact_sales").attempts
+    assert full.error_message == "1 check warned: `ref_store_id` (1 row)."

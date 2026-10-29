@@ -356,10 +356,16 @@ the text of a check the run does not have. The target is the one the run's proje
 declared for the check (`CheckSpec.generated.target`); the right is asked by name before anything
 is looked up, as for a reference. A result whose target cannot be told (no readable entry, or a
 target that is not a table name) is shown only to a reader with READ_TABLE on the whole
-environment. `key_*` and hand-written checks are not filtered. Residual, accepted for now: the
-task's `error_message`, a table's `state_message` (`not_published_message`, kept notes), webhook
-notifications and the `CHECK_FAILED` audit event still name a failed `ref_` check by its name,
-`<table>/ref_<column>`, which does not name the target. Pins: `test_hidden_reference_checks.py` in
+environment. `key_*` and hand-written checks are not filtered. A task's `error_message`, in
+`RunService.get` and in each attempt of `RunService.task_log`, goes through
+`runs/checks.withhold_from_message`: every fragment the worker built from a group of results that
+holds a withheld one (the first sentence of failed checks, the rows commands, the `warn` note) is
+built again from the group without it, or dropped; a text that still names a withheld check is
+replaced by `WITHHELD_TASK_MESSAGE`. Residual, accepted for now and tracked in #385: a table's
+`state_message` (`not_published_message`, kept notes), the task's free-text log (one
+`check ref_<column>: …, N rows` line per check), webhook notifications and the `CHECK_FAILED`
+audit event still name a failed `ref_` check and may carry its row count, which tells how many
+rows point at keys the target lacks; none of them names the target. Pins: `test_hidden_reference_checks.py` in
 lakana-core and lakana-server.
 
 The rows are written only by a deploy, a rollback and a run's table creation

@@ -4,13 +4,23 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
+from functools import partial
 
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from lakana_core.models import CheckOutcome, CheckResult, JobVersion, Run, Table, TaskRun
-from lakana_core.runs.checks import check_not_in_run_message
+from lakana_core.catalog.service import Rollback
+from lakana_core.models import (
+    CheckOutcome,
+    CheckResult,
+    JobVersion,
+    RollbackOutcome,
+    Run,
+    Table,
+    TaskRun,
+)
+from lakana_core.runs.checks import check_not_in_run_message, failure_message
 from tests.api.platform.test_deployments_run_as import _deploy
 from tests.conftest import AUTH_HEADER
 
@@ -183,3 +193,31 @@ def test_the_rows_of_a_withheld_check_are_404_as_for_a_missing_check(client: Tes
     )
     assert answer.status_code == 404
     assert answer.json()["detail"] == check_not_in_run_message(uuid.UUID(run_id), _REF, "dev")
+
+
+def test_the_run_route_leaves_the_withheld_check_out_of_the_task_message(
+    client: TestClient,
+) -> None:
+    """The task's text names each failed check and its rows; the withheld one is left out."""
+    run_id = _run_with_checks(client)
+    with Session(client.app.state.engine) as session:
+        task = session.scalars(select(TaskRun).where(TaskRun.run_id == uuid.UUID(run_id))).one()
+        results = list(
+            session.scalars(select(CheckResult).where(CheckResult.run_id == task.run_id))
+        )
+        build = partial(
+            failure_message,
+            table="silver.clean",
+            run_id=task.run_id,
+            environment="dev",
+            rollback=Rollback(RollbackOutcome.ROLLED_BACK),
+        )
+        task.error_message = build(results)
+        shown = build([r for r in results if r.check_name != _REF])
+        whole = task.error_message
+        session.commit()
+    (task_out,) = client.get(f"{_ENV}/runs/{run_id}", headers=_reader(client)).json()["tasks"]
+    assert task_out["error_message"] == shown
+    assert "ref_store_id" not in task_out["error_message"]
+    (full,) = client.get(f"{_ENV}/runs/{run_id}", headers=AUTH_HEADER).json()["tasks"]
+    assert full["error_message"] == whole

@@ -185,8 +185,12 @@ shown anywhere: not in the Model block, `lakana table health`, `lakana check lis
 `lakana runs show` or `lakana run`, nor in their REST and SDK answers. In its place they say how
 many were left out (`1 check of a reference to a table you cannot read is not shown.`;
 `hidden_checks` on table health and on each task of a run, `hidden` on a page of check results),
-and `lakana check rows` for such a check answers as for a check the run does not have. Key checks
-and hand-written checks are shown as before.
+and `lakana check rows` for such a check answers as for a check the run does not have. A task's
+message (the `error` column of `lakana runs show` and `lakana run`, and each attempt's message in
+`lakana runs logs`) leaves such a check and its row count out, and says nothing of it when no other
+check is left to mention. Key checks and hand-written checks are shown as before. Still not
+filtered: the free-text log of a task, the note of a table that was kept or not published,
+notifications of a failed job and the audit log, which can name such a check with its row count.
 
 **References follow names.** A reference names its target as the header writes it, so it is
 listed with whichever table has that name now, as the reference's generated check reads it. A

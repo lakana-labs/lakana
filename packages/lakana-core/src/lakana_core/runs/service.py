@@ -76,6 +76,7 @@ from lakana_core.runs.checks import (
     SOURCE_CHECK,
     CheckResultView,
     view_of,
+    withhold_from_message,
 )
 from lakana_core.runs.failures import Failure, attempt_failure, task_failure
 from lakana_core.runs.hidden_checks import ReferenceCheckFilter
@@ -1012,7 +1013,8 @@ class RunService:
             run_as = self._name(run.run_as_principal_id)
             asset_of = {task.id: task.asset for task, _ in rows}
             checks: dict[uuid.UUID, list[CheckResultView]] = {}
-            hidden: dict[uuid.UUID, int] = {}
+            hidden: dict[uuid.UUID, set[str]] = {}
+            every: dict[uuid.UUID, list[CheckResult]] = {}
             withheld = ReferenceCheckFilter(self._session, self._authz, reader, env.name)
             for result in self._session.scalars(
                 select(CheckResult)
@@ -1020,8 +1022,9 @@ class RunService:
                 .order_by(CheckResult.check_name)
                 .execution_options(populate_existing=True)
             ):
+                every.setdefault(result.task_run_id, []).append(result)
                 if withheld.hides(result.run_id, result.check_name, result.generated):
-                    hidden[result.task_run_id] = hidden.get(result.task_run_id, 0) + 1
+                    hidden.setdefault(result.task_run_id, set()).add(result.check_name)
                     continue
                 checks.setdefault(result.task_run_id, []).append(
                     view_of(result, asset_of[result.task_run_id], run_as)
@@ -1036,7 +1039,13 @@ class RunService:
                     next_attempt_at=task.next_attempt_at,
                     started_at=task.started_at,
                     finished_at=task.finished_at,
-                    error_message=task.error_message,
+                    error_message=withhold_from_message(
+                        task.error_message,
+                        every.get(task.id, ()),
+                        hidden.get(task.id, set()),
+                        run_id=run.id,
+                        environment=env.name,
+                    ),
                     query_run_id=task.query_run_id,
                     rows_written=(
                         rows_written if task.query_run_id is not None else attempted.get(task.id)
@@ -1044,7 +1053,7 @@ class RunService:
                     waiting_for=reasons.get(task.id),
                     kind=task.kind,
                     checks=tuple(checks.get(task.id, ())),
-                    hidden_checks=hidden.get(task.id, 0),
+                    hidden_checks=len(hidden.get(task.id, ())),
                     kept_check=(
                         None
                         if version is None and task.kind == SOURCE_CHECK
@@ -2232,6 +2241,13 @@ class RunService:
         ).scalar_one_or_none()
         if task is None:
             raise NotFoundError(f"Run {run_id} has no task {asset!r}.")
+        results = list(
+            self._session.scalars(select(CheckResult).where(CheckResult.task_run_id == task.id))
+        )
+        withheld = ReferenceCheckFilter(self._session, self._authz, p, env.name)
+        hidden = {
+            r.check_name for r in results if withheld.hides(r.run_id, r.check_name, r.generated)
+        }
         attempts = tuple(
             TaskAttemptView(
                 attempt=a.attempt,
@@ -2240,7 +2256,9 @@ class RunService:
                 finished_at=a.finished_at,
                 outcome=a.outcome.value if a.outcome is not None else None,
                 rows_written=a.rows_written,
-                error_message=a.error_message,
+                error_message=withhold_from_message(
+                    a.error_message, results, hidden, run_id=run.id, environment=env.name
+                ),
                 failure=attempt_failure(a),
             )
             for a in self._session.scalars(

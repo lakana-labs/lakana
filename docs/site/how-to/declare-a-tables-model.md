@@ -317,7 +317,8 @@ not listed: `lakana table get` says how many there are (`1 more reference to a t
 read`), `lakana table references` says the same of the tables that reference this one (`3 more from
 tables you cannot read`), and a hidden reference never says whether its target exists. The
 `ref_<column>` check of such a reference is left out of every listing of checks, which say instead
-how many were left out (`1 check of a reference to a table you cannot read is not shown.`), and
+how many were left out (`1 check of a reference to a table you cannot read is not shown.`), and of
+a task's message, so such a reader is not shown ``note: 1 check warned: `ref_sku` (1 row).``;
 search never shows the grain or kind of a table the reader may not read. Key checks and
 hand-written checks are shown as always. The details are in
 [See a table's model](describe-a-table.md#see-a-tables-model).
