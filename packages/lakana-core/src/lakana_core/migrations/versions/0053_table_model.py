@@ -1,10 +1,12 @@
-"""The model a project declares for a table: tables.model_kind, model_grain, model_key, and the table_references rows.
+"""The model a project declares for a table.
+
+Adds tables.model_kind, model_grain and model_key, and the table_references rows.
 
 Revision ID: e3a7c5d9f1b2
 Revises: d1f6b2c4e5a7
 Create Date: 2026-10-29 15:00:00.000000
 
-"""  # ruff: ignore[line-too-long]
+"""
 
 from collections.abc import Sequence
 
