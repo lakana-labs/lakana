@@ -340,6 +340,7 @@ class TableReferences:
 
 
 ReadCheck = Callable[[TableRef], bool]
+"""Whether the reader may read a table, asked by name and without looking it up."""
 
 WithheldCheck = Callable[[uuid.UUID, str, bool], bool]
 """Whether a check result (its run, its full name, generated or not) is withheld from a reader.
@@ -347,7 +348,6 @@ WithheldCheck = Callable[[uuid.UUID, str, bool], bool]
 `lakana_core.runs.hidden_checks.ReferenceCheckFilter.hides` is the one implementation: it asks
 about the target the result's run declared, not the target the header declares now.
 """
-"""Whether the reader may read a table, asked by name and without looking it up."""
 
 
 def reference_id(table: str, column: str) -> str:

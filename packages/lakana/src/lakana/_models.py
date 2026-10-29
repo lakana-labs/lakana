@@ -337,18 +337,19 @@ class ModelReference:
     Parameters
     ----------
     id
-        ``<ns.table>/ref_<column>``: the name of the reference's generated check.
+        The reference's id, which is also its generated check's name, for example
+        ``gold.fact_sales/ref_store_id``.
     table
-        The dotted name of the table that declares it.
+        Which table declares the reference (``namespace.table``).
     column
-        The referencing column.
+        Its column whose values point at the target.
     target
-        The dotted name of the table it points at, as the header names it.
+        Which table the values point at (``namespace.table``), spelled as in the header.
     target_column
-        The column of the target it must match.
+        Which column of that table every non-null value must appear in.
     target_exists
-        Whether a table of that name exists now. A reference to a table you may not read is
-        never listed, only counted.
+        `True` while a table by the target's name exists. References to tables you may not
+        read are counted on the model, never listed.
     """
 
     id: str
@@ -366,13 +367,14 @@ class TableModel:
     Parameters
     ----------
     kind
-        ``fact``, ``dimension``, ``wide`` or ``staging``; `None` when the header names none.
+        The declared kind (``fact``, ``dimension``, ``wide``, ``staging``), or `None` without
+        one.
     grain
-        What one row is, in one sentence; `None` when the header says nothing.
+        The header's one sentence on what a row stands for, or `None` without one.
     key
-        The columns that identify one row; empty for no key and for `key: none`.
+        Which columns identify a row; empty when there is no key or it is `key: none`.
     key_none
-        Whether the header says `key: none`: no columns are unique, and the grain is not checked.
+        `True` for `key: none`, where no set of columns is unique and nothing checks the grain.
     references
         The references whose target you may read.
     hidden_references
