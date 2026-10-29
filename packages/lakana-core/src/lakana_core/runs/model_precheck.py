@@ -6,11 +6,14 @@ makes that check ``errored`` (so `block` sets the table back) without counting i
 
 - The pre-check reads names and types from `table_columns` (`stored_columns`), never a value of
   a table.
-- The text never says whether a reference target that the run's principal may not read exists,
-  and never names a target column's type: a run's reader may not be able to read the target.
-  A missing target and an unreadable one get the same text (`TARGET_GONE`).
-- Each text is a module constant, filled with the header's column and table names, the check's
-  path and the checked table's own column type.
+- A reference's text never names its target, never names a type, and never says whether the
+  target exists: a reader of the run may not be able to read the target. A target that is
+  missing, one the run's principal may not read and one that no longer has the column get one
+  text (`REFERENCE_UNCHECKABLE`); both reference texts point at the check's path, the asset's
+  header line, which the reader sees already.
+- Each text is a module constant, filled with the header's own column names, the checked table's
+  name, the check's path and the checked table's own column type. A column name that matches
+  only in case adds `CASE_HINT`, naming the checked table's own column.
 """
 
 from __future__ import annotations
@@ -46,23 +49,22 @@ REFERENCE_MISSING = (
 )
 """A referencing column the written table does not have."""
 
-TARGET_GONE = (
-    "Reference target `{target}` no longer exists, or the run's principal may not read it; fix "
-    "the reference, or grant READ_TABLE on it, and deploy again."
-)
-"""A reference target that is gone, or that the run's principal may not read: one text for both."""
+CASE_HINT = " Column names match exactly; the table has `{actual}`."
+"""Added to `KEY_MISSING` or `REFERENCE_MISSING` when the checked table has the column in another
+case. The table is the asset's own, which the run's principal has just written."""
 
-TARGET_COLUMN_GONE = (
-    "Reference `{column}` points at `{target}.{target_column}`, which `{target}` no longer has; "
-    "fix the reference and deploy again."
+REFERENCE_UNCHECKABLE = (
+    "The reference `{column}` at `{path}` cannot be checked: its target is missing, not readable "
+    "by the run's principal, or no longer has the key column; fix the reference or the grant and "
+    "deploy again."
 )
-"""A readable reference target that no longer has the referenced column."""
+"""A reference target that is missing, unreadable, or without the referenced column: one text."""
 
 TYPE_MISMATCH = (
-    "Reference `{column}` is {type}, which does not match the type of "
-    "`{target}.{target_column}`; cast one of them so they match."
+    "The reference `{column}` at `{path}` has a type that differs from its target key column's; "
+    "make the types match and deploy again."
 )
-"""A referencing column whose type differs from the target column's; names only its own type."""
+"""A referencing column whose type differs from the target column's; names neither type."""
 
 
 def types_match(own: str, other: str) -> bool:
@@ -144,7 +146,8 @@ def _key_problem(own: dict[str, str], generated: GeneratedFrom, spec: CheckSpec)
     for column in generated.columns:
         type_ = own.get(column)
         if type_ is None:
-            return KEY_MISSING.format(column=column, table=spec.table, path=spec.path)
+            text = KEY_MISSING.format(column=column, table=spec.table, path=spec.path)
+            return text + _case_hint(own, column)
         if type_ in FLOAT_TYPES:
             return KEY_FLOAT.format(column=column, type=type_)
     return None
@@ -187,8 +190,9 @@ def _reference_problem(
     (column,) = generated.columns
     target, target_column = generated.target or "", generated.target_column or ""
     if column not in own:
-        return REFERENCE_MISSING.format(column=column, table=spec.table, path=spec.path)
-    gone = TARGET_GONE.format(target=target)
+        text = REFERENCE_MISSING.format(column=column, table=spec.table, path=spec.path)
+        return text + _case_hint(own, column)
+    gone = REFERENCE_UNCHECKABLE.format(column=column, path=spec.path)
     try:
         ref = TableRef.from_dotted(environment, target)
     except ValidationError:
@@ -203,9 +207,29 @@ def _reference_problem(
     if target_column not in theirs:
         if not theirs:
             return None
-        return TARGET_COLUMN_GONE.format(column=column, target=target, target_column=target_column)
+        return gone
     if not types_match(own[column], theirs[target_column]):
-        return TYPE_MISMATCH.format(
-            column=column, type=own[column], target=target, target_column=target_column
-        )
+        return TYPE_MISMATCH.format(column=column, path=spec.path)
     return None
+
+
+def _case_hint(own: dict[str, str], column: str) -> str:
+    """Name the checked table's column that matches `column` in all but case.
+
+    Parameters
+    ----------
+    own
+        The checked table's columns, in schema order.
+    column
+        The header's column name, which the table does not have exactly.
+
+    Returns
+    -------
+    str
+        `CASE_HINT` for the first such column, or an empty string when there is none.
+    """
+    folded = column.casefold()
+    for name in own:
+        if name.casefold() == folded:
+            return CASE_HINT.format(actual=name)
+    return ""

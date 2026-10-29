@@ -185,6 +185,19 @@ def deny_target() -> AuthorizationService:
             "and deploy again.",
         ),
         (
+            {"Id": "long", "id": "long"},
+            GeneratedFrom("key", ("ID",)),
+            "Key column `ID` is not a column of `gold.f`; fix `key:` in assets/gold/f.sql:1 "
+            "and deploy again. Column names match exactly; the table has `Id`.",
+        ),
+        (
+            {"store_ID": "long"},
+            GeneratedFrom("references", ("store_id",), "gold.d", "store_id"),
+            "Reference column `store_id` is not a column of `gold.f`; fix `references:` in "
+            "assets/gold/f.sql:1 and deploy again. Column names match exactly; the table has "
+            "`store_ID`.",
+        ),
+        (
             {"store_id": "int"},
             GeneratedFrom("references", ("store_id",), "gold.d", "store_id"),
             None,
@@ -192,14 +205,15 @@ def deny_target() -> AuthorizationService:
         (
             {"store_id": "string"},
             GeneratedFrom("references", ("store_id",), "gold.d", "store_id"),
-            "Reference `store_id` is string, which does not match the type of "
-            "`gold.d.store_id`; cast one of them so they match.",
+            "The reference `store_id` at `assets/gold/f.sql:1` has a type that differs from its "
+            "target key column's; make the types match and deploy again.",
         ),
         (
             {"store_id": "long"},
             GeneratedFrom("references", ("store_id",), "gold.gone", "store_id"),
-            "Reference target `gold.gone` no longer exists, or the run's principal may not read "
-            "it; fix the reference, or grant READ_TABLE on it, and deploy again.",
+            "The reference `store_id` at `assets/gold/f.sql:1` cannot be checked: its target is "
+            "missing, not readable by the run's principal, or no longer has the key column; fix "
+            "the reference or the grant and deploy again.",
         ),
         (
             {"id": "long"},
@@ -210,8 +224,9 @@ def deny_target() -> AuthorizationService:
         (
             {"store_id": "long"},
             GeneratedFrom("references", ("store_id",), "gold.d", "shop_id"),
-            "Reference `store_id` points at `gold.d.shop_id`, which `gold.d` no longer has; fix "
-            "the reference and deploy again.",
+            "The reference `store_id` at `assets/gold/f.sql:1` cannot be checked: its target is "
+            "missing, not readable by the run's principal, or no longer has the key column; fix "
+            "the reference or the grant and deploy again.",
         ),
     ],
 )
@@ -224,9 +239,9 @@ def test_the_precheck_texts(
 ) -> None:
     env_with_tables(own=columns, target={"store_id": "long"})
     principal = env_with_tables.principal
-    assert model_problem(session, AllowAllAuthorization(), principal, "dev", _spec(generated)) == (
-        expected
-    )
+    text = model_problem(session, AllowAllAuthorization(), principal, "dev", _spec(generated))
+    assert text == expected
+    assert text is None or generated.target is None or generated.target not in text
 
 
 def test_a_table_without_column_rows_is_left_to_the_count(
@@ -263,7 +278,7 @@ def test_a_hand_written_check_is_not_prechecked(session: Session, env_with_table
 def test_the_precheck_does_not_reveal_an_unreadable_target(
     session: Session, env_with_tables: _Tables, deny_target: AuthorizationService
 ) -> None:
-    """Without READ_TABLE on the target, the text is the "no longer exists" one, with no type."""
+    """Without READ_TABLE on the target, the text is the combined one, with no type."""
     env_with_tables(own={"store_id": "string"}, target={"store_id": "long"})
     text = model_problem(
         session,
@@ -273,9 +288,11 @@ def test_the_precheck_does_not_reveal_an_unreadable_target(
         _spec(GeneratedFrom("references", ("store_id",), "gold.d", "store_id")),
     )
     assert text == (
-        "Reference target `gold.d` no longer exists, or the run's principal may not read it; fix "
-        "the reference, or grant READ_TABLE on it, and deploy again."
+        "The reference `store_id` at `assets/gold/f.sql:1` cannot be checked: its target is "
+        "missing, not readable by the run's principal, or no longer has the key column; fix the "
+        "reference or the grant and deploy again."
     )
+    assert "gold.d" not in text
     # "longer" holds "long": the target column's type is looked for as a word.
     assert "long" not in text.replace("longer", "")
 
@@ -291,8 +308,9 @@ def test_a_malformed_target_name_reads_as_gone(session: Session, env_with_tables
         _spec(GeneratedFrom("references", ("store_id",), "nodot", "store_id")),
     )
     assert text == (
-        "Reference target `nodot` no longer exists, or the run's principal may not read it; fix "
-        "the reference, or grant READ_TABLE on it, and deploy again."
+        "The reference `store_id` at `assets/gold/f.sql:1` cannot be checked: its target is "
+        "missing, not readable by the run's principal, or no longer has the key column; fix the "
+        "reference or the grant and deploy again."
     )
 
 

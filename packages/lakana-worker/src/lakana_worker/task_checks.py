@@ -403,8 +403,14 @@ def _count_one(
     spec: CheckSpec,
     environment_id: uuid.UUID,
     principal: PrincipalRef,
+    environment: str,
 ) -> tuple[checks.Counted | None, CheckOutcome, str | None]:
     """Count one check and say what it means, or end the phase.
+
+    A generated check is pre-checked first (`model_problem`): a problem with its columns or
+    types makes it ``errored`` without a count, since the count of a float key would pass and a
+    join of two types that differ may not compare. The pre-check's reads fail like the count's:
+    a database error is a transient failure.
 
     Parameters
     ----------
@@ -422,11 +428,14 @@ def _count_one(
         The run's environment.
     principal
         The run's principal: who the check is counted as.
+    environment
+        The run's environment's name.
 
     Returns
     -------
     tuple
-        The count (`None` when counting raised), the check's outcome, and the error text of
+        The count (`None` when counting raised or the pre-check found a problem), the check's
+        outcome, and the error text of
         an ``errored`` check. A check is ``errored`` when its count failed for a reason a
         retry would repeat, when it failed transiently on the last attempt, and when counting
         raised something that is not a database error: data that could not be checked must
@@ -447,6 +456,14 @@ def _count_one(
     crash: str | None = None
     retryable = False
     try:
+        problem = (
+            None
+            if spec.generated is None
+            else model_problem(session, engine.authz_factory(session), principal, environment, spec)
+        )
+        session.rollback()
+        if problem is not None:
+            return None, CheckOutcome.ERRORED, problem
         with cancellation(keeper.cancel):
             counted = checks.count_check(
                 session,
@@ -1400,23 +1417,16 @@ def _checks_under(
         session.rollback()
         if spec.name in refusals:
             counted, outcome, error = None, CheckOutcome.ERRORED, refusals[spec.name]
-        elif (
-            phase.active
-            and spec.generated is not None
-            and (
-                problem := model_problem(
-                    session, engine.authz_factory(session), principal, phase.environment, spec
-                )
-            )
-            is not None
-        ):
-            # A generated check whose columns or types are wrong is not counted: the count of
-            # a float key would pass, and a join of two types that differ may not compare.
-            session.rollback()
-            counted, outcome, error = None, CheckOutcome.ERRORED, problem
         elif phase.active:
             counted, outcome, error = _count_one(
-                session, engine, claimed, keeper, spec, phase.environment_id, principal
+                session,
+                engine,
+                claimed,
+                keeper,
+                spec,
+                phase.environment_id,
+                principal,
+                phase.environment,
             )
             if counted is not None and isinstance(counted.failure, KeptAfterCheckError):
                 kept_refusals[spec.name] = str(counted.failure)

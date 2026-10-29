@@ -2231,14 +2231,19 @@ action.
 
 **What a generated check's error may hold.** A check generated from an asset's header
 (`TABLE/key_unique`, `TABLE/key_not_null`, `TABLE/ref_<column>`; `CheckResult.generated`) is
-pre-checked by the worker right before its count (`lakana_core.runs.model_precheck.model_problem`),
-because a deploy has no output types. The pre-check reads names and types from `table_columns`,
-never a value. A problem makes the check `errored` without a count, so `block` sets the table
-back, and its `error` is one of the module's fixed sentences, filled with the header's column and
-table names, the check's path and the checked table's own column type. It never holds a value and
-never a target column's type: a reader of the run may not be able to read the target. A target
-that is gone and one the run's principal may not read (`READ_TABLE`, asked before the target's
-columns are read) get one text (`TARGET_GONE`), the same rule as `ERROR_UNREADABLE`.
+pre-checked by the worker inside `_count_one`, right before its count
+(`lakana_core.runs.model_precheck.model_problem`), because a deploy has no output types. The
+pre-check reads names and types from `table_columns`, never a value. A problem makes the check
+`errored` without a count, so `block` sets the table back; a database error while reading is a
+transient failure, like a failed count. Its `error` is one of the module's fixed sentences,
+filled with the header's own column names, the checked table's name, the check's path and the
+checked table's own column type (a float key), plus, for a column that matches only in case, the
+checked table's own column name. It never holds a value. A reference's text **never names its
+target or a type and never says whether the target exists**: a reader of the run may not be
+able to read the target. A target that is missing, one the run's principal may not read
+(`READ_TABLE`, asked before the target's columns are read) and one without the referenced column
+get one text (`REFERENCE_UNCHECKABLE`), which points at the check's path, the asset's header line;
+a type mismatch (`TYPE_MISMATCH`) points there too. Same rule as `ERROR_UNREADABLE`.
 
 **Who rolls back.** The worker, for a running task on its own asset, with the **claim form** of
 the run context (`RunContext(task_run_id, claim)`, built in `lakana_worker.task_checks._set_back`): the
