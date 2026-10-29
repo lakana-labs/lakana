@@ -181,6 +181,17 @@ def test_a_hand_written_check_may_not_take_a_generated_name() -> None:
     ]
 
 
+def test_a_hand_written_check_may_not_look_generated() -> None:
+    """`lakana check list` marks a generated check with ` (generated)`; no file may imitate it."""
+    hands = [_hand("unique_id (generated)"), _hand("x (Generated)", "gold.other"), _hand("ok")]
+    assert [i.message for i in generated_name_issues(hands, [])] == [
+        "A check name may not end in ` (generated)`, which marks a check generated from an "
+        "asset's header; rename `checks/gold/fact_sales/unique_id (generated).sql`.",
+        "A check name may not end in ` (generated)`, which marks a check generated from an "
+        "asset's header; rename `checks/gold/other/x (Generated).sql`.",
+    ]
+
+
 def test_a_hand_written_check_with_a_generated_name_elsewhere_is_accepted() -> None:
     """The F26 ruling: only the name the check's own table's header generates is refused."""
     generated = generated_checks(
@@ -244,8 +255,8 @@ def test_the_limit_directory_comes_from_a_hand_written_check_when_there_is_one()
     (alone,) = check_issues([*generated, _hand("a")], [asset], graph, limits=limits)
     assert (alone.path, alone.line) == ("checks/gold/fact_sales", None)
     assert alone.message == (
-        "more than 2 checks of table 'gold.fact_sales'; combine checks or split the table "
-        "(2 of them generated from the asset's header)"
+        "more than 2 checks of table 'gold.fact_sales' (2 of them generated from the asset's "
+        "header); remove or combine hand-written checks, or split the table"
     )
     only_generated = generated_checks(
         [asset], {"gold.fact_sales": (_REF,)}, default_on_failure="block"

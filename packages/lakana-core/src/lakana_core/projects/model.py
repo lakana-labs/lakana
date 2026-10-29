@@ -7,7 +7,7 @@ checked against an explicit SELECT; a star or a Python asset leaves them to the 
 
 from __future__ import annotations
 
-from collections.abc import Callable, Collection, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 
 from lakana_core.projects.asset_model import ParsedAsset, ResolvedReference, key_columns
@@ -98,26 +98,35 @@ def split_reference(raw: str, is_table: Callable[[str], bool]) -> tuple[str, str
     return (prefix, last) if long else None
 
 
-def project_reference_target(raw: str, produced: Collection[str]) -> str | None:
+def project_reference_target(
+    raw: str, produced: Mapping[str, tuple[str, ...] | None]
+) -> str | None:
     """Find the project table a reference target names, for the DAG.
+
+    It reads the name as `_split` does where the project alone decides: a table part whose known
+    columns lack the last part is not the target, because the deploy then reads the whole name as
+    a table outside the project, or refuses the reference.
 
     Parameters
     ----------
     raw
         The target as written.
     produced
-        The tables the project builds.
+        The tables the project builds, each with its columns (`None` when not known).
 
     Returns
     -------
     str or None
-        `raw` when the project builds it, else its table part (long form) when the project
-        builds that, else `None`.
+        `raw` when the project builds it; else its table part (long form) when the project
+        builds that and it may have the column; else `None`.
     """
     if raw in produced:
         return raw
-    prefix = raw.rpartition(".")[0]
-    return prefix if prefix in produced else None
+    prefix, _, column = raw.rpartition(".")
+    if prefix not in produced:
+        return None
+    known = produced[prefix]
+    return prefix if known is None or column in known else None
 
 
 def _missing(raw: str, environment: str) -> str:

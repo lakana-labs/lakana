@@ -169,9 +169,22 @@ def test_a_shorter_table_with_unknown_columns_reads_two_ways() -> None:
 
 
 def test_project_reference_target_prefers_the_whole_name() -> None:
-    assert project_reference_target("gold.dim_store", {"gold.dim_store"}) == "gold.dim_store"
-    assert project_reference_target("gold.dim_store.id", {"gold.dim_store"}) == "gold.dim_store"
-    assert project_reference_target("gold.other", {"gold.dim_store"}) is None
+    built: dict[str, tuple[str, ...] | None] = {"gold.dim_store": ("id",)}
+    assert project_reference_target("gold.dim_store", built) == "gold.dim_store"
+    assert project_reference_target("gold.dim_store.id", built) == "gold.dim_store"
+    assert project_reference_target("gold.dim_store.id", {"gold.dim_store": None}) == (
+        "gold.dim_store"
+    )
+    assert project_reference_target("gold.other", built) is None
+
+
+def test_project_reference_target_reads_a_name_as_the_deploy_does() -> None:
+    """A table part whose known columns lack the last part is not the target, as in `_split`."""
+    assert project_reference_target("gold.dim_store.nope", {"gold.dim_store": ("id",)}) is None
+    both: dict[str, tuple[str, ...] | None] = {"a.b": ("x",), "a.b.store_id": ("id",)}
+    assert project_reference_target("a.b.store_id", both) == "a.b.store_id"
+    unknown: dict[str, tuple[str, ...] | None] = {"a.b": None, "a.b.store_id": ("id",)}
+    assert project_reference_target("a.b.store_id", unknown) == "a.b.store_id"
 
 
 def test_key_and_reference_columns_must_be_in_an_explicit_select() -> None:

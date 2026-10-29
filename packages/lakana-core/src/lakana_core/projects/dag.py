@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Collection, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from itertools import pairwise
 
@@ -31,14 +31,13 @@ class ProjectGraph:
 
 
 _REFERENCE_HINT = (
-    " (a reference in `references:` counts as a dependency: the target is built first)"
+    " (a reference in `references:` counts as a dependency: the target is built first); remove "
+    "one of the references, or check it with a hand-written check under `checks/`"
 )
 """Appended to a cycle that only the header's references close."""
 
 
-def _upstream(
-    asset: ParsedAsset, produced: Collection[str], *, with_references: bool = True
-) -> set[str]:
+def _upstream(asset: ParsedAsset, produced: Mapping[str, tuple[str, ...] | None]) -> set[str]:
     """List what an asset must wait for: the tables it reads and the targets it references.
 
     Parameters
@@ -46,9 +45,7 @@ def _upstream(
     asset
         The asset.
     produced
-        The tables the repository builds.
-    with_references
-        Whether a `references:` target the repository builds counts.
+        The tables the repository builds, each with its columns (`None` when not known).
 
     Returns
     -------
@@ -56,16 +53,28 @@ def _upstream(
         The tables, never the asset's own. A reference target the repository does not build adds
         nothing: it is no input of the SQL, and the deploy resolves it on its own.
     """
-    targets = (
-        {
-            target
-            for raw in asset.metadata.references.values()
-            if (target := project_reference_target(raw, produced)) is not None
-        }
-        if with_references
-        else set()
-    )
+    targets = {
+        target
+        for raw in asset.metadata.references.values()
+        if (target := project_reference_target(raw, produced)) is not None
+    }
     return {*asset.references, *targets} - {asset.table}
+
+
+def _produced(assets: Sequence[ParsedAsset]) -> dict[str, tuple[str, ...] | None]:
+    """Map each table the repository builds to its columns.
+
+    Parameters
+    ----------
+    assets
+        The parsed assets.
+
+    Returns
+    -------
+    dict
+        Table → its columns, `None` for a star projection or a Python asset.
+    """
+    return {asset.table: asset.columns for asset in assets}
 
 
 def build_graph(assets: Sequence[ParsedAsset]) -> ProjectGraph:
@@ -81,7 +90,7 @@ def build_graph(assets: Sequence[ParsedAsset]) -> ProjectGraph:
     ProjectGraph
         Edges and external inputs.
     """
-    produced = {asset.table for asset in assets}
+    produced = _produced(assets)
     edges: set[tuple[str, str]] = set()
     external: set[str] = set()
     for asset in assets:
@@ -93,7 +102,7 @@ def build_graph(assets: Sequence[ParsedAsset]) -> ProjectGraph:
     return ProjectGraph(edges=tuple(sorted(edges)), external_inputs=tuple(sorted(external)))
 
 
-def find_cycle(assets: Sequence[ParsedAsset], *, with_references: bool = True) -> list[str] | None:
+def find_cycle(assets: Sequence[ParsedAsset]) -> list[str] | None:
     """Find one dependency cycle, if any.
 
     Walks assets in table-name order, depth first along their upstreams in
@@ -103,19 +112,14 @@ def find_cycle(assets: Sequence[ParsedAsset], *, with_references: bool = True) -
     ----------
     assets
         The parsed assets.
-    with_references
-        Whether a `references:` target counts as an upstream, as `build_graph` counts it.
 
     Returns
     -------
     list of str or None
         The cycle's tables, the first repeated at the end; `None` if acyclic.
     """
-    produced = {asset.table for asset in assets}
-    upstream = {
-        asset.table: sorted(_upstream(asset, produced, with_references=with_references))
-        for asset in assets
-    }
+    produced = _produced(assets)
+    upstream = {asset.table: sorted(_upstream(asset, produced)) for asset in assets}
     done: set[str] = set()
     for root in sorted(upstream):
         if root in done:

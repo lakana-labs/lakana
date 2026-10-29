@@ -33,8 +33,8 @@ INTEGER_TYPES = frozenset({"int", "long"})
 """The catalog's spellings of the integer types; a reference may join one width to the other."""
 
 KEY_FLOAT = (
-    "Key column `{column}` is {type}; a floating-point column cannot identify a row. "
-    "Use an integer, decimal, string or date column."
+    "Key column `{column}` is {type}, a floating-point type, so it cannot identify a row; cast it "
+    "in the asset, for example to DECIMAL, BIGINT or VARCHAR, and deploy again."
 )
 """A key column of a floating-point type."""
 

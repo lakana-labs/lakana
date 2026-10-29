@@ -24,6 +24,9 @@ KEY_NOT_NULL = "key_not_null"
 REF_PREFIX = "ref_"
 """The prefix of a reference check: ``ref_<column>``."""
 
+GENERATED_MARK = " (generated)"
+"""What the CLI shows after a generated check's name; no hand-written check's name may end in it."""
+
 
 def _quote(identifier: str) -> str:
     """Quote one identifier for DuckDB.
@@ -224,11 +227,13 @@ def generated_checks(
 def generated_name_issues(
     hand: Sequence[ParsedCheck], generated: Sequence[ParsedCheck]
 ) -> list[ProjectIssue]:
-    """Refuse a hand-written check whose name its own table's header generates.
+    """Refuse a hand-written check that takes a generated name or looks generated.
 
     A hand-written check named ``key_unique`` or ``ref_x`` is fine as long as the header of its
     table generates no check of that name. Names are compared as discovery compares two check
-    files (`_fold`), so ``Key_Unique.sql`` collides with a generated ``key_unique`` too.
+    files (`_fold`), so ``Key_Unique.sql`` collides with a generated ``key_unique`` too. A name
+    ending in `GENERATED_MARK`, in any case, is refused everywhere: the CLI would show it as a
+    generated check.
 
     Parameters
     ----------
@@ -240,16 +245,28 @@ def generated_name_issues(
     Returns
     -------
     list of ProjectIssue
-        One per colliding hand-written check, at its file, in path order.
+        One per refused hand-written check, at its file, in path order.
     """
     names = {_fold(check.name) for check in generated}
-    return [
-        ProjectIssue(
-            check.path,
-            None,
-            f"A check named `{shown(check.check)}` is generated for `{shown(check.table)}`; "
-            f"rename `{check.path}`.",
-        )
-        for check in sorted(hand, key=lambda c: c.path)
-        if _fold(check.name) in names
-    ]
+    mark = _fold(GENERATED_MARK)
+    issues: list[ProjectIssue] = []
+    for check in sorted(hand, key=lambda c: c.path):
+        if _fold(check.check).endswith(mark):
+            issues.append(
+                ProjectIssue(
+                    check.path,
+                    None,
+                    f"A check name may not end in `{GENERATED_MARK}`, which marks a check "
+                    f"generated from an asset's header; rename `{check.path}`.",
+                )
+            )
+        elif _fold(check.name) in names:
+            issues.append(
+                ProjectIssue(
+                    check.path,
+                    None,
+                    f"A check named `{shown(check.check)}` is generated for "
+                    f"`{shown(check.table)}`; rename `{check.path}`.",
+                )
+            )
+    return issues

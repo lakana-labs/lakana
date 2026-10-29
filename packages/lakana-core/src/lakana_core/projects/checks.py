@@ -714,15 +714,14 @@ def check_issues(
             directory = (
                 hand[0].path.rsplit("/", 1)[0] if hand else members[0].path.rpartition(":")[0]
             )
-            note = f" ({generated} of them generated from the asset's header)" if generated else ""
-            issues.append(
-                ProjectIssue(
-                    directory,
-                    None,
-                    f"more than {limits.max_checks_per_table} checks of table {table!r}; "
-                    f"combine checks or split the table{note}",
-                )
+            head = f"more than {limits.max_checks_per_table} checks of table {table!r}"
+            message = (
+                f"{head} ({generated} of them generated from the asset's header); remove or "
+                "combine hand-written checks, or split the table"
+                if generated
+                else f"{head}; combine checks or split the table"
             )
+            issues.append(ProjectIssue(directory, None, message))
     return issues
 
 

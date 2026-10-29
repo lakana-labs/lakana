@@ -347,8 +347,8 @@ def test_a_generated_key_check_on_a_float_column_errors_without_a_count(world: W
 
     task = _task(world, "silver.orders")
     error = (
-        "Key column `amount` is double; a floating-point column cannot identify a row. "
-        "Use an integer, decimal, string or date column."
+        "Key column `amount` is double, a floating-point type, so it cannot identify a row; cast "
+        "it in the asset, for example to DECIMAL, BIGINT or VARCHAR, and deploy again."
     )
     (result,) = _results(world, task.id)
     assert (result.outcome, result.error, result.failing_rows, result.generated) == (

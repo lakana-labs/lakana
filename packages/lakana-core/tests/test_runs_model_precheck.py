@@ -169,14 +169,14 @@ def deny_target() -> AuthorizationService:
         (
             {"amount": "double"},
             GeneratedFrom("key", ("amount",)),
-            "Key column `amount` is double; a floating-point column cannot identify a row. "
-            "Use an integer, decimal, string or date column.",
+            "Key column `amount` is double, a floating-point type, so it cannot identify a row; "
+            "cast it in the asset, for example to DECIMAL, BIGINT or VARCHAR, and deploy again.",
         ),
         (
             {"id": "long", "ratio": "float"},
             GeneratedFrom("key", ("id", "ratio")),
-            "Key column `ratio` is float; a floating-point column cannot identify a row. "
-            "Use an integer, decimal, string or date column.",
+            "Key column `ratio` is float, a floating-point type, so it cannot identify a row; "
+            "cast it in the asset, for example to DECIMAL, BIGINT or VARCHAR, and deploy again.",
         ),
         (
             {"id": "long"},
