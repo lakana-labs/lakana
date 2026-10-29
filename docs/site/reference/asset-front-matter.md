@@ -186,6 +186,8 @@ Dry run of analytics in dev at abcc6826166c7e41e9bbed945192487e8ef38035
 ┡━━━━━━━━╇━━━━━━━━━━━━━━━━━━━┩
 │ added  │ silver.orders_log │
 └────────┴───────────────────┘
+Checks:
+  silver.customers: key_not_null, key_unique
 hint: silver.orders_log: `materialize: incremental` is now written `write: append` with `watermark: order_id`; both work
 ```
 
