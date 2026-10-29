@@ -117,7 +117,7 @@ Each cell is a summary. The page named in the last column has the detail. The ch
 
 | Release | What it asks | Where |
 |---|---|---|
-| Next release | No migration. `key:` is allowed with every write mode and has at most 8 columns, a merge key's included. A project that declares `kind`, `grain`, `key`, `references` or `checks` (every project with a `write: merge` asset) deploys a version 9 manifest: upgrade every worker before you deploy it. | [Notes for the next release](#notes-for-the-next-release) |
+| Next release | Migration `0052` (marks a check result as generated). `key:` is allowed with every write mode. A project that declares `kind`, `grain`, `key`, `references` or `checks` (every project with a `write: merge` asset) deploys a version 9 manifest: upgrade the server and every worker together, before you deploy it. **Breaking:** `key:` generates the checks `key_unique` and `key_not_null`, and each `references:` entry a `ref_<column>` check: a hand-written check of the same name on that table is refused at deploy (rename it under `checks/`), and every `write: merge` asset gains key checks that block unless `checks.on_failure` says `warn` (deduplicate the key, or set `checks: key: warn` in its header); a key has at most 8 columns, a merge key's included (shorten it); a referenced table of the project is built first, and when it fails or is set back the tables that reference it end `upstream_failed`. | [Notes for the next release](#notes-for-the-next-release), [Generated checks](../reference/checks.md#generated-checks) |
 | 0.21.0 | Migrations `0049` (connections and their tests, the secret use `connection`), `0050` (the key of a merge run) and `0051` (the record of a deploy's job starts, and the CI trust rule setting `start_on_deploy_jobs`). **Breaking:** a REST client that reads every job trigger kind must ignore or handle the new `{"kind": "deploy"}` (a job with `on_deploy: true` starts after each deploy; CI trust rules opt in with `start_on_deploy_jobs`, off on every existing rule; upgrade the workers before you deploy such a job); a Python asset's parameter `ctx` is its context, never an input (rename such an input); an unusable `LAKANA_RUN__CA_BUNDLE` stops the worker, and local tasks trust Mozilla's roots plus that file instead of the system store; builds and tasks never reach a Docker gateway or `host.docker.internal` (list the host's other addresses in `LAKANA_EGRESS_REFUSED`); under the local runner a database connection test needs `lakana[assets]` next to the worker. Upgrade the launcher, `egress`, the task images (46.7 MB larger each) and the workers together, and the workers before you deploy connections or `write: append`/`merge`. Lock Python projects again: `lakana[assets]` gains six packages (about 19 MB of wheels). An http connection test that gets 5xx or 429 is `failed`. Python tasks need this release's server: a worker of this release next to an older server fails every Python task (`… holds no write of this attempt`). New: connections, task egress, the `lakana.ingest` helpers, `lakana load`, `lakana init --template`, `@asset(evolve_schema=True)` for a Python asset that replaces its table, and `LAKANA_INGESTION_ROOTS` in the bundle's `.env`. | [Notes for 0.21.0](#notes-for-0210), [Load data from a source](../how-to/load-data-from-a-source.md) |
 | 0.20.0 | No migration. **Breaking:** the Compose bundle runs Python tasks in containers: replace `compose.yaml`, add four `.env` lines, Docker Engine 28 or later; budget `LAKANA_RUN__TASK_MEMORY` (2 GB) per worker; with the docker runner `LAKANA_RUN__HTTPS_PROXY`, `LAKANA_RUN__CA_BUNDLE` (accepted again from the next release) and an `http://` `LAKANA_RUN__INDEX_URL` are refused, and a registered index on another port than 443 needs a credential. A protected environment runs Python assets only on workers with `LAKANA_RUN__RUNNER=docker`, so no longer in local mode. | [Notes for 0.20.0](#notes-for-0200), [Run Python tasks in containers](../how-to/run-python-tasks-in-containers.md) |
 | 0.19.0 | No migration. **Security fix**: upgrade the server and every worker. **Breaking:** queries run on DuckDB 2.0: `//` and `%` by zero fail (use `TRY` or `NULLIF`), an untyped `NULL AS x` in a write is refused (add a `CAST`), a table function's alias is its value, `price = 1.1` after a float-to-double widening matches only newer rows, some Parquet files from other writers may not read; the worker needs macOS 10.15 or glibc 2.27. A `PIVOT` lists its values; `CONNECT BY`, DuckDB-internal and sequence functions are refused; a query opens only the tables it reads. The worker stops at start-up on an unusable CA bundle; an unverifiable store certificate fails at once. | [Notes for 0.19.0](#notes-for-0190) |
@@ -152,6 +152,36 @@ environment; a target you may not read gets the same message as one that does no
 - A project that declares a model field deploys a version 9 manifest. `key:` alone counts, so
   every project with a `write: merge` asset deploys version 9 from this release on: upgrade every
   worker before you deploy it. A worker of an earlier release refuses the manifest.
+
+### Generated key and reference checks (breaking)
+
+A deploy turns `key:` into the checks `key_unique` and `key_not_null`, and each entry of
+`references:` into a check `ref_<column>`. See
+[Generated checks](../reference/checks.md#generated-checks).
+
+- A hand-written check whose name the header now generates for its table (`key_unique`,
+  `key_not_null` or `ref_<column>` on a table that declares `key:` or `references:`) is refused at
+  the next deploy with ``A check named `key_unique` is generated for `TABLE`; rename `checks/…`.``
+  Rename the file under `checks/`.
+- Every existing `write: merge` asset declares a key, so it gains `key_unique` and `key_not_null`
+  at its next deploy. They take the project default: they block unless `checks.on_failure` in
+  `lakana.yaml` says `warn`. A merge already keeps keys unique; if one fails, deduplicate the key
+  columns, or set `checks: key: warn` in the asset's header.
+- A merge key of more than 8 columns is refused at deploy, as any key is. Shorten it to the
+  columns that identify one row.
+- A reference target that the project builds is now built before the table that references it.
+  When it fails, or a blocking check sets it back, the tables that reference it are not built and
+  end `upstream_failed`; `lakana run --select TABLE --upstream` builds the targets too.
+- Migration `0052` marks each check result as generated or not; earlier results read as not
+  generated. Projects with `write: merge` or any model field deploy manifest version 9, which only
+  workers of this release run: upgrade the server and the workers together.
+- Before it counts a generated check, the worker checks the columns and their types in the
+  catalog: a key column may not be `float` or `double`, and a reference column must have its
+  target column's type, where only `int` and `long` match each other. A mismatch makes the check
+  `errored`, which blocks like a failure; the texts are in
+  [Before a generated check counts](../reference/checks.md#before-a-generated-check-counts).
+- `lakana check list`, `lakana table health`, REST and the SDK mark a generated check
+  (`key_unique (generated)`, `"generated": true`).
 
 ## Notes for 0.21.0
 
