@@ -883,6 +883,8 @@ header or the project's default says otherwise. Their names, the run order, the 
 whose columns or types do not fit and what to do about each are in
 [Generated checks](../reference/checks.md#generated-checks); the header's fields are in
 [Model fields](../reference/asset-front-matter.md#model-fields-kind-grain-key-and-references).
+[Declare a table's model](declare-a-tables-model.md) builds a star whose generated checks warn,
+fail and pass.
 
 ## Block, keep or warn
 

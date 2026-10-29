@@ -81,19 +81,25 @@ SDK and the audit events are in [Descriptions](../reference/descriptions.md).
 A table's model is what the header of the asset that builds it declares: its `kind`, its `grain`,
 its `key` and its `references` (see [Model fields](../reference/asset-front-matter.md#model-fields-kind-grain-key-and-references)).
 Only the header sets it: a deploy writes it, and neither a command nor the REST API changes it.
-Here a fact declares its grain, its key and the dimension its `store_id` points at:
+Here a fact declares its grain, its key and the dimensions its `store_id` and `sku` point at
+([Declare a table's model](declare-a-tables-model.md) walks through writing one):
 
 <!-- source: docs/examples/see-a-tables-model/project/assets/gold/fact_sales.sql -->
 ```sql
 /* lakana
-description: Sales per store and day.
+description: Sales per store, product and day.
 kind: fact
-grain: One row per store and day.
-key: [date, store_id]
+grain: One row per store, product and calendar day.
+key: [date, store_id, sku]
 references:
   store_id: gold.dim_store
+  sku: gold.dim_product
+checks:
+  references: warn
 */
-SELECT date, store_id, SUM(amount) AS amount FROM bronze.sales GROUP BY date, store_id
+SELECT date, store_id, sku, SUM(amount) AS amount
+FROM bronze.sales
+GROUP BY date, store_id, sku
 ```
 
 After a deploy and a run, `lakana table get` shows the model after the columns, with the newest
@@ -101,21 +107,23 @@ result of each check the header generates:
 
 <!-- source: docs/examples/see-a-tables-model/run.sh#get -->
 ```bash
-lakana table get gold.fact_sales
+lakana table get gold.fact_sales --env dev
 ```
 
 <!-- output -->
 ```text
 Model: fact
-Grain: One row per store and day.
-Key: date, store_id
+Grain: One row per store, product and calendar day.
+Key: date, store_id, sku
+  sku → gold.dim_product.sku (exists)
   store_id → gold.dim_store.store_id (exists)
 ┏━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 ┃ check                    ┃ state  ┃ failing_rows ┃ finished_at               ┃
 ┡━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ key_not_null (generated) │ passed │ 0            │ 2026-10-29T15:39:34+00:00 │
-│ key_unique (generated)   │ passed │ 0            │ 2026-10-29T15:39:34+00:00 │
-│ ref_store_id (generated) │ passed │ 0            │ 2026-10-29T15:39:34+00:00 │
+│ key_not_null (generated) │ passed │ 0            │ 2026-10-29T20:19:56+00:00 │
+│ key_unique (generated)   │ passed │ 0            │ 2026-10-29T20:19:56+00:00 │
+│ ref_sku (generated)      │ passed │ 0            │ 2026-10-29T20:19:56+00:00 │
+│ ref_store_id (generated) │ passed │ 0            │ 2026-10-29T20:19:56+00:00 │
 └──────────────────────────┴────────┴──────────────┴───────────────────────────┘
 ```
 
@@ -129,7 +137,7 @@ flowed, references are what the model says relates.
 
 <!-- source: docs/examples/see-a-tables-model/run.sh#references -->
 ```bash
-lakana table references gold.dim_store
+lakana table references gold.dim_store --env dev
 ```
 
 <!-- output: see-a-tables-model#references -->
@@ -148,7 +156,7 @@ To list only the tables of one kind, add `--model-kind` with `fact`, `dimension`
 
 <!-- source: docs/examples/see-a-tables-model/run.sh#list -->
 ```bash
-lakana table list gold --model-kind fact
+lakana table list gold --model-kind fact --env dev
 ```
 
 <!-- output: see-a-tables-model#list -->
