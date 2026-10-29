@@ -106,7 +106,7 @@ dependency updates and a batch of small issues, then M6 ingestion, M8d data mode
 interface and sign-in, a small private test round on a hosted instance, M7c (the public beta,
 #33), M8, M8b, M8c, M9, M10 and v1.0.0.
 
-After 0.20.0, M6, ingestion (#1), was built; it ships with the next release (see the
+M6, ingestion (#1), shipped with 0.21.0 (see the
 [notes for 0.21.0](upgrades.md#notes-for-0210)). An administrator registers
 a source once per environment as a named connection (#85), and `lakana connection test` checks
 its address and credentials; a Python asset declares the connections it reads, fetches their
@@ -185,7 +185,7 @@ beta ships with the ingestion helpers and named connections.
    first audience needs, and the private test round checks it before the public beta. After
    M7, a small private test round on a hosted instance comes before the beta.
 7. **M7c, public beta.** The repository is open and the packages are on PyPI as a pre-beta from
-   0.12.0; the beta is the 0.x release that says it is ready to try, planned for about February 2027.
+   0.12.0; the beta is the 0.x release that says it is ready to try, planned for about early December 2026.
    The beta includes the web interface (M7) with sign-in by OIDC, or by an invite link and a
    passkey for teams without an identity provider, and the data-modelling features of M8d, after a
    small private test round on a hosted instance. The CLI, the SDK and the REST API stay. Tokens
