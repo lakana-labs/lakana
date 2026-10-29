@@ -226,3 +226,47 @@ def test_a_cycle_through_a_python_asset_is_found_and_named() -> None:
     assert find_cycle(assets) == ["a.x", "a.z", "a.y", "a.x"]
     messages = [issue.message for issue in validate_project(assets, ResolvedProjectConfig())]
     assert "cycle: a.x -> a.z -> a.y -> a.x" in messages
+
+
+def test_a_reference_orders_the_target_first() -> None:
+    dim = make_asset("gold.dim_store")
+    fact = make_asset(
+        "gold.fact",
+        columns=("store_id",),
+        metadata=AssetMetadata(materialize="table", references={"store_id": "gold.dim_store"}),
+    )
+    assert ("gold.dim_store", "gold.fact") in build_graph([dim, fact]).edges
+
+
+def test_a_long_form_reference_orders_its_table_first_and_an_outside_target_is_no_input() -> None:
+    """The long form's table part is the edge; a target no asset builds adds nothing."""
+    dim = make_asset("gold.dim_store")
+    fact = make_asset(
+        "gold.fact",
+        metadata=AssetMetadata(
+            materialize="table",
+            references={"store_id": "gold.dim_store.id", "region": "ref.regions.code"},
+        ),
+    )
+    graph = build_graph([dim, fact])
+    assert graph.edges == (("gold.dim_store", "gold.fact"),)
+    assert graph.external_inputs == ()
+
+
+def test_mutual_references_are_a_cycle_and_a_self_reference_is_not() -> None:
+    a = make_asset(
+        "gold.a", metadata=AssetMetadata(materialize="table", references={"b_id": "gold.b"})
+    )
+    b = make_asset(
+        "gold.b", metadata=AssetMetadata(materialize="table", references={"a_id": "gold.a"})
+    )
+    issues = validate_project([a, b], ResolvedProjectConfig())
+    assert [i.message for i in issues] == [
+        "cycle: gold.a -> gold.b -> gold.a (a reference in `references:` counts as a dependency: "
+        "the target is built first)"
+    ]
+    assert find_cycle([a, b], with_references=False) is None
+    me = make_asset(
+        "gold.e", metadata=AssetMetadata(materialize="table", references={"m": "gold.e"})
+    )
+    assert validate_project([me], ResolvedProjectConfig()) == []

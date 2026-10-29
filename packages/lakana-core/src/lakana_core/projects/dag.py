@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 
 from lakana_core.projects.issues import ProjectIssue
+from lakana_core.projects.model import project_reference_target
 from lakana_core.projects.parse import ParsedAsset
 from lakana_core.projects.project_config import ResolvedProjectConfig
 
@@ -18,13 +19,52 @@ class ProjectGraph:
     ----------
     edges
         ``(upstream, downstream)`` pairs between assets of this repository,
-        sorted. Self-references are omitted.
+        sorted. Self-references are omitted. A target of `references:` that the
+        repository builds is an upstream too: it is built first.
     external_inputs
         Every referenced table this repository does not produce, sorted.
     """
 
     edges: tuple[tuple[str, str], ...]
     external_inputs: tuple[str, ...]
+
+
+_REFERENCE_HINT = (
+    " (a reference in `references:` counts as a dependency: the target is built first)"
+)
+"""Appended to a cycle that only the header's references close."""
+
+
+def _upstream(
+    asset: ParsedAsset, produced: Collection[str], *, with_references: bool = True
+) -> set[str]:
+    """List what an asset must wait for: the tables it reads and the targets it references.
+
+    Parameters
+    ----------
+    asset
+        The asset.
+    produced
+        The tables the repository builds.
+    with_references
+        Whether a `references:` target the repository builds counts.
+
+    Returns
+    -------
+    set of str
+        The tables, never the asset's own. A reference target the repository does not build adds
+        nothing: it is no input of the SQL, and the deploy resolves it on its own.
+    """
+    targets = (
+        {
+            target
+            for raw in asset.metadata.references.values()
+            if (target := project_reference_target(raw, produced)) is not None
+        }
+        if with_references
+        else set()
+    )
+    return {*asset.references, *targets} - {asset.table}
 
 
 def build_graph(assets: Sequence[ParsedAsset]) -> ProjectGraph:
@@ -44,9 +84,7 @@ def build_graph(assets: Sequence[ParsedAsset]) -> ProjectGraph:
     edges: set[tuple[str, str]] = set()
     external: set[str] = set()
     for asset in assets:
-        for reference in asset.references:
-            if reference == asset.table:
-                continue
+        for reference in _upstream(asset, produced):
             if reference in produced:
                 edges.add((reference, asset.table))
             else:
@@ -54,23 +92,29 @@ def build_graph(assets: Sequence[ParsedAsset]) -> ProjectGraph:
     return ProjectGraph(edges=tuple(sorted(edges)), external_inputs=tuple(sorted(external)))
 
 
-def find_cycle(assets: Sequence[ParsedAsset]) -> list[str] | None:
+def find_cycle(assets: Sequence[ParsedAsset], *, with_references: bool = True) -> list[str] | None:
     """Find one dependency cycle, if any.
 
-    Walks assets in table-name order, depth first along their references in
-    reference order, so the reported cycle is deterministic.
+    Walks assets in table-name order, depth first along their upstreams in
+    name order, so the reported cycle is deterministic.
 
     Parameters
     ----------
     assets
         The parsed assets.
+    with_references
+        Whether a `references:` target counts as an upstream, as `build_graph` counts it.
 
     Returns
     -------
     list of str or None
         The cycle's tables, the first repeated at the end; `None` if acyclic.
     """
-    upstream = {asset.table: [r for r in asset.references if r != asset.table] for asset in assets}
+    produced = {asset.table for asset in assets}
+    upstream = {
+        asset.table: sorted(_upstream(asset, produced, with_references=with_references))
+        for asset in assets
+    }
     done: set[str] = set()
     for root in sorted(upstream):
         if root in done:
@@ -138,7 +182,10 @@ def validate_project(
     cycle = find_cycle(assets)
     if cycle is not None:
         first = by_table[cycle[0]]
-        issues.append(ProjectIssue(first.path, first.body_line, "cycle: " + " -> ".join(cycle)))
+        hint = _REFERENCE_HINT if find_cycle(assets, with_references=False) is None else ""
+        issues.append(
+            ProjectIssue(first.path, first.body_line, "cycle: " + " -> ".join(cycle) + hint)
+        )
     for asset in sorted(assets, key=lambda a: a.path):
         line = asset.block_line or asset.body_line
         for field in config.requirements.fields:

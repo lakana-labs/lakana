@@ -219,3 +219,17 @@ def test_the_long_form_resolves_to_the_named_column() -> None:
 
 def test_key_and_reference_columns_the_select_returns_pass() -> None:
     assert project_model_issues([_fact({"store_id": "gold.dim_store"})]) == []
+
+
+def test_an_artifact_is_no_reference_target_in_either_form() -> None:
+    """An artifact has no rows, so nothing points at it; the deployer may read it: it is named."""
+    artifact = TargetInfo(kind=None, key=(), key_none=False, columns=None, artifact=True)
+    for raw in ("gold.model", "gold.model.id"):
+        resolved, issues = resolve_references(
+            [_fact({"store_id": raw})], _lookup({"gold.model": artifact}), environment="dev"
+        )
+        assert resolved == {}
+        assert [i.message for i in issues] == [
+            f"Reference `store_id: {raw}`: `gold.model` is an artifact, not a table, so no "
+            "column can point at it; point the reference at a table."
+        ]

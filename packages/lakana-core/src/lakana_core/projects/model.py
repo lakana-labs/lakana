@@ -31,12 +31,15 @@ class TargetInfo:
         Whether it declares `key: none`.
     columns
         Its columns, or `None` when they are not known at deploy.
+    artifact
+        Whether it is an artifact: a versioned file with no rows, which nothing can point at.
     """
 
     kind: str | None
     key: tuple[str, ...]
     key_none: bool
     columns: tuple[str, ...] | None
+    artifact: bool = False
 
 
 class AmbiguousReference(Exception):
@@ -221,6 +224,13 @@ def _resolve_one(
     info = lookup(target)
     if info is None:
         return None, [_missing(raw, environment)]
+    if info.artifact:
+        # The lookup describes only a project asset or a table the deployer may read, so naming
+        # the artifact reveals nothing.
+        return None, [
+            f"Reference `{column}: {raw}`: `{target}` is an artifact, not a table, so no column "
+            "can point at it; point the reference at a table."
+        ]
     messages: list[str] = []
     kind = asset.metadata.kind
     if kind in _MODELLED and info.kind == "staging":

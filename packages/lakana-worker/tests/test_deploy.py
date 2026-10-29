@@ -2621,6 +2621,56 @@ def test_a_check_that_reads_a_missing_table_fails_the_deploy(
     assert run.error_message == "checks/silver/clean/x.sql:1: table 'dim.ghost' not found"
 
 
+_KEYED = "/* lakana\ndescription: Clean events.\nkey: id\n*/\nSELECT id FROM bronze.events\n"
+
+
+def test_a_header_key_generates_checks_in_the_manifest_and_the_listing(
+    session: Session, principal: PrincipalRef, world: World
+) -> None:
+    """The two key checks are stored with their SQL and source, beside the hand-written one."""
+    commit(
+        world.repo_path,
+        {"assets/silver/clean.sql": _KEYED, "checks/silver/clean/id_present.sql": _CHECK},
+    )
+    run = _submit_and_run(session, principal, world)
+    assert (run.status, run.error_message) == (DeployStatus.SUCCEEDED, None)
+    version = session.get(JobVersion, run.job_version_id)
+    assert version is not None
+    entries = {entry["check"]: entry for entry in version.manifest_json["checks"]}
+    assert sorted(entries) == ["id_present", "key_not_null", "key_unique"]
+    assert entries["key_unique"]["generated"] == {
+        "family": "key",
+        "columns": ["id"],
+        "target": None,
+        "target_column": None,
+    }
+    assert entries["key_unique"]["path"] == "assets/silver/clean.sql:1"
+    assert entries["key_not_null"]["sql"] == 'SELECT * FROM "silver"."clean" WHERE "id" IS NULL'
+    assert "generated" not in entries["id_present"]
+    assert run.checks_json == {
+        "silver.clean": [
+            {"check": "id_present", "on_failure": "warn"},
+            {"check": "key_not_null", "on_failure": "block"},
+            {"check": "key_unique", "on_failure": "block"},
+        ]
+    }
+
+
+def test_a_hand_written_check_with_a_name_the_header_generates_fails_the_deploy(
+    session: Session, principal: PrincipalRef, world: World
+) -> None:
+    commit(
+        world.repo_path,
+        {"assets/silver/clean.sql": _KEYED, "checks/silver/clean/key_unique.sql": _PLAIN_CHECK},
+    )
+    run = _submit_and_run(session, principal, world)
+    assert run.status is DeployStatus.FAILED
+    assert run.error_message == (
+        "checks/silver/clean/key_unique.sql: A check named `key_unique` is generated for "
+        "`silver.clean`; rename `checks/silver/clean/key_unique.sql`."
+    )
+
+
 def test_a_deploy_without_checks_keeps_manifest_version_3(
     session: Session, principal: PrincipalRef, world: World
 ) -> None:

@@ -678,7 +678,7 @@ def consistency_issues(
             materialize=metadata.materialize,
             evolve_schema=metadata.evolve_schema,
         ),
-        *key_issues(metadata.key, merge=metadata.write == "merge"),
+        *key_issues(metadata.key),
     ]
     issues.extend(ProjectIssue(path, line, message) for message in rules)
     return issues

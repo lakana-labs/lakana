@@ -21,7 +21,12 @@ from sqlglot import exp
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable
 from lakana_core.errors import ValidationError
 from lakana_core.identifiers import TableRef, shown, validate_path_component
-from lakana_core.projects.asset_model import CHECK_MODES, ParsedAsset, normalized_write
+from lakana_core.projects.asset_model import (
+    CHECK_FAMILIES,
+    CHECK_MODES,
+    ParsedAsset,
+    normalized_write,
+)
 from lakana_core.projects.dag import ProjectGraph
 from lakana_core.projects.discovery import (
     CHECKS_DIR,
@@ -61,22 +66,25 @@ _LINK_MESSAGE = "symlinks are not allowed under checks/"
 _LISTED_TABLES = 10
 _KEEP_REFUSED: dict[str, str] = {
     "incremental": (
-        "on_failure: keep cannot be used on `{table}`: it is an incremental asset, and building "
-        "it again only adds rows, so the rows that failed would stay. Use `on_failure: block`: "
+        "{setting} cannot be used on `{table}`: it is an incremental asset, and building "
+        "it again only adds rows, so the rows that failed would stay. Use {fix}: "
         "it takes the failed increment out again."
     ),
     "merge": (
-        "on_failure: keep cannot be used on `{table}`: it is written with `write: merge`, and "
+        "{setting} cannot be used on `{table}`: it is written with `write: merge`, and "
         "building it again never deletes a row, so the rows that failed would stay. Use "
-        "`on_failure: block`: it takes the failed merge out again."
+        "{fix}: it takes the failed merge out again."
     ),
     "view": (
-        "on_failure: keep cannot be used on `{table}`: it is a view and holds no data to keep. "
-        "Use `on_failure: block`: for a view it stops what reads it in that run."
+        "{setting} cannot be used on `{table}`: it is a view and holds no data to keep. "
+        "Use {fix}: for a view it stops what reads it in that run."
     ),
 }
 """Why a check of an asset cannot say ``on_failure: keep``, by how the asset is built
 (`_built_as`).
+
+``{setting}`` is ``on_failure: keep`` for a hand-written check and ``checks: <family>: keep``
+for a generated one; ``{fix}`` is the same setting with ``block``.
 
 A kept table is cleared by building it again and passing its checks. An incremental build
 (``write: append``) only adds rows and a merge never deletes one, so the rows that failed would
@@ -108,6 +116,28 @@ def _built_as(asset: ParsedAsset) -> str | None:
     if write == "append":
         return "incremental"
     return "merge" if write == "merge" else asset.metadata.materialize
+
+
+@dataclass(frozen=True)
+class GeneratedFrom:
+    """The header field a generated check comes from.
+
+    Parameters
+    ----------
+    family
+        ``key`` or ``references`` (`CHECK_FAMILIES`).
+    columns
+        The key's columns, or the one referencing column.
+    target
+        The referenced table; `None` for a key check.
+    target_column
+        The referenced column; `None` for a key check.
+    """
+
+    family: str
+    columns: tuple[str, ...]
+    target: str | None = None
+    target_column: str | None = None
 
 
 @dataclass(frozen=True)
@@ -161,7 +191,10 @@ class ParsedCheck:
         none itself and the default is not ``block``.
     block_line
         Line on which the check's ``/* lakana */`` settings block starts; `None` when it has
-        none.
+        none. For a generated check, the line of the asset's header.
+    generated
+        Where a generated check comes from; `None` for a hand-written one. A generated check's
+        `path` is ``<asset file>:<header line>``.
     """
 
     name: str
@@ -175,6 +208,7 @@ class ParsedCheck:
     body_line: int
     from_default: bool = False
     block_line: int | None = None
+    generated: GeneratedFrom | None = None
 
 
 @dataclass(frozen=True)
@@ -197,6 +231,8 @@ class CheckSpec:
         The description, if any.
     sql
         The SELECT.
+    generated
+        Where a generated check comes from; `None` for a hand-written one.
     """
 
     name: str
@@ -206,6 +242,7 @@ class CheckSpec:
     on_failure: str
     description: str | None
     sql: str
+    generated: GeneratedFrom | None = None
 
 
 class CheckMetadata(SafeTextModel):
@@ -626,8 +663,9 @@ def check_issues(
     -------
     list of ProjectIssue
         A check of a table the project neither builds nor reads, a check of an artifact, a
-        check with ``on_failure: keep`` of an incremental or view asset (`_KEEP_REFUSED`), and
-        a table with too many checks.
+        check with ``on_failure: keep`` (or a header's ``checks: <family>: keep``) of an
+        incremental, merge or view asset (`_KEEP_REFUSED`), and a table with too many checks,
+        generated checks counted.
     """
     limits = limits or DeployLimits()
     built = {asset.table for asset in assets}
@@ -661,21 +699,51 @@ def check_issues(
         elif check.on_failure == "keep" and materialize.get(check.table) in _KEEP_REFUSED:
             # The project's default is never `keep`, so this is the check's own value.
             refusal = _KEEP_REFUSED[cast("str", materialize[check.table])]
-            issues.append(
-                ProjectIssue(check.path, check.block_line, refusal.format(table=shown(check.table)))
-            )
+            issues.append(_keep_refused(check, refusal))
     for table, members in per_table.items():
         if len(members) > limits.max_checks_per_table:
-            directory = members[0].path.rsplit("/", 1)[0]
+            generated = sum(1 for member in members if member.generated)
+            hand = [member for member in members if member.generated is None]
+            directory = (
+                hand[0].path.rsplit("/", 1)[0] if hand else members[0].path.rpartition(":")[0]
+            )
+            note = f" ({generated} of them generated from the asset's header)" if generated else ""
             issues.append(
                 ProjectIssue(
                     directory,
                     None,
                     f"more than {limits.max_checks_per_table} checks of table {table!r}; "
-                    "combine checks or split the table",
+                    f"combine checks or split the table{note}",
                 )
             )
     return issues
+
+
+def _keep_refused(check: ParsedCheck, refusal: str) -> ProjectIssue:
+    """Refuse `keep` on one check, naming the setting that says it.
+
+    Parameters
+    ----------
+    check
+        The check, hand-written or generated.
+    refusal
+        The `_KEEP_REFUSED` text for how its table is built.
+
+    Returns
+    -------
+    ProjectIssue
+        At the check's settings block, or, for a generated check, at the asset's header, whose
+        file is the check's `path` without its ``:<line>``.
+    """
+    table = shown(check.table)
+    if check.generated is None:
+        text = refusal.format(setting="on_failure: keep", fix="`on_failure: block`", table=table)
+        return ProjectIssue(check.path, check.block_line, text)
+    family = check.generated.family
+    text = refusal.format(
+        setting=f"`checks: {family}: keep`", fix=f"`checks: {family}: block`", table=table
+    )
+    return ProjectIssue(check.path.rpartition(":")[0], check.block_line, text)
 
 
 def checks_listing(checks: Sequence[ParsedCheck]) -> dict[str, list[dict[str, str]]]:
@@ -802,7 +870,9 @@ def read_manifest_checks(manifest: object) -> ManifestChecks:
         The readable checks, and what could not be read. Empty for a manifest from before
         checks. An ``on_failure`` that is not ``keep`` or ``warn`` reads as ``block``: an
         unreadable value must not turn a blocking check into a warning. A damaged
-        ``description`` is only dropped; it decides nothing.
+        ``description`` is only dropped; it decides nothing. A ``generated`` key that
+        `_generated_from` cannot read makes the entry unreadable: it says which header field the
+        check stands for.
     """
     if not isinstance(manifest, Mapping):
         return ManifestChecks((), frozenset(), unplaced=False)
@@ -833,6 +903,12 @@ def read_manifest_checks(manifest: object) -> ManifestChecks:
             else:
                 unplaced = True
             continue
+        generated = None
+        if "generated" in entry:
+            generated = _generated_from(entry["generated"])
+            if generated is None:
+                tables.add(cast("str", table))
+                continue
         description = entry.get("description")
         candidates.append(
             CheckSpec(
@@ -841,6 +917,7 @@ def read_manifest_checks(manifest: object) -> ManifestChecks:
                 if (value := entry.get("on_failure")) in ("keep", "warn")
                 else "block",
                 description=description if isinstance(description, str) else None,
+                generated=generated,
             )
         )
     names = [spec.name for spec in candidates]
@@ -852,6 +929,39 @@ def read_manifest_checks(manifest: object) -> ManifestChecks:
     return ManifestChecks(
         tuple(sorted(specs, key=lambda spec: spec.name)), frozenset(tables), unplaced
     )
+
+
+def _generated_from(raw: object) -> GeneratedFrom | None:
+    """Read a stored entry's ``generated`` value.
+
+    Parameters
+    ----------
+    raw
+        The value; untrusted.
+
+    Returns
+    -------
+    GeneratedFrom or None
+        The source of a well-formed value, else `None`: a mapping whose ``family`` is in
+        `CHECK_FAMILIES`, whose ``columns`` is a non-empty list of strings, and whose
+        ``target`` and ``target_column`` are both strings for ``references`` and both absent
+        or null for ``key``.
+    """
+    if not isinstance(raw, Mapping):
+        return None
+    family, columns = raw.get("family"), raw.get("columns")
+    target, target_column = raw.get("target"), raw.get("target_column")
+    if family not in CHECK_FAMILIES or not isinstance(columns, list) or not columns:
+        return None
+    if not all(isinstance(column, str) for column in columns):
+        return None
+    if family == "references":
+        if not isinstance(target, str) or not isinstance(target_column, str):
+            return None
+        return GeneratedFrom("references", tuple(columns), target, target_column)
+    if target is not None or target_column is not None:
+        return None
+    return GeneratedFrom("key", tuple(columns))
 
 
 def manifest_checks(manifest: object) -> tuple[CheckSpec, ...]:

@@ -5,7 +5,7 @@ from __future__ import annotations
 import dataclasses
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from test_projects_dag import make_asset
@@ -13,6 +13,7 @@ from test_projects_dag import make_asset
 from lakana_core.errors import ValidationError
 from lakana_core.projects.checks import (
     DiscoveredCheck,
+    GeneratedFrom,
     ParsedCheck,
     check_issues,
     checks_listing,
@@ -1396,3 +1397,75 @@ def test_keep_on_a_check_of_a_merge_asset_is_refused() -> None:
         "written with `write: merge`, and building it again never deletes a row, so the rows "
         "that failed would stay. Use `on_failure: block`: it takes the failed merge out again."
     ]
+
+
+# -- generated checks in the manifest -------------------------------------------------------------
+
+_KEY_FROM = {"family": "key", "columns": ["id"]}
+_REF_FROM = {"family": "references", "columns": ["s"], "target": "x.y", "target_column": "id"}
+
+
+def test_a_generated_check_records_where_it_came_from_and_a_hand_written_one_does_not() -> None:
+    """Only a generated entry gets the `generated` key, so every older entry keeps its shape."""
+    generated = dataclasses.replace(
+        _parsed("ref_s"), generated=GeneratedFrom("references", ("s",), "x.y", "id")
+    )
+    manifest = _manifest_with(_parsed("hand"), generated)
+    entries = {entry["check"]: entry for entry in manifest["checks"]}
+    assert "generated" not in entries["hand"]
+    assert entries["ref_s"]["generated"] == _REF_FROM
+    keyed = dataclasses.replace(_parsed("key_unique"), generated=GeneratedFrom("key", ("id",)))
+    (entry,) = _manifest_with(keyed)["checks"]
+    assert entry["generated"] == {**_KEY_FROM, "target": None, "target_column": None}
+
+
+@pytest.mark.parametrize("generated", [_KEY_FROM, _REF_FROM, {**_KEY_FROM, "target": None}])
+def test_a_well_formed_generated_entry_reads_back(generated: dict[str, object]) -> None:
+    manifest = {"assets": [{"table": "a.b"}], "checks": [_stored(generated=generated)]}
+    (spec,) = read_manifest_checks(manifest).specs
+    assert spec.generated == GeneratedFrom(
+        cast("str", generated["family"]),
+        tuple(cast("list[str]", generated["columns"])),
+        cast("str | None", generated.get("target")),
+        cast("str | None", generated.get("target_column")),
+    )
+    assert (
+        read_manifest_checks({"assets": [{"table": "a.b"}], "checks": [_stored()]})
+        .specs[0]
+        .generated
+        is None
+    )
+
+
+@pytest.mark.parametrize(
+    "generated",
+    [
+        "key",
+        None,
+        {**_KEY_FROM, "family": "rows"},
+        {**_KEY_FROM, "columns": []},
+        {**_KEY_FROM, "columns": "id"},
+        {**_KEY_FROM, "columns": [1]},
+        {"columns": ["id"]},
+        {**_KEY_FROM, "target": "x.y", "target_column": "id"},
+        {**_REF_FROM, "target": None},
+        {**_REF_FROM, "target_column": 3},
+    ],
+    ids=[
+        "a string",
+        "null",
+        "unknown family",
+        "no columns",
+        "columns a string",
+        "column not a string",
+        "no family",
+        "key with a target",
+        "reference without a target",
+        "target column not a string",
+    ],
+)
+def test_a_damaged_generated_entry_is_unreadable_for_its_table(generated: object) -> None:
+    entry: dict[str, object] = {**_stored(), "generated": generated}
+    read = read_manifest_checks({"assets": [{"table": "a.b"}], "checks": [entry]})
+    assert read.specs == ()
+    assert read.unreadable_tables == {"a.b"}

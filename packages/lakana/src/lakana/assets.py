@@ -227,7 +227,7 @@ def _check_write(
     ValueError
         For a value of the wrong type or with a character deploy refuses, a `write` outside
         `WRITE_CHOICES`, an empty key column, a key column listed twice, a key of more than 8
-        columns unless it is a merge's, ``append``
+        columns, ``append``
         without a watermark, ``merge`` without a key or with ``key="none"``, and ``replace``
         with a watermark.
     """
@@ -256,8 +256,11 @@ def _check_write(
         if column in seen:
             raise ValueError(f"key column `{column}` is listed twice")
         seen.add(column)
-    if mode != "merge" and len(columns) > 8:  # a merge key keeps the earlier rule: no limit
-        raise ValueError(f"a key has at most 8 columns; `key:` lists {len(columns)}")
+    if len(columns) > 8:
+        raise ValueError(
+            f"a key has at most 8 columns, and `key:` lists {len(columns)}; shorten it to the "
+            "columns that identify one row"
+        )
     if mode == "append" and watermark is None:
         raise ValueError(
             "`write: append` needs `watermark:` — the column whose largest value the next run "

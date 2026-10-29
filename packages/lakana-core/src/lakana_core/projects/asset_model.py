@@ -187,23 +187,21 @@ def write_choice_message(write: str) -> str:
     return f"write must be one of {', '.join(WRITE_CHOICES)}; got '{write}'"
 
 
-def key_issues(key: Sequence[str] | str, *, merge: bool = False) -> list[str]:
+def key_issues(key: Sequence[str] | str) -> list[str]:
     """Check the columns of a key on their own.
 
     Parameters
     ----------
     key
         The key columns as given, or `KEY_NONE`.
-    merge
-        Whether the asset merges on the key. A merge key keeps the rule of the release before
-        model fields: no column limit.
 
     Returns
     -------
     list of str
         One message for a column with an unsafe character (the first), one for an empty column,
-        one per column listed twice, and, unless the asset merges, one for more than
-        `MAX_KEY_COLUMNS` columns; empty when the key is fine.
+        one per column listed twice, and one for more than `MAX_KEY_COLUMNS` columns, a merge
+        key's included (its generated checks partition by every column); empty when the key is
+        fine.
     """
     if key == KEY_NONE:
         return []
@@ -215,8 +213,11 @@ def key_issues(key: Sequence[str] | str, *, merge: bool = False) -> list[str]:
         if column in seen and column and not unsafe_identifier(column):
             issues.append(f"key column `{column}` is listed twice")
         seen.add(column)
-    if not merge and len(key) > MAX_KEY_COLUMNS:
-        issues.append(f"a key has at most {MAX_KEY_COLUMNS} columns; `key:` lists {len(key)}")
+    if len(key) > MAX_KEY_COLUMNS:
+        issues.append(
+            f"a key has at most {MAX_KEY_COLUMNS} columns, and `key:` lists {len(key)}; shorten "
+            "it to the columns that identify one row"
+        )
     return issues
 
 

@@ -340,10 +340,14 @@ def test_a_wrong_write_model_is_refused(arguments: dict[str, Any], message: str)
 def test_a_key_is_accepted_with_every_write_mode() -> None:
     assert callable(lakana.asset(key=["id"]))
     assert callable(lakana.asset(write="append", watermark="ts", key=["id"]))
-    assert callable(lakana.asset(write="merge", key=[f"c{i}" for i in range(9)]))
-    with pytest.raises(ValueError) as caught:
-        lakana.asset(write="replace", key=[f"c{i}" for i in range(9)])
-    assert str(caught.value) == "a key has at most 8 columns; `key:` lists 9"
+    assert callable(lakana.asset(write="merge", key=[f"c{i}" for i in range(8)]))
+    for write in ("replace", "merge"):
+        with pytest.raises(ValueError) as caught:
+            lakana.asset(write=write, key=[f"c{i}" for i in range(9)])
+        assert str(caught.value) == (
+            "a key has at most 8 columns, and `key:` lists 9; shorten it to the columns that "
+            "identify one row"
+        )
 
 
 _EVOLVE_NEEDS_REPLACE = (
@@ -496,7 +500,11 @@ UNSAFE_GRAIN = (
             "reference `a` names a target that must not contain a control, format or surrogate "
             "character or a line separator",
         ),
-        ({"key": [str(n) for n in range(9)]}, "a key has at most 8 columns; `key:` lists 9"),
+        (
+            {"key": [str(n) for n in range(9)]},
+            "a key has at most 8 columns, and `key:` lists 9; shorten it to the columns that "
+            "identify one row",
+        ),
         (
             {"output": "artifact", "kind": "fact"},
             "kind does not apply to an artifact asset; remove it",

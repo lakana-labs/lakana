@@ -2295,19 +2295,26 @@ class DeployService:
             Returns
             -------
             TargetInfo or None
-                The info of a project asset, or of an existing table `p` may read; `None` for
-                anything else.
+                The info of a project asset, or of an existing table `p` may read, an artifact
+                marked as one; `None` for anything else.
             """
             if name in by_table:
                 asset = by_table[name]
                 meta = asset.metadata
                 return TargetInfo(
-                    meta.kind, key_columns(meta.key), meta.key == KEY_NONE, asset.columns
+                    meta.kind,
+                    key_columns(meta.key),
+                    meta.key == KEY_NONE,
+                    asset.columns,
+                    artifact=asset.output == "artifact",
                 )
             # Another repository's table counts only once it exists and `p` may read it, so an
             # unreadable target never reaches the manifest or catalog metadata below.
-            if not self._readable_table(p, environment, name):
+            table_type = self._readable_type(p, environment, name)
+            if table_type is None:
                 return None
+            if table_type is TableType.ARTIFACT:
+                return TargetInfo(None, (), False, None, artifact=True)
             columns = self._catalog_columns(environment, name)
             entry = elsewhere.get(name)
             if entry is None:

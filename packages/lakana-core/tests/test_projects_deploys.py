@@ -4302,6 +4302,33 @@ def test_a_target_the_deployer_may_not_read_reveals_nothing(
     ]
 
 
+def test_an_artifact_of_the_project_or_the_catalog_is_no_reference_target(
+    session: Session, env: None, principal: PrincipalRef
+) -> None:
+    """A project's artifact asset and a catalog artifact are refused, long form included."""
+    _as_artifact(session, "gold", "scorer")
+    repo = _repo(session)
+    model = _python("models.churn", {}, output="artifact")
+    fact = make_asset(
+        "silver.f",
+        ("bronze.events",),
+        columns=("a", "b"),
+        metadata=AssetMetadata(
+            materialize="table", references={"a": "models.churn.id", "b": "gold.scorer"}
+        ),
+    )
+    resolved, issues = DeployService(session, AllowAllAuthorization()).resolve_model_references(
+        principal, "dev", repo.id, [model, fact]
+    )
+    assert resolved == {}
+    assert [i.message for i in issues] == [
+        "Reference `a: models.churn.id`: `models.churn` is an artifact, not a table, so no "
+        "column can point at it; point the reference at a table.",
+        "Reference `b: gold.scorer`: `gold.scorer` is an artifact, not a table, so no column "
+        "can point at it; point the reference at a table.",
+    ]
+
+
 def _bind_run_as(session: Session, admin: PrincipalRef, repo: Repository, *tables: str) -> str:
     """Bind a run principal to `repo` in `dev` that may read only `tables`.
 
