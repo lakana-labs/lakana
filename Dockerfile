@@ -22,7 +22,7 @@ RUN python -m venv /opt/lakana \
 # of its own: Dependabot's docker ecosystem reads `FROM` lines but not the image of a
 # `COPY --from=<image>` (dependabot-core #5103), so a bare COPY would never get an update PR.
 # Dependabot bumps the tag and the digest together; by hand, use `docker buildx imagetools inspect`.
-FROM ghcr.io/astral-sh/uv:0.13.5@sha256:32a7bb39b496babbd997b0a39a4d66c126bdaf5661b302bf6f06abda8deca6ff AS uv
+FROM ghcr.io/astral-sh/uv:0.13.6@sha256:af22a52f5eafef3d78e551599d405c02df61919d18028f0cea8eda93bc9986d0 AS uv
 
 FROM python:3.14-slim@sha256:0514bc76712d64f8bb48adcb95b1ab0d88c69fee95d62fe4c18ee948bee9b1e1
 ENV TMPDIR=/var/tmp/lakana \
