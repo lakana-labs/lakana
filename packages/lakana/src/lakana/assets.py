@@ -710,8 +710,8 @@ def _check_measures(
         size = len(column.encode("utf-8"))
         if size > 1024:
             raise ValueError(
-                f"measures: measure column `{column}` has {size} bytes; a measure column may "
-                "have at most 1024 bytes"
+                f"measures: measure column `{column[:100]}…` has {size} bytes; a measure column "
+                "may have at most 1024 bytes"
             )
         if not _component_ok(f"measure_{column}"):
             raise ValueError(

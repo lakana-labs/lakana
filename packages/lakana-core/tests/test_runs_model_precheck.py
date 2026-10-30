@@ -17,7 +17,7 @@ from lakana_core.auth import (
 )
 from lakana_core.models import TableColumn
 from lakana_core.projects.checks import CheckSpec, GeneratedFrom
-from lakana_core.runs.model_precheck import is_numeric, model_problem, types_match
+from lakana_core.runs.model_precheck import is_numeric, model_problem, type_family, types_match
 
 
 def _spec(generated: GeneratedFrom | None) -> CheckSpec:
@@ -438,3 +438,64 @@ def test_the_type_rule_of_each_aggregation(
 )
 def test_is_numeric(type_: str, expected: bool) -> None:
     assert is_numeric(type_) is expected
+
+
+@pytest.mark.parametrize(
+    ("type_", "family"),
+    [
+        *[(t, "integer") for t in ("int", "long", "int8", "int16", "int32", "int64")],
+        *[(t, "integer") for t in ("uint8", "uint16", "uint32", "uint64", " UInt64 ")],
+        *[(t, "float") for t in ("float", "double", "halffloat", "float16", "float32")],
+        *[(t, "float") for t in ("float64",)],
+        *[(t, "decimal") for t in ("decimal(10,2)", "decimal128(10, 2)", "decimal256(50, 2)")],
+        *[(t, "date") for t in ("date", "date32[day]", "date64[ms]")],
+        *[(t, "timestamp") for t in ("timestamp", "timestamptz", "timestamp_ns")],
+        *[(t, "timestamp") for t in ("timestamptz_ns", "timestamp[s]", "timestamp[ms]")],
+        *[(t, "timestamp") for t in ("timestamp[ns]", "timestamp[s, tz=UTC]")],
+        *[(t, "timestamp") for t in ("timestamp[ns, tz=Europe/Berlin]",)],
+        *[(t, None) for t in ("string", "boolean", "time", "time32[ms]", "duration[us]")],
+        *[(t, None) for t in ("binary", "list<item: int64>", "uint128", "decimal", "int2")],
+        *[(t, None) for t in ("timestamp[ns", "date32[day]x", "")],
+    ],
+)
+def test_type_family_reads_every_iceberg_and_arrow_spelling(type_: str, family: str | None) -> None:
+    """A view stores the Arrow spelling of a type a table cannot store (`view_columns`)."""
+    assert type_family(type_) == family
+
+
+@pytest.mark.parametrize(
+    ("aggregation", "type_"),
+    [
+        ("sum", "uint64"),
+        ("avg", "halffloat"),
+        ("sum", "decimal256(50, 2)"),
+        ("max", "timestamp[ns]"),
+        ("min", "timestamp[ms, tz=Europe/Berlin]"),
+        ("max", "date64[ms]"),
+    ],
+)
+def test_a_view_column_in_arrow_spelling_passes_the_type_rule(
+    session: Session, env_with_tables: _Tables, aggregation: str, type_: str
+) -> None:
+    env_with_tables(own={"m": type_}, target={})
+    generated = GeneratedFrom("measures", ("m",), aggregations=(aggregation,))
+    text = model_problem(
+        session, AllowAllAuthorization(), env_with_tables.principal, "dev", _spec(generated)
+    )
+    assert text is None
+
+
+def test_an_unknown_type_fails_closed_and_is_named(
+    session: Session, env_with_tables: _Tables
+) -> None:
+    env_with_tables(own={"m": "duration[us]", "n": "uint128"}, target={})
+    authz, principal = AllowAllAuthorization(), env_with_tables.principal
+    on_max = GeneratedFrom("measures", ("m",), aggregations=("max",))
+    assert model_problem(session, authz, principal, "dev", _spec(on_max)) == (
+        "Measure `m` is duration[us], so `aggregation: max` cannot apply to it: it needs a number, "
+        "a date or a timestamp; cast it in the asset, or change `aggregation:` (`count`, "
+        "`count_distinct` and `none` take any type), and deploy again."
+    )
+    on_sum = GeneratedFrom("measures", ("n",), aggregations=("sum",))
+    text = model_problem(session, authz, principal, "dev", _spec(on_sum))
+    assert text is not None and text.startswith("Measure `n` is uint128, not a number")

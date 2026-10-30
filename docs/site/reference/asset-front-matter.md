@@ -383,7 +383,7 @@ Each of these fails the deploy with an issue at the block's line:
 | ``measures: a measure column must not be empty`` | A measure whose column is `""`. |
 | ``measures: a measure column must not contain a control, format or surrogate character or a line separator`` | An unsafe column name. |
 | ``measures: measure column `a/b` cannot name its id `measure_a/b`: …`` | A column whose id would not be a valid path component. |
-| ``measures: measure column `…` has 1100 bytes; a measure column may have at most 1024 bytes`` | A measure column longer than 1024 bytes in UTF-8. |
+| ``measures: measure column `…` has 1100 bytes; a measure column may have at most 1024 bytes`` | A measure column longer than 1024 bytes in UTF-8. The message shows its first 100 characters. |
 | ``measures: at most 100 measures per table, and `measures:` lists 120; keep the ones people aggregate, and describe the others in `columns:``` | More than 100 measures. |
 | ``measures: measure `stock_level` names itself in `not_over`; list the other columns it must not be summed over, such as a date`` | `not_over` contains the measure itself. |
 | ``measures.net_amount: needs `aggregation:`: one of sum, count, min, max, avg, count_distinct or none (none for a value that is never aggregated)`` | No `aggregation`. |

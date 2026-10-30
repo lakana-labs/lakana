@@ -393,8 +393,8 @@ class AssetMetadata(SafeTextModel):
             size = len(column.encode("utf-8"))
             if size > MAX_MEASURE_COLUMN_BYTES:
                 raise ValueError(
-                    f"measure column `{column}` has {size} bytes; a measure column may have at "
-                    f"most {MAX_MEASURE_COLUMN_BYTES} bytes"
+                    f"measure column `{column[:100]}…` has {size} bytes; a measure column may "
+                    f"have at most {MAX_MEASURE_COLUMN_BYTES} bytes"
                 )
             try:
                 validate_path_component(f"{MEASURE_PREFIX}{column}", what="Measure id")

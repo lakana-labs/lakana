@@ -21,6 +21,8 @@ makes that check ``errored`` (so `block` sets the table back) without counting i
 
 from __future__ import annotations
 
+import re
+
 from sqlalchemy.orm import Session
 
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable
@@ -36,12 +38,26 @@ FLOAT_TYPES = frozenset({"float", "double"})
 INTEGER_TYPES = frozenset({"int", "long"})
 """The catalog's spellings of the integer types; a reference may join one width to the other."""
 
-DECIMAL_PREFIX = "decimal("
-"""How the catalog spells a decimal type: ``decimal(p,s)``."""
+_TYPE_FAMILIES: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("integer", re.compile(r"(?:int|long|u?int(?:8|16|32|64))")),
+    ("float", re.compile(r"(?:float|double|halffloat|float(?:16|32|64))")),
+    ("decimal", re.compile(r"decimal(?:128|256)?\(\s*\d+\s*,\s*\d+\s*\)")),
+    ("date", re.compile(r"date(?:32\[day\]|64\[ms\])?")),
+    (
+        "timestamp",
+        re.compile(r"timestamp(?:tz)?(?:_ns)?|timestamp\[(?:s|ms|us|ns)(?:, tz=[^\]]+)?\]"),
+    ),
+)
+"""Each family a measure's type rule knows, with every spelling of it that `table_columns` holds:
+the Iceberg name a table stores, and the Arrow name a view stores for a type a table cannot store
+(`view_columns`), such as ``uint64``, ``decimal256(50, 2)`` or ``timestamp[ns, tz=UTC]``."""
 
-TEMPORAL_TYPES = frozenset({"date", "timestamp", "timestamptz", "timestamp_ns", "timestamptz_ns"})
-"""The catalog's spellings of the dates and timestamps `min` and `max` may aggregate; `time`, a
-time of day, is not one of them."""
+_NUMERIC_FAMILIES = frozenset({"integer", "float", "decimal"})
+"""The families `sum` and `avg` take."""
+
+_ORDERED_FAMILIES = _NUMERIC_FAMILIES | {"date", "timestamp"}
+"""The families `min` and `max` take: a number, a date or a timestamp; `time`, a time of day, is
+not one of them."""
 
 KEY_FLOAT = (
     "Key column `{column}` is {type}, a floating-point type, so it cannot identify a row; cast it "
@@ -123,6 +139,27 @@ def types_match(own: str, other: str) -> bool:
     return own == other or (own in INTEGER_TYPES and other in INTEGER_TYPES)
 
 
+def type_family(type_: str) -> str | None:
+    """Name the family of a column type, in its Iceberg or its Arrow spelling.
+
+    Parameters
+    ----------
+    type_
+        The type, as `table_columns` spells it; case and surrounding blanks do not matter.
+
+    Returns
+    -------
+    str or None
+        ``integer``, ``float``, ``decimal``, ``date`` or ``timestamp``; `None` for any other
+        type, which the type rule then refuses for every aggregation that needs a family.
+    """
+    spelled = type_.strip().lower()
+    for family, pattern in _TYPE_FAMILIES:
+        if pattern.fullmatch(spelled):
+            return family
+    return None
+
+
 def is_numeric(type_: str) -> bool:
     """Say whether a column type, as `table_columns` spells it, is a number.
 
@@ -134,9 +171,9 @@ def is_numeric(type_: str) -> bool:
     Returns
     -------
     bool
-        True for ``int``, ``long``, ``float``, ``double`` and ``decimal(p,s)``.
+        True for an integer, a floating-point or a decimal type (`type_family`).
     """
-    return type_ in INTEGER_TYPES or type_ in FLOAT_TYPES or type_.startswith(DECIMAL_PREFIX)
+    return type_family(type_) in _NUMERIC_FAMILIES
 
 
 def model_problem(
@@ -235,9 +272,7 @@ def _measures_problem(own: dict[str, str], generated: GeneratedFrom, spec: Check
             return text + _case_hint(own, column)
         if aggregation in NUMERIC_AGGREGATIONS and not is_numeric(type_):
             return MEASURE_NOT_NUMERIC.format(column=column, type=type_, aggregation=aggregation)
-        if aggregation in ORDERED_AGGREGATIONS and not (
-            is_numeric(type_) or type_ in TEMPORAL_TYPES
-        ):
+        if aggregation in ORDERED_AGGREGATIONS and type_family(type_) not in _ORDERED_FAMILIES:
             return MEASURE_NOT_ORDERED.format(column=column, type=type_, aggregation=aggregation)
     for column in generated.not_over:
         if column not in own:

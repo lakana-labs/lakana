@@ -16,6 +16,7 @@ from lakana_core.projects.measures import (
     MeasureSpec,
     default_additivity,
     measure_entries,
+    measure_issues,
     read_measure_entries,
 )
 from lakana_core.projects.model import project_model_issues
@@ -99,7 +100,7 @@ def test_the_default_additivity_follows_the_aggregation(aggregation: str, expect
         ),
         (
             {"x" * 1100: {"aggregation": "sum", "unit": "count"}},
-            f"measures: measure column `{'x' * 1100}` has 1100 bytes; a measure column may have at "
+            f"measures: measure column `{'x' * 100}…` has 1100 bytes; a measure column may have at "
             "most 1024 bytes",
         ),
         (
@@ -429,3 +430,15 @@ def test_read_measure_entries_drops_what_it_cannot_store() -> None:
     ]
     assert [m.column for m in read_measure_entries([good, *damaged])] == ["a"]
     assert read_measure_entries("not a list") == ()
+
+
+def test_measures_are_refused_on_every_kind_but_fact_and_wide() -> None:
+    """A kind added later is refused until it is allowed, as the SDK refuses it."""
+    spec = {"m": MeasureSpec(aggregation="sum", unit="count")}
+    assert measure_issues("fact", "none", spec, table="gold.t") == []
+    assert measure_issues("wide", "none", spec, table="gold.t") == []
+    assert measure_issues("bridge", "none", spec, table="gold.t") == [
+        "Asset `gold.t` is a bridge table and declares `measures:`; measures belong on a fact or "
+        "wide table. Move them to the fact or wide table that holds these values, or remove "
+        "`measures:`."
+    ]
