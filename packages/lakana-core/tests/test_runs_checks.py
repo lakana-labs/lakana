@@ -1629,6 +1629,7 @@ _COMMANDS = {
     "run",
     "runs cancel",
     "runs resume",
+    "runs show",
     "table get",
 }
 """The commands the texts of this module may name: every one exists in the CLI."""
