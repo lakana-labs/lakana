@@ -368,12 +368,90 @@ pair together. When the state does not give back the text (an earlier attempt wh
 counted again), or the visible results need another kind of message, the reader gets
 `WITHHELD_TASK_MESSAGE`; a text without a state is shown only when it names no withheld check.
 `test_check_message.py` proves, over every outcome, mode and state, that the reader's text is the
-worker's own text from the visible results. Residual, accepted for now and tracked in #385: a table's
-`state_message` (`not_published_message`, kept notes), the task's free-text log (one
-`check ref_<column>: …, N rows` line per check), webhook notifications and the `CHECK_FAILED`
-audit event still name a failed `ref_` check and may carry its row count, which tells how many
-rows point at keys the target lacks; none of them names the target. Pins: `test_hidden_reference_checks.py` in
-lakana-core and lakana-server.
+worker's own text from the visible results. The other texts that name a check (#385):
+
+- **A table's notes.** `not_published_message` leaves out every result `hidden_checks.result_hider`
+  hides (as if it did not exist; with none left it names no check), in `table get`'s
+  `state_message` and in `NotPublishedError`. The kept note's check text is rebuilt by
+  `kept.shown_kept_check` from the visible `keep` failures of `Table.kept_task_run_id`, after
+  the failures (all, or those not refused a kept table, as `note_kept` chose) were shown to give
+  back the stored `kept_check`; otherwise, or with none visible, the note names no check. Without
+  the results (the run deleted), a text that names a `ref_` check names none. `result_hider`
+  asks a person as `ReferenceCheckFilter` does; for a **task** (a run context or a task token) it
+  hides every generated `ref_` check, because what a task is told (the K4 refusal of a kept
+  table, a not-published refusal) lands in its own message and log, which every reader of its run
+  reads.
+- **The task's free-text log.** It is read by byte offsets, so it is one text for every reader:
+  the worker writes a generated `ref_` check's line as `check ref_<column>: outcome withheld from
+  the log; see lakana runs show RUN --env ENV` (`reference_check_log_line`, the same words for
+  every outcome; `task_checks._check_lines`), and the attempt's `error:` line
+  is `check_message.message_for_log`: the message rebuilt without any generated `ref_` result, or
+  `log_withheld_message` when it cannot be. Hand-written and key checks are unchanged. A log
+  written before this release keeps its lines.
+- **Notifications** go to an endpoint, not to a principal whose rights can be asked:
+  `payload.facts_for_run` leaves every generated `ref_` check out of `failed_checks` and sets
+  `reference_check_failed`, which the messages say as `A reference check failed; see lakana runs
+  show …` (`json`: `"reference_check_failed": true`, only then). They never carried row counts.
+- **The `CHECK_FAILED` audit event** (and `TABLE_KEPT`, `TABLE_ROLLED_BACK`, which name checks)
+  is unchanged: the log is read only with `READ_AUDIT_LOG` on the instance (`AuditService.query`),
+  which only the instance `ADMIN` role carries, or a grant of that one action on the instance to a
+  reviewer. Either reads every table's events instance-wide by design (the log is not filtered
+  per table at all), so a check's name and row count there reveal nothing beyond what that reader
+  already sees. Revisit if the audit log is ever opened per environment or per table.
+
+Pins: `test_hidden_reference_checks.py` in lakana-core and lakana-server,
+`test_check_message.py`, `test_notifications_payload.py`, and the worker's
+`test_the_log_gives_a_reference_check_no_count_and_its_error_no_name`.
+
+**A task's wait reason (#385).** `RunService._waiting` names an unfinished upstream task only
+when the reader may read its table (`may_read_every`, by name, before anything is looked up, so a
+missing table and an unreadable one look the same) and counts the rest in
+`WaitReason.hidden_upstream` (`Waiting for upstream tasks: a and 1 table you may not read.`), as
+the project-version view drops the edges from a table the reader may not read. `upstream_count` stays the
+total. The run's task list itself still lists every task by its table (it always did; the edge is
+what was hidden). Pins: `test_a_wait_reason_names_only_the_upstream_tables_the_reader_may_read`,
+`test_runs_waiting.py`.
+
+**A failed deploy's error (#385).** `error_message` reaches every reader of the environment, but
+some issues tell of an object only the deployer may read. Each such `ProjectIssue` carries
+`targets` and `withheld`, the line a missing object gets (empty when a missing one makes none):
+
+- `projects/model.resolve_references`: every issue raised after the lookup described the target
+  (its kind, its key, its columns, that it is an artifact, an ambiguous name, a name too long to
+  store), and the run-principal refusal, which `resolve_model_references` passes in as
+  `refusal` so that it sits at its reference's place in path/column order. `withheld` is
+  `missing_target_message(raw)` for the first problem of a reference and empty for the others: a
+  missing target makes one line.
+- `DeployService._kind_issues`: a SQL asset reading an artifact, and a Python parameter that
+  reads one (`table 'x' not found`, or empty for the case-only group), for an artifact that is
+  not the project's own (its project version shows every reader its own); a clash of the asset's
+  name with an existing table, view, external table or artifact (empty: a missing object makes
+  no clash). `validate_checks_against_environment`: a check reading a catalog artifact
+  (`table 'x' not found`, in the very place a missing table's line takes).
+
+The worker stores `issues.withheld_lines` beside the text (`deploy_runs.error_withheld_json`:
+each line's **position**, the line, its replacement, its targets), and `DeployService._view`
+passes the text through `issues.error_for_reader` for a reader who is not `run.principal_id`:
+a line whose targets the reader may not all read is replaced **by position**, never by text (two
+references to one target can make the same line), or left out when its replacement is empty;
+with nothing left, the reader gets `WITHHELD_DEPLOY_MESSAGE`. The deployer and readers of the
+targets see it whole. Pins: `test_two_references_to_one_hidden_target_read_like_two_missing_targets`,
+`test_a_run_principal_refusal_reads_like_a_missing_target_in_its_place`, the artifact and clash
+tests in `test_projects_deploys.py`. Residuals:
+
+- The replacement of a SQL asset's or a Python parameter's artifact line stays among the asset's
+  kind issues, after the not-found lines, where a missing input's `table 'x' not found` would sit
+  among those (one per name, at its first reader); a reader who compares the order or the count
+  of lines can tell the name exists. A replaced clash line leaves the deploy failed for a reason
+  the reader is not shown.
+- `generated_name_issues` ("A check named `ref_x` is generated for …") is raised only for a
+  reference that resolved, and carries no targets; it needs the author to name a hand-written
+  check like a generated one, and a successful deploy would reveal the same.
+- An error stored before this release has no lines and is shown whole. In practice nothing is
+  exposed by it: the reference issues come from #384/#386/#387, which no release contains
+  (the last tag is v0.21.0); the artifact and clash lines are older and were shown whole before.
+- When a run lists more than 50 issues, the `…and N more issues` tail still counts the lines a
+  reader sees left out.
 
 The rows are written only by a deploy, a rollback and a run's table creation
 (`catalog/model_metadata.py`); REST, the SDK and the CLI only read them. References are held by

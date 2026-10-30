@@ -2779,3 +2779,26 @@ def test_0054_on_postgres() -> None:
         migrate.upgrade(url, revision_0054)
         assert _alembic_version(engine) == revision_0054
         engine.dispose()
+
+
+def test_0055_on_postgres() -> None:
+    """0055 adds `error_withheld_json` to deploy runs, drops it, and adds it again."""
+    revision_0054 = "f4b8d6e0a2c3"
+    revision_0055 = "a5c9e7f1b3d4"
+
+    with PostgresContainer("postgres:16", driver="pg8000") as pg:
+        url = pg.get_connection_url()
+        migrate.upgrade(url, revision_0055)
+        engine = sqlalchemy.create_engine(url)
+        assert _alembic_version(engine) == revision_0055
+        columns = {c["name"]: c for c in sqlalchemy.inspect(engine).get_columns("deploy_runs")}
+        assert columns["error_withheld_json"]["nullable"] is True
+
+        migrate.downgrade(url, revision_0054)
+        assert _alembic_version(engine) == revision_0054
+        names = {c["name"] for c in sqlalchemy.inspect(engine).get_columns("deploy_runs")}
+        assert "error_withheld_json" not in names
+
+        migrate.upgrade(url, revision_0055)
+        assert _alembic_version(engine) == revision_0055
+        engine.dispose()

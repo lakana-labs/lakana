@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import enum
 import uuid
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import cast
 
 from sqlalchemy import select, update
@@ -36,6 +36,7 @@ from lakana_core.identifiers import NamespacePath, shown
 from lakana_core.kept_mark import KeptSeen
 from lakana_core.models import (
     AuditEventType,
+    CheckOutcome,
     CheckResult,
     Environment,
     JobVersion,
@@ -47,6 +48,8 @@ from lakana_core.models import (
     TaskStatus,
 )
 from lakana_core.projects.manifest import manifest_assets
+from lakana_core.projects.model_checks import REF_PREFIX
+from lakana_core.runs.checks import ERROR_KEPT
 from lakana_core.runs.store import is_check_count, upstream_names
 
 __all__ = [
@@ -67,6 +70,7 @@ __all__ = [
     "refused_message",
     "restore_kept",
     "shown_checks",
+    "shown_kept_check",
     "task_may_read",
 ]
 
@@ -118,12 +122,12 @@ KEPT_WHY = ("checks_passed", "rebuilt_without_checks")
 """Why a note was cleared: the values of the ``why`` in a ``TABLE_KEPT_CLEARED`` event."""
 
 _KEPT_STATE = (
-    "Kept after a failed check (`{check}`, run {run}): the table holds the data that failed. "
+    "Kept after a failed check ({check}run {run}): the table holds the data that failed. "
     "Tasks do not read it until its checks pass."
 )
 
 _KEPT_STATE_UNCHECKED = (
-    "Kept after a check that could not run (`{check}`, run {run}): the table holds data no check "
+    "Kept after a check that could not run ({check}run {run}): the table holds data no check "
     "could run on. Tasks do not read it until its checks pass."
 )
 """The state text of a table whose new data no check could run on."""
@@ -141,13 +145,13 @@ the way out is to drop the table.
 """
 
 _KEPT_REFUSED = (
-    "`{table}` was kept after a failed check (`{check}`, run {run}) and has not passed its "
+    "`{table}` was kept after a failed check ({check}run {run}) and has not passed its "
     "checks since, so this task does not read it."
 )
 """Why a task is refused a kept table (the first sentence of text K4)."""
 
 _KEPT_REFUSED_UNCHECKED = (
-    "`{table}` was kept after a check that could not run (`{check}`, run {run}) and has not "
+    "`{table}` was kept after a check that could not run ({check}run {run}) and has not "
     "passed its checks since, so this task does not read it."
 )
 """Why a task is refused a table whose new data no check could run on."""
@@ -178,30 +182,53 @@ def shown_checks(kept: Sequence[CheckResult]) -> str:
     return text if len(names) == 1 else f"{text} and {len(names) - 1} more"
 
 
-def kept_message(row: Table) -> str | None:
+def _check_part(row: Table, check: str | None) -> str:
+    """Word the check a note names, in front of its run.
+
+    Parameters
+    ----------
+    row
+        The table's row.
+    check
+        The check text to show (`shown_kept_check`); `None` for the row's own, and an empty text
+        for none.
+
+    Returns
+    -------
+    str
+        ``"`<check>`, "``, or an empty text when no check is named.
+    """
+    text = row.kept_check if check is None else check
+    return f"`{text}`, " if text else ""
+
+
+def kept_message(row: Table, check: str | None = None) -> str | None:
     """Say that a table keeps data that failed a check (K2), from its row alone.
 
     Parameters
     ----------
     row
         The table's row.
+    check
+        The check text the reader may see (`shown_kept_check`); `None` for the row's own, and an
+        empty text to name no check.
 
     Returns
     -------
     str or None
         The state message, or `None` when the row has no note. It names the first failing
-        check and the run (a note of unknown checks, only the run), and does not need the run
-        or the results to exist.
+        check (unless `check` is empty) and the run (a note of unknown checks, only the run),
+        and does not need the run or the results to exist.
     """
     if row.kept_run_id is None:
         return None
     if row.kept_unknown:
         return _KEPT_STATE_UNKNOWN.format(run=row.kept_run_id)
     template = _KEPT_STATE_UNCHECKED if row.kept_unchecked else _KEPT_STATE
-    return template.format(check=row.kept_check, run=row.kept_run_id)
+    return template.format(check=_check_part(row, check), run=row.kept_run_id)
 
 
-def refused_message(row: Table, table: str, environment: str) -> str:
+def refused_message(row: Table, table: str, environment: str, check: str | None = None) -> str:
     """Say that a task does not read a kept table, and how the note is cleared (K4).
 
     Parameters
@@ -212,6 +239,9 @@ def refused_message(row: Table, table: str, environment: str) -> str:
         The table's dotted name, as the reader addressed it.
     environment
         The environment's name.
+    check
+        The check text the text may show (`shown_kept_check`); `None` for the row's own, and an
+        empty text to name no check.
 
     Returns
     -------
@@ -223,8 +253,68 @@ def refused_message(row: Table, table: str, environment: str) -> str:
         template = _KEPT_REFUSED_UNKNOWN
     else:
         template = _KEPT_REFUSED_UNCHECKED if row.kept_unchecked else _KEPT_REFUSED
-    refused = template.format(check=row.kept_check, run=row.kept_run_id, **names)
+    refused = template.format(check=_check_part(row, check), run=row.kept_run_id, **names)
     return f"{refused} {KEPT_WAY_OUT.format(**names)}"
+
+
+def shown_kept_check(
+    session: Session, row: Table, hides: Callable[[CheckResult], bool]
+) -> str | None:
+    """Word the check a table's note names for a reader from whom some results are withheld.
+
+    The note names the first of the `keep` checks that failed and counts the others
+    (`shown_checks`). When one of them is withheld (`hidden_checks.result_hider`), the text is
+    built again from the visible ones, after the results were shown to give back the stored
+    text, as `check_message.message_for_reader` does for a task's message. When they do not, or
+    when no visible check is left, no check is named. Without the results (the run was deleted),
+    a note names only its first check, without the count of the others, and none when that is a
+    ``ref_`` check.
+
+    Parameters
+    ----------
+    session
+        Database session; read only.
+    row
+        The table's row, with a note.
+    hides
+        Whether a result is withheld from the reader.
+
+    Returns
+    -------
+    str or None
+        `None` to show the row's own text, an empty text to name no check, or the text to show.
+    """
+    if not row.kept_check:
+        return None
+    failed = [
+        result
+        for result in session.scalars(
+            select(CheckResult)
+            .where(
+                CheckResult.task_run_id == row.kept_task_run_id,
+                CheckResult.on_failure == "keep",
+                CheckResult.outcome.in_([CheckOutcome.FAILED, CheckOutcome.ERRORED]),
+            )
+            .order_by(CheckResult.check_name)
+        )
+    ]
+    if not failed:
+        # Without the results nothing tells which checks the count covers: name the first one
+        # only, and none when it is a `ref_` check.
+        first = row.kept_check.split(" and ", 1)[0]
+        if f"/{REF_PREFIX}" in first:
+            return ""
+        return None if first == row.kept_check else first
+    if not any(hides(result) for result in failed):
+        return None
+    # The note named the checks that failed, or, when only checks refused a kept table failed,
+    # those (`note_kept`'s `failed or found.kept`).
+    ran = [r for r in failed if not (r.outcome is CheckOutcome.ERRORED and r.error == ERROR_KEPT)]
+    for named in (failed, ran):
+        if named and shown_checks(named) == row.kept_check:
+            visible = [result for result in named if not hides(result)]
+            return shown_checks(visible) if visible else ""
+    return ""
 
 
 def _is_count(session: Session, query_run_id: uuid.UUID, task_run_id: uuid.UUID) -> bool:

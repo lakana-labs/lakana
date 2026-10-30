@@ -103,6 +103,7 @@ from lakana_core.runs.checks import (
     kept_no_checks_error,
     mark_rollback_failed,
     record_result,
+    reference_check_log_line,
     results_of_task,
     run_stop_message,
     set_back_ending,
@@ -112,6 +113,7 @@ from lakana_core.runs.checks import (
     verdict,
 )
 from lakana_core.runs.failures import FailureCode, check_failure_code
+from lakana_core.runs.hidden_checks import is_reference_check
 from lakana_core.runs.kept import (
     KeptNote,
     clear_kept_in_attempt,
@@ -203,23 +205,34 @@ def _held(session: Session, engine: RunEngine, claimed: ClaimedTask) -> bool:
     return held is not None
 
 
-def _check_lines(results: Sequence[CheckResult]) -> tuple[str, ...]:
+def _check_lines(
+    results: Sequence[CheckResult], run_id: uuid.UUID, environment: str
+) -> tuple[str, ...]:
     """Build the log lines of an attempt's checks.
 
     Parameters
     ----------
     results
         The results of the task run, by check name.
+    run_id
+        The run, for the command a reference check's line names.
+    environment
+        The environment's name, likewise.
 
     Returns
     -------
     tuple of str
-        One line per check.
+        One line per check. A generated reference check's withholds its outcome
+        (`reference_check_log_line`): its outcome and row count are shown by `lakana runs show`
+        to a reader who may read its target.
     """
     lines = []
     for result in results:
         name = shown(result.check_name.rpartition("/")[2])
-        if result.outcome is CheckOutcome.PASSED:
+        if is_reference_check(result.check_name, result.generated):
+            # The log is one text for every reader; the outcome and rows tell of the target.
+            found = reference_check_log_line(run_id, environment)
+        elif result.outcome is CheckOutcome.PASSED:
             found = "passed"
         elif result.outcome is CheckOutcome.ERRORED:
             found = f"errored: {result.error}"
@@ -320,7 +333,10 @@ def _landed_rollback(
         FailureKind.PERMANENT,
         message,
         environment,
-        checks=(*_check_lines(results), f"  rollback: {outcome.value}"),
+        checks=(
+            *_check_lines(results, claimed.run_id, environment or ""),
+            f"  rollback: {outcome.value}",
+        ),
         failure_code=check_failure_code(blocking),
         check_state=state.to_json(),
     )
@@ -1488,7 +1504,7 @@ def _checks_under(
     session.expunge_all()
     session.rollback()
     found = verdict(results)
-    lines = _check_lines(results)
+    lines = _check_lines(results, claimed.run_id, phase.environment)
     if not found.blocking and found.kept:
         # Only `keep` checks failed: the run's data stays in the table, and the task fails.
         # A `keep` check that could not run because a table it reads is kept says nothing

@@ -63,6 +63,7 @@ from lakana_core.notifications.views import NotificationView, notification_view
 from lakana_core.pagination import decode_cursor, encode_cursor, parse_choices
 from lakana_core.projects.checks import (
     kept_check_tables,
+    may_read_every,
     read_manifest_checks,
     source_check_tables,
     view_readers,
@@ -856,7 +857,9 @@ class RunService:
         row = self._session.get(Principal, principal_id)
         return row.name if row is not None else None
 
-    def _waiting(self, run: Run, tasks: Sequence[TaskRun]) -> dict[uuid.UUID, WaitReason]:
+    def _waiting(
+        self, run: Run, tasks: Sequence[TaskRun], reader: PrincipalRef, environment: str
+    ) -> dict[uuid.UUID, WaitReason]:
         """Say why each waiting task of a run has not started.
 
         Only a running run that has not been asked to stop gets reasons: the tasks of a queued
@@ -869,12 +872,20 @@ class RunService:
         whole run (at most five statements), and only when a task is `pending` or `ready`; the
         tasks of the run are already loaded, and no other statement depends on their number.
 
+        An upstream task is named only when `reader` may read its table, asked by name before
+        anything else, so a missing table and an unreadable one look the same; the others are
+        counted (`WaitReason.hidden_upstream`), as the project-version view drops their edges.
+
         Parameters
         ----------
         run
             The run.
         tasks
             Its task runs.
+        reader
+            Who reads the run.
+        environment
+            The run's environment name.
 
         Returns
         -------
@@ -899,20 +910,41 @@ class RunService:
             for t in tasks
             if t.status in (TaskStatus.FAILED, TaskStatus.UPSTREAM_FAILED, TaskStatus.CANCELLED)
         }
+        readable: dict[str, bool] = {}
+
+        def may_read(name: str) -> bool:
+            """Ask, once per name, whether the reader may read an upstream table.
+
+            Parameters
+            ----------
+            name
+                The upstream task's table, dotted.
+
+            Returns
+            -------
+            bool
+                Whether a READ_TABLE grant covers the name.
+            """
+            if name not in readable:
+                readable[name] = may_read_every(self._authz, reader, environment, [name])
+            return readable[name]
+
         reasons: dict[uuid.UUID, WaitReason] = {}
         for task in waiting:
             upstream = [name for name in upstream_names(task.upstream_json) if name in in_run]
             unfinished = [name for name in upstream if name not in succeeded]
+            named = [name for name in unfinished if may_read(name)]
             reason = task_wait_reason(
                 WaitingTask(
                     status=task.status.value,
                     attempt=task.attempt,
                     max_attempts=task.max_attempts,
                     next_attempt_at=task.next_attempt_at,
-                    unfinished_upstream=unfinished,
+                    unfinished_upstream=named,
                     blocked=any(name in dead for name in unfinished),
                     checking=task.has_checks and task.written_table_id is not None,
                     setting_back=task.setting_back,
+                    hidden_upstream=len(unfinished) - len(named),
                 ),
                 counts,
                 now,
@@ -1008,7 +1040,7 @@ class RunService:
                     .order_by(TaskAttempt.attempt)
                 )
             }
-            reasons = self._waiting(run, [task for task, _ in rows])
+            reasons = self._waiting(run, [task for task, _ in rows], reader, env.name)
             built = set(manifest_assets(version.manifest_json)) if version is not None else set()
             run_as = self._name(run.run_as_principal_id)
             asset_of = {task.id: task.asset for task, _ in rows}

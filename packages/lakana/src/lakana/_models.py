@@ -943,10 +943,15 @@ class WaitingFor:
         before this query (the other kind too while a worker takes both); for a query's
         `starting` and `workers_busy`. A count, not a promise.
     upstream
-        The first 50 upstream tasks of the same run that have not succeeded (raw names); for
-        `upstream`.
+        The first 50 upstream tasks of the same run that have not succeeded and whose tables
+        you may read (raw names); for `upstream`.
     upstream_count
-        How many upstream tasks have not succeeded in all; for `upstream`.
+        How many upstream tasks have not succeeded in all, those you may not read included;
+        for `upstream`.
+    hidden_upstream
+        How many of them are tables you may not read: counted, never named, so a missing table
+        and one you may not read look the same; for `upstream`. `None` when there are none,
+        and from a server that predates the field.
     attempt
         Attempts made so far; for `retry`.
     max_attempts
@@ -978,6 +983,7 @@ class WaitingFor:
     other_workers: int | None = None
     running: int | None = None
     limit: int | None = None
+    hidden_upstream: int | None = None
 
 
 @dataclass(frozen=True)

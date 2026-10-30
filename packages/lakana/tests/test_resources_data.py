@@ -2187,6 +2187,22 @@ def test_a_query_status_parses_waiting_for() -> None:
     assert waiting.next_attempt_at is not None and waiting.next_attempt_at.tzinfo is not None
 
 
+def test_the_count_of_hidden_upstream_tables_is_parsed() -> None:
+    """An upstream the caller may not read is counted in `hidden_upstream`, never named."""
+    body = {
+        "code": "upstream",
+        "message": "Waiting for upstream tasks: a and 1 table you may not read.",
+        "upstream": ["a"],
+        "upstream_count": 2,
+        "hidden_upstream": 1,
+    }
+    waiting = waiting_for_from_json(body)
+    assert waiting is not None
+    assert (waiting.upstream, waiting.upstream_count, waiting.hidden_upstream) == (("a",), 2, 1)
+    older = waiting_for_from_json({"code": "upstream", "message": "m", "upstream": ["a"]})
+    assert older is not None and older.hidden_upstream is None
+
+
 def test_new_fields_of_a_reason_are_parsed() -> None:
     """The two newer codes carry `other_workers`, `running` and `limit`."""
     kind = waiting_for_from_json(

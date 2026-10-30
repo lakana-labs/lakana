@@ -8,6 +8,7 @@ from test_projects_dag import make_asset
 
 from lakana_core.projects.asset_model import ParsedAsset, ResolvedReference
 from lakana_core.projects.frontmatter import AssetMetadata
+from lakana_core.projects.issues import error_for_reader, withheld_lines
 from lakana_core.projects.model import (
     TargetInfo,
     project_model_issues,
@@ -274,3 +275,51 @@ def test_a_reference_too_long_to_store_is_refused_with_what_to_shorten() -> None
         [_fact({"c" * 1024: "gold.dim_store"})], _lookup(targets), environment="dev"
     )
     assert issues == [] and ok
+
+
+def test_an_issue_that_tells_of_a_target_carries_it_and_the_missing_text() -> None:
+    """The deploy's stored error reaches every reader of the environment, not only the deployer.
+
+    Each issue that says something of a target the lookup found (that it exists, its kind, its
+    key, its columns) names that target in `targets`, and `withheld` is the text of a missing
+    target, so a reader who may not read it can be shown what a missing one shows: one line
+    per reference, so a second problem of the same reference has an empty `withheld`.
+    """
+    missing = (
+        "Reference target `{raw}` does not exist in environment `dev`, or you may not read it; "
+        "build it first, or ask for READ_TABLE on it."
+    )
+    staging = TargetInfo(kind="staging", key=("a", "b"), key_none=False, columns=("a", "b"))
+    artifact = TargetInfo(kind=None, key=(), key_none=False, columns=None, artifact=True)
+    cases = [
+        ({"store_id": "gold.dim_store"}, {"gold.dim_store": staging}, ("gold.dim_store",)),
+        ({"store_id": "gold.dim_store.nope"}, {"gold.dim_store": _DIM}, ("gold.dim_store",)),
+        ({"store_id": "gold.model"}, {"gold.model": artifact}, ("gold.model",)),
+        (
+            {"store_id": "a.b.store_id"},
+            {"a.b": _DIM, "a.b.store_id": _DIM},
+            ("a.b.store_id", "a.b"),
+        ),
+        ({"c" * 1025: "gold.dim_store"}, {"gold.dim_store": _DIM}, ("gold.dim_store",)),
+    ]
+    for references, targets, told in cases:
+        _, issues = resolve_references([_fact(references)], _lookup(targets), environment="dev")
+        assert issues
+        raw = next(iter(references.values()))
+        first, *others = issues
+        assert (first.targets, first.withheld) == (told, missing.format(raw=raw))
+        assert [(i.targets, i.withheld) for i in others] == [(told, "")] * len(others)
+    _, plain = resolve_references([_fact({"store_id": "gold.x"})], _lookup({}), environment="dev")
+    assert [(i.targets, i.withheld) for i in plain] == [((), None)]
+
+
+def test_two_references_to_one_hidden_target_read_like_two_missing_targets() -> None:
+    """The staging line names no column, so both references make the same line: by position."""
+    staging = TargetInfo(kind="staging", key=("store_id",), key_none=False, columns=("store_id",))
+    fact = _fact({"a_id": "dim.store", "b_id": "dim.store.store_id"})
+    _, issues = resolve_references([fact], _lookup({"dim.store": staging}), environment="dev")
+    assert issues[0].message == issues[1].message
+    whole = "\n".join(issue.render() for issue in issues)
+    _, missing = resolve_references([fact], _lookup({}), environment="dev")
+    shown = error_for_reader(whole, withheld_lines(issues), lambda _t: False)
+    assert shown.encode() == "\n".join(issue.render() for issue in missing).encode()

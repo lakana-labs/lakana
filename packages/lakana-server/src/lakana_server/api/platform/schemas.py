@@ -2916,8 +2916,10 @@ class TaskRunOut(BaseModel):
         uses. A task is pipeline work: `no_worker_of_kind` means workers are running and none
         takes pipeline work (`workers` is 0, `other_workers` the workers running), and `workers` in
         `workers_busy` counts the workers that take pipeline work. For `upstream`, `upstream`
-        lists the first 50 unfinished upstream tasks (raw names) and `upstream_count` is how
-        many there are in all; the sentence names five, escaped.
+        lists the first 50 unfinished upstream tasks whose tables the caller may read (raw
+        names), `upstream_count` is how many there are in all, and `hidden_upstream` (present
+        only when not 0) how many the caller may not read, counted and never named; the
+        sentence names five, escaped.
     kind
         ``asset`` for a table the run builds, ``source_check`` for a table it only checks.
     checks

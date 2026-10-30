@@ -153,7 +153,12 @@ def test_slack_shows_unknown_for_an_empty_value() -> None:
     assert "finished `unknown`" in text
 
 
-def _seed(session: Session, outcomes: list[tuple[str, str, CheckOutcome]]) -> Run:
+def _seed(
+    session: Session,
+    outcomes: list[tuple[str, str, CheckOutcome]],
+    *,
+    generated: tuple[str, ...] = (),
+) -> Run:
     """Seed a failed run whose errors carry a marker.
 
     Parameters
@@ -162,6 +167,8 @@ def _seed(session: Session, outcomes: list[tuple[str, str, CheckOutcome]]) -> Ru
         Database session.
     outcomes
         (check name, on_failure, outcome) per check, all on one failed task.
+    generated
+        The names of the checks generated from the asset's header.
 
     Returns
     -------
@@ -238,8 +245,10 @@ def _seed(session: Session, outcomes: list[tuple[str, str, CheckOutcome]]) -> Ru
                 on_failure=on_failure,
                 outcome=outcome,
                 error="SECRET-MARKER check" if outcome is CheckOutcome.ERRORED else None,
+                failing_rows=7 if outcome is CheckOutcome.FAILED else None,
                 started_at=FINISHED,
                 finished_at=FINISHED,
+                generated=name in generated,
             )
         )
     session.flush()
@@ -269,3 +278,34 @@ def test_facts_for_run_reads_names_and_no_error_text(session: Session) -> None:
     for fmt in FORMATS:
         for event in ("failed", "recovered", "test"):
             assert b"SECRET-MARKER" not in build(fmt, event, facts)[0]
+
+
+def test_a_failed_reference_check_is_said_but_never_named(session: Session) -> None:
+    """The endpoint is no reader whose rights can be asked: no reference check name or count."""
+    run = _seed(
+        session,
+        [
+            ("blocks", "block", CheckOutcome.FAILED),
+            ("ref_store_id", "block", CheckOutcome.FAILED),
+            ("ref_handwritten", "block", CheckOutcome.FAILED),
+        ],
+        generated=("ref_store_id",),
+    )
+    facts = facts_for_run(session, run, DELIVERY)
+    assert facts.failed_checks == ("silver.clean/blocks", "silver.clean/ref_handwritten")
+    assert facts.reference_check_failed
+    data = json.loads(build("json", "failed", facts)[0])
+    assert data["reference_check_failed"] is True
+    slack = json.loads(build("slack", "failed", facts)[0])["text"]
+    note = f"A reference check failed; see `lakana runs show {facts.run_id} --env prod`"
+    assert note in slack
+    teams = build("teams", "failed", facts)[0].decode()
+    assert "A reference check failed" in teams
+    for fmt in FORMATS:
+        body = build(fmt, "failed", facts)[0].decode()
+        assert "ref_store_id" not in body
+        assert "7" not in body.replace(facts.run_id, "").replace(DELIVERY, "")
+
+
+def test_without_a_failed_reference_check_the_json_has_no_flag() -> None:
+    assert "reference_check_failed" not in json.loads(build("json", "failed", _facts())[0])

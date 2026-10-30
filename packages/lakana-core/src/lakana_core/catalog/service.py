@@ -272,8 +272,14 @@ from lakana_core.runs.checks import (
     no_checked_snapshot_message,
     not_published_message,
 )
-from lakana_core.runs.hidden_checks import ReferenceCheckFilter
-from lakana_core.runs.kept import kept_message, refused_message, restore_kept, task_may_read
+from lakana_core.runs.hidden_checks import ReferenceCheckFilter, result_hider
+from lakana_core.runs.kept import (
+    kept_message,
+    refused_message,
+    restore_kept,
+    shown_kept_check,
+    task_may_read,
+)
 from lakana_core.runs.lockdown import (
     OTHER_ASSET_MESSAGE,
     ProtectedWriteGuard,
@@ -2934,7 +2940,7 @@ class CatalogService:
             )
         if row.table_type is TableType.ARTIFACT:
             raise NotFoundError(_not_exposed_artifact_message(ref.dotted()))
-        self._require_published(ref, row)
+        self._require_published(p, ref, row)
         self._require_not_kept(p, ref, ns, row)
         return self._to_loaded_table(ref, row)
 
@@ -3065,11 +3071,13 @@ class CatalogService:
             columns=schema.fields,
         )
 
-    def _require_published(self, ref: TableRef, row: Table) -> None:
+    def _require_published(self, p: PrincipalRef, ref: TableRef, row: Table) -> None:
         """Refuse a read of a table that is not published (its first build failed).
 
         Parameters
         ----------
+        p
+            The reader: the text names only the checks it may see (`result_hider`).
         ref
             How the caller addressed the table.
         row
@@ -3083,7 +3091,12 @@ class CatalogService:
         if row.unpublished_run_id is not None:
             raise NotPublishedError(
                 not_published_message(
-                    self._session, ref.dotted(), row.id, row.unpublished_run_id, ref.environment
+                    self._session,
+                    ref.dotted(),
+                    row.id,
+                    row.unpublished_run_id,
+                    ref.environment,
+                    result_hider(self._session, self._authz, p, ref.environment),
                 )
             )
 
@@ -3122,22 +3135,27 @@ class CatalogService:
         if row.kept_run_id is None:
             return
         context = p.run_context
-        if context is None:
-            if p.task_scope is None:
-                return
-            # A task token bound to no task has no run to stand on: refused like a task that
-            # has no standing, and told what a person who holds one does instead.
-            raise KeptAfterCheckError(
-                f"{refused_message(row, ref.dotted(), ref.environment)} {_KEPT_ADVICE_FOR_A_PERSON}"
-            )
-        if not task_may_read(
+        if context is None and p.task_scope is None:
+            return
+        if context is not None and task_may_read(
             self._session,
             context.task_run_id,
             context.query_run_id,
             ns.environment_id,
             table_target(ref),
         ):
-            raise KeptAfterCheckError(refused_message(row, ref.dotted(), ref.environment))
+            return
+        # Only tasks are refused, and a task's error reaches every reader of its run: the text
+        # names no generated reference check (`result_hider`).
+        check = shown_kept_check(
+            self._session, row, result_hider(self._session, self._authz, p, ref.environment)
+        )
+        refused = refused_message(row, ref.dotted(), ref.environment, check)
+        if context is None:
+            # A task token bound to no task has no run to stand on: refused like a task that
+            # has no standing, and told what a person who holds one does instead.
+            raise KeptAfterCheckError(f"{refused} {_KEPT_ADVICE_FOR_A_PERSON}")
+        raise KeptAfterCheckError(refused)
 
     def load_table_row(self, p: PrincipalRef, ref: TableRef) -> Table:
         """Fetch a table's raw catalog row: ICEBERG, EXTERNAL, VIEW or ARTIFACT.
@@ -3621,13 +3639,14 @@ class CatalogService:
         unpublished = row.unpublished_run_id
         state: Literal["published", "not_published", "kept"] = "published"
         message = None
+        hides = result_hider(self._session, self._authz, p, ref.environment)
         if unpublished is not None:
             state = "not_published"
             message = not_published_message(
-                self._session, ref.dotted(), row.id, unpublished, ref.environment
+                self._session, ref.dotted(), row.id, unpublished, ref.environment, hides
             )
         elif row.kept_run_id is not None:
-            state, message = "kept", kept_message(row)
+            state, message = "kept", kept_message(row, shown_kept_check(self._session, row, hides))
         stats = snapshot_stats(loaded.metadata)
         return TableDescription(
             ref=ref,
@@ -3980,7 +3999,7 @@ class CatalogService:
             return False
         try:
             ns, row = self._find_table(ref)
-            self._require_published(ref, row)
+            self._require_published(p, ref, row)
             self._require_not_kept(p, ref, ns, row)
         except (NotFoundError, NotPublishedError, KeptAfterCheckError):
             return False

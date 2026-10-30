@@ -191,9 +191,15 @@ message (the `error` column of `lakana runs show` and `lakana run`, and each att
 check is left to mention. A message that names such a check in a way that cannot be taken apart
 is replaced by ``This task's message is not shown: it names a check of a reference to a table you
 cannot read. The checks you may see are listed with the task.``; the checks it lists are still in
-`lakana runs show` and `lakana check list`. Key checks and hand-written checks are shown as before. Still not
-filtered: the free-text log of a task, the note of a table that was kept or not published,
-notifications of a failed job and the audit log, which can name such a check with its row count.
+`lakana runs show` and `lakana check list`. Key checks and hand-written checks are shown as before.
+The note of a table that was kept or not published (`lakana table get`) names only the checks you
+may see. The free-text log of a task (`lakana runs logs`) is the same for everyone who reads the
+run, so it never shows the outcome or row count of a `ref_<column>` check (``check ref_store_id:
+outcome withheld from the log; see `lakana runs show RUN --env ENV` ``), and its `error:` line leaves such checks out. Notifications of a
+failed job never name one; they say `A reference check failed; see lakana runs show …`. Only the
+audit log, which only an administrator (or a reviewer given `READ_AUDIT_LOG`) of the whole instance
+reads, names such a check with its row count. A task's wait reason in `lakana runs show` names only the upstream tables you may read
+and counts the others (`Waiting for upstream tasks: silver.a and 1 table you may not read.`).
 
 **References follow names.** A reference names its target as the header writes it, so it is
 listed with whichever table has that name now, as the reference's generated check reads it. A

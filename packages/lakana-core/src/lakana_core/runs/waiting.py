@@ -194,10 +194,13 @@ class WaitReason:
         Queued queries and deploys, of every environment, that the workers for this kind take
         before this query: the same kind, and the other kind too while a worker takes `all`.
     upstream
-        The first 50 unfinished upstream tasks of the same run, raw names (the sentence names at
-        most five, escaped).
+        The first 50 unfinished upstream tasks of the same run that the reader may read, raw
+        names (the sentence names at most five, escaped).
     upstream_count
-        How many unfinished upstream tasks there are in all.
+        How many unfinished upstream tasks there are in all, the hidden ones included.
+    hidden_upstream
+        How many of them the reader may not read: counted, never named. Unset when there are
+        none.
     attempt
         Attempts made so far.
     max_attempts
@@ -220,6 +223,7 @@ class WaitReason:
     ahead: int | None = None
     upstream: tuple[str, ...] | None = None
     upstream_count: int | None = None
+    hidden_upstream: int | None = None
     attempt: int | None = None
     max_attempts: int | None = None
     next_attempt_at: datetime | None = None
@@ -243,6 +247,7 @@ class WaitReason:
             "running",
             "limit",
             "upstream_count",
+            "hidden_upstream",
             "attempt",
             "max_attempts",
         ):
@@ -271,7 +276,8 @@ class WaitingTask:
     next_attempt_at
         When a pending retry may start.
     unfinished_upstream
-        Tasks of the same run that this one waits for and that have not succeeded.
+        Tasks of the same run that this one waits for, that have not succeeded, and whose tables
+        the reader may read.
     blocked
         An upstream task failed, was cancelled or is `upstream_failed`: the scheduler is about
         to mark this task, so it is not "waiting for" anything.
@@ -284,6 +290,9 @@ class WaitingTask:
         written, or its run was cancelled while it waited with such rows), and the next claim
         only sets the table back. A ready task says so unless no worker could take it:
         starting one is then what helps.
+    hidden_upstream
+        How many more such tasks there are whose tables the reader may not read: counted in
+        the reason, never named.
     """
 
     status: str
@@ -294,6 +303,7 @@ class WaitingTask:
     blocked: bool = False
     checking: bool = False
     setting_back: bool = False
+    hidden_upstream: int = 0
 
 
 @dataclass(frozen=True)
@@ -615,6 +625,37 @@ def query_wait_reason(
     )
 
 
+def _upstream_sentence(names: Sequence[str], hidden: int) -> str:
+    """Say which upstream tasks a task waits for, counting those the reader may not read.
+
+    Parameters
+    ----------
+    names
+        The unfinished upstream tasks the reader may read.
+    hidden
+        How many unfinished upstream tasks the reader may not read.
+
+    Returns
+    -------
+    str
+        One sentence: at most five names, escaped, then how many more, then the hidden count.
+    """
+    noun = "table" if hidden == 1 else "tables"
+    if not names:
+        pronoun = "it is" if hidden == 1 else "they are"
+        return (
+            f"Waiting for {hidden} upstream {noun} you may not read; the task starts when "
+            f"{pronoun} built."
+        )
+    listed = ", ".join(shown(name) for name in names[:MAX_UPSTREAM_NAMES])
+    more = len(names) - MAX_UPSTREAM_NAMES
+    if not hidden:
+        return f"Waiting for upstream tasks: {listed}{f' and {more} more' if more > 0 else ''}."
+    if more > 0:
+        listed = f"{listed}, {more} more"
+    return f"Waiting for upstream tasks: {listed} and {hidden} {noun} you may not read."
+
+
 def task_wait_reason(task: WaitingTask, counts: WorkerCounts, now: datetime) -> WaitReason | None:
     """Say why a `pending` or `ready` task has not started.
 
@@ -639,16 +680,14 @@ def task_wait_reason(task: WaitingTask, counts: WorkerCounts, now: datetime) -> 
     pending = task.status == "pending"
     if pending and task.blocked:
         return None
-    if pending and task.unfinished_upstream:
+    if pending and (task.unfinished_upstream or task.hidden_upstream):
         names = tuple(task.unfinished_upstream)
-        more = len(names) - MAX_UPSTREAM_NAMES
-        tail = f" and {more} more" if more > 0 else ""
-        listed = ", ".join(shown(name) for name in names[:MAX_UPSTREAM_NAMES])
         return WaitReason(
             UPSTREAM,
-            f"Waiting for upstream tasks: {listed}{tail}.",
+            _upstream_sentence(names, task.hidden_upstream),
             upstream=names[:MAX_UPSTREAM_BODY],
-            upstream_count=len(names),
+            upstream_count=len(names) + task.hidden_upstream,
+            hidden_upstream=task.hidden_upstream or None,
         )
     if pending and task.next_attempt_at is not None and task.next_attempt_at > now:
         when = task.next_attempt_at.astimezone(UTC)

@@ -16,9 +16,10 @@ from lakana_core.auth import (
     AllowAllAuthorization,
     PrincipalRef,
     SecurableKind,
+    TaskScope,
 )
 from lakana_core.catalog.service import CatalogService
-from lakana_core.errors import CheckNotInRunError
+from lakana_core.errors import CheckNotInRunError, KeptAfterCheckError, NotPublishedError
 from lakana_core.grants.authorization import GrantAuthorization
 from lakana_core.grants.roles import Role
 from lakana_core.grants.service import GrantService
@@ -45,10 +46,12 @@ from lakana_core.runs.check_message import (
 )
 from lakana_core.runs.check_rows import submit_check_rows
 from lakana_core.runs.checks import (
+    ERROR_KEPT,
     WITHHELD_TASK_MESSAGE,
     check_not_in_run_message,
 )
 from lakana_core.runs.hidden_checks import ReferenceCheckFilter
+from lakana_core.runs.kept import shown_checks, shown_kept_check
 from lakana_core.runs.service import RunService
 from lakana_core.storage.resolver import StorageResolver
 
@@ -550,3 +553,144 @@ def test_an_attempts_message_in_the_task_log_leaves_out_the_withheld_check(star:
     both = star.person(tables=("fact_sales", "dim_store"))
     (full,) = star.runs().task_log(both, "dev", star.run_id, "gold.fact_sales").attempts
     assert full.error_message == "1 check warned: `ref_store_id` (1 row)."
+
+
+def _fact(star: Star) -> Table:
+    """Read the fact's catalog row.
+
+    Parameters
+    ----------
+    star
+        The run.
+
+    Returns
+    -------
+    Table
+        The row of `gold.fact_sales`.
+    """
+    return star.session.scalars(select(Table).where(Table.name == "fact_sales")).one()
+
+
+def test_the_not_published_note_names_only_the_checks_the_reader_may_see(star: Star) -> None:
+    _fact(star).unpublished_run_id = star.run_id
+    star.session.commit()
+    reader = star.person(tables=("fact_sales",))
+    note = star.catalog().describe_table(reader, _FACT).state_message
+    assert note is not None and "ref_store_id" not in note
+    assert "the checks `key_unique` and `positive`" in note
+    with pytest.raises(NotPublishedError) as refused:
+        star.catalog().load_table(reader, _FACT)
+    assert str(refused.value) == note
+    both = star.person(tables=("fact_sales", "dim_store"))
+    full = star.catalog().describe_table(both, _FACT).state_message
+    assert full is not None and "`key_unique`, `positive` and `ref_store_id`" in full
+
+
+def test_a_not_published_note_whose_only_failure_is_withheld_names_no_check(star: Star) -> None:
+    for result in _results(star):
+        if result.check_name != _REF:
+            result.outcome = CheckOutcome.PASSED
+    _fact(star).unpublished_run_id = star.run_id
+    star.session.commit()
+    note = star.catalog().describe_table(star.person(tables=("fact_sales",)), _FACT).state_message
+    assert note is not None and "did not finish, or failed a check" in note
+    assert "ref_store_id" not in note
+
+
+def _kept(star: Star) -> None:
+    """Make every check `keep`, and note on the fact what the worker would.
+
+    Parameters
+    ----------
+    star
+        The run.
+    """
+    results = _results(star)
+    for result in results:
+        result.on_failure = "keep"
+    fact = _fact(star)
+    fact.kept_run_id = star.run_id
+    fact.kept_task_run_id = results[0].task_run_id
+    fact.kept_check = shown_checks(results)
+    star.session.commit()
+
+
+def test_the_kept_note_names_only_the_checks_the_reader_may_see(star: Star) -> None:
+    _kept(star)
+    reader = star.person(tables=("fact_sales",))
+    note = star.catalog().describe_table(reader, _FACT).state_message
+    assert note is not None and "`gold.fact_sales/key_unique and 1 more`" in note
+    assert "ref_store_id" not in note and "2 more" not in note
+    both = star.person(tables=("fact_sales", "dim_store"))
+    full = star.catalog().describe_table(both, _FACT).state_message
+    assert full is not None and "`gold.fact_sales/key_unique and 2 more`" in full
+
+
+def test_a_kept_note_of_only_a_withheld_check_names_no_check(star: Star) -> None:
+    _kept(star)
+    fact = _fact(star)
+    ref = star.session.scalars(select(CheckResult).where(CheckResult.check_name == _REF)).one()
+    for result in _results(star):
+        if result.check_name != _REF:
+            result.outcome = CheckOutcome.PASSED
+    fact.kept_check = shown_checks([ref])
+    star.session.commit()
+    note = star.catalog().describe_table(star.person(tables=("fact_sales",)), _FACT).state_message
+    assert note == (
+        f"Kept after a failed check (run {star.run_id}): the table holds the data that failed. "
+        "Tasks do not read it until its checks pass."
+    )
+
+
+def test_a_kept_note_without_its_results_hides_a_reference_check_name(star: Star) -> None:
+    """The run was deleted: a note that names a `ref_` check names it to nobody."""
+    _kept(star)
+    fact = _fact(star)
+    fact.kept_check = _REF
+    fact.kept_task_run_id = uuid.uuid4()
+    star.session.commit()
+    note = star.catalog().describe_table(star.person(tables=("fact_sales",)), _FACT).state_message
+    assert note is not None and "ref_store_id" not in note
+
+
+def test_a_task_refused_a_kept_table_is_told_no_reference_check(star: Star) -> None:
+    """A task's error reaches every reader of its run: no reference check, whoever the task is."""
+    _kept(star)
+    task = PrincipalRef(
+        id=star.admin.id,
+        name=star.admin.name,
+        type=star.admin.type,
+        task_scope=TaskScope(environment="dev", asset_scope=[], token_id=uuid.uuid4()),
+    )
+    allowed = CatalogService(star.session, StorageResolver(star.session), AllowAllAuthorization())
+    with pytest.raises(KeptAfterCheckError) as refused:
+        allowed.load_table(task, _FACT)
+    assert "`gold.fact_sales/key_unique and 1 more`" in str(refused.value)
+    assert "ref_store_id" not in str(refused.value)
+
+
+def test_a_kept_note_is_matched_without_the_checks_a_kept_table_refused(star: Star) -> None:
+    """`note_kept` names the checks that failed, not those whose count a kept table refused."""
+    _kept(star)
+    by_name = {r.check_name: r for r in _results(star)}
+    refused = by_name["gold.fact_sales/positive"]
+    refused.outcome, refused.error, refused.failing_rows = CheckOutcome.ERRORED, ERROR_KEPT, None
+    fact = _fact(star)
+    fact.kept_check = shown_checks([by_name["gold.fact_sales/key_unique"], by_name[_REF]])
+    star.session.commit()
+
+    def hides(result: CheckResult) -> bool:
+        return result.check_name == _REF
+
+    assert shown_kept_check(star.session, fact, hides) == "gold.fact_sales/key_unique"
+    assert shown_kept_check(star.session, fact, lambda _r: False) is None
+    fact.kept_check = "gold.fact_sales/something_else"
+    assert shown_kept_check(star.session, fact, hides) == ""
+    fact.kept_check = "gold.fact_sales/key_unique"
+    fact.kept_task_run_id = uuid.uuid4()
+    assert shown_kept_check(star.session, fact, hides) is None
+    # Without the results, "and 2 more" may count reference checks: the count goes.
+    fact.kept_check = "gold.fact_sales/key_unique and 2 more"
+    assert shown_kept_check(star.session, fact, hides) == "gold.fact_sales/key_unique"
+    fact.kept_check = None
+    assert shown_kept_check(star.session, fact, hides) is None
