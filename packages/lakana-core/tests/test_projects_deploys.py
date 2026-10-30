@@ -62,6 +62,7 @@ from lakana_core.projects.deploys import (
 from lakana_core.projects.diff import DeployDiff, diff_manifests
 from lakana_core.projects.frontmatter import AssetMetadata
 from lakana_core.projects.issues import (
+    WITHHELD_DEPLOY_MESSAGE,
     ProjectIssue,
     ProjectValidationError,
     error_for_reader,
@@ -73,6 +74,7 @@ from lakana_core.projects.manifest import (
     manifest_assets,
     manifest_tables,
 )
+from lakana_core.projects.model import resolve_references
 from lakana_core.projects.model_checks import reference_sql
 from lakana_core.projects.parse import ParsedAsset
 from lakana_core.projects.project_config import (
@@ -2148,6 +2150,12 @@ def test_a_sql_asset_cannot_read_an_artifact(
             "`models.churn` is an artifact; only a Python asset can read it.",
         ),
     ]
+    # Of the catalog artifact, a reader who may not read it is shown a missing table's text; the
+    # project's own artifact is in its project version for every reader anyway.
+    assert [(issue.targets, issue.withheld) for issue in issues] == [
+        (("models.base",), "table 'models.base' not found"),
+        ((), None),
+    ]
 
 
 @pytest.mark.parametrize(
@@ -2196,6 +2204,8 @@ def test_a_name_that_is_the_other_kind_in_the_catalog_is_a_deploy_issue(
         principal, "dev", repo_id, assets, build_graph(assets)
     )
     assert [issue.message for issue in issues] == [message]
+    # A missing object makes no line: a reader who may not read it is shown none.
+    assert [(issue.targets, issue.withheld) for issue in issues] == [(("models.churn",), "")]
     same_kind = "artifact" if existing is TableType.ARTIFACT else "table"
     matching = [_python("models.churn", {}, output=same_kind)]
     assert (
@@ -2675,6 +2685,14 @@ def test_an_artifact_parameter_the_task_cannot_store_is_a_deploy_issue(
         principal, "dev", _repo(session).id, assets, build_graph(assets)
     )
     assert [issue.message for issue in issues] == messages
+    for issue in issues:
+        if issue.message.startswith("parameters "):
+            assert (issue.targets, issue.withheld) == (("models.base", "models.other"), "")
+        else:
+            assert (issue.targets, issue.withheld) == (
+                ("models.base",),
+                "table 'models.base' not found",
+            )
 
 
 def test_a_table_parameter_may_be_any_python_name(
@@ -3146,6 +3164,7 @@ def test_a_check_that_reads_an_artifact_of_the_project_is_refused(
     assert [i.render() for i in issues] == [
         "checks/silver/clean/x.sql:1: reads the artifact 'ml.model'; SQL cannot read an artifact"
     ]
+    assert [(i.targets, i.withheld) for i in issues] == [((), None)]
 
 
 def test_a_check_that_reads_a_catalog_artifact_is_refused(
@@ -3164,6 +3183,9 @@ def test_a_check_that_reads_a_catalog_artifact_is_refused(
     )
     assert [i.message for i in issues] == [
         "reads the artifact 'bronze.events'; SQL cannot read an artifact"
+    ]
+    assert [(i.targets, i.withheld) for i in issues] == [
+        (("bronze.events",), "table 'bronze.events' not found")
     ]
 
 
@@ -4457,6 +4479,46 @@ def test_a_target_the_bound_run_principal_may_not_read_is_refused_by_name(
     )
 
 
+def test_a_run_principal_refusal_reads_like_a_missing_target_in_its_place(
+    session: Session, env: None, principal: PrincipalRef
+) -> None:
+    """The refused reference sorts first: its line must come first, as a missing one's would."""
+    other = _repo(session, "other")
+    dim = make_asset(
+        "dim.store",
+        ("bronze.events",),
+        columns=("store_id",),
+        metadata=AssetMetadata(materialize="table", kind="dimension", grain="g", key=("store_id",)),
+    )
+    _deployed(session, principal, other, "a" * 40, dim)
+    ensure_table(session, "dev", "dim", "store")
+    repo = _repo(session)
+    _bind_run_as(session, principal, repo, "bronze.events")
+    deployer = _read_environment_only(session, principal, "bronze.events", "dim.store")
+    fact = make_asset(
+        "silver.f",
+        ("bronze.events",),
+        columns=("store_id", "zz_id"),
+        metadata=AssetMetadata(
+            materialize="table", references={"store_id": "dim.store", "zz_id": "nope.missing"}
+        ),
+    )
+    _, issues = DeployService(session, GrantAuthorization(session)).resolve_model_references(
+        deployer, "dev", repo.id, [fact]
+    )
+    whole = "\n".join(issue.render() for issue in issues)
+    _, missing = resolve_references([fact], lambda _name: None, environment="dev")
+    assert error_for_reader(whole, withheld_lines(issues), lambda _t: False) == "\n".join(
+        issue.render() for issue in missing
+    )
+
+
+def test_a_deploy_error_whose_every_line_is_withheld_says_so() -> None:
+    withheld = [{"index": 0, "line": "a", "withheld": "", "targets": ["x.y"]}]
+    assert error_for_reader("a", withheld, lambda _t: False) == WITHHELD_DEPLOY_MESSAGE
+    assert error_for_reader("a", withheld, lambda _t: True) == "a"
+
+
 def test_a_run_principal_that_may_read_the_target_lets_the_reference_through(
     session: Session, env: None, principal: PrincipalRef
 ) -> None:
@@ -4711,7 +4773,12 @@ def test_an_error_stored_without_withheld_lines_is_shown_whole() -> None:
     assert error_for_reader("a\nb", None, lambda _t: False) == "a\nb"
     odd = [
         "x",
-        {"line": "a", "withheld": 3, "targets": []},
-        {"line": "b", "withheld": "c", "targets": [7]},
+        {"index": 0, "line": "a", "withheld": 3, "targets": []},
+        {"index": 9, "line": "z", "withheld": "c", "targets": ["x.y"]},
+        {"index": True, "line": "a", "withheld": "c", "targets": ["x.y"]},
+        {"index": 1, "line": "b", "withheld": "c", "targets": [7]},
     ]
     assert error_for_reader("a\nb", odd, lambda _t: True) == "a\nc"
+    # A line that is not the one stored is withheld all the same (fail closed).
+    changed = [{"index": 0, "line": "other", "withheld": "c", "targets": ["x.y"]}]
+    assert error_for_reader("a\nb", changed, lambda _t: False) == "c\nb"

@@ -377,6 +377,7 @@ def resolve_references(
     *,
     environment: str,
     is_table: Callable[[str], bool] | None = None,
+    refusal: Callable[[str], str | None] | None = None,
 ) -> tuple[dict[str, tuple[ResolvedReference, ...]], list[ProjectIssue]]:
     """Resolve every asset's references against what `lookup` knows.
 
@@ -392,6 +393,11 @@ def resolve_references(
     is_table
         Whether a dotted name is a table a reference may point at; by default, whether `lookup`
         finds it. The deploy passes the test its `lookup` applies.
+    refusal
+        Why a resolved reference's target may not be used after all (the bound run principal
+        may not read it), or `None` when it may. Its issue takes the reference's place in the
+        order, so that a reader shown a missing target's line instead finds it where a missing
+        target's would be.
 
     Returns
     -------
@@ -426,7 +432,18 @@ def resolve_references(
                 )
                 for n, told in enumerate(problems)
             )
-            if reference is not None:
+            refused = None if reference is None or refusal is None else refusal(reference.target)
+            if refused is not None and reference is not None:
+                issues.append(
+                    ProjectIssue(
+                        asset.path,
+                        line,
+                        refused,
+                        targets=(reference.target,),
+                        withheld=missing_target_message(raw, environment),
+                    )
+                )
+            elif reference is not None:
                 found.append(reference)
         if found:
             resolved[asset.table] = tuple(found)

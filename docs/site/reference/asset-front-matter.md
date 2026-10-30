@@ -310,8 +310,12 @@ long to store say something about a target you may read: that it exists, its kin
 columns, or what the run principal may read of it. Anyone else who reads the deploy
 (`lakana deploys show`, `lakana deploys list`) and may not read that target sees the line
 ``Reference target `gold.dim_store` does not exist in environment `prod`, or you may not read it; …``
-in its place, as for a missing target. You, the deployer, and readers of the target see the whole
-text. A deploy that failed before this release keeps its text as it was stored.
+in its place, as for a missing target. The same holds for a line that says an object outside the
+project is an artifact (`table 'NAME' not found` in its place) or that the asset's name is taken by
+an existing object (left out). When every line is replaced this way, such a reader is told
+``This deploy failed because of objects you may not read, so its error is not shown to you. …``.
+You, the deployer, and readers of the objects see the whole text. A deploy that failed before this
+release keeps its text as it was stored.
 
 A project version in which an asset declares a model field (`key:` alone counts, so every project
 with a `write: merge` asset) needs workers of this release or later: a worker of an earlier one

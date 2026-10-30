@@ -1243,12 +1243,29 @@ WITHHELD_TASK_MESSAGE = (
 )
 """What a reader sees in place of a task message that still names a withheld check."""
 
-REFERENCE_CHECK_LOG_LINE = "done; see lakana runs show"
-"""What a task's log says of a generated reference check, in place of its outcome and rows.
 
-The log is one text for every reader of the run, and a reference check's outcome and row count
-tell of its target; `lakana runs show` shows them to a reader who may read it.
-"""
+def reference_check_log_line(run_id: uuid.UUID, environment: str) -> str:
+    """Say what a task's log says of a generated reference check, in place of its outcome.
+
+    The log is one text for every reader of the run, and a reference check's outcome and row
+    count tell of its target; `lakana runs show` shows them to a reader who may read it. The
+    words are true whatever the outcome.
+
+    Parameters
+    ----------
+    run_id
+        The run.
+    environment
+        The environment's name.
+
+    Returns
+    -------
+    str
+        The text after ``check ref_<column>: ``.
+    """
+    return (
+        f"outcome withheld from the log; see `lakana runs show {run_id} --env {shown(environment)}`"
+    )
 
 
 def log_withheld_message(run_id: uuid.UUID, environment: str) -> str:

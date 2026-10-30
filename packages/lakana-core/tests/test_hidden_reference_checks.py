@@ -689,5 +689,8 @@ def test_a_kept_note_is_matched_without_the_checks_a_kept_table_refused(star: St
     fact.kept_check = "gold.fact_sales/key_unique"
     fact.kept_task_run_id = uuid.uuid4()
     assert shown_kept_check(star.session, fact, hides) is None
+    # Without the results, "and 2 more" may count reference checks: the count goes.
+    fact.kept_check = "gold.fact_sales/key_unique and 2 more"
+    assert shown_kept_check(star.session, fact, hides) == "gold.fact_sales/key_unique"
     fact.kept_check = None
     assert shown_kept_check(star.session, fact, hides) is None

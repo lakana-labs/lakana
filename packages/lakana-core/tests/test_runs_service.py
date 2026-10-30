@@ -1554,7 +1554,9 @@ def test_a_wait_reason_names_only_the_upstream_tables_the_reader_may_read(
         return {t.asset: t.waiting_for.to_json() for t in view.tasks if t.waiting_for}
 
     hidden = reasons("gold.b")["gold.b"]
-    assert hidden["message"] == "Waiting for 1 upstream table you may not read."
+    assert hidden["message"] == (
+        "Waiting for 1 upstream table you may not read; the task starts when it is built."
+    )
     assert (hidden["upstream"], hidden["hidden_upstream"], hidden["upstream_count"]) == ([], 1, 1)
     assert "silver.a" not in str(hidden)
     shown = reasons("gold.b", "silver.a")["gold.b"]

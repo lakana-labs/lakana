@@ -642,7 +642,11 @@ def _upstream_sentence(names: Sequence[str], hidden: int) -> str:
     """
     noun = "table" if hidden == 1 else "tables"
     if not names:
-        return f"Waiting for {hidden} upstream {noun} you may not read."
+        pronoun = "it is" if hidden == 1 else "they are"
+        return (
+            f"Waiting for {hidden} upstream {noun} you may not read; the task starts when "
+            f"{pronoun} built."
+        )
     listed = ", ".join(shown(name) for name in names[:MAX_UPSTREAM_NAMES])
     more = len(names) - MAX_UPSTREAM_NAMES
     if not hidden:

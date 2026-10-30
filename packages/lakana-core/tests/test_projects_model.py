@@ -8,6 +8,7 @@ from test_projects_dag import make_asset
 
 from lakana_core.projects.asset_model import ParsedAsset, ResolvedReference
 from lakana_core.projects.frontmatter import AssetMetadata
+from lakana_core.projects.issues import error_for_reader, withheld_lines
 from lakana_core.projects.model import (
     TargetInfo,
     project_model_issues,
@@ -310,3 +311,15 @@ def test_an_issue_that_tells_of_a_target_carries_it_and_the_missing_text() -> No
         assert [(i.targets, i.withheld) for i in others] == [(told, "")] * len(others)
     _, plain = resolve_references([_fact({"store_id": "gold.x"})], _lookup({}), environment="dev")
     assert [(i.targets, i.withheld) for i in plain] == [((), None)]
+
+
+def test_two_references_to_one_hidden_target_read_like_two_missing_targets() -> None:
+    """The staging line names no column, so both references make the same line: by position."""
+    staging = TargetInfo(kind="staging", key=("store_id",), key_none=False, columns=("store_id",))
+    fact = _fact({"a_id": "dim.store", "b_id": "dim.store.store_id"})
+    _, issues = resolve_references([fact], _lookup({"dim.store": staging}), environment="dev")
+    assert issues[0].message == issues[1].message
+    whole = "\n".join(issue.render() for issue in issues)
+    _, missing = resolve_references([fact], _lookup({}), environment="dev")
+    shown = error_for_reader(whole, withheld_lines(issues), lambda _t: False)
+    assert shown.encode() == "\n".join(issue.render() for issue in missing).encode()

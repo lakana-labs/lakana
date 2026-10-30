@@ -90,7 +90,7 @@ from lakana_core.projects.manifest import (
     manifest_tables,
     read_entry_connections,
 )
-from lakana_core.projects.model import TargetInfo, missing_target_message, resolve_references
+from lakana_core.projects.model import TargetInfo, resolve_references
 from lakana_core.projects.parse import ParsedAsset
 from lakana_core.runs.kept import kept_tables
 from lakana_core.runs.pools import PIPELINE
@@ -317,7 +317,9 @@ def _sql_file_references(sql: str, references: Iterable[str]) -> set[str]:
     return found
 
 
-def _artifact_parameter_issues(asset: ParsedAsset, artifacts: set[str]) -> list[str]:
+def _artifact_parameter_issues(
+    asset: ParsedAsset, artifacts: set[str], own: frozenset[str] | set[str] = frozenset()
+) -> list[tuple[str, tuple[str, ...]]]:
     """Find the parameters that read an artifact under a name the task cannot store it by.
 
     Parameters
@@ -326,30 +328,40 @@ def _artifact_parameter_issues(asset: ParsedAsset, artifacts: set[str]) -> list[
         A Python asset.
     artifacts
         Every name known to be an artifact.
+    own
+        The project's own artifact assets, which its project version shows every reader; none
+        by default.
 
     Returns
     -------
-    list of str
+    list of tuple
         One message per parameter that is not an ASCII identifier of at most 128
-        characters, then one per group of parameters that differ only in case.
+        characters, then one per group of parameters that differ only in case, each with the
+        artifacts it tells of that are not the project's own.
     """
     reading = [(parameter, table) for parameter, table in asset.inputs if table in artifacts]
     messages = [
-        f"parameter {parameter!r} reads the artifact `{table}`, which the task stores in a "
-        "directory of that name: rename the parameter, in the function and in inputs, to an "
-        "ASCII identifier of at most 128 characters (letters, digits, underscores)"
+        (
+            f"parameter {parameter!r} reads the artifact `{table}`, which the task stores in a "
+            "directory of that name: rename the parameter, in the function and in inputs, to an "
+            "ASCII identifier of at most 128 characters (letters, digits, underscores)",
+            tuple(t for t in (table,) if t not in own),
+        )
         for parameter, table in reading
         if ARTIFACT_PARAMETER.fullmatch(parameter) is None
     ]
-    folded: dict[str, list[str]] = {}
-    for parameter, _table in reading:
-        folded.setdefault(parameter.lower(), []).append(parameter)
+    folded: dict[str, list[tuple[str, str]]] = {}
+    for parameter, table in reading:
+        folded.setdefault(parameter.lower(), []).append((parameter, table))
     for group in folded.values():
         if len(group) > 1:
-            names = " and ".join(repr(name) for name in sorted(group))
+            names = " and ".join(repr(name) for name, _ in sorted(group))
             messages.append(
-                f"parameters {names} read artifacts and differ only in case, so a file system "
-                "may store both in one directory: rename one, in the function and in inputs"
+                (
+                    f"parameters {names} read artifacts and differ only in case, so a file system "
+                    "may store both in one directory: rename one, in the function and in inputs",
+                    tuple(sorted({t for _, t in group if t not in own})),
+                )
             )
     return messages
 
@@ -2359,36 +2371,37 @@ class DeployService:
                 return TargetInfo(None, key, False, columns or listed)
             return TargetInfo(model.kind, model.key, model.key_none, columns or listed)
 
-        resolved, issues = resolve_references(assets, lookup, environment=environment)
         run_as = self._bound_run_as(env.id, repository_id)
-        if run_as is None or run_as.id == p.id:
-            return resolved, issues
-        kept: dict[str, tuple[ResolvedReference, ...]] = {}
-        for asset in sorted(assets, key=lambda a: a.path):
-            readable = []
-            for reference in resolved.get(asset.table, ()):
-                if reference.target in by_table or self._readable_table(
-                    run_as, environment, reference.target
-                ):
-                    readable.append(reference)
-                    continue
-                raw = asset.metadata.references.get(reference.column, reference.target)
-                issues.append(
-                    ProjectIssue(
-                        asset.path,
-                        asset.block_line or asset.body_line,
-                        f"Reference target `{reference.target}` cannot be read by "
-                        f"`{shown(run_as.name)}`, the run principal bound to this repository in "
-                        f"`{environment}`, so its runs could not check it; grant it READ_TABLE "
-                        f"on `{reference.target}`, or bind another run principal with "
-                        "`lakana deployments set-run-as`.",
-                        targets=(reference.target,),
-                        withheld=missing_target_message(raw, environment),
-                    )
-                )
-            if readable:
-                kept[asset.table] = tuple(readable)
-        return kept, issues
+
+        def refusal(target: str) -> str | None:
+            """Refuse a target the bound run principal may not read.
+
+            Parameters
+            ----------
+            target
+                The resolved target's dotted name.
+
+            Returns
+            -------
+            str or None
+                The refusal, naming the target and the run principal; `None` when there is no
+                other run principal, the project builds the target, or it may read it.
+            """
+            if (
+                run_as is None
+                or run_as.id == p.id
+                or target in by_table
+                or self._readable_table(run_as, environment, target)
+            ):
+                return None
+            return (
+                f"Reference target `{target}` cannot be read by `{shown(run_as.name)}`, the run "
+                f"principal bound to this repository in `{environment}`, so its runs could not "
+                f"check it; grant it READ_TABLE on `{target}`, or bind another run principal "
+                "with `lakana deployments set-run-as`."
+            )
+
+        return resolve_references(assets, lookup, environment=environment, refusal=refusal)
 
     def _bound_run_as(
         self, environment_id: uuid.UUID, repository_id: uuid.UUID
@@ -2493,8 +2506,9 @@ class DeployService:
                 )
         artifacts = {asset.table for asset in assets if asset.output == "artifact"}
         artifacts |= self.artifact_inputs(p, environment, graph, repository_id=repository_id)
+        own = {asset.table for asset in assets if asset.output == "artifact"}
         for asset in ordered:
-            issues.extend(self._kind_issues(p, environment, asset, artifacts))
+            issues.extend(self._kind_issues(p, environment, asset, artifacts, own))
         return issues
 
     def validate_checks_against_environment(
@@ -2533,8 +2547,8 @@ class DeployService:
         built = {asset.table for asset in assets}
         ordered = sorted(checks, key=lambda c: c.path)
         outside = sorted({ref for check in ordered for ref in check.references} - built)
-        artifacts = {asset.table for asset in assets if asset.output == "artifact"}
-        artifacts |= self.artifact_inputs(
+        own = {asset.table for asset in assets if asset.output == "artifact"}
+        artifacts = own | self.artifact_inputs(
             p,
             environment,
             ProjectGraph(edges=(), external_inputs=tuple(outside)),
@@ -2545,18 +2559,33 @@ class DeployService:
             files = _sql_file_references(check.sql, check.references)
             for name in check.references:
                 if name in artifacts:
-                    message = f"reads the artifact {name!r}; SQL cannot read an artifact"
+                    # A reader who may not read a catalog artifact is shown a missing table's
+                    # line; the project's own artifact is in its project version anyway.
+                    told = () if name in own else (name,)
+                    issues.append(
+                        ProjectIssue(
+                            check.path,
+                            check.body_line,
+                            f"reads the artifact {name!r}; SQL cannot read an artifact",
+                            targets=told,
+                            withheld=f"table {name!r} not found" if told else None,
+                        )
+                    )
                 elif name in files or not (
                     name in built or name in elsewhere or self._readable_table(p, environment, name)
                 ):
-                    message = f"table {name!r} not found"
-                else:
-                    continue
-                issues.append(ProjectIssue(check.path, check.body_line, message))
+                    issues.append(
+                        ProjectIssue(check.path, check.body_line, f"table {name!r} not found")
+                    )
         return issues
 
     def _kind_issues(
-        self, p: PrincipalRef, environment: str, asset: ParsedAsset, artifacts: set[str]
+        self,
+        p: PrincipalRef,
+        environment: str,
+        asset: ParsedAsset,
+        artifacts: set[str],
+        own: set[str],
     ) -> list[ProjectIssue]:
         """Check one asset against the kinds of the objects it reads and of the name it takes.
 
@@ -2572,48 +2601,71 @@ class DeployService:
             Every name known to be an artifact: the project's artifact assets and
             the inputs `artifact_inputs` finds (readable catalog artifacts, and
             artifacts another repository's deploy produces).
+        own
+            The project's own artifact assets, which its project version shows every reader.
 
         Returns
         -------
         list of ProjectIssue
-            The issues, in a stable order.
+            The issues, in a stable order. One that tells of an object outside the project
+            carries it in `targets`, with the line of a missing object in `withheld` (empty
+            for a clash of the asset's own name, which a missing object does not make).
         """
         issues: list[ProjectIssue] = []
 
-        def issue(message: str) -> None:
+        def issue(message: str, targets: tuple[str, ...] = (), withheld: str = "") -> None:
             """Add an issue on the asset's file and line.
 
             Parameters
             ----------
             message
                 The issue.
+            targets
+                The objects outside the project it tells of; a reader who may not read one is
+                shown `withheld` instead (`issues.error_for_reader`).
+            withheld
+                The line of a missing object, or empty when a missing one makes none.
             """
-            issues.append(ProjectIssue(asset.path, asset.body_line, message))
+            issues.append(
+                ProjectIssue(
+                    asset.path,
+                    asset.body_line,
+                    message,
+                    targets=targets,
+                    withheld=withheld if targets else None,
+                )
+            )
 
         if asset.kind != "python":
             for name in asset.references:
                 if name in artifacts:
-                    issue(f"`{name}` is an artifact; only a Python asset can read it.")
+                    issue(
+                        f"`{name}` is an artifact; only a Python asset can read it.",
+                        () if name in own else (name,),
+                        f"table {name!r} not found",
+                    )
         elif asset.output == "artifact" and asset.table in asset.references:
             issue(
                 f"an artifact asset cannot read its own artifact ({asset.table}); "
                 "remove it from inputs"
             )
         if asset.kind == "python":
-            issues.extend(
-                ProjectIssue(asset.path, asset.body_line, message)
-                for message in _artifact_parameter_issues(asset, artifacts)
-            )
+            for message, targets in _artifact_parameter_issues(asset, artifacts, own):
+                single = len(targets) == 1 and message.startswith("parameter ")
+                issue(message, targets, f"table {targets[0]!r} not found" if single else "")
+        # A missing object makes no clash, so a reader who may not read it is shown no line.
         existing = self._readable_type(p, environment, asset.table)
         if asset.output == "artifact" and existing in _KIND_PHRASES:
             issue(
                 f"`{asset.table}` already exists in {environment} as {_KIND_PHRASES[existing]}; "
-                "drop it first, or choose another name."
+                "drop it first, or choose another name.",
+                (asset.table,),
             )
         elif asset.output != "artifact" and existing is TableType.ARTIFACT:
             issue(
                 f"`{asset.table}` already exists in {environment} as an artifact; drop it "
-                f"first (`lakana artifact drop {asset.table}`), or choose another name."
+                f"first (`lakana artifact drop {asset.table}`), or choose another name.",
+                (asset.table,),
             )
         return issues
 

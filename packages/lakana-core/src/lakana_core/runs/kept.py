@@ -267,7 +267,8 @@ def shown_kept_check(
     built again from the visible ones, after the results were shown to give back the stored
     text, as `check_message.message_for_reader` does for a task's message. When they do not, or
     when no visible check is left, no check is named. Without the results (the run was deleted),
-    a note that names a ``ref_`` check names none.
+    a note names only its first check, without the count of the others, and none when that is a
+    ``ref_`` check.
 
     Parameters
     ----------
@@ -298,7 +299,12 @@ def shown_kept_check(
         )
     ]
     if not failed:
-        return "" if f"/{REF_PREFIX}" in row.kept_check else None
+        # Without the results nothing tells which checks the count covers: name the first one
+        # only, and none when it is a `ref_` check.
+        first = row.kept_check.split(" and ", 1)[0]
+        if f"/{REF_PREFIX}" in first:
+            return ""
+        return None if first == row.kept_check else first
     if not any(hides(result) for result in failed):
         return None
     # The note named the checks that failed, or, when only checks refused a kept table failed,

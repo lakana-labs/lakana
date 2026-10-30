@@ -3220,6 +3220,7 @@ def test_a_deploy_refuses_a_reference_it_cannot_resolve_and_a_key_the_select_lac
     # The line tells of `bronze.events`: a reader who may not read it is shown a missing one's.
     assert run.error_withheld_json == [
         {
+            "index": 1,
             "line": "assets/gold/fact_visits.sql:1: Reference `id: bronze.events`: "
             "`bronze.events` declares no key. Declare `key:` in its asset, or name the column: "
             "`id: bronze.events.<column>`.",

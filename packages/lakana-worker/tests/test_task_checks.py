@@ -460,7 +460,11 @@ def test_the_log_gives_a_reference_check_no_count_and_its_error_no_name(world: W
     ]
     log = _log(world, run_id, "silver.orders")
     assert "  check a_unique: failed, 1 row\n" in log
-    assert "  check ref_id: done; see lakana runs show\n" in log
+    assert (
+        "  check ref_id: outcome withheld from the log; "
+        f"see `lakana runs show {run_id} --env dev`\n" in log
+    )
+    assert "ref_id: failed" not in log and "ref_id: done" not in log
     error = log.split("  error: ", 1)[1]
     assert error.startswith("Check `silver.orders/a_unique` failed: 1 row")
     assert "ref_id" not in error and "2 checks" not in error

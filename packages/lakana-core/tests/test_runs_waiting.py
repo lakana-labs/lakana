@@ -654,8 +654,16 @@ def test_the_body_lists_at_most_fifty_upstream_names_and_the_total() -> None:
 @pytest.mark.parametrize(
     ("names", "hidden", "message"),
     [
-        ([], 1, "Waiting for 1 upstream table you may not read."),
-        ([], 2, "Waiting for 2 upstream tables you may not read."),
+        (
+            [],
+            1,
+            "Waiting for 1 upstream table you may not read; the task starts when it is built.",
+        ),
+        (
+            [],
+            2,
+            "Waiting for 2 upstream tables you may not read; the task starts when they are built.",
+        ),
         (["a"], 1, "Waiting for upstream tasks: a and 1 table you may not read."),
         (
             list("abcdefg"),
