@@ -93,6 +93,7 @@ from lakana_core.runs.checks import (
     ERROR_NO_PRINCIPAL,
     ERROR_NOT_PUBLISHED,
     ERROR_UNREADABLE_CHECK,
+    REFERENCE_CHECK_LOG_LINE,
     RETRY_MESSAGE,
     RUN_CANCELLED_MESSAGE,
     SET_BACK_NOTHING,
@@ -112,6 +113,7 @@ from lakana_core.runs.checks import (
     verdict,
 )
 from lakana_core.runs.failures import FailureCode, check_failure_code
+from lakana_core.runs.hidden_checks import is_reference_check
 from lakana_core.runs.kept import (
     KeptNote,
     clear_kept_in_attempt,
@@ -214,12 +216,17 @@ def _check_lines(results: Sequence[CheckResult]) -> tuple[str, ...]:
     Returns
     -------
     tuple of str
-        One line per check.
+        One line per check. A generated reference check's says only that it ran
+        (`REFERENCE_CHECK_LOG_LINE`): its outcome and row count are shown by `lakana runs show`
+        to a reader who may read its target.
     """
     lines = []
     for result in results:
         name = shown(result.check_name.rpartition("/")[2])
-        if result.outcome is CheckOutcome.PASSED:
+        if is_reference_check(result.check_name, result.generated):
+            # The log is one text for every reader; the outcome and rows tell of the target.
+            found = REFERENCE_CHECK_LOG_LINE
+        elif result.outcome is CheckOutcome.PASSED:
             found = "passed"
         elif result.outcome is CheckOutcome.ERRORED:
             found = f"errored: {result.error}"

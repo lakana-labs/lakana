@@ -651,6 +651,38 @@ def test_the_body_lists_at_most_fifty_upstream_names_and_the_total() -> None:
     assert str(MAX_UPSTREAM_BODY + 2) + " more" in str(body["message"])
 
 
+@pytest.mark.parametrize(
+    ("names", "hidden", "message"),
+    [
+        ([], 1, "Waiting for 1 upstream table you may not read."),
+        ([], 2, "Waiting for 2 upstream tables you may not read."),
+        (["a"], 1, "Waiting for upstream tasks: a and 1 table you may not read."),
+        (
+            list("abcdefg"),
+            3,
+            "Waiting for upstream tasks: a, b, c, d, e, 2 more and 3 tables you may not read.",
+        ),
+    ],
+)
+def test_an_upstream_the_reader_may_not_read_is_counted_never_named(
+    names: list[str], hidden: int, message: str
+) -> None:
+    task = _task(unfinished_upstream=names, hidden_upstream=hidden)
+    reason = task_wait_reason(task, WorkerCounts(1, 1, 1), _NOW)
+    assert reason is not None
+    assert reason.message == message
+    body = reason.to_json()
+    assert body["upstream"] == names
+    assert body["upstream_count"] == len(names) + hidden
+    assert body["hidden_upstream"] == hidden
+
+
+def test_no_hidden_upstream_leaves_the_body_without_the_count() -> None:
+    reason = task_wait_reason(_task(unfinished_upstream=["a"]), WorkerCounts(1, 1, 1), _NOW)
+    assert reason is not None
+    assert "hidden_upstream" not in reason.to_json()
+
+
 def test_an_upstream_name_is_escaped_in_the_sentence_and_raw_in_the_list() -> None:
     raw = "a\x1b[31m\nb"
     reason = task_wait_reason(_task(unfinished_upstream=[raw]), WorkerCounts(1, 1, 1), _NOW)

@@ -76,6 +76,7 @@ def waiting_for_from_json(data: object) -> WaitingFor | None:
         ahead=_int(data.get("ahead")),
         upstream=names,
         upstream_count=_int(data.get("upstream_count")),
+        hidden_upstream=_int(data.get("hidden_upstream")),
         attempt=_int(data.get("attempt")),
         max_attempts=_int(data.get("max_attempts")),
         next_attempt_at=next_attempt,

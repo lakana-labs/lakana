@@ -1501,6 +1501,68 @@ def test_each_waiting_task_of_a_run_carries_its_reason(
     assert _reasons(session, principal, started.id)["silver.clean"] is None
 
 
+class _ReadsOnly(AllowAllAuthorization):
+    """Allows everything but READ_TABLE, which it allows on the listed table names only.
+
+    Parameters
+    ----------
+    *tables
+        The dotted names the reader may read.
+    """
+
+    def __init__(self, *tables: str) -> None:
+        self.tables = frozenset(tables)
+
+    def permits(self, principal: PrincipalRef, action: Action, securable: Securable) -> bool:
+        """Refuse READ_TABLE on any table not listed.
+
+        Parameters
+        ----------
+        principal
+            The actor.
+        action
+            The action.
+        securable
+            The object.
+
+        Returns
+        -------
+        bool
+            `False` for READ_TABLE on an unlisted table.
+        """
+        if action is not Action.READ_TABLE or securable.table is None:
+            return True
+        assert securable.namespace is not None
+        return f"{securable.namespace.joined()}.{securable.table}" in self.tables
+
+
+def test_a_wait_reason_names_only_the_upstream_tables_the_reader_may_read(
+    session: Session, checked_version: JobVersion, principal: PrincipalRef
+) -> None:
+    """An unreadable upstream is counted, never named; missing and unreadable look the same."""
+    started = _service(session).start(principal, "dev", "analytics", Selection())
+    _running_run(
+        session,
+        started.id,
+        raw__events=TaskStatus.READY,
+        silver__a=TaskStatus.PENDING,
+        gold__b=TaskStatus.PENDING,
+    )
+
+    def reasons(*tables: str) -> dict[str, dict[str, Any]]:
+        view = _service(session, _ReadsOnly(*tables)).get(principal, "dev", started.id)
+        return {t.asset: t.waiting_for.to_json() for t in view.tasks if t.waiting_for}
+
+    hidden = reasons("gold.b")["gold.b"]
+    assert hidden["message"] == "Waiting for 1 upstream table you may not read."
+    assert (hidden["upstream"], hidden["hidden_upstream"], hidden["upstream_count"]) == ([], 1, 1)
+    assert "silver.a" not in str(hidden)
+    shown = reasons("gold.b", "silver.a")["gold.b"]
+    assert shown["message"] == "Waiting for upstream tasks: silver.a."
+    assert shown["upstream"] == ["silver.a"]
+    assert "hidden_upstream" not in shown
+
+
 def test_wait_reasons_of_source_checks_and_of_a_written_task_that_waits_again(
     session: Session, checked_version: JobVersion, principal: PrincipalRef
 ) -> None:

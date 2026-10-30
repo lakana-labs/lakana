@@ -24,10 +24,12 @@ from lakana_core.runs.checks import (
     failure_message,
     kept_check_message,
     kept_failure_message,
+    log_withheld_message,
     refused_source_message,
     verdict,
     warning_note,
 )
+from lakana_core.runs.hidden_checks import is_reference_check
 
 if TYPE_CHECKING:
     from lakana_core.catalog.service import Rollback
@@ -394,6 +396,7 @@ def message_for_reader(
     table: str,
     run_id: uuid.UUID,
     environment: str,
+    withheld: str = WITHHELD_TASK_MESSAGE,
 ) -> str | None:
     """Show a task's message to a reader from whom some of its check results are withheld.
 
@@ -421,6 +424,9 @@ def message_for_reader(
         The run.
     environment
         The environment's name.
+    withheld
+        What the reader gets when the message cannot be built again without the withheld
+        results; `WITHHELD_TASK_MESSAGE` by default.
 
     Returns
     -------
@@ -431,15 +437,64 @@ def message_for_reader(
         return message
     state = CheckMessageState.from_json(stored_state)
     if state is None:
-        return WITHHELD_TASK_MESSAGE if _names_withheld(message, hidden) else message
+        return withheld if _names_withheld(message, hidden) else message
     where = {"table": table, "run_id": run_id, "environment": environment}
     try:
         # The state must give back the stored text from every result: a text that a later
         # claim, the scheduler or a set-back wrote over it, or an earlier attempt's text whose
         # results have been counted again since, is not rebuilt.
         if check_message(results, state, **where) != message:
-            return WITHHELD_TASK_MESSAGE
+            return withheld
         visible = [r for r in results if r.check_name not in hidden]
         return check_message(visible, state, **where)
     except UndeterminedMessage:
-        return WITHHELD_TASK_MESSAGE
+        return withheld
+
+
+def message_for_log(
+    message: str | None,
+    stored_state: object,
+    results: Sequence[CheckResult],
+    *,
+    table: str,
+    run_id: uuid.UUID,
+    environment: str,
+) -> str | None:
+    """Word a task's message for its free-text log, which every reader of the run reads alike.
+
+    The log cannot be filtered per reader (it is read by byte offsets), so it leaves out every
+    generated reference check, as `message_for_reader` does for a reader who may read none of
+    their targets. Hand-written and key checks are worded as in the task's message.
+
+    Parameters
+    ----------
+    message
+        The task's message.
+    stored_state
+        Its `CheckMessageState`, as JSON, or `None`.
+    results
+        Every result of the task.
+    table
+        The task's table.
+    run_id
+        The run.
+    environment
+        The environment's name.
+
+    Returns
+    -------
+    str or None
+        The message without any reference check's name or row count; `log_withheld_message`
+        when it cannot be worded without them.
+    """
+    hidden = {r.check_name for r in results if is_reference_check(r.check_name, r.generated)}
+    return message_for_reader(
+        message,
+        stored_state,
+        results,
+        hidden,
+        table=table,
+        run_id=run_id,
+        environment=environment,
+        withheld=log_withheld_message(run_id, environment),
+    )

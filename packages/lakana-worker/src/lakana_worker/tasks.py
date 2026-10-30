@@ -67,9 +67,11 @@ from lakana_core.models import (
 from lakana_core.projects.asset_model import WRITE_CHOICES
 from lakana_core.projects.checks import read_manifest_checks, source_check_tables
 from lakana_core.projects.manifest import asset_kind, entry_write
+from lakana_core.runs.check_message import message_for_log
 from lakana_core.runs.checks import (
     ASSET,
     SOURCE_CHECK,
+    results_of_task,
 )
 from lakana_core.runs.failures import FailureCode
 from lakana_core.runs.kept import clear_kept
@@ -760,7 +762,8 @@ def _log_block(
     Returns
     -------
     str
-        The block, ending in a line break.
+        The block, ending in a line break. Its error line leaves out generated reference checks
+        (`message_for_log`): the log is one text for every reader of the run.
     """
     mode = outcome.mode
     lines = [
@@ -776,8 +779,18 @@ def _log_block(
     if outcome.artifact_version is not None:
         lines.append(f"  artifact version: {outcome.artifact_version}")
     lines.extend(outcome.checks)
-    if outcome.message:
-        lines.append(f"  error: {outcome.message}")
+    message = outcome.message
+    if message and outcome.environment is not None:
+        message = message_for_log(
+            message,
+            outcome.check_state,
+            results_of_task(session, claimed.task_run_id),
+            table=claimed.asset,
+            run_id=claimed.run_id,
+            environment=outcome.environment,
+        )
+    if message:
+        lines.append(f"  error: {message}")
     if outcome.output:
         lines.append("  output:")
         lines.extend(f"    {line}" for line in outcome.output.splitlines())

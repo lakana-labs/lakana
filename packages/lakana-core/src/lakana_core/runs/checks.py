@@ -13,7 +13,7 @@ from __future__ import annotations
 import re
 import shlex
 import uuid
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING
@@ -1243,6 +1243,34 @@ WITHHELD_TASK_MESSAGE = (
 )
 """What a reader sees in place of a task message that still names a withheld check."""
 
+REFERENCE_CHECK_LOG_LINE = "done; see lakana runs show"
+"""What a task's log says of a generated reference check, in place of its outcome and rows.
+
+The log is one text for every reader of the run, and a reference check's outcome and row count
+tell of its target; `lakana runs show` shows them to a reader who may read it.
+"""
+
+
+def log_withheld_message(run_id: uuid.UUID, environment: str) -> str:
+    """Say, in a task's log, that its message is shown only where it can be filtered.
+
+    Parameters
+    ----------
+    run_id
+        The run.
+    environment
+        The environment's name.
+
+    Returns
+    -------
+    str
+        The text: it names no check, and points at the command that shows the message.
+    """
+    return (
+        "This task's message names a reference check, so it is not in the log; see "
+        f"`lakana runs show {run_id} --env {shown(environment)}`."
+    )
+
 
 def record_result(
     session: Session,
@@ -1452,7 +1480,12 @@ def results_of_task(session: Session, task_run_id: uuid.UUID) -> list[CheckResul
 
 
 def not_published_message(
-    session: Session, dotted: str, table_id: uuid.UUID, run_id: uuid.UUID, environment: str
+    session: Session,
+    dotted: str,
+    table_id: uuid.UUID,
+    run_id: uuid.UUID,
+    environment: str,
+    hides: Callable[[CheckResult], bool] | None = None,
 ) -> str:
     """Say why a table cannot be read, with the checks its first build failed, if any.
 
@@ -1476,6 +1509,9 @@ def not_published_message(
         The run whose checks failed, `Table.unpublished_run_id`.
     environment
         The environment's name, for the command that shows the rows.
+    hides
+        Whether a result is withheld from the reader (`hidden_checks.result_hider`): the text is
+        built as if it did not exist. `None` withholds nothing.
 
     Returns
     -------
@@ -1484,15 +1520,19 @@ def not_published_message(
         location, no row, and no value a check computed.
     """
     found = sorted(
-        session.scalars(
-            select(CheckResult)
-            .where(
-                CheckResult.run_id == run_id,
-                CheckResult.table_id == table_id,
-                CheckResult.on_failure == "block",
-                CheckResult.outcome.in_([CheckOutcome.FAILED, CheckOutcome.ERRORED]),
+        (
+            result
+            for result in session.scalars(
+                select(CheckResult)
+                .where(
+                    CheckResult.run_id == run_id,
+                    CheckResult.table_id == table_id,
+                    CheckResult.on_failure == "block",
+                    CheckResult.outcome.in_([CheckOutcome.FAILED, CheckOutcome.ERRORED]),
+                )
+                .execution_options(populate_existing=True)
             )
-            .execution_options(populate_existing=True)
+            if hides is None or not hides(result)
         ),
         key=lambda result: result.check_name,
     )

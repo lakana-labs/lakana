@@ -19,9 +19,10 @@ from lakana_core.runs.check_message import (
     UndeterminedMessage,
     branch_of,
     check_message,
+    message_for_log,
     message_for_reader,
 )
-from lakana_core.runs.checks import ERROR_KEPT, WITHHELD_TASK_MESSAGE
+from lakana_core.runs.checks import ERROR_KEPT, WITHHELD_TASK_MESSAGE, log_withheld_message
 
 _TABLE = "gold.t"
 _RUN = uuid.UUID("00000000-0000-4000-8000-000000000001")
@@ -366,3 +367,33 @@ def test_the_reader_sees_the_message_the_worker_writes_from_the_shown_results_al
             assert "ref_z" not in (seen or "") and "1204" not in (seen or "")
             tried += 1
     assert tried > 1000
+
+
+def test_the_log_words_the_message_without_the_reference_checks() -> None:
+    """The log is read alike by every reader, so every generated reference check is left out."""
+    results = [
+        _result("a", CheckOutcome.FAILED, "block", rows=1),
+        _result("ref_z", CheckOutcome.FAILED, "block", rows=9),
+    ]
+    state = CheckMessageState(BLOCKING, rollback_outcome=RollbackOutcome.ROLLED_BACK.value)
+    stored = _build(results, state)
+    logged = message_for_log(
+        stored, state.to_json(), results, table=_TABLE, run_id=_RUN, environment="dev"
+    )
+    assert logged == _build(results[:1], state)
+    assert logged is not None and "ref_z" not in logged and "9 rows" not in logged
+
+
+def test_the_log_points_at_runs_show_when_the_message_cannot_be_worded_again() -> None:
+    results = [_result("ref_z", CheckOutcome.FAILED, "block", rows=9)]
+    stored = f"Check `{_HIDDEN}` failed: 9 rows."
+    assert message_for_log(
+        stored, None, results, table=_TABLE, run_id=_RUN, environment="dev"
+    ) == log_withheld_message(_RUN, "dev")
+    assert "ref_z" not in log_withheld_message(_RUN, "dev")
+    assert (
+        message_for_log(
+            "The build failed.", None, results, table=_TABLE, run_id=_RUN, environment="dev"
+        )
+        == "The build failed."
+    )

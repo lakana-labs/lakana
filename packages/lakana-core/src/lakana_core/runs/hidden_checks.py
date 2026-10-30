@@ -16,6 +16,7 @@ only to a reader who may read every table of the environment.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Callable
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -23,9 +24,28 @@ from sqlalchemy.orm import Session
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable
 from lakana_core.errors import ValidationError
 from lakana_core.identifiers import TableRef
-from lakana_core.models import JobVersion, Run
+from lakana_core.models import CheckResult, JobVersion, Run
 from lakana_core.projects.checks import read_manifest_checks
 from lakana_core.projects.model_checks import REF_PREFIX
+
+
+def is_reference_check(name: str, generated: bool) -> bool:
+    """Say whether a check is a generated reference check, whose result tells of its target.
+
+    Parameters
+    ----------
+    name
+        The check's name, ``<table>/<check>``.
+    generated
+        Whether the check was generated from the asset's header.
+
+    Returns
+    -------
+    bool
+        `True` for a generated ``ref_<column>`` check. A hand-written check named ``ref_…`` is
+        not one.
+    """
+    return generated and name.rpartition("/")[2].startswith(REF_PREFIX)
 
 
 class ReferenceCheckFilter:
@@ -76,7 +96,7 @@ class ReferenceCheckFilter:
         bool
             `True` for a generated reference check whose target the reader may not read.
         """
-        if not generated or not name.rpartition("/")[2].startswith(REF_PREFIX):
+        if not is_reference_check(name, generated):
             return False
         target = self._targets_of(run_id).get(name)
         if target not in self._readable:
@@ -133,3 +153,34 @@ class ReferenceCheckFilter:
             else Securable.table_scope(ref.environment, ref.namespace, ref.name)
         )
         return self._authz.permits(self._principal, Action.READ_TABLE, securable)
+
+
+def result_hider(
+    session: Session, authz: AuthorizationService, reader: PrincipalRef, environment: str
+) -> Callable[[CheckResult], bool]:
+    """Decide which check results a text shown to a reader leaves out.
+
+    A person is asked as `ReferenceCheckFilter` asks. A task (a principal with a run context or
+    a task token) is not: what it is told ends up in its own message and log, which every reader
+    of its run reads, so every generated reference check is left out for it.
+
+    Parameters
+    ----------
+    session
+        Database session; read only.
+    authz
+        The authorization service.
+    reader
+        Who is told.
+    environment
+        The environment's name.
+
+    Returns
+    -------
+    Callable
+        Whether a result is left out.
+    """
+    if reader.run_context is not None or reader.task_scope is not None:
+        return lambda result: is_reference_check(result.check_name, result.generated)
+    withheld = ReferenceCheckFilter(session, authz, reader, environment)
+    return lambda result: withheld.hides(result.run_id, result.check_name, result.generated)

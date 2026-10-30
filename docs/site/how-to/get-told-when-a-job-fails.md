@@ -118,6 +118,13 @@ with the values of a test project:
 
 `event` is `failed`, `recovered` or, from `notify-test`, `test`.
 
+A failed reference check, the `ref_<column>` check Lakana generates from a `references:` entry in
+an asset's header, is never named in a message: whether it failed, and how many rows it found, says
+something about the table it points at, and the people who read the channel may not be allowed to
+read that table. The message says only `A reference check failed; see lakana runs show ...` (in
+**json**, `"reference_check_failed": true`, a field that is there only then). `lakana runs show`
+shows the check to everyone who may read its target.
+
 **slack** is a short text message in Slack's format, which other chat tools accept as
 well. The message is `{"text": "..."}` and the text reads, for the same run:
 

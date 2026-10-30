@@ -30,6 +30,7 @@ from lakana_core.models import (
     TaskRun,
     TaskStatus,
 )
+from lakana_core.runs.hidden_checks import is_reference_check
 
 PAYLOAD_VERSION = 1
 """The `version` of the `json` payload; raised only by a change that breaks a receiver."""
@@ -69,9 +70,14 @@ class Facts:
     failed_tasks
         Names of the tasks that failed.
     failed_checks
-        Names (`table/check`) of the blocking checks that failed or errored.
+        Names (`table/check`) of the blocking checks that failed or errored, generated reference
+        checks left out.
     delivery_id
         The delivery's id, for a receiver to deduplicate on.
+    reference_check_failed
+        Whether a generated reference check failed or errored. Such a check is never named: its
+        outcome tells of the table it points at, and the endpoint is no reader whose right to
+        read that table can be asked. `lakana runs show` shows it to a reader who may.
     """
 
     job: str
@@ -85,6 +91,7 @@ class Facts:
     failed_tasks: tuple[str, ...]
     failed_checks: tuple[str, ...]
     delivery_id: str
+    reference_check_failed: bool = False
 
     @property
     def command(self) -> str:
@@ -139,7 +146,7 @@ def facts_for_run(session: Session, run: Run, delivery_id: UUID | str) -> Facts:
         .order_by(TaskRun.asset)
     ).all()
     checks = session.execute(
-        select(CheckResult.table_name, CheckResult.check_name)
+        select(CheckResult.table_name, CheckResult.check_name, CheckResult.generated)
         .where(
             CheckResult.run_id == run.id,
             CheckResult.outcome.in_((CheckOutcome.FAILED, CheckOutcome.ERRORED)),
@@ -157,8 +164,15 @@ def facts_for_run(session: Session, run: Run, delivery_id: UUID | str) -> Facts:
         finished_at=run.finished_at,
         status=run.status.value,
         failed_tasks=tuple(tasks),
-        failed_checks=tuple(f"{table}/{name}" for table, name in checks),
+        failed_checks=tuple(
+            f"{table}/{name}"
+            for table, name, generated in checks
+            if not is_reference_check(name, generated)
+        ),
         delivery_id=str(delivery_id),
+        reference_check_failed=any(
+            is_reference_check(name, generated) for _, name, generated in checks
+        ),
     )
 
 
@@ -281,7 +295,7 @@ def _json(event: str, facts: Facts) -> dict[str, Any]:
         "failed_tasks": list(facts.failed_tasks),
         "failed_checks": list(facts.failed_checks),
         "command": facts.command,
-    }
+    } | ({"reference_check_failed": True} if facts.reference_check_failed else {})
 
 
 def _title(event: str, facts: Facts) -> str:
@@ -364,6 +378,8 @@ def _slack(event: str, facts: Facts) -> str:
         lines.append("Failed tasks: " + ", ".join(_code(t) for t in facts.failed_tasks))
     if facts.failed_checks:
         lines.append("Failed checks: " + ", ".join(_code(c) for c in facts.failed_checks))
+    if facts.reference_check_failed:
+        lines.append(f"A reference check failed; see {_code(facts.command)}")
     lines.append(f"Details: {_code(facts.command)}")
     lines.append(f"Delivery {_code(facts.delivery_id)}")
     return "\n".join(lines)
@@ -422,6 +438,8 @@ def _teams(event: str, facts: Facts) -> dict[str, Any]:
         pairs.append(("Failed tasks", ", ".join(facts.failed_tasks)))
     if facts.failed_checks:
         pairs.append(("Failed checks", ", ".join(facts.failed_checks)))
+    if facts.reference_check_failed:
+        pairs.append(("Reference check", f"A reference check failed; see {facts.command}"))
     pairs += [("Details", facts.command), ("Delivery", facts.delivery_id)]
     card = {
         "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",

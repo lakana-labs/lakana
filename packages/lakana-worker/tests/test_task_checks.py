@@ -432,6 +432,40 @@ def test_a_generated_reference_to_an_unreadable_target_says_gone_or_unreadable(
     assert task.status is TaskStatus.FAILED
 
 
+def test_the_log_gives_a_reference_check_no_count_and_its_error_no_name(world: World) -> None:
+    """The log is one text for every reader: a reference check's detail is in `runs show`."""
+    _outside_table(world, "gold.dim", [1])
+    _checked(
+        world,
+        _check("a_unique", _DUPLICATE_IDS),
+        _generated(
+            "ref_id",
+            "SELECT o.id FROM silver.orders o LEFT JOIN gold.dim d ON d.id = o.id "
+            "WHERE o.id IS NOT NULL AND d.id IS NULL",
+            {
+                "family": "references",
+                "columns": ["id"],
+                "target": "gold.dim",
+                "target_column": "id",
+            },
+        ),
+    )
+    run_id = _start(world)
+    _drain(world)
+
+    task = _task(world, "silver.orders")
+    assert [(r.check_name, r.failing_rows) for r in _results(world, task.id)] == [
+        ("silver.orders/a_unique", 1),
+        ("silver.orders/ref_id", 1),
+    ]
+    log = _log(world, run_id, "silver.orders")
+    assert "  check a_unique: failed, 1 row\n" in log
+    assert "  check ref_id: done; see lakana runs show\n" in log
+    error = log.split("  error: ", 1)[1]
+    assert error.startswith("Check `silver.orders/a_unique` failed: 1 row")
+    assert "ref_id" not in error and "2 checks" not in error
+
+
 @pytest.mark.parametrize(
     ("target", "target_column", "orders_sql"),
     [
