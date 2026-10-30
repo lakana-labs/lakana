@@ -62,6 +62,7 @@ from lakana_core.models import (
     Base,
     ColumnDescription,
     ColumnMask,
+    DeclaredMeasure,
     Grant,
     Namespace,
     Principal,
@@ -1179,6 +1180,56 @@ def test_undrop_restores_the_model_and_its_references(
     ]
 
 
+def _measured_entry() -> dict[str, object]:
+    """Build `_MODEL_ENTRY` with one measure, `amount`.
+
+    Returns
+    -------
+    dict of str to object
+        The manifest entry.
+    """
+    model = _MODEL_ENTRY["model"]
+    assert isinstance(model, dict)
+    return {
+        **_MODEL_ENTRY,
+        "model": {
+            **model,
+            "measures": [
+                {
+                    "column": "amount",
+                    "aggregation": "sum",
+                    "additivity": "additive",
+                    "not_over": [],
+                    "unit": None,
+                    "currency": "EUR",
+                    "label": None,
+                    "description": None,
+                }
+            ],
+        },
+    }
+
+
+def test_undrop_restores_the_measures(
+    session: Session, catalog: CatalogService, principal: PrincipalRef
+) -> None:
+    """The measure rows come back with the row, ids and all."""
+    table_id = _orders_table(catalog, principal)
+    entry = _measured_entry()
+    write_model_entry(session, _fresh(session, Table, table_id), entry)
+    session.commit()
+    before = read_table_model(session, _fresh(session, Table, table_id))
+    assert before is not None and len(before.measures) == 1
+    ids = session.scalars(select(DeclaredMeasure.id)).all()
+
+    catalog.drop_table(principal, _ref("gold.orders"))
+    assert session.scalars(select(DeclaredMeasure.id)).all() == []
+    catalog.undrop_table(principal, _ref("gold.orders"))
+
+    assert read_table_model(session, _fresh(session, Table, table_id)) == before
+    assert session.scalars(select(DeclaredMeasure.id)).all() == ids
+
+
 def test_undrop_of_a_tombstone_from_before_references_restores_the_model_without_them(
     session: Session, catalog: CatalogService, principal: PrincipalRef
 ) -> None:
@@ -1205,3 +1256,25 @@ def test_undrop_of_a_tombstone_from_before_references_restores_the_model_without
     assert model is not None
     assert (model.kind, model.key, model.references) == ("fact", ("id",), ())
     assert incoming_references(session, environment_id, "gold.regions") == []
+
+
+def test_undrop_of_a_tombstone_from_before_measures_restores_the_model_without_them(
+    session: Session, catalog: CatalogService, principal: PrincipalRef
+) -> None:
+    """A tombstone written before measures has no `measures` key; it restores none."""
+    table_id = _orders_table(catalog, principal)
+    write_model_entry(session, _fresh(session, Table, table_id), _measured_entry())
+    session.commit()
+    catalog.drop_table(principal, _ref("gold.orders"))
+    record = _record(session, table_id)
+    snapshot = dict(record.dropped_table or {})
+    assert snapshot.pop("measures")
+    record.dropped_table = snapshot
+    session.commit()
+
+    catalog.undrop_table(principal, _ref("gold.orders"))
+
+    model = read_table_model(session, _fresh(session, Table, table_id))
+    assert model is not None
+    assert (model.kind, model.measures) == ("fact", ())
+    assert session.scalars(select(DeclaredMeasure.id)).all() == []

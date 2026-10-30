@@ -252,6 +252,90 @@ lakana search "calendar" --model-kind fact --env dev
 `lakana table list` takes `--model-kind` too. The search rules are in
 [Search](../reference/search.md).
 
+## Declare the measures
+
+A fact's numbers are its measures. Say for each one how it is aggregated and what its numbers
+are, so that people and agents add up the right columns the right way. A measure is metadata:
+Lakana computes nothing from it, and a metric that spans tables or days still belongs in a SQL
+asset.
+
+<!-- source: docs/examples/see-a-tables-model/measures/assets/gold/fact_sales.sql -->
+```sql
+/* lakana
+description: Sales per store, product and day.
+kind: fact
+grain: One row per store, product and calendar day.
+key: [date, store_id, sku]
+references:
+  store_id: gold.dim_store
+  sku: gold.dim_product
+checks:
+  references: warn
+measures:
+  amount:
+    aggregation: sum
+    currency: EUR
+    label: Sales amount
+    description: What the store took for the product that day.
+*/
+SELECT date, store_id, sku, SUM(amount) AS amount
+FROM bronze.sales
+GROUP BY date, store_id, sku
+```
+
+`amount` is summed over every dimension (`additive`, which `sum` implies) and is in euros. A
+balance or a stock level that may be summed across stores but not across days says
+`additivity: semi` and `not_over: date`; a price says `aggregation: avg` and is never summed.
+Every rule is in [Measures](../reference/asset-front-matter.md#measures).
+
+After a deploy and a run, `lakana table get` lists the measures under the model, and the
+generated check `measures` has checked that `amount` is a number (a `decimal(38,1)` column), as
+`sum` needs:
+
+<!-- source: docs/examples/see-a-tables-model/run.sh#measures -->
+```bash
+lakana table get gold.fact_sales --env dev
+```
+
+<!-- output: see-a-tables-model#measures -->
+```text
+┌───────────────────┬──────────────────────────────────────────────────────────────────────────────┐
+│ name              │ fact_sales                                                                   │
+│ namespace         │ gold                                                                         │
+│ kind              │ TABLE                                                                        │
+│ state             │ published                                                                    │
+│ uuid              │ 1d93cd3c-a835-47f2-9416-98d2913ef53d                                         │
+│ metadata_location │ file:///tmp/tmp.hOsHF7pyxI/home/data/lakana/local/lake/dev/managed/gold/fac… │
+└───────────────────┴──────────────────────────────────────────────────────────────────────────────┘
+Description (from the project): Sales per store, product and day.
+┏━━━━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━┓
+┃ name     ┃ type          ┃ nullable ┃ description ┃ description_source ┃
+┡━━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━┩
+│ date     │ date          │ True     │             │                    │
+│ store_id │ int           │ True     │             │                    │
+│ sku      │ string        │ True     │             │                    │
+│ amount   │ decimal(38,1) │ True     │             │                    │
+└──────────┴───────────────┴──────────┴─────────────┴────────────────────┘
+Model: fact
+Grain: One row per store, product and calendar day.
+Key: date, store_id, sku
+  sku → gold.dim_product.sku (exists)
+  store_id → gold.dim_store.store_id (exists)
+Measures:
+  amount: sum, additive, EUR — Sales amount
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ check                    ┃ state  ┃ failing_rows ┃ finished_at               ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ key_not_null (generated) │ passed │ 0            │ 2026-10-30T16:03:58+00:00 │
+│ key_unique (generated)   │ passed │ 0            │ 2026-10-30T16:03:58+00:00 │
+│ measures (generated)     │ passed │ 0            │ 2026-10-30T16:03:58+00:00 │
+│ ref_sku (generated)      │ passed │ 0            │ 2026-10-30T16:03:58+00:00 │
+│ ref_store_id (generated) │ passed │ 0            │ 2026-10-30T16:03:58+00:00 │
+└──────────────────────────┴────────┴──────────────┴───────────────────────────┘
+```
+
+Search finds the column by its measure's label or description, `matched` `measure`.
+
 ## A reference sets the run order
 
 A table the project builds and another table references is built first, as if the referencing

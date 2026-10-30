@@ -1,14 +1,16 @@
-"""The model a project declares for a table, stored on the table row and its references as rows.
+"""The model a project declares for a table, stored on the table row, its references and measures.
 
 The asset header's `kind:`, `grain:` and `key:` are written onto the table row
-(`Table.model_kind`, `model_grain`, `model_key`), and each of its `references:` becomes a
-`DeclaredReference` row, so that REST, search and the metadata graph read them without loading a
-manifest. Only the header sets them: a deploy, a rollback and the table's creation by a run write
-them, through `lakana_core.catalog.descriptions`; nothing else does.
+(`Table.model_kind`, `model_grain`, `model_key`), each of its `references:` becomes a
+`DeclaredReference` row and each of its `measures:` becomes a `DeclaredMeasure` row, so that REST,
+search and the metadata graph read them without loading a manifest. Only the header sets them: a
+deploy, a rollback and the table's creation by a run write them, through
+`lakana_core.catalog.descriptions`; nothing else does.
 
 Every row is stored, whoever may read its target. A reader-facing path must filter by read rights:
 a reference by the source table (`DeclaredReference.source_table_id`) and by its target, which is
-held by name and resolved in the environment when it is read.
+held by name and resolved in the environment when it is read. A measure names only columns of its
+own table, so a reader of the table sees it whole.
 """
 
 from __future__ import annotations
@@ -25,9 +27,15 @@ from lakana_core.catalog.health import CheckHealth, latest_checks
 from lakana_core.catalog.identity import resolve_table_id
 from lakana_core.errors import ValidationError
 from lakana_core.identifiers import NamespacePath, TableRef
-from lakana_core.models import DeclaredReference, Namespace, Table
+from lakana_core.models import DeclaredMeasure, DeclaredReference, Namespace, Table
 from lakana_core.projects.asset_model import KEY_NONE, ResolvedReference
 from lakana_core.projects.manifest import entry_model, manifest_assets
+from lakana_core.projects.measures import (
+    MEASURE_PREFIX,
+    MEASURED_KINDS,
+    MEASURES_CHECK,
+    MeasureEntry,
+)
 from lakana_core.projects.model_checks import KEY_NOT_NULL, KEY_UNIQUE, REF_PREFIX
 
 
@@ -47,6 +55,8 @@ class TableModel:
         Whether the header declares `key: none`.
     references
         The declared references, ordered by the referencing column.
+    measures
+        The declared measures, ordered by column.
     """
 
     kind: str | None
@@ -54,16 +64,19 @@ class TableModel:
     key: tuple[str, ...]
     key_none: bool
     references: tuple[ResolvedReference, ...]
+    measures: tuple[MeasureEntry, ...] = ()
 
 
 def write_model_entry(session: Session, row: Table, entry: Mapping[str, Any]) -> None:
-    """Write the model of one manifest entry onto a table and its reference rows.
+    """Write the model of one manifest entry onto a table, its reference rows and measure rows.
 
-    A reference row the header still declares keeps its id; one it no longer declares is
-    deleted. An entry without a model clears what an earlier deploy wrote. A row that is not in
-    the database yet (a run creating its table) has no reference rows, so none are read for it,
-    and the namespace is read only when a row is added: a new table without a model costs no
-    statement. Nothing is committed.
+    A row the header still declares keeps its id; one it no longer declares is deleted. An entry
+    without a model clears what an earlier deploy wrote. A row that is not in the database yet (a
+    run creating its table) has no reference or measure rows, so none are read for it, and the
+    namespace is read only when a row is added: a new table without a model costs no statement.
+    Measure rows are written only for a kind in `MEASURED_KINDS` (a damaged entry may pair them
+    with another kind, or none) and read only when the stored kind was one of them, so a table of
+    any other kind has none. Nothing is committed.
 
     Parameters
     ----------
@@ -75,20 +88,80 @@ def write_model_entry(session: Session, row: Table, entry: Mapping[str, Any]) ->
         The manifest entry of the asset that produces it; untrusted.
     """
     model = entry_model(entry)
+    had_measures = row.model_kind in MEASURED_KINDS
     row.model_kind = model.kind if model else None
     row.model_grain = model.grain if model else None
     row.model_key = (KEY_NONE if model.key_none else list(model.key) or None) if model else None
-    wanted = {r.column: r for r in (model.references if model else ())}
     state = inspect(row)
+    stored = not (state.pending or state.transient)
+    added = [
+        *_sync_references(session, row, model.references if model else (), stored=stored),
+        *_sync_measures(
+            session,
+            row,
+            model.measures if model and model.kind in MEASURED_KINDS else (),
+            stored=stored and had_measures,
+        ),
+    ]
+    if not added:
+        return
+    environment_id = _environment_of(session, row)
+    for target in added:
+        target.environment_id = environment_id
+        session.add(target)
+
+
+def _environment_of(session: Session, row: Table) -> uuid.UUID:
+    """Read the environment of a table through its namespace.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    row
+        The table.
+
+    Returns
+    -------
+    uuid.UUID
+        Its environment's id.
+    """
+    namespace = session.get(Namespace, row.namespace_id)
+    assert namespace is not None  # nosec B101 -- a table row's namespace is never missing
+    return namespace.environment_id
+
+
+def _sync_references(
+    session: Session, row: Table, references: tuple[ResolvedReference, ...], *, stored: bool
+) -> list[DeclaredReference]:
+    """Make a table's stored reference rows what its header declares, and build the missing ones.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    row
+        The table.
+    references
+        The declared references.
+    stored
+        Whether the row is in the database already; a new one has no reference rows to read.
+
+    Returns
+    -------
+    list of DeclaredReference
+        The rows to add, not yet in the session and without their environment.
+    """
+    wanted = {r.column: r for r in references}
     existing = (
-        {}
-        if state.pending or state.transient
-        else {
+        {
             r.source_column: r
             for r in session.scalars(
                 select(DeclaredReference).where(DeclaredReference.source_table_id == row.id)
             )
         }
+        if stored
+        else {}
     )
     for column, found in existing.items():
         ref = wanted.get(column)
@@ -96,22 +169,81 @@ def write_model_entry(session: Session, row: Table, entry: Mapping[str, Any]) ->
             session.delete(found)
         else:
             found.target_name, found.target_column = ref.target, ref.target_column
-    added = [ref for column, ref in wanted.items() if column not in existing]
-    if not added:
-        return
-    namespace = session.get(Namespace, row.namespace_id)
-    assert namespace is not None  # nosec B101 -- a table row's namespace is never missing
-    for ref in added:
-        session.add(
-            DeclaredReference(
-                id=uuid.uuid4(),
-                environment_id=namespace.environment_id,
-                table=row,
-                source_column=ref.column,
-                target_name=ref.target,
-                target_column=ref.target_column,
-            )
+    return [
+        DeclaredReference(
+            id=uuid.uuid4(),
+            table=row,
+            source_column=ref.column,
+            target_name=ref.target,
+            target_column=ref.target_column,
         )
+        for column, ref in wanted.items()
+        if column not in existing
+    ]
+
+
+def _copy_measure(target: DeclaredMeasure, measure: MeasureEntry) -> None:
+    """Set a measure row's fields from a declared measure.
+
+    Parameters
+    ----------
+    target
+        The row.
+    measure
+        The declaration.
+    """
+    target.aggregation, target.additivity = measure.aggregation, measure.additivity
+    target.not_over = list(measure.not_over)
+    target.unit, target.currency = measure.unit, measure.currency
+    target.label, target.description = measure.label, measure.description
+
+
+def _sync_measures(
+    session: Session, row: Table, measures: tuple[MeasureEntry, ...], *, stored: bool
+) -> list[DeclaredMeasure]:
+    """Make a table's stored measure rows what its header declares, and build the missing ones.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    row
+        The table.
+    measures
+        The declared measures.
+    stored
+        Whether the row may have measure rows already: it is in the database, and its stored
+        kind was one of `MEASURED_KINDS`.
+
+    Returns
+    -------
+    list of DeclaredMeasure
+        The rows to add, not yet in the session and without their environment.
+    """
+    wanted = {m.column: m for m in measures}
+    existing = (
+        {
+            m.column: m
+            for m in session.scalars(
+                select(DeclaredMeasure).where(DeclaredMeasure.table_id == row.id)
+            )
+        }
+        if stored
+        else {}
+    )
+    for column, found in existing.items():
+        measure = wanted.get(column)
+        if measure is None:
+            session.delete(found)
+        else:
+            _copy_measure(found, measure)
+    added: list[DeclaredMeasure] = []
+    for column, measure in wanted.items():
+        if column not in existing:
+            target = DeclaredMeasure(id=uuid.uuid4(), table=row, column=column)
+            _copy_measure(target, measure)
+            added.append(target)
+    return added
 
 
 def find_project_table(session: Session, environment_id: uuid.UUID, dotted: str) -> Table | None:
@@ -153,7 +285,8 @@ def clear_removed_models(
 
     Called by a deploy and a rollback, in their transaction, next to
     `sync_project_descriptions`. A table in `previous` but not in `current` that has a row in
-    the environment loses its model columns and its reference rows; its descriptions stay.
+    the environment loses its model columns, its reference rows and its measure rows; its
+    descriptions stay.
     Nothing is committed.
 
     Parameters
@@ -171,11 +304,17 @@ def clear_removed_models(
         row = find_project_table(session, environment_id, dotted)
         if row is None:
             continue
+        had_measures = row.model_kind in MEASURED_KINDS
         row.model_kind = row.model_grain = row.model_key = None
         for found in session.scalars(
             select(DeclaredReference).where(DeclaredReference.source_table_id == row.id)
         ):
             session.delete(found)
+        if had_measures:
+            for measure in session.scalars(
+                select(DeclaredMeasure).where(DeclaredMeasure.table_id == row.id)
+            ):
+                session.delete(measure)
 
 
 def read_table_model(session: Session, row: Table) -> TableModel | None:
@@ -194,7 +333,8 @@ def read_table_model(session: Session, row: Table) -> TableModel | None:
     Returns
     -------
     TableModel or None
-        The model, or `None` when the row records none (no kind, grain, key or reference).
+        The model, or `None` when the row records none (no kind, grain, key, reference or
+        measure).
     """
     references = tuple(
         ResolvedReference(r.source_column, r.target_name, r.target_column)
@@ -204,11 +344,40 @@ def read_table_model(session: Session, row: Table) -> TableModel | None:
             .order_by(DeclaredReference.source_column)
         )
     )
+    measures = (
+        tuple(
+            MeasureEntry(
+                m.column,
+                m.aggregation,
+                m.additivity,
+                tuple(m.not_over or ()),
+                m.unit,
+                m.currency,
+                m.label,
+                m.description,
+            )
+            for m in session.scalars(
+                select(DeclaredMeasure)
+                .where(DeclaredMeasure.table_id == row.id)
+                .order_by(DeclaredMeasure.column)
+            )
+        )
+        if row.model_kind in MEASURED_KINDS
+        else ()
+    )
     stored_key = row.model_key
-    if row.model_kind is None and row.model_grain is None and stored_key is None and not references:
+    if (
+        row.model_kind is None
+        and row.model_grain is None
+        and stored_key is None
+        and not references
+        and not measures
+    ):
         return None
     key = tuple(stored_key) if isinstance(stored_key, list) else ()
-    return TableModel(row.model_kind, row.model_grain, key, stored_key == KEY_NONE, references)
+    return TableModel(
+        row.model_kind, row.model_grain, key, stored_key == KEY_NONE, references, measures
+    )
 
 
 def incoming_references(
@@ -280,6 +449,61 @@ class ModelReferenceView:
 
 
 @dataclass(frozen=True)
+class MeasureView:
+    """One declared measure as a reader is shown it.
+
+    Parameters
+    ----------
+    id
+        ``<ns.table>/measure_<column>``, with the table's current name.
+    column
+        The measure's column.
+    aggregation
+        The default aggregation.
+    additivity
+        ``additive``, ``semi`` or ``non``.
+    not_over
+        The columns a ``semi`` measure must not be summed over.
+    unit
+        The unit, or `None`.
+    currency
+        The ISO 4217 currency, or `None`.
+    label
+        The label, or `None`.
+    description
+        The description, or `None`.
+    """
+
+    id: str
+    column: str
+    aggregation: str
+    additivity: str
+    not_over: tuple[str, ...]
+    unit: str | None
+    currency: str | None
+    label: str | None
+    description: str | None
+
+
+def measure_id(table: str, column: str) -> str:
+    """Build a measure's canonical id.
+
+    Parameters
+    ----------
+    table
+        The dotted name of the table that declares it.
+    column
+        The measure's column.
+
+    Returns
+    -------
+    str
+        ``<ns.table>/measure_<column>``.
+    """
+    return f"{table}/{MEASURE_PREFIX}{column}"
+
+
+@dataclass(frozen=True)
 class TableModelView:
     """The model a table's header declares, filtered for one reader.
 
@@ -298,10 +522,14 @@ class TableModelView:
     hidden_references
         How many references point at a table the reader may not read. A missing target counts
         here too for such a reader, so a hidden reference never says whether its target exists.
+    measures
+        Every declared measure, by column. A measure names only columns of the table, so every
+        reader of the table sees all of them.
     checks
         The newest result of each check the current model generates (`key_unique` and
-        `key_not_null` for a key, `ref_<column>` for each shown reference), by name. A stored
-        result of a generated check the header no longer declares is left out.
+        `key_not_null` for a key, `ref_<column>` for each shown reference, `measures` for
+        declared measures), by name. A stored result of a generated check the header no longer
+        declares is left out.
     """
 
     kind: str | None
@@ -310,6 +538,7 @@ class TableModelView:
     key_none: bool
     references: tuple[ModelReferenceView, ...]
     hidden_references: int
+    measures: tuple[MeasureView, ...]
     checks: tuple[CheckHealth, ...]
 
 
@@ -453,6 +682,7 @@ def model_view(
     references, hidden = _outgoing(session, table, model, may_read)
     generated = {KEY_UNIQUE, KEY_NOT_NULL} if model.key else set()
     generated |= {f"{REF_PREFIX}{r.column}" for r in references}
+    generated |= {MEASURES_CHECK} if model.measures else set()
     return TableModelView(
         kind=model.kind,
         grain=model.grain,
@@ -460,6 +690,20 @@ def model_view(
         key_none=model.key_none,
         references=references,
         hidden_references=hidden,
+        measures=tuple(
+            MeasureView(
+                id=measure_id(table.dotted(), m.column),
+                column=m.column,
+                aggregation=m.aggregation,
+                additivity=m.additivity,
+                not_over=m.not_over,
+                unit=m.unit,
+                currency=m.currency,
+                label=m.label,
+                description=m.description,
+            )
+            for m in model.measures
+        ),
         checks=tuple(
             c
             for c in latest_checks(session, row.id)

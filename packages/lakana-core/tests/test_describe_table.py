@@ -765,3 +765,26 @@ def test_a_stored_target_that_is_no_table_name_is_counted_as_hidden(star: Star) 
     model = star.catalog(AllowAllAuthorization()).describe_table(star.admin, star.fact_ref).model
     assert model is not None
     assert (model.references, model.hidden_references) == ((), 1)
+
+
+def test_a_measures_check_result_shows_while_the_header_declares_measures(star: Star) -> None:
+    star.record_generated("gold.fact_sales", "measures")
+    catalog = star.catalog(AllowAllAuthorization())
+    before = catalog.describe_table(star.admin, star.fact_ref).model
+    assert before is not None and [c.check for c in before.checks] == ["key_unique"]
+    entry = _fact_entry(("store_id", "gold.dim_store"))
+    cast("dict[str, object]", entry["model"])["measures"] = [
+        {
+            "column": "amount",
+            "aggregation": "sum",
+            "additivity": "additive",
+            "not_over": [],
+            "unit": None,
+            "currency": "EUR",
+            "label": None,
+            "description": None,
+        }
+    ]
+    star.write_model("fact_sales", entry)
+    after = catalog.describe_table(star.admin, star.fact_ref).model
+    assert after is not None and [c.check for c in after.checks] == ["key_unique", "measures"]

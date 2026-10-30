@@ -622,7 +622,8 @@ MASKS: tuple[tuple[str, re.Pattern[str], str], ...] = tuple(
         ("port", r"\b(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]):\d{2,5}\b", r"\1:<port>"),
         (
             "path",
-            r"(?<![\w.:/-])/(?:tmp|var/tmp|var/folders|home|Users|root|run/user)/[^\s'\"`<>),;]*",
+            r"(?:(?<=file://)|(?<![\w.:/-]))"
+            r"/(?:tmp|var/tmp|var/folders|home|Users|root|run/user)/[^\s'\"`<>),;]*",
             "<path>",
         ),
         (

@@ -97,7 +97,8 @@ def search(
     first, then names that start with TEXT, then names that contain it, then descriptions.
     Runs are found by the first four or more characters of their id, their job or their
     repository. A table is also found by the grain its asset header declares, and shows its kind
-    in brackets after its name. You see only what you may read. Use --output json for every field.
+    in brackets after its name; a column by the label or description of its declared measure.
+    You see only what you may read. Use --output json for every field.
 
     Parameters
     ----------

@@ -37,12 +37,12 @@ def search(
     """Search an environment.
 
     Finds tables, columns, runs, jobs, repositories and principals whose names or
-    descriptions, or a table's declared grain, contain `q` (1 to 200 characters,
-    case-insensitive; run ids need four characters or more), one page at a time. What the
-    caller may not read is left out of the hits, not refused: tables and columns need
-    `READ_TABLE`, runs `READ_ENVIRONMENT`, principals the right to list them. Needs
-    `READ_ENVIRONMENT`. Answers 404 when the environment does not
-    exist and 422 for a `q`, `model_kind` or paging value out of range.
+    descriptions, a table's declared grain, or the label or description of a column's
+    declared measure contain `q` (1 to 200 characters, case-insensitive; run ids need four
+    characters or more), one page at a time. What the caller may not read is left out of the
+    hits, not refused: tables and columns need `READ_TABLE`, runs `READ_ENVIRONMENT`,
+    principals the right to list them. Needs `READ_ENVIRONMENT`. Answers 404 when the
+    environment does not exist and 422 for a `q`, `model_kind` or paging value out of range.
 
     Parameters
     ----------

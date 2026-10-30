@@ -13,6 +13,9 @@ terminal, the SDK or through REST. You need an environment with at least one tab
   text shown is the one `lakana table get` shows;
 - the grain a table's asset header declares (`grain: One row per store and day`), which shows when
   you search for a part of that sentence;
+- the label and description of a column's measure (`label: Sales amount`, see
+  [Declare the measures](declare-a-tables-model.md#declare-the-measures)), which finds the column
+  with `matched` `measure`;
 - runs: the first four or more characters of a run's id, its job and its repository;
 - people and service accounts, if you may list them.
 

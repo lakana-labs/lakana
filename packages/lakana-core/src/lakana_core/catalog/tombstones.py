@@ -43,6 +43,7 @@ from lakana_core.models import (
     AuditEventType,
     ColumnDescription,
     ColumnMask,
+    DeclaredMeasure,
     DeclaredReference,
     Grant,
     Namespace,
@@ -55,6 +56,7 @@ from lakana_core.models import (
     TableType,
 )
 from lakana_core.models.table import table_kind
+from lakana_core.projects.measures import MEASURED_KINDS
 from lakana_core.storage.resolver import table_root_from_metadata_location
 
 _M = TypeVar("_M")
@@ -297,8 +299,8 @@ def snapshot_table(session: Session, row: Table, namespace: NamespacePath) -> di
     dict of str to object
         ``namespace`` (the path's parts), ``row`` (every column of the row),
         ``column_descriptions`` and ``columns`` (their rows without the table id) and
-        ``references`` (the model's reference rows without the table and environment ids); the
-        rows a table's id cascades to and that only describe it.
+        ``references`` and ``measures`` (the model's reference and measure rows without the table
+        and environment ids); the rows a table's id cascades to and that only describe it.
     """
     descriptions = session.scalars(
         select(ColumnDescription).where(ColumnDescription.table_id == row.id)
@@ -307,6 +309,11 @@ def snapshot_table(session: Session, row: Table, namespace: NamespacePath) -> di
     references = session.scalars(
         select(DeclaredReference).where(DeclaredReference.source_table_id == row.id)
     ).all()
+    measures = (
+        session.scalars(select(DeclaredMeasure).where(DeclaredMeasure.table_id == row.id)).all()
+        if row.model_kind in MEASURED_KINDS
+        else ()
+    )
     leave_out = frozenset({"table_id"})
     return {
         "namespace": list(namespace.parts),
@@ -316,6 +323,9 @@ def snapshot_table(session: Session, row: Table, namespace: NamespacePath) -> di
         "references": [
             _row_json(r, leave_out=frozenset({"source_table_id", "environment_id"}))
             for r in references
+        ],
+        "measures": [
+            _row_json(m, leave_out=frozenset({"table_id", "environment_id"})) for m in measures
         ],
     }
 
@@ -593,7 +603,7 @@ def _known_principals(session: Session, ids: Iterable[object]) -> set[str]:
 def restore_table(
     session: Session, snapshot: Mapping[str, Any], *, namespace_id: uuid.UUID, name: str
 ) -> Table:
-    """Insert a dropped table's row, column descriptions, columns and references again, uncommitted.
+    """Insert a dropped table's row, descriptions, columns, references and measures, uncommitted.
 
     A principal deleted since the drop (the owner, the author of a description, who set its
     retention) is left out, as the row's foreign key would have done had the row stayed.
@@ -657,6 +667,16 @@ def restore_table(
                 DeclaredReference,
                 reference,
                 source_table_id=row.id,
+                environment_id=namespace.environment_id,
+            )
+        )
+    # A tombstone written before measures were kept has none.
+    for measure in snapshot.get("measures", ()):
+        session.add(
+            _row_from_json(
+                DeclaredMeasure,
+                measure,
+                table_id=row.id,
                 environment_id=namespace.environment_id,
             )
         )

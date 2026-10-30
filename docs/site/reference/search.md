@@ -10,7 +10,7 @@ columns of tables that existed before search are filled in. For the steps, see
 | Kind | Matched against | `matched` is |
 |---|---|---|
 | `table` | the table's name, its name with the namespace (`silver.orders`), its shown description, its declared grain | `name`, `description` or `grain` |
-| `column` | the column's name, its shown description | `name` or `description` |
+| `column` | the column's name, its shown description, the label and description of its measure | `name`, `description` or `measure` |
 | `run` | the run's id (four hex characters or more, with or without dashes), its job, its repository | `id`, `job` or `repository` |
 | `principal` | the principal's name | `name` |
 
@@ -44,8 +44,8 @@ read.
 | run | `READ_ENVIRONMENT` |
 | principal | the right to list principals: `MANAGE_PRINCIPAL`, which the `ADMIN` role holds |
 
-A result you may not see is left out, never refused. A description, a grain and a kind are shown, even as a snippet, only
-for a table you may read. An environment that does not exist is `404` for a caller who may read
+A result you may not see is left out, never refused. A description, a grain, a kind and a measure's label and description are
+shown, even as a snippet, only for a table you may read. An environment that does not exist is `404` for a caller who may read
 environments; for anyone else the answer is an empty page, as for an environment that exists.
 
 The search examines at most 5,000 candidate matches in the order above. A caller who may read only
@@ -74,7 +74,7 @@ The answer is `{"results": [...], "limit": N, "offset": N, "has_more": true|fals
 | `run` | `run_id`, `job`, `repository`, `status` |
 | `principal` | `principal`, `principal_type` |
 
-`snippet` is set when `matched` is `description` or `grain`: at most 160 characters of that text around
+`snippet` is set when `matched` is `description`, `grain` or `measure`: at most 160 characters of that text around
 the first hit. A bad `q`, `limit`, `offset` or `kind` is `422` and says the range.
 
 ## Command and SDK

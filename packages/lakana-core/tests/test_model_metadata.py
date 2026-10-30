@@ -20,12 +20,15 @@ from lakana_core.catalog.model_metadata import (
     TableModel,
     clear_removed_models,
     incoming_references,
+    measure_id,
+    model_view,
     read_table_model,
     write_model_entry,
 )
 from lakana_core.catalog.service import CatalogService
 from lakana_core.identifiers import NamespacePath, TableRef
 from lakana_core.models import (
+    DeclaredMeasure,
     DeclaredReference,
     Environment,
     EnvironmentDeployment,
@@ -40,6 +43,7 @@ from lakana_core.projects.asset_model import KEY_NONE, ResolvedReference
 from lakana_core.projects.dag import build_graph
 from lakana_core.projects.frontmatter import AssetMetadata
 from lakana_core.projects.manifest import build_manifest
+from lakana_core.projects.measures import MeasureEntry
 from lakana_core.projects.project_config import ResolvedProjectConfig
 
 _GOLD = NamespacePath.from_parts(["gold"])
@@ -324,7 +328,7 @@ def _pending_fact(session: Session, catalog: CatalogService) -> Table:
     return row
 
 
-def _statements_while(session: Session, write: Callable[[], None]) -> list[str]:
+def _statements_while(session: Session, write: Callable[[], object]) -> list[str]:
     """Run a write and list the statements it issued.
 
     Parameters
@@ -396,3 +400,248 @@ def test_a_source_dropped_while_references_are_read_is_counted_not_an_error(
     )
     found = model_metadata.references_view(session, row, _FACT, lambda _: True)
     assert (found.incoming, found.hidden_incoming) == ((), 1)
+
+
+@pytest.fixture
+def fact_row(session: Session, catalog: CatalogService, principal: PrincipalRef) -> Table:
+    """Create `gold.fact_sales` in `dev` and return its row.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    catalog
+        The allow-all catalog with `gold`.
+    principal
+        Who creates it.
+
+    Returns
+    -------
+    Table
+        The row.
+    """
+    catalog.create_table(principal, _FACT, schema=_SCHEMA)
+    return session.scalars(select(Table)).one()
+
+
+_AMOUNT = {
+    "column": "amount",
+    "aggregation": "sum",
+    "additivity": "additive",
+    "not_over": [],
+    "unit": None,
+    "currency": "EUR",
+    "label": "Amount",
+    "description": None,
+}
+_STOCK = {
+    "column": "stock",
+    "aggregation": "sum",
+    "additivity": "semi",
+    "not_over": ["date"],
+    "unit": "count",
+    "currency": None,
+    "label": None,
+    "description": None,
+}
+
+
+def _entry(*measures: dict) -> dict:
+    """Build a manifest entry of a fact with the given measures.
+
+    Parameters
+    ----------
+    *measures
+        Stored measure mappings.
+
+    Returns
+    -------
+    dict
+        The entry.
+    """
+    return {
+        "table": "gold.fact_sales",
+        "key": ["date", "store_id"],
+        "model": {
+            "kind": "fact",
+            "grain": _GRAIN,
+            "key_none": False,
+            "references": [],
+            "checks": {},
+            "measures": list(measures),
+        },
+    }
+
+
+def test_write_model_entry_keeps_updates_and_deletes_measure_rows(
+    session: Session, fact_row: Table
+) -> None:
+    write_model_entry(session, fact_row, _entry(_AMOUNT, _STOCK))
+    session.commit()
+    kept_id = session.scalars(
+        select(DeclaredMeasure.id).where(DeclaredMeasure.column == "amount")
+    ).one()
+    write_model_entry(session, fact_row, _entry({**_AMOUNT, "label": "Net amount"}))
+    session.commit()
+    rows = session.scalars(select(DeclaredMeasure)).all()
+    assert [(r.id, r.column, r.label) for r in rows] == [(kept_id, "amount", "Net amount")]
+    model = read_table_model(session, fact_row)
+    assert model is not None
+    assert model.measures == (
+        MeasureEntry("amount", "sum", "additive", (), None, "EUR", "Net amount", None),
+    )
+    write_model_entry(session, fact_row, {"table": "gold.fact_sales"})
+    session.commit()
+    assert session.scalars(select(DeclaredMeasure)).all() == []
+
+
+def test_a_damaged_measure_entry_is_not_written(session: Session, fact_row: Table) -> None:
+    write_model_entry(session, fact_row, _entry({**_AMOUNT, "currency": "E" * 50}))
+    session.commit()
+    assert session.scalars(select(DeclaredMeasure)).all() == []
+
+
+def test_clear_removed_models_deletes_the_measures(session: Session, fact_row: Table) -> None:
+    write_model_entry(session, fact_row, _entry(_AMOUNT))
+    session.commit()
+    clear_removed_models(session, _env_id(session), {"assets": [_entry(_AMOUNT)]}, {"assets": []})
+    session.commit()
+    assert session.scalars(select(DeclaredMeasure)).all() == []
+
+
+def test_a_new_table_with_measures_gets_them_on_creation(
+    session: Session, catalog: CatalogService
+) -> None:
+    """A run creating a fact writes its measure rows without reading any; the namespace once."""
+    row = _pending_fact(session, catalog)
+    entry = _entry(_AMOUNT, _STOCK)
+    entry["model"]["references"] = [
+        {"column": "store_id", "target": "gold.dim_store", "target_column": "store_id"}
+    ]
+    seen = _statements_while(session, lambda: write_model_entry(session, row, entry))
+    assert [s for s in seen if "table_measures" in s or "table_references" in s] == []
+    assert len([s for s in seen if "FROM namespaces" in s]) <= 1
+    session.commit()
+    model = read_table_model(session, row)
+    assert model is not None
+    assert [m.column for m in model.measures] == ["amount", "stock"]
+    assert model.measures[1].not_over == ("date",)
+    assert model.references == (_REF,)
+
+
+def test_model_view_shows_every_measure_with_its_id(session: Session, fact_row: Table) -> None:
+    write_model_entry(session, fact_row, _entry(_STOCK, _AMOUNT))
+    session.commit()
+    view = model_view(session, fact_row, _FACT, lambda target: False, lambda *_: False)
+    assert view is not None
+    assert [(m.id, m.additivity, m.not_over) for m in view.measures] == [
+        ("gold.fact_sales/measure_amount", "additive", ()),
+        ("gold.fact_sales/measure_stock", "semi", ("date",)),
+    ]
+    assert measure_id("gold.fact_sales", "amount") == "gold.fact_sales/measure_amount"
+
+
+def _dimension(*measures: dict) -> dict:
+    """Build the entry of `_entry`, declared a dimension.
+
+    Parameters
+    ----------
+    *measures
+        Stored measure mappings; a deploy refuses any on a dimension.
+
+    Returns
+    -------
+    dict
+        The entry.
+    """
+    entry = _entry(*measures)
+    entry["model"]["kind"] = "dimension"
+    return entry
+
+
+def _measure_reads(session: Session, call: Callable[[], object]) -> list[str]:
+    """List the statements on `table_measures` that a call issues.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    call
+        A callable without arguments.
+
+    Returns
+    -------
+    list of str
+        The statements that name `table_measures`.
+    """
+    return [s for s in _statements_while(session, call) if "table_measures" in s]
+
+
+@pytest.mark.parametrize("entry", [{"table": "gold.fact_sales"}, _dimension()])
+def test_a_stored_table_that_cannot_carry_measures_never_reads_them(
+    session: Session, fact_row: Table, catalog: CatalogService, principal: PrincipalRef, entry: dict
+) -> None:
+    """Only a fact or a wide table has measure rows; describe, deploy, clear and drop know it."""
+    write_model_entry(session, fact_row, entry)
+    session.commit()
+    assert _measure_reads(session, lambda: write_model_entry(session, fact_row, entry)) == []
+    session.commit()
+    assert _measure_reads(session, lambda: read_table_model(session, fact_row)) == []
+    assert (
+        _measure_reads(
+            session,
+            lambda: clear_removed_models(
+                session, _env_id(session), {"assets": [entry]}, {"assets": []}
+            ),
+        )
+        == []
+    )
+    session.rollback()
+    assert _measure_reads(session, lambda: catalog.drop_table(principal, _FACT)) == []
+
+
+def test_a_fact_that_becomes_a_dimension_loses_its_measures(
+    session: Session, fact_row: Table
+) -> None:
+    write_model_entry(session, fact_row, _entry(_AMOUNT))
+    session.commit()
+    write_model_entry(session, fact_row, _dimension())
+    session.commit()
+    assert session.scalars(select(DeclaredMeasure)).all() == []
+    model = read_table_model(session, fact_row)
+    assert model is not None and (model.kind, model.measures) == ("dimension", ())
+
+
+def test_a_fact_still_reads_and_writes_its_measures(session: Session, fact_row: Table) -> None:
+    write_model_entry(session, fact_row, _entry(_AMOUNT))
+    session.commit()
+    assert _measure_reads(session, lambda: write_model_entry(session, fact_row, _entry(_STOCK)))
+    session.commit()
+    seen: list[TableModel | None] = []
+    assert _measure_reads(session, lambda: seen.append(read_table_model(session, fact_row)))
+    assert seen[0] is not None and [m.column for m in seen[0].measures] == ["stock"]
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [_dimension(_AMOUNT), {"table": "gold.fact_sales", "model": {"measures": [_AMOUNT]}}],
+)
+def test_measures_on_a_kind_that_cannot_carry_them_are_not_written(
+    session: Session, fact_row: Table, entry: dict
+) -> None:
+    """A damaged entry writes no row, so writing it again cannot collide (no 500)."""
+    for _ in range(2):
+        write_model_entry(session, fact_row, entry)
+        session.commit()
+    assert session.scalars(select(DeclaredMeasure)).all() == []
+
+
+def test_a_fact_rewritten_as_a_dimension_with_measures_loses_them(
+    session: Session, fact_row: Table
+) -> None:
+    write_model_entry(session, fact_row, _entry(_AMOUNT))
+    session.commit()
+    for _ in range(2):
+        write_model_entry(session, fact_row, _dimension(_AMOUNT))
+        session.commit()
+    assert session.scalars(select(DeclaredMeasure)).all() == []

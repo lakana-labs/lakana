@@ -129,7 +129,9 @@ Key: date, store_id, sku
 
 Each reference says whether its target table exists now (`exists` or `missing`). `Key: none —
 grain not checked` stands for `key: none`. A table whose header declares no model has no Model
-block, and `model` is `null` in `--output json`.
+block, and `model` is `null` in `--output json`. A fact or wide table that declares measures lists
+them under `Measures:`, one line each: the column, its aggregation, its additivity, its unit or
+currency and its label ([Declare the measures](declare-a-tables-model.md#declare-the-measures)).
 
 `lakana table references` shows both directions: what the table references, and which tables
 reference it. These are the references the model declares, not lineage: lineage is how data
