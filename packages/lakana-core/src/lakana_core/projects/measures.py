@@ -16,7 +16,9 @@ from pydantic import field_validator, model_validator
 from lakana_core.identifiers import shown
 from lakana_core.projects.project_config import (
     IDENTIFIER_MESSAGE,
+    MAX_DESCRIPTION_CHARS,
     StrictModel,
+    checked_label,
     checked_text,
     unsafe_identifier,
 )
@@ -90,11 +92,8 @@ CURRENCY_CODES = _CURRENT_CURRENCIES | _WITHDRAWN_CURRENCIES
 MAX_MEASURES = 100
 """The most measures one table declares; `lakana.assets` repeats the number."""
 
-MAX_LABEL_CHARS = 100
-"""The longest `label:`, in characters."""
-
-MAX_MEASURE_DESCRIPTION_CHARS = 4000
-"""The longest `description:` of a measure: the limit of a column description."""
+MAX_MEASURE_DESCRIPTION_CHARS = MAX_DESCRIPTION_CHARS
+"""The longest `description:` of a measure: the limit of every limited description."""
 
 MAX_MEASURE_COLUMN_BYTES = 1024
 """The most UTF-8 bytes of a measure column: `table_measures.column` holds 1024 characters."""
@@ -428,7 +427,7 @@ class MeasureSpec(StrictModel):
         """
         if value is None:
             return value
-        return checked_text(value, limit=MAX_LABEL_CHARS, one_line=True)
+        return checked_label(value)
 
     @field_validator("description")
     @classmethod

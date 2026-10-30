@@ -29,8 +29,9 @@ from lakana_core.models import (
     Table,
     TableType,
 )
+from lakana_core.projects.project_config import MAX_DESCRIPTION_CHARS
 
-MAX_DESCRIPTION_LENGTH = 4000
+MAX_DESCRIPTION_LENGTH = MAX_DESCRIPTION_CHARS
 """The most characters a description may have, for a table and for a column."""
 
 DescriptionSource = Literal["project", "edited"]

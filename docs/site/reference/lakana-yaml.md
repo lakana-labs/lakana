@@ -52,6 +52,41 @@ Without it, tasks run on the worker's own Python. It applies to every environmen
 version's first release (`>=3.12`, or `==3.12.*`). A worker that runs tasks without containers
 (`LAKANA_RUN__RUNNER=local`, local mode) refuses a project that names another Python than its own.
 
+## `main_language` and `translations`
+
+`main_language:` names the language your asset headers (descriptions, labels, columns) are
+written in. `translations.require` lists languages in which every header text must also have a
+translation. Both are optional.
+
+```yaml
+main_language: de          # the language of the asset headers
+translations:
+  require: [fr]            # optional: refuse a deploy with a gap in French
+```
+
+- Without `main_language:`, your texts are in the instance's main language, the server setting
+  `LAKANA_MAIN_LANGUAGE` (default `en`).
+- A project that ships a `translations/` folder or a non-empty `require` must declare
+  `main_language:`. A later change of the server setting would otherwise silently relabel every
+  header text.
+- Both keys apply to the whole project: an `environments:` override cannot set them.
+- `translations.require` is empty by default: a text without a translation shows in the main
+  language.
+- A language is a tag of the form language, optional script, optional region (BCP 47), written
+  `en`, `de`, `fr-CH` or `zh-Hant`: lower case for the language, Title case for the script, upper
+  case for the region.
+
+What a deploy says when the file is wrong:
+
+| Mistake | Message |
+|---|---|
+| A tag that is no tag | ``main_language: `English` is not a language tag Lakana takes: a language, then optionally a script and a region (BCP 47), such as en, de, fr-CH or zh-Hant`` |
+| A tag in the wrong case | ``main_language: `DE-ch` is written `de-CH`; use that spelling`` |
+| A bad tag in `require` | the same two texts, with `translations.require.0:` as the field |
+| A language listed twice | ``translations.require: lists `fr` twice`` |
+| The main language in `require` | ``translations.require: `de` is the main language, whose texts are the asset headers; remove it from the list`` |
+| `require` without `main_language:` | ``a project with translations must say which language its asset headers are written in; add `main_language:` with that language, such as `main_language: en`, to lakana.yaml`` |
+
 ## Jobs
 
 A **job** is a name for a selection of assets, with an optional schedule, that can also start

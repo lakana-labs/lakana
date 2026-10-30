@@ -10,12 +10,14 @@ import pytest
 from lakana_core.projects.issues import ProjectIssue, ProjectValidationError
 from lakana_core.projects.limits import DeployLimits
 from lakana_core.projects.project_config import (
+    NEEDS_MAIN_LANGUAGE,
     SUPPORTED_TASK_PYTHONS,
     ChecksDefaults,
     EnvironmentOverride,
     JobOverride,
     ProjectConfig,
     ScheduleOverride,
+    checked_label,
     parse_project_config,
 )
 
@@ -837,3 +839,82 @@ def test_a_python_without_a_task_image_is_refused_at_deploy(text: str, message: 
     with pytest.raises(ProjectValidationError) as caught:
         parse_project_config(text)
     assert message in str(caught.value)
+
+
+_TAG_TEXT = (
+    "is not a language tag Lakana takes: a language, then optionally a script and a region "
+    "(BCP 47), such as en, de, fr-CH or zh-Hant"
+)
+
+
+def _messages_of(text: str) -> list[str]:
+    """Parse a `lakana.yaml` that must be refused and return its issue messages.
+
+    Parameters
+    ----------
+    text
+        The file's content.
+
+    Returns
+    -------
+    list of str
+        The messages, in order (the file's `_issues` returns the issues themselves).
+    """
+    return [issue.message for issue in _issues(text)]
+
+
+def test_main_language_and_require_parse() -> None:
+    config = parse_project_config("main_language: de\ntranslations:\n  require: [fr, it]\n")
+    assert config.main_language == "de"
+    assert config.translations.require == ("fr", "it")
+    assert parse_project_config("repo: x\n").main_language is None
+
+
+def test_a_main_language_that_is_not_a_tag_or_not_canonical_is_refused() -> None:
+    assert _messages_of("main_language: English\n") == [f"main_language: `English` {_TAG_TEXT}"]
+    assert _messages_of("main_language: DE-ch\n") == [
+        "main_language: `DE-ch` is written `de-CH`; use that spelling"
+    ]
+
+
+def test_require_takes_tags_once_each() -> None:
+    assert _messages_of("main_language: de\ntranslations:\n  require: [French]\n") == [
+        f"translations.require.0: `French` {_TAG_TEXT}"
+    ]
+    assert _messages_of("main_language: de\ntranslations:\n  require: [fr, fr]\n") == [
+        "translations.require: lists `fr` twice"
+    ]
+
+
+def test_require_may_not_name_the_main_language() -> None:
+    assert _messages_of("main_language: de\ntranslations:\n  require: [de]\n") == [
+        "translations.require: `de` is the main language, whose texts are the asset headers; "
+        "remove it from the list"
+    ]
+
+
+def test_require_needs_a_main_language() -> None:
+    assert _messages_of("translations:\n  require: [fr]\n") == [NEEDS_MAIN_LANGUAGE]
+
+
+def test_an_environment_may_not_set_the_languages() -> None:
+    messages = _messages_of("main_language: de\nenvironments:\n  prod:\n    main_language: fr\n")
+    assert messages == ["environments.prod.main_language: Extra inputs are not permitted"]
+
+
+def test_the_resolved_configuration_leaves_the_languages_out() -> None:
+    config = parse_project_config("main_language: de\ntranslations:\n  require: [fr]\n")
+    resolved = config.resolved_for("dev")
+    assert "main_language" not in resolved.model_dump()
+    assert "translations" not in resolved.model_dump()
+
+
+def test_checked_label_is_one_short_line() -> None:
+    assert checked_label("  Net revenue ") == "Net revenue"
+    for bad, message in (
+        ("", "must not be empty"),
+        ("a\nb", "must be one line"),
+        ("x" * 101, "must be at most 100 characters"),
+    ):
+        with pytest.raises(ValueError, match=message):
+            checked_label(bad)
