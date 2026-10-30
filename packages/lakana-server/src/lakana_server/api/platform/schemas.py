@@ -2964,8 +2964,9 @@ class TaskRunOut(BaseModel):
         ``pending`` again after that claim's worker drained. ``false`` once it has ended.
     schema_note
         One neutral sentence when one of the task's writes removed or replaced a column of its
-        table (``This run changed the table's columns; an administrator has been told what to
-        check.``), else `null`. The same for every caller, whether or not a row filter or column
+        table (``This run removed or retyped a column of the table. An administrator can see in
+        this run what else that affects; if other people read this table, tell one.``), else
+        `null`. The same for every caller, whether or not a row filter or column
         mask uses the column.
     policy_warnings
         For a caller who may manage policies (MANAGE_POLICY), the row filters and column masks
