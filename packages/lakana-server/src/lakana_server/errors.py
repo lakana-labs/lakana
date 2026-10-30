@@ -26,6 +26,7 @@ from lakana_core.errors import (
     NotFoundError,
     NotPublishedError,
     PermissionDenied,
+    StorageRefusedError,
     StorageUnavailableError,
     ValidationError,
 )
@@ -99,6 +100,7 @@ _STATUS_CODES: dict[type[LakanaError], int] = {
     DownloadConcurrencyLimitError: 503,
     ClientDisconnectedError: 400,
     StorageUnavailableError: 503,
+    StorageRefusedError: 502,
     AuditUnavailableError: 503,
 }
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 TABLE_STORAGE_UNREACHABLE = (
     "The storage of environment '{environment}' could not be reached, so no table was read. Try "
     "again in a moment; if it keeps failing, tell the operator that this environment's storage "
@@ -47,3 +49,48 @@ def is_storage_unavailable(exc: BaseException) -> bool:
     return isinstance(exc, OSError) and not isinstance(
         exc, (FileNotFoundError, IsADirectoryError, NotADirectoryError, PermissionError)
     )
+
+
+_CREDENTIAL_ERRORS = frozenset(
+    {
+        "NoCredentialsError",
+        "PartialCredentialsError",
+        "CredentialRetrievalError",
+        "NoAuthTokenError",
+        "TokenRetrievalError",
+        "UnauthorizedSSOTokenError",
+    }
+)
+"""The botocore errors that say the credentials are missing or unusable, by class name."""
+
+
+def storage_failure(exc: BaseException) -> Literal["refused", "unreachable"] | None:
+    """Tell whether a storage call failed because the storage refused or did not answer.
+
+    s3fs translates an error answer of the storage into an `OSError` (wrong keys into a
+    `PermissionError`), but re-raises botocore's own errors as they are: an endpoint that does
+    not answer is `EndpointConnectionError`, missing keys `NoCredentialsError`, neither an
+    `OSError`. They are recognised by their class's module, so core does not import botocore,
+    which only s3fs needs.
+
+    Parameters
+    ----------
+    exc
+        What the storage call raised.
+
+    Returns
+    -------
+    str or None
+        ``refused`` for a refusal of the credentials (`PermissionError`, or a botocore
+        credentials error); ``unreachable`` for a storage that did not answer
+        (`is_storage_unavailable`, or any other botocore error); `None` for anything else, a
+        missing file among them.
+    """
+    if isinstance(exc, PermissionError):
+        return "refused"
+    if is_storage_unavailable(exc):
+        return "unreachable"
+    botocore = [c for c in type(exc).__mro__ if c.__module__ == "botocore.exceptions"]
+    if not botocore:
+        return None
+    return "refused" if any(c.__name__ in _CREDENTIAL_ERRORS for c in botocore) else "unreachable"

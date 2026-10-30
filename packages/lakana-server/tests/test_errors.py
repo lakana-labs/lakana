@@ -19,6 +19,7 @@ from lakana_core.errors import (
     NotFoundError,
     NotPublishedError,
     PermissionDenied,
+    StorageRefusedError,
     ValidationError,
 )
 from lakana_server.errors import install_exception_handlers
@@ -56,6 +57,7 @@ def _client_raising(exc: LakanaError) -> TestClient:
         (ConflictError("conflict"), 409),
         (ValidationError("bad input"), 422),
         (PermissionDenied("no"), 403),
+        (StorageRefusedError("refused"), 502),
     ],
 )
 def test_each_lakana_error_maps_to_its_documented_status_code(
@@ -143,3 +145,11 @@ def test_kept_after_check_is_a_409_on_the_platform_api() -> None:
 
     assert response.status_code == 409
     assert response.json() == {"detail": text, "type": "KeptAfterCheckError"}
+
+
+def test_a_storage_refusal_does_not_ask_the_client_to_retry() -> None:
+    """Wrong credentials stay wrong: 502 without `Retry-After`, unlike an unreachable storage."""
+    with _client_raising(StorageRefusedError("refused")) as client:
+        response = client.get("/boom")
+    assert response.status_code == 502
+    assert "Retry-After" not in response.headers

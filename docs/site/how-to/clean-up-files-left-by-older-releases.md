@@ -103,18 +103,20 @@ storage root may be shared with other environments.
 
 ## When the storage refuses or does not answer
 
-Both calls answer 503, and nothing is deleted, when the environment's storage refuses its
-credentials or does not answer:
+Nothing is deleted when the environment's storage refuses its credentials or does not answer.
+The command fails with the cause and what to do:
 
 - ``The storage of environment 'legacy' refused access, so no directory was listed or deleted.``
-  The access key or secret the environment uses is wrong, or may not list its root. Check the
-  environment's storage options and the secret they name (see
-  [Manage secrets](manage-secrets.md)), then run the command again.
-- ``The storage of environment 'legacy' could not be reached, …`` The storage did not answer. Try
-  again in a moment; if it keeps failing, check that the storage is running.
+  (REST: 502.) The access key or secret the environment uses is wrong, missing, or may not list
+  its root. Running the command again does not help: check the environment's storage options and
+  the secret they name (see [Manage secrets](manage-secrets.md)), then run it again. The server's
+  log has a `storage_refused` line.
+- ``The storage of environment 'legacy' could not be reached, …`` (REST: 503 with `Retry-After`.)
+  The storage did not answer, or its address is wrong. Try again in a moment; if it keeps
+  failing, check that the storage is running and that the environment's endpoint is right. The
+  server's log has a `storage_unreachable` line.
 
-The server's log has a `storage_unreachable` line for each, with the kind of error and
-never the storage's own text.
+Neither the message nor the log line has the storage's own text, which can name a host or a path.
 
 ## Related
 

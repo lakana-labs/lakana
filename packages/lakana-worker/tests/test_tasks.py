@@ -2365,9 +2365,9 @@ def test_a_sql_table_asset_whose_result_lost_a_column_is_told_a_step_it_can_take
     task = _task(world, "silver.orders")
     assert task.status is TaskStatus.FAILED
     assert task.error_message == (
-        f"{_MISMATCH} A SQL asset that replaces its table cannot change the table's columns: "
-        "make its SELECT return the columns and types silver.orders has (list them instead of "
-        "`*`), then run it again."
+        f"{_MISMATCH} A SQL asset that replaces its table cannot drop, rename or retype the "
+        "table's columns: make its SELECT return the columns and types silver.orders has (list "
+        "them instead of `*`), then run it again."
     )
 
 

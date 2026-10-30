@@ -222,6 +222,7 @@ from lakana_core.errors import (
     NotFoundError,
     NotPublishedError,
     PermissionDenied,
+    StorageRefusedError,
     StorageUnavailableError,
     UnsupportedTableError,
     ValidationError,
@@ -310,6 +311,7 @@ from lakana_core.storage.unavailable import (
     ORPHANED_STORAGE_UNREACHABLE,
     TABLE_STORAGE_UNREACHABLE,
     is_storage_unavailable,
+    storage_failure,
 )
 
 logger = logging.getLogger(__name__)
@@ -1566,8 +1568,10 @@ class CatalogService:
             If `older_than_days` is not 1 to 3650.
         NotFoundError
             If no environment has that name.
+        StorageRefusedError
+            If the storage refused the environment's credentials (`_orphaned`).
         StorageUnavailableError
-            If the storage refused access or did not answer (`_orphaned`).
+            If the storage did not answer.
         """
         self._authz.authorize(p, Action.MANAGE_ENVIRONMENT, Securable.instance_scope())
         return self._orphaned(name, older_than_days, find_orphaned_locations)
@@ -1604,9 +1608,9 @@ class CatalogService:
             If `older_than_days` is not 1 to 3650.
         NotFoundError
             If no environment has that name.
-        StorageUnavailableError
-            If the storage refused access or did not answer during the walk; nothing was
-            deleted.
+        StorageRefusedError, StorageUnavailableError
+            If the storage refused the credentials or did not answer during the walk, which
+            comes before any deletion; nothing was deleted.
         """
         self._authz.authorize(p, Action.MANAGE_ENVIRONMENT, Securable.instance_scope())
         report = self._orphaned(name, older_than_days, delete_orphaned_locations)
@@ -1656,13 +1660,16 @@ class CatalogService:
 
         Raises
         ------
+        StorageRefusedError
+            If the storage refused the environment's credentials while the directories were
+            walked (`ORPHANED_STORAGE_REFUSED`, log code `storage_refused`).
         StorageUnavailableError
-            If the storage refused access (`ORPHANED_STORAGE_REFUSED`) or did not answer
-            (`ORPHANED_STORAGE_UNREACHABLE`) while the directories were walked; the walk comes
-            before any deletion, so nothing was deleted. The log line has the error's class,
-            never its text, which can name a host or a path.
-        OSError
-            Any other storage error (a missing file, for one), as the storage raised it.
+            If the storage did not answer while the directories were walked
+            (`ORPHANED_STORAGE_UNREACHABLE`, log code `storage_unreachable`). The walk comes
+            before any deletion, so nothing was deleted either way, and the log line has the
+            error's class, never its text, which can name a host or a path.
+        Exception
+            Any other error (a missing file, for one), as it was raised (`storage_failure`).
         """
         check_days(older_than_days, "older_than_days")
         environment = target(self._session, name)
@@ -1677,20 +1684,27 @@ class CatalogService:
                 now=now,
                 older_than_days=older_than_days,
             )
-        except OSError as exc:
-            refused = isinstance(exc, PermissionError)
-            if not refused and not is_storage_unavailable(exc):
+        except Exception as exc:
+            failure = storage_failure(exc)
+            if failure is None:
                 raise
             self._session.rollback()
+            refused = failure == "refused"
+            code = LogEvent.STORAGE_REFUSED if refused else LogEvent.STORAGE_UNREACHABLE
             logger.warning(
                 "The storage of environment %s %s while its orphaned locations were walked (%s).",
                 shown(name),
                 "refused access" if refused else "could not be reached",
                 type(exc).__name__,
-                extra=log_event(LogEvent.STORAGE_UNREACHABLE),
+                extra=log_event(code),
             )
-            message = ORPHANED_STORAGE_REFUSED if refused else ORPHANED_STORAGE_UNREACHABLE
-            raise StorageUnavailableError(message.format(environment=shown(name))) from None
+            if refused:
+                raise StorageRefusedError(
+                    ORPHANED_STORAGE_REFUSED.format(environment=shown(name))
+                ) from None
+            raise StorageUnavailableError(
+                ORPHANED_STORAGE_UNREACHABLE.format(environment=shown(name))
+            ) from None
 
     def _lock_environment_row(self, name: str) -> Environment | None:
         """Lock an environment's row by name, deleted or not, and read it again.

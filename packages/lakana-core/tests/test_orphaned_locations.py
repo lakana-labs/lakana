@@ -17,6 +17,7 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
+from botocore.exceptions import ConnectTimeoutError, EndpointConnectionError, NoCredentialsError
 from core_test_helpers import ActionAllowList, _earlier_layout
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -45,6 +46,7 @@ from lakana_core.db import create_engine
 from lakana_core.errors import (
     NotFoundError,
     PermissionDenied,
+    StorageRefusedError,
     StorageUnavailableError,
     ValidationError,
 )
@@ -1288,10 +1290,34 @@ def test_a_location_in_another_case_keeps_the_directory(
 
 
 @pytest.mark.parametrize(
-    ("error", "said"),
+    ("error", "kind", "said", "code"),
     [
-        (PermissionError("denied /secret/path"), "refused access"),
-        (ConnectionRefusedError("host:9000"), "could not be reached"),
+        # What s3fs raises: wrong keys arrive translated, the rest as botocore raised them.
+        (
+            PermissionError("denied /secret/path"),
+            StorageRefusedError,
+            "refused access",
+            "storage_refused",
+        ),
+        (NoCredentialsError(), StorageRefusedError, "refused access", "storage_refused"),
+        (
+            EndpointConnectionError(endpoint_url="http://seaweedfs:8333/secret"),
+            StorageUnavailableError,
+            "could not be reached",
+            "storage_unreachable",
+        ),
+        (
+            ConnectTimeoutError(endpoint_url="http://seaweedfs:8333/secret"),
+            StorageUnavailableError,
+            "could not be reached",
+            "storage_unreachable",
+        ),
+        (
+            ConnectionRefusedError("host:9000"),
+            StorageUnavailableError,
+            "could not be reached",
+            "storage_unreachable",
+        ),
     ],
 )
 def test_a_storage_that_refuses_or_does_not_answer_is_a_storage_error(
@@ -1299,8 +1325,10 @@ def test_a_storage_that_refuses_or_does_not_answer_is_a_storage_error(
     store: Path,
     principal: PrincipalRef,
     caplog: pytest.LogCaptureFixture,
-    error: OSError,
+    error: Exception,
+    kind: type[Exception],
     said: str,
+    code: str,
 ) -> None:
     """The cause and the next step, never the storage's own text; the log line has the code."""
     _leftover(_location(store, "refused"))
@@ -1310,13 +1338,15 @@ def test_a_storage_that_refuses_or_does_not_answer_is_a_storage_error(
 
     with mock.patch.object(FsspecStorage, "list_children", failing):
         for call in (catalog.find_orphaned_locations, catalog.delete_orphaned_locations):
-            with pytest.raises(StorageUnavailableError) as raised:
+            with pytest.raises(kind) as raised:
                 call(principal, "dev")
+            assert type(raised.value) is kind
             message = str(raised.value)
             assert message.startswith(f"The storage of environment 'dev' {said}")
             assert "no directory was listed or deleted" in message
             assert str(error) not in message
-    assert [getattr(r, "event", None) for r in caplog.records].count("storage_unreachable") == 2
+    events = [getattr(r, "event", None) for r in caplog.records]
+    assert events.count(code) == 2
     assert str(error) not in caplog.text
 
 

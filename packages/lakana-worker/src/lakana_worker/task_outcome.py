@@ -222,9 +222,9 @@ def sql_asset_mismatch_message(text: str, table: str, mode: WriteMode) -> str:
             f"{table} has."
         )
     return (
-        f"{detail} A SQL asset that replaces its table cannot change the table's columns: make "
-        f"its SELECT return the columns and types {table} has (list them instead of `*`), then "
-        "run it again."
+        f"{detail} A SQL asset that replaces its table cannot drop, rename or retype the "
+        f"table's columns: make its SELECT return the columns and types {table} has (list them "
+        "instead of `*`), then run it again."
     )
 
 

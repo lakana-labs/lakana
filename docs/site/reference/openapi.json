@@ -880,7 +880,7 @@
           "environments"
         ],
         "summary": "List table directories without a location record",
-        "description": "Lists the directories that older releases left under the environment's storage with no table to own them. Deletes nothing. Needs `MANAGE_ENVIRONMENT` on the instance. Answers 404 when there is no such environment, 422 when `older_than_days` is out of range, and 503 when the environment's storage refused access or did not answer (the message says which, and what to do).",
+        "description": "Lists the directories that older releases left under the environment's storage with no table to own them. Deletes nothing. Needs `MANAGE_ENVIRONMENT` on the instance. Answers 404 when there is no such environment, 422 when `older_than_days` is out of range, 502 when the environment's storage refused its credentials (fix them; asking again does not help), and 503 when the storage did not answer (ask again after `Retry-After`).",
         "operationId": "list_orphaned_locations_api_v1_environments__name__orphaned_locations_get",
         "parameters": [
           {
@@ -964,6 +964,16 @@
               }
             }
           },
+          "502": {
+            "description": "A service behind the server, such as the environment's storage, refused it; the message says what to fix. Asking again does not help until then.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
           "503": {
             "description": "The server cannot do this right now; ask again after the time in `Retry-After`.",
             "content": {
@@ -993,7 +1003,7 @@
           "environments"
         ],
         "summary": "Delete table directories without a location record",
-        "description": "Deletes the directories that older releases left under the environment's storage and whose files are older than `older_than_days`. Needs `MANAGE_ENVIRONMENT` on the instance. Answers 404 when there is no such environment, 422 when `older_than_days` is out of range, and 503 when the environment's storage refused access or did not answer before anything was deleted (the message says which, and what to do).",
+        "description": "Deletes the directories that older releases left under the environment's storage and whose files are older than `older_than_days`. Needs `MANAGE_ENVIRONMENT` on the instance. Answers 404 when there is no such environment, 422 when `older_than_days` is out of range, 502 when the environment's storage refused its credentials, and 503 when it did not answer; either comes before anything is deleted.",
         "operationId": "delete_orphaned_locations_api_v1_environments__name__orphaned_locations_delete_post",
         "parameters": [
           {
@@ -1068,6 +1078,16 @@
           },
           "404": {
             "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "A service behind the server, such as the environment's storage, refused it; the message says what to fix. Asking again does not help until then.",
             "content": {
               "application/json": {
                 "schema": {
