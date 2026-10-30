@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import dataclasses
+import difflib
 import os
+import time
 from pathlib import Path
 
 import pytest
 from test_projects_dag import make_asset
 
+from lakana_core.projects import project_config as project_config_module
 from lakana_core.projects import translations as translations_module
+from lakana_core.projects import yaml_loader
 from lakana_core.projects.asset_model import ParsedAsset
 from lakana_core.projects.discovery import _read
 from lakana_core.projects.frontmatter import AssetMetadata
@@ -128,8 +132,43 @@ def test_a_flat_folder_of_canonical_yaml_files_is_found(tmp_path: Path) -> None:
 
 def test_no_folder_finds_nothing(tmp_path: Path) -> None:
     assert discover_translations(tmp_path, limits=_LIMITS) == ([], [])
-    _files(tmp_path, {"translations": "not a folder\n"})
-    assert discover_translations(tmp_path, limits=_LIMITS) == ([], [])
+
+
+def test_a_file_named_translations_is_refused(tmp_path: Path) -> None:
+    _files(tmp_path, {"translations": "gold.t: {label: T}\n"})
+    assert discover_translations(tmp_path, limits=_LIMITS) == (
+        [],
+        [
+            ProjectIssue(
+                "translations",
+                None,
+                "translations must be a folder holding one <language>.yaml file per language, "
+                "such as translations/de.yaml; move this file there under its language's name",
+            )
+        ],
+    )
+
+
+def test_a_yaml_suffix_in_another_case_gets_the_rename_hint(tmp_path: Path) -> None:
+    root = _files(tmp_path, {"translations/fr.YAML": "{}\n", "translations/de.Yml": "{}\n"})
+    _, issues = discover_translations(root, limits=_LIMITS)
+    assert [i.render() for i in issues] == [
+        "translations/de.Yml: a translation file ends in .yaml; rename it to translations/de.yaml",
+        "translations/fr.YAML: a translation file ends in .yaml; rename it to translations/fr.yaml",
+    ]
+
+
+def test_every_entry_counts_toward_the_fifty_and_the_rest_is_not_examined(
+    tmp_path: Path,
+) -> None:
+    files = {f"translations/note{i:03}.md": "x\n" for i in range(60)}
+    root = _files(tmp_path, {**files, "translations/zu.yaml": "{}\n"})
+    found, issues = discover_translations(root, limits=_LIMITS)
+    assert found == []
+    assert len(issues) == 51
+    assert issues[-1].message == (
+        "translations/ holds 61 files; a project has at most 50 languages besides its main language"
+    )
 
 
 def test_wrong_names_and_shapes_are_refused_with_the_fix(tmp_path: Path) -> None:
@@ -302,14 +341,17 @@ def test_a_file_that_is_not_a_mapping_of_tables_is_refused() -> None:
 
 
 def test_too_many_keys_are_refused_before_validation(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(translations_module, "MAX_FILE_ENTRIES", 3)
+    monkeypatch.setattr(translations_module, "MAX_FILE_ENTRIES", 8)
     text = (
         "gold.fact_sales:\n  columns: {a: {label: A}, b: {label: B}}\n  measures: {c: {label: C}}\n"
     )
-    assert _issues_of({"fr.yaml": text}) == [
-        "translations/fr.yaml: names 4 tables, columns and measures, and a translation file "
-        "names at most 3; keep only the texts of tables, columns and measures the project builds"
-    ]
+    refusal = (
+        "translations/fr.yaml: has {} keys, and a translation file has at most 8; keep only the "
+        "texts of tables, columns and measures the project builds"
+    )
+    assert _issues_of({"fr.yaml": text}) == [refusal.format(9)]
+    nested = "gold.fact_sales:\n  x: {y: {z: [1, 2, {w: 3}]}}\n  v: {u: 1, t: 2}\n"
+    assert _issues_of({"fr.yaml": nested}) == [refusal.format(11)]
     under = _issues_of({"fr.yaml": "gold.fact_sales:\n  columns: {a: {label: A}}\n"})
     assert [line.split(": ", 1)[1].startswith("`a` is not a column") for line in under] == [True]
 
@@ -522,3 +564,134 @@ def test_translated_texts_lists_every_text_of_an_entry() -> None:
         "gold.t.measures.m.label",
         "gold.t.measures.m.description",
     ]
+
+
+def _counting(monkeypatch: pytest.MonkeyPatch) -> dict[str, int]:
+    """Count YAML parses and close-name searches, and make the per-issue re-parse fail.
+
+    Parameters
+    ----------
+    monkeypatch
+        The fixture.
+
+    Returns
+    -------
+    dict of str to int
+        ``parses`` and ``suggestions``, updated as they happen.
+    """
+    counts = {"parses": 0, "suggestions": 0}
+    parse, close = yaml_loader._NoAliasLoader.get_single_node, difflib.get_close_matches
+
+    def counted_parse(self: yaml_loader._NoAliasLoader) -> object:
+        """Count one parse.
+
+        Parameters
+        ----------
+        self
+            The loader.
+
+        Returns
+        -------
+        object
+            The node.
+        """
+        counts["parses"] += 1
+        return parse(self)
+
+    def counted_close(word: str, possibilities: list[str], n: int, cutoff: float) -> list[str]:
+        """Count one search.
+
+        Parameters
+        ----------
+        word
+            As for difflib.
+        possibilities
+            As for difflib.
+        n
+            As for difflib.
+        cutoff
+            As for difflib.
+
+        Returns
+        -------
+        list of str
+            The matches.
+        """
+        counts["suggestions"] += 1
+        return close(word, possibilities, n=n, cutoff=cutoff)
+
+    def no_reparse(*args: object, **kwargs: object) -> None:
+        """Fail: a line must come from the one parse.
+
+        Parameters
+        ----------
+        *args
+            Ignored.
+        **kwargs
+            Ignored.
+
+        Raises
+        ------
+        AssertionError
+            Always.
+        """
+        raise AssertionError("re-parsed for a key line")
+
+    monkeypatch.setattr(yaml_loader._NoAliasLoader, "get_single_node", counted_parse)
+    monkeypatch.setattr(translations_module.difflib, "get_close_matches", counted_close)
+    monkeypatch.setattr(yaml_loader, "key_line", no_reparse)
+    monkeypatch.setattr(project_config_module, "key_line", no_reparse)
+    monkeypatch.setattr(translations_module, "key_line", no_reparse, raising=False)
+    return counts
+
+
+def test_issues_are_capped_per_file_and_each_file_is_parsed_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    counts = _counting(monkeypatch)
+    unknown = "".join(f"silver.t{i:03}: {{label: X}}\n" for i in range(60))
+    extra = "gold.fact_sales:\n" + "".join(f"  k{i:03}: x\n" for i in range(55))
+    issues = _issues_of({"fr.yaml": unknown, "de.yaml": extra})
+    assert counts == {"parses": 3, "suggestions": 50}  # each file once, and lakana.yaml
+    fr = [i for i in issues if i.startswith("translations/fr.yaml")]
+    de = [i for i in issues if i.startswith("translations/de.yaml")]
+    assert len(fr) == len(de) == 51
+    assert fr[0] == (
+        "translations/fr.yaml:1: `silver.t000` is not a table this project builds; fix the "
+        "name, or remove the entry"
+    )
+    assert fr[49].startswith("translations/fr.yaml:50: `silver.t049`")
+    assert fr[50] == (
+        "translations/fr.yaml: … and 10 more problems in translations/fr.yaml; fix the ones "
+        "above and deploy again to see the rest"
+    )
+    assert de[0] == "translations/de.yaml:2: gold.fact_sales.k000: Extra inputs are not permitted"
+    assert de[50] == (
+        "translations/de.yaml: … and 5 more problems in translations/de.yaml; fix the ones "
+        "above and deploy again to see the rest"
+    )
+
+
+def test_a_worst_case_file_is_checked_in_bounded_time(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Adversarial: thousands of unknown tables and nested extra keys cost one parse.
+
+    Before, every issue parsed the file again, and a 1 MiB file took hours. The file is kept
+    small enough for the unit-test budget; the structural bound (`_counting`) holds at any size.
+    """
+    counts = _counting(monkeypatch)
+    unknown = "".join(f"gold.fact_sales{i:05}: {{label: X}}\n" for i in range(1500))
+    bad = "".join(f"silver.t{i:05}: {{bad: {{deep: {{er: 1}}}}}}\n" for i in range(800))
+    extra = "gold.fact_sales:\n" + "".join(f"  k{i:05}: {{x: 1}}\n" for i in range(800))
+    text = unknown + bad + extra
+    assert len(text.encode()) < 100 * 1024
+    found = [DiscoveredTranslation("translations/fr.yaml", "fr", text)]
+    config = parse_project_config("main_language: en\n")
+    counts["parses"] = 0
+    started = time.perf_counter()
+    parsed, problems = parse_translations(found, limits=_LIMITS)
+    issues = translation_issues(config, [_sales()], parsed)
+    elapsed = time.perf_counter() - started
+    assert counts["parses"] == 1
+    assert counts["suggestions"] <= 50
+    assert len(problems) == len(issues) == 51
+    assert elapsed < 1.0, f"took {elapsed:.2f} s"

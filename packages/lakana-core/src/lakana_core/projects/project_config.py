@@ -26,7 +26,7 @@ from lakana_core.jobs.tz import load_zone
 from lakana_core.languages import language_problem
 from lakana_core.projects.issues import ProjectIssue, ProjectValidationError
 from lakana_core.projects.limits import DeployLimits
-from lakana_core.projects.yaml_loader import YamlError, key_line, load_yaml
+from lakana_core.projects.yaml_loader import KeyLines, YamlError, key_line, load_yaml
 
 Materialize = Literal["table", "view", "incremental"]
 """How an asset is materialized; mapped onto M5a write modes in `manifest`."""
@@ -941,6 +941,7 @@ def pydantic_issues(
     line: int | None,
     text: str | None = None,
     prefix: Sequence[str] = (),
+    lines: KeyLines | None = None,
 ) -> list[ProjectIssue]:
     """Turn a pydantic error into one issue per failing field.
 
@@ -958,6 +959,9 @@ def pydantic_issues(
     prefix
         Keys in front of every location, such as a translation file's table name; used for the
         message and the line.
+    lines
+        The document's key lines from its one parse; preferred over `text`, which is parsed
+        again for every error.
 
     Returns
     -------
@@ -971,7 +975,9 @@ def pydantic_issues(
         if error["type"] == "value_error":  # pydantic prefixes what a validator raised
             message = message.removeprefix("Value error, ")
         where = line
-        if where is None and text is not None:
+        if where is None and lines is not None:
+            where = lines.line(parts)
+        elif where is None and text is not None:
             where = key_line(text, parts)
         issues.append(
             ProjectIssue(

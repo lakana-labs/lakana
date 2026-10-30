@@ -5,7 +5,13 @@ from __future__ import annotations
 import pytest
 
 from lakana_core.errors import ValidationError
-from lakana_core.projects.yaml_loader import YamlError, key_line, load_yaml
+from lakana_core.projects.yaml_loader import (
+    KeyLines,
+    YamlError,
+    key_line,
+    load_yaml,
+    load_yaml_with_lines,
+)
 
 
 def test_loads_plain_mappings_and_lists() -> None:
@@ -141,3 +147,25 @@ def test_key_line_is_none_for_a_missing_first_key_or_bad_yaml() -> None:
     assert key_line("a: [\n", ("a",)) is None
     assert key_line("a: &x 1\n", ("a",)) is None
     assert key_line("- 1\n", ("a",)) is None
+
+
+def test_one_parse_gives_the_value_and_every_key_line() -> None:
+    text = "a:\n  b:\n    c: 1\n  d: [x, {e: 2}]\n'7': 3\n"
+    value, lines = load_yaml_with_lines(text, what="t", max_bytes=1024)
+    assert value == {"a": {"b": {"c": 1}, "d": ["x", {"e": 2}]}, "7": 3}
+    for path in [("a", "b", "c"), ("a", "d"), ("a", "b", "missing", "deeper"), ("7",), ("z",)]:
+        assert lines.line(path) == key_line(text, path)
+    assert lines.line(("a", "d", 1, "e")) == 4
+    assert lines.line(()) is None
+
+
+def test_key_lines_of_an_empty_document_find_nothing() -> None:
+    value, lines = load_yaml_with_lines("", what="t", max_bytes=10)
+    assert (value, lines) == (None, KeyLines())
+    assert lines.line(("a",)) is None
+
+
+def test_load_with_lines_refuses_what_load_refuses() -> None:
+    with pytest.raises(YamlError, match="anchors and aliases") as info:
+        load_yaml_with_lines("a: 1\nb: &x 2\n", what="t", max_bytes=1024)
+    assert info.value.line == 2

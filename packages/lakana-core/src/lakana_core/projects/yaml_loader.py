@@ -9,11 +9,12 @@ reads would not be what the platform applies.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
 
 import yaml
 from yaml.events import AliasEvent, CollectionStartEvent, ScalarEvent
-from yaml.nodes import MappingNode, Node
+from yaml.nodes import MappingNode, Node, SequenceNode
 
 from lakana_core.errors import ValidationError
 
@@ -132,6 +133,145 @@ class _NoAliasLoader(yaml.SafeLoader):
             self._depth -= 1
 
 
+def _load(text: str, *, what: str, max_bytes: int) -> tuple[object, Node | None]:
+    """Parse one YAML document from untrusted repository content, keeping its node tree.
+
+    Parameters
+    ----------
+    text
+        The document.
+    what
+        Names the document in error messages, e.g. ``"lakana.yaml"``.
+    max_bytes
+        Largest accepted UTF-8 size.
+
+    Returns
+    -------
+    tuple of (object, Node or None)
+        The loaded value (`None` for an empty document) and the composed node it was built from.
+
+    Raises
+    ------
+    YamlError
+        As `load_yaml` documents.
+    """
+    size = len(text.encode("utf-8"))
+    if size > max_bytes:
+        raise YamlError(f"{what} is larger than {max_bytes // 1024} KiB.")
+    loader = _NoAliasLoader(text)  # nosec B506 -- a SafeLoader subclass
+    try:
+        node = loader.get_single_node()
+        return (None if node is None else loader.construct_document(node)), node
+    except _AliasRefused as exc:
+        line = exc.problem_mark.line + 1 if exc.problem_mark is not None else None
+        raise YamlError(f"{what}: anchors and aliases are not allowed.", line) from exc
+    except _AmbiguousMapping as exc:
+        line = exc.problem_mark.line + 1 if exc.problem_mark is not None else None
+        raise YamlError(f"{what}: {exc.problem}.", line) from exc
+    except _TooDeep as exc:
+        line = exc.problem_mark.line + 1 if exc.problem_mark is not None else None
+        raise YamlError(f"{what}: nesting is deeper than {_MAX_DEPTH} levels.", line) from exc
+    except yaml.MarkedYAMLError as exc:
+        line = exc.problem_mark.line + 1 if exc.problem_mark is not None else None
+        raise YamlError(f"{what} is not valid YAML: {exc.problem}", line) from exc
+    except (ValueError, TypeError, OverflowError) as exc:
+        raise YamlError(f"{what} has an invalid value: {exc}") from exc
+    except yaml.YAMLError as exc:  # pragma: no cover -- every PyYAML parse error is marked
+        raise YamlError(f"{what} is not valid YAML.") from exc
+    finally:
+        loader.dispose()
+
+
+@dataclass(frozen=True)
+class KeyLines:
+    """The line of every key of one document, from the parse that loaded it.
+
+    `key_line` composes the document again on each call; a caller with many issues for one
+    document uses this instead, so reporting them costs one parse, not one per issue.
+
+    Parameters
+    ----------
+    lines
+        Path of keys from the top → the 1-based line of its last key. A key inside a list is
+        reached through the item's index.
+    """
+
+    lines: Mapping[tuple[object, ...], int] = field(default_factory=dict)
+
+    def line(self, path: Sequence[object]) -> int | None:
+        """Find a key's line as `key_line` does: the deepest key of `path` that exists.
+
+        Parameters
+        ----------
+        path
+            The keys from the top.
+
+        Returns
+        -------
+        int or None
+            The 1-based line; `None` if not even the first key exists.
+        """
+        for end in range(len(path), 0, -1):
+            found = self.lines.get(tuple(path[:end]))
+            if found is not None:
+                return found
+        return None
+
+
+def _key_lines(root: Node | None) -> KeyLines:
+    """Index the line of every key of a composed document.
+
+    Parameters
+    ----------
+    root
+        The document's node, or `None` for an empty one.
+
+    Returns
+    -------
+    KeyLines
+        Every key path and its line; a key's first occurrence wins.
+    """
+    lines: dict[tuple[object, ...], int] = {}
+    stack: list[tuple[tuple[object, ...], Node | None]] = [((), root)]
+    while stack:
+        path, node = stack.pop()
+        if isinstance(node, MappingNode):
+            # Every key is a scalar here: the load refused a list or mapping key as unhashable.
+            for key_node, value_node in node.value:
+                here = (*path, key_node.value)
+                lines.setdefault(here, key_node.start_mark.line + 1)
+                stack.append((here, value_node))
+        elif isinstance(node, SequenceNode):
+            stack.extend(((*path, index), item) for index, item in enumerate(node.value))
+    return KeyLines(lines)
+
+
+def load_yaml_with_lines(text: str, *, what: str, max_bytes: int) -> tuple[object, KeyLines]:
+    """Parse one YAML document once, returning its value and the line of every key.
+
+    Parameters
+    ----------
+    text
+        The document.
+    what
+        Names the document in error messages.
+    max_bytes
+        Largest accepted UTF-8 size.
+
+    Returns
+    -------
+    tuple of (object, KeyLines)
+        The loaded value (`None` for an empty document) and its keys' lines.
+
+    Raises
+    ------
+    YamlError
+        As `load_yaml` documents.
+    """
+    value, node = _load(text, what=what, max_bytes=max_bytes)
+    return value, _key_lines(node)
+
+
 def load_yaml(text: str, *, what: str, max_bytes: int) -> object:
     """Parse one YAML document from untrusted repository content.
 
@@ -156,27 +296,7 @@ def load_yaml(text: str, *, what: str, max_bytes: int) -> object:
         value PyYAML cannot construct, uses an anchor, alias or merge key, or
         repeats a key.
     """
-    size = len(text.encode("utf-8"))
-    if size > max_bytes:
-        raise YamlError(f"{what} is larger than {max_bytes // 1024} KiB.")
-    try:
-        return yaml.load(text, Loader=_NoAliasLoader)  # nosec B506 -- a SafeLoader subclass
-    except _AliasRefused as exc:
-        line = exc.problem_mark.line + 1 if exc.problem_mark is not None else None
-        raise YamlError(f"{what}: anchors and aliases are not allowed.", line) from exc
-    except _AmbiguousMapping as exc:
-        line = exc.problem_mark.line + 1 if exc.problem_mark is not None else None
-        raise YamlError(f"{what}: {exc.problem}.", line) from exc
-    except _TooDeep as exc:
-        line = exc.problem_mark.line + 1 if exc.problem_mark is not None else None
-        raise YamlError(f"{what}: nesting is deeper than {_MAX_DEPTH} levels.", line) from exc
-    except yaml.MarkedYAMLError as exc:
-        line = exc.problem_mark.line + 1 if exc.problem_mark is not None else None
-        raise YamlError(f"{what} is not valid YAML: {exc.problem}", line) from exc
-    except (ValueError, TypeError, OverflowError) as exc:
-        raise YamlError(f"{what} has an invalid value: {exc}") from exc
-    except yaml.YAMLError as exc:  # pragma: no cover -- every PyYAML parse error is marked
-        raise YamlError(f"{what} is not valid YAML.") from exc
+    return _load(text, what=what, max_bytes=max_bytes)[0]
 
 
 def _find_key(node: Node | None, name: object) -> tuple[Node, Node] | None:
