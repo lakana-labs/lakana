@@ -304,6 +304,15 @@ Each of these fails the deploy with an issue at the block's line:
 | ``checks: takes only key and references``, ``checks: key must be block, keep or warn`` | Another check family or failure mode. |
 | ``` `checks: key` sets how the key checks fail, but the asset declares no `key:`; declare `key:`, or remove `checks: key` ``` | A `checks` family for a field the asset does not declare (`references` likewise). |
 
+The deploy's error is shown to everyone who may read the environment, not only to you. The issues
+from ``Reference `…`: `gold.dim_store` declares no key`` down to the one about a reference too
+long to store say something about a target you may read: that it exists, its kind, its key or its
+columns, or what the run principal may read of it. Anyone else who reads the deploy
+(`lakana deploys show`, `lakana deploys list`) and may not read that target sees the line
+``Reference target `gold.dim_store` does not exist in environment `prod`, or you may not read it; …``
+in its place, as for a missing target. You, the deployer, and readers of the target see the whole
+text. A deploy that failed before this release keeps its text as it was stored.
+
 A project version in which an asset declares a model field (`key:` alone counts, so every project
 with a `write: merge` asset) needs workers of this release or later: a worker of an earlier one
 refuses its manifest. A deploy's changes list a table whose `kind`, `grain`, `references`,

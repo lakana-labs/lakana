@@ -3217,4 +3217,16 @@ def test_a_deploy_refuses_a_reference_it_cannot_resolve_and_a_key_the_select_lac
         "no key. Declare `key:` in its asset, or name the column: `id: bronze.events.<column>`."
         in run.error_message
     )
+    # The line tells of `bronze.events`: a reader who may not read it is shown a missing one's.
+    assert run.error_withheld_json == [
+        {
+            "line": "assets/gold/fact_visits.sql:1: Reference `id: bronze.events`: "
+            "`bronze.events` declares no key. Declare `key:` in its asset, or name the column: "
+            "`id: bronze.events.<column>`.",
+            "withheld": "assets/gold/fact_visits.sql:1: Reference target `bronze.events` does "
+            "not exist in environment `dev`, or you may not read it; build it first, or ask for "
+            "READ_TABLE on it.",
+            "targets": ["bronze.events"],
+        }
+    ]
     assert session.query(JobVersion).count() == 0

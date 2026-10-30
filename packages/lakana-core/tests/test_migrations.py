@@ -4586,3 +4586,39 @@ def test_0054_adds_the_check_message_state_null_on_old_rows(
             }
     finally:
         engine.dispose()
+
+
+_REVISION_0055 = "a5c9e7f1b3d4"
+
+
+@pytest.mark.usefixtures("_without_fsync")
+def test_0055_adds_the_withheld_lines_of_a_deploy_error_null_on_old_rows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Revision `0055`: `error_withheld_json` on deploy runs, and back.
+
+    Parameters
+    ----------
+    tmp_path
+        Holds the throwaway SQLite file.
+    monkeypatch
+        Points `lakana_core.config.Settings` at that file.
+    """
+    db_path = tmp_path / "migrated.db"
+    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    config = Config(str(ALEMBIC_INI))
+    command.upgrade(config, _REVISION_0055)
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        found = {c["name"]: c for c in inspect(engine).get_columns("deploy_runs")}
+        assert found["error_withheld_json"]["nullable"] is True
+    finally:
+        engine.dispose()
+
+    command.downgrade(config, _REVISION_0054)
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        names = {c["name"] for c in inspect(engine).get_columns("deploy_runs")}
+        assert "error_withheld_json" not in names
+    finally:
+        engine.dispose()

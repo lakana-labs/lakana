@@ -274,3 +274,37 @@ def test_a_reference_too_long_to_store_is_refused_with_what_to_shorten() -> None
         [_fact({"c" * 1024: "gold.dim_store"})], _lookup(targets), environment="dev"
     )
     assert issues == [] and ok
+
+
+def test_an_issue_that_tells_of_a_target_carries_it_and_the_missing_text() -> None:
+    """The deploy's stored error reaches every reader of the environment, not only the deployer.
+
+    Each issue that says something of a target the lookup found (that it exists, its kind, its
+    key, its columns) names that target in `targets`, and `withheld` is the text of a missing
+    target, so a reader who may not read it can be shown what a missing one shows.
+    """
+    missing = (
+        "Reference target `{raw}` does not exist in environment `dev`, or you may not read it; "
+        "build it first, or ask for READ_TABLE on it."
+    )
+    staging = TargetInfo(kind="staging", key=("a", "b"), key_none=False, columns=("a", "b"))
+    artifact = TargetInfo(kind=None, key=(), key_none=False, columns=None, artifact=True)
+    cases = [
+        ({"store_id": "gold.dim_store"}, {"gold.dim_store": staging}, ("gold.dim_store",)),
+        ({"store_id": "gold.dim_store.nope"}, {"gold.dim_store": _DIM}, ("gold.dim_store",)),
+        ({"store_id": "gold.model"}, {"gold.model": artifact}, ("gold.model",)),
+        (
+            {"store_id": "a.b.store_id"},
+            {"a.b": _DIM, "a.b.store_id": _DIM},
+            ("a.b.store_id", "a.b"),
+        ),
+        ({"c" * 1025: "gold.dim_store"}, {"gold.dim_store": _DIM}, ("gold.dim_store",)),
+    ]
+    for references, targets, told in cases:
+        _, issues = resolve_references([_fact(references)], _lookup(targets), environment="dev")
+        assert issues
+        raw = next(iter(references.values()))
+        for issue in issues:
+            assert (issue.targets, issue.withheld) == (told, missing.format(raw=raw))
+    _, plain = resolve_references([_fact({"store_id": "gold.x"})], _lookup({}), environment="dev")
+    assert [(i.targets, i.withheld) for i in plain] == [((), None)]

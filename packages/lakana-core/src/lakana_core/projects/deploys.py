@@ -77,7 +77,7 @@ from lakana_core.projects.deploy_jobs import (
 )
 from lakana_core.projects.diff import DeployDiff, diff_manifests
 from lakana_core.projects.git_input import is_full_sha, validate_ref
-from lakana_core.projects.issues import ProjectIssue, ProjectValidationError
+from lakana_core.projects.issues import ProjectIssue, ProjectValidationError, error_for_reader
 from lakana_core.projects.lookups import deployment_row, environment_by_name, repository_by_name
 from lakana_core.projects.manifest import (
     entry_model,
@@ -90,7 +90,7 @@ from lakana_core.projects.manifest import (
     manifest_tables,
     read_entry_connections,
 )
-from lakana_core.projects.model import TargetInfo, resolve_references
+from lakana_core.projects.model import TargetInfo, missing_target_message, resolve_references
 from lakana_core.projects.parse import ParsedAsset
 from lakana_core.runs.kept import kept_tables
 from lakana_core.runs.pools import PIPELINE
@@ -627,7 +627,10 @@ class DeployService:
             When given, ``adopted`` tables this principal may not read are
             dropped from the diff and counted in `hidden_adopted`: adopting a
             table names one that exists outside any repository, which a
-            READ_ENVIRONMENT reader is not entitled to learn.
+            READ_ENVIRONMENT reader is not entitled to learn. A reader who is not
+            the deployer gets each line of the error that tells of a reference
+            target it may not read as the line of a missing target
+            (`error_for_reader`).
         reads
             What earlier calls of a listing already read for the warnings; a new one when
             `None`.
@@ -659,6 +662,13 @@ class DeployService:
             visible = [t for t in adopted if self._may_read(reader, env_name, t)]
             hidden_adopted = len(adopted) - len(visible)
             diff = {**diff, "adopted": visible}
+        error = run.error_message
+        if reader is not None and error is not None and reader.id != run.principal_id:
+            error = error_for_reader(
+                error,
+                run.error_withheld_json,
+                lambda target: self._may_read(reader, env_name, target),
+            )
         return DeployRunView(
             id=run.id,
             environment=env_name,
@@ -668,7 +678,7 @@ class DeployService:
             requested_ref=run.requested_ref,
             resolved_sha=run.resolved_sha,
             rollback_to_job_version_id=run.rollback_to_job_version_id,
-            error_message=run.error_message,
+            error_message=error,
             diff=diff,
             job_version_id=run.job_version_id,
             principal_id=run.principal_id,
@@ -2362,6 +2372,7 @@ class DeployService:
                 ):
                     readable.append(reference)
                     continue
+                raw = asset.metadata.references.get(reference.column, reference.target)
                 issues.append(
                     ProjectIssue(
                         asset.path,
@@ -2371,6 +2382,8 @@ class DeployService:
                         f"`{environment}`, so its runs could not check it; grant it READ_TABLE "
                         f"on `{reference.target}`, or bind another run principal with "
                         "`lakana deployments set-run-as`.",
+                        targets=(reference.target,),
+                        withheld=missing_target_message(raw, environment),
                     )
                 )
             if readable:
@@ -3457,7 +3470,14 @@ class DeployService:
         self._finish(lambda: self._audit(p, run, names, AuditEventType.ROLLED_BACK, target, diff))
         return target
 
-    def fail(self, run: DeployRun, message: str, *, worker_id: str | None) -> None:
+    def fail(
+        self,
+        run: DeployRun,
+        message: str,
+        *,
+        worker_id: str | None,
+        withheld: Sequence[Mapping[str, Any]] = (),
+    ) -> None:
         """Mark a run failed.
 
         A `queued` run is accepted on purpose: nobody claimed it, and a run whose principal is
@@ -3473,6 +3493,9 @@ class DeployService:
             Already-redacted error text.
         worker_id
             The id the worker claimed the run under; `None` for a run nobody claimed.
+        withheld
+            The lines of `message` that tell of a reference target, with what other readers are
+            shown instead (`projects.issues.withheld_lines`); stored beside it.
 
         Raises
         ------
@@ -3486,5 +3509,6 @@ class DeployService:
         self._hold(run, worker_id, queued_too=True)
         run.status = DeployStatus.FAILED
         run.error_message = message
+        run.error_withheld_json = [dict(line) for line in withheld] or None
         run.finished_at = datetime.now(UTC)
         self._finish()

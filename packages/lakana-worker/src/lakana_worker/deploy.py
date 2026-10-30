@@ -18,11 +18,12 @@ import shutil
 import tempfile
 import time
 import uuid
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from importlib.metadata import version as _package_version
 from pathlib import Path
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -55,7 +56,7 @@ from lakana_core.projects.dag import build_graph, validate_project
 from lakana_core.projects.deploys import DeclaredConnections, DeployService, connection_issues
 from lakana_core.projects.diff import diff_manifests
 from lakana_core.projects.discovery import discover
-from lakana_core.projects.issues import ProjectIssue, ProjectValidationError
+from lakana_core.projects.issues import ProjectIssue, ProjectValidationError, withheld_lines
 from lakana_core.projects.jobs import job_issues
 from lakana_core.projects.limits import DeployLimits
 from lakana_core.projects.lockfile import (
@@ -386,7 +387,31 @@ def _describe(exc: LakanaError | GitError) -> str:
     return str(exc)
 
 
-def _fail(service: DeployService, run: DeployRun, message: str, worker_id: str | None) -> None:
+def _withheld(exc: LakanaError | GitError) -> list[dict[str, Any]]:
+    """List the lines of a failure's text that other readers of the deploy are shown otherwise.
+
+    Parameters
+    ----------
+    exc
+        The failure `_describe` renders.
+
+    Returns
+    -------
+    list of dict
+        `withheld_lines` of the project issues the text lists; empty for any other failure.
+    """
+    if not isinstance(exc, ProjectValidationError):
+        return []
+    return withheld_lines(exc.issues[:_MAX_ISSUES])
+
+
+def _fail(
+    service: DeployService,
+    run: DeployRun,
+    message: str,
+    worker_id: str | None,
+    withheld: Sequence[Mapping[str, Any]] = (),
+) -> None:
     """Mark a run failed, tolerating a run that is gone or already ended.
 
     A run the scheduler ended while this worker was lost (or frozen) keeps the scheduler's
@@ -402,9 +427,11 @@ def _fail(service: DeployService, run: DeployRun, message: str, worker_id: str |
         Safe error text.
     worker_id
         The id the run was claimed under; `None` for a run that is still queued or carries none.
+    withheld
+        The lines of `message` that tell of a reference target (`_withheld`).
     """
     try:
-        service.fail(run, message, worker_id=worker_id)
+        service.fail(run, message, worker_id=worker_id, withheld=withheld)
     except (ConflictError, NotFoundError):
         logger.warning(
             "Deploy run could not be marked failed (gone, finished, ended by the scheduler or "
@@ -637,7 +664,7 @@ def run_deploy(
         _fail(service, run, f"permission denied: {exc}", worker_id)
     except (LakanaError, GitError) as exc:
         session.rollback()
-        _fail(service, run, _describe(exc), worker_id)
+        _fail(service, run, _describe(exc), worker_id, _withheld(exc))
     except Exception:
         logger.exception(
             "Deploy run %s failed unexpectedly.", run_id, extra=log_event(LogEvent.INTERNAL_ERROR)

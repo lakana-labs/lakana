@@ -92,6 +92,10 @@ class DeployRun(Base):
         SAEnum(DeployStatus, native_enum=False, length=9), index=True
     )
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error_withheld_json: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    """The lines of `error_message` that tell of a reference target, each with the line a
+    reader who may not read the target is shown instead (`projects.issues.withheld_lines`);
+    `None` for an error without such lines and for one written before the column existed."""
     diff_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     checks_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     """The checks a deploy or dry run found, table to ``[{"check", "on_failure"}]``;

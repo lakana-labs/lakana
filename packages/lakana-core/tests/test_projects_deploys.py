@@ -61,7 +61,12 @@ from lakana_core.projects.deploys import (
 )
 from lakana_core.projects.diff import DeployDiff, diff_manifests
 from lakana_core.projects.frontmatter import AssetMetadata
-from lakana_core.projects.issues import ProjectValidationError
+from lakana_core.projects.issues import (
+    ProjectIssue,
+    ProjectValidationError,
+    error_for_reader,
+    withheld_lines,
+)
 from lakana_core.projects.manifest import (
     build_manifest,
     entry_input_kinds,
@@ -4445,6 +4450,11 @@ def test_a_target_the_bound_run_principal_may_not_read_is_refused_by_name(
         "`dim.store`, or bind another run principal with `lakana deployments set-run-as`."
     ]
     assert resolved == {}
+    assert (issues[0].targets, issues[0].withheld) == (
+        ("dim.store",),
+        "Reference target `dim.store` does not exist in environment `dev`, or you may not read "
+        "it; build it first, or ask for READ_TABLE on it.",
+    )
 
 
 def test_a_run_principal_that_may_read_the_target_lets_the_reference_through(
@@ -4637,3 +4647,71 @@ def test_a_merge_target_deployed_before_models_reads_its_merge_key(
     )
     assert issues == []
     assert resolved["silver.f"] == (ResolvedReference("store_id", "dim.store", "store_id"),)
+
+
+def test_a_failed_deploy_shows_what_it_tells_of_a_target_only_to_who_may_read_it(
+    session: Session, env: None, principal: PrincipalRef
+) -> None:
+    """The deployer and a reader of the target get the error whole; others a missing target's."""
+    repo = _repo(session)
+    _deployed(session, principal, repo, "a" * 40, make_asset("silver.clean"))
+    ensure_table(session, "dev", "dim", "store")
+    missing = (
+        "Reference target `dim.store` does not exist in environment `dev`, or you may not read "
+        "it; build it first, or ask for READ_TABLE on it."
+    )
+    issues = [
+        ProjectIssue("assets/silver/f.sql", 1, "Something else is wrong."),
+        ProjectIssue(
+            "assets/silver/f.sql",
+            2,
+            "`silver.f` (a fact) references `dim.store`, a staging table; point it at a "
+            "modelled table.",
+            targets=("dim.store",),
+            withheld=missing,
+        ),
+        ProjectIssue(
+            "assets/silver/f.sql",
+            2,
+            "Reference `store_id: dim.store`: `dim.store` has a key of 2 columns; name the "
+            "column: `store_id: dim.store.<column>`.",
+            targets=("dim.store",),
+            withheld=missing,
+        ),
+    ]
+    whole = "\n".join(issue.render() for issue in issues)
+    run = session.execute(select(DeployRun)).scalar_one()
+    run.status, run.error_message = DeployStatus.FAILED, whole
+    run.error_withheld_json = withheld_lines(issues)
+    session.commit()
+    reader = _read_environment_only(session, principal)
+    service = DeployService(session, GrantAuthorization(session))
+    for view in (service.get(reader, "dev", run.id), service.history(reader, "dev")[0]):
+        assert view.error_message == (
+            f"assets/silver/f.sql:1: Something else is wrong.\nassets/silver/f.sql:2: {missing}"
+        )
+    assert (
+        DeployService(session, AllowAllAuthorization()).get(principal, "dev", run.id).error_message
+        == whole
+    )
+    GrantService(session, AllowAllAuthorization()).grant(
+        principal,
+        principal="reader",
+        action=Action.READ_TABLE,
+        kind=SecurableKind.TABLE,
+        environment="dev",
+        namespace="dim",
+        table="store",
+    )
+    readable = DeployService(session, GrantAuthorization(session)).get(reader, "dev", run.id)
+    assert readable.error_message == whole
+
+
+def test_an_error_stored_without_withheld_lines_is_shown_whole() -> None:
+    assert error_for_reader("a\nb", None, lambda _t: False) == "a\nb"
+    odd = [
+        "x",
+        {"line": "a", "withheld": 3, "targets": []},
+        {"line": "b", "withheld": "c", "targets": [7]},
+    ]
+    assert error_for_reader("a\nb", odd, lambda _t: True) == "a\nc"
