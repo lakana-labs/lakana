@@ -62,6 +62,7 @@ from lakana_core.models import (
     Base,
     ColumnDescription,
     ColumnMask,
+    DeclaredMeasure,
     Grant,
     Namespace,
     Principal,
@@ -1177,6 +1178,45 @@ def test_undrop_restores_the_model_and_its_references(
     assert incoming_references(session, environment_id, "gold.regions") == [
         (table_id, "region", "code")
     ]
+
+
+def test_undrop_restores_the_measures(
+    session: Session, catalog: CatalogService, principal: PrincipalRef
+) -> None:
+    """The measure rows come back with the row, ids and all."""
+    table_id = _orders_table(catalog, principal)
+    model = _MODEL_ENTRY["model"]
+    assert isinstance(model, dict)
+    entry = {
+        **_MODEL_ENTRY,
+        "model": {
+            **model,
+            "measures": [
+                {
+                    "column": "amount",
+                    "aggregation": "sum",
+                    "additivity": "additive",
+                    "not_over": [],
+                    "unit": None,
+                    "currency": "EUR",
+                    "label": None,
+                    "description": None,
+                }
+            ],
+        },
+    }
+    write_model_entry(session, _fresh(session, Table, table_id), entry)
+    session.commit()
+    before = read_table_model(session, _fresh(session, Table, table_id))
+    assert before is not None and len(before.measures) == 1
+    ids = session.scalars(select(DeclaredMeasure.id)).all()
+
+    catalog.drop_table(principal, _ref("gold.orders"))
+    assert session.scalars(select(DeclaredMeasure.id)).all() == []
+    catalog.undrop_table(principal, _ref("gold.orders"))
+
+    assert read_table_model(session, _fresh(session, Table, table_id)) == before
+    assert session.scalars(select(DeclaredMeasure.id)).all() == ids
 
 
 def test_undrop_of_a_tombstone_from_before_references_restores_the_model_without_them(

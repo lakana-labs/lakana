@@ -1960,7 +1960,8 @@ landing between the lookup and the delete is in the snapshot, not lost to it), t
 this table's id**, under `lock_location`: `DROPPED`, `dropped_at = now`, `purge_after = now +
 LAKANA_TABLES__UNDO_DAYS` (`now` for a purge or `UNDO_DAYS=0`), `revoked_policy_ids` = the
 `RevokedPolicy` list, `dropped_table` = every mapped column of the row, of its `column_descriptions`,
-of its `table_columns` and of its `table_references` (the rows its id cascades to); then
+of its `table_columns`, of its `table_references` and of its `table_measures` (the rows its id
+cascades to); then
 `TABLE_DROPPED` and the row delete.
 The drop itself deletes no file any more (`purge=True` used to delete the metadata file in the
 request). No tombstone, files kept: an `EXTERNAL` table, a view (no location), a table whose root's

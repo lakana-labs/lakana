@@ -2825,3 +2825,24 @@ def test_0056_on_postgres() -> None:
         migrate.upgrade(url, revision_0056)
         assert _alembic_version(engine) == revision_0056
         engine.dispose()
+
+
+def test_0057_on_postgres() -> None:
+    """0057 adds `table_measures`, drops it, and adds it again."""
+    revision_0056 = "b6d0f8a2c4e5"
+    revision_0057 = "c8e2f4a6b0d1"
+
+    with PostgresContainer("postgres:16", driver="pg8000") as pg:
+        url = pg.get_connection_url()
+        migrate.upgrade(url, revision_0057)
+        engine = sqlalchemy.create_engine(url)
+        assert _alembic_version(engine) == revision_0057
+        assert "table_measures" in sqlalchemy.inspect(engine).get_table_names()
+
+        migrate.downgrade(url, revision_0056)
+        assert _alembic_version(engine) == revision_0056
+        assert "table_measures" not in sqlalchemy.inspect(engine).get_table_names()
+
+        migrate.upgrade(url, revision_0057)
+        assert _alembic_version(engine) == revision_0057
+        engine.dispose()
