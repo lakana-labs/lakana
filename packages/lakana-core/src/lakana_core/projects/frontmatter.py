@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal
 
@@ -27,6 +28,12 @@ from lakana_core.projects.asset_model import (
 )
 from lakana_core.projects.issues import ProjectIssue, ProjectValidationError
 from lakana_core.projects.limits import DeployLimits
+from lakana_core.projects.measures import (
+    MAX_MEASURE_COLUMN_BYTES,
+    MAX_MEASURES,
+    MEASURE_PREFIX,
+    MeasureSpec,
+)
 from lakana_core.projects.project_config import (
     FREE_TEXT_MESSAGE,
     IDENTIFIER_MESSAGE,
@@ -92,9 +99,11 @@ class AssetMetadata(SafeTextModel):
         no columns identify one.
     references
         Column → the table (``ns.table``, or ``ns.table.column``) its values must exist in.
+    measures
+        Column → its measure (aggregation, additivity, unit or currency, label, description).
     checks
-        Check family (``key``, ``references``) → what a failure does (``block``, ``keep`` or
-        ``warn``).
+        Check family (``key``, ``references``, ``measures``) → what a failure does (``block``,
+        ``keep`` or ``warn``).
     watermark
         The column whose largest value the next run starts after, for ``write: append`` (and
         optionally ``merge``).
@@ -119,6 +128,7 @@ class AssetMetadata(SafeTextModel):
     grain: str | None = None
     key: tuple[str, ...] | Literal["none"] = ()
     references: dict[str, str] = Field(default_factory=dict)
+    measures: dict[str, MeasureSpec] = Field(default_factory=dict)
     checks: dict[str, str] = Field(default_factory=dict)
     watermark: str | None = None
     columns: dict[str, str] = Field(default_factory=dict)
@@ -321,6 +331,87 @@ class AssetMetadata(SafeTextModel):
                 ) from exc
         return value
 
+    @field_validator("measures", mode="before")
+    @classmethod
+    def _measures_are_mappings(cls, value: object) -> object:
+        """Refuse a measure that is not a mapping, before pydantic's own text for it.
+
+        Parameters
+        ----------
+        value
+            The field's raw value.
+
+        Returns
+        -------
+        object
+            `value`, for the type check that follows.
+
+        Raises
+        ------
+        ValueError
+            For the first measure whose value is not a mapping.
+        """
+        if isinstance(value, Mapping):
+            for column, spec in value.items():
+                if isinstance(column, str) and not isinstance(spec, Mapping):
+                    raise ValueError(
+                        f"`{shown(column)}` must be a mapping such as "
+                        "`{aggregation: sum, currency: EUR}`"
+                    )
+        return value
+
+    @field_validator("measures")
+    @classmethod
+    def _measure_columns_are_usable(cls, value: dict[str, MeasureSpec]) -> dict[str, MeasureSpec]:
+        """Refuse too many measures, or a measure column that cannot be stored or named.
+
+        Parameters
+        ----------
+        value
+            The field's value.
+
+        Returns
+        -------
+        dict
+            `value`.
+
+        Raises
+        ------
+        ValueError
+            For more than `MAX_MEASURES` measures, then for the first column that is empty,
+            unsafe, longer than `MAX_MEASURE_COLUMN_BYTES`, cannot name its id, or is in its own
+            `not_over`.
+        """
+        if len(value) > MAX_MEASURES:
+            raise ValueError(
+                f"at most {MAX_MEASURES} measures per table, and `measures:` lists {len(value)}; "
+                "keep the ones people aggregate, and describe the others in `columns:`"
+            )
+        for column, spec in value.items():
+            if not column:
+                raise ValueError("a measure column must not be empty")
+            if unsafe_identifier(column):
+                raise ValueError(f"a measure column {IDENTIFIER_MESSAGE}")
+            size = len(column.encode("utf-8"))
+            if size > MAX_MEASURE_COLUMN_BYTES:
+                raise ValueError(
+                    f"measure column `{column}` has {size} bytes; a measure column may have at "
+                    f"most {MAX_MEASURE_COLUMN_BYTES} bytes"
+                )
+            try:
+                validate_path_component(f"{MEASURE_PREFIX}{column}", what="Measure id")
+            except ValidationError as exc:
+                raise ValueError(
+                    f"measure column `{column}` cannot name its id `{MEASURE_PREFIX}{column}`: "
+                    f"{exc}"
+                ) from exc
+            if column in spec.not_over:
+                raise ValueError(
+                    f"measure `{column}` names itself in `not_over`; list the other columns it "
+                    "must not be summed over, such as a date"
+                )
+        return value
+
     @field_validator("checks")
     @classmethod
     def _checks_are_known(cls, value: dict[str, str]) -> dict[str, str]:
@@ -343,7 +434,9 @@ class AssetMetadata(SafeTextModel):
         """
         for family, mode in value.items():
             if family not in CHECK_FAMILIES:
-                raise ValueError("takes only key and references")
+                raise ValueError(
+                    f"takes only {', '.join(CHECK_FAMILIES[:-1])} and {CHECK_FAMILIES[-1]}"
+                )
             if mode not in CHECK_MODES:
                 raise ValueError(f"{family} must be block, keep or warn")
         return value

@@ -203,7 +203,7 @@ worker of an earlier one refuses its manifest instead of running the asset as a 
 
 ## Model fields: kind, grain, key and references
 
-Five keys say what the asset's table is, so that the people who read it, and the checks that
+Six keys say what the asset's table is, so that the people who read it, and the checks that
 guard it, know what one row stands for and which tables it points at. A Python asset takes the
 same names as arguments of `@asset(...)` ([Python assets](python-assets.md)). The keys of an
 asset's block:
@@ -215,6 +215,8 @@ key: [date, store_id]                 # one column may be written as a plain str
 references:
   store_id: gold.dim_store            # short form: that table's single key column
   product_sku: gold.dim_product.sku   # long form: a column you name
+measures:                             # fact or wide only
+  net_amount: {aggregation: sum, currency: EUR, label: Net revenue}
 checks:
   key: block                          # block | warn | keep
   references: warn
@@ -226,7 +228,8 @@ checks:
 | `grain` | One sentence saying what exactly one row stands for. It is for people. | One line, not empty, at most 300 characters. |
 | `key` | The columns that identify one row; usually the grain written as columns. It is also the key `write: merge` matches rows on: there is one key, not a second one for merging. | Distinct, non-empty columns of the `SELECT`, at most 8 (a merge key too), or `none` where the kind allows it (below). Allowed with every write mode. |
 | `references` | For each column, the table its values point at. A null in a reference column is allowed; a reference that is required is also in `key`. | The column is a column of the `SELECT`; the target is checked as "References" below says. |
-| `checks` | How the checks generated from `key` and `references` fail: `block`, `warn` or `keep`, with the rules of a check's `on_failure` (`keep` never on a view, an append or a merge). | Only `key` and `references`, and only for a field the asset declares. A deploy turns `key` into the checks `key_unique` and `key_not_null`, and each reference into `ref_<column>`; they count toward the 50 checks of a table, a hand-written check of the same table may not use their names, and a referenced table the project builds is built first. See [Generated checks](checks.md#generated-checks). |
+| `measures` | The measures of a fact or wide table: how each is aggregated and what its numbers are. | See [Measures](#measures). |
+| `checks` | How the checks generated from `key`, `references` and `measures` fail: `block`, `warn` or `keep`, with the rules of a check's `on_failure` (`keep` never on a view, an append or a merge). | Only `key`, `references` and `measures`, and only for a field the asset declares. A deploy turns `key` into the checks `key_unique` and `key_not_null`, and each reference into `ref_<column>`; they count toward the 50 checks of a table, a hand-written check of the same table may not use their names, and a referenced table the project builds is built first. See [Generated checks](checks.md#generated-checks). |
 
 ### Rules for each kind
 
@@ -276,6 +279,71 @@ checked when it runs. Column types are checked only then, for every asset: a key
 and `long` match each other. A problem makes the generated check `errored`; the texts and what to
 do about each are in [Before a generated check counts](checks.md#before-a-generated-check-counts).
 
+### Measures
+
+A measure is metadata: Lakana computes nothing from it. Only a `fact` or a `wide` table declares
+measures. A key column is not a measure. Metrics that span tables or time windows belong in a SQL
+asset.
+
+```yaml
+measures:
+  net_amount:
+    aggregation: sum
+    currency: EUR
+    label: Net revenue
+    description: Revenue after discounts, before tax.
+  quantity:
+    aggregation: sum
+    unit: count
+  unit_price:
+    aggregation: avg
+    currency: EUR
+  stock_level:
+    aggregation: sum
+    additivity: semi
+    not_over: date              # one column may be written as a plain string
+    unit: count
+```
+
+In a Python asset, the same mapping goes in `@asset(measures={...})`. Each key is a column of the
+asset's output; its value is a mapping with these keys:
+
+| Key | Required | Meaning |
+|---|---|---|
+| `aggregation` | yes | The default aggregation: `sum`, `count`, `min`, `max`, `avg`, `count_distinct`, or `none` for a value that is never aggregated. |
+| `additivity` | no | `additive` (sums over every dimension), `semi` (sums over some, not over the columns in `not_over`), `non` (never summed). Left out, it follows from the aggregation (below). |
+| `not_over` | with `semi` only | The columns of the table the measure must not be summed over, usually a date. One or more distinct columns; a single column may be written as a plain string. |
+| `currency` | one of `currency` or `unit` | An ISO 4217 code in capitals. |
+| `unit` | one of `currency` or `unit` | One of the units below. |
+| `label` | no | A short name for people, in the main language. One line, at most 100 characters. |
+| `description` | no | What the measure means, in the main language. At most 4,000 characters. |
+
+A table declares at most 100 measures.
+
+Aggregation and additivity agree:
+
+| `aggregation` | allowed `additivity` | default when left out |
+|---|---|---|
+| `sum`, `count` | `additive`, `semi` | `additive` |
+| `min`, `max`, `avg`, `count_distinct`, `none` | `non` | `non` |
+
+`semi` is always written out, and always comes with `not_over`.
+
+**Units.** `count`, `percent`, `ratio`, `millisecond`, `second`, `minute`, `hour`, `day`, `byte`,
+`gram`, `kilogram`, `tonne`, `metre`, `kilometre`, `litre`, `kilowatt_hour` and `degree_celsius`.
+`percent` is 0 to 100, `ratio` is 0 to 1. Even a count has a unit (`unit: count`). Money has a
+`currency:` instead; a measure takes exactly one of the two. To have a unit added, open an issue.
+
+**Currencies.** Any current ISO 4217 code except XTS and XXX, in capitals. Codes withdrawn since
+1999 that historic data still carries are accepted too: the euro's predecessors (such as DEM),
+and BGN, HRK, ANG, SLL, ZWL, CUC, VEF, MRO, STD, BYR, LTL, LVL, EEK, SKK, CYP, MTL, SIT, ROL, TRL,
+GHC, ZMK, TMM, AZM and VEB. A table of 2015 sales in lev still says `BGN`.
+
+The deploy checks the measure and `not_over` columns of an explicit `SELECT`. Whether a measure's
+type suits its aggregation is checked when the table is written (see
+[Generated checks](checks.md#generated-checks)): `sum` and `avg` need a number; `min` and `max`
+take a number, a date or a timestamp; `count`, `count_distinct` and `none` take any type.
+
 ### Errors
 
 Each of these fails the deploy with an issue at the block's line:
@@ -308,8 +376,36 @@ Each of these fails the deploy with an issue at the block's line:
 | ``` cycle: gold.a -> gold.b -> gold.a (a reference in `references:` counts as a dependency: the target is built first); remove one of the references, or check it with a hand-written check under `checks/` ``` | Two assets of the project reference each other, directly or through others. A target the project builds is built before the table that references it, so such references cannot all hold; remove one of them. |
 | ``A check named `key_unique` is generated for `gold.fact_orders`; rename `checks/gold/fact_orders/key_unique.sql`.`` | A hand-written check of a table has the name of a check that table's header generates (`key_unique`, `key_not_null`, `ref_<column>`). Rename the file. |
 | ``` `checks: key: keep` cannot be used on `gold.fact_orders`: it is written with `write: merge`, … Use `checks: key: block`: … ``` | `keep` for a generated check of a view, an append or a merge, as for a hand-written check's `on_failure`. |
-| ``checks: takes only key and references``, ``checks: key must be block, keep or warn`` | Another check family or failure mode. |
+| ``checks: takes only key, references and measures``, ``checks: key must be block, keep or warn`` | Another check family or failure mode. |
 | ``` `checks: key` sets how the key checks fail, but the asset declares no `key:`; declare `key:`, or remove `checks: key` ``` | A `checks` family for a field the asset does not declare (`references` likewise). |
+| ``measures: `net_amount` must be a mapping such as `{aggregation: sum, currency: EUR}``` | A measure written as a string or a list. |
+| ``measures: a measure column must not be empty`` | A measure whose column is `""`. |
+| ``measures: a measure column must not contain a control, format or surrogate character or a line separator`` | An unsafe column name. |
+| ``measures: measure column `a/b` cannot name its id `measure_a/b`: …`` | A column whose id would not be a valid path component. |
+| ``measures: measure column `…` has 1100 bytes; a measure column may have at most 1024 bytes`` | A measure column longer than 1024 bytes in UTF-8. |
+| ``measures: at most 100 measures per table, and `measures:` lists 120; keep the ones people aggregate, and describe the others in `columns:``` | More than 100 measures. |
+| ``measures: measure `stock_level` names itself in `not_over`; list the other columns it must not be summed over, such as a date`` | `not_over` contains the measure itself. |
+| ``measures.net_amount: needs `aggregation:`: one of sum, count, min, max, avg, count_distinct or none (none for a value that is never aggregated)`` | No `aggregation`. |
+| ``measures.net_amount.aggregation: must be one of sum, count, min, max, avg, count_distinct, none; got 'total'`` | Another aggregation. |
+| ``measures.net_amount.additivity: must be one of additive, semi, non; got 'full'`` | Another additivity. |
+| ``measures.unit_price: `aggregation: avg` does not add values up, so `additivity` must be `non`; leave `additivity:` out, or change `aggregation:``` | `min`, `max`, `avg`, `count_distinct` or `none` with `additive` or `semi`. |
+| ``measures.net_amount: `aggregation: sum` adds values up, so `additivity` must be `additive` or `semi`; for a value that is never summed, use `aggregation: avg`, `min`, `max` or `none``` | `sum` or `count` with `non`. |
+| ``measures.stock_level: `additivity: semi` needs `not_over:`: the columns the measure must not be summed over, such as the date of a balance`` | `semi` without `not_over`. |
+| ``measures.net_amount: `not_over:` is only for `additivity: semi`; remove `not_over:`, or declare `additivity: semi``` | `not_over` without `semi`. |
+| ``measures.stock_level.not_over: a column must not be empty; write the name of a column of the asset``, ``… column `date` is listed twice``, ``… a column must not contain a control, …`` | A `not_over` column that is empty, repeated or unsafe. |
+| ``measures.quantity: needs `unit:` or `currency:`: `currency:` for money (an ISO 4217 code such as EUR), `unit:` for anything else (for a number of things, `unit: count`)`` | Neither `unit` nor `currency`. |
+| ``measures.net_amount: takes `unit:` or `currency:`, not both; money has a currency, every other value a unit`` | Both `unit` and `currency`. |
+| ``measures.weight.unit: must be one of count, percent, ratio, millisecond, second, minute, hour, day, byte, gram, kilogram, tonne, metre, kilometre, litre, kilowatt_hour, degree_celsius; got 'kg'. For money use `currency:`; to have a unit added, open an issue`` | A unit that is not in the list. |
+| ``measures.net_amount.currency: must be an ISO 4217 currency code in capitals, such as EUR, USD or CHF; got 'eur'`` | A currency that is not an ISO 4217 code, lower case included. |
+| ``measures.net_amount.label: must not be empty``, ``… must be one line``, ``… must be at most 100 characters`` | A label that is empty, of several lines or too long. |
+| ``measures.net_amount.description: must not be empty``, ``… must be at most 4000 characters`` | A description that is empty or too long. |
+| ``measures.net_amount.unitt: Extra inputs are not permitted`` | An unknown key in a measure. |
+| ``Asset `gold.dim_store` is a dimension and declares `measures:`; measures belong on a fact or wide table. Move them to the fact or wide table that holds these values, or remove `measures:`.`` | `measures` on a dimension (a staging table likewise). |
+| ``Asset `gold.sales` declares `measures:` but no `kind:`; measures belong on a fact or wide table. Declare `kind: fact` or `kind: wide`, or remove `measures:`.`` | `measures` without `kind`. |
+| ``Measure `order_id` is a key column of `gold.fact_orders`; a key identifies a row and is not a value to aggregate. Remove it from `measures:`.`` | A measure that is a key column. A reference column may be a measure. |
+| ``Measure column `net_amount` is not a column of `gold.fact_sales`'s SELECT; add it to the SELECT, or remove it from `measures:`.`` | A measure column the `SELECT` does not return. |
+| ``Column `date` in `not_over` of measure `stock_level` is not a column of `gold.fact_stock`'s SELECT; add it to the SELECT, or change `not_over:`.`` | A `not_over` column the `SELECT` does not return. |
+| ``` `checks: measures` sets how the measure checks fail, but the asset declares no `measures:`; declare `measures:`, or remove `checks: measures` ``` | A `checks: measures` for an asset without `measures`. |
 
 The deploy's error is shown to everyone who may read the environment, not only to you. The issues
 from ``Reference `…`: `gold.dim_store` declares no key`` down to the one about a reference too
