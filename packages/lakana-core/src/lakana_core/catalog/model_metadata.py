@@ -30,7 +30,12 @@ from lakana_core.identifiers import NamespacePath, TableRef
 from lakana_core.models import DeclaredMeasure, DeclaredReference, Namespace, Table
 from lakana_core.projects.asset_model import KEY_NONE, ResolvedReference
 from lakana_core.projects.manifest import entry_model, manifest_assets
-from lakana_core.projects.measures import MEASURE_PREFIX, MEASURES_CHECK, MeasureEntry
+from lakana_core.projects.measures import (
+    MEASURE_PREFIX,
+    MEASURED_KINDS,
+    MEASURES_CHECK,
+    MeasureEntry,
+)
 from lakana_core.projects.model_checks import KEY_NOT_NULL, KEY_UNIQUE, REF_PREFIX
 
 
@@ -69,7 +74,8 @@ def write_model_entry(session: Session, row: Table, entry: Mapping[str, Any]) ->
     without a model clears what an earlier deploy wrote. A row that is not in the database yet (a
     run creating its table) has no reference or measure rows, so none are read for it, and the
     namespace is read only when a row is added: a new table without a model costs no statement.
-    Nothing is committed.
+    Measure rows are read only when the stored kind was one of `MEASURED_KINDS`, the only kinds
+    that have any. Nothing is committed.
 
     Parameters
     ----------
@@ -81,6 +87,7 @@ def write_model_entry(session: Session, row: Table, entry: Mapping[str, Any]) ->
         The manifest entry of the asset that produces it; untrusted.
     """
     model = entry_model(entry)
+    had_measures = row.model_kind in MEASURED_KINDS
     row.model_kind = model.kind if model else None
     row.model_grain = model.grain if model else None
     row.model_key = (KEY_NONE if model.key_none else list(model.key) or None) if model else None
@@ -88,7 +95,9 @@ def write_model_entry(session: Session, row: Table, entry: Mapping[str, Any]) ->
     stored = not (state.pending or state.transient)
     added = [
         *_sync_references(session, row, model.references if model else (), stored=stored),
-        *_sync_measures(session, row, model.measures if model else (), stored=stored),
+        *_sync_measures(
+            session, row, model.measures if model else (), stored=stored and had_measures
+        ),
     ]
     if not added:
         return
@@ -199,7 +208,8 @@ def _sync_measures(
     measures
         The declared measures.
     stored
-        Whether the row is in the database already; a new one has no measure rows to read.
+        Whether the row may have measure rows already: it is in the database, and its stored
+        kind was one of `MEASURED_KINDS`.
 
     Returns
     -------
@@ -290,15 +300,17 @@ def clear_removed_models(
         row = find_project_table(session, environment_id, dotted)
         if row is None:
             continue
+        had_measures = row.model_kind in MEASURED_KINDS
         row.model_kind = row.model_grain = row.model_key = None
         for found in session.scalars(
             select(DeclaredReference).where(DeclaredReference.source_table_id == row.id)
         ):
             session.delete(found)
-        for measure in session.scalars(
-            select(DeclaredMeasure).where(DeclaredMeasure.table_id == row.id)
-        ):
-            session.delete(measure)
+        if had_measures:
+            for measure in session.scalars(
+                select(DeclaredMeasure).where(DeclaredMeasure.table_id == row.id)
+            ):
+                session.delete(measure)
 
 
 def read_table_model(session: Session, row: Table) -> TableModel | None:
@@ -328,22 +340,26 @@ def read_table_model(session: Session, row: Table) -> TableModel | None:
             .order_by(DeclaredReference.source_column)
         )
     )
-    measures = tuple(
-        MeasureEntry(
-            m.column,
-            m.aggregation,
-            m.additivity,
-            tuple(m.not_over or ()),
-            m.unit,
-            m.currency,
-            m.label,
-            m.description,
+    measures = (
+        tuple(
+            MeasureEntry(
+                m.column,
+                m.aggregation,
+                m.additivity,
+                tuple(m.not_over or ()),
+                m.unit,
+                m.currency,
+                m.label,
+                m.description,
+            )
+            for m in session.scalars(
+                select(DeclaredMeasure)
+                .where(DeclaredMeasure.table_id == row.id)
+                .order_by(DeclaredMeasure.column)
+            )
         )
-        for m in session.scalars(
-            select(DeclaredMeasure)
-            .where(DeclaredMeasure.table_id == row.id)
-            .order_by(DeclaredMeasure.column)
-        )
+        if row.model_kind in MEASURED_KINDS
+        else ()
     )
     stored_key = row.model_key
     if (

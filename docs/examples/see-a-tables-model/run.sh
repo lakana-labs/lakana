@@ -224,7 +224,7 @@ lakana deploy --env dev >/dev/null
 lakana run --env dev >/dev/null
 
 # The fact declares its measure; the generated `measures` check passes because `amount` is a
-# number column, which `aggregation: sum` needs.
+# decimal column, a number, which `aggregation: sum` needs.
 cp "$EXAMPLE_DIR/measures/assets/gold/fact_sales.sql" assets/gold/fact_sales.sql
 git add -A
 git commit -q -m "Declare the measure"

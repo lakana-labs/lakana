@@ -152,8 +152,12 @@ _KEY_MEASURE = (
     "to aggregate. Remove it from `measures:`."
 )
 _ARTICLE = {"dimension": "a dimension", "staging": "a staging table"}
-_MEASURED_KINDS = frozenset({"fact", "wide"})
-"""The kinds that may declare measures; every other kind is refused, one added later too."""
+MEASURED_KINDS = frozenset({"fact", "wide"})
+"""The kinds that may declare measures; every other kind is refused, one added later too.
+
+A table whose stored `model_kind` is not one of them has no `table_measures` rows, so the
+catalog reads none for it.
+"""
 
 
 def default_additivity(aggregation: str) -> str:
@@ -516,7 +520,7 @@ def measure_issues(
     issues: list[str] = []
     if kind is None:
         issues.append(_NO_KIND.format(table=table))
-    elif kind not in _MEASURED_KINDS:
+    elif kind not in MEASURED_KINDS:
         article = _ARTICLE.get(kind, f"a {kind} table")
         issues.append(_WRONG_KIND.format(table=table, article=article))
     keyed = set() if isinstance(key, str) else set(key)

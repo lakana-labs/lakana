@@ -328,7 +328,7 @@ def _pending_fact(session: Session, catalog: CatalogService) -> Table:
     return row
 
 
-def _statements_while(session: Session, write: Callable[[], None]) -> list[str]:
+def _statements_while(session: Session, write: Callable[[], object]) -> list[str]:
     """Run a write and list the statements it issued.
 
     Parameters
@@ -539,3 +539,84 @@ def test_model_view_shows_every_measure_with_its_id(session: Session, fact_row: 
         ("gold.fact_sales/measure_stock", "semi", ("date",)),
     ]
     assert measure_id("gold.fact_sales", "amount") == "gold.fact_sales/measure_amount"
+
+
+def _dimension(*measures: dict) -> dict:
+    """Build the entry of `_entry`, declared a dimension.
+
+    Parameters
+    ----------
+    *measures
+        Stored measure mappings; a deploy refuses any on a dimension.
+
+    Returns
+    -------
+    dict
+        The entry.
+    """
+    entry = _entry(*measures)
+    entry["model"]["kind"] = "dimension"
+    return entry
+
+
+def _measure_reads(session: Session, call: Callable[[], object]) -> list[str]:
+    """List the statements on `table_measures` that a call issues.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    call
+        A callable without arguments.
+
+    Returns
+    -------
+    list of str
+        The statements that name `table_measures`.
+    """
+    return [s for s in _statements_while(session, call) if "table_measures" in s]
+
+
+@pytest.mark.parametrize("entry", [{"table": "gold.fact_sales"}, _dimension()])
+def test_a_stored_table_that_cannot_carry_measures_never_reads_them(
+    session: Session, fact_row: Table, catalog: CatalogService, principal: PrincipalRef, entry: dict
+) -> None:
+    """Only a fact or a wide table has measure rows; describe, deploy, clear and drop know it."""
+    write_model_entry(session, fact_row, entry)
+    session.commit()
+    assert _measure_reads(session, lambda: write_model_entry(session, fact_row, entry)) == []
+    session.commit()
+    assert _measure_reads(session, lambda: read_table_model(session, fact_row)) == []
+    assert (
+        _measure_reads(
+            session,
+            lambda: clear_removed_models(
+                session, _env_id(session), {"assets": [entry]}, {"assets": []}
+            ),
+        )
+        == []
+    )
+    session.rollback()
+    assert _measure_reads(session, lambda: catalog.drop_table(principal, _FACT)) == []
+
+
+def test_a_fact_that_becomes_a_dimension_loses_its_measures(
+    session: Session, fact_row: Table
+) -> None:
+    write_model_entry(session, fact_row, _entry(_AMOUNT))
+    session.commit()
+    write_model_entry(session, fact_row, _dimension())
+    session.commit()
+    assert session.scalars(select(DeclaredMeasure)).all() == []
+    model = read_table_model(session, fact_row)
+    assert model is not None and (model.kind, model.measures) == ("dimension", ())
+
+
+def test_a_fact_still_reads_and_writes_its_measures(session: Session, fact_row: Table) -> None:
+    write_model_entry(session, fact_row, _entry(_AMOUNT))
+    session.commit()
+    assert _measure_reads(session, lambda: write_model_entry(session, fact_row, _entry(_STOCK)))
+    session.commit()
+    seen: list[TableModel | None] = []
+    assert _measure_reads(session, lambda: seen.append(read_table_model(session, fact_row)))
+    assert seen[0] is not None and [m.column for m in seen[0].measures] == ["stock"]

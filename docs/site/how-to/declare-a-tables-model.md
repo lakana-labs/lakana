@@ -289,7 +289,8 @@ balance or a stock level that may be summed across stores but not across days sa
 Every rule is in [Measures](../reference/asset-front-matter.md#measures).
 
 After a deploy and a run, `lakana table get` lists the measures under the model, and the
-generated check `measures` has checked that `amount` is a number column, as `sum` needs:
+generated check `measures` has checked that `amount` is a number (a `decimal(38,1)` column), as
+`sum` needs:
 
 <!-- source: docs/examples/see-a-tables-model/run.sh#measures -->
 ```bash

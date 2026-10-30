@@ -56,6 +56,7 @@ from lakana_core.models import (
     TableType,
 )
 from lakana_core.models.table import table_kind
+from lakana_core.projects.measures import MEASURED_KINDS
 from lakana_core.storage.resolver import table_root_from_metadata_location
 
 _M = TypeVar("_M")
@@ -308,9 +309,11 @@ def snapshot_table(session: Session, row: Table, namespace: NamespacePath) -> di
     references = session.scalars(
         select(DeclaredReference).where(DeclaredReference.source_table_id == row.id)
     ).all()
-    measures = session.scalars(
-        select(DeclaredMeasure).where(DeclaredMeasure.table_id == row.id)
-    ).all()
+    measures = (
+        session.scalars(select(DeclaredMeasure).where(DeclaredMeasure.table_id == row.id)).all()
+        if row.model_kind in MEASURED_KINDS
+        else ()
+    )
     leave_out = frozenset({"table_id"})
     return {
         "namespace": list(namespace.parts),

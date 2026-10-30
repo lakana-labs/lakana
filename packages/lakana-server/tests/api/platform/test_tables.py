@@ -938,6 +938,6 @@ def test_a_measure_id_follows_a_rename_of_its_table(client: TestClient) -> None:
             "destination": {"namespace": ["gold"], "name": "fact_orders"},
         },
     )
-    assert renamed.status_code in (200, 204), renamed.text
+    assert renamed.status_code == 200, renamed.text
     body = client.get(f"{_GOLD_TABLES}/fact_orders", headers=AUTH_HEADER).json()
     assert body["model"]["measures"] == [{"id": "gold.fact_orders/measure_id", **_SALES_MEASURE}]
