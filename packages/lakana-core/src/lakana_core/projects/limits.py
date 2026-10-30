@@ -43,6 +43,8 @@ class DeployLimits:
         Most checks of one table under `checks/`.
     translation_bytes
         Largest translation file, one per language.
+    translation_total_bytes
+        Most bytes of all translation files together.
     """
 
     git_command_seconds: float = 120.0
@@ -59,3 +61,4 @@ class DeployLimits:
     statement_chars: int = DEFAULT_MAX_STATEMENT_CHARS
     max_checks_per_table: int = 50
     translation_bytes: int = 1024 * 1024
+    translation_total_bytes: int = 10 * 1024 * 1024

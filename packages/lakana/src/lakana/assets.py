@@ -115,6 +115,11 @@ _FREE_TEXT_MESSAGE = (
     "a bidirectional control or a line separator"
 )
 _MAX_DESCRIPTION_CHARS = 4000
+_IDENTIFIER_MESSAGE = (
+    "must not contain a control, format or surrogate character or a line separator"
+)
+_IDENTIFIER_CATEGORIES = ("Cc", "Cf", "Cs", "Zl", "Zp")
+_MAX_KEY_CHARS = 80
 
 _CHECK_FAMILIES = ("key", "references", "measures")
 _CHECK_MODES = ("block", "keep", "warn")
@@ -579,6 +584,41 @@ def _check_label(where: str, value: object) -> str:
     return stripped
 
 
+def _shown(name: object) -> str:
+    """Escape a name for a message as core's `shown` does.
+
+    Parameters
+    ----------
+    name
+        A column name as given.
+
+    Returns
+    -------
+    str
+        The ASCII-escaped text, at most 200 characters.
+    """
+    return ascii(str(name))[1:-1][:200]
+
+
+def _loc(name: object) -> str:
+    """Render a name inside a field path as core's `shown_key` does.
+
+    Parameters
+    ----------
+    name
+        A column name as given.
+
+    Returns
+    -------
+    str
+        One line of at most 80 characters, cut with a trailing ``…``.
+    """
+    text = str(name)
+    if not text.isprintable():
+        text = ascii(text)[1:-1]
+    return text if len(text) <= _MAX_KEY_CHARS else text[: _MAX_KEY_CHARS - 1] + "…"
+
+
 def _check_columns(columns: object) -> dict[str, str | dict[str, str]] | None:
     """Read the decorator's `columns` with the rules deploy applies to its long form.
 
@@ -611,27 +651,34 @@ def _check_columns(columns: object) -> dict[str, str | dict[str, str]] | None:
             continue
         if not isinstance(given, Mapping):
             raise ValueError(
-                f"columns: `{name}` must be a description or a mapping such as "
+                f"columns: `{_shown(name)}` must be a description or a mapping such as "
                 "`{label: Store, description: The store that sold.}`"
             )
+        where = f"columns.{_loc(name)}"
         for key in given:
             if key not in ("label", "description"):
-                raise ValueError(f"columns.{name}.{key}: Extra inputs are not permitted")
-        if "label" not in given and "description" not in given:
+                raise ValueError(f"{where}.{_loc(key)}: Extra inputs are not permitted")
+        texts = {key: value for key, value in given.items() if value is not None}  # as core
+        if not texts:
             raise ValueError(
-                f"columns.{name}: needs `label:` or `description:`; write a description alone "
+                f"{where}: needs `label:` or `description:`; write a description alone "
                 "as a plain string"
             )
-        texts = dict(given)
         description = texts.get("description")
         if description is not None:
             if not isinstance(description, str):
-                raise ValueError(f"columns.{name}.description: Input should be a valid string")
+                raise ValueError(f"{where}.description: Input should be a valid string")
             if _unsafe_free_text(description):
-                raise ValueError(f"columns.{name}.description: {_FREE_TEXT_MESSAGE}")
+                raise ValueError(f"{where}.description: {_FREE_TEXT_MESSAGE}")
         if "label" in texts:
-            texts["label"] = _check_label(f"columns.{name}.label", texts["label"])
+            texts["label"] = _check_label(f"{where}.label", texts["label"])
         result[name] = texts
+    if any(
+        unicodedata.category(char) in _IDENTIFIER_CATEGORIES
+        for name in result
+        for char in str(name)
+    ):
+        raise ValueError(f"columns: a column name {_IDENTIFIER_MESSAGE}")
     return result
 
 

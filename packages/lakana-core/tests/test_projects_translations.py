@@ -339,21 +339,61 @@ def test_a_file_that_is_not_a_mapping_of_tables_is_refused() -> None:
         "texts, such as `gold.fact_sales: {label: Ventes}`"
     )
     assert _issues_of({"fr.yaml": "- gold.fact_sales\n"}) == [message]
-    assert _issues_of({"fr.yaml": "1: {label: x}\n"}) == [message]
 
 
-def test_too_many_keys_are_refused_before_validation(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_key_that_is_not_a_table_name_is_named() -> None:
+    assert _issues_of({"fr.yaml": "1: {label: x}\ngold.fact_sales: {label: V}\n"}) == [
+        "translations/fr.yaml:1: `1` is not a table name; a key is a table's dotted name, such as "
+        "`gold.fact_sales`"
+    ]
+
+
+@pytest.mark.parametrize("value", ["Ventes", "[a, b]", "!!set {a}"])
+def test_a_table_entry_that_is_not_a_mapping_shows_the_shape(value: str) -> None:
+    assert _issues_of({"fr.yaml": f"gold.fact_sales: {value}\n"}) == [
+        "translations/fr.yaml:1: `gold.fact_sales` must be a mapping of its texts, such as "
+        "`gold.fact_sales: {label: …, description: …, columns: …}`"
+    ]
+
+
+def test_a_control_character_in_a_file_names_the_file_and_line() -> None:
+    assert _issues_of({"fr.yaml": "gold.fact_sales:\n  label: a\x00b\n"}) == [
+        "translations/fr.yaml:2: translations/fr.yaml is not valid YAML: it holds the control "
+        "character U+0000, which YAML does not allow; remove it"
+    ]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        f'? "gold.{"x" * (1024 * 1024 - 100)}"\n: {{labl: 1}}\n',
+        f'gold.fact_sales:\n  columns: {{? "{"x" * 64 * 1024}" : {{labl: 1}}}}\n',
+        f'? "gold.{"x" * 64 * 1024}"\n: {{label: V}}\n',
+    ],
+    ids=["table-1MiB", "column", "unknown-table"],
+)
+def test_an_issue_from_a_huge_key_stays_short(text: str) -> None:
+    found = [DiscoveredTranslation("translations/fr.yaml", "fr", text)]
+    parsed, problems = parse_translations(found, limits=_LIMITS)
+    config = parse_project_config("main_language: en\n")
+    (issue,) = [*problems, *translation_issues(config, [_sales()], parsed)]
+    assert len(issue.render()) < 300, issue.render()[:400]
+
+
+def test_too_many_keys_are_refused_while_parsing(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(translations_module, "MAX_FILE_ENTRIES", 8)
     text = (
         "gold.fact_sales:\n  columns: {a: {label: A}, b: {label: B}}\n  measures: {c: {label: C}}\n"
     )
     refusal = (
-        "translations/fr.yaml: has {} keys, and a translation file has at most 8; keep only the "
-        "texts of tables, columns and measures the project builds"
+        "translations/fr.yaml:{}: has more than 8 keys, and a translation file has at most 8; "
+        "keep only the texts of tables, columns and measures the project builds"
     )
-    assert _issues_of({"fr.yaml": text}) == [refusal.format(9)]
+    assert _issues_of({"fr.yaml": text}) == [refusal.format(3)]
     nested = "gold.fact_sales:\n  x: {y: {z: [1, 2, {w: 3}]}}\n  v: {u: 1, t: 2}\n"
-    assert _issues_of({"fr.yaml": nested}) == [refusal.format(11)]
+    assert _issues_of({"fr.yaml": nested}) == [refusal.format(3)]
+    flat = "gold.fact_sales: [" + ", ".join("a" * 9) + "]\n"
+    assert _issues_of({"fr.yaml": flat}) == [refusal.format(1)]
     under = _issues_of({"fr.yaml": "gold.fact_sales:\n  columns: {a: {label: A}}\n"})
     assert [line.split(": ", 1)[1].startswith("`a` is not a column") for line in under] == [True]
 
@@ -396,7 +436,12 @@ def test_field_errors_name_the_table_and_the_field() -> None:
         "`{label: …, description: …}`"
     ]
     assert _issues_of({"fr.yaml": "gold.fact_sales:\n  measures: [net_amount]\n"}) == [
-        "translations/fr.yaml:2: gold.fact_sales.measures: Input should be a valid dictionary"
+        "translations/fr.yaml:2: gold.fact_sales.measures: must be a mapping of names to their "
+        "texts, such as `{store_id: {label: …, description: …}}`"
+    ]
+    assert _issues_of({"fr.yaml": "gold.fact_sales:\n  columns: abc\n"}) == [
+        "translations/fr.yaml:2: gold.fact_sales.columns: must be a mapping of names to their "
+        "texts, such as `{store_id: {label: …, description: …}}`"
     ]
 
 
@@ -730,3 +775,69 @@ def test_translation_entries_are_the_manifest_form() -> None:
     assert translation_entries(parsed) == {
         "gold.fact_sales": {"fr": {"label": "V", "columns": {"store_id": {"label": "M"}}}}
     }
+
+
+def test_all_files_together_are_capped(tmp_path: Path) -> None:
+    root = _files(
+        tmp_path,
+        {f"translations/{tag}.yaml": "# " + "x" * 1500 + "\n" for tag in ("de", "fr", "it")},
+    )
+    limits = DeployLimits(translation_total_bytes=3 * 1024)
+    found, issues = discover_translations(root, limits=limits)
+    assert [f.language for f in found] == ["de", "fr"]
+    assert [i.render() for i in issues] == [
+        "translations: translations/ holds 5 KiB of translation files, and together they may "
+        "hold at most 3 KiB; keep only the texts of tables, columns and measures the project "
+        "builds"
+    ]
+
+
+def test_time_is_checked_before_each_file() -> None:
+    found = [
+        DiscoveredTranslation(f"translations/{tag}.yaml", tag, "gold.fact_sales: {label: V}\n")
+        for tag in ("de", "fr", "it")
+    ]
+    calls: list[int] = []
+
+    def check_time() -> None:
+        """Stop at the second file.
+
+        Raises
+        ------
+        TimeoutError
+            At the second call.
+        """
+        calls.append(1)
+        if len(calls) == 2:
+            raise TimeoutError
+
+    with pytest.raises(TimeoutError):
+        parse_translations(found, limits=_LIMITS, check_time=check_time)
+    assert len(calls) == 2
+
+
+def test_a_refused_entry_is_not_reported_again_by_strict_mode() -> None:
+    config = "main_language: en\ntranslations:\n  require: [fr]\n"
+    assert _issues_of({"fr.yaml": "gold.fact_sales:\n  labl: V\n"}, config) == [
+        "translations/fr.yaml:2: gold.fact_sales.labl: Extra inputs are not permitted"
+    ]
+
+
+def test_a_project_without_translations_checks_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    def never(asset: ParsedAsset) -> list[str]:
+        """Fail: nothing needs the header texts.
+
+        Parameters
+        ----------
+        asset
+            Ignored.
+
+        Raises
+        ------
+        AssertionError
+            Always.
+        """
+        raise AssertionError("header texts were listed")
+
+    monkeypatch.setattr(translations_module, "header_texts", never)
+    assert translation_issues(parse_project_config("main_language: en\n"), [_sales()], []) == []

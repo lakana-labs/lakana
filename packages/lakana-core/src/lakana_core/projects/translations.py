@@ -9,9 +9,10 @@ the deployer may not see.
 
 from __future__ import annotations
 
+import contextlib
 import difflib
 import os
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Annotated, Any
@@ -19,7 +20,6 @@ from typing import Annotated, Any
 import pydantic
 from pydantic import AfterValidator, BeforeValidator, Field, model_validator
 
-from lakana_core.identifiers import shown
 from lakana_core.languages import canonical_language, language_problem
 from lakana_core.projects.asset_model import MAX_GRAIN_CHARS, ParsedAsset
 from lakana_core.projects.discovery import (
@@ -41,7 +41,13 @@ from lakana_core.projects.project_config import (
     checked_text,
     pydantic_issues,
 )
-from lakana_core.projects.yaml_loader import KeyLines, YamlError, load_yaml_with_lines
+from lakana_core.projects.yaml_loader import (
+    KeyLines,
+    YamlError,
+    YamlTooManyEntries,
+    load_yaml_with_lines,
+    shown_key,
+)
 
 MAX_LANGUAGES = 50
 """The most translation files a project may have."""
@@ -116,6 +122,22 @@ def _name_issue(relative: str, stem: str) -> ProjectIssue | None:
     return ProjectIssue(relative, None, problem + fix)
 
 
+def _kib(size: int) -> int:
+    """Round a size up to whole KiB, so a size just over a limit never reads as the limit.
+
+    Parameters
+    ----------
+    size
+        Bytes.
+
+    Returns
+    -------
+    int
+        KiB, rounded up.
+    """
+    return -(-size // 1024)
+
+
 def discover_translations(
     root: Path, *, limits: DeployLimits
 ) -> tuple[list[DiscoveredTranslation], list[ProjectIssue]]:
@@ -132,9 +154,10 @@ def discover_translations(
     -------
     tuple of (list of DiscoveredTranslation, list of ProjectIssue)
         The files sorted by name, and every problem: a `translations` that is a link or not a
-        folder, links, folders, other files, bad names, oversized or non-UTF-8 content, and more
+        folder, links, folders, other files, bad names, oversized or non-UTF-8 content, more
         than `MAX_LANGUAGES` entries, of any kind (those past it are not examined, so the issues
-        stay few). A project without the folder has neither.
+        stay few), and files past `translation_total_bytes` together (those are not read). A
+        project without the folder has neither.
     """
     folder = root / TRANSLATIONS_DIR
     if folder.is_symlink():
@@ -150,6 +173,7 @@ def discover_translations(
     found: list[DiscoveredTranslation] = []
     issues: list[ProjectIssue] = []
     files = 0
+    total = 0
     for entry in entries:
         files += 1
         if files > MAX_LANGUAGES:
@@ -185,10 +209,24 @@ def discover_translations(
         if named is not None:
             issues.append(named)
             continue
+        with contextlib.suppress(OSError):  # gone since the listing: `_read` below names it
+            total += entry.stat(follow_symlinks=False).st_size
+        if total > limits.translation_total_bytes:
+            continue  # counted, never read: the refusal below names the total
         data = _read(Path(entry.path), relative, limits.translation_bytes, issues)
         text = _decode(data, relative, issues) if data is not None else None
         if text is not None:
             found.append(DiscoveredTranslation(relative, stem, text))
+    if total > limits.translation_total_bytes:
+        issues.append(
+            ProjectIssue(
+                TRANSLATIONS_DIR,
+                None,
+                f"translations/ holds {_kib(total)} KiB of translation files, and together they "
+                f"may hold at most {_kib(limits.translation_total_bytes)} KiB; keep only the "
+                "texts of tables, columns and measures the project builds",
+            )
+        )
     if files > MAX_LANGUAGES:
         issues.append(
             ProjectIssue(
@@ -292,14 +330,18 @@ def _pairs_are_mappings(value: object) -> object:
     Raises
     ------
     ValueError
-        For the first entry that is not a mapping.
+        For a value that is not a mapping, or the first entry that is not one.
     """
-    if isinstance(value, Mapping):
-        for name, texts in value.items():
-            if not isinstance(texts, Mapping):
-                raise ValueError(
-                    f"`{shown(name)}` must be a mapping such as `{{label: …, description: …}}`"
-                )
+    if not isinstance(value, Mapping):
+        raise ValueError(
+            "must be a mapping of names to their texts, such as "
+            "`{store_id: {label: …, description: …}}`"
+        )
+    for name, texts in value.items():
+        if not isinstance(texts, Mapping):
+            raise ValueError(
+                f"`{shown_key(name)}` must be a mapping such as `{{label: …, description: …}}`"
+            )
     return value
 
 
@@ -347,6 +389,8 @@ class Translations:
         Table → its texts.
     lines
         The line of every key, from the one parse of the file.
+    invalid
+        Tables whose entry was refused; strict mode does not report their texts as missing too.
     """
 
     path: str
@@ -354,32 +398,7 @@ class Translations:
     text: str
     tables: dict[str, TableTranslation]
     lines: KeyLines = field(default_factory=KeyLines)
-
-
-def _entry_count(raw: object) -> int:
-    """Count the keys and list items of a loaded document, at every depth.
-
-    Parameters
-    ----------
-    raw
-        The loaded document.
-
-    Returns
-    -------
-    int
-        Every mapping key and every list item, however deep.
-    """
-    count = 0
-    stack = [raw]
-    while stack:
-        item = stack.pop()
-        if isinstance(item, Mapping):
-            count += len(item)
-            stack.extend(item.values())
-        elif isinstance(item, list):
-            count += len(item)
-            stack.extend(item)
-    return count
+    invalid: frozenset[str] = frozenset()
 
 
 class _FileIssues:
@@ -438,8 +457,15 @@ class _FileIssues:
         return [*self.shown, rest]
 
 
+def _no_check() -> None:
+    """Check nothing: the default time check of `parse_translations`."""
+
+
 def parse_translations(
-    found: Sequence[DiscoveredTranslation], *, limits: DeployLimits
+    found: Sequence[DiscoveredTranslation],
+    *,
+    limits: DeployLimits,
+    check_time: Callable[[], None] = _no_check,
 ) -> tuple[list[Translations], list[ProjectIssue]]:
     """Read each file's YAML and validate every table entry.
 
@@ -449,25 +475,43 @@ def parse_translations(
         `discover_translations`' files.
     limits
         Supplies `translation_bytes`.
+    check_time
+        Called before each file; raises when the deploy is past its deadline.
 
     Returns
     -------
     tuple of (list of Translations, list of ProjectIssue)
         Each readable file with its valid entries, and every problem, ``table.field: message`` at
-        the key's line.
+        the key's line. A file with more than `MAX_FILE_ENTRIES` keys and list items is refused
+        while it is parsed, before its values are built.
     """
     parsed: list[Translations] = []
     issues: list[ProjectIssue] = []
     for item in found:
+        check_time()
         try:
             raw, lines = load_yaml_with_lines(
-                item.text, what=item.path, max_bytes=limits.translation_bytes
+                item.text,
+                what=item.path,
+                max_bytes=limits.translation_bytes,
+                max_entries=MAX_FILE_ENTRIES,
             )
+        except YamlTooManyEntries as exc:
+            issues.append(
+                ProjectIssue(
+                    item.path,
+                    exc.line,
+                    f"has more than {MAX_FILE_ENTRIES} keys, and a translation file has at most "
+                    f"{MAX_FILE_ENTRIES}; keep only the texts of tables, columns and measures the "
+                    "project builds",
+                )
+            )
+            continue
         except YamlError as exc:
             issues.append(ProjectIssue(item.path, exc.line, str(exc)))
             continue
         raw = {} if raw is None else raw
-        if not isinstance(raw, dict) or not all(isinstance(key, str) for key in raw):
+        if not isinstance(raw, dict):
             issues.append(
                 ProjectIssue(
                     item.path,
@@ -477,29 +521,43 @@ def parse_translations(
                 )
             )
             continue
-        entries = _entry_count(raw)
-        if entries > MAX_FILE_ENTRIES:
-            issues.append(
-                ProjectIssue(
-                    item.path,
-                    None,
-                    f"has {entries} keys, and a translation file has at most {MAX_FILE_ENTRIES}; "
-                    "keep only the texts of tables, columns and measures the project builds",
-                )
-            )
-            continue
         tables: dict[str, TableTranslation] = {}
+        invalid: set[str] = set()
         problems = _FileIssues(item.path)
         for table, value in raw.items():
+            if not isinstance(table, str):
+                problems.add(
+                    ProjectIssue(
+                        item.path,
+                        lines.line([str(table)]),
+                        f"`{shown_key(table)}` is not a table name; a key is a table's dotted "
+                        "name, such as `gold.fact_sales`",
+                    )
+                )
+                continue
+            if value is not None and not isinstance(value, Mapping):
+                invalid.add(table)
+                problems.add(
+                    ProjectIssue(
+                        item.path,
+                        lines.line([table]),
+                        f"`{shown_key(table)}` must be a mapping of its texts, such as "
+                        f"`{shown_key(table)}: {{label: …, description: …, columns: …}}`",
+                    )
+                )
+                continue
             try:
                 tables[table] = TableTranslation.model_validate({} if value is None else value)
             except pydantic.ValidationError as exc:
+                invalid.add(table)
                 for issue in pydantic_issues(
                     exc, path=item.path, line=None, prefix=(table,), lines=lines
                 ):
                     problems.add(issue)
         issues += problems.done()
-        parsed.append(Translations(item.path, item.language, item.text, tables, lines))
+        parsed.append(
+            Translations(item.path, item.language, item.text, tables, lines, frozenset(invalid))
+        )
     return parsed, issues
 
 
@@ -583,7 +641,8 @@ def _unknown_table(table: str, known: Sequence[str]) -> str:
     close = difflib.get_close_matches(table, known, n=1, cutoff=0.8)
     hint = f"; did you mean `{close[0]}`? Fix" if close else "; fix"
     return (
-        f"`{shown(table)}` is not a table this project builds{hint} the name, or remove the entry"
+        f"`{shown_key(table)}` is not a table this project builds{hint} the name, or remove "
+        "the entry"
     )
 
 
@@ -644,7 +703,7 @@ def _entry_issues(
                 ProjectIssue(
                     t.path,
                     at("columns", column),
-                    f"`{shown(column)}` is not a column the header of `{table}` describes "
+                    f"`{shown_key(column)}` is not a column the header of `{table}` describes "
                     f"(`columns:` in {source}); fix the name, or describe the column there first",
                 )
             )
@@ -655,7 +714,7 @@ def _entry_issues(
                     ProjectIssue(
                         t.path,
                         at("columns", column, kind),
-                        f"the header of `{table}` gives column `{shown(column)}` no {kind} to "
+                        f"the header of `{table}` gives column `{shown_key(column)}` no {kind} to "
                         f"translate; add `{kind}:` for it under `columns:` in {source}, or "
                         "remove this text",
                     )
@@ -667,8 +726,8 @@ def _entry_issues(
                 ProjectIssue(
                     t.path,
                     at("measures", column),
-                    f"`{shown(column)}` is not a measure of `{table}` (`measures:` in {source}); "
-                    "fix the name, or remove the entry",
+                    f"`{shown_key(column)}` is not a measure of `{table}` (`measures:` in "
+                    f"{source}); fix the name, or remove the entry",
                 )
             )
             continue
@@ -678,8 +737,8 @@ def _entry_issues(
                     ProjectIssue(
                         t.path,
                         at("measures", column, kind),
-                        f"measure `{shown(column)}` of `{table}` has no {kind} to translate; add "
-                        f"`{kind}:` to it under `measures:` in {source}, or remove this text",
+                        f"measure `{shown_key(column)}` of `{table}` has no {kind} to translate; "
+                        f"add `{kind}:` to it under `measures:` in {source}, or remove this text",
                     )
                 )
     return issues
@@ -735,6 +794,8 @@ def translation_issues(
     """
     main = config.main_language
     require = config.translations.require
+    if not translations and not require:
+        return []
     issues: list[ProjectIssue] = []
     if main is None and translations and not require:
         issues.append(ProjectIssue(CONFIG_FILE, None, NEEDS_MAIN_LANGUAGE))
@@ -791,7 +852,8 @@ def translation_issues(
             )
             continue
         done = {key for table, entry in t.tables.items() for key in translated_texts(table, entry)}
-        missing = [key for key in every if key not in done]
+        refused = tuple(f"{table}." for table in t.invalid)  # reported already, not twice
+        missing = [key for key in every if key not in done and not key.startswith(refused)]
         if missing:
             issues.append(_missing_issue(t, missing))
     return issues

@@ -14,7 +14,7 @@ import shutil
 import tarfile
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from importlib.metadata import version as package_version
 from pathlib import Path
 from typing import Any, NamedTuple, cast
@@ -62,6 +62,7 @@ from lakana_core.projects.manifest import manifest_assets
 from lakana_core.projects.package_indexes import PackageIndexService
 from lakana_core.projects.repositories import RepositoryService
 from lakana_core.projects.run_policy import RunCaps
+from lakana_core.projects.translations import DiscoveredTranslation, Translations
 from lakana_core.runs.store import DEPLOY_LOST_MESSAGE
 from lakana_core.secrets.keys import EnvKeyProvider
 from lakana_core.secrets.service import SecretService
@@ -3327,3 +3328,78 @@ def test_a_required_language_with_gaps_refuses_the_deploy(
         "silver.clean.columns.id.label, silver.clean.description. Add them to "
         "translations/fr.yaml, or remove `fr` from translations.require."
     )
+
+
+def test_the_deadline_is_checked_between_translation_files(
+    session: Session, principal: PrincipalRef, world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Past the deadline, the deploy stops before the next translation file is parsed."""
+    commit(
+        world.repo_path,
+        {
+            "lakana.yaml": "repo: analytics\nmain_language: en\n",
+            "assets/silver/clean.sql": _TEXTS_SQL,
+            "translations/fr.yaml": "silver.clean:\n  label: Événements\n",
+        },
+    )
+    late = {"now": False}
+    parse = deploy_module.parse_translations
+
+    def parse_late(
+        found: Sequence[DiscoveredTranslation],
+        *,
+        limits: DeployLimits,
+        check_time: Callable[[], None],
+    ) -> tuple[list[Translations], list[ProjectIssue]]:
+        """Move the clock past the deadline, then parse.
+
+        Parameters
+        ----------
+        found
+            As for `parse_translations`.
+        limits
+            As for `parse_translations`.
+        check_time
+            As for `parse_translations`.
+
+        Returns
+        -------
+        tuple
+            Its result.
+        """
+        late["now"] = True
+        return parse(found, limits=limits, check_time=check_time)
+
+    def never(*args: object, **kwargs: object) -> None:
+        """Fail: the deploy must stop before the files are checked.
+
+        Parameters
+        ----------
+        *args
+            Ignored.
+        **kwargs
+            Ignored.
+
+        Raises
+        ------
+        AssertionError
+            Always.
+        """
+        raise AssertionError("checked after the deadline")
+
+    monkeypatch.setattr(deploy_module, "parse_translations", parse_late)
+    monkeypatch.setattr(deploy_module, "translation_issues", never)
+    view = DeployService(session, AllowAllAuthorization()).submit(
+        principal, "dev", repository="analytics", kind=DeployKind.DEPLOY
+    )
+    run_deploy(
+        session,
+        view.id,
+        AllowAllAuthorization(),
+        _KEY,
+        world.settings,
+        lambda: time.monotonic() + (1e6 if late["now"] else 0),
+    )
+    run = session.get(DeployRun, view.id)
+    assert run is not None
+    assert run.error_message == "the deploy exceeded its time limit"

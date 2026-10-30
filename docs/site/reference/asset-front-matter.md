@@ -30,8 +30,9 @@ SELECT station_id, ts, temp_c FROM bronze.weather WHERE temp_c IS NOT NULL
 `label` is a short name for people, one line of at most 100 characters; `description` and
 `columns` describe the table and its columns. A column is a description alone (`station_id: WMO
 station identifier.`) or a mapping with `label:`, `description:` or both. Write them in the
-project's main language ([`main_language`](lakana-yaml.md#main_language-and-translations)). A deploy publishes them as the
-project's text, and a description set with `lakana table describe` wins over them and survives
+project's main language ([`main_language`](lakana-yaml.md#main_language-and-translations)). A deploy publishes the
+descriptions as the project's text (labels are checked and recorded with the project version; the
+catalog shows them in a later release), and a description set with `lakana table describe` wins over them and survives
 every deploy; see [Describe a table](../how-to/describe-a-table.md).
 
 A deploy refuses a bad text with its field and the next step:

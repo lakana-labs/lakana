@@ -336,7 +336,7 @@ def test_unsafe_characters_are_refused_in_every_measure_text() -> None:
 
 
 def test_measures_that_is_not_a_mapping_is_refused() -> None:
-    assert _texts(["m"])[0].startswith("measures: Input should be a valid dictionary")
+    assert _texts(["m"])[0].startswith("measures: must be a mapping of keys to values")
 
 
 def test_a_not_over_column_of_the_select_passes() -> None:

@@ -26,7 +26,7 @@ from lakana_core.jobs.tz import load_zone
 from lakana_core.languages import language_problem
 from lakana_core.projects.issues import ProjectIssue, ProjectValidationError
 from lakana_core.projects.limits import DeployLimits
-from lakana_core.projects.yaml_loader import KeyLines, YamlError, key_line, load_yaml
+from lakana_core.projects.yaml_loader import KeyLines, YamlError, key_line, load_yaml, shown_key
 
 Materialize = Literal["table", "view", "incremental"]
 """How an asset is materialized; mapped onto M5a write modes in `manifest`."""
@@ -928,10 +928,14 @@ def _loc_part(part: object) -> str:
     -------
     str
         `part`, ASCII-escaped when it has a non-printable character, so a key
-        from the repository cannot start a second line.
+        from the repository cannot start a second line, and cut to 80 characters
+        with a trailing ``…`` (`shown_key`).
     """
-    text = str(part)
-    return text if text.isprintable() else ascii(text)[1:-1]
+    return shown_key(part)
+
+
+_NOT_A_MAPPING = "must be a mapping of keys to values (`key: value`), not a list or a single value"
+"""What `pydantic_issues` says instead of pydantic's text, which names an internal class."""
 
 
 def pydantic_issues(
@@ -974,6 +978,8 @@ def pydantic_issues(
         message = error["msg"]
         if error["type"] == "value_error":  # pydantic prefixes what a validator raised
             message = message.removeprefix("Value error, ")
+        elif error["type"] in ("model_type", "dict_type"):  # pydantic names a class here
+            message = _NOT_A_MAPPING
         where = line
         if where is None and lines is not None:
             where = lines.line(parts)

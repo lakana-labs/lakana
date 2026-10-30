@@ -815,8 +815,20 @@ def _deploy(
         checks = parse_checks(
             checkout.checks, limits=limits, default_on_failure=config.checks.on_failure
         )
+
+        def check_time() -> None:
+            """Stop between translation files once the deploy is past its deadline.
+
+            Raises
+            ------
+            GitError
+                When the deadline has passed.
+            """
+            if clock() > deadline:
+                raise GitError(_TIME_LIMIT_MESSAGE)
+
         translations, translation_problems = parse_translations(
-            checkout.translations, limits=limits
+            checkout.translations, limits=limits, check_time=check_time
         )
         graph = build_graph(assets)
         resolved, reference_issues = service.resolve_model_references(

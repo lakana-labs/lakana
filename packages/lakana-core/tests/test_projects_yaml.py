@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import pytest
 
 from lakana_core.errors import ValidationError
+from lakana_core.projects import yaml_loader
 from lakana_core.projects.yaml_loader import (
     KeyLines,
     YamlError,
+    YamlTooManyEntries,
     key_line,
     load_yaml,
     load_yaml_with_lines,
+    shown_key,
 )
 
 
@@ -169,3 +174,83 @@ def test_load_with_lines_refuses_what_load_refuses() -> None:
     with pytest.raises(YamlError, match="anchors and aliases") as info:
         load_yaml_with_lines("a: 1\nb: &x 2\n", what="t", max_bytes=1024)
     assert info.value.line == 2
+
+
+def _load_value(text: str, *, what: str, max_bytes: int) -> object:
+    """Load through `load_yaml_with_lines`, keeping only the value.
+
+    Parameters
+    ----------
+    text
+        The document.
+    what
+        Its name.
+    max_bytes
+        Its size limit.
+
+    Returns
+    -------
+    object
+        The value.
+    """
+    return load_yaml_with_lines(text, what=what, max_bytes=max_bytes)[0]
+
+
+@pytest.mark.parametrize("load", [load_yaml, _load_value])
+@pytest.mark.parametrize(("char", "code"), [("\x00", "0000"), ("\x01", "0001"), ("\x0c", "000C")])
+def test_a_control_character_is_not_valid_yaml(
+    load: Callable[..., object], char: str, code: str
+) -> None:
+    """PyYAML's reader refuses it while the loader is built; that is still a YAML error."""
+    with pytest.raises(YamlError) as info:
+        load(f"a: 1\nb: x{char}y\n", what="t", max_bytes=1024)
+    assert str(info.value) == (
+        f"t is not valid YAML: it holds the control character U+{code}, which YAML does not "
+        "allow; remove it"
+    )
+    assert info.value.line == 2
+
+
+def test_entries_are_counted_while_composing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The cap stops the parse at the first entry past it, before any value is built."""
+    text = "x:\n- a\n- b\n- c\n"
+    assert load_yaml_with_lines(text, what="t", max_bytes=1024, max_entries=4)[0] == {
+        "x": ["a", "b", "c"]
+    }
+
+    def never(*args: object, **kwargs: object) -> None:
+        """Fail: no value may be built.
+
+        Parameters
+        ----------
+        *args
+            Ignored.
+        **kwargs
+            Ignored.
+
+        Raises
+        ------
+        AssertionError
+            Always.
+        """
+        raise AssertionError("a value was built")
+
+    monkeypatch.setattr(yaml_loader._NoAliasLoader, "construct_document", never)
+    with pytest.raises(YamlTooManyEntries) as info:
+        load_yaml_with_lines(text, what="t", max_bytes=1024, max_entries=3)
+    assert (str(info.value), info.value.line) == ("t has more than 3 keys and list items.", 4)
+
+
+def test_a_long_duplicate_key_is_cut_in_the_message() -> None:
+    key = "k" * 5000
+    with pytest.raises(YamlError) as info:
+        load_yaml(f'? "{key}"\n: 1\n? "{key}"\n: 2\n', what="t", max_bytes=100_000)
+    assert str(info.value) == f"t: duplicate key '{'k' * 78}…."
+
+
+def test_shown_key_is_one_short_line() -> None:
+    assert shown_key("a\nb") == "a\\nb"
+    assert shown_key("é") == "é"
+    assert shown_key(3) == "3"
+    assert shown_key("x" * 100) == "x" * 79 + "…"
+    assert len(shown_key("x" * 80)) == 80

@@ -918,3 +918,24 @@ def test_checked_label_is_one_short_line() -> None:
     ):
         with pytest.raises(ValueError, match=message):
             checked_label(bad)
+
+
+def test_a_control_character_in_lakana_yaml_names_the_file_and_line() -> None:
+    assert [issue.render() for issue in _issues("repo: a\nname: x\x01\n")] == [
+        "lakana.yaml:2: lakana.yaml is not valid YAML: it holds the control character U+0001, "
+        "which YAML does not allow; remove it"
+    ]
+
+
+@pytest.mark.parametrize("key", ["defaults", "checks", "requirements", "translations"])
+def test_a_section_that_is_not_a_mapping_names_no_class(key: str) -> None:
+    assert [issue.render() for issue in _issues(f"main_language: en\n{key}: abc\n")] == [
+        f"lakana.yaml:2: {key}: must be a mapping of keys to values (`key: value`), not a list "
+        "or a single value"
+    ]
+
+
+def test_a_long_key_is_cut_in_an_issue() -> None:
+    (issue,) = _issues(f'? "{"k" * 5000}"\n: 1\n')
+    assert len(issue.render()) < 200
+    assert issue.message.startswith("k" * 79 + "…: ")

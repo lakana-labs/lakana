@@ -13,6 +13,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 
 import yaml
+import yaml.reader
 from yaml.events import AliasEvent, CollectionStartEvent, ScalarEvent
 from yaml.nodes import MappingNode, Node, SequenceNode
 
@@ -35,8 +36,43 @@ class YamlError(ValidationError):
         super().__init__(message)
 
 
+class YamlTooManyEntries(YamlError):
+    """A document with more keys and list items than its caller accepts, refused while parsing.
+
+    Parameters
+    ----------
+    message
+        What is wrong.
+    line
+        1-based line of the first entry past the limit.
+    """
+
+
 _MAX_DEPTH = 64
 """Deepest nesting accepted; stops recursion far below Python's limit."""
+
+_MAX_KEY_CHARS = 80
+"""The most characters of a key a message repeats; a longer key is cut and ends in ``…``."""
+
+
+def shown_key(key: object) -> str:
+    """Render a key or value from a document for a message: one line, at most 80 characters.
+
+    Parameters
+    ----------
+    key
+        A key, an index or a value from the document.
+
+    Returns
+    -------
+    str
+        Its text, ASCII-escaped when it has a non-printable character so that it cannot start a
+        second line, and cut to `_MAX_KEY_CHARS` with a trailing ``…``.
+    """
+    text = str(key)
+    if not text.isprintable():
+        text = ascii(text)[1:-1]
+    return text if len(text) <= _MAX_KEY_CHARS else text[: _MAX_KEY_CHARS - 1] + "…"
 
 
 class _AliasRefused(yaml.MarkedYAMLError):
@@ -51,13 +87,23 @@ class _AmbiguousMapping(yaml.MarkedYAMLError):
     """Raised by `_NoAliasLoader` at a duplicate key or a merge key."""
 
 
+class _TooMany(yaml.MarkedYAMLError):
+    """Raised by `_NoAliasLoader` at the first key or list item past `max_entries`."""
+
+
 _MERGE_TAG = "tag:yaml.org,2002:merge"
 
 
 class _NoAliasLoader(yaml.SafeLoader):
-    """A `SafeLoader` that refuses anchors, aliases, merge keys, duplicate keys and deep nesting."""
+    """A `SafeLoader` that refuses anchors, aliases, merge keys, duplicate keys and deep nesting.
+
+    With `max_entries` set it also counts every mapping key and list item as it composes them and
+    stops at the first one past the limit, before any Python value is built.
+    """
 
     _depth = 0
+    _entries = 0
+    max_entries: int | None = None
 
     def construct_mapping(self, node: MappingNode, deep: bool = False) -> dict[object, object]:
         """Refuse a merge key or a repeated key, then build the mapping.
@@ -89,7 +135,8 @@ class _NoAliasLoader(yaml.SafeLoader):
                 key = self.construct_object(key_node, deep=True)
                 if key in seen:
                     raise _AmbiguousMapping(
-                        problem=f"duplicate key {key!r}", problem_mark=key_node.start_mark
+                        problem=f"duplicate key {shown_key(repr(key))}",
+                        problem_mark=key_node.start_mark,
                     )
                 seen.add(key)
             except TypeError:  # unhashable key: PyYAML's own refusal below names it
@@ -117,6 +164,8 @@ class _NoAliasLoader(yaml.SafeLoader):
             At the first anchor or alias.
         _TooDeep
             When nesting exceeds `_MAX_DEPTH`.
+        _TooMany
+            At the first key or list item past `max_entries`.
         """
         event = self.peek_event()
         anchored = isinstance(event, ScalarEvent | CollectionStartEvent) and event.anchor
@@ -126,6 +175,12 @@ class _NoAliasLoader(yaml.SafeLoader):
             )
         if self._depth >= _MAX_DEPTH:
             raise _TooDeep(problem="nesting is too deep", problem_mark=event.start_mark)
+        # A key is composed with index None and a list item with its position; a value gets its
+        # key's node, so it is not counted twice. The count equals keys plus list items.
+        if self.max_entries is not None and parent is not None and not isinstance(index, Node):
+            self._entries += 1
+            if self._entries > self.max_entries:
+                raise _TooMany(problem="too many entries", problem_mark=event.start_mark)
         self._depth += 1
         try:
             return super().compose_node(parent, index)
@@ -133,7 +188,28 @@ class _NoAliasLoader(yaml.SafeLoader):
             self._depth -= 1
 
 
-def _load(text: str, *, what: str, max_bytes: int) -> tuple[object, Node | None]:
+def _reader_line(text: str, exc: yaml.reader.ReaderError) -> int | None:
+    """Find the line of the character PyYAML's reader refused.
+
+    Parameters
+    ----------
+    text
+        The document.
+    exc
+        The reader's error.
+
+    Returns
+    -------
+    int or None
+        The 1-based line, or `None` when the error has no position.
+    """
+    position = getattr(exc, "position", None)
+    return text.count("\n", 0, position) + 1 if isinstance(position, int) else None
+
+
+def _load(
+    text: str, *, what: str, max_bytes: int, max_entries: int | None = None
+) -> tuple[object, Node | None]:
     """Parse one YAML document from untrusted repository content, keeping its node tree.
 
     Parameters
@@ -144,6 +220,8 @@ def _load(text: str, *, what: str, max_bytes: int) -> tuple[object, Node | None]
         Names the document in error messages, e.g. ``"lakana.yaml"``.
     max_bytes
         Largest accepted UTF-8 size.
+    max_entries
+        The most keys and list items accepted, counted while composing; `None` for no limit.
 
     Returns
     -------
@@ -154,11 +232,22 @@ def _load(text: str, *, what: str, max_bytes: int) -> tuple[object, Node | None]
     ------
     YamlError
         As `load_yaml` documents.
+    YamlTooManyEntries
+        At the first key or list item past `max_entries`.
     """
     size = len(text.encode("utf-8"))
     if size > max_bytes:
         raise YamlError(f"{what} is larger than {max_bytes // 1024} KiB.")
-    loader = _NoAliasLoader(text)  # nosec B506 -- a SafeLoader subclass
+    try:
+        # Built inside the try: the reader refuses a control character in its constructor.
+        loader = _NoAliasLoader(text)  # nosec B506 -- a SafeLoader subclass
+    except yaml.reader.ReaderError as exc:
+        raise YamlError(
+            f"{what} is not valid YAML: it holds the control character "
+            f"U+{exc.character:04X}, which YAML does not allow; remove it",
+            _reader_line(text, exc),
+        ) from exc
+    loader.max_entries = max_entries
     try:
         node = loader.get_single_node()
         return (None if node is None else loader.construct_document(node)), node
@@ -171,6 +260,11 @@ def _load(text: str, *, what: str, max_bytes: int) -> tuple[object, Node | None]
     except _TooDeep as exc:
         line = exc.problem_mark.line + 1 if exc.problem_mark is not None else None
         raise YamlError(f"{what}: nesting is deeper than {_MAX_DEPTH} levels.", line) from exc
+    except _TooMany as exc:
+        line = exc.problem_mark.line + 1 if exc.problem_mark is not None else None
+        raise YamlTooManyEntries(
+            f"{what} has more than {max_entries} keys and list items.", line
+        ) from exc
     except yaml.MarkedYAMLError as exc:
         line = exc.problem_mark.line + 1 if exc.problem_mark is not None else None
         raise YamlError(f"{what} is not valid YAML: {exc.problem}", line) from exc
@@ -246,7 +340,9 @@ def _key_lines(root: Node | None) -> KeyLines:
     return KeyLines(lines)
 
 
-def load_yaml_with_lines(text: str, *, what: str, max_bytes: int) -> tuple[object, KeyLines]:
+def load_yaml_with_lines(
+    text: str, *, what: str, max_bytes: int, max_entries: int | None = None
+) -> tuple[object, KeyLines]:
     """Parse one YAML document once, returning its value and the line of every key.
 
     Parameters
@@ -257,6 +353,8 @@ def load_yaml_with_lines(text: str, *, what: str, max_bytes: int) -> tuple[objec
         Names the document in error messages.
     max_bytes
         Largest accepted UTF-8 size.
+    max_entries
+        The most keys and list items accepted, counted while composing; `None` for no limit.
 
     Returns
     -------
@@ -267,8 +365,10 @@ def load_yaml_with_lines(text: str, *, what: str, max_bytes: int) -> tuple[objec
     ------
     YamlError
         As `load_yaml` documents.
+    YamlTooManyEntries
+        At the first key or list item past `max_entries`, before any value is built.
     """
-    value, node = _load(text, what=what, max_bytes=max_bytes)
+    value, node = _load(text, what=what, max_bytes=max_bytes, max_entries=max_entries)
     return value, _key_lines(node)
 
 

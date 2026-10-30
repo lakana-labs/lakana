@@ -550,4 +550,16 @@ def test_a_long_form_description_with_an_unsafe_character_is_refused() -> None:
 
 
 def test_columns_that_are_not_a_mapping_get_pydantic_text() -> None:
-    assert _header_issues("columns: [a]\n") == ["columns: Input should be a valid dictionary"]
+    assert _header_issues("columns: [a]\n") == [
+        "columns: must be a mapping of keys to values (`key: value`), not a list or a single value"
+    ]
+
+
+def test_a_control_character_in_a_header_names_the_file_and_line() -> None:
+    text = "/* lakana\ndescription: a\x0cb\n*/\nSELECT 1 AS a\n"
+    with pytest.raises(ProjectValidationError) as caught:
+        parse_front_matter(text, path="assets/gold/t.sql")
+    assert [issue.render() for issue in caught.value.issues] == [
+        "assets/gold/t.sql:2: assets/gold/t.sql front-matter is not valid YAML: it holds the "
+        "control character U+000C, which YAML does not allow; remove it"
+    ]

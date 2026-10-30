@@ -762,6 +762,12 @@ def test_a_null_not_over_means_no_columns_at_deploy_and_in_the_sdk() -> None:
         {"columns": {"c": "a\u202eb"}},
         {"columns": {"c": 3}},
         {"columns": {"c": ["x"]}},
+        {"columns": {"c": {"description": None}}},
+        {"columns": {"c": {"label": None}}},
+        {"columns": {"c\n": 3}},
+        {"columns": {"c\n": {"lable": "C"}}},
+        {"columns": {"c\u202e": "x"}},
+        {"columns": {"c" * 200: {"lable": "C"}}},
     ],
 )
 def test_a_bad_text_gets_the_same_words_from_deploy_and_the_sdk(texts: dict[str, Any]) -> None:
@@ -777,6 +783,24 @@ def test_a_bad_text_gets_the_same_words_from_deploy_and_the_sdk(texts: dict[str,
     with pytest.raises(ValueError) as sdk:
         cast("Any", sdk_assets.asset)(**texts)
     assert str(sdk.value) == issue.message
+
+
+def test_a_none_text_is_absent_at_deploy_and_in_the_sdk() -> None:
+    """`label: None` beside a description is accepted by both, and neither keeps the `None`."""
+    from lakana_core.projects.frontmatter import AssetMetadata
+
+    columns: dict[str, Any] = {"c": {"label": None, "description": "x"}}
+    deployed = AssetMetadata.model_validate({"columns": columns})
+    assert (deployed.columns["c"].label, deployed.columns["c"].description) == (None, "x")
+    spec = cast("Any", sdk_assets.asset)(columns=columns)(lambda: None)
+    assert getattr(spec, sdk_assets.ASSET_ATTRIBUTE).columns == {"c": {"description": "x"}}
+
+
+def test_the_sdk_words_the_identifier_rule_as_core_does() -> None:
+    """The column-name rule's text is copied into the SDK; the copy must be core's."""
+    from lakana_core.projects.project_config import IDENTIFIER_MESSAGE
+
+    assert sdk_assets._IDENTIFIER_MESSAGE == IDENTIFIER_MESSAGE
 
 
 def test_the_sdk_words_the_free_text_rule_as_core_does() -> None:

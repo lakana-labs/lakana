@@ -93,7 +93,8 @@ Strict mode reads the project's files only: a text typed into the catalog does n
 |---|---|
 | Translation files | 50 (languages besides the main one) |
 | Size of one file | 1 MiB |
-| Keys of one file, counted at every depth | 50,000 |
+| Size of all files together | 10 MiB |
+| Keys and list items of one file, counted at every depth while it is read | 50,000 |
 | Problems reported per check and file | 50, then a count of the rest |
 | Missing texts named by strict mode | 20, then a count of the rest |
 
@@ -117,6 +118,8 @@ and, where there is one, the key's line.
 | ``` `en` is the project's main language (`main_language:` in lakana.yaml); its texts belong in the asset headers. Move them there, or remove the file``` | Write those texts in the asset headers. |
 | `larger than 1024 KiB` | Keep only the texts of tables the project builds. |
 | `translations/fr.yaml is not valid UTF-8` | Save the file as UTF-8. |
+| `translations/ holds 10241 KiB of translation files, and together they may hold at most 10240 KiB; keep only the texts of tables, columns and measures the project builds` | Remove texts of tables the project does not build. Files past the limit are not read. |
+| `the path has a non-UTF-8 or control character` | Rename the file after its language, such as `translations/de.yaml`. |
 
 ### `lakana.yaml`
 
@@ -133,7 +136,12 @@ The messages about the two keys themselves are in [`lakana.yaml`](lakana-yaml.md
 | Message | Next step |
 |---|---|
 | ``translations/fr.yaml must be a mapping of table names to their texts, such as `gold.fact_sales: {label: Ventes}` `` | Key the file by table. |
-| `has 50001 keys, and a translation file has at most 50000; keep only the texts of tables, columns and measures the project builds` | Remove entries. |
+| `has more than 50000 keys, and a translation file has at most 50000; keep only the texts of tables, columns and measures the project builds` | Remove entries. The file is refused while it is read, at the line of the first key past the limit. |
+| ``` `1` is not a table name; a key is a table's dotted name, such as `gold.fact_sales` ``` | Key the entry by the table's dotted name; quote a name YAML reads as a number, `yes` or `null`. |
+| ``` `gold.fact_sales` must be a mapping of its texts, such as `gold.fact_sales: {label: …, description: …, columns: …}` ``` | Write the texts under their keys, such as `label: Ventes`. |
+| ``gold.fact_sales.columns: must be a mapping of names to their texts, such as `{store_id: {label: …, description: …}}` `` (also `measures`) | Key the columns or measures by name. |
+| ``gold.fact_sales.columns: `store_id` must be a mapping such as `{label: …, description: …}` `` | Give the column `label:` or `description:`. |
+| `gold.fact_sales.label: Input should be a valid string` | Write the text as a string; quote it if YAML reads it as a number or a date. |
 | ``` `gold.fact_sale` is not a table this project builds; did you mean `gold.fact_sales`? Fix the name, or remove the entry``` | Fix the table's name. The suggestion appears only when a name is close. |
 | ``` `ml.model` is an artifact, which has no catalog texts to translate; remove the entry``` | Remove the entry. |
 | `gold.fact_sales.labl: Extra inputs are not permitted` | Fix the misspelt key. |
@@ -148,6 +156,21 @@ The messages about the two keys themselves are in [`lakana.yaml`](lakana-yaml.md
 | ``the header of `gold.fact_sales` gives column `store_id` no label to translate; add `label:` for it under `columns:` in assets/gold/fact_sales.sql, or remove this text`` (also `description`) | Add the column's text to the header first. |
 | ``measure `net_amount` of `gold.fact_sales` has no label to translate; add `label:` to it under `measures:` in assets/gold/fact_sales.sql, or remove this text`` (also `description`) | Add the measure's text to the header first. |
 | `… and 12 more problems in translations/fr.yaml; fix the ones above and deploy again to see the rest` | Fix the problems shown and deploy again. |
+
+A key or name that a message repeats is cut to 80 characters, ending in `…`.
+
+### YAML
+
+The file is read with the rules of every project file. Each message starts with the file's name.
+
+| Message | Next step |
+|---|---|
+| `translations/fr.yaml is not valid YAML: …` | Fix the syntax at the line named. |
+| `translations/fr.yaml is not valid YAML: it holds the control character U+0000, which YAML does not allow; remove it` | Remove the character at the line named. |
+| `translations/fr.yaml: anchors and aliases are not allowed.` | Write each text out. |
+| `translations/fr.yaml: merge keys (<<) are not allowed.` | Write each key out. |
+| `translations/fr.yaml: duplicate key 'gold.fact_sales'.` | Keep one entry per key. |
+| `translations/fr.yaml: nesting is deeper than 64 levels.` | Keep to the format above. |
 
 ## Workers and manifest version
 
