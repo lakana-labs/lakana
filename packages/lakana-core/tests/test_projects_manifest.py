@@ -9,7 +9,7 @@ import pytest
 from test_projects_dag import make_asset
 
 from lakana_core.projects.asset_model import ResolvedReference, deploy_hints
-from lakana_core.projects.checks import ParsedCheck, read_manifest_checks
+from lakana_core.projects.checks import GeneratedFrom, ParsedCheck, read_manifest_checks
 from lakana_core.projects.dag import build_graph
 from lakana_core.projects.frontmatter import AssetMetadata
 from lakana_core.projects.manifest import (
@@ -17,6 +17,7 @@ from lakana_core.projects.manifest import (
     CONNECTIONS_VERSION,
     JOBS_VERSION,
     MANIFEST_VERSION,
+    MEASURES_VERSION,
     MODEL_VERSION,
     NOTIFY_VERSION,
     VERSION_WITHOUT_CHECKS,
@@ -44,6 +45,7 @@ from lakana_core.projects.manifest import (
     python_entry,
     read_entry_connections,
 )
+from lakana_core.projects.model_checks import generated_checks
 from lakana_core.projects.parse import ParsedAsset
 from lakana_core.projects.project_config import ResolvedProjectConfig, parse_project_config
 
@@ -532,7 +534,7 @@ def test_a_python_entry_records_decimals_and_the_manifest_version_is_unchanged(
     asset = dataclasses.replace(_python_asset(), decimals=decimals)
     manifest = build_manifest([asset], build_graph([asset]), ResolvedProjectConfig())
     assert manifest["version"] == VERSION_WITHOUT_CHECKS == 3
-    assert MANIFEST_VERSION == 9
+    assert MANIFEST_VERSION == 10
     assert manifest["assets"][0]["decimals"] == decimals
 
 
@@ -1045,3 +1047,47 @@ def test_entry_model_drops_what_it_cannot_read() -> None:
     assert entry_model({"model": {"references": "x", "checks": []}}) == EntryModel(
         None, None, (), False, (), {}
     )
+
+
+def test_measures_raise_the_version_to_10_and_are_recorded() -> None:
+    metadata = AssetMetadata.model_validate(
+        {
+            "materialize": "table",
+            "kind": "fact",
+            "grain": "One row per order.",
+            "key": ["id"],
+            "measures": {"amount": {"aggregation": "sum", "currency": "EUR"}},
+        }
+    )
+    asset = make_asset("gold.fact_orders", columns=("id", "amount"), metadata=metadata)
+    checks = generated_checks([asset], {}, default_on_failure="block")
+    manifest = build_manifest([asset], build_graph([asset]), ResolvedProjectConfig(), checks=checks)
+    assert manifest["version"] == MEASURES_VERSION == MANIFEST_VERSION == 10
+    (entry,) = manifest["assets"]
+    assert entry["model"]["measures"] == [
+        {
+            "column": "amount",
+            "aggregation": "sum",
+            "additivity": "additive",
+            "not_over": [],
+            "unit": None,
+            "currency": "EUR",
+            "label": None,
+            "description": None,
+        }
+    ]
+    model = entry_model(entry)
+    assert model is not None and [m.column for m in model.measures] == ["amount"]
+    measures_check = next(c for c in manifest["checks"] if c["check"] == "measures")
+    assert measures_check["generated"]["not_over"] == []
+    assert measures_check["generated"]["aggregations"] == ["sum"]
+    read = read_manifest_checks(manifest)
+    assert [s.generated for s in read.specs if s.check == "measures"] == [
+        GeneratedFrom("measures", ("amount",), not_over=(), aggregations=("sum",))
+    ]
+
+
+def test_a_model_without_measures_stays_version_9_without_a_measures_key() -> None:
+    manifest = build_manifest([_modelled()], build_graph([_modelled()]), ResolvedProjectConfig())
+    assert manifest["version"] == MODEL_VERSION == 9
+    assert "measures" not in manifest["assets"][0]["model"]

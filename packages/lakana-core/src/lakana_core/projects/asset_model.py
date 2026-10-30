@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 from lakana_core.errors import ValidationError
 from lakana_core.identifiers import shown
+from lakana_core.projects.measures import measure_issues
 from lakana_core.projects.project_config import IDENTIFIER_MESSAGE, unsafe_identifier
 
 if TYPE_CHECKING:
@@ -59,7 +60,7 @@ def require_model_kind(value: str) -> None:
         )
 
 
-CHECK_FAMILIES = ("key", "references")
+CHECK_FAMILIES = ("key", "references", "measures")
 """The generated checks an asset's `checks:` may set the failure mode of."""
 
 CHECK_MODES = ("block", "keep", "warn")
@@ -174,8 +175,8 @@ def model_issues(metadata: AssetMetadata, *, table: str) -> list[str]:
     -------
     list of str
         The spec's fixed texts for a missing grain or key, a dimension's `key: none`, a
-        `key: none` without a kind that allows it, and a `checks:` family the asset has nothing
-        for; empty when the fields agree.
+        `key: none` without a kind that allows it, a `checks:` family the asset has nothing
+        for, and `measure_issues`' texts; empty when the fields agree.
     """
     kind, key = metadata.kind, metadata.key
     issues: list[str] = []
@@ -193,6 +194,9 @@ def model_issues(metadata: AssetMetadata, *, table: str) -> list[str]:
         issues.append(
             _FAMILY_UNUSED.format(family="references", what="reference", field="references")
         )
+    if "measures" in metadata.checks and not metadata.measures:
+        issues.append(_FAMILY_UNUSED.format(family="measures", what="measure", field="measures"))
+    issues.extend(measure_issues(kind, key, metadata.measures, table=table))
     return issues
 
 

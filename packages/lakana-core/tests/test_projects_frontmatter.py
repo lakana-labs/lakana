@@ -445,7 +445,7 @@ _UNSAFE_TARGET = (
         ("grain: ''", "grain: must not be empty"),
         ("grain: |\n  two\n  lines", "grain: must be one line"),
         ("grain: " + "x" * 301, "grain: must be at most 300 characters"),
-        ("checks:\n  rows: warn", "checks: takes only key and references"),
+        ("checks:\n  rows: warn", "checks: takes only key, references and measures"),
         ("checks:\n  key: loud", "checks: key must be block, keep or warn"),
         ("references:\n  store_id: dim_store", "references: reference `store_id: dim_store`"),
         ('grain: "a\\u202eb"', "grain: must not contain a surrogate"),
