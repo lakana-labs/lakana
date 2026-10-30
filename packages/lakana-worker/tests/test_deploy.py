@@ -3230,4 +3230,10 @@ def test_a_deploy_refuses_a_reference_it_cannot_resolve_and_a_key_the_select_lac
             "targets": ["bronze.events"],
         }
     ]
+    # The position contract `error_for_reader` relies on: each stored line is the text of the
+    # error at its index, end to end from the deploy that stored both.
+    lines = run.error_message.split("\n")
+    for entry in run.error_withheld_json or []:
+        size = entry["line"].count("\n") + 1
+        assert "\n".join(lines[entry["index"] : entry["index"] + size]) == entry["line"]
     assert session.query(JobVersion).count() == 0
