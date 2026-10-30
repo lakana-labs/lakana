@@ -297,7 +297,7 @@ def test_measure_and_not_over_columns_must_be_in_an_explicit_select() -> None:
 
 
 def test_unsafe_characters_are_refused_in_every_measure_text() -> None:
-    bad = "a‮b"
+    bad = "a\u202eb"
     spec = {"aggregation": "sum", "unit": "count"}
     assert _texts({bad: spec}) == [f"measures: a measure column {IDENTIFIER_MESSAGE}"]
     assert _texts(

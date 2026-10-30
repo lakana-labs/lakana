@@ -1177,3 +1177,76 @@ def test_model_fields_are_refused_on_an_artifact_asset() -> None:
     )
     assert isinstance(issues, list)
     assert any("argument 'kind' does not apply to an artifact asset" in i.message for i in issues)
+
+
+def test_the_decorator_takes_measures() -> None:
+    """A two-level literal reaches the metadata, `not_over` as a list."""
+    meta = _parsed(
+        "from lakana import asset\n\n"
+        '@asset(kind="fact", grain="One row per day.", key="day",\n'
+        '       measures={"amount": {"aggregation": "sum", "currency": "EUR"},\n'
+        '                 "stock": {"aggregation": "sum", "additivity": "semi",\n'
+        '                           "not_over": ["day"], "unit": "count"}})\n'
+        "def fact_days():\n    return None\n"
+    ).metadata
+    assert meta.measures["amount"].currency == "EUR"
+    assert meta.measures["stock"].not_over == ("day",)
+
+
+@pytest.mark.parametrize(
+    ("argument", "expected"),
+    [
+        ('{"m": {"aggregation": AGG, "unit": "count"}}', "argument 'measures' must be a literal"),
+        ('{"m": {"x": {"y": "z"}}}', "argument 'measures' must be a literal"),
+        (
+            '{"m": {"aggregation": "sum", "aggregation": "avg"}}',
+            "argument 'measures' repeats a key",
+        ),
+        ('["amount"]', "argument 'measures' must be a dict of dicts"),
+    ],
+)
+def test_a_measures_argument_that_is_not_a_literal_is_refused(argument: str, expected: str) -> None:
+    issues = _issues(
+        "from lakana import asset\n\nAGG = 'sum'\n\n"
+        f'@asset(kind="fact", grain="g", key="none", measures={argument})\n'
+        "def f():\n    return None\n"
+    )
+    assert expected in [issue.message for issue in issues]
+
+
+def test_measures_on_an_artifact_asset_and_on_a_dimension_are_refused() -> None:
+    artifact = _issues(
+        "from lakana import asset\n\n"
+        '@asset(output="artifact", measures={"m": {"aggregation": "sum", "unit": "count"}})\n'
+        "def f():\n    return None\n"
+    )
+    assert "argument 'measures' does not apply to an artifact asset; remove it" in [
+        issue.message for issue in artifact
+    ]
+    dimension = _issues(
+        "from lakana import asset\n\n"
+        '@asset(kind="dimension", grain="g", key="id",\n'
+        '       measures={"m": {"aggregation": "sum", "unit": "count"}})\n'
+        "def dim_x():\n    return None\n"
+    )
+    assert any("measures belong on a fact or wide table" in i.message for i in dimension)
+
+
+@pytest.mark.parametrize(
+    "argument",
+    [
+        '{"m": {**OTHER}}',
+        '{"m": {1: "sum"}}',
+        "{**OTHER}",
+        '{1: {"aggregation": "sum"}}',
+        '{"m": {"aggregation": "sum"}, "m": {"aggregation": "avg"}}',
+        '{"m": "sum"}',
+    ],
+)
+def test_odd_measures_displays_are_refused_without_running_code(argument: str) -> None:
+    issues = _issues(
+        "from lakana import asset\n\nOTHER = {}\n\n"
+        f'@asset(kind="fact", grain="g", key="none", measures={argument})\n'
+        "def f():\n    return None\n"
+    )
+    assert issues
