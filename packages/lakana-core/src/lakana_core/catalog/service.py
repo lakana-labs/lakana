@@ -264,6 +264,7 @@ from lakana_core.models import (
 from lakana_core.models.run import TERMINAL_TASK_STATUSES
 from lakana_core.pagination import escape_like
 from lakana_core.policy.resolver import PolicyResolver
+from lakana_core.policy.schema_change import BrokenPolicy, broken_policies
 from lakana_core.query_rewrite import ViewDefinition
 from lakana_core.runs.checks import (
     CHECK_ROWS_NOT_FOR_A_TASK,
@@ -6100,6 +6101,13 @@ class CatalogService:
             next_schema_id=max(s.schema_id for s in current.schemas) + 1,
             table_name=ref.dotted(),
         )
+        broken = (
+            ()
+            if plan.schema is None
+            else broken_policies(
+                self._session, table_id, ref.dotted(), current.schema(), plan.schema
+            )
+        )
         schema_updates: list[TableUpdate] = (
             []
             if plan.schema is None
@@ -6160,6 +6168,7 @@ class CatalogService:
                 environment_id,
                 snapshot_before=current.current_snapshot_id,
                 publishes=unpublished,
+                policy_warnings=broken,
             )
             self.commit_table(
                 p,
@@ -7014,6 +7023,7 @@ class CatalogService:
         snapshot_before: int | None = None,
         publishes: bool = False,
         detail: Mapping[str, object] | None = None,
+        policy_warnings: Sequence[BrokenPolicy] = (),
     ) -> None:
         """Add a write's `TABLE_WRITE` event and lineage edges to the session, uncommitted.
 
@@ -7049,7 +7059,12 @@ class CatalogService:
             Whether the write creates the table or finds it not published.
         detail
             More fields for the event, after the common ones (a merge's counts and key).
+        policy_warnings
+            The row filters and column masks the write's schema change leaves out of date: named
+            in the event (``broken_policies``, only when there are any) and handed to the guard,
+            which records them on the task run of a write in a run.
         """
+        stored = tuple(warning.to_json() for warning in policy_warnings)
         AuditService(self._session).record(
             p.id,
             AuditEventType.TABLE_WRITE,
@@ -7066,6 +7081,7 @@ class CatalogService:
                 else result.schema_diff.to_json(),
                 "run_id": None if query_run_id is None else str(query_run_id),
                 "principal": p.name,
+                **({"broken_policies": list(stored)} if stored else {}),
                 **(detail or {}),
             },
         )
@@ -7087,6 +7103,7 @@ class CatalogService:
             table_id=result.table_id,
             snapshot_before=snapshot_before,
             publishes=publishes,
+            policy_warnings=stored,
         )
 
     def _connection_sources(

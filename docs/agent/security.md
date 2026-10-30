@@ -3814,6 +3814,29 @@ work.
   refused, and revoking it first would leave a window without any policy (two masks on one column
   collapse to `NULL`, filters are ANDed). Binding policies to field ids is not done yet. Pins:
   `test_pipeline_schema_evolution.py` (the `rename` and set-back tests), `test_policy_renames.py`.
+- **A write that removes or replaces a policy's column warns, and shows the policy by reader
+  (#376).** `CatalogService.write_batches` compares the current schema with the planned one
+  (`policy.schema_change.changed_columns`: a column whose name is gone, or whose name now owns
+  another field id; widening keeps the id) and reads the table's active row filters and column
+  masks by `table_id` (`broken_policies`; a mask counts its own column and its expression's, a
+  filter its expression's, compared case-folded; an expression that no longer parses counts only a
+  mask's own column, so the write never fails for it). The result is stored as kind, policy id,
+  column and change, never the expression or the subject: in the `TABLE_WRITE` audit detail
+  (`broken_policies`, a shown field; the audit log already needs `READ_AUDIT_LOG`) and, for a write
+  in a run, on `task_runs.policy_warnings_json` through the guard (`note_result` ->
+  `record_pending` -> `_note_policy_warnings`), in the write's own transaction after the run
+  context held again, so it lands with the schema change or not at all. The run view
+  (`warnings_for_reader`) shows the policy id and the revoke command only to a reader who
+  `permits` `MANAGE_POLICY` on the instance (the policy listings need it); a reader with READ_TABLE
+  on the warning's table (`may_read_every`, by name) gets kind and column without the id; anyone
+  else gets nothing for that table. A notification names only the run's own tables
+  (`Facts.policy_warnings`, event `warned` for an otherwise silent success), never the policy or
+  the column: the endpoint is no reader. Deploy does not warn: output columns and types are known
+  only at run time. The write proceeds and reads stay fail-closed as above. Pins:
+  `test_policy_schema_change.py`, `test_runs_service.py`
+  (`test_a_tasks_policy_warnings_are_shown_by_who_reads_the_run`), the server's `test_runs.py`
+  (`test_a_policy_warning_names_the_policy_only_to_an_administrator`) and
+  `test_notifications_payload.py`.
 - **Grants, row filters, and column masks bind to ids, never names.** A rename or a
   drop-and-recreate under the same name cannot evade either. An `EXTERNAL` table goes
   through this same rewriter and its own row filters/column masks apply to it, confined to

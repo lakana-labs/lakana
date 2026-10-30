@@ -20188,7 +20188,7 @@
           "delivered_at"
         ],
         "title": "NotificationOut",
-        "description": "One notification of a run.\n\nParameters\n----------\nid\n    The delivery id: the ``delivery_id`` a receiver sees, and what\n    ``GET /environments/{env}/notifications/{id}`` takes.\nevent\n    ``failed``, ``recovered`` or ``test``.\nstate\n    ``pending``, ``delivered`` or ``failed``.\nattempts\n    Attempts made so far.\nmax_attempts\n    Attempts before the delivery counts as failed.\nlast_result\n    A short text on the last attempt; never the URL.\ndelivered_at\n    When it was delivered."
+        "description": "One notification of a run.\n\nParameters\n----------\nid\n    The delivery id: the ``delivery_id`` a receiver sees, and what\n    ``GET /environments/{env}/notifications/{id}`` takes.\nevent\n    ``failed``, ``recovered``, ``warned`` or ``test``.\nstate\n    ``pending``, ``delivered`` or ``failed``.\nattempts\n    Attempts made so far.\nmax_attempts\n    Attempts before the delivery counts as failed.\nlast_result\n    A short text on the last attempt; never the URL.\ndelivered_at\n    When it was delivered."
       },
       "NotifyTestOut": {
         "properties": {
@@ -20576,6 +20576,48 @@
         ],
         "title": "PermissionsOut",
         "description": "A principal's effective permissions on one object.\n\nParameters\n----------\nprincipal\n    The principal's name.\nactive\n    Whether it may sign in.\nscope\n    The object asked about.\npermissions\n    One per action the routes ask for on an object of this kind.\nnote\n    Set for a deactivated principal: its tokens no longer work, whatever its grants allow."
+      },
+      "PolicyWarningOut": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "column": {
+            "type": "string",
+            "title": "Column"
+          },
+          "change": {
+            "type": "string",
+            "title": "Change"
+          },
+          "policy_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Policy Id"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "column",
+          "change",
+          "policy_id",
+          "message"
+        ],
+        "title": "PolicyWarningOut",
+        "description": "A row filter or column mask a task's write left out of date.\n\nParameters\n----------\nkind\n    ``row_filter`` or ``column_mask``.\ncolumn\n    The column the policy uses, as the policy spells it.\nchange\n    ``removed`` (the write removed the column) or ``replaced`` (its type changed in a way\n    that does not widen, so it is a new column under the same name).\npolicy_id\n    The policy's id, for a caller who may manage policies; `null` for everyone else.\nmessage\n    What happened and the next step, in one paragraph."
       },
       "PrincipalCreate": {
         "properties": {
@@ -23229,6 +23271,13 @@
                 "type": "null"
               }
             ]
+          },
+          "policy_warnings": {
+            "items": {
+              "$ref": "#/components/schemas/PolicyWarningOut"
+            },
+            "type": "array",
+            "title": "Policy Warnings"
           }
         },
         "type": "object",
@@ -23246,7 +23295,7 @@
           "rows_written"
         ],
         "title": "TaskRunOut",
-        "description": "One task run.\n\nParameters\n----------\nasset\n    Dotted table name.\nstatus\n    Task status.\nattempt\n    Attempts counted.\nmax_attempts\n    Retries + 1.\ntimeout_seconds\n    Per-attempt limit.\nnext_attempt_at\n    When a pending retry may start.\nstarted_at\n    First claim.\nfinished_at\n    Final state.\nerror_message\n    Last failure, as free text: the detail of `failure`.\nquery_run_id\n    The write that executed the last attempt.\nrows_written\n    Rows it wrote.\nfailure\n    Why the task failed, was cancelled or never ran, with its stable code, the cause and the\n    next step (`FailureOut`); `null` for a task with no error. A task that failed before the\n    codes existed has the code `unknown`.\nwaiting_for\n    Why a `pending` or `ready` task of a running run has not started, or `null`: a stable\n    `code` (`upstream`, `retry`, `setting_back`, `no_worker`, `no_worker_of_kind`,\n    `workers_busy` or `starting`), one sentence in `message`, and the numbers or names it\n    uses. A task is pipeline work: `no_worker_of_kind` means workers are running and none\n    takes pipeline work (`workers` is 0, `other_workers` the workers running), and `workers` in\n    `workers_busy` counts the workers that take pipeline work. For `upstream`, `upstream`\n    lists the first 50 unfinished upstream tasks whose tables the caller may read (raw\n    names), `upstream_count` is how many there are in all, and `hidden_upstream` (present\n    only when not 0) how many the caller may not read, counted and never named; the\n    sentence names five, escaped.\nkind\n    ``asset`` for a table the run builds, ``source_check`` for a table it only checks.\nchecks\n    The task's check results, by name.\nhidden_checks\n    How many results were left out of `checks`: generated reference checks whose target the\n    caller may not read.\nkept_check\n    ``true`` for a ``source_check`` task that checks a table the project builds, because\n    that table was kept after a failed check; ``false`` for every other task; ``null`` for a\n    ``source_check`` task of a run whose project version is gone, which cannot tell.\nsetting_back\n    ``true`` while the task has not ended and its next claim only sets its table back:\n    its worker was lost after it may have written the table, or its run was cancelled\n    while it waited with rows no check had passed. The task is then ``ready``\n    (`waiting_for` has the code `setting_back`), ``running`` with that claim, or\n    ``pending`` again after that claim's worker drained. ``false`` once it has ended."
+        "description": "One task run.\n\nParameters\n----------\nasset\n    Dotted table name.\nstatus\n    Task status.\nattempt\n    Attempts counted.\nmax_attempts\n    Retries + 1.\ntimeout_seconds\n    Per-attempt limit.\nnext_attempt_at\n    When a pending retry may start.\nstarted_at\n    First claim.\nfinished_at\n    Final state.\nerror_message\n    Last failure, as free text: the detail of `failure`.\nquery_run_id\n    The write that executed the last attempt.\nrows_written\n    Rows it wrote.\nfailure\n    Why the task failed, was cancelled or never ran, with its stable code, the cause and the\n    next step (`FailureOut`); `null` for a task with no error. A task that failed before the\n    codes existed has the code `unknown`.\nwaiting_for\n    Why a `pending` or `ready` task of a running run has not started, or `null`: a stable\n    `code` (`upstream`, `retry`, `setting_back`, `no_worker`, `no_worker_of_kind`,\n    `workers_busy` or `starting`), one sentence in `message`, and the numbers or names it\n    uses. A task is pipeline work: `no_worker_of_kind` means workers are running and none\n    takes pipeline work (`workers` is 0, `other_workers` the workers running), and `workers` in\n    `workers_busy` counts the workers that take pipeline work. For `upstream`, `upstream`\n    lists the first 50 unfinished upstream tasks whose tables the caller may read (raw\n    names), `upstream_count` is how many there are in all, and `hidden_upstream` (present\n    only when not 0) how many the caller may not read, counted and never named; the\n    sentence names five, escaped.\nkind\n    ``asset`` for a table the run builds, ``source_check`` for a table it only checks.\nchecks\n    The task's check results, by name.\nhidden_checks\n    How many results were left out of `checks`: generated reference checks whose target the\n    caller may not read.\nkept_check\n    ``true`` for a ``source_check`` task that checks a table the project builds, because\n    that table was kept after a failed check; ``false`` for every other task; ``null`` for a\n    ``source_check`` task of a run whose project version is gone, which cannot tell.\nsetting_back\n    ``true`` while the task has not ended and its next claim only sets its table back:\n    its worker was lost after it may have written the table, or its run was cancelled\n    while it waited with rows no check had passed. The task is then ``ready``\n    (`waiting_for` has the code `setting_back`), ``running`` with that claim, or\n    ``pending`` again after that claim's worker drained. ``false`` once it has ended.\npolicy_warnings\n    The row filters and column masks the task's writes left out of date by removing or\n    replacing a column they use (`PolicyWarningOut`). Reads by the people they apply to are\n    refused until an administrator creates them again. A caller who may manage policies sees\n    every one with its id; a caller who may read the task's table sees its kind and column\n    without the id; anyone else sees none. Empty for a task without any."
       },
       "TaskTokenMintIn": {
         "properties": {

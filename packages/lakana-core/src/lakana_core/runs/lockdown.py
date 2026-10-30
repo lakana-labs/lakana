@@ -329,6 +329,9 @@ class _Evidence:
         The table's current snapshot when the write was staged, or `None`.
     publishes
         Whether the write created the table or found it not published.
+    policy_warnings
+        The row filters and column masks the write leaves out of date, as stored
+        (`lakana_core.policy.schema_change.BrokenPolicy.to_json`).
     """
 
     key: tuple[str, Target]
@@ -338,6 +341,7 @@ class _Evidence:
     fence: WriteFence | None
     snapshot_before: int | None
     publishes: bool
+    policy_warnings: tuple[dict[str, str], ...] = ()
 
 
 class ProtectedWriteGuard:
@@ -405,6 +409,7 @@ class ProtectedWriteGuard:
         table_id: uuid.UUID,
         snapshot_before: int | None = None,
         publishes: bool = False,
+        policy_warnings: tuple[dict[str, str], ...] = (),
     ) -> None:
         """Remember what the write of `target` is about to commit, for `record_pending`.
 
@@ -430,6 +435,9 @@ class ProtectedWriteGuard:
             did not exist or had no snapshot, and for a view.
         publishes
             Whether the write created the table or found it not published.
+        policy_warnings
+            The row filters and column masks the write leaves out of date, as stored; recorded on
+            the task run of a write in a run (`_note_policy_warnings`).
         """
         self._evidence = _Evidence(
             (environment, target),
@@ -439,6 +447,7 @@ class ProtectedWriteGuard:
             self._fence,
             snapshot_before,
             publishes,
+            policy_warnings,
         )
 
     def note_own_commit(
@@ -684,6 +693,8 @@ class ProtectedWriteGuard:
                 self._stamp_written(relied_on.context.task_run_id, noted)
         if noted is not None and relied_on is not None and relied_on.context.claim is not None:
             self._advance_own_tip(relied_on.context.task_run_id, noted)
+        if noted is not None and relied_on is not None and noted.policy_warnings:
+            self._note_policy_warnings(relied_on.context.task_run_id, noted.policy_warnings)
         if self._pending is None:
             return
         key, principal_id, detail = self._pending
@@ -695,6 +706,35 @@ class ProtectedWriteGuard:
             AuditEventType.BREAK_GLASS_WRITE,
             securable=Securable.environment_scope(key[0]),
             detail=detail,
+        )
+
+    def _note_policy_warnings(
+        self, task_run_id: uuid.UUID, warnings: tuple[dict[str, str], ...]
+    ) -> None:
+        """Add a write's policy warnings to its task run, in the write's own transaction.
+
+        Both forms of a run context get here (a SQL task's write run and a Python task's own
+        write), after the context held again, so the warnings land with the schema change or not
+        at all. An entry the task run already holds is not added twice: a later write of the same
+        task that changes the same column again tells nothing new.
+
+        Parameters
+        ----------
+        task_run_id
+            The task run whose write this is.
+        warnings
+            The warnings, as stored.
+        """
+        held = self._session.scalar(
+            select(TaskRun.policy_warnings_json).where(TaskRun.id == task_run_id)
+        )
+        merged = list(held or [])
+        merged += [warning for warning in warnings if warning not in merged]
+        self._session.execute(
+            update(TaskRun)
+            .where(TaskRun.id == task_run_id)
+            .values(policy_warnings_json=merged)
+            .execution_options(synchronize_session=False)
         )
 
     def _stamp_written(self, task_run_id: uuid.UUID, evidence: _Evidence) -> None:

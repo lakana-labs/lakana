@@ -71,6 +71,41 @@ ask whoever manages the table's policies, so the reads do not stop by surprise.
 Adding the column back does not bring its data back: it returns as a new column, empty in every row
 written before.
 
+## The run that breaks a row filter or column mask says so
+
+A run that removes a column, or replaces it with a new one by changing its type, checks the table's
+row filters and column masks at the write. For each one that uses the column, the run records a
+warning on its task, naming the kind of policy and the column, with the next step. The write itself
+goes through, and the reads stay refused as described above: the warning only means that you learn
+of it from the run, not from the people whose queries stop working.
+
+- `lakana runs show RUN --env ENV` (and `lakana run`, when the run ends) prints the warning under
+  the tasks, for example ``gold.payments warning:`` and then
+  ``A row filter on `gold.payments` uses column `amount`, which this run replaced: its type changed in a way that does not widen, so it is a new column under the same name. Reads of the table by the people the filter applies to are refused until it is created again. Next: ask an administrator to create the filter again for the column it is meant for and then revoke the old one, in that order (see "After a rename" in the documentation).``
+- The SDK has it in `RunTask.policy_warnings`, and the REST API in `policy_warnings` on each task
+  of `GET /api/v1/environments/{env}/runs/{id}`.
+- The write's `TABLE_WRITE` event in the audit log lists the policies in `broken_policies`: kind,
+  id, column and change (`removed` or `replaced`).
+- A job with `notify:` sends a message: the event `warned` for a run that succeeded, or a line in
+  its `failed` or `recovered` message. The message names the table, never the policy or the column
+  ([Get told when a job fails](../how-to/get-told-when-a-job-fails.md#when-a-message-is-sent)).
+
+What a reader of the run sees depends on what they may do. Someone who may manage policies (an
+instance administrator) sees every warning with the policy's id and the `lakana row-filter revoke`
+or `lakana column-mask revoke` command for it, after creating the new one. Someone who may read the
+table sees the kind of policy and the column, but not its id: the list of policies is for those who
+manage them. Anyone else who may see the run sees no warning for that table. Nobody sees a policy's
+expression or whom it applies to here.
+
+The warning comes once, from the run whose write changed the column. A later run that leaves the
+column as it is does not repeat it, although the reads stay refused until the policy is created
+again. A write outside a run (`lakana query --evolve-schema`, an upload, or
+`client.tables.replace(..., evolve_schema=True)`) has no run to show it: only its audit event lists
+the policies.
+
+A deploy cannot warn ahead of time: the columns and types an asset returns are known only when the
+run computes them.
+
 ## The old data is still in the old snapshots
 
 Removing a column deletes no data. Every write leaves a **snapshot**, the state of the table it

@@ -30,6 +30,7 @@ from lakana_core.models import (
     TaskRun,
     TaskStatus,
 )
+from lakana_core.notifications.events import policy_warning_tables
 from lakana_core.runs.hidden_checks import is_reference_check
 
 PAYLOAD_VERSION = 1
@@ -41,6 +42,7 @@ FORMATS = NOTIFY_FORMATS
 _TITLES = {
     "failed": "Lakana: job {job} failed in {environment}",
     "recovered": "Lakana: job {job} succeeded again in {environment}",
+    "warned": "Lakana: job {job} succeeded with a warning in {environment}",
     "test": "Lakana: test message for job {job} in {environment}",
 }
 
@@ -78,6 +80,11 @@ class Facts:
         Whether a generated reference check failed or errored. Such a check is never named: its
         outcome tells of the table it points at, and the endpoint is no reader whose right to
         read that table can be asked. `lakana runs show` shows it to a reader who may.
+    policy_warnings
+        The run's own tables on which a write left a row filter or column mask out of date by
+        removing or replacing a column. The policy and the column are never named: the endpoint
+        is no reader whose rights can be asked; `lakana runs show` names them to a reader of the
+        table.
     """
 
     job: str
@@ -92,6 +99,7 @@ class Facts:
     failed_checks: tuple[str, ...]
     delivery_id: str
     reference_check_failed: bool = False
+    policy_warnings: tuple[str, ...] = ()
 
     @property
     def command(self) -> str:
@@ -173,6 +181,7 @@ def facts_for_run(session: Session, run: Run, delivery_id: UUID | str) -> Facts:
         reference_check_failed=any(
             is_reference_check(name, generated) for _, name, generated in checks
         ),
+        policy_warnings=policy_warning_tables(session, run.id),
     )
 
 
@@ -237,7 +246,7 @@ def build(fmt: str, event: str, facts: Facts) -> tuple[bytes, dict[str, str]]:
     fmt
         `json`, `slack` or `teams`.
     event
-        `failed`, `recovered` or `test`.
+        `failed`, `recovered`, `warned` or `test`.
     facts
         What the message says.
 
@@ -295,7 +304,10 @@ def _json(event: str, facts: Facts) -> dict[str, Any]:
         "failed_tasks": list(facts.failed_tasks),
         "failed_checks": list(facts.failed_checks),
         "command": facts.command,
-    } | ({"reference_check_failed": True} if facts.reference_check_failed else {})
+    } | (
+        ({"reference_check_failed": True} if facts.reference_check_failed else {})
+        | ({"policy_warnings": list(facts.policy_warnings)} if facts.policy_warnings else {})
+    )
 
 
 def _title(event: str, facts: Facts) -> str:
@@ -380,6 +392,12 @@ def _slack(event: str, facts: Facts) -> str:
         lines.append("Failed checks: " + ", ".join(_code(c) for c in facts.failed_checks))
     if facts.reference_check_failed:
         lines.append(f"A reference check failed; see {_code(facts.command)}")
+    if facts.policy_warnings:
+        tables = ", ".join(_code(t) for t in facts.policy_warnings)
+        lines.append(
+            "A schema change left row filters or column masks out of date on "
+            f"{tables}; see {_code(facts.command)}"
+        )
     lines.append(f"Details: {_code(facts.command)}")
     lines.append(f"Delivery {_code(facts.delivery_id)}")
     return "\n".join(lines)
@@ -440,6 +458,14 @@ def _teams(event: str, facts: Facts) -> dict[str, Any]:
         pairs.append(("Failed checks", ", ".join(facts.failed_checks)))
     if facts.reference_check_failed:
         pairs.append(("Reference check", f"A reference check failed; see {facts.command}"))
+    if facts.policy_warnings:
+        pairs.append(
+            (
+                "Row filters and column masks",
+                "A schema change left some out of date on "
+                f"{', '.join(facts.policy_warnings)}; see {facts.command}",
+            )
+        )
     pairs += [("Details", facts.command), ("Delivery", facts.delivery_id)]
     card = {
         "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",

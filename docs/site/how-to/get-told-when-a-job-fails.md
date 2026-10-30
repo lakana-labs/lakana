@@ -116,7 +116,7 @@ with the values of a test project:
 {"command":"lakana runs show 11111111-2222-3333-4444-555555555555 --env prod","commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","delivery_id":"99999999-8888-7777-6666-555555555555","environment":"prod","event":"failed","failed_checks":["silver.clean/no_nulls"],"failed_tasks":["silver.clean"],"finished_at":"2026-10-14T06:05:00+00:00","job":"daily","repository":"analytics","run_id":"11111111-2222-3333-4444-555555555555","status":"failed","trigger":"schedule","version":1}
 ```
 
-`event` is `failed`, `recovered` or, from `notify-test`, `test`.
+`event` is `failed`, `recovered`, `warned` or, from `notify-test`, `test`.
 
 A failed reference check, the `ref_<column>` check Lakana generates from a `references:` entry in
 an asset's header, is never named in a message: whether it failed, and how many rows it found, says
@@ -124,6 +124,14 @@ something about the table it points at, and the people who read the channel may 
 read that table. The message says only `A reference check failed; see lakana runs show ...` (in
 **json**, `"reference_check_failed": true`, a field that is there only then). `lakana runs show`
 shows the check to everyone who may read its target.
+
+When a run's write left a row filter or column mask out of date (it removed a column the policy
+uses, or changed its type in a way that does not widen), the message names the run's tables where
+that happened, never the policy or the column: in **json**, `"policy_warnings": ["gold.payments"]`,
+a field that is there only then; in **slack** and **teams**, a line such as
+``A schema change left row filters or column masks out of date on `gold.payments`; see `lakana runs show ...` ``.
+`lakana runs show` names the policy's kind and the column to everyone who may read the table
+([When a table's columns change](../explanation/when-columns-change.md#the-run-that-breaks-a-row-filter-or-column-mask-says-so)).
 
 **slack** is a short text message in Slack's format, which other chat tools accept as
 well. The message is `{"text": "..."}` and the text reads, for the same run:
@@ -150,6 +158,9 @@ webhook request is received"), not the older Office 365 connector.
 - **`recovered`:** a run that succeeds when the run of the same job before it (in the same
   environment and repository, cancelled runs skipped) failed. The first run of a job never sends
   `recovered`.
+- **`warned`:** any other run that succeeds, when one of its writes left a row filter or column mask
+  out of date. Its title reads ``Lakana: job `daily` succeeded with a warning in `prod` ``. A run
+  that fails or recovers sends its own event, with the same line in it.
 - **Nothing:** an ad-hoc `lakana run` (it has no job), a job whose version had no `notify:`, and a
   scheduled start that never becomes a run (it was dropped, or the environment has no run
   principal bound): a team that relies on `notify:` hears nothing when a job never starts. The

@@ -4622,3 +4622,39 @@ def test_0055_adds_the_withheld_lines_of_a_deploy_error_null_on_old_rows(
         assert "error_withheld_json" not in names
     finally:
         engine.dispose()
+
+
+_REVISION_0056 = "b6d0f8a2c4e5"
+
+
+@pytest.mark.usefixtures("_without_fsync")
+def test_0056_adds_the_policy_warnings_of_a_task_null_on_old_rows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Revision `0056`: `policy_warnings_json` on task runs, and back.
+
+    Parameters
+    ----------
+    tmp_path
+        Holds the throwaway SQLite file.
+    monkeypatch
+        Points `lakana_core.config.Settings` at that file.
+    """
+    db_path = tmp_path / "migrated.db"
+    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    config = Config(str(ALEMBIC_INI))
+    command.upgrade(config, _REVISION_0056)
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        found = {c["name"]: c for c in inspect(engine).get_columns("task_runs")}
+        assert found["policy_warnings_json"]["nullable"] is True
+    finally:
+        engine.dispose()
+
+    command.downgrade(config, _REVISION_0055)
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        names = {c["name"] for c in inspect(engine).get_columns("task_runs")}
+        assert "policy_warnings_json" not in names
+    finally:
+        engine.dispose()

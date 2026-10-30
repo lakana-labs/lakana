@@ -838,3 +838,54 @@ def test_an_old_failed_task_without_a_code_is_unknown_over_rest(client: TestClie
     assert task_body["failure"]["code"] == "unknown"
     assert task_body["failure"]["next_step"]
     assert task_body["error_message"] == "boom"
+
+
+def test_a_policy_warning_names_the_policy_only_to_an_administrator(client: TestClient) -> None:
+    """A viewer of the table sees kind and column, a reader without the table nothing."""
+    _deploy(client)
+    started = client.post(_RUNS, headers=AUTH_HEADER, json={"repository": "analytics"}).json()
+    policy_id = "12345678-1234-1234-1234-123456789abc"
+    with Session(client.app.state.engine) as session:
+        task = session.query(TaskRun).filter(TaskRun.run_id == uuid.UUID(started["id"])).one()
+        task.policy_warnings_json = [
+            {
+                "table": "silver.clean",
+                "kind": "row_filter",
+                "policy_id": policy_id,
+                "column": "region",
+                "change": "replaced",
+            }
+        ]
+        session.commit()
+    viewer = _token_for(client, "viewer")
+    outsider = _token_for(client, "outsider")
+    for body in (
+        {"principal": "viewer", "role": "VIEWER", "kind": "ENVIRONMENT", "environment": "dev"},
+        {
+            "principal": "outsider",
+            "action": "READ_ENVIRONMENT",
+            "kind": "ENVIRONMENT",
+            "environment": "dev",
+        },
+    ):
+        created = client.post("/api/v1/grants", headers=AUTH_HEADER, json=body)
+        assert created.status_code == 201, created.text
+
+    def warnings(headers: dict[str, str]) -> list[dict[str, object]]:
+        shown = client.get(f"{_RUNS}/{started['id']}", headers=headers)
+        assert shown.status_code == 200, shown.text
+        (task_body,) = shown.json()["tasks"]
+        return task_body["policy_warnings"]
+
+    (admin,) = warnings(AUTH_HEADER)
+    assert admin["policy_id"] == policy_id
+    (seen,) = warnings(viewer)
+    assert {k: seen[k] for k in ("kind", "column", "change", "policy_id")} == {
+        "kind": "row_filter",
+        "column": "region",
+        "change": "replaced",
+        "policy_id": None,
+    }
+    assert policy_id not in str(seen["message"])
+    assert str(seen["message"]).startswith("A row filter on `silver.clean` uses column `region`")
+    assert warnings(outsider) == []

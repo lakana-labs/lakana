@@ -2878,6 +2878,31 @@ class FailureOut(BaseModel):
     next_step: str
 
 
+class PolicyWarningOut(BaseModel):
+    """A row filter or column mask a task's write left out of date.
+
+    Parameters
+    ----------
+    kind
+        ``row_filter`` or ``column_mask``.
+    column
+        The column the policy uses, as the policy spells it.
+    change
+        ``removed`` (the write removed the column) or ``replaced`` (its type changed in a way
+        that does not widen, so it is a new column under the same name).
+    policy_id
+        The policy's id, for a caller who may manage policies; `null` for everyone else.
+    message
+        What happened and the next step, in one paragraph.
+    """
+
+    kind: str
+    column: str
+    change: str
+    policy_id: uuid.UUID | None
+    message: str
+
+
 class TaskRunOut(BaseModel):
     """One task run.
 
@@ -2937,6 +2962,12 @@ class TaskRunOut(BaseModel):
         while it waited with rows no check had passed. The task is then ``ready``
         (`waiting_for` has the code `setting_back`), ``running`` with that claim, or
         ``pending`` again after that claim's worker drained. ``false`` once it has ended.
+    policy_warnings
+        The row filters and column masks the task's writes left out of date by removing or
+        replacing a column they use (`PolicyWarningOut`). Reads by the people they apply to are
+        refused until an administrator creates them again. A caller who may manage policies sees
+        every one with its id; a caller who may read the task's table sees its kind and column
+        without the id; anyone else sees none. Empty for a task without any.
     """
 
     asset: str
@@ -2963,6 +2994,7 @@ class TaskRunOut(BaseModel):
     kept_check: bool | None = False
     setting_back: bool = False
     failure: FailureOut | None = None
+    policy_warnings: list[PolicyWarningOut] = Field(default_factory=list)
 
 
 class NotificationOut(BaseModel):
@@ -2974,7 +3006,7 @@ class NotificationOut(BaseModel):
         The delivery id: the ``delivery_id`` a receiver sees, and what
         ``GET /environments/{env}/notifications/{id}`` takes.
     event
-        ``failed``, ``recovered`` or ``test``.
+        ``failed``, ``recovered``, ``warned`` or ``test``.
     state
         ``pending``, ``delivered`` or ``failed``.
     attempts

@@ -322,6 +322,29 @@ def _emit_failures(run: Run) -> None:
         typer.echo(f"  Next: {_output.inline(task.failure.next_step, _PROGRESS_REASON_LIMIT)}")
 
 
+_WARNING_LIMIT = 1000
+"""The most characters of a policy warning `lakana runs show` keeps; the server's are shorter."""
+
+
+def _emit_policy_warnings(run: Run) -> None:
+    """Print, for each task, the row filters and column masks its writes left out of date.
+
+    Prints nothing for a run without any, so its output is what it was before the warnings.
+
+    Parameters
+    ----------
+    run
+        The run.
+    """
+    for task in run.tasks:
+        if not task.policy_warnings:
+            continue
+        typer.echo("")
+        typer.echo(f"{_output.inline(task.asset)} warning:")
+        for warning in task.policy_warnings:
+            typer.echo(f"  {_output.inline(warning.message, _WARNING_LIMIT)}")
+
+
 _NAME_PAD = 2
 """The name column of a check group is its longest name plus this many spaces."""
 _STATE_WIDTH = 7
@@ -603,6 +626,7 @@ def _summary(state: CliState, run: Run) -> None:
     typer.echo(f"Run {run.id} {run.status}")
     _emit_tasks(state, run)
     _emit_failures(run)
+    _emit_policy_warnings(run)
     _emit_checks(state, run)
 
 
@@ -843,6 +867,7 @@ def show(ctx: typer.Context, run_id: str, env: _ENV = None) -> None:
     _output.emit(state, found, columns=_SHOW_COLUMNS)
     _emit_tasks(state, found)
     _emit_failures(found)
+    _emit_policy_warnings(found)
     _emit_checks(state, found)
     _emit_notifications(state, found)
 

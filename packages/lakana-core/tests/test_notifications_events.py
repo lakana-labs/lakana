@@ -376,3 +376,49 @@ def test_a_success_with_a_failing_warn_check_still_recovers(
     run = project.run(RunStatus.SUCCEEDED)
     _check(project, run, "warn", CheckOutcome.FAILED)
     assert decide_event(session, run) == "recovered"
+
+
+def _warned(project: Project, run: Run) -> None:
+    """Add a succeeded task whose write left a row filter out of date.
+
+    Parameters
+    ----------
+    project
+        The project.
+    run
+        The run.
+    """
+    project.session.add(
+        TaskRun(
+            id=uuid.uuid4(),
+            run_id=run.id,
+            asset="gold.orders",
+            status=TaskStatus.SUCCEEDED,
+            max_attempts=1,
+            timeout_seconds=60,
+            retry_delay_seconds=0,
+            policy_warnings_json=[{"table": "gold.orders", "kind": "row_filter"}],
+        )
+    )
+    project.session.flush()
+
+
+def test_a_success_whose_write_left_a_policy_out_of_date_gives_warned(
+    project: Project, session: Session
+) -> None:
+    run = project.run(RunStatus.SUCCEEDED)
+    _warned(project, run)
+    assert decide_event(session, run) == "warned"
+    queue_notification(session, run, T0)
+    assert [d.event for d in session.scalars(select(NotificationDelivery))] == ["warned"]
+
+
+def test_a_failure_or_a_recovery_with_a_policy_warning_keeps_its_own_event(
+    project: Project, session: Session
+) -> None:
+    failed = project.run(RunStatus.FAILED)
+    _warned(project, failed)
+    assert decide_event(session, failed) == "failed"
+    recovered = project.run(RunStatus.SUCCEEDED)
+    _warned(project, recovered)
+    assert decide_event(session, recovered) == "recovered"

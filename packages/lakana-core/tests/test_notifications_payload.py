@@ -309,3 +309,40 @@ def test_a_failed_reference_check_is_said_but_never_named(session: Session) -> N
 
 def test_without_a_failed_reference_check_the_json_has_no_flag() -> None:
     assert "reference_check_failed" not in json.loads(build("json", "failed", _facts())[0])
+
+
+def test_a_policy_warning_names_the_table_and_never_the_policy_or_the_column(
+    session: Session,
+) -> None:
+    """The endpoint is no reader: the run's own table is named, the policy and column are not."""
+    run = _seed(session, [])
+    run.status = RunStatus.SUCCEEDED
+    for task in session.query(TaskRun).filter(TaskRun.run_id == run.id):
+        task.policy_warnings_json = [
+            {
+                "table": task.asset,
+                "kind": "column_mask",
+                "policy_id": "12345678-1234-1234-1234-123456789abc",
+                "column": "ssn_marker",
+                "change": "removed",
+            }
+        ]
+    session.flush()
+    facts = facts_for_run(session, run, DELIVERY)
+    assert facts.policy_warnings == ("silver.clean", "silver.ok")
+    data = json.loads(build("json", "warned", facts)[0])
+    assert data["event"] == "warned"
+    assert data["policy_warnings"] == ["silver.clean", "silver.ok"]
+    slack = json.loads(build("slack", "warned", facts)[0])["text"]
+    assert slack.startswith("Lakana: job `daily` succeeded with a warning in `prod`")
+    assert (
+        "A schema change left row filters or column masks out of date on `silver.clean`, "
+        f"`silver.ok`; see `lakana runs show {facts.run_id} --env prod`"
+    ) in slack
+    teams = build("teams", "warned", facts)[0].decode()
+    assert "Row filters and column masks" in teams
+    for fmt in FORMATS:
+        body = build(fmt, "warned", facts)[0].decode()
+        assert "ssn_marker" not in body
+        assert "12345678" not in body
+    assert "policy_warnings" not in json.loads(build("json", "failed", _facts())[0])

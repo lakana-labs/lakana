@@ -148,8 +148,9 @@ would never send.
 
 ### Notify a webhook
 
-`notify:` names where a job reports a run that failed or recovered. It is optional; a job without
-it tells nobody.
+`notify:` names where a job reports a run that failed or recovered, or that left a row filter or
+column mask out of date ([the events](../how-to/get-told-when-a-job-fails.md#when-a-message-is-sent)).
+It is optional; a job without it tells nobody.
 
 - `webhook:` is the **name of a secret** of the environment, never the URL: the URL is a
   credential, so it stays out of the repository. A name has 1 to 255 characters and no space,
