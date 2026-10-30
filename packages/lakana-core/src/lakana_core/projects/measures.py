@@ -14,10 +14,9 @@ from pydantic import field_validator, model_validator
 
 from lakana_core.identifiers import shown
 from lakana_core.projects.project_config import (
-    FREE_TEXT_MESSAGE,
     IDENTIFIER_MESSAGE,
     StrictModel,
-    unsafe_free_text,
+    checked_text,
     unsafe_identifier,
 )
 
@@ -397,16 +396,7 @@ class MeasureSpec(StrictModel):
         """
         if value is None:
             return value
-        text = value.strip()
-        if not text:
-            raise ValueError("must not be empty")
-        if "\n" in text:
-            raise ValueError("must be one line")
-        if len(text) > MAX_LABEL_CHARS:
-            raise ValueError(f"must be at most {MAX_LABEL_CHARS} characters")
-        if unsafe_free_text(value):
-            raise ValueError(FREE_TEXT_MESSAGE)
-        return text
+        return checked_text(value, limit=MAX_LABEL_CHARS, one_line=True)
 
     @field_validator("description")
     @classmethod
@@ -430,14 +420,7 @@ class MeasureSpec(StrictModel):
         """
         if value is None:
             return value
-        text = value.strip()
-        if not text:
-            raise ValueError("must not be empty")
-        if len(text) > MAX_MEASURE_DESCRIPTION_CHARS:
-            raise ValueError(f"must be at most {MAX_MEASURE_DESCRIPTION_CHARS} characters")
-        if unsafe_free_text(value):
-            raise ValueError(FREE_TEXT_MESSAGE)
-        return text
+        return checked_text(value, limit=MAX_MEASURE_DESCRIPTION_CHARS)
 
     @model_validator(mode="after")
     def _fields_agree(self) -> MeasureSpec:

@@ -43,6 +43,7 @@ from lakana_core.projects.project_config import (
     Materialize,
     PositiveDuration,
     SafeTextModel,
+    checked_text,
     normalize_source,
     pydantic_issues,
     unsafe_free_text,
@@ -276,16 +277,12 @@ class AssetMetadata(SafeTextModel):
         """
         if value is None:
             return value
-        text = value.strip()
-        if not text:
-            raise ValueError("must not be empty: say in one sentence what one row is")
-        if "\n" in text:
-            raise ValueError("must be one line")
-        if len(text) > MAX_GRAIN_CHARS:
-            raise ValueError(f"must be at most {MAX_GRAIN_CHARS} characters")
-        if unsafe_free_text(value):
-            raise ValueError(FREE_TEXT_MESSAGE)
-        return text
+        return checked_text(
+            value,
+            limit=MAX_GRAIN_CHARS,
+            one_line=True,
+            empty="must not be empty: say in one sentence what one row is",
+        )
 
     @field_validator("references")
     @classmethod
