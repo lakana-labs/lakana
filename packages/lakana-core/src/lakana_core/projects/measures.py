@@ -9,6 +9,7 @@ import it.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 
 from pydantic import field_validator, model_validator
 
@@ -25,6 +26,13 @@ AGGREGATIONS = ("sum", "count", "min", "max", "avg", "count_distinct", "none")
 
 ADDITIVITIES = ("additive", "semi", "non")
 """Whether a measure sums over every dimension, over some (not `not_over`), or never."""
+
+NUMERIC_AGGREGATIONS = ("sum", "avg")
+"""The aggregations whose column must be a number; the `measures` check's pre-check reads this."""
+
+ORDERED_AGGREGATIONS = ("min", "max")
+"""The aggregations whose column must be a number, a date or a timestamp. Every other aggregation
+(`count`, `count_distinct`, `none`) takes a column of any type."""
 
 _SUMMING = frozenset({"sum", "count"})
 """The aggregations that add values up: they allow `additive` and `semi`, the others `non`."""
@@ -123,6 +131,13 @@ _DOES_NOT_ADD_UP = (
     "`aggregation: {aggregation}` does not add values up, so `additivity` must be `non`; leave "
     "`additivity:` out, or change `aggregation:`"
 )
+NOT_OVER_SHAPE = "must be a column name or a list of column names"
+"""A `not_over` that is neither; `lakana.assets` repeats the text."""
+MEASURE_ID_CHARACTERS = (
+    "a measure id must not contain '.', '/', a NUL byte or the unit separator; rename the column "
+    "in the asset"
+)
+"""Why a measure column cannot name its id; `lakana.assets` repeats the text."""
 EMPTY_NOT_OVER = "a column must not be empty; write the name of a column of the asset"
 _WRONG_KIND = (
     "Asset `{table}` is {article} and declares `measures:`; measures belong on a fact or wide "
@@ -281,7 +296,7 @@ class MeasureSpec(StrictModel):
     @field_validator("not_over", mode="before")
     @classmethod
     def _not_over_is_one_spelling(cls, value: object) -> object:
-        """Read a single column name as a one-column list.
+        """Read a single column name as a one-column list, and `None` as no columns.
 
         Parameters
         ----------
@@ -291,9 +306,20 @@ class MeasureSpec(StrictModel):
         Returns
         -------
         object
-            A one-tuple for a string, else `value`.
+            A one-tuple for a string, an empty tuple for `None`, else `value`.
+
+        Raises
+        ------
+        ValueError
+            With `NOT_OVER_SHAPE` for anything but a string, `None` or a list of strings.
         """
-        return (value,) if isinstance(value, str) else value
+        if value is None:
+            return ()
+        if isinstance(value, str):
+            return (value,)
+        if not isinstance(value, list | tuple) or not all(isinstance(c, str) for c in value):
+            raise ValueError(NOT_OVER_SHAPE)
+        return value
 
     @field_validator("not_over")
     @classmethod
@@ -497,3 +523,131 @@ def measure_issues(
         if column in keyed
     )
     return issues
+
+
+@dataclass(frozen=True)
+class MeasureEntry:
+    """One measure as a manifest entry and the catalog hold it.
+
+    Parameters
+    ----------
+    column
+        The measure's column.
+    aggregation
+        One of `AGGREGATIONS`.
+    additivity
+        One of `ADDITIVITIES`, resolved.
+    not_over
+        The columns a `semi` measure must not be summed over.
+    unit
+        One of `UNITS`, or `None`.
+    currency
+        One of `CURRENCY_CODES`, or `None`.
+    label
+        The label, or `None`.
+    description
+        The description, or `None`.
+    """
+
+    column: str
+    aggregation: str
+    additivity: str
+    not_over: tuple[str, ...]
+    unit: str | None
+    currency: str | None
+    label: str | None
+    description: str | None
+
+
+def measure_entries(measures: Mapping[str, MeasureSpec]) -> list[dict[str, object]]:
+    """Write an asset's measures as its manifest entry holds them.
+
+    Parameters
+    ----------
+    measures
+        Column → its validated measure.
+
+    Returns
+    -------
+    list of dict
+        One mapping per measure, sorted by column, with the additivity resolved.
+    """
+    return [
+        {
+            "column": column,
+            "aggregation": spec.aggregation,
+            "additivity": spec.resolved_additivity,
+            "not_over": list(spec.not_over),
+            "unit": spec.unit,
+            "currency": spec.currency,
+            "label": spec.label,
+            "description": spec.description,
+        }
+        for column, spec in sorted(measures.items())
+    ]
+
+
+def _measure_entry(item: object) -> MeasureEntry | None:
+    """Read one stored measure, or nothing when the catalog could not hold it.
+
+    Parameters
+    ----------
+    item
+        One element of a stored `measures` list; untrusted.
+
+    Returns
+    -------
+    MeasureEntry or None
+        `None` unless every value is what a deploy writes.
+    """
+    if not isinstance(item, Mapping):
+        return None
+    column, aggregation = item.get("column"), item.get("aggregation")
+    additivity, not_over = item.get("additivity"), item.get("not_over")
+    unit, currency = item.get("unit"), item.get("currency")
+    label, description = item.get("label"), item.get("description")
+    if not isinstance(column, str) or len(column.encode("utf-8")) > MAX_MEASURE_COLUMN_BYTES:
+        return None
+    if aggregation not in AGGREGATIONS or additivity not in ADDITIVITIES:
+        return None
+    if not isinstance(not_over, list) or not all(isinstance(c, str) for c in not_over):
+        return None
+    if not (unit is None or unit in UNITS) or not (currency is None or currency in CURRENCY_CODES):
+        return None
+    if not all(text is None or isinstance(text, str) for text in (label, description)):
+        return None
+    return MeasureEntry(
+        column,
+        str(aggregation),
+        str(additivity),
+        tuple(not_over),
+        unit,
+        currency,
+        label,
+        description,
+    )
+
+
+def read_measure_entries(raw: object) -> tuple[MeasureEntry, ...]:
+    """Read a stored `measures` list, failing safe.
+
+    Parameters
+    ----------
+    raw
+        The value of ``entry["model"]["measures"]``; untrusted.
+
+    Returns
+    -------
+    tuple of MeasureEntry
+        The readable measures sorted by column; a column listed twice is left out entirely.
+    """
+    found: dict[str, MeasureEntry] = {}
+    repeated: set[str] = set()
+    for item in raw if isinstance(raw, list) else []:
+        entry = _measure_entry(item)
+        if entry is None:
+            continue
+        if entry.column in found:
+            repeated.add(entry.column)
+        found[entry.column] = entry
+    return tuple(entry for column, entry in sorted(found.items()) if column not in repeated)

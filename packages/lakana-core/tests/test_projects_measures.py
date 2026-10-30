@@ -12,8 +12,11 @@ from lakana_core.projects.issues import ProjectValidationError
 from lakana_core.projects.measures import (
     CURRENCY_CODES,
     UNITS,
+    MeasureEntry,
     MeasureSpec,
     default_additivity,
+    measure_entries,
+    read_measure_entries,
 )
 from lakana_core.projects.model import project_model_issues
 from lakana_core.projects.project_config import (
@@ -108,6 +111,25 @@ def test_the_default_additivity_follows_the_aggregation(aggregation: str, expect
             {"s": {"aggregation": "sum", "additivity": "semi", "not_over": ["s"], "unit": "count"}},
             "measures: measure `s` names itself in `not_over`; list the other columns it must not "
             "be summed over, such as a date",
+        ),
+        (
+            {"m": {"aggregation": "sum", "additivity": "semi", "not_over": 3, "unit": "count"}},
+            "measures.m.not_over: must be a column name or a list of column names",
+        ),
+        (
+            {"m": {"aggregation": "sum", "additivity": "semi", "not_over": [1], "unit": "count"}},
+            "measures.m.not_over: must be a column name or a list of column names",
+        ),
+        (
+            {"m": {"aggregation": "sum", "additivity": "semi", "not_over": None, "unit": "count"}},
+            "measures.m: `additivity: semi` needs `not_over:`: the columns the measure must not "
+            "be summed over, such as the date of a balance",
+        ),
+        (
+            {"a.b": {"aggregation": "sum", "unit": "count"}},
+            "measures: measure column `a.b` cannot name its id `measure_a.b`: a measure id must "
+            "not contain '.', '/', a NUL byte or the unit separator; rename the column in the "
+            "asset",
         ),
         (
             {"m": {"unit": "count"}},
@@ -360,3 +382,50 @@ def test_a_null_label_and_a_padded_description_are_read() -> None:
         .description
         is None
     )
+
+
+def test_measure_entries_round_trip_with_the_resolved_additivity() -> None:
+    spec = MeasureSpec(aggregation="avg", currency="EUR", label="Price")
+    written = measure_entries({"price": spec})
+    assert written == [
+        {
+            "column": "price",
+            "aggregation": "avg",
+            "additivity": "non",
+            "not_over": [],
+            "unit": None,
+            "currency": "EUR",
+            "label": "Price",
+            "description": None,
+        }
+    ]
+    assert read_measure_entries(written) == (
+        MeasureEntry("price", "avg", "non", (), None, "EUR", "Price", None),
+    )
+
+
+def test_read_measure_entries_drops_what_it_cannot_store() -> None:
+    good = {
+        "column": "a",
+        "aggregation": "sum",
+        "additivity": "additive",
+        "not_over": [],
+        "unit": "count",
+        "currency": None,
+        "label": None,
+        "description": None,
+    }
+    damaged = [
+        {**good, "column": "b", "currency": "E" * 50, "unit": None},
+        {**good, "column": "x" * 2000},
+        {**good, "column": "c", "aggregation": "median"},
+        {**good, "column": "d", "additivity": ["non"]},
+        {**good, "column": "e", "not_over": "day"},
+        {**good, "column": "f", "unit": "parsec"},
+        {**good, "column": "g", "label": 3},
+        {**good, "column": "dup"},
+        {**good, "column": "dup"},
+        "not a mapping",
+    ]
+    assert [m.column for m in read_measure_entries([good, *damaged])] == ["a"]
+    assert read_measure_entries("not a list") == ()

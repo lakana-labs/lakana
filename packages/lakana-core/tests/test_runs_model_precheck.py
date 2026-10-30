@@ -17,7 +17,7 @@ from lakana_core.auth import (
 )
 from lakana_core.models import TableColumn
 from lakana_core.projects.checks import CheckSpec, GeneratedFrom
-from lakana_core.runs.model_precheck import model_problem, types_match
+from lakana_core.runs.model_precheck import is_numeric, model_problem, types_match
 
 
 def _spec(generated: GeneratedFrom | None) -> CheckSpec:
@@ -327,3 +327,114 @@ def test_a_malformed_target_name_reads_as_gone(session: Session, env_with_tables
 )
 def test_types_match(own: str, other: str, expected: bool) -> None:
     assert types_match(own, other) is expected
+
+
+def test_the_measures_precheck_refuses_a_string_column_and_a_missing_not_over(
+    session: Session, env_with_tables: _Tables
+) -> None:
+    env_with_tables(
+        own={
+            "day": "date",
+            "amount": "decimal(38,1)",
+            "qty": "long",
+            "name": "string",
+            "flag": "boolean",
+            "Stock": "long",
+        },
+        target={},
+    )
+    principal = env_with_tables.principal
+    authz = AllowAllAuthorization()
+
+    def problem(
+        columns: tuple[str, ...], aggregations: tuple[str, ...], not_over: tuple[str, ...] = ()
+    ) -> str | None:
+        """Pre-check a `measures` check of `gold.f`.
+
+        Parameters
+        ----------
+        columns
+            The measure columns.
+        aggregations
+            Their aggregations, in the same order.
+        not_over
+            The `not_over` columns.
+
+        Returns
+        -------
+        str or None
+            The pre-check's text.
+        """
+        generated = GeneratedFrom("measures", columns, not_over=not_over, aggregations=aggregations)
+        return model_problem(session, authz, principal, "dev", _spec(generated))
+
+    assert problem(("amount", "qty"), ("sum", "avg"), ("day",)) is None
+    assert problem(("name",), ("sum",)) == (
+        "Measure `name` is string, not a number, so `aggregation: sum` cannot apply to it; cast "
+        "it in the asset, for example to DECIMAL, BIGINT or DOUBLE, or change `aggregation:` "
+        "(`count`, `count_distinct` and `none` take any type), and deploy again."
+    )
+    assert problem(("flag",), ("max",)) == (
+        "Measure `flag` is boolean, so `aggregation: max` cannot apply to it: it needs a number, "
+        "a date or a timestamp; cast it in the asset, or change `aggregation:` (`count`, "
+        "`count_distinct` and `none` take any type), and deploy again."
+    )
+    assert problem(("stock",), ("count",)) == (
+        "Measure column `stock` is not a column of `gold.f`; fix `measures:` in "
+        "assets/gold/f.sql:1 and deploy again. Column names match exactly; the table has `Stock`."
+    )
+    assert problem(("qty",), ("sum",), ("date",)) == (
+        "Column `date` in `not_over` is not a column of `gold.f`; fix `measures:` in "
+        "assets/gold/f.sql:1 and deploy again."
+    )
+
+
+@pytest.mark.parametrize(
+    ("aggregation", "type_", "allowed"),
+    [
+        ("sum", "decimal(38,1)", True),
+        ("sum", "string", False),
+        ("avg", "double", True),
+        ("avg", "date", False),
+        ("min", "long", True),
+        ("min", "date", True),
+        ("min", "string", False),
+        ("max", "timestamptz", True),
+        ("max", "timestamp_ns", True),
+        ("max", "boolean", False),
+        ("max", "time", False),
+        ("count", "string", True),
+        ("count_distinct", "string", True),
+        ("count_distinct", "list<long>", True),
+        ("none", "boolean", True),
+    ],
+)
+def test_the_type_rule_of_each_aggregation(
+    session: Session, env_with_tables: _Tables, aggregation: str, type_: str, allowed: bool
+) -> None:
+    """`sum`/`avg` need a number, `min`/`max` a number, date or timestamp, the rest any type."""
+    env_with_tables(own={"m": type_}, target={})
+    generated = GeneratedFrom("measures", ("m",), aggregations=(aggregation,))
+    text = model_problem(
+        session, AllowAllAuthorization(), env_with_tables.principal, "dev", _spec(generated)
+    )
+    assert (text is None) is allowed, text
+
+
+@pytest.mark.parametrize(
+    ("type_", "expected"),
+    [
+        ("int", True),
+        ("long", True),
+        ("float", True),
+        ("double", True),
+        ("decimal(10,2)", True),
+        ("string", False),
+        ("boolean", False),
+        ("date", False),
+        ("timestamptz", False),
+        ("list<long>", False),
+    ],
+)
+def test_is_numeric(type_: str, expected: bool) -> None:
+    assert is_numeric(type_) is expected

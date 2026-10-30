@@ -229,7 +229,7 @@ checks:
 | `key` | The columns that identify one row; usually the grain written as columns. It is also the key `write: merge` matches rows on: there is one key, not a second one for merging. | Distinct, non-empty columns of the `SELECT`, at most 8 (a merge key too), or `none` where the kind allows it (below). Allowed with every write mode. |
 | `references` | For each column, the table its values point at. A null in a reference column is allowed; a reference that is required is also in `key`. | The column is a column of the `SELECT`; the target is checked as "References" below says. |
 | `measures` | The measures of a fact or wide table: how each is aggregated and what its numbers are. | See [Measures](#measures). |
-| `checks` | How the checks generated from `key`, `references` and `measures` fail: `block`, `warn` or `keep`, with the rules of a check's `on_failure` (`keep` never on a view, an append or a merge). | Only `key`, `references` and `measures`, and only for a field the asset declares. A deploy turns `key` into the checks `key_unique` and `key_not_null`, and each reference into `ref_<column>`; they count toward the 50 checks of a table, a hand-written check of the same table may not use their names, and a referenced table the project builds is built first. See [Generated checks](checks.md#generated-checks). |
+| `checks` | How the checks generated from `key`, `references` and `measures` fail: `block`, `warn` or `keep`, with the rules of a check's `on_failure` (`keep` never on a view, an append or a merge). | Only `key`, `references` and `measures`, and only for a field the asset declares. A deploy turns `key` into the checks `key_unique` and `key_not_null`, each reference into `ref_<column>`, and `measures` into the check `measures`; they count toward the 50 checks of a table, a hand-written check of the same table may not use their names, and a referenced table the project builds is built first. See [Generated checks](checks.md#generated-checks). |
 
 ### Rules for each kind
 
@@ -273,10 +273,11 @@ column `c` of the table `a.b`. When only one of them is a table, that one is mea
 the deploy refuses the reference unless it knows that `a.b` has no column `c`; rename one of the
 two tables.
 
-A `SELECT *` or a Python asset has no columns at deploy, so its key and reference columns are
-checked when it runs. Column types are checked only then, for every asset: a key column may not be
-`float` or `double`, and a reference column must have its target column's type, where only `int`
-and `long` match each other. A problem makes the generated check `errored`; the texts and what to
+A `SELECT *` or a Python asset has no columns at deploy, so its key, reference and measure
+columns are checked when it runs. Column types are checked only then, for every asset: a key column
+may not be `float` or `double`, a reference column must have its target column's type, where only
+`int` and `long` match each other, and a measure column must have a type its aggregation allows
+([Measures](#measures)). A problem makes the generated check `errored`; the texts and what to
 do about each are in [Before a generated check counts](checks.md#before-a-generated-check-counts).
 
 ### Measures
@@ -374,7 +375,7 @@ Each of these fails the deploy with an issue at the block's line:
 | ``Reference `model_id: models.churn`: `models.churn` is an artifact, not a table, so no column can point at it; point the reference at a table.`` | The target is an artifact, of the project or of the environment. |
 | ``Reference `store_id: gold.dim_store` is too long to store: the column `…` has 1025 bytes, and each of the column, the target table and the target column may have at most 1024 bytes; shorten that name.`` | A reference column, its target table's dotted name or its target column is longer than 1024 bytes in UTF-8. Shorten the name the message points at. |
 | ``` cycle: gold.a -> gold.b -> gold.a (a reference in `references:` counts as a dependency: the target is built first); remove one of the references, or check it with a hand-written check under `checks/` ``` | Two assets of the project reference each other, directly or through others. A target the project builds is built before the table that references it, so such references cannot all hold; remove one of them. |
-| ``A check named `key_unique` is generated for `gold.fact_orders`; rename `checks/gold/fact_orders/key_unique.sql`.`` | A hand-written check of a table has the name of a check that table's header generates (`key_unique`, `key_not_null`, `ref_<column>`). Rename the file. |
+| ``A check named `key_unique` is generated for `gold.fact_orders`; rename `checks/gold/fact_orders/key_unique.sql`.`` | A hand-written check of a table has the name of a check that table's header generates (`key_unique`, `key_not_null`, `ref_<column>`, `measures`). Rename the file. |
 | ``` `checks: key: keep` cannot be used on `gold.fact_orders`: it is written with `write: merge`, … Use `checks: key: block`: … ``` | `keep` for a generated check of a view, an append or a merge, as for a hand-written check's `on_failure`. |
 | ``checks: takes only key, references and measures``, ``checks: key must be block, keep or warn`` | Another check family or failure mode. |
 | ``` `checks: key` sets how the key checks fail, but the asset declares no `key:`; declare `key:`, or remove `checks: key` ``` | A `checks` family for a field the asset does not declare (`references` likewise). |
@@ -393,6 +394,7 @@ Each of these fails the deploy with an issue at the block's line:
 | ``measures.stock_level: `additivity: semi` needs `not_over:`: the columns the measure must not be summed over, such as the date of a balance`` | `semi` without `not_over`. |
 | ``measures.net_amount: `not_over:` is only for `additivity: semi`; remove `not_over:`, or declare `additivity: semi``` | `not_over` without `semi`. |
 | ``measures.stock_level.not_over: a column must not be empty; write the name of a column of the asset``, ``… column `date` is listed twice``, ``… a column must not contain a control, …`` | A `not_over` column that is empty, repeated or unsafe. |
+| ``measures.stock_level.not_over: must be a column name or a list of column names`` | A `not_over` that is a number, or a list holding something other than names. Left empty (`not_over:` with no value), it means no columns. |
 | ``measures.quantity: needs `unit:` or `currency:`: `currency:` for money (an ISO 4217 code such as EUR), `unit:` for anything else (for a number of things, `unit: count`)`` | Neither `unit` nor `currency`. |
 | ``measures.net_amount: takes `unit:` or `currency:`, not both; money has a currency, every other value a unit`` | Both `unit` and `currency`. |
 | ``measures.weight.unit: must be one of count, percent, ratio, millisecond, second, minute, hour, day, byte, gram, kilogram, tonne, metre, kilometre, litre, kilowatt_hour, degree_celsius; got 'kg'. For money use `currency:`; to have a unit added, open an issue`` | A unit that is not in the list. |
@@ -421,7 +423,8 @@ You, the deployer, and readers of the objects see the whole text. A deploy that 
 release keeps its text as it was stored.
 
 A project version in which an asset declares a model field (`key:` alone counts, so every project
-with a `write: merge` asset) needs workers of this release or later: a worker of an earlier one
-refuses its manifest. A deploy's changes list a table whose `kind`, `grain`, `references`,
+with a `write: merge` asset) has manifest version 9, and one in which an asset declares `measures:`
+version 10. Each needs workers of the release that introduced it or later: a worker of an earlier
+one refuses its manifest. A deploy's changes list a table whose `kind`, `grain`, `references`,
 `checks`, or the `key` of an asset that does not merge, changed as `model_changed`; the key of a
 merge stays a change of how the table is written.

@@ -49,7 +49,8 @@ limits lie is in [Python assets: what they are for and how far they are trusted]
   was deleted since fails the same way. While a deployed version declares a connection, the
   connection cannot be deleted. An asset without `connections` deploys as before. A project
   version in which an asset declares connections has manifest version 7 (8 when an asset also
-  appends or merges, 9 when an asset declares a model field), so a worker of an earlier release refuses its runs instead of running the
+  appends or merges, 9 when an asset declares a model field, 10 when an asset declares
+  measures), so a worker of an earlier release refuses its runs instead of running the
   asset without them: upgrade the workers first. The kinds of connection and the commands that manage them are in
   [Connections](connections.md).
 - **Model fields.** `kind` (`fact`, `dimension`, `wide` or `staging`), `grain`, `key`,
@@ -110,8 +111,8 @@ limits lie is in [Python assets: what they are for and how far they are trusted]
   `materialize="incremental"` is refused with
   ``a Python asset appends with write="append" and watermark="<column>", not materialize='incremental'``.
   A project version in which an asset appends or merges has manifest version 8 (9 when an asset
-  declares a model field, a `key` included, so every merge): a worker of an earlier release
-  refuses it instead of replacing the table.
+  declares a model field, a `key` included, so every merge, and 10 when an asset declares
+  measures): a worker of an earlier release refuses it instead of replacing the table.
 - **Schema changes.** `evolve_schema=True` lets a replace give the table the columns the
   function returns, a removed column included; without it, a changed schema fails the run. See
   [When the output changes shape](#when-the-output-changes-shape).

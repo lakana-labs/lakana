@@ -690,6 +690,19 @@ def test_the_measure_values_are_the_same_in_core_and_the_sdk() -> None:
         {"m": {"aggregation": "sum", "unit": "count", "description": " "}},
         {"m": {"aggregation": "sum", "unit": "count", "label": "a\u202eb"}},
         {"m\u202e": {"aggregation": "sum", "unit": "count"}},
+        {"a.b": {"aggregation": "sum", "unit": "count"}},
+        {"a/b": {"aggregation": "sum", "unit": "count"}},
+        {"m": {"aggregation": "sum", "additivity": "semi", "not_over": 3, "unit": "count"}},
+        {"m": {"aggregation": "sum", "additivity": "semi", "not_over": [1], "unit": "count"}},
+        {
+            "m": {
+                "aggregation": "sum",
+                "additivity": "semi",
+                "not_over": ["a", ["b"]],
+                "unit": "count",
+            }
+        },
+        {"m": {"aggregation": "sum", "additivity": "semi", "not_over": None, "unit": "count"}},
     ],
 )
 def test_a_bad_measure_gets_the_same_text_from_deploy_and_the_sdk(measures: object) -> None:
@@ -706,3 +719,15 @@ def test_a_bad_measure_gets_the_same_text_from_deploy_and_the_sdk(measures: obje
     with pytest.raises(ValueError) as sdk:
         cast("Any", sdk_assets.asset)(**fields, measures=measures)
     assert str(sdk.value) == issue.message
+
+
+def test_a_null_not_over_means_no_columns_at_deploy_and_in_the_sdk() -> None:
+    """`not_over: None` is left out, as every other measure field given as `None` is."""
+    from lakana_core.projects.frontmatter import AssetMetadata
+
+    measure: dict[str, Any] = {"aggregation": "sum", "unit": "count", "not_over": None}
+    fields: dict[str, Any] = {"kind": "fact", "grain": "g", "key": "none"}
+    deployed = AssetMetadata.model_validate({**fields, "measures": {"m": measure}})
+    assert deployed.measures["m"].not_over == ()
+    spec = cast("Any", sdk_assets.asset)(**fields, measures={"m": measure})(lambda: None)
+    assert "not_over" not in getattr(spec, sdk_assets.ASSET_ATTRIBUTE).measures["m"]

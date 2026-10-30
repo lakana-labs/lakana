@@ -11,6 +11,9 @@ makes that check ``errored`` (so `block` sets the table back) without counting i
   missing, one the run's principal may not read and one that no longer has the column get one
   text (`REFERENCE_UNCHECKABLE`); both reference texts point at the check's path, the asset's
   header line, which the reader sees already.
+- A `measures` check's pre-check reads only the checked table's columns: each measure column
+  exists and has a type its aggregation allows (a number for `sum` and `avg`, a number, a date or
+  a timestamp for `min` and `max`, any type otherwise), and each `not_over` column exists.
 - Each text is a module constant, filled with the header's own column names, the checked table's
   name, the check's path and the checked table's own column type. A column name that matches
   only in case adds `CASE_HINT`, naming the checked table's own column.
@@ -25,12 +28,20 @@ from lakana_core.catalog.columns import stored_columns
 from lakana_core.errors import ValidationError
 from lakana_core.identifiers import TableRef
 from lakana_core.projects.checks import CheckSpec, GeneratedFrom
+from lakana_core.projects.measures import NUMERIC_AGGREGATIONS, ORDERED_AGGREGATIONS
 
 FLOAT_TYPES = frozenset({"float", "double"})
 """The catalog's spellings of the floating-point types, which cannot identify a row."""
 
 INTEGER_TYPES = frozenset({"int", "long"})
 """The catalog's spellings of the integer types; a reference may join one width to the other."""
+
+DECIMAL_PREFIX = "decimal("
+"""How the catalog spells a decimal type: ``decimal(p,s)``."""
+
+TEMPORAL_TYPES = frozenset({"date", "timestamp", "timestamptz", "timestamp_ns", "timestamptz_ns"})
+"""The catalog's spellings of the dates and timestamps `min` and `max` may aggregate; `time`, a
+time of day, is not one of them."""
 
 KEY_FLOAT = (
     "Key column `{column}` is {type}, a floating-point type, so it cannot identify a row; cast it "
@@ -49,9 +60,36 @@ REFERENCE_MISSING = (
 )
 """A referencing column the written table does not have."""
 
+MEASURE_MISSING = (
+    "Measure column `{column}` is not a column of `{table}`; fix `measures:` in {path} and deploy "
+    "again."
+)
+"""A measure column the written table does not have."""
+
+MEASURE_NOT_NUMERIC = (
+    "Measure `{column}` is {type}, not a number, so `aggregation: {aggregation}` cannot apply to "
+    "it; cast it in the asset, for example to DECIMAL, BIGINT or DOUBLE, or change "
+    "`aggregation:` (`count`, `count_distinct` and `none` take any type), and deploy again."
+)
+"""A `sum` or `avg` measure whose column is not a number."""
+
+MEASURE_NOT_ORDERED = (
+    "Measure `{column}` is {type}, so `aggregation: {aggregation}` cannot apply to it: it needs a "
+    "number, a date or a timestamp; cast it in the asset, or change `aggregation:` (`count`, "
+    "`count_distinct` and `none` take any type), and deploy again."
+)
+"""A `min` or `max` measure whose column is neither a number, nor a date or a timestamp."""
+
+NOT_OVER_MISSING = (
+    "Column `{column}` in `not_over` is not a column of `{table}`; fix `measures:` in {path} and "
+    "deploy again."
+)
+"""A `not_over` column the written table does not have."""
+
 CASE_HINT = " Column names match exactly; the table has `{actual}`."
-"""Added to `KEY_MISSING` or `REFERENCE_MISSING` when the checked table has the column in another
-case. The table is the asset's own, which the run's principal has just written."""
+"""Added to `KEY_MISSING`, `REFERENCE_MISSING`, `MEASURE_MISSING` or `NOT_OVER_MISSING` when the
+checked table has the column in another case. The table is the asset's own, which the run's
+principal has just written."""
 
 REFERENCE_UNCHECKABLE = (
     "The reference `{column}` at `{path}` cannot be checked: its target is missing, not readable "
@@ -85,6 +123,22 @@ def types_match(own: str, other: str) -> bool:
     return own == other or (own in INTEGER_TYPES and other in INTEGER_TYPES)
 
 
+def is_numeric(type_: str) -> bool:
+    """Say whether a column type, as `table_columns` spells it, is a number.
+
+    Parameters
+    ----------
+    type_
+        The type.
+
+    Returns
+    -------
+    bool
+        True for ``int``, ``long``, ``float``, ``double`` and ``decimal(p,s)``.
+    """
+    return type_ in INTEGER_TYPES or type_ in FLOAT_TYPES or type_.startswith(DECIMAL_PREFIX)
+
+
 def model_problem(
     session: Session,
     authz: AuthorizationService,
@@ -111,7 +165,8 @@ def model_problem(
     Returns
     -------
     str or None
-        The fixed text of the first problem found, or `None` when there is none: also for a
+        The fixed text of the first problem found (`_key_problem`, `_measures_problem` or
+        `_reference_problem`, by the check's family), or `None` when there is none: also for a
         hand-written check, for a checked table that is gone or whose columns are not stored yet
         (the count reports what it finds then).
     """
@@ -123,6 +178,8 @@ def model_problem(
         return None
     if generated.family == "key":
         return _key_problem(own, generated, spec)
+    if generated.family == "measures":
+        return _measures_problem(own, generated, spec)
     return _reference_problem(session, authz, principal, environment, own, generated, spec)
 
 
@@ -150,6 +207,42 @@ def _key_problem(own: dict[str, str], generated: GeneratedFrom, spec: CheckSpec)
             return text + _case_hint(own, column)
         if type_ in FLOAT_TYPES:
             return KEY_FLOAT.format(column=column, type=type_)
+    return None
+
+
+def _measures_problem(own: dict[str, str], generated: GeneratedFrom, spec: CheckSpec) -> str | None:
+    """Check a `measures` check's columns: each measure of a type its aggregation allows.
+
+    Parameters
+    ----------
+    own
+        The checked table's columns and their types.
+    generated
+        The measures the check comes from; `_generated_from` guarantees one aggregation per
+        column.
+    spec
+        The check.
+
+    Returns
+    -------
+    str or None
+        The text of the first problem, measure columns before `not_over` columns, else `None`.
+    """
+    for column, aggregation in zip(generated.columns, generated.aggregations, strict=True):
+        type_ = own.get(column)
+        if type_ is None:
+            text = MEASURE_MISSING.format(column=column, table=spec.table, path=spec.path)
+            return text + _case_hint(own, column)
+        if aggregation in NUMERIC_AGGREGATIONS and not is_numeric(type_):
+            return MEASURE_NOT_NUMERIC.format(column=column, type=type_, aggregation=aggregation)
+        if aggregation in ORDERED_AGGREGATIONS and not (
+            is_numeric(type_) or type_ in TEMPORAL_TYPES
+        ):
+            return MEASURE_NOT_ORDERED.format(column=column, type=type_, aggregation=aggregation)
+    for column in generated.not_over:
+        if column not in own:
+            text = NOT_OVER_MISSING.format(column=column, table=spec.table, path=spec.path)
+            return text + _case_hint(own, column)
     return None
 
 

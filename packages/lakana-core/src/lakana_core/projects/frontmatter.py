@@ -31,6 +31,7 @@ from lakana_core.projects.limits import DeployLimits
 from lakana_core.projects.measures import (
     MAX_MEASURE_COLUMN_BYTES,
     MAX_MEASURES,
+    MEASURE_ID_CHARACTERS,
     MEASURE_PREFIX,
     MeasureSpec,
 )
@@ -400,7 +401,7 @@ class AssetMetadata(SafeTextModel):
             except ValidationError as exc:
                 raise ValueError(
                     f"measure column `{column}` cannot name its id `{MEASURE_PREFIX}{column}`: "
-                    f"{exc}"
+                    f"{MEASURE_ID_CHARACTERS}"
                 ) from exc
             if column in spec.not_over:
                 raise ValueError(

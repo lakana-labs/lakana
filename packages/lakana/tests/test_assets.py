@@ -599,7 +599,7 @@ def test_checks_measures_needs_measures_in_the_decorator() -> None:
         ),
         (
             {"m": {"aggregation": "sum", "additivity": "semi", "not_over": [3], "unit": "count"}},
-            "measures.m.not_over: must be a list of strings",
+            "measures.m.not_over: must be a column name or a list of column names",
         ),
     ],
 )

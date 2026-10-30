@@ -579,8 +579,8 @@ def _check_measure(column: str, spec: Mapping[object, object]) -> dict[str, Any]
         )
     raw_not_over = given.get("not_over", [])
     not_over = [raw_not_over] if isinstance(raw_not_over, str) else raw_not_over
-    if not isinstance(not_over, list) or not all(isinstance(c, str) for c in not_over):
-        raise ValueError(f"{where}.not_over: must be a list of strings")
+    if not isinstance(not_over, list | tuple) or not all(isinstance(c, str) for c in not_over):
+        raise ValueError(f"{where}.not_over: must be a column name or a list of column names")
     seen: set[str] = set()
     for other in not_over:
         if not other:
@@ -716,7 +716,8 @@ def _check_measures(
         if not _component_ok(f"measure_{column}"):
             raise ValueError(
                 f"measures: measure column `{column}` cannot name its id `measure_{column}`: a "
-                "measure id must not contain '.', '/', a NUL byte or the unit separator"
+                "measure id must not contain '.', '/', a NUL byte or the unit separator; rename "
+                "the column in the asset"
             )
         checked[column] = _check_measure(column, spec)
         if column in checked[column].get("not_over", []):

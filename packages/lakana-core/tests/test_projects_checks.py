@@ -1487,3 +1487,34 @@ def test_a_damaged_generated_entry_is_unreadable_for_its_table(generated: object
     read = read_manifest_checks({"assets": [{"table": "a.b"}], "checks": [entry]})
     assert read.specs == ()
     assert read.unreadable_tables == {"a.b"}
+
+
+_MEASURES_FROM = {"family": "measures", "columns": ["a", "b"], "aggregations": ["sum", "max"]}
+
+
+@pytest.mark.parametrize(
+    ("generated", "expected"),
+    [
+        (
+            {**_MEASURES_FROM, "not_over": ["d"]},
+            GeneratedFrom("measures", ("a", "b"), not_over=("d",), aggregations=("sum", "max")),
+        ),
+        (_MEASURES_FROM, GeneratedFrom("measures", ("a", "b"), aggregations=("sum", "max"))),
+        ({**_MEASURES_FROM, "target": "gold.x", "target_column": "id"}, None),
+        ({**_MEASURES_FROM, "not_over": "d"}, None),
+        ({**_MEASURES_FROM, "aggregations": None}, None),
+        ({**_MEASURES_FROM, "aggregations": ["sum"]}, None),
+        ({**_MEASURES_FROM, "aggregations": ["sum", "median"]}, None),
+        ({**_MEASURES_FROM, "aggregations": "sum"}, None),
+        ({"family": "key", "columns": ["a"], "not_over": ["d"]}, None),
+        ({"family": "key", "columns": ["a"], "aggregations": ["sum"]}, None),
+    ],
+)
+def test_a_stored_measures_entry_reads_back_or_is_unreadable(
+    generated: dict[str, object], expected: GeneratedFrom | None
+) -> None:
+    read = read_manifest_checks(
+        {"assets": [{"table": "a.b"}], "checks": [_stored(generated=generated)]}
+    )
+    assert [spec.generated for spec in read.specs] == ([] if expected is None else [expected])
+    assert read.unreadable_tables == (set() if expected is not None else {"a.b"})
