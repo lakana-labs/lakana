@@ -18,7 +18,9 @@ from lakana_core.models import (
     NotificationState,
     Run,
     RunStatus,
+    TaskRun,
 )
+from lakana_core.policy.schema_change import changed_tables
 from lakana_core.projects.manifest import JobNotify, job_notify
 
 FAILED = "failed"
@@ -27,6 +29,11 @@ FAILED = "failed"
 RECOVERED = "recovered"
 """The event of a run that succeeded after the previous finished run failed."""
 
+COLUMNS_CHANGED = "columns_changed"
+"""The event of a run that succeeded, reports no other event, and whose writes removed or replaced
+a column (`TaskRun.schema_change_json`). Sent whether or not a row filter or column mask uses the
+column: the endpoint is no administrator, so the message must not tell that a policy exists."""
+
 
 def decide_event(session: Session, run: Run) -> str | None:
     """Decide which event a finished run of a job reports.
@@ -34,7 +41,9 @@ def decide_event(session: Session, run: Run) -> str | None:
     A failed run reports `FAILED`, whether or not a blocking check failed in it: the one message
     names the check. A succeeded run reports `RECOVERED` when the previous finished run of the same
     job (same environment and repository, ordered by `created_at`, then `finished_at`) failed;
-    cancelled runs are looked through, and the first run of a job has no previous one. A `warn`
+    cancelled runs are looked through, and the first run of a job has no previous one. Any other
+    succeeded run reports `COLUMNS_CHANGED` when a task's write removed or replaced a column; a
+    failed or recovered run names those tables in its own message instead. A `warn`
     check does not fail a run, so it changes nothing here.
 
     Parameters
@@ -47,8 +56,8 @@ def decide_event(session: Session, run: Run) -> str | None:
     Returns
     -------
     str or None
-        `FAILED`, `RECOVERED`, or `None` for an ad-hoc run (no job), a cancelled run, and a success
-        that follows a success or nothing.
+        `FAILED`, `RECOVERED`, `COLUMNS_CHANGED`, or `None` for an ad-hoc run (no job), a
+        cancelled run, and a success without a column change that follows a success or nothing.
     """
     if run.job is None:
         return None
@@ -75,7 +84,30 @@ def decide_event(session: Session, run: Run) -> str | None:
         .order_by(Run.created_at.desc(), Run.finished_at.desc(), Run.id)
         .limit(1)
     ).first()
-    return RECOVERED if previous is RunStatus.FAILED else None
+    if previous is RunStatus.FAILED:
+        return RECOVERED
+    return COLUMNS_CHANGED if columns_changed_tables(session, run.id) else None
+
+
+def columns_changed_tables(session: Session, run_id: uuid.UUID) -> tuple[str, ...]:
+    """Name the tables whose columns a run's writes removed or replaced.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    run_id
+        The run.
+
+    Returns
+    -------
+    tuple of str
+        The tables, sorted, each once; empty when there are none.
+    """
+    stored = session.scalars(
+        select(TaskRun.schema_change_json).where(TaskRun.run_id == run_id)
+    ).all()
+    return tuple(sorted({table for entry in stored for table in changed_tables(entry)}))
 
 
 def new_delivery(
@@ -95,7 +127,7 @@ def new_delivery(
     notify
         The job's `notify:`.
     event
-        ``failed``, ``recovered`` or ``test``.
+        ``failed``, ``recovered``, ``columns_changed`` or ``test``.
     now
         When the first attempt is due.
     run_id

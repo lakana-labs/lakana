@@ -19,7 +19,7 @@ class NotificationView:
         The delivery id: what a receiver sees as ``delivery_id`` and what
         ``lakana job notification`` takes.
     event
-        ``failed``, ``recovered`` or ``test``.
+        ``failed``, ``recovered``, ``columns_changed`` or ``test``.
     state
         ``pending``, ``delivered`` or ``failed``.
     attempts

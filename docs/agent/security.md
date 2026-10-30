@@ -3814,6 +3814,40 @@ work.
   refused, and revoking it first would leave a window without any policy (two masks on one column
   collapse to `NULL`, filters are ANDed). Binding policies to field ids is not done yet. Pins:
   `test_pipeline_schema_evolution.py` (the `rename` and set-back tests), `test_policy_renames.py`.
+- **A write that removes or replaces a column says so; only an administrator learns of a policy
+  (#376).** `CatalogService.write_batches` compares the current schema with the planned one
+  (`policy.schema_change.changed_columns`: a column whose name is gone, or whose name now owns
+  another field id; widening keeps the id) and reads the table's active row filters and column
+  masks by `table_id` (`broken_policies`; a mask counts its own column and its expression's, a
+  filter its expression's, compared case-folded; an expression that no longer parses counts only a
+  mask's own column, so the write never fails for it). Stored as kind, policy id, column and change,
+  never the expression or the subject: in the `TABLE_WRITE` audit detail (`broken_policies`, a
+  shown field; the audit log needs `READ_AUDIT_LOG`) and, for a write in a run, in
+  `task_runs.schema_change_json` (`{"tables", "policies"}`) through the guard (`note_result` ->
+  `record_pending` -> `_note_schema_change`), in the write's own transaction after the run context
+  held again. A commit through `commit_table` that is not this service's own write
+  (`own_data_files`), a maintenance commit or the set-back (an Iceberg REST client's) is checked
+  the same way (`_commit_schema_change`): it records `TABLE_SCHEMA_CHANGED` (target, principal,
+  `broken_policies`) in the swap's transaction and, under a task's run context, the same task-run
+  note. A set-back that makes the schema before current again sets the task run's
+  `schema_change_json` to NULL in its `settle` transaction, so no note, warning or notification line
+  outlives the change. The task row is written for **every** write that removes or replaces a column, with
+  or without a policy, so its presence is no existence signal. Nobody without `MANAGE_POLICY` may
+  learn that a policy exists (`table get` shows none; listings need `MANAGE_POLICY`), the asset's
+  author included: the run view (`schema_change_for_reader`) gives every reader the same
+  `COLUMNS_CHANGED_NOTE` for such a task (it asks the reader to tell an administrator: no channel
+  pushes it to one) and `policy_warnings` (id, kind, column, revoke command)
+  only to a reader who `permits` `MANAGE_POLICY` on the instance; the REST, SDK and CLI output of a
+  non-administrator is identical for a table with policies and one without. A job's notification
+  goes to a webhook the project chooses, not to administrators, so it is neutral too: the event
+  `columns_changed` (or a line in `failed`/`recovered`) for every run that removed or replaced a
+  column, naming only the table. Deploy does not warn: output columns and types are known only at
+  run time. The write proceeds and reads stay fail-closed as above. Pins:
+  `test_policy_schema_change.py`, `test_runs_service.py`
+  (`test_a_schema_change_is_one_neutral_line_unless_the_reader_manages_policies`), the server's
+  `test_runs.py` (`test_a_schema_change_shows_policy_details_only_to_an_administrator`, which
+  compares a viewer's and a READ_ENVIRONMENT reader's bodies with and without a policy) and
+  `test_notifications_payload.py`.
 - **Grants, row filters, and column masks bind to ids, never names.** A rename or a
   drop-and-recreate under the same name cannot evade either. An `EXTERNAL` table goes
   through this same rewriter and its own row filters/column masks apply to it, confined to

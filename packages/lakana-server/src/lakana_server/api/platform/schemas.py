@@ -2878,6 +2878,31 @@ class FailureOut(BaseModel):
     next_step: str
 
 
+class PolicyWarningOut(BaseModel):
+    """A row filter or column mask a task's write left out of date; shown to administrators only.
+
+    Parameters
+    ----------
+    kind
+        ``row_filter`` or ``column_mask``.
+    column
+        The column the policy uses, as the policy spells it.
+    change
+        ``removed`` (the write removed the column) or ``replaced`` (its type changed in a way
+        that does not widen, so it is a new column under the same name).
+    policy_id
+        The policy's id.
+    message
+        What happened and the next step, in one paragraph.
+    """
+
+    kind: str
+    column: str
+    change: str
+    policy_id: uuid.UUID
+    message: str
+
+
 class TaskRunOut(BaseModel):
     """One task run.
 
@@ -2937,6 +2962,17 @@ class TaskRunOut(BaseModel):
         while it waited with rows no check had passed. The task is then ``ready``
         (`waiting_for` has the code `setting_back`), ``running`` with that claim, or
         ``pending`` again after that claim's worker drained. ``false`` once it has ended.
+    schema_note
+        One neutral sentence when one of the task's writes removed or replaced a column of its
+        table (``This run removed or retyped a column of the table. An administrator can see in
+        this run what else that affects; if other people read this table, tell one.``), else
+        `null`. The same for every caller, whether or not a row filter or column
+        mask uses the column.
+    policy_warnings
+        For a caller who may manage policies (MANAGE_POLICY), the row filters and column masks
+        those writes left out of date (`PolicyWarningOut`); reads by the people they apply to are
+        refused until an administrator creates them again. Always empty for every other caller,
+        who may not learn that a policy exists.
     """
 
     asset: str
@@ -2963,6 +2999,8 @@ class TaskRunOut(BaseModel):
     kept_check: bool | None = False
     setting_back: bool = False
     failure: FailureOut | None = None
+    schema_note: str | None = None
+    policy_warnings: list[PolicyWarningOut] = Field(default_factory=list)
 
 
 class NotificationOut(BaseModel):
@@ -2974,7 +3012,7 @@ class NotificationOut(BaseModel):
         The delivery id: the ``delivery_id`` a receiver sees, and what
         ``GET /environments/{env}/notifications/{id}`` takes.
     event
-        ``failed``, ``recovered`` or ``test``.
+        ``failed``, ``recovered``, ``columns_changed`` or ``test``.
     state
         ``pending``, ``delivered`` or ``failed``.
     attempts

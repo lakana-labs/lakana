@@ -63,6 +63,7 @@ from lakana_core.models import (
     TaskRun,
     TaskStatus,
 )
+from lakana_core.policy.schema_change import merge_schema_change
 from lakana_core.projects.manifest import entry_output, python_entry
 
 PROTECTED_MESSAGE = (
@@ -394,6 +395,9 @@ class ProtectedWriteGuard:
         self._relied_on: _RunWrite | None = None
         self._fence: WriteFence | None = None
         self._evidence: _Evidence | None = None
+        self._schema_change: tuple[tuple[str, Target], str, tuple[dict[str, str], ...]] | None = (
+            None
+        )
 
     def note_result(
         self,
@@ -440,6 +444,35 @@ class ProtectedWriteGuard:
             snapshot_before,
             publishes,
         )
+
+    def note_schema_change(
+        self,
+        environment: str,
+        target: Target,
+        *,
+        table: str,
+        policies: tuple[dict[str, str], ...],
+    ) -> None:
+        """Remember that the commit of `target` removes or replaces a column, for `record_pending`.
+
+        A write of a task (either form of run context) records it on its task run when the run
+        context holds again in `record_pending`, with or without a policy; a write outside a run
+        records nothing here. Dropped by the next `check` of another target and by
+        `forget_result`.
+
+        Parameters
+        ----------
+        environment
+            The environment written to.
+        target
+            The table, as parts.
+        table
+            The table's dotted name.
+        policies
+            The row filters and column masks the change leaves out of date, as stored
+            (`lakana_core.policy.schema_change.BrokenPolicy.to_json`).
+        """
+        self._schema_change = ((environment, target), table, policies)
 
     def note_own_commit(
         self,
@@ -503,6 +536,7 @@ class ProtectedWriteGuard:
         evidence. The rollback calls this first.
         """
         self._evidence = None
+        self._schema_change = None
 
     def check(
         self,
@@ -554,6 +588,8 @@ class ProtectedWriteGuard:
         self._fence = p.write_fence
         if self._evidence is not None and self._evidence.key != (environment, target):
             self._evidence = None
+        if self._schema_change is not None and self._schema_change[0] != (environment, target):
+            self._schema_change = None
         if self._pending is not None:
             pending_key, _, pending_detail = self._pending
             # A pending record of a deletion never outlives the call that made it, and a
@@ -684,6 +720,15 @@ class ProtectedWriteGuard:
                 self._stamp_written(relied_on.context.task_run_id, noted)
         if noted is not None and relied_on is not None and relied_on.context.claim is not None:
             self._advance_own_tip(relied_on.context.task_run_id, noted)
+        schema_change, self._schema_change = self._schema_change, None
+        if (
+            schema_change is not None
+            and relied_on is not None
+            and schema_change[0] == (relied_on.environment, relied_on.target)
+        ):
+            self._note_schema_change(
+                relied_on.context.task_run_id, schema_change[1], schema_change[2]
+            )
         if self._pending is None:
             return
         key, principal_id, detail = self._pending
@@ -695,6 +740,35 @@ class ProtectedWriteGuard:
             AuditEventType.BREAK_GLASS_WRITE,
             securable=Securable.environment_scope(key[0]),
             detail=detail,
+        )
+
+    def _note_schema_change(
+        self, task_run_id: uuid.UUID, table: str, warnings: tuple[dict[str, str], ...]
+    ) -> None:
+        """Add a write's schema change to its task run, in the write's own transaction.
+
+        Both forms of a run context get here (a SQL task's write run and a Python task's own
+        write), after the context held again, so the record lands with the schema change or not
+        at all. It is recorded for every write that removed or replaced a column, with or without
+        a policy (`merge_schema_change` keeps each entry once).
+
+        Parameters
+        ----------
+        task_run_id
+            The task run whose write this is.
+        table
+            The table whose columns changed.
+        warnings
+            The policies it left out of date, as stored.
+        """
+        held = self._session.scalar(
+            select(TaskRun.schema_change_json).where(TaskRun.id == task_run_id)
+        )
+        self._session.execute(
+            update(TaskRun)
+            .where(TaskRun.id == task_run_id)
+            .values(schema_change_json=merge_schema_change(held, table, warnings))
+            .execution_options(synchronize_session=False)
         )
 
     def _stamp_written(self, task_run_id: uuid.UUID, evidence: _Evidence) -> None:

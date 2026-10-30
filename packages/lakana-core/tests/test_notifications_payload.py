@@ -309,3 +309,43 @@ def test_a_failed_reference_check_is_said_but_never_named(session: Session) -> N
 
 def test_without_a_failed_reference_check_the_json_has_no_flag() -> None:
     assert "reference_check_failed" not in json.loads(build("json", "failed", _facts())[0])
+
+
+@pytest.mark.parametrize("with_policy", [True, False])
+def test_a_column_change_is_said_neutrally_whether_or_not_a_policy_is_affected(
+    session: Session, with_policy: bool
+) -> None:
+    """The endpoint is no administrator: the table is named, nothing says a policy exists."""
+    run = _seed(session, [])
+    run.status = RunStatus.SUCCEEDED
+    broken = {
+        "table": "silver.clean",
+        "kind": "column_mask",
+        "policy_id": "12345678-1234-1234-1234-123456789abc",
+        "column": "ssn_marker",
+        "change": "removed",
+    }
+    for task in session.query(TaskRun).filter(TaskRun.run_id == run.id):
+        task.schema_change_json = {
+            "tables": [task.asset],
+            "policies": [broken] if with_policy and task.asset == "silver.clean" else [],
+        }
+    session.flush()
+    facts = facts_for_run(session, run, DELIVERY)
+    assert facts.columns_changed == ("silver.clean", "silver.ok")
+    data = json.loads(build("json", "columns_changed", facts)[0])
+    assert data["event"] == "columns_changed"
+    assert data["columns_changed"] == ["silver.clean", "silver.ok"]
+    slack = json.loads(build("slack", "columns_changed", facts)[0])["text"]
+    assert slack.startswith("Lakana: job `daily` changed table columns in `prod`")
+    assert (
+        "The run removed or retyped columns of `silver.clean`, `silver.ok`; an administrator can "
+        f"see in `lakana runs show {facts.run_id} --env prod` what to check"
+    ) in slack
+    teams = build("teams", "columns_changed", facts)[0].decode()
+    assert "Columns changed" in teams
+    for fmt in FORMATS:
+        body = build(fmt, "columns_changed", facts)[0].decode()
+        for word in ("ssn_marker", "12345678", "mask", "filter", "polic"):
+            assert word not in body
+    assert "columns_changed" not in json.loads(build("json", "failed", _facts())[0])

@@ -2130,6 +2130,35 @@ class DeployPage:
 
 
 @dataclass(frozen=True)
+class PolicyWarning:
+    """A row filter or column mask a task's write left out of date; administrators only.
+
+    The write removed a column the policy uses, or changed its type in a way that does not widen
+    (a new column under the same name). Reads of the table by the people the policy applies to
+    are refused until an administrator creates it again.
+
+    Parameters
+    ----------
+    kind
+        ``row_filter`` or ``column_mask``.
+    column
+        The column the policy uses.
+    change
+        ``removed`` or ``replaced``.
+    policy_id
+        The policy's id.
+    message
+        What happened and the next step.
+    """
+
+    kind: str
+    column: str
+    change: str
+    policy_id: str
+    message: str
+
+
+@dataclass(frozen=True)
 class RunTask:
     """One task run of a run.
 
@@ -2181,6 +2210,14 @@ class RunTask:
     failure
         Why the task failed, was cancelled or never ran (`Failure`); `None` for a task with no
         error, and for a server that predates the field. `error_message` is its detail.
+    schema_note
+        One neutral sentence when one of the task's writes removed or replaced a column of its
+        table, the same whether or not a policy is affected; `None` otherwise and from an older
+        server.
+    policy_warnings
+        The row filters and column masks those writes left out of date (`PolicyWarning`), only
+        when you may manage policies; empty otherwise, for a task without any, and from an older
+        server.
     """
 
     asset: str
@@ -2201,6 +2238,8 @@ class RunTask:
     kept_check: bool | None = False
     setting_back: bool = False
     failure: Failure | None = None
+    schema_note: str | None = None
+    policy_warnings: tuple[PolicyWarning, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -2212,7 +2251,7 @@ class Notification:
     id
         The delivery id, the same as the ``delivery_id`` of the message the receiver got.
     event
-        ``failed``, ``recovered`` or ``test``.
+        ``failed``, ``recovered``, ``columns_changed`` or ``test``.
     state
         ``pending`` (waiting for a first or another attempt), ``delivered`` or ``failed``.
     attempts

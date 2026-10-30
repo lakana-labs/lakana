@@ -237,6 +237,8 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "versions",
         # settings and changes
         "approved_options",
+        # policy kinds, ids and column names of a write's schema change, never an expression
+        "broken_policies",
         "changed",
         "filters",
         "options_keys",

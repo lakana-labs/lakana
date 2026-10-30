@@ -116,7 +116,7 @@ with the values of a test project:
 {"command":"lakana runs show 11111111-2222-3333-4444-555555555555 --env prod","commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","delivery_id":"99999999-8888-7777-6666-555555555555","environment":"prod","event":"failed","failed_checks":["silver.clean/no_nulls"],"failed_tasks":["silver.clean"],"finished_at":"2026-10-14T06:05:00+00:00","job":"daily","repository":"analytics","run_id":"11111111-2222-3333-4444-555555555555","status":"failed","trigger":"schedule","version":1}
 ```
 
-`event` is `failed`, `recovered` or, from `notify-test`, `test`.
+`event` is `failed`, `recovered`, `columns_changed` or, from `notify-test`, `test`.
 
 A failed reference check, the `ref_<column>` check Lakana generates from a `references:` entry in
 an asset's header, is never named in a message: whether it failed, and how many rows it found, says
@@ -124,6 +124,16 @@ something about the table it points at, and the people who read the channel may 
 read that table. The message says only `A reference check failed; see lakana runs show ...` (in
 **json**, `"reference_check_failed": true`, a field that is there only then). `lakana runs show`
 shows the check to everyone who may read its target.
+
+When a run's write removed a column or changed its type in a way that does not widen, the message
+names the run's tables where that happened and nothing more: in **json**,
+`"columns_changed": ["gold.payments"]`, a field that is there only then; in **slack** and **teams**,
+a line such as
+``The run removed or retyped columns of `gold.payments`; an administrator can see in `lakana runs show ...` what to check``.
+It is sent whether or not a row filter or column mask uses the column: whoever reads the channel may
+not be an administrator, and only an administrator may learn that a policy exists. Nothing tells an
+administrator by itself; one sees the affected policies with `lakana runs show`
+([When a table's columns change](../explanation/when-columns-change.md#the-run-that-changes-a-column-says-so)).
 
 **slack** is a short text message in Slack's format, which other chat tools accept as
 well. The message is `{"text": "..."}` and the text reads, for the same run:
@@ -150,6 +160,10 @@ webhook request is received"), not the older Office 365 connector.
 - **`recovered`:** a run that succeeds when the run of the same job before it (in the same
   environment and repository, cancelled runs skipped) failed. The first run of a job never sends
   `recovered`.
+- **`columns_changed`:** any other run that succeeds, when one of its writes removed a column or
+  changed its type in a way that does not widen. Its title reads
+  ``Lakana: job `daily` changed table columns in `prod` ``. A run that fails or recovers sends its
+  own event, with the same line in it.
 - **Nothing:** an ad-hoc `lakana run` (it has no job), a job whose version had no `notify:`, and a
   scheduled start that never becomes a run (it was dropped, or the environment has no run
   principal bound): a team that relies on `notify:` hears nothing when a job never starts. The

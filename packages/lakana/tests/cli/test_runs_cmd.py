@@ -1936,3 +1936,64 @@ def test_runs_show_counts_the_checks_it_does_not_show(tmp_path: Path) -> None:
         {**_checked("gold.fact_sales", result_body("positive")), "hidden_checks": 2},
     )
     assert block[-1] == "  2 checks of references to tables you cannot read are not shown."
+
+
+_NOTE = (
+    "This run removed or retyped a column of the table. An administrator can see in this run "
+    "what else that affects; if other people read this table, tell one."
+)
+_POLICY_MESSAGE = (
+    "Row filter 12345678-1234-1234-1234-123456789abc on `gold.orders` uses column `region`, "
+    "which this run removed from the table."
+)
+
+
+def _changed_task(*messages: str) -> dict[str, object]:
+    """Build a succeeded task body whose write changed its table's columns.
+
+    Parameters
+    ----------
+    *messages
+        The policy warnings an administrator is shown.
+
+    Returns
+    -------
+    dict
+        The task body.
+    """
+    warnings = [
+        {
+            "kind": "row_filter",
+            "column": "region",
+            "change": "removed",
+            "policy_id": "12345678-1234-1234-1234-123456789abc",
+            "message": message,
+        }
+        for message in messages
+    ]
+    return {
+        **_task("gold.orders", "succeeded"),
+        "schema_note": _NOTE,
+        "policy_warnings": warnings,
+    }
+
+
+def test_runs_show_and_run_print_the_note_and_an_administrators_warnings(tmp_path: Path) -> None:
+    """The note for everyone, the warnings in full and escaped; a run without either prints none."""
+    api = FakeApi()
+    api.on("GET", _RUN_PATH, json=_run("succeeded", _changed_task(_POLICY_MESSAGE + "\x1b[2J")))
+    api.on("POST", "/api/v1/environments/dev/runs", status=202, json=_run("queued"))
+    state = make_state(tmp_path, api)
+
+    for args in (("runs", "show", _ID, "--env", "dev"), ("run", "analytics", "--env", "dev")):
+        lines = invoke(state, *args, env=_CI).stdout.splitlines()
+        at = lines.index("gold.orders warning:")
+        assert lines[at + 1 : at + 3] == [f"  {_NOTE}", f"  {_POLICY_MESSAGE}\\x1b[2J"]
+
+    api.on("GET", _RUN_PATH, json=_run("succeeded", _changed_task()))
+    lines = invoke(state, "runs", "show", _ID, "--env", "dev", env=_CI).stdout.splitlines()
+    at = lines.index("gold.orders warning:")
+    assert lines[at + 1 :] == [f"  {_NOTE}"]
+
+    api.on("GET", _RUN_PATH, json=_run("succeeded", _task("gold.orders", "succeeded")))
+    assert "warning" not in invoke(state, "runs", "show", _ID, "--env", "dev", env=_CI).stdout

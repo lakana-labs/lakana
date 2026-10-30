@@ -5,12 +5,13 @@ from __future__ import annotations
 import time
 from collections.abc import Callable, Iterator, Sequence
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
 from lakana._http import NEXT_CURSOR_HEADER, HttpTransport, csv_param, query_params
 from lakana._models import (
     Failure,
     Notification,
+    PolicyWarning,
     Run,
     RunPage,
     RunTask,
@@ -96,6 +97,33 @@ def failure_from_json(data: object) -> Failure | None:
     return Failure(code, cause, next_step)
 
 
+def policy_warnings_from_json(data: object) -> tuple[PolicyWarning, ...]:
+    """Build the `policy_warnings` of a task.
+
+    A warning is a help for the reader, so an entry that cannot be read never fails a command: it
+    is left out.
+
+    Parameters
+    ----------
+    data
+        The decoded list, or `None` from a server that predates the field.
+
+    Returns
+    -------
+    tuple of PolicyWarning
+        The warnings that could be read, in order.
+    """
+    found: list[PolicyWarning] = []
+    for entry in data if isinstance(data, list) else ():
+        if not isinstance(entry, dict):
+            continue
+        texts = [entry.get(key) for key in ("kind", "column", "change", "policy_id", "message")]
+        if all(isinstance(t, str) for t in texts):
+            kind, column, change, policy_id, message = cast(list[str], texts)
+            found.append(PolicyWarning(kind, column, change, policy_id, message))
+    return tuple(found)
+
+
 def run_from_json(data: dict[str, Any]) -> Run:
     """Build a `Run` from a `RunOut` body.
 
@@ -146,6 +174,8 @@ def run_from_json(data: dict[str, Any]) -> Run:
                 kept_check=t.get("kept_check", False),
                 setting_back=t.get("setting_back", False),
                 failure=failure_from_json(t.get("failure")),
+                schema_note=note if isinstance(note := t.get("schema_note"), str) else None,
+                policy_warnings=policy_warnings_from_json(t.get("policy_warnings")),
             )
             for t in data["tasks"]
         ],

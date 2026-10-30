@@ -376,3 +376,49 @@ def test_a_success_with_a_failing_warn_check_still_recovers(
     run = project.run(RunStatus.SUCCEEDED)
     _check(project, run, "warn", CheckOutcome.FAILED)
     assert decide_event(session, run) == "recovered"
+
+
+def _changed(project: Project, run: Run) -> None:
+    """Add a succeeded task whose write removed or retyped a column.
+
+    Parameters
+    ----------
+    project
+        The project.
+    run
+        The run.
+    """
+    project.session.add(
+        TaskRun(
+            id=uuid.uuid4(),
+            run_id=run.id,
+            asset="gold.orders",
+            status=TaskStatus.SUCCEEDED,
+            max_attempts=1,
+            timeout_seconds=60,
+            retry_delay_seconds=0,
+            schema_change_json={"tables": ["gold.orders"], "policies": []},
+        )
+    )
+    project.session.flush()
+
+
+def test_a_success_that_removed_or_retyped_a_column_gives_columns_changed(
+    project: Project, session: Session
+) -> None:
+    run = project.run(RunStatus.SUCCEEDED)
+    _changed(project, run)
+    assert decide_event(session, run) == "columns_changed"
+    queue_notification(session, run, T0)
+    assert [d.event for d in session.scalars(select(NotificationDelivery))] == ["columns_changed"]
+
+
+def test_a_failure_or_a_recovery_that_changed_columns_keeps_its_own_event(
+    project: Project, session: Session
+) -> None:
+    failed = project.run(RunStatus.FAILED)
+    _changed(project, failed)
+    assert decide_event(session, failed) == "failed"
+    recovered = project.run(RunStatus.SUCCEEDED)
+    _changed(project, recovered)
+    assert decide_event(session, recovered) == "recovered"

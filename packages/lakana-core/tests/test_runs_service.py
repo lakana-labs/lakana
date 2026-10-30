@@ -55,6 +55,11 @@ from lakana_core.models import (
     TaskStatus,
     Worker,
 )
+from lakana_core.policy.schema_change import (
+    COLUMNS_CHANGED_NOTE,
+    BrokenPolicy,
+    PolicyWarningView,
+)
 from lakana_core.projects.run_policy import MAX_RETRY_DELAY_SECONDS, RunCaps
 from lakana_core.runs import workers
 from lakana_core.runs.checks import ASSET, SOURCE_CHECK
@@ -1563,6 +1568,61 @@ def test_a_wait_reason_names_only_the_upstream_tables_the_reader_may_read(
     assert shown["message"] == "Waiting for upstream tasks: silver.a."
     assert shown["upstream"] == ["silver.a"]
     assert "hidden_upstream" not in shown
+
+
+class _NoPolicies(_ReadsOnly):
+    """Like `_ReadsOnly`, and refuses MANAGE_POLICY too: a reader who is no administrator."""
+
+    def permits(self, principal: PrincipalRef, action: Action, securable: Securable) -> bool:
+        """Refuse MANAGE_POLICY, else answer as `_ReadsOnly`.
+
+        Parameters
+        ----------
+        principal
+            The actor.
+        action
+            The action.
+        securable
+            The object.
+
+        Returns
+        -------
+        bool
+            `False` for MANAGE_POLICY and for READ_TABLE on an unlisted table.
+        """
+        return action is not Action.MANAGE_POLICY and super().permits(principal, action, securable)
+
+
+def test_a_schema_change_is_one_neutral_line_unless_the_reader_manages_policies(
+    session: Session, checked_version: JobVersion, principal: PrincipalRef
+) -> None:
+    """A table reader sees the same line with or without a policy; an administrator the details."""
+    started = _service(session).start(principal, "dev", "analytics", Selection())
+    policy_id = uuid.UUID(int=5)
+    broken = BrokenPolicy("silver.a", "column_mask", policy_id, "ssn", "removed").to_json()
+    for asset, policies in (("silver.a", [broken]), ("gold.b", [])):
+        session.execute(
+            update(TaskRun)
+            .where(TaskRun.run_id == started.id, TaskRun.asset == asset)
+            .values(schema_change_json={"tables": [asset], "policies": policies})
+        )
+    session.commit()
+
+    def shown(
+        authz: AuthorizationService,
+    ) -> dict[str, tuple[str | None, tuple[PolicyWarningView, ...]]]:
+        view = _service(session, authz).get(principal, "dev", started.id)
+        return {t.asset: (t.schema_note, t.policy_warnings) for t in view.tasks}
+
+    reader = shown(_NoPolicies("silver.a", "gold.b"))
+    assert reader["silver.a"] == reader["gold.b"] == (COLUMNS_CHANGED_NOTE, ())
+    assert reader["raw.events"] == (None, ())
+    admin = shown(AllowAllAuthorization())
+    note, (warning,) = admin["silver.a"]
+    assert note == COLUMNS_CHANGED_NOTE
+    assert (warning.kind, warning.column, warning.policy_id) == ("column_mask", "ssn", policy_id)
+    assert f"lakana column-mask revoke {policy_id}" in warning.message
+    assert admin["gold.b"] == (COLUMNS_CHANGED_NOTE, ())
 
 
 def test_wait_reasons_of_source_checks_and_of_a_written_task_that_waits_again(

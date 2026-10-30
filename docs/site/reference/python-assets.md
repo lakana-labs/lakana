@@ -145,8 +145,11 @@ def order_totals(orders: pl.DataFrame) -> pl.DataFrame:
   asset that names it fails, and a row filter or column mask on it stops the reads it applies
   to. A column whose type changes without widening is a new column: a row filter or column
   mask that uses it refuses the reads it applies to until an administrator creates it again.
-  Its values stay in the table's older snapshots until maintenance removes them. Read
-  [When a table's columns change](../explanation/when-columns-change.md) before you remove or
+  Its values stay in the table's older snapshots until maintenance removes them. The run that
+  does it says so in `lakana runs show`, and an administrator sees there which row filters and
+  column masks to create again
+  ([The run that changes a column says so](../explanation/when-columns-change.md#the-run-that-changes-a-column-says-so)).
+  Read [When a table's columns change](../explanation/when-columns-change.md) before you remove or
   retype a column others read.
 - The first run after a deploy adopted an existing table (the diff shows it as `adopted`) removes
   every column of that table the function does not return.

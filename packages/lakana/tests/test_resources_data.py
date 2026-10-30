@@ -35,6 +35,7 @@ from lakana._models import (
     MergeResult,
     ModelReference,
     Namespace,
+    PolicyWarning,
     QueryStatus,
     Table,
     TableReference,
@@ -2353,6 +2354,70 @@ def test_a_run_task_parses_setting_back_and_defaults_it_for_an_older_server() ->
     }
     setting, old = run_from_json(body).tasks
     assert (setting.setting_back, old.setting_back) == (True, False)
+
+
+def test_a_run_task_parses_policy_warnings_and_skips_what_it_cannot_read() -> None:
+    task = {
+        "asset": "gold.orders",
+        "status": "succeeded",
+        "attempt": 1,
+        "max_attempts": 3,
+        "timeout_seconds": 60,
+        "next_attempt_at": None,
+        "started_at": None,
+        "finished_at": None,
+        "error_message": None,
+        "query_run_id": None,
+        "rows_written": None,
+    }
+    warning = {
+        "kind": "column_mask",
+        "column": "ssn",
+        "change": "removed",
+        "policy_id": "p0",
+        "message": "Column mask p0 on `gold.orders` uses column `ssn` ...",
+    }
+    body = {
+        "id": "r1",
+        "environment": "dev",
+        "repository": "analytics",
+        "project_version_id": "v1",
+        "commit_sha": "a" * 40,
+        "kind": "full",
+        "status": "succeeded",
+        "cancel_requested": False,
+        "triggered_by": "admin",
+        "run_as": "admin",
+        "resumed_from_run_id": None,
+        "selection": {},
+        "error_message": None,
+        "created_at": "2026-10-09T14:00:00+00:00",
+        "started_at": None,
+        "finished_at": None,
+        "tasks": [
+            {
+                **task,
+                "schema_note": "This run changed the table's columns.",
+                "policy_warnings": [
+                    warning,
+                    {**warning, "policy_id": "p1"},
+                    {**warning, "policy_id": None},
+                    {"kind": 1},
+                    7,
+                ],
+            },
+            {**task, "schema_note": 5},
+            task,
+        ],
+    }
+    warned, odd, old = run_from_json(body).tasks
+    assert warned.schema_note == "This run changed the table's columns."
+    assert (odd.schema_note, old.schema_note) == (None, None)
+    assert warned.policy_warnings == (
+        PolicyWarning("column_mask", "ssn", "removed", "p0", warning["message"]),
+        PolicyWarning("column_mask", "ssn", "removed", "p1", warning["message"]),
+    )
+    assert old.policy_warnings == ()
 
 
 def _sequence_run(statuses: list[dict[str, Any]]) -> QueryRun:

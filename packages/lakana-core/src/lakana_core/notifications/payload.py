@@ -30,7 +30,10 @@ from lakana_core.models import (
     TaskRun,
     TaskStatus,
 )
+from lakana_core.notifications.events import columns_changed_tables
 from lakana_core.runs.hidden_checks import is_reference_check
+
+_CHANGED = "The run removed or retyped columns of"
 
 PAYLOAD_VERSION = 1
 """The `version` of the `json` payload; raised only by a change that breaks a receiver."""
@@ -41,6 +44,7 @@ FORMATS = NOTIFY_FORMATS
 _TITLES = {
     "failed": "Lakana: job {job} failed in {environment}",
     "recovered": "Lakana: job {job} succeeded again in {environment}",
+    "columns_changed": "Lakana: job {job} changed table columns in {environment}",
     "test": "Lakana: test message for job {job} in {environment}",
 }
 
@@ -78,6 +82,10 @@ class Facts:
         Whether a generated reference check failed or errored. Such a check is never named: its
         outcome tells of the table it points at, and the endpoint is no reader whose right to
         read that table can be asked. `lakana runs show` shows it to a reader who may.
+    columns_changed
+        The run's own tables whose columns a write removed or replaced, whether or not a row
+        filter or column mask uses them. Nothing more is said: the endpoint is no administrator,
+        and only an administrator may learn that a policy exists (`lakana runs show` shows them).
     """
 
     job: str
@@ -92,6 +100,7 @@ class Facts:
     failed_checks: tuple[str, ...]
     delivery_id: str
     reference_check_failed: bool = False
+    columns_changed: tuple[str, ...] = ()
 
     @property
     def command(self) -> str:
@@ -173,6 +182,7 @@ def facts_for_run(session: Session, run: Run, delivery_id: UUID | str) -> Facts:
         reference_check_failed=any(
             is_reference_check(name, generated) for _, name, generated in checks
         ),
+        columns_changed=columns_changed_tables(session, run.id),
     )
 
 
@@ -237,7 +247,7 @@ def build(fmt: str, event: str, facts: Facts) -> tuple[bytes, dict[str, str]]:
     fmt
         `json`, `slack` or `teams`.
     event
-        `failed`, `recovered` or `test`.
+        `failed`, `recovered`, `columns_changed` or `test`.
     facts
         What the message says.
 
@@ -295,7 +305,10 @@ def _json(event: str, facts: Facts) -> dict[str, Any]:
         "failed_tasks": list(facts.failed_tasks),
         "failed_checks": list(facts.failed_checks),
         "command": facts.command,
-    } | ({"reference_check_failed": True} if facts.reference_check_failed else {})
+    } | (
+        ({"reference_check_failed": True} if facts.reference_check_failed else {})
+        | ({"columns_changed": list(facts.columns_changed)} if facts.columns_changed else {})
+    )
 
 
 def _title(event: str, facts: Facts) -> str:
@@ -380,6 +393,11 @@ def _slack(event: str, facts: Facts) -> str:
         lines.append("Failed checks: " + ", ".join(_code(c) for c in facts.failed_checks))
     if facts.reference_check_failed:
         lines.append(f"A reference check failed; see {_code(facts.command)}")
+    if facts.columns_changed:
+        tables = ", ".join(_code(t) for t in facts.columns_changed)
+        lines.append(
+            f"{_CHANGED} {tables}; an administrator can see in {_code(facts.command)} what to check"
+        )
     lines.append(f"Details: {_code(facts.command)}")
     lines.append(f"Delivery {_code(facts.delivery_id)}")
     return "\n".join(lines)
@@ -440,6 +458,14 @@ def _teams(event: str, facts: Facts) -> dict[str, Any]:
         pairs.append(("Failed checks", ", ".join(facts.failed_checks)))
     if facts.reference_check_failed:
         pairs.append(("Reference check", f"A reference check failed; see {facts.command}"))
+    if facts.columns_changed:
+        tables = ", ".join(facts.columns_changed)
+        pairs.append(
+            (
+                "Columns changed",
+                f"{_CHANGED} {tables}; an administrator can see in {facts.command} what to check",
+            )
+        )
     pairs += [("Details", facts.command), ("Delivery", facts.delivery_id)]
     card = {
         "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",

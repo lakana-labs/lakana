@@ -55,7 +55,7 @@ class NotificationDelivery(Base):
     )
     job: Mapped[str] = mapped_column(String(255))
     event: Mapped[str] = mapped_column(String(16))
-    """``failed``, ``recovered`` or ``test``."""
+    """``failed``, ``recovered``, ``columns_changed`` or ``test``."""
     format: Mapped[str] = mapped_column(String(8))
     """``json``, ``slack`` or ``teams``, as the project version declared it."""
     secret_name: Mapped[str] = mapped_column(String(255))

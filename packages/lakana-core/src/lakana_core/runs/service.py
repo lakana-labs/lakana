@@ -61,6 +61,7 @@ from lakana_core.models.run import (
 )
 from lakana_core.notifications.views import NotificationView, notification_view
 from lakana_core.pagination import decode_cursor, encode_cursor, parse_choices
+from lakana_core.policy.schema_change import PolicyWarningView, schema_change_for_reader
 from lakana_core.projects.checks import (
     kept_check_tables,
     may_read_every,
@@ -313,6 +314,14 @@ class TaskRunView:
         Why the task failed, was cancelled or never ran: the code with its cause and next step.
         `None` for a task with no error; ``unknown`` for a task that failed before the codes
         existed.
+    schema_note
+        `lakana_core.policy.schema_change.COLUMNS_CHANGED_NOTE` when one of the task's writes
+        removed or replaced a column, else `None`; the same for every reader, whether or not a
+        policy is affected.
+    policy_warnings
+        The row filters and column masks those writes left out of date, with their ids, for a
+        reader who may manage policies; empty for everyone else, who may not learn that a policy
+        exists (`lakana_core.policy.schema_change.schema_change_for_reader`).
     """
 
     asset: str
@@ -333,6 +342,8 @@ class TaskRunView:
     kept_check: bool | None = False
     setting_back: bool = False
     failure: Failure | None = None
+    schema_note: str | None = None
+    policy_warnings: tuple[PolicyWarningView, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -1048,6 +1059,15 @@ class RunService:
             hidden: dict[uuid.UUID, set[str]] = {}
             every: dict[uuid.UUID, list[CheckResult]] = {}
             withheld = ReferenceCheckFilter(self._session, self._authz, reader, env.name)
+            manages_policies = any(task.schema_change_json for task, _ in rows) and (
+                self._authz.permits(reader, Action.MANAGE_POLICY, Securable.instance_scope())
+            )
+            schema_changes = {
+                task.id: schema_change_for_reader(
+                    task.schema_change_json, manages_policies=manages_policies
+                )
+                for task, _ in rows
+            }
             for result in self._session.scalars(
                 select(CheckResult)
                 .where(CheckResult.run_id == run.id)
@@ -1095,6 +1115,8 @@ class RunService:
                     ),
                     setting_back=task.setting_back and task.status not in TERMINAL_TASK_STATUSES,
                     failure=task_failure(task),
+                    schema_note=schema_changes[task.id][0],
+                    policy_warnings=schema_changes[task.id][1],
                 )
                 for task, rows_written in rows
             )
