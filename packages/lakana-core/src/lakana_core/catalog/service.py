@@ -1567,8 +1567,7 @@ class CatalogService:
         NotFoundError
             If no environment has that name.
         StorageUnavailableError
-            If the storage refused access or did not answer during the walk; nothing was
-            deleted.
+            If the storage refused access or did not answer (`_orphaned`).
         """
         self._authz.authorize(p, Action.MANAGE_ENVIRONMENT, Securable.instance_scope())
         return self._orphaned(name, older_than_days, find_orphaned_locations)
