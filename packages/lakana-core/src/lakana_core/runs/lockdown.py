@@ -330,11 +330,6 @@ class _Evidence:
         The table's current snapshot when the write was staged, or `None`.
     publishes
         Whether the write created the table or found it not published.
-    policy_warnings
-        The row filters and column masks the write leaves out of date, as stored
-        (`lakana_core.policy.schema_change.BrokenPolicy.to_json`).
-    changed_table
-        The table whose columns the write removed or replaced, or `None`.
     """
 
     key: tuple[str, Target]
@@ -344,8 +339,6 @@ class _Evidence:
     fence: WriteFence | None
     snapshot_before: int | None
     publishes: bool
-    policy_warnings: tuple[dict[str, str], ...] = ()
-    changed_table: str | None = None
 
 
 class ProtectedWriteGuard:
@@ -402,6 +395,9 @@ class ProtectedWriteGuard:
         self._relied_on: _RunWrite | None = None
         self._fence: WriteFence | None = None
         self._evidence: _Evidence | None = None
+        self._schema_change: tuple[tuple[str, Target], str, tuple[dict[str, str], ...]] | None = (
+            None
+        )
 
     def note_result(
         self,
@@ -413,8 +409,6 @@ class ProtectedWriteGuard:
         table_id: uuid.UUID,
         snapshot_before: int | None = None,
         publishes: bool = False,
-        policy_warnings: tuple[dict[str, str], ...] = (),
-        changed_table: str | None = None,
     ) -> None:
         """Remember what the write of `target` is about to commit, for `record_pending`.
 
@@ -440,12 +434,6 @@ class ProtectedWriteGuard:
             did not exist or had no snapshot, and for a view.
         publishes
             Whether the write created the table or found it not published.
-        policy_warnings
-            The row filters and column masks the write leaves out of date, as stored; recorded on
-            the task run of a write in a run (`_note_schema_change`).
-        changed_table
-            The table whose columns the write removed or replaced, or `None`; recorded the same
-            way, with or without a policy.
         """
         self._evidence = _Evidence(
             (environment, target),
@@ -455,9 +443,36 @@ class ProtectedWriteGuard:
             self._fence,
             snapshot_before,
             publishes,
-            policy_warnings,
-            changed_table,
         )
+
+    def note_schema_change(
+        self,
+        environment: str,
+        target: Target,
+        *,
+        table: str,
+        policies: tuple[dict[str, str], ...],
+    ) -> None:
+        """Remember that the commit of `target` removes or replaces a column, for `record_pending`.
+
+        A write of a task (either form of run context) records it on its task run when the run
+        context holds again in `record_pending`, with or without a policy; a write outside a run
+        records nothing here. Dropped by the next `check` of another target and by
+        `forget_result`.
+
+        Parameters
+        ----------
+        environment
+            The environment written to.
+        target
+            The table, as parts.
+        table
+            The table's dotted name.
+        policies
+            The row filters and column masks the change leaves out of date, as stored
+            (`lakana_core.policy.schema_change.BrokenPolicy.to_json`).
+        """
+        self._schema_change = ((environment, target), table, policies)
 
     def note_own_commit(
         self,
@@ -521,6 +536,7 @@ class ProtectedWriteGuard:
         evidence. The rollback calls this first.
         """
         self._evidence = None
+        self._schema_change = None
 
     def check(
         self,
@@ -572,6 +588,8 @@ class ProtectedWriteGuard:
         self._fence = p.write_fence
         if self._evidence is not None and self._evidence.key != (environment, target):
             self._evidence = None
+        if self._schema_change is not None and self._schema_change[0] != (environment, target):
+            self._schema_change = None
         if self._pending is not None:
             pending_key, _, pending_detail = self._pending
             # A pending record of a deletion never outlives the call that made it, and a
@@ -702,9 +720,14 @@ class ProtectedWriteGuard:
                 self._stamp_written(relied_on.context.task_run_id, noted)
         if noted is not None and relied_on is not None and relied_on.context.claim is not None:
             self._advance_own_tip(relied_on.context.task_run_id, noted)
-        if noted is not None and relied_on is not None and noted.changed_table is not None:
+        schema_change, self._schema_change = self._schema_change, None
+        if (
+            schema_change is not None
+            and relied_on is not None
+            and schema_change[0] == (relied_on.environment, relied_on.target)
+        ):
             self._note_schema_change(
-                relied_on.context.task_run_id, noted.changed_table, noted.policy_warnings
+                relied_on.context.task_run_id, schema_change[1], schema_change[2]
             )
         if self._pending is None:
             return

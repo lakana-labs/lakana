@@ -3825,11 +3825,18 @@ work.
   shown field; the audit log needs `READ_AUDIT_LOG`) and, for a write in a run, in
   `task_runs.schema_change_json` (`{"tables", "policies"}`) through the guard (`note_result` ->
   `record_pending` -> `_note_schema_change`), in the write's own transaction after the run context
-  held again. The task row is written for **every** write that removes or replaces a column, with
+  held again. A commit through `commit_table` that is not this service's own write
+  (`own_data_files`), a maintenance commit or the set-back (an Iceberg REST client's) is checked
+  the same way (`_commit_schema_change`): it records `TABLE_SCHEMA_CHANGED` (target, principal,
+  `broken_policies`) in the swap's transaction and, under a task's run context, the same task-run
+  note. A set-back that makes the schema before current again sets the task run's
+  `schema_change_json` to NULL in its `settle` transaction, so no note, warning or notification line
+  outlives the change. The task row is written for **every** write that removes or replaces a column, with
   or without a policy, so its presence is no existence signal. Nobody without `MANAGE_POLICY` may
   learn that a policy exists (`table get` shows none; listings need `MANAGE_POLICY`), the asset's
   author included: the run view (`schema_change_for_reader`) gives every reader the same
-  `COLUMNS_CHANGED_NOTE` for such a task and `policy_warnings` (id, kind, column, revoke command)
+  `COLUMNS_CHANGED_NOTE` for such a task (it asks the reader to tell an administrator: no channel
+  pushes it to one) and `policy_warnings` (id, kind, column, revoke command)
   only to a reader who `permits` `MANAGE_POLICY` on the instance; the REST, SDK and CLI output of a
   non-administrator is identical for a table with policies and one without. A job's notification
   goes to a webhook the project chooses, not to administrators, so it is neutral too: the event

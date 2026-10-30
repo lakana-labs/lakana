@@ -63,11 +63,12 @@ _REVOKE_FIRST = {
 _FIELDS = ("table", "kind", "policy_id", "column", "change")
 
 COLUMNS_CHANGED_NOTE = (
-    "This run changed the table's columns; an administrator has been told what to check."
+    "This run removed or retyped a column of the table. An administrator can see in this run "
+    "what else that affects; if other people read this table, tell one."
 )
-"""What a reader who may not manage policies is shown for a task whose write removed or replaced a
-column, whether or not a row filter or column mask uses it: its presence must not tell that one
-exists."""
+"""What every reader is shown for a task whose write removed or replaced a column, whether or not
+a row filter or column mask uses it: its presence must not tell that one exists. Nothing tells an
+administrator on its own, so the line asks the reader to."""
 
 
 @dataclass(frozen=True)
@@ -238,27 +239,33 @@ def broken_policies(
     """
     if not changed:
         return ()
-    used: list[tuple[str, uuid.UUID, set[str]]] = [
-        (ROW_FILTER, row.id, _read_columns(row.expression))
+    used: list[tuple[str, uuid.UUID, list[str]]] = [
+        (ROW_FILTER, row.id, sorted(_read_columns(row.expression)))
         for row in session.scalars(
             select(RowFilter).where(RowFilter.table_id == table_id, RowFilter.revoked_at.is_(None))
         )
     ]
     used += [
-        (COLUMN_MASK, row.id, {row.column, *_read_columns(row.expression)})
+        (COLUMN_MASK, row.id, [row.column, *sorted(_read_columns(row.expression))])
         for row in session.scalars(
             select(ColumnMask).where(
                 ColumnMask.table_id == table_id, ColumnMask.revoked_at.is_(None)
             )
         )
     ]
-    found = [
-        BrokenPolicy(table, kind, policy_id, column, changed[column.casefold()])
-        for kind, policy_id, columns in used
-        for column in columns
-        if column.casefold() in changed
-    ]
-    return tuple(sorted(found, key=lambda b: (b.kind, b.column.casefold(), str(b.policy_id))))
+    found: dict[tuple[str, uuid.UUID, str], BrokenPolicy] = {}
+    for kind, policy_id, columns in used:
+        # A mask's own column comes first, so that its spelling wins over the expression's.
+        for column in columns:
+            folded = column.casefold()
+            if folded in changed:
+                found.setdefault(
+                    (kind, policy_id, folded),
+                    BrokenPolicy(table, kind, policy_id, column, changed[folded]),
+                )
+    return tuple(
+        sorted(found.values(), key=lambda b: (b.kind, b.column.casefold(), str(b.policy_id)))
+    )
 
 
 def _message(warning: BrokenPolicy) -> str:

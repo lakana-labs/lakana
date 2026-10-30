@@ -2146,7 +2146,7 @@ class PolicyWarning:
     change
         ``removed`` or ``replaced``.
     policy_id
-        The policy's id; `None` only if the server sent none.
+        The policy's id.
     message
         What happened and the next step.
     """
@@ -2154,7 +2154,7 @@ class PolicyWarning:
     kind: str
     column: str
     change: str
-    policy_id: str | None
+    policy_id: str
     message: str
 
 

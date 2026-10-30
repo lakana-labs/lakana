@@ -129,10 +129,10 @@ When a run's write removed a column or changed its type in a way that does not w
 names the run's tables where that happened and nothing more: in **json**,
 `"columns_changed": ["gold.payments"]`, a field that is there only then; in **slack** and **teams**,
 a line such as
-``The run removed or retyped columns of `gold.payments`; an administrator has been told what to check; see `lakana runs show ...` ``.
+``The run removed or retyped columns of `gold.payments`; an administrator can see in `lakana runs show ...` what to check``.
 It is sent whether or not a row filter or column mask uses the column: whoever reads the channel may
-not be an administrator, and only an administrator may learn that a policy exists. An administrator
-sees the affected policies with `lakana runs show`
+not be an administrator, and only an administrator may learn that a policy exists. Nothing tells an
+administrator by itself; one sees the affected policies with `lakana runs show`
 ([When a table's columns change](../explanation/when-columns-change.md#the-run-that-changes-a-column-says-so)).
 
 **slack** is a short text message in Slack's format, which other chat tools accept as

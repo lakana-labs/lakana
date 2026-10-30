@@ -11,6 +11,12 @@ import pyarrow as pa
 import pytest
 from core_test_helpers import python_task_run
 from pyiceberg.schema import Schema
+from pyiceberg.table.update import (
+    AddSchemaUpdate,
+    AssertCurrentSchemaId,
+    SetCurrentSchemaUpdate,
+    SetPropertiesUpdate,
+)
 from pyiceberg.types import IcebergType, IntegerType, LongType, NestedField, StringType
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -39,6 +45,7 @@ from lakana_core.policy.schema_change import (
     changed_tables,
     schema_change_for_reader,
 )
+from lakana_core.runs.lockdown import ProtectedWriteGuard, WriteOperation
 from lakana_core.storage.resolver import StorageResolver
 
 _TABLE = "gold.orders"
@@ -417,7 +424,8 @@ def test_a_reader_who_manages_no_policies_sees_one_neutral_line_whatever_the_pol
     assert shown == (COLUMNS_CHANGED_NOTE, ())
     assert shown == schema_change_for_reader(without, manages_policies=False)
     assert COLUMNS_CHANGED_NOTE == (
-        "This run changed the table's columns; an administrator has been told what to check."
+        "This run removed or retyped a column of the table. An administrator can see in this run "
+        "what else that affects; if other people read this table, tell one."
     )
     assert schema_change_for_reader(None, manages_policies=False) == (None, ())
     assert schema_change_for_reader({"tables": []}, manages_policies=True) == (None, ())
@@ -459,3 +467,157 @@ def test_the_changed_tables_are_read_from_what_is_stored_and_junk_is_ignored() -
     assert changed_tables(["gold.a"]) == ()
     assert changed_tables({"tables": "gold.a"}) == ()
     assert changed_tables(None) == ()
+
+
+def test_a_mask_whose_expression_spells_its_column_in_another_case_is_named_once(
+    session: Session, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    _catalog(session, principal, tmp_path)
+    table = session.scalars(select(Table)).one()
+    mask = _policy(session, principal, ColumnMask, "upper(REGION)", column="region")
+
+    found = broken_policies(session, table.id, _TABLE, {"region": "removed"})
+
+    assert found == (BrokenPolicy(_TABLE, "column_mask", mask, "region", "removed"),)
+
+
+def test_a_widening_write_records_nothing_and_a_rename_records_the_old_column_removed(
+    session: Session, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    catalog = CatalogService(session, StorageResolver(session), AllowAllAuthorization())
+    catalog.create_environment(
+        principal,
+        name="dev",
+        storage=StorageConfig(scheme="file", root=f"file://{tmp_path}", options={}),
+    )
+    narrow = pa.table({"id": pa.array([1], pa.int32()), "region": pa.array(["eu"])})
+    _write(catalog, principal, WriteMode.CREATE, narrow)
+    row_filter = _policy(session, principal, RowFilter, "region = 'eu' AND id > 0")
+    p, task_run_id = _python_task(session, principal)
+
+    widened = pa.table({"id": pa.array([1], pa.int64()), "region": pa.array(["eu"])})
+    _write(catalog, p, WriteMode.REPLACE, widened, evolve_schema=True)
+    assert _stored(session, task_run_id) is None
+
+    renamed = pa.table({"id": pa.array([1], pa.int64()), "area": pa.array(["eu"])})
+    _write(catalog, p, WriteMode.REPLACE, renamed, evolve_schema=True)
+    assert _stored(session, task_run_id) == {
+        "tables": [_TABLE],
+        "policies": [
+            {
+                "table": _TABLE,
+                "kind": "row_filter",
+                "policy_id": str(row_filter),
+                "column": "region",
+                "change": "removed",
+            }
+        ],
+    }
+
+
+def _drop_region(catalog: CatalogService, p: PrincipalRef, principal: PrincipalRef) -> None:
+    """Commit a schema without `region`, as an Iceberg client's schema update does.
+
+    Parameters
+    ----------
+    catalog
+        The catalog.
+    p
+        The committing principal.
+    principal
+        A principal who may read the table, to load its metadata.
+    """
+    ref = TableRef.from_dotted("dev", _TABLE)
+    metadata = catalog.load_table(principal, ref).metadata
+    kept = [f for f in metadata.schema().fields if f.name != "region"]
+    next_id = max(s.schema_id for s in metadata.schemas) + 1
+    catalog.commit_table(
+        p,
+        ref,
+        requirements=[AssertCurrentSchemaId(current_schema_id=metadata.current_schema_id)],
+        updates=[
+            AddSchemaUpdate(schema_=Schema(*kept, schema_id=next_id)),
+            SetCurrentSchemaUpdate(schema_id=-1),
+        ],
+    )
+
+
+def _schema_events(session: Session) -> list[dict[str, object]]:
+    """Read the details of the `TABLE_SCHEMA_CHANGED` events, oldest first.
+
+    Parameters
+    ----------
+    session
+        Database session.
+
+    Returns
+    -------
+    list of dict
+        Their details.
+    """
+    return [
+        dict(event.detail or {})
+        for event in session.scalars(
+            select(AuditEvent).where(AuditEvent.event_type == AuditEventType.TABLE_SCHEMA_CHANGED)
+        )
+    ]
+
+
+def test_a_column_dropped_by_an_iceberg_commit_is_audited_and_noted_on_a_task(
+    session: Session, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    catalog = _catalog(session, principal, tmp_path)
+    mask = _policy(session, principal, ColumnMask, "'***'", column="region")
+    p, task_run_id = _python_task(session, principal)
+    expected = {
+        "table": _TABLE,
+        "kind": "column_mask",
+        "policy_id": str(mask),
+        "column": "region",
+        "change": "removed",
+    }
+
+    _drop_region(catalog, p, principal)
+
+    assert _stored(session, task_run_id) == {"tables": [_TABLE], "policies": [expected]}
+    assert _schema_events(session) == [
+        {"target": _TABLE, "principal": "admin", "broken_policies": [expected]}
+    ]
+
+
+def test_an_iceberg_commit_outside_a_run_is_audited_only_and_one_without_a_change_not_at_all(
+    session: Session, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    catalog = _catalog(session, principal, tmp_path)
+    ref = TableRef.from_dotted("dev", _TABLE)
+    catalog.commit_table(
+        principal,
+        ref,
+        requirements=[],
+        updates=[SetPropertiesUpdate(updates={"owner": "x"})],
+    )
+    assert _schema_events(session) == []
+
+    _drop_region(catalog, principal, principal)
+
+    assert _schema_events(session) == [
+        {"target": _TABLE, "principal": "admin", "broken_policies": []}
+    ]
+
+
+def test_a_noted_column_change_does_not_carry_over_to_a_check_of_another_table(
+    session: Session, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    _catalog(session, principal, tmp_path)
+    p, task_run_id = _python_task(session, principal)
+    guard = ProtectedWriteGuard(session, AllowAllAuthorization())
+    orders, other = ("gold", "orders"), ("gold", "other")
+    guard.check(p, "dev", WriteOperation.COMMIT, orders)
+    guard.note_schema_change("dev", orders, table=_TABLE, policies=())
+    guard.check(principal, "dev", WriteOperation.COMMIT, other)
+    guard.check(p, "dev", WriteOperation.COMMIT, orders)
+
+    guard.record_pending()
+    session.commit()
+
+    assert _stored(session, task_run_id) is None

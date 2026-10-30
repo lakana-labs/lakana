@@ -117,12 +117,9 @@ def policy_warnings_from_json(data: object) -> tuple[PolicyWarning, ...]:
     for entry in data if isinstance(data, list) else ():
         if not isinstance(entry, dict):
             continue
-        texts = [entry.get(key) for key in ("kind", "column", "change", "message")]
-        policy_id = entry.get("policy_id")
-        if all(isinstance(t, str) for t in texts) and (
-            policy_id is None or isinstance(policy_id, str)
-        ):
-            kind, column, change, message = cast(list[str], texts)
+        texts = [entry.get(key) for key in ("kind", "column", "change", "policy_id", "message")]
+        if all(isinstance(t, str) for t in texts):
+            kind, column, change, policy_id, message = cast(list[str], texts)
             found.append(PolicyWarning(kind, column, change, policy_id, message))
     return tuple(found)
 

@@ -339,8 +339,8 @@ def test_a_column_change_is_said_neutrally_whether_or_not_a_policy_is_affected(
     slack = json.loads(build("slack", "columns_changed", facts)[0])["text"]
     assert slack.startswith("Lakana: job `daily` changed table columns in `prod`")
     assert (
-        "The run removed or retyped columns of `silver.clean`, `silver.ok`; an administrator "
-        f"has been told what to check; see `lakana runs show {facts.run_id} --env prod`"
+        "The run removed or retyped columns of `silver.clean`, `silver.ok`; an administrator can "
+        f"see in `lakana runs show {facts.run_id} --env prod` what to check"
     ) in slack
     teams = build("teams", "columns_changed", facts)[0].decode()
     assert "Columns changed" in teams

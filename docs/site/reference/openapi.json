@@ -16943,6 +16943,7 @@
           "BOOTSTRAP_ADMIN_RESTORED",
           "TABLE_APPENDED",
           "TABLE_WRITE",
+          "TABLE_SCHEMA_CHANGED",
           "TABLE_MAINTAINED",
           "REPOSITORY_CREATED",
           "REPOSITORY_UPDATED",

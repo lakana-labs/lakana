@@ -880,7 +880,10 @@ def test_a_schema_change_shows_policy_details_only_to_an_administrator(client: T
         (task_body,) = shown.json()["tasks"]
         return task_body
 
-    neutral = "This run changed the table's columns; an administrator has been told what to check."
+    neutral = (
+        "This run removed or retyped a column of the table. An administrator can see in this run "
+        "what else that affects; if other people read this table, tell one."
+    )
     store([broken])
     with_policy = {"viewer": task_of(viewer), "outsider": task_of(outsider)}
     admin = task_of(AUTH_HEADER)

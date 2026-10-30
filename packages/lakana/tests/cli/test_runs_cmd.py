@@ -1938,7 +1938,10 @@ def test_runs_show_counts_the_checks_it_does_not_show(tmp_path: Path) -> None:
     assert block[-1] == "  2 checks of references to tables you cannot read are not shown."
 
 
-_NOTE = "This run changed the table's columns; an administrator has been told what to check."
+_NOTE = (
+    "This run removed or retyped a column of the table. An administrator can see in this run "
+    "what else that affects; if other people read this table, tell one."
+)
 _POLICY_MESSAGE = (
     "Row filter 12345678-1234-1234-1234-123456789abc on `gold.orders` uses column `region`, "
     "which this run removed from the table."

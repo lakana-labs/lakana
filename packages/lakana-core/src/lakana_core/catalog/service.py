@@ -46,7 +46,7 @@ from pyiceberg.table.update import (
     TableUpdate,
 )
 from pyiceberg.types import NestedField
-from sqlalchemy import delete, event, or_, select, text, update
+from sqlalchemy import delete, event, null, or_, select, text, update
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import ORMExecuteState, Session, SessionTransaction
 
@@ -4373,6 +4373,13 @@ class CatalogService:
         added = {u.snapshot.snapshot_id for u in updates if isinstance(u, AddSnapshotUpdate)}
         with self._state_withheld(p, ref, ValidationError, _UPDATE_DOES_NOT_FIT):
             updated = apply_updates(current, updates)
+        # A write of this service found and recorded its own column change (`write_batches`);
+        # every other commit (an Iceberg client's) is looked at here.
+        schema_change = (
+            None
+            if maintenance or internal_rollback or own_data_files
+            else self._commit_schema_change(ref, table_id, current, updated)
+        )
         had, has = current.current_snapshot_id, updated.current_snapshot_id
         with self._state_withheld(
             p, ref, ValidationError, _UPDATE_DOES_NOT_FIT, publication_only=True
@@ -4424,6 +4431,20 @@ class CatalogService:
                 snapshot_before=had,
                 publishes=unpublished,
             )
+        if schema_change is not None:
+            AuditService(self._session).record(
+                p.id,
+                AuditEventType.TABLE_SCHEMA_CHANGED,
+                securable=Securable.table_scope(ref.environment, ref.namespace, ref.name),
+                detail={
+                    "target": ref.dotted(),
+                    "principal": p.name,
+                    "broken_policies": list(schema_change),
+                },
+            )
+            self._guard.note_schema_change(
+                ref.environment, table_target(ref), table=ref.dotted(), policies=schema_change
+            )
         commit_metadata_pointer(
             self._session,
             table_id,
@@ -4441,6 +4462,40 @@ class CatalogService:
         self._commit_sent = True
         self._session.commit()
         return LoadedTable(ref=ref, uuid=table_id, metadata_location=written, metadata=updated)
+
+    def _commit_schema_change(
+        self,
+        ref: TableRef,
+        table_id: uuid.UUID,
+        current: TableMetadata,
+        updated: TableMetadata,
+    ) -> tuple[dict[str, str], ...] | None:
+        """Find the column change of an Iceberg commit and the policies it leaves out of date.
+
+        Parameters
+        ----------
+        ref
+            The table.
+        table_id
+            The table's id.
+        current
+            The metadata before the commit.
+        updated
+            The metadata the commit makes current.
+
+        Returns
+        -------
+        tuple of dict or None
+            The policies, as stored (possibly none), when the commit removes or replaces a column;
+            `None` when it does not.
+        """
+        if updated.current_schema_id == current.current_schema_id:
+            return None
+        changed = changed_columns(current.schema(), updated.schema())
+        if not changed:
+            return None
+        broken = broken_policies(self._session, table_id, ref.dotted(), changed)
+        return tuple(warning.to_json() for warning in broken)
 
     def roll_back(
         self,
@@ -4835,9 +4890,23 @@ class CatalogService:
                     and schema_after == current.current_schema_id
                 ):
                     updates.append(SetCurrentSchemaUpdate(schema_id=schema_before))
+        restores_schema = any(isinstance(u, SetCurrentSchemaUpdate) for u in updates)
 
         def settle() -> None:
-            """Mark, clear the stamp, restore the note and record: the statements after the swap."""
+            """Mark, clear the stamp, restore the note and record: the statements after the swap.
+
+            A set-back that makes the schema before current again also drops the task run's
+            column change (`TaskRun.schema_change_json`): the columns and their field ids are
+            the old ones again, so neither the note, the warnings nor the notification line may
+            say otherwise.
+            """
+            if restores_schema:
+                self._session.execute(
+                    update(TaskRun)
+                    .where(TaskRun.id == task_run_id)
+                    .values(schema_change_json=null())
+                    .execution_options(synchronize_session=False)
+                )
             if written.publishes:
                 self._session.execute(
                     update(Table)
@@ -7104,9 +7173,11 @@ class CatalogService:
             table_id=result.table_id,
             snapshot_before=snapshot_before,
             publishes=publishes,
-            policy_warnings=stored,
-            changed_table=ref.dotted() if columns_changed else None,
         )
+        if columns_changed:
+            self._guard.note_schema_change(
+                ref.environment, table_target(ref), table=ref.dotted(), policies=stored
+            )
 
     def _connection_sources(
         self, p: PrincipalRef, environment_id: uuid.UUID

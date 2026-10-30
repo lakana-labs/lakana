@@ -2374,8 +2374,8 @@ def test_a_run_task_parses_policy_warnings_and_skips_what_it_cannot_read() -> No
         "kind": "column_mask",
         "column": "ssn",
         "change": "removed",
-        "policy_id": None,
-        "message": "A column mask on `gold.orders` uses column `ssn` ...",
+        "policy_id": "p0",
+        "message": "Column mask p0 on `gold.orders` uses column `ssn` ...",
     }
     body = {
         "id": "r1",
@@ -2398,7 +2398,13 @@ def test_a_run_task_parses_policy_warnings_and_skips_what_it_cannot_read() -> No
             {
                 **task,
                 "schema_note": "This run changed the table's columns.",
-                "policy_warnings": [warning, {**warning, "policy_id": "p1"}, {"kind": 1}, 7],
+                "policy_warnings": [
+                    warning,
+                    {**warning, "policy_id": "p1"},
+                    {**warning, "policy_id": None},
+                    {"kind": 1},
+                    7,
+                ],
             },
             {**task, "schema_note": 5},
             task,
@@ -2408,7 +2414,7 @@ def test_a_run_task_parses_policy_warnings_and_skips_what_it_cannot_read() -> No
     assert warned.schema_note == "This run changed the table's columns."
     assert (odd.schema_note, old.schema_note) == (None, None)
     assert warned.policy_warnings == (
-        PolicyWarning("column_mask", "ssn", "removed", None, warning["message"]),
+        PolicyWarning("column_mask", "ssn", "removed", "p0", warning["message"]),
         PolicyWarning("column_mask", "ssn", "removed", "p1", warning["message"]),
     )
     assert old.policy_warnings == ()

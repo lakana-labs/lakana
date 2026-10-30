@@ -34,7 +34,6 @@ from lakana_core.notifications.events import columns_changed_tables
 from lakana_core.runs.hidden_checks import is_reference_check
 
 _CHANGED = "The run removed or retyped columns of"
-_TOLD = "an administrator has been told what to check"
 
 PAYLOAD_VERSION = 1
 """The `version` of the `json` payload; raised only by a change that breaks a receiver."""
@@ -86,7 +85,7 @@ class Facts:
     columns_changed
         The run's own tables whose columns a write removed or replaced, whether or not a row
         filter or column mask uses them. Nothing more is said: the endpoint is no administrator,
-        and only an administrator may learn that a policy exists (`lakana runs show` tells them).
+        and only an administrator may learn that a policy exists (`lakana runs show` shows them).
     """
 
     job: str
@@ -396,7 +395,9 @@ def _slack(event: str, facts: Facts) -> str:
         lines.append(f"A reference check failed; see {_code(facts.command)}")
     if facts.columns_changed:
         tables = ", ".join(_code(t) for t in facts.columns_changed)
-        lines.append(f"{_CHANGED} {tables}; {_TOLD}; see {_code(facts.command)}")
+        lines.append(
+            f"{_CHANGED} {tables}; an administrator can see in {_code(facts.command)} what to check"
+        )
     lines.append(f"Details: {_code(facts.command)}")
     lines.append(f"Delivery {_code(facts.delivery_id)}")
     return "\n".join(lines)
@@ -459,7 +460,12 @@ def _teams(event: str, facts: Facts) -> dict[str, Any]:
         pairs.append(("Reference check", f"A reference check failed; see {facts.command}"))
     if facts.columns_changed:
         tables = ", ".join(facts.columns_changed)
-        pairs.append(("Columns changed", f"{_CHANGED} {tables}; {_TOLD}; see {facts.command}"))
+        pairs.append(
+            (
+                "Columns changed",
+                f"{_CHANGED} {tables}; an administrator can see in {facts.command} what to check",
+            )
+        )
     pairs += [("Details", facts.command), ("Delivery", facts.delivery_id)]
     card = {
         "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",

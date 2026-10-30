@@ -78,12 +78,13 @@ and checks the table's row filters and column masks at the write. The write itse
 reads under an affected policy stay refused, as described above.
 
 Everyone who may see the run gets the same line, whether or not a policy uses the column:
-``This run changed the table's columns; an administrator has been told what to check.``
+``This run removed or retyped a column of the table. An administrator can see in this run what else that affects; if other people read this table, tell one.``
 `lakana runs show RUN --env ENV` (and `lakana run`, when the run ends) prints it under the tasks,
 after ``gold.payments warning:``. The SDK has it in `RunTask.schema_note`, the REST API in
 `schema_note` on each task of `GET /api/v1/environments/{env}/runs/{id}`. Only an administrator may
 learn that a table has a row filter or column mask (`lakana table get` shows none), so the line is
-the same for a table with policies and one without.
+the same for a table with policies and one without. Nothing tells an administrator by itself: if
+you see the line and other people read the table, tell an administrator, who then opens the run.
 
 An administrator, someone who may manage policies, sees more under the same line: one paragraph per
 row filter or column mask that uses the column, with its id, the column, and the next step: create
@@ -91,22 +92,31 @@ the policy again for the column it is meant for, then revoke the old one with th
 `lakana row-filter revoke` or `lakana column-mask revoke` command it names, in that order
 ([After a rename](../how-to/filter-rows.md#after-a-rename)). The SDK and the REST API have these in
 `policy_warnings`, which is empty for everyone else. Nobody sees a policy's expression or whom it
-applies to here. If you wrote the asset and are not an administrator, tell one when you see the line.
+applies to here.
 
 The write's `TABLE_WRITE` event in the audit log lists the policies in `broken_policies`: kind,
 id, column and change (`removed` or `replaced`). Reading the audit log is for administrators and
 reviewers.
 
 A job with `notify:` sends a message: the event `columns_changed` for a run that succeeded, or a
-line in its `failed` or `recovered` message. It names the table and says that an administrator has
-been told what to check, never a policy or a column, and it is sent on every such run, with or
-without a policy ([Get told when a job fails](../how-to/get-told-when-a-job-fails.md#when-a-message-is-sent)).
+line in its `failed` or `recovered` message. It names the table and says that an administrator can
+see in `lakana runs show` what to check, never a policy or a column, and it is sent on every such run,
+with or without a policy
+([Get told when a job fails](../how-to/get-told-when-a-job-fails.md#when-a-message-is-sent)).
 
 The line comes from the run whose write changed the column. A later run that leaves the columns as
-they are does not repeat it, although the reads stay refused until the policy is created again. A
-write outside a run (`lakana query --evolve-schema`, an upload, or
+they are does not repeat it, although the reads stay refused until the policy is created again. When
+a failed check sets the write back and the table's schema before the write is current again, the
+columns are the old ones and nothing needs creating again: the run then shows no line, no warning
+and no notification line for that table ([Checks](../reference/checks.md)).
+
+A write outside a run (`lakana query --evolve-schema`, an upload, or
 `client.tables.replace(..., evolve_schema=True)`) has no run to show it: only its audit event lists
-the policies.
+the policies. A schema change committed through the Iceberg REST catalog (for example PyIceberg's
+`update_schema().delete_column(...)`) is checked the same way: the audit log gets a
+`TABLE_SCHEMA_CHANGED` event with `broken_policies`, and when a Python task commits it with its own
+token, its run shows the line as for a write. Outside a run, the audit event is the only place it
+shows.
 
 A deploy cannot warn ahead of time: the columns and types an asset returns are known only when the
 run computes them.

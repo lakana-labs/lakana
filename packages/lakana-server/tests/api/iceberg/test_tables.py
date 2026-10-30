@@ -1203,3 +1203,76 @@ def test_an_iceberg_rest_create_claims_its_location_and_publishes_it(
         TableLocationState.LIVE,
         table_id,
     )
+
+
+def test_a_column_dropped_through_the_commit_route_is_audited_with_the_masks_on_it(
+    client: TestClient, storage_root: str, settings: Settings
+) -> None:
+    """A PyIceberg-style schema update gets the same detection as a write; audit only, no run."""
+    _setup(client, storage_root)
+    created = client.post(
+        "/v1/dev/namespaces/gold/tables",
+        headers=AUTH_HEADER,
+        json={"name": "sales", "schema": _SCHEMA, "properties": {}},
+    )
+    assert created.status_code == 200, created.text
+    mask = client.post(
+        "/api/v1/column-masks",
+        headers=AUTH_HEADER,
+        json={
+            "principal": "admin",
+            "environment": "dev",
+            "namespace": "gold",
+            "table": "sales",
+            "column": "name",
+            "expression": "'***'",
+        },
+    )
+    assert mask.status_code == 201, mask.text
+    narrower = {
+        "type": "struct",
+        "schema-id": 1,
+        "fields": [{"id": 1, "name": "id", "type": "long", "required": True}],
+    }
+
+    committed = client.post(
+        "/v1/dev/namespaces/gold/tables/sales",
+        headers=AUTH_HEADER,
+        json={
+            "requirements": [{"type": "assert-current-schema-id", "current-schema-id": 0}],
+            "updates": [
+                {"action": "add-schema", "schema": narrower, "last-column-id": 2},
+                {"action": "set-current-schema", "schema-id": -1},
+            ],
+        },
+    )
+
+    assert committed.status_code == 200, committed.text
+    engine = create_engine(settings.database)
+    try:
+        with Session(engine) as session:
+            details = [
+                event.detail
+                for event in session.scalars(
+                    select(AuditEvent).where(
+                        AuditEvent.event_type == AuditEventType.TABLE_SCHEMA_CHANGED
+                    )
+                )
+            ]
+    finally:
+        engine.dispose()
+    assert details == [
+        {
+            "target": "gold.sales",
+            "principal": "admin",
+            "broken_policies": [
+                {
+                    "table": "gold.sales",
+                    "kind": "column_mask",
+                    "policy_id": mask.json()["id"],
+                    "column": "name",
+                    "change": "removed",
+                }
+            ],
+        }
+    ]

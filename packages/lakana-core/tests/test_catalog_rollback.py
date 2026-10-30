@@ -571,6 +571,58 @@ def test_a_write_that_evolved_the_schema_takes_the_schema_back(
     assert detail["schema_before"] != detail["schema_after"]
 
 
+def test_a_set_back_that_takes_the_schema_back_drops_the_tasks_column_change(
+    session: Session, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    """The note, the warnings and the notification line read it: none may outlive the change."""
+    catalog = _catalog(session, principal, tmp_path)
+    before = _write(catalog, principal, _orders([1], ["eu"]), WriteMode.CREATE).snapshot_id
+    narrower = pa.table({"id": pa.array([2], pa.int64())})
+    after = _write(catalog, principal, narrower, WriteMode.REPLACE, evolve_schema=True).snapshot_id
+    changed = {"tables": [_TABLE], "policies": []}
+    task = _task(session, principal)
+    other = _task(session, principal)
+    session.execute(
+        update(TaskRun)
+        .where(TaskRun.id.in_([task.id, other.id]))
+        .values(schema_change_json=changed)
+    )
+    session.commit()
+
+    result = _roll_back(catalog, principal, task, Written(_row(session).id, before, after, False))
+
+    assert result.outcome is RollbackOutcome.ROLLED_BACK
+    loaded = catalog.load_table(principal, _ref())
+    assert [f.name for f in loaded.metadata.schema().fields] == ["id", "region"]
+    session.expire_all()
+    stored = dict(
+        session.execute(
+            select(TaskRun.id, TaskRun.schema_change_json).where(
+                TaskRun.id.in_([task.id, other.id])
+            )
+        ).all()
+    )
+    assert stored == {task.id: None, other.id: changed}
+
+
+def test_a_set_back_that_keeps_the_schema_keeps_the_tasks_column_change(
+    session: Session, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    catalog = _catalog(session, principal, tmp_path)
+    before = _write(catalog, principal, _orders([1], ["eu"]), WriteMode.CREATE).snapshot_id
+    after = _write(catalog, principal, _orders([2], ["us"]), WriteMode.APPEND).snapshot_id
+    task = _task(session, principal)
+    changed = {"tables": [_TABLE], "policies": []}
+    task.schema_change_json = changed
+    session.commit()
+
+    _roll_back(catalog, principal, task, Written(_row(session).id, before, after, False))
+
+    session.expire_all()
+    stored = session.scalar(select(TaskRun.schema_change_json).where(TaskRun.id == task.id))
+    assert stored == changed
+
+
 def test_an_empty_existing_table_goes_back_to_empty_and_stays_published(
     session: Session, principal: PrincipalRef, tmp_path: Path
 ) -> None:
