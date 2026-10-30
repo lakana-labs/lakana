@@ -23,6 +23,7 @@ import inspect
 import sys
 import types
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
@@ -367,6 +368,17 @@ _ARGUMENT_CASES: dict[str, str] = {
     "checks-unknown-family": 'checks={"rows": "warn"}',
     "checks-bad-mode": 'checks={"key": "loud"}',
     "checks-without-key": 'checks={"key": "warn"}',
+    "measures-on-a-fact": 'kind="fact", grain="g", key="none", '
+    'measures={"m": {"aggregation": "sum", "unit": "count"}}',
+    "measures-on-a-dimension": 'kind="dimension", grain="g", key="id", '
+    'measures={"m": {"aggregation": "sum", "unit": "count"}}',
+    "measures-without-a-kind": 'measures={"m": {"aggregation": "sum", "unit": "count"}}',
+    "measures-on-a-key-column": 'kind="fact", grain="g", key="m", '
+    'measures={"m": {"aggregation": "sum", "unit": "count"}}',
+    "checks-measures-without-measures": 'kind="fact", grain="g", key="none", '
+    'checks={"measures": "warn"}',
+    "measures-on-artifact": 'output="artifact", '
+    'measures={"m": {"aggregation": "sum", "unit": "count"}}',
     "write-on-artifact": 'output="artifact", write="append", watermark="ts"',
     "key-on-artifact": 'output="artifact", key=["id"]',
     "replace-and-empty-key-on-artifact": 'output="artifact", write="replace", key=[]',
@@ -619,3 +631,103 @@ def test_the_sdk_routes_the_kinds_the_worker_routes() -> None:
 
 def test_the_model_kinds_are_the_same_in_core_and_the_sdk() -> None:
     assert sdk_assets.MODEL_KINDS == MODEL_KINDS == ("fact", "dimension", "wide", "staging")
+
+
+def test_the_measure_values_are_the_same_in_core_and_the_sdk() -> None:
+    from lakana_core.projects import measures as core
+
+    assert sdk_assets.AGGREGATIONS == core.AGGREGATIONS
+    assert sdk_assets.ADDITIVITIES == core.ADDITIVITIES
+    assert sdk_assets.UNITS == core.UNITS
+    assert sdk_assets.CURRENT_CURRENCIES == core._CURRENT_CURRENCIES
+    assert sdk_assets.WITHDRAWN_CURRENCIES == core._WITHDRAWN_CURRENCIES
+    assert sdk_assets.CURRENCY_CODES == core.CURRENCY_CODES
+    assert sdk_assets.MAX_MEASURES == core.MAX_MEASURES
+
+
+@pytest.mark.parametrize(
+    "measures",
+    [
+        {"m": "sum"},
+        {"": {"aggregation": "sum", "unit": "count"}},
+        {"m": {"unit": "count"}},
+        {"m": {"aggregation": "total", "unit": "count"}},
+        {"m": {"aggregation": "sum", "additivity": "full", "unit": "count"}},
+        {"m": {"aggregation": "avg", "additivity": "additive", "currency": "EUR"}},
+        {"m": {"aggregation": "count", "additivity": "non", "unit": "count"}},
+        {"m": {"aggregation": "sum", "additivity": "semi", "unit": "count"}},
+        {"m": {"aggregation": "sum", "not_over": "d", "unit": "count"}},
+        {
+            "m": {
+                "aggregation": "sum",
+                "additivity": "semi",
+                "not_over": ["d", "d"],
+                "unit": "count",
+            }
+        },
+        {"m": {"aggregation": "sum"}},
+        {"m": {"aggregation": "sum", "unit": "count", "currency": "EUR"}},
+        {"m": {"aggregation": "sum", "unit": "kg"}},
+        {"m": {"aggregation": "sum", "currency": "eur"}},
+        {"m": {"aggregation": "sum", "unit": "count", "label": "a\nb"}},
+        {"m": {"aggregation": "sum", "unit": "count", "label": "x" * 101}},
+        {"m": {"aggregation": "sum", "unit": "count", "description": "x" * 4001}},
+        {"m": {"aggregation": "sum", "unit": "count", "unitt": "x"}},
+        {"s": {"aggregation": "sum", "additivity": "semi", "not_over": "s", "unit": "count"}},
+        {f"c{i}": {"aggregation": "sum", "unit": "count"} for i in range(101)},
+        {"x" * 1100: {"aggregation": "sum", "unit": "count"}},
+        {"m": {"aggregation": 3, "unit": "count"}},
+        {"m": {"aggregation": "sum", "additivity": "semi", "not_over": [""], "unit": "count"}},
+        {
+            "m": {
+                "aggregation": "sum",
+                "additivity": "semi",
+                "not_over": ["a\u202eb"],
+                "unit": "count",
+            }
+        },
+        {"m": {"aggregation": "sum", "unit": "count", "label": " "}},
+        {"m": {"aggregation": "sum", "unit": "count", "description": " "}},
+        {"m": {"aggregation": "sum", "unit": "count", "label": "a\u202eb"}},
+        {"m\u202e": {"aggregation": "sum", "unit": "count"}},
+        {"a.b": {"aggregation": "sum", "unit": "count"}},
+        {"a/b": {"aggregation": "sum", "unit": "count"}},
+        {"m": {"aggregation": "sum", "additivity": "semi", "not_over": 3, "unit": "count"}},
+        {"m": {"aggregation": "sum", "additivity": "semi", "not_over": [1], "unit": "count"}},
+        {
+            "m": {
+                "aggregation": "sum",
+                "additivity": "semi",
+                "not_over": ["a", ["b"]],
+                "unit": "count",
+            }
+        },
+        {"m": {"aggregation": "sum", "additivity": "semi", "not_over": None, "unit": "count"}},
+    ],
+)
+def test_a_bad_measure_gets_the_same_text_from_deploy_and_the_sdk(measures: object) -> None:
+    """The field rules are worded once: the SDK raises the deploy issue's text."""
+    import pydantic
+
+    from lakana_core.projects.frontmatter import AssetMetadata
+    from lakana_core.projects.project_config import pydantic_issues
+
+    fields: dict[str, Any] = {"kind": "fact", "grain": "g", "key": "none"}
+    with pytest.raises(pydantic.ValidationError) as deploy:
+        AssetMetadata.model_validate({**fields, "measures": measures})
+    (issue,) = pydantic_issues(deploy.value, path="a.py", line=1)
+    with pytest.raises(ValueError) as sdk:
+        cast("Any", sdk_assets.asset)(**fields, measures=measures)
+    assert str(sdk.value) == issue.message
+
+
+def test_a_null_not_over_means_no_columns_at_deploy_and_in_the_sdk() -> None:
+    """`not_over: None` is left out, as every other measure field given as `None` is."""
+    from lakana_core.projects.frontmatter import AssetMetadata
+
+    measure: dict[str, Any] = {"aggregation": "sum", "unit": "count", "not_over": None}
+    fields: dict[str, Any] = {"kind": "fact", "grain": "g", "key": "none"}
+    deployed = AssetMetadata.model_validate({**fields, "measures": {"m": measure}})
+    assert deployed.measures["m"].not_over == ()
+    spec = cast("Any", sdk_assets.asset)(**fields, measures={"m": measure})(lambda: None)
+    assert "not_over" not in getattr(spec, sdk_assets.ASSET_ATTRIBUTE).measures["m"]

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, cast
@@ -10,7 +11,7 @@ import pytest
 
 import lakana
 import lakana.assets
-from lakana.assets import ASSET_ATTRIBUTE, AssetSpec
+from lakana.assets import ASSET_ATTRIBUTE, AssetSpec, asset
 
 
 def test_decorator_returns_the_function_with_metadata() -> None:
@@ -436,7 +437,7 @@ UNSAFE_GRAIN = (
         ({"references": ["x"]}, "references must be a dict of strings"),
         ({"references": {"a": 1}}, "references must be a dict of strings"),
         ({"checks": {"key": 1}}, "checks must be a dict of strings"),
-        ({"checks": {"rows": "warn"}}, "checks takes only key and references"),
+        ({"checks": {"rows": "warn"}}, "checks takes only key, references and measures"),
         ({"checks": {"key": "loud"}}, "checks: key must be block, keep or warn"),
         (
             {"key": "none"},
@@ -520,3 +521,115 @@ def test_a_wrong_model_is_refused(arguments: dict[str, Any], message: str) -> No
 def test_a_grain_may_hold_a_tab_and_is_stripped() -> None:
     spec = getattr(lakana.asset(grain="  one\trow per order  ")(lambda: None), ASSET_ATTRIBUTE)
     assert spec.grain == "one\trow per order"
+
+
+def test_the_decorator_keeps_valid_measures() -> None:
+    decorate = asset(
+        kind="fact",
+        grain="One row per day.",
+        key="day",
+        measures={
+            "stock": {
+                "aggregation": "sum",
+                "additivity": "semi",
+                "not_over": "day",
+                "unit": "count",
+            }
+        },
+    )
+
+    def f() -> None:
+        """Do nothing."""
+
+    spec = getattr(decorate(f), ASSET_ATTRIBUTE)
+    assert spec.measures == {
+        "stock": {"aggregation": "sum", "additivity": "semi", "not_over": ["day"], "unit": "count"}
+    }
+
+
+@pytest.mark.parametrize(
+    ("arguments", "expected"),
+    [
+        (
+            {"kind": "dimension", "grain": "g", "key": "id"},
+            'measures belong on a fact or wide table; declare kind="fact" or kind="wide", or '
+            "remove measures=",
+        ),
+        (
+            {"kind": "fact", "grain": "g", "key": "m"},
+            "measure `m` is a key column; a key identifies a row and is not a value to aggregate. "
+            "Remove it from measures=",
+        ),
+    ],
+)
+def test_the_decorator_applies_the_rules_between_fields(
+    arguments: dict[str, Any], expected: str
+) -> None:
+    with pytest.raises(ValueError, match=re.escape(expected)):
+        asset(**arguments, measures={"m": {"aggregation": "sum", "unit": "count"}})
+
+
+def test_checks_measures_needs_measures_in_the_decorator() -> None:
+    with pytest.raises(ValueError, match="checks: measures sets how the measure checks fail"):
+        asset(kind="fact", grain="g", key="none", checks={"measures": "warn"})
+    with pytest.raises(ValueError, match="checks takes only key, references and measures"):
+        asset(checks={"rows": "warn"})
+
+
+@pytest.mark.parametrize(
+    ("measures", "expected"),
+    [
+        (["amount"], "measures must be a dict of dicts"),
+        ({3: {"aggregation": "sum", "unit": "count"}}, "measures must be a dict of dicts"),
+        (
+            {"m": "sum"},
+            "measures: `m` must be a mapping such as `{aggregation: sum, currency: EUR}`",
+        ),
+        (
+            {"": {"aggregation": "sum", "unit": "count"}},
+            "measures: a measure column must not be empty",
+        ),
+        (
+            {"a.b": {"aggregation": "sum", "unit": "count"}},
+            "measures: measure column `a.b` cannot name its id `measure_a.b`",
+        ),
+        (
+            {"m": {"aggregation": "sum", "unit": "count", "label": 3}},
+            "measures.m.label: Input should be a valid string",
+        ),
+        (
+            {"m": {"aggregation": "sum", "additivity": "semi", "not_over": [3], "unit": "count"}},
+            "measures.m.not_over: must be a column name or a list of column names",
+        ),
+    ],
+)
+def test_the_decorator_refuses_a_measures_value_of_the_wrong_shape(
+    measures: object, expected: str
+) -> None:
+    """The shapes only Python can produce: deploy reads them as YAML or literals instead."""
+    with pytest.raises(ValueError, match=re.escape(expected)):
+        cast("Any", asset)(kind="fact", grain="g", key="none", measures=measures)
+
+
+def test_the_sdk_currencies_are_the_two_lists_together() -> None:
+    assert lakana.assets.CURRENCY_CODES == (
+        lakana.assets.CURRENT_CURRENCIES | lakana.assets.WITHDRAWN_CURRENCIES
+    )
+    assert "EUR" in lakana.assets.CURRENT_CURRENCIES
+    assert "DEM" in lakana.assets.WITHDRAWN_CURRENCIES
+
+
+def test_the_decorator_keeps_a_label_and_a_description_as_given() -> None:
+    texts = {"label": "Revenue", "description": "Net of returns."}
+    decorate = asset(
+        kind="fact",
+        grain="g",
+        key="none",
+        measures={"amount": {"aggregation": "sum", "currency": "EUR", **texts}},
+    )
+
+    def f() -> None:
+        """Do nothing."""
+
+    spec = getattr(decorate(f), ASSET_ATTRIBUTE)
+    assert spec.measures == {"amount": {"aggregation": "sum", "currency": "EUR", **texts}}

@@ -2,7 +2,9 @@
 
 import hashlib
 import os
+import shutil
 import signal
+import sqlite3
 import tempfile
 import threading
 import time
@@ -11,6 +13,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from sqlalchemy import Engine, event
 from sqlalchemy.orm import Session
 from task_run_helpers import _CODE, _CODE_PATH, World, _entry
 
@@ -87,6 +90,92 @@ def without_o_path(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     monkeypatch.delattr(os, "O_PATH", raising=False)
     monkeypatch.setattr("lakana_worker.processes._CHMOD_AT_WITHOUT_FOLLOWING", True)
+
+
+def _skip_fsync(dbapi_connection: object, connection_record: object) -> None:
+    """Turn off SQLite's flush to disk on commit for a connection a test opened.
+
+    Parameters
+    ----------
+    dbapi_connection
+        The new DB-API connection; anything but a `sqlite3.Connection` is left alone.
+    connection_record
+        SQLAlchemy's record of the connection (unused).
+    """
+    if isinstance(dbapi_connection, sqlite3.Connection):
+        dbapi_connection.execute("PRAGMA synchronous=OFF")
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _sqlite_commits_without_fsync() -> Iterator[None]:
+    """Let every SQLite engine in this test process commit without flushing to disk.
+
+    Each commit otherwise waits for an `fsync`; a task test commits a hundred times or more.
+    No unit test can observe durability across a power cut; the pragmas a test can observe
+    (WAL, foreign keys, busy timeout) still come from `lakana_core.db`, whose listener runs on
+    the same connections.
+
+    Yields
+    ------
+    None
+        The listener stays registered for the session and is removed afterwards.
+    """
+    event.listen(Engine, "connect", _skip_fsync)
+    yield
+    event.remove(Engine, "connect", _skip_fsync)
+
+
+@pytest.fixture(scope="session")
+def catalog_template(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Create the catalog schema once per test process, in a read-only SQLite file.
+
+    Creating the schema costs most of a second (each of the hundreds of `CREATE` statements
+    is a commit); copying the finished file costs under a millisecond. `catalog_database`
+    hands every test its own copy, so no test sees another's rows. The file is left in
+    SQLite's default journal mode, so it is complete on its own (no `-wal` file to copy),
+    and is made read-only, so a test that opened it by mistake fails instead of leaking.
+
+    Parameters
+    ----------
+    tmp_path_factory
+        Pytest's session-wide temporary directory factory.
+
+    Returns
+    -------
+    Path
+        The template database file.
+    """
+    template = tmp_path_factory.mktemp("catalog-template") / "lakana.db"
+    engine = create_engine(DatabaseConfig(url=f"sqlite:///{template}"))
+    try:
+        Base.metadata.create_all(engine)
+        with engine.connect() as connection:
+            connection.exec_driver_sql("PRAGMA journal_mode=DELETE")
+    finally:
+        engine.dispose()
+    template.chmod(0o444)
+    return template
+
+
+@pytest.fixture
+def catalog_database(tmp_path: Path, catalog_template: Path) -> Path:
+    """Provide a private, writable copy of `catalog_template` in the test's directory.
+
+    Parameters
+    ----------
+    tmp_path
+        Pytest's per-test directory; the copy is `lakana.db` in it.
+    catalog_template
+        The session's read-only database with the schema already created.
+
+    Returns
+    -------
+    Path
+        The copy, with the schema `Base.metadata.create_all` creates.
+    """
+    database = tmp_path / "lakana.db"
+    shutil.copyfile(catalog_template, database)
+    return database
 
 
 @pytest.fixture
@@ -257,13 +346,17 @@ def child_leak_check(
 
 
 @pytest.fixture
-def world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[World]:
+def world(
+    tmp_path: Path, catalog_database: Path, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[World]:
     """Build the world; lease keepers poll every 20 ms.
 
     Parameters
     ----------
     tmp_path
         Pytest's per-test directory.
+    catalog_database
+        The test's copy of the catalog schema.
     monkeypatch
         Speeds up the keeper.
 
@@ -273,8 +366,7 @@ def world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[World]:
         The world, deploying `silver.clean` → `gold.daily`.
     """
     monkeypatch.setattr(task_lease_module, "_POLL_SECONDS", 0.02)
-    engine = create_engine(DatabaseConfig(url=f"sqlite:///{tmp_path}/lakana.db"))
-    Base.metadata.create_all(engine)
+    engine = create_engine(DatabaseConfig(url=f"sqlite:///{catalog_database}"))
     root = f"file://{tmp_path / 'storage'}"
     with Session(engine) as session:
         admin = PrincipalRef(id=uuid.uuid4(), name="admin", type=PrincipalType.USER)

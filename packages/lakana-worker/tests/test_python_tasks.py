@@ -95,7 +95,6 @@ from lakana_core.models import (
     AttemptOutcome,
     AuditEvent,
     AuditEventType,
-    Base,
     CheckOutcome,
     Connection,
     ConnectionTest,
@@ -610,13 +609,17 @@ class PyWorld:
 
 
 @pytest.fixture
-def py(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[PyWorld]:
+def py(
+    tmp_path: Path, catalog_database: Path, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[PyWorld]:
     """Build the world; keepers poll every 20 ms and the idle wait is 20 ms.
 
     Parameters
     ----------
     tmp_path
         Pytest's per-test directory.
+    catalog_database
+        The test's copy of the catalog schema.
     monkeypatch
         Speeds up the keeper and the serve loop.
 
@@ -627,8 +630,7 @@ def py(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[PyWorld]:
     """
     monkeypatch.setattr(task_lease_module, "_POLL_SECONDS", 0.02)
     monkeypatch.setattr(python_tasks_module, "_IDLE_SECONDS", 0.02)
-    engine = create_engine(DatabaseConfig(url=f"sqlite:///{tmp_path}/lakana.db"))
-    Base.metadata.create_all(engine)
+    engine = create_engine(DatabaseConfig(url=f"sqlite:///{catalog_database}"))
     root = f"file://{tmp_path / 'storage'}"
     with Session(engine) as session:
         admin = PrincipalRef(id=uuid.uuid4(), name="admin", type=PrincipalType.USER)
@@ -3679,7 +3681,7 @@ def test_an_output_this_worker_does_not_know_fails_permanently_and_runs_nothing(
     assert _versions(py) == []
 
 
-@pytest.mark.parametrize("version", [10, 99, "3", 3.0, True, [3], 0, -1, 10**30])
+@pytest.mark.parametrize("version", [MANIFEST_VERSION + 1, 99, "3", 3.0, True, [3], 0, -1, 10**30])
 def test_a_manifest_this_worker_cannot_read_fails_permanently(py: PyWorld, version: object) -> None:
     py.deploy()
 
