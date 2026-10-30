@@ -77,8 +77,6 @@ _STORAGE_ROUTES = frozenset(
     {
         "/api/v1/environments/{env}/namespaces/{path}/tables",
         "/api/v1/environments/{env}/namespaces/{path}/tables/{name}",
-        # Answers a bare 500 with wrong keys (s3fs's PermissionError is not mapped to a 503 as
-        # the table routes' is); no value leaks. Mapping it is a separate change.
         "/api/v1/environments/{name}/orphaned-locations",
         "/v1/{prefix}/namespaces/{namespace}/tables/{table}",
     }
@@ -257,7 +255,7 @@ class _Stack:
         return statuses
 
     def assert_only_storage_routes_failed(self, statuses: dict[str, int]) -> None:
-        """Require that a route that answered 5xx is one that reads the environment's storage.
+        """Require that a route that answered 5xx reads the environment's storage, and said so.
 
         Parameters
         ----------
@@ -267,10 +265,13 @@ class _Stack:
         Raises
         ------
         AssertionError
-            If a route outside `_STORAGE_ROUTES` answered 5xx.
+            If a route outside `_STORAGE_ROUTES` answered 5xx, or one answered a bare 500
+            instead of the mapped storage error (503, with the cause and the next step).
         """
         failed = {template for template, status in statuses.items() if status >= 500}
         assert failed <= _STORAGE_ROUTES, sorted(failed - _STORAGE_ROUTES)
+        bare = {template for template, status in statuses.items() if status == 500}
+        assert not bare, sorted(bare)
 
     def raw_rows(self) -> list[bytes]:
         """Read what the database holds, as bytes to search.

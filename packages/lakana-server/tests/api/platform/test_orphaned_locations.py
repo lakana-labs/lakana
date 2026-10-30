@@ -145,3 +145,29 @@ def test_a_deleted_environment_is_accepted_and_an_unknown_one_is_404(
     assert len(listed.json()["locations"]) == 1
     missing = client.get("/api/v1/environments/nope/orphaned-locations", headers=AUTH_HEADER)
     assert missing.status_code == 404
+
+
+def test_a_storage_that_refuses_access_is_a_503_with_the_cause_and_the_next_step(
+    client: TestClient, settings: Settings, tmp_path: Path
+) -> None:
+    """A refusal of the storage is the mapped storage error, not a bare 500 (#371)."""
+    _create(client, tmp_path)
+    _leftover(tmp_path / "dev")
+    managed = tmp_path / "dev" / "managed"
+    managed.chmod(0)
+    try:
+        listed = client.get("/api/v1/environments/dev/orphaned-locations", headers=AUTH_HEADER)
+        deleted = client.post(
+            "/api/v1/environments/dev/orphaned-locations/delete", headers=AUTH_HEADER, json={}
+        )
+    finally:
+        managed.chmod(0o755)
+
+    for answer in (listed, deleted):
+        assert answer.status_code == 503, answer.text
+        assert answer.headers["Retry-After"] == "5"
+        detail = answer.json()["detail"]
+        assert "The storage of environment 'dev' refused access" in detail
+        assert "storage credentials" in detail
+        assert str(tmp_path) not in detail
+    assert _events(settings, AuditEventType.ORPHANED_LOCATIONS_DELETED) == []

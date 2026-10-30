@@ -10,6 +10,21 @@ TABLE_STORAGE_UNREACHABLE = (
 """What a table read says when the environment's storage did not answer. `{environment}` is the
 name as `lakana_core.identifiers.shown` makes it safe; no path, host or storage text is in it."""
 
+ORPHANED_STORAGE_REFUSED = (
+    "The storage of environment '{environment}' refused access, so no directory was listed or "
+    "deleted. Ask the operator to check the environment's storage credentials (its storage "
+    "options, or the secret they name), then try again."
+)
+"""What the orphaned-locations routes say when the storage refused the environment's credentials.
+`{environment}` is the shown name; no path, host or storage text is in it."""
+
+ORPHANED_STORAGE_UNREACHABLE = (
+    "The storage of environment '{environment}' could not be reached, so no directory was listed "
+    "or deleted. Try again in a moment; if it keeps failing, tell the operator that this "
+    "environment's storage may be unreachable."
+)
+"""What the orphaned-locations routes say when the environment's storage did not answer."""
+
 
 def is_storage_unavailable(exc: BaseException) -> bool:
     """Tell whether a read failed because the storage did not answer.
