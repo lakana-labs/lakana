@@ -407,7 +407,7 @@ Pins: `test_hidden_reference_checks.py` in lakana-core and lakana-server,
 when the reader may read its table (`may_read_every`, by name, before anything is looked up, so a
 missing table and an unreadable one look the same) and counts the rest in
 `WaitReason.hidden_upstream` (`Waiting for upstream tasks: a and 1 table you may not read.`), as
-`job_version` drops the edges from a table the reader may not read. `upstream_count` stays the
+The project-version view drops the edges from a table the reader may not read. `upstream_count` stays the
 total. The run's task list itself still lists every task by its table (it always did; the edge is
 what was hidden). Pins: `test_a_wait_reason_names_only_the_upstream_tables_the_reader_may_read`,
 `test_runs_waiting.py`.
