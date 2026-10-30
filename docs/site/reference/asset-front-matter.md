@@ -448,8 +448,9 @@ You, the deployer, and readers of the objects see the whole text. A deploy that 
 release keeps its text as it was stored.
 
 A project version in which an asset declares a model field (`key:` alone counts, so every project
-with a `write: merge` asset) has manifest version 9, and one in which an asset declares `measures:`
-version 10. Each needs workers of the release that introduced it or later: a worker of an earlier
+with a `write: merge` asset) has manifest version 9, one in which an asset declares `measures:`
+version 10, and one that declares `main_language`, a label or a
+[translation](translations.md) version 11. Each needs workers of the release that introduced it or later: a worker of an earlier
 one refuses its manifest. A deploy's changes list a table whose `kind`, `grain`, `references`,
 `checks`, or the `key` of an asset that does not merge, changed as `model_changed`; the key of a
 merge stays a change of how the table is written.

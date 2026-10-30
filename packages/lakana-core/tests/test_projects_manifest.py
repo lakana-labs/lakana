@@ -20,10 +20,12 @@ from lakana_core.projects.manifest import (
     MEASURES_VERSION,
     MODEL_VERSION,
     NOTIFY_VERSION,
+    TEXTS_VERSION,
     VERSION_WITHOUT_CHECKS,
     WRITES_VERSION,
     EntryConnections,
     EntryModel,
+    EntryText,
     JobNotify,
     asset_kind,
     build_manifest,
@@ -34,12 +36,14 @@ from lakana_core.projects.manifest import (
     entry_keep_versions,
     entry_model,
     entry_output,
+    entry_translations,
     entry_write,
     job_notify,
     manifest_artifacts,
     manifest_assets,
     manifest_jobs,
     manifest_lock_sha256,
+    manifest_main_language,
     manifest_python,
     manifest_tables,
     python_entry,
@@ -534,7 +538,7 @@ def test_a_python_entry_records_decimals_and_the_manifest_version_is_unchanged(
     asset = dataclasses.replace(_python_asset(), decimals=decimals)
     manifest = build_manifest([asset], build_graph([asset]), ResolvedProjectConfig())
     assert manifest["version"] == VERSION_WITHOUT_CHECKS == 3
-    assert MANIFEST_VERSION == 10
+    assert MANIFEST_VERSION == 11
     assert manifest["assets"][0]["decimals"] == decimals
 
 
@@ -1062,7 +1066,7 @@ def test_measures_raise_the_version_to_10_and_are_recorded() -> None:
     asset = make_asset("gold.fact_orders", columns=("id", "amount"), metadata=metadata)
     checks = generated_checks([asset], {}, default_on_failure="block")
     manifest = build_manifest([asset], build_graph([asset]), ResolvedProjectConfig(), checks=checks)
-    assert manifest["version"] == MEASURES_VERSION == MANIFEST_VERSION == 10
+    assert manifest["version"] == MEASURES_VERSION == 10
     (entry,) = manifest["assets"]
     assert entry["model"]["measures"] == [
         {
@@ -1106,8 +1110,67 @@ def test_labels_go_into_the_entry_only_when_declared() -> None:
     manifest = build_manifest(
         [plain, labelled], build_graph([plain, labelled]), ResolvedProjectConfig()
     )
+    assert manifest["version"] == TEXTS_VERSION
     a, b = manifest["assets"]
     assert a["metadata"] == {"description": None, "owner": None, "tags": [], "columns": {"a": "x"}}
     assert b["metadata"]["label"] == "B"
     assert b["metadata"]["columns"] == {"c": "the c"}
     assert b["metadata"]["column_labels"] == {"a": "A", "c": "C"}
+
+
+def test_texts_raise_the_version_only_when_used() -> None:
+    asset = make_asset("gold.a")
+    plain = build_manifest([asset], build_graph([asset]), ResolvedProjectConfig())
+    assert plain["version"] < TEXTS_VERSION
+    assert "main_language" not in plain
+    declared = build_manifest(
+        [asset], build_graph([asset]), ResolvedProjectConfig(), main_language="de"
+    )
+    assert (declared["version"], declared["main_language"]) == (TEXTS_VERSION, "de")
+    assert declared["checks"] == []
+    translated = build_manifest(
+        [asset],
+        build_graph([asset]),
+        ResolvedProjectConfig(),
+        main_language="de",
+        translations={"gold.a": {"fr": {"label": "A"}}},
+    )
+    assert translated["assets"][0]["metadata"]["translations"] == {"fr": {"label": "A"}}
+    assert MANIFEST_VERSION == TEXTS_VERSION == 11
+
+
+def test_entry_translations_flattens_and_fails_safe() -> None:
+    entry = {
+        "metadata": {
+            "translations": {
+                "fr": {
+                    "label": "V",
+                    "grain": "G",
+                    "columns": {
+                        "c": {"label": "C", "description": " "},
+                        "x" * 2000: {"label": "L"},
+                    },
+                    "measures": {"m": {"description": "D", "grain": "no"}},
+                },
+                "FR": {"label": "dropped"},
+                "it": "not a mapping",
+                "de": {"label": 5},
+                "it-CH": {"columns": "not a mapping", "measures": {7: {"label": "x"}}},
+                9: {"label": "not a tag"},
+            }
+        }
+    }
+    assert entry_translations(entry) == {
+        "fr": (
+            EntryText("table", "", "label", "V"),
+            EntryText("table", "", "grain", "G"),
+            EntryText("column", "c", "label", "C"),
+            EntryText("measure", "m", "description", "D"),
+        )
+    }
+    assert entry_translations({}) == {}
+    assert entry_translations({"metadata": {"translations": ["fr"]}}) == {}
+    assert entry_translations("not an entry") == {}
+    assert manifest_main_language({"main_language": "de"}) == "de"
+    assert manifest_main_language({"main_language": "DE"}) is None
+    assert manifest_main_language(None) is None

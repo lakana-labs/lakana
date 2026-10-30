@@ -71,7 +71,8 @@ translations:
   header text.
 - Both keys apply to the whole project: an `environments:` override cannot set them.
 - `translations.require` is empty by default: a text without a translation shows in the main
-  language.
+  language. The files themselves, coverage and strict mode are described in
+  [Translations](translations.md).
 - A language is a tag of the form language, optional script, optional region (BCP 47), written
   `en`, `de`, `fr-CH` or `zh-Hant`: lower case for the language, Title case for the script, upper
   case for the region.

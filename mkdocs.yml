@@ -73,6 +73,7 @@ nav:
       - reference/ci-trust-rules.md
       - reference/checks.md
       - reference/descriptions.md
+      - reference/translations.md
       - reference/merge.md
       - reference/load.md
       - reference/table-health.md

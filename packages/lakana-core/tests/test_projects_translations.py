@@ -29,10 +29,12 @@ from lakana_core.projects.project_config import (
 from lakana_core.projects.translations import (
     DiscoveredTranslation,
     TableTranslation,
+    coverage_hints,
     discover_translations,
     header_texts,
     parse_translations,
     translated_texts,
+    translation_entries,
     translation_issues,
 )
 
@@ -695,3 +697,36 @@ def test_a_worst_case_file_is_checked_in_bounded_time(monkeypatch: pytest.Monkey
     assert counts["suggestions"] <= 50
     assert len(problems) == len(issues) == 51
     assert elapsed < 1.0, f"took {elapsed:.2f} s"
+
+
+def test_coverage_hints_count_every_header_text() -> None:
+    found = [
+        DiscoveredTranslation("translations/fr.yaml", "fr", "gold.fact_sales:\n  label: V\n"),
+        DiscoveredTranslation(
+            "translations/it.yaml",
+            "it",
+            "gold.fact_sales:\n  label: V\n  description: D\n  grain: G\n"
+            "  columns:\n    store_id: {label: N, description: D}\n"
+            "  measures:\n    net_amount: {label: R}\n",
+        ),
+    ]
+    parsed, _ = parse_translations(found, limits=_LIMITS)
+    config = parse_project_config("main_language: en\n")
+    assert coverage_hints(config, [_sales()], parsed) == (
+        "translations/fr.yaml: 1 of 6 texts translated; the other 5 show in `en`",
+        "translations/it.yaml: 6 of 6 texts translated",
+    )
+
+
+def test_translation_entries_are_the_manifest_form() -> None:
+    found = [
+        DiscoveredTranslation(
+            "translations/fr.yaml",
+            "fr",
+            "gold.fact_sales:\n  label: V\n  columns:\n    store_id: {label: M}\n",
+        )
+    ]
+    parsed, _ = parse_translations(found, limits=_LIMITS)
+    assert translation_entries(parsed) == {
+        "gold.fact_sales": {"fr": {"label": "V", "columns": {"store_id": {"label": "M"}}}}
+    }

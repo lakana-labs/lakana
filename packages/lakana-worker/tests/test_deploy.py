@@ -3237,3 +3237,93 @@ def test_a_deploy_refuses_a_reference_it_cannot_resolve_and_a_key_the_select_lac
         size = entry["line"].count("\n") + 1
         assert "\n".join(lines[entry["index"] : entry["index"] + size]) == entry["line"]
     assert session.query(JobVersion).count() == 0
+
+
+_TEXTS_SQL = (
+    "/* lakana\nlabel: Clean events\ndescription: Clean events.\ncolumns:\n"
+    "  id: {label: Id, description: The id.}\n*/\nSELECT id FROM bronze.events\n"
+)
+
+
+@pytest.mark.parametrize("kind", [DeployKind.DEPLOY, DeployKind.DRY_RUN])
+def test_a_project_with_translations_deploys_with_its_coverage(
+    session: Session, principal: PrincipalRef, world: World, kind: DeployKind
+) -> None:
+    commit(
+        world.repo_path,
+        {
+            "lakana.yaml": "repo: analytics\nmain_language: en\n",
+            "assets/silver/clean.sql": _TEXTS_SQL,
+            "translations/fr.yaml": "silver.clean:\n  label: Événements\n",
+        },
+    )
+    run = _submit_and_run(session, principal, world, kind)
+    assert (run.status, run.error_message) == (DeployStatus.SUCCEEDED, None)
+    assert run.diff_json is not None
+    assert run.diff_json["hints"] == [
+        "translations/fr.yaml: 1 of 4 texts translated; the other 3 show in `en`"
+    ]
+    if kind is DeployKind.DEPLOY:
+        version = session.get(JobVersion, run.job_version_id)
+        assert version is not None
+        manifest = version.manifest_json
+        assert (manifest["version"], manifest["main_language"]) == (11, "en")
+        assert manifest["assets"][0]["metadata"]["translations"] == {"fr": {"label": "Événements"}}
+
+
+def test_a_misspelt_translation_key_refuses_the_deploy(
+    session: Session, principal: PrincipalRef, world: World
+) -> None:
+    commit(
+        world.repo_path,
+        {
+            "lakana.yaml": "repo: analytics\nmain_language: en\n",
+            "translations/fr.yaml": "silver.clen:\n  label: X\n",
+        },
+    )
+    run = _submit_and_run(session, principal, world)
+    assert run.status is DeployStatus.FAILED
+    assert run.error_message == (
+        "translations/fr.yaml:1: `silver.clen` is not a table this project builds; did you mean "
+        "`silver.clean`? Fix the name, or remove the entry"
+    )
+
+
+def test_translations_without_a_main_language_refuse_the_deploy(
+    session: Session, principal: PrincipalRef, world: World
+) -> None:
+    commit(
+        world.repo_path,
+        {
+            "assets/silver/clean.sql": _TEXTS_SQL,
+            "translations/fr.yaml": "silver.clean:\n  label: Événements\n",
+        },
+    )
+    run = _submit_and_run(session, principal, world)
+    assert run.status is DeployStatus.FAILED
+    assert run.error_message == (
+        "lakana.yaml: a project with translations must say which language its asset headers are "
+        "written in; add `main_language:` with that language, such as `main_language: en`, to "
+        "lakana.yaml"
+    )
+
+
+def test_a_required_language_with_gaps_refuses_the_deploy(
+    session: Session, principal: PrincipalRef, world: World
+) -> None:
+    commit(
+        world.repo_path,
+        {
+            "lakana.yaml": "repo: analytics\nmain_language: en\ntranslations:\n  require: [fr]\n",
+            "assets/silver/clean.sql": _TEXTS_SQL,
+            "translations/fr.yaml": "silver.clean:\n  label: Événements\n",
+        },
+    )
+    run = _submit_and_run(session, principal, world)
+    assert run.status is DeployStatus.FAILED
+    assert run.error_message == (
+        "translations/fr.yaml: translations.require in lakana.yaml needs a `fr` text for every "
+        "header text, and 3 are missing: silver.clean.columns.id.description, "
+        "silver.clean.columns.id.label, silver.clean.description. Add them to "
+        "translations/fr.yaml, or remove `fr` from translations.require."
+    )

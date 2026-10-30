@@ -14,7 +14,7 @@ import os
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import pydantic
 from pydantic import AfterValidator, BeforeValidator, Field, model_validator
@@ -795,3 +795,67 @@ def translation_issues(
         if missing:
             issues.append(_missing_issue(t, missing))
     return issues
+
+
+def coverage_hints(
+    config: ProjectConfig, assets: Sequence[ParsedAsset], translations: Sequence[Translations]
+) -> tuple[str, ...]:
+    """Say, per file, how many header texts it translates; the deploy prints these as hints.
+
+    Parameters
+    ----------
+    config
+        The whole `lakana.yaml`, for the main language.
+    assets
+        The parsed assets.
+    translations
+        The parsed, validated files.
+
+    Returns
+    -------
+    tuple of str
+        One hint per file, by language.
+    """
+    every = {key for asset in assets for key in header_texts(asset)}
+    hints: list[str] = []
+    for t in sorted(translations, key=lambda t: t.language):
+        done = {k for table, e in t.tables.items() for k in translated_texts(table, e)} & every
+        hint = f"{t.path}: {len(done)} of {len(every)} texts translated"
+        rest = len(every) - len(done)
+        if rest:
+            hint += f"; the other {rest} show in `{config.main_language}`"
+        hints.append(hint)
+    return tuple(hints)
+
+
+def translation_entries(
+    translations: Sequence[Translations],
+) -> dict[str, dict[str, dict[str, Any]]]:
+    """Build the manifest form of every table's translations.
+
+    Parameters
+    ----------
+    translations
+        The parsed, validated files.
+
+    Returns
+    -------
+    dict
+        Table → language → ``{label, description, grain, columns, measures}``, absent texts and
+        empty sections left out, languages sorted.
+    """
+    result: dict[str, dict[str, dict[str, Any]]] = {}
+    for t in sorted(translations, key=lambda t: t.language):
+        for table, entry in sorted(t.tables.items()):
+            form: dict[str, Any] = entry.model_dump(
+                exclude_none=True, exclude={"columns", "measures"}
+            )
+            for part in ("columns", "measures"):
+                pairs = {
+                    name: pair.model_dump(exclude_none=True)
+                    for name, pair in sorted(getattr(entry, part).items())
+                }
+                if pairs:
+                    form[part] = pairs
+            result.setdefault(table, {})[t.language] = form
+    return result
