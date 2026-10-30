@@ -1,4 +1,7 @@
-"""The checks an asset's header generates: ``key_unique``, ``key_not_null`` and ``ref_<column>``.
+"""The checks an asset's header generates: ``key_*``, ``ref_<column>`` and ``measures``.
+
+``key_unique`` and ``key_not_null`` come from a key, ``ref_<column>`` from each reference, and
+``measures`` from `measures:`.
 
 A deploy turns each declared key and each resolved reference into an ordinary `ParsedCheck`, so the
 generated checks run, count, block and show exactly like hand-written ones. The SQL quotes every
@@ -14,6 +17,7 @@ from lakana_core.projects.asset_model import ParsedAsset, ResolvedReference, key
 from lakana_core.projects.checks import GeneratedFrom, ParsedCheck
 from lakana_core.projects.discovery import _fold
 from lakana_core.projects.issues import ProjectIssue
+from lakana_core.projects.measures import MEASURES_CHECK
 
 KEY_UNIQUE = "key_unique"
 """The check that returns the rows whose key appears more than once."""
@@ -123,6 +127,22 @@ def reference_sql(table: str, column: str, target: str, target_column: str) -> s
     return f"{source}{join} WHERE s.{own} IS NOT NULL AND t.{other} IS NULL"
 
 
+def measures_sql(table: str) -> str:
+    """Select no rows of a table: the `measures` check exists for its pre-check.
+
+    Parameters
+    ----------
+    table
+        The checked table.
+
+    Returns
+    -------
+    str
+        One SELECT that returns nothing; the worker's pre-check decides the outcome.
+    """
+    return f"SELECT * FROM {_table(table)} WHERE false"  # nosec B608 -- identifiers quoted
+
+
 def _generated(
     asset: ParsedAsset,
     check: str,
@@ -193,8 +213,9 @@ def generated_checks(
     Returns
     -------
     list of ParsedCheck
-        ``key_not_null`` and ``key_unique`` for a declared key (none for ``key: none``), and
-        ``ref_<column>`` per resolved reference; sorted by name.
+        ``key_not_null`` and ``key_unique`` for a declared key (none for ``key: none``),
+        ``ref_<column>`` per resolved reference, and one ``measures`` for an asset that
+        declares measures; sorted by name.
     """
     checks: list[ParsedCheck] = []
     for asset in sorted(assets, key=lambda a: a.table):
@@ -218,6 +239,25 @@ def generated_checks(
                     reference_sql(asset.table, ref.column, ref.target, ref.target_column),
                     GeneratedFrom("references", (ref.column,), ref.target, ref.target_column),
                     f"generated from `references: {ref.column}`",
+                    default_on_failure,
+                )
+            )
+        measures = asset.metadata.measures
+        if measures:
+            ordered = sorted(measures)
+            source = GeneratedFrom(
+                "measures",
+                tuple(ordered),
+                not_over=tuple(sorted({c for spec in measures.values() for c in spec.not_over})),
+                aggregations=tuple(str(measures[column].aggregation) for column in ordered),
+            )
+            checks.append(
+                _generated(
+                    asset,
+                    MEASURES_CHECK,
+                    measures_sql(asset.table),
+                    source,
+                    "generated from `measures:`",
                     default_on_failure,
                 )
             )

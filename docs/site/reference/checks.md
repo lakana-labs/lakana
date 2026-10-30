@@ -71,14 +71,30 @@ A project without `checks/` deploys and runs as before.
 ## Generated checks
 
 An asset's header can declare `key:` and `references:`
-([Model fields](asset-front-matter.md#model-fields-kind-grain-key-and-references)). A deploy turns
-them into checks of the asset's table, with no file under `checks/`:
+([Model fields](asset-front-matter.md#model-fields-kind-grain-key-and-references)), and
+`measures:` ([Measures](asset-front-matter.md#measures)). A deploy turns them into checks of the
+asset's table, with no file under `checks/`:
 
 | Check | From | Returns |
 |---|---|---|
 | `TABLE/key_unique` | `key:` | Every row whose key, all key columns together, appears in more than one row. |
 | `TABLE/key_not_null` | `key:` | Every row with a null in any key column. |
 | `TABLE/ref_COLUMN` | each entry of `references:` | Every row whose `COLUMN` is not null and has no match in the target's key column. A null is allowed; a reference that is required is also in `key:`. |
+| `TABLE/measures` | `measures:` | Nothing: it exists so that, before it counts, the worker checks that every measure column exists and has a type its aggregation allows, and that every `not_over` column exists ([below](#before-a-generated-check-counts)). |
+
+The type a measure's column needs depends on its `aggregation`:
+
+| `aggregation` | The column's type |
+|---|---|
+| `sum`, `avg` | A number: `int`, `long`, `float`, `double` or `decimal`. |
+| `min`, `max` | A number, a date or a timestamp: `date`, `timestamp`, `timestamptz`, and their `_ns` forms. A `time` of day is not one. |
+| `count`, `count_distinct`, `none` | Any type. |
+
+These are the types `lakana table get` shows. A view also shows a type a table cannot store by its
+Arrow name, and the rule reads those too: `uint64` and the other `int`/`uint` widths, `halffloat`,
+`decimal256(p, s)`, `date64[ms]`, and `timestamp[ns]` or `timestamp[ms, tz=Europe/Berlin]` in any
+unit. Any other type, such as `duration[us]`, is refused by `sum`, `avg`, `min` and `max`, and the
+message names it.
 
 `key: none` generates nothing. Apart from where they come from, they are checks like any other:
 they run after the table is written, end as the outcomes below, set the table back when they
@@ -87,10 +103,10 @@ block, and `lakana check rows RUN TABLE/key_unique --env ENV` shows the rows the
 | Rule | Value |
 |---|---|
 | The source | The asset's file and the line of its header, for example `assets/gold/fact_orders.sql:1`. A result's `path` holds it where a hand-written check's holds `checks/…`. |
-| `on_failure` | `checks: key:` or `checks: references:` in the asset's header, then `checks.on_failure` in `lakana.yaml`, then `block` (as in [The default of `on_failure`](#the-default-of-on_failure)). `keep` follows the rules of a hand-written check: never on a view, an append or a merge. |
-| The most | They count toward the 50 checks of a table, so a table near the limit can be refused when its header gains `key:` or `references:`. The message says how many of them the header generated: ``more than 50 checks of table 'gold.fact_orders' (3 of them generated from the asset's header); remove or combine hand-written checks, or split the table``. |
+| `on_failure` | `checks: key:`, `checks: references:` or `checks: measures:` in the asset's header, then `checks.on_failure` in `lakana.yaml`, then `block` (as in [The default of `on_failure`](#the-default-of-on_failure)). `keep` follows the rules of a hand-written check: never on a view, an append or a merge. |
+| The most | They count toward the 50 checks of a table, so a table near the limit can be refused when its header gains `key:`, `references:` or `measures:`. The message says how many of them the header generated: ``more than 50 checks of table 'gold.fact_orders' (3 of them generated from the asset's header); remove or combine hand-written checks, or split the table``. |
 | Names | A hand-written check of the same table may not take a generated name: ``A check named `key_unique` is generated for `gold.fact_orders`; rename `checks/gold/fact_orders/key_unique.sql`.`` Rename the file. A hand-written `key_unique` of a table that declares no `key:` is fine. |
-| The mark | `lakana check list`, `lakana table health`, `lakana runs show`, `lakana run` and the Model block of `lakana table get` show `key_unique (generated)`, and the list of checks of `lakana deploy` shows `key_unique (generated)` too; REST and the SDK have `generated: true` on the result (`false` on a hand-written check, and in the SDK `false` from an older server), and a deploy's list of checks has `"generated": "key"` or `"generated": "references"` on such a check. |
+| The mark | `lakana check list`, `lakana table health`, `lakana runs show`, `lakana run` and the Model block of `lakana table get` (the `measures` check not yet: it shows in the other places) show `key_unique (generated)`, and the list of checks of `lakana deploy` shows `key_unique (generated)` too; REST and the SDK have `generated: true` on the result (`false` on a hand-written check, and in the SDK `false` from an older server), and a deploy's list of checks has `"generated": "key"`, `"generated": "references"` or `"generated": "measures"` on such a check. |
 | Who sees a reference check | A `ref_<column>` result is shown only to someone who may read the reference's target. Anyone else gets a count instead: `1 check of a reference to a table you cannot read is not shown.` in `lakana table health`, `lakana check list`, `lakana runs show` and `lakana run`; `hidden_checks` on table health and on each task of a run, `hidden` on a page of `GET .../checks`. `GET .../runs/{id}/checks` leaves such results out (the run's tasks carry the count), and `lakana check rows` answers as for a check the run does not have. A task's `error_message` (in `lakana runs show`, `lakana run` and each attempt of `lakana runs logs`) is rebuilt without such a check and its rows, and is empty when nothing else is left in it. A kept or not-published table's note (`state_message` of `lakana table get`, and the refusal of a read of a table that is not published) names only the checks you may see; a note whose only failing check is withheld names none. The free-text task log (`lakana runs logs`) is one text for every reader, so it gives a reference check no outcome and no row count (``check ref_<column>: outcome withheld from the log; see `lakana runs show RUN --env ENV` ``), and its `error:` line leaves reference checks out. A task is never told of a reference check (a refusal of a kept table, say): what a task is told ends up in its own message, which every reader of the run reads. Notifications never name one: they say `A reference check failed; see lakana runs show …`. The `CHECK_FAILED` audit event names the check and its row count; only someone who may read the audit log of the whole instance reads it. A result whose target cannot be told (its project version is gone) is shown only to someone who may read every table of the environment. Key and hand-written checks are not affected. |
 
 ### A reference sets the run order
@@ -125,6 +141,10 @@ back, as a failed one does.
 | ``Reference column `store_id` is not a column of `gold.fact_orders`; fix `references:` in assets/gold/fact_orders.sql:1 and deploy again.`` | The written table has no such column (the letter-case hint as above). | Fix `references:`, or the `SELECT`, and deploy again. |
 | ``The reference `store_id` at `assets/gold/fact_orders.sql:1` cannot be checked: its target is missing, not readable by the run's principal, or no longer has the key column; fix the reference or the grant and deploy again.`` | The target table is gone, the run's principal may not read it, or it no longer has the referenced column. The text does not say which, so that it tells nothing about a table its reader may not read. | Check that the target exists and has the column, and grant the run's principal `READ_TABLE` on it. |
 | ``The reference `store_id` at `assets/gold/fact_orders.sql:1` has a type that differs from its target key column's; make the types match and deploy again.`` | The two columns have different types. Only `int` and `long` match each other; every other type must be the same, so `decimal(10,2)` against `decimal(12,2)`, or `string` against `long`, differ. The text names neither type. | Cast the column in the `SELECT` to the type that `lakana table get` shows for the target column. |
+| ``Measure `name` is string, not a number, so `aggregation: sum` cannot apply to it; cast it in the asset, for example to DECIMAL, BIGINT or DOUBLE, or change `aggregation:` (`count`, `count_distinct` and `none` take any type), and deploy again.`` | A `sum` or `avg` measure whose column is not `int`, `long`, `float`, `double` or `decimal`. | Cast it in the asset (in SQL, `CAST(name AS DECIMAL(18, 2))`), or change `aggregation:` to `count`, `count_distinct` or `none`, and deploy again. |
+| ``Measure `flag` is boolean, so `aggregation: max` cannot apply to it: it needs a number, a date or a timestamp; cast it in the asset, or change `aggregation:` (`count`, `count_distinct` and `none` take any type), and deploy again.`` | A `min` or `max` measure whose column is neither a number nor a date or timestamp. | Cast it in the asset, or change `aggregation:`, and deploy again. |
+| ``Measure column `amount` is not a column of `gold.fact_sales`; fix `measures:` in assets/gold/fact_sales.sql:1 and deploy again.`` | The written table has no such column (the letter-case hint as above). | Fix `measures:`, or the `SELECT`, and deploy again. |
+| ``Column `day` in `not_over` is not a column of `gold.fact_stock`; fix `measures:` in assets/gold/fact_stock.sql:1 and deploy again.`` | The written table has no such column (the letter-case hint as above). | Fix `not_over:`, or the `SELECT`, and deploy again. |
 
 When the count of a reference check fails under a row filter or column mask, its `error` names the
 checked table only if the filter or mask is on that table; one on the target reads ``… under a row
