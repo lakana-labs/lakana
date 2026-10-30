@@ -399,7 +399,8 @@ def resolve_references(
         Table → its resolved references ordered by column (only tables that have one), and one
         issue per problem, at the asset's block, in path and column order. An issue that tells
         of a target the lookup described carries it (`ProjectIssue.targets`) and the text of a
-        missing target (`ProjectIssue.withheld`).
+        missing target (`ProjectIssue.withheld`); the second and later problems of one
+        reference carry an empty text, as a missing target makes one line.
     """
     test = is_table if is_table is not None else (lambda name: lookup(name) is not None)
     resolved: dict[str, tuple[ResolvedReference, ...]] = {}
@@ -409,15 +410,21 @@ def resolve_references(
         found: list[ResolvedReference] = []
         for column, raw in sorted(asset.metadata.references.items()):
             reference, problems = _resolve_one(asset, column, raw, lookup, test, environment)
+            # A reader who may not read the target is shown what a missing target shows: one
+            # line per reference, so the first problem's line becomes it and the others go.
             issues.extend(
                 ProjectIssue(
                     asset.path,
                     line,
                     told.message,
                     targets=told.targets,
-                    withheld=missing_target_message(raw, environment) if told.targets else None,
+                    withheld=(
+                        (missing_target_message(raw, environment) if n == 0 else "")
+                        if told.targets
+                        else None
+                    ),
                 )
-                for told in problems
+                for n, told in enumerate(problems)
             )
             if reference is not None:
                 found.append(reference)

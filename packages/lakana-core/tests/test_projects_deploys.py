@@ -4676,7 +4676,7 @@ def test_a_failed_deploy_shows_what_it_tells_of_a_target_only_to_who_may_read_it
             "Reference `store_id: dim.store`: `dim.store` has a key of 2 columns; name the "
             "column: `store_id: dim.store.<column>`.",
             targets=("dim.store",),
-            withheld=missing,
+            withheld="",
         ),
     ]
     whole = "\n".join(issue.render() for issue in issues)

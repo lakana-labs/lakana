@@ -281,7 +281,8 @@ def test_an_issue_that_tells_of_a_target_carries_it_and_the_missing_text() -> No
 
     Each issue that says something of a target the lookup found (that it exists, its kind, its
     key, its columns) names that target in `targets`, and `withheld` is the text of a missing
-    target, so a reader who may not read it can be shown what a missing one shows.
+    target, so a reader who may not read it can be shown what a missing one shows: one line
+    per reference, so a second problem of the same reference has an empty `withheld`.
     """
     missing = (
         "Reference target `{raw}` does not exist in environment `dev`, or you may not read it; "
@@ -304,7 +305,8 @@ def test_an_issue_that_tells_of_a_target_carries_it_and_the_missing_text() -> No
         _, issues = resolve_references([_fact(references)], _lookup(targets), environment="dev")
         assert issues
         raw = next(iter(references.values()))
-        for issue in issues:
-            assert (issue.targets, issue.withheld) == (told, missing.format(raw=raw))
+        first, *others = issues
+        assert (first.targets, first.withheld) == (told, missing.format(raw=raw))
+        assert [(i.targets, i.withheld) for i in others] == [(told, "")] * len(others)
     _, plain = resolve_references([_fact({"store_id": "gold.x"})], _lookup({}), environment="dev")
     assert [(i.targets, i.withheld) for i in plain] == [((), None)]

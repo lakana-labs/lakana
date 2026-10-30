@@ -368,12 +368,62 @@ pair together. When the state does not give back the text (an earlier attempt wh
 counted again), or the visible results need another kind of message, the reader gets
 `WITHHELD_TASK_MESSAGE`; a text without a state is shown only when it names no withheld check.
 `test_check_message.py` proves, over every outcome, mode and state, that the reader's text is the
-worker's own text from the visible results. Residual, accepted for now and tracked in #385: a table's
-`state_message` (`not_published_message`, kept notes), the task's free-text log (one
-`check ref_<column>: …, N rows` line per check), webhook notifications and the `CHECK_FAILED`
-audit event still name a failed `ref_` check and may carry its row count, which tells how many
-rows point at keys the target lacks; none of them names the target. Pins: `test_hidden_reference_checks.py` in
-lakana-core and lakana-server.
+worker's own text from the visible results. The other texts that name a check (#385):
+
+- **A table's notes.** `not_published_message` leaves out every result `hidden_checks.result_hider`
+  hides (as if it did not exist; with none left it names no check), in `table get`'s
+  `state_message` and in `NotPublishedError`. The kept note's check text is rebuilt by
+  `kept.shown_kept_check` from the visible `keep` failures of `Table.kept_task_run_id`, after
+  the failures (all, or those not refused a kept table, as `note_kept` chose) were shown to give
+  back the stored `kept_check`; otherwise, or with none visible, the note names no check. Without
+  the results (the run deleted), a text that names a `ref_` check names none. `result_hider`
+  asks a person as `ReferenceCheckFilter` does; for a **task** (a run context or a task token) it
+  hides every generated `ref_` check, because what a task is told (the K4 refusal of a kept
+  table, a not-published refusal) lands in its own message and log, which every reader of its run
+  reads.
+- **The task's free-text log.** It is read by byte offsets, so it is one text for every reader:
+  the worker writes a generated `ref_` check's line as `check ref_<column>: done; see lakana runs
+  show` (`REFERENCE_CHECK_LOG_LINE`, `task_checks._check_lines`), and the attempt's `error:` line
+  is `check_message.message_for_log`: the message rebuilt without any generated `ref_` result, or
+  `log_withheld_message` when it cannot be. Hand-written and key checks are unchanged. A log
+  written before this release keeps its lines.
+- **Notifications** go to an endpoint, not to a principal whose rights can be asked:
+  `payload.facts_for_run` leaves every generated `ref_` check out of `failed_checks` and sets
+  `reference_check_failed`, which the messages say as `A reference check failed; see lakana runs
+  show …` (`json`: `"reference_check_failed": true`, only then). They never carried row counts.
+- **The `CHECK_FAILED` audit event** (and `TABLE_KEPT`, `TABLE_ROLLED_BACK`, which name checks)
+  is unchanged: the log is read only with `READ_AUDIT_LOG` on the instance (`AuditService.query`),
+  which only the instance `ADMIN` role carries, or a grant of that one action on the instance to a
+  reviewer. Either reads every table's events instance-wide by design (the log is not filtered
+  per table at all), so a check's name and row count there reveal nothing beyond what that reader
+  already sees. Revisit if the audit log is ever opened per environment or per table.
+
+Pins: `test_hidden_reference_checks.py` in lakana-core and lakana-server,
+`test_check_message.py`, `test_notifications_payload.py`, and the worker's
+`test_the_log_gives_a_reference_check_no_count_and_its_error_no_name`.
+
+**A task's wait reason (#385).** `RunService._waiting` names an unfinished upstream task only
+when the reader may read its table (`may_read_every`, by name, before anything is looked up, so a
+missing table and an unreadable one look the same) and counts the rest in
+`WaitReason.hidden_upstream` (`Waiting for upstream tasks: a and 1 table you may not read.`), as
+`job_version` drops the edges from a table the reader may not read. `upstream_count` stays the
+total. The run's task list itself still lists every task by its table (it always did; the edge is
+what was hidden). Pins: `test_a_wait_reason_names_only_the_upstream_tables_the_reader_may_read`,
+`test_runs_waiting.py`.
+
+**A failed deploy's error (#385).** `error_message` reaches every reader of the environment, but
+the issues of `projects/model.resolve_references` that follow a successful lookup (the target's
+kind, its key, its columns, that it is an artifact, an ambiguous name, a name too long to store)
+and the run-principal refusal of `resolve_model_references` tell of a target the deployer may
+read. Each such `ProjectIssue` carries `targets` and `withheld` (the missing-target text,
+`missing_target_message(raw)`); the worker stores `withheld_lines` beside the text
+(`deploy_runs.error_withheld_json`), and `DeployService._view` passes the text through
+`issues.error_for_reader` for a reader who is not `run.principal_id`: a line whose targets the
+reader may not all read becomes the missing-target line, and the second and later problems of
+the same reference (an empty `withheld`) are left out, as a missing target makes one line. The
+deployer and readers of the target see it whole. Residual: an error stored before this release
+has no lines and is shown whole; and when a run lists more than 50 issues, the `…and N more
+issues` tail still counts the lines a reader sees left out.
 
 The rows are written only by a deploy, a rollback and a run's table creation
 (`catalog/model_metadata.py`); REST, the SDK and the CLI only read them. References are held by

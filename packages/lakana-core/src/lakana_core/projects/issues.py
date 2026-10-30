@@ -26,7 +26,9 @@ class ProjectIssue:
         columns, or what a principal may read of it); empty for most issues. Not compared.
     withheld
         The message shown instead to a reader who may not read one of `targets`: the one a
-        missing table gets. Set exactly when `targets` is. Not compared.
+        missing table gets, or an empty text to show nothing in its place (a missing table makes
+        one line where a found one can make several). Set exactly when `targets` is. Not
+        compared.
     """
 
     path: str
@@ -88,13 +90,13 @@ def withheld_lines(issues: Sequence[ProjectIssue]) -> list[dict[str, Any]]:
     -------
     list of dict
         One ``{"line", "withheld", "targets"}`` per issue that tells of a target: its rendered
-        line, the line shown instead, and the tables it tells of. Stored beside the error
-        (`DeployRun.error_withheld_json`), read by `error_for_reader`.
+        line, the line shown instead (empty for none), and the tables it tells of. Stored
+        beside the error (`DeployRun.error_withheld_json`), read by `error_for_reader`.
     """
     return [
         {
             "line": issue.render(),
-            "withheld": issue.render_message(issue.withheld),
+            "withheld": issue.render_message(issue.withheld) if issue.withheld else "",
             "targets": list(issue.targets),
         }
         for issue in issues
@@ -106,8 +108,8 @@ def error_for_reader(message: str, withheld: object, may_read: Callable[[str], b
     """Show a stored error to a reader who is not the one it was written for.
 
     Each line that tells of a table the reader may not read is replaced by the line a missing
-    table gets, so a missing table and an unreadable one read the same. A replaced line that is
-    already shown is not shown twice: one reference to a missing table makes one line.
+    table gets, or left out when its replacement is empty (the second and later problems of one
+    reference), so a missing table and an unreadable one read the same.
 
     Parameters
     ----------
@@ -138,7 +140,6 @@ def error_for_reader(message: str, withheld: object, may_read: Callable[[str], b
     shown: list[str] = []
     for line in message.split("\n"):
         replaced = instead.get(line, line)
-        if line in instead and replaced in shown:
-            continue
-        shown.append(replaced)
+        if replaced or line not in instead:
+            shown.append(replaced)
     return "\n".join(shown)
