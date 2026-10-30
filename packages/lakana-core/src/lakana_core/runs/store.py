@@ -484,12 +484,12 @@ def _apply_task(session: Session, transition: TaskTransition, now: datetime) -> 
         values["lease_expires_at"] = None
         if committed:
             values["error_message"] = COMMITTED_BEFORE_LOST_MESSAGE
-    if "error_message" in values:
-        # The state of a check phase's text describes that text only (`runs.check_message`).
-        values["check_message_state"] = None
         session.execute(
             select(TaskRun.id).where(TaskRun.id == transition.task_id).with_for_update()
         )
+    if "error_message" in values:
+        # The state of a check phase's text describes that text only (`runs.check_message`).
+        values["check_message_state"] = None
     statement = update(TaskRun).where(
         TaskRun.id == transition.task_id, TaskRun.status == transition.expected
     )

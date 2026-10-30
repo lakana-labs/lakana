@@ -154,6 +154,20 @@ def test_failed_blocking_checks_past_five_and_an_errored_warn_check_count_only_t
     assert seen is not None and "ref_z" not in seen and "more" not in seen
 
 
+def test_failed_keep_checks_past_five_count_only_the_shown() -> None:
+    """The kept branch's listing: six shown `keep` failures and the withheld one."""
+    every = [
+        _result(n, CheckOutcome.FAILED, "keep") for n in ("a", "b", "c", "d", "e", "f", "ref_z")
+    ]
+    state = CheckMessageState(KEPT)
+    stored = _build(every, state)
+    assert stored is not None and "7 checks of `gold.t` failed" in stored
+    seen = _seen(every, state)
+    assert seen == _build(every[:6], state)
+    assert seen is not None and "6 checks of `gold.t` failed" in seen
+    assert "and 1 more" in seen and "ref_z" not in seen
+
+
 def test_a_refused_block_check_beside_more_than_five_failures_on_the_source_path() -> None:
     """Round 3, S1: the source path words the failures without the refused ones."""
     failed = [
