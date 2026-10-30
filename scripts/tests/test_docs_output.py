@@ -25,6 +25,7 @@ BLOCK = "<!-- output: demo#show -->\n```text\n{}```\n"
         ("in /home/you/analytics now", "in <path> now"),
         ("in '/tmp/tmp.Ab12/home/work/x'", "in '<path>'"),
         ("in /var/folders/zz/T/x", "in <path>"),
+        ("│ file:///tmp/tmp.Ab12/home/data/lake/gold/fac… │", "│ file://<path> │"),
         (
             "took 0.0s, then 1.5 s, 12ms, 3 minutes",
             "took <duration>, then <duration>, <duration>, <duration>",

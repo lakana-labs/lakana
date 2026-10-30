@@ -482,7 +482,7 @@ lakana sql "SELECT * FROM gold.station_ranking ORDER BY warmth_rank"
 | `hash` | 40 to 64 hexadecimal digits: commits, SHA-256 digests | `<hash>` |
 | `token` | `lakana_pat_`, `lakana_ci_` and `lakana_task_` tokens | `lakana_pat_<key id>_<secret>` |
 | `port` | the port after `localhost`, `127.0.0.1`, `0.0.0.0`, `[::1]` | `host:<port>` |
-| `path` | absolute paths under `/tmp`, `/var/tmp`, `/var/folders`, `/home`, `/Users`, `/root`, `/run/user` | `<path>` |
+| `path` | absolute paths under `/tmp`, `/var/tmp`, `/var/folders`, `/home`, `/Users`, `/root`, `/run/user`, also after `file://` | `<path>` |
 | `version` | `1.2.3`, with `.dev4`, `rc1`, `+g1a2b3c` | `<version>` |
 | `duration` | a number with `ms`, `s`, `sec`, `seconds`, `min`, `minutes` | `<duration>` |
 | `size` | a number with `KiB`, `MiB`, `GiB`, `KB`, `MB`, `GB` | `<size>` |

@@ -284,7 +284,8 @@ do about each are in [Before a generated check counts](checks.md#before-a-genera
 
 A measure is metadata: Lakana computes nothing from it. Only a `fact` or a `wide` table declares
 measures. A key column is not a measure. Metrics that span tables or time windows belong in a SQL
-asset.
+asset. [Declare the measures](../how-to/declare-a-tables-model.md#declare-the-measures) walks
+through one.
 
 ```yaml
 measures:
