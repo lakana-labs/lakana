@@ -2,15 +2,19 @@
 
 import os
 import uuid
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import pytest
+from botocore.exceptions import EndpointConnectionError
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from lakana_core.db import create_engine
 from lakana_core.models import AuditEvent, AuditEventType
+from lakana_core.storage.fsspec_storage import FsspecStorage
 from lakana_server.settings import Settings
 from tests.api.platform.test_environments import _create, _grant_environment_admin
 from tests.conftest import AUTH_HEADER
@@ -145,3 +149,54 @@ def test_a_deleted_environment_is_accepted_and_an_unknown_one_is_404(
     assert len(listed.json()["locations"]) == 1
     missing = client.get("/api/v1/environments/nope/orphaned-locations", headers=AUTH_HEADER)
     assert missing.status_code == 404
+
+
+def test_a_storage_that_refuses_access_is_a_502_with_the_cause_and_the_next_step(
+    client: TestClient, settings: Settings, tmp_path: Path
+) -> None:
+    """A refusal is not a bare 500, and not a 503: asking again does not help (#371)."""
+    _create(client, tmp_path)
+    _leftover(tmp_path / "dev")
+    managed = tmp_path / "dev" / "managed"
+    managed.chmod(0)
+    try:
+        listed = client.get("/api/v1/environments/dev/orphaned-locations", headers=AUTH_HEADER)
+        deleted = client.post(
+            "/api/v1/environments/dev/orphaned-locations/delete", headers=AUTH_HEADER, json={}
+        )
+    finally:
+        managed.chmod(0o755)
+
+    for answer in (listed, deleted):
+        assert answer.status_code == 502, answer.text
+        assert "Retry-After" not in answer.headers
+        detail = answer.json()["detail"]
+        assert "The storage of environment 'dev' refused access" in detail
+        assert "check the environment's storage credentials" in detail
+        assert str(tmp_path) not in detail
+    assert _events(settings, AuditEventType.ORPHANED_LOCATIONS_DELETED) == []
+
+
+def test_a_storage_that_does_not_answer_is_a_503_to_ask_again(
+    client: TestClient, settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """s3fs raises botocore's own error for an endpoint that does not answer, not an OSError."""
+    _create(client, tmp_path)
+    _leftover(tmp_path / "dev")
+
+    def unreachable(self: FsspecStorage, prefix: str) -> Iterator[tuple[str, bool]]:
+        raise EndpointConnectionError(endpoint_url="http://seaweedfs:8333/")
+
+    monkeypatch.setattr(FsspecStorage, "list_children", unreachable)
+    listed = client.get("/api/v1/environments/dev/orphaned-locations", headers=AUTH_HEADER)
+    deleted = client.post(
+        "/api/v1/environments/dev/orphaned-locations/delete", headers=AUTH_HEADER, json={}
+    )
+
+    for answer in (listed, deleted):
+        assert answer.status_code == 503, answer.text
+        assert answer.headers["Retry-After"] == "5"
+        detail = answer.json()["detail"]
+        assert "The storage of environment 'dev' could not be reached" in detail
+        assert "seaweedfs" not in detail
+    assert _events(settings, AuditEventType.ORPHANED_LOCATIONS_DELETED) == []

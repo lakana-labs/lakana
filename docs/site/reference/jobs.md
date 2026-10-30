@@ -75,3 +75,11 @@ dry run, a rollback, a deploy that failed and a deploy of the commit already cur
 under `Jobs started after the deploy:` and a `warning:` line on stderr for each job not started.
 The deploy itself succeeded either way: its exit code is 0. `client.deploys.wait` waits the same
 way, and `Deploy.job_starts` is a tuple of `DeployJobStart` with the fields above.
+
+With `--timeout`, a deploy that succeeded before the worker recorded every start still exits 0. It
+prints what it knows, and a warning for each start not recorded yet:
+``warning: the start of job `nightly` is not recorded yet. See what came of it with 'lakana deploys show <id> --env prod'.``
+Do not start such a job by hand before you have looked: the worker may still start it. In Python,
+`client.deploys.wait(..., timeout=...)` raises `lakana.JobStartsNotRecorded` then, a
+`TimeoutError` whose `deploy` is the succeeded deploy with those starts `pending`. A deploy that
+has not finished by the timeout still exits 1 (`TimeoutError` in Python).

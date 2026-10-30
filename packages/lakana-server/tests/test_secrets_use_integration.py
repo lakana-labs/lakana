@@ -77,8 +77,6 @@ _STORAGE_ROUTES = frozenset(
     {
         "/api/v1/environments/{env}/namespaces/{path}/tables",
         "/api/v1/environments/{env}/namespaces/{path}/tables/{name}",
-        # Answers a bare 500 with wrong keys (s3fs's PermissionError is not mapped to a 503 as
-        # the table routes' is); no value leaks. Mapping it is a separate change.
         "/api/v1/environments/{name}/orphaned-locations",
         "/v1/{prefix}/namespaces/{namespace}/tables/{table}",
     }
@@ -257,7 +255,7 @@ class _Stack:
         return statuses
 
     def assert_only_storage_routes_failed(self, statuses: dict[str, int]) -> None:
-        """Require that a route that answered 5xx is one that reads the environment's storage.
+        """Require that a route that answered 5xx reads the environment's storage, and said so.
 
         Parameters
         ----------
@@ -267,10 +265,14 @@ class _Stack:
         Raises
         ------
         AssertionError
-            If a route outside `_STORAGE_ROUTES` answered 5xx.
+            If a route outside `_STORAGE_ROUTES` answered 5xx, or one answered a 5xx other than
+            the mapped storage errors (502 for refused credentials, 503 for no answer), each
+            with the cause and the next step.
         """
         failed = {template for template, status in statuses.items() if status >= 500}
         assert failed <= _STORAGE_ROUTES, sorted(failed - _STORAGE_ROUTES)
+        unmapped = {t: s for t, s in statuses.items() if s >= 500 and s not in (502, 503)}
+        assert not unmapped, unmapped
 
     def raw_rows(self) -> list[bytes]:
         """Read what the database holds, as bytes to search.
@@ -688,11 +690,24 @@ def test_an_error_raised_by_storage_after_the_secret_was_resolved_shows_no_value
             allow_5xx=True,
         ),
         stack.call("GET", f"/v1/{_ENV}/namespaces/bronze/tables/t", allow_5xx=True),
-        stack.call("GET", f"/api/v1/environments/{_ENV}/orphaned-locations", allow_5xx=True),
     ]
     # Control: the storage refused the call (503, "could not be reached"), not a missing table,
     # so the failing path ran with the wrong keys.
     assert any(answer.status_code == 503 for answer in refused), [a.status_code for a in refused]
+    # The orphaned-locations routes name the refusal and its fix, and do not ask to retry.
+    orphaned = [
+        stack.call("GET", f"/api/v1/environments/{_ENV}/orphaned-locations", allow_5xx=True),
+        stack.call(
+            "POST",
+            f"/api/v1/environments/{_ENV}/orphaned-locations/delete",
+            json={},
+            allow_5xx=True,
+        ),
+    ]
+    for answer in orphaned:
+        assert answer.status_code == 502, answer.text
+        assert "check the environment's storage credentials" in answer.json()["detail"]
+        assert "Retry-After" not in answer.headers
     _, status = _run_query(stack, "SELECT id FROM bronze.t")
     assert status == QueryRunStatus.FAILED
     stack.assert_only_storage_routes_failed(stack.sweep(allow_5xx=True))

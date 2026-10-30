@@ -2319,3 +2319,74 @@ def test_a_merge_entry_that_cannot_be_read_fails_without_writing(
     assert task.status is TaskStatus.FAILED
     assert task.error_message is not None and task.error_message.startswith(message)
     assert not _exists(world, "silver.orders")
+
+
+def _orders_with_region(world: World) -> None:
+    """Create `silver.orders` with the columns `id` and `region`, outside the project.
+
+    Parameters
+    ----------
+    world
+        The world.
+    """
+    data = pa.table({"id": pa.array([1], pa.int64()), "region": pa.array(["eu"], pa.string())})
+    with world.session() as session:
+        catalog = CatalogService(session, StorageResolver(session), AllowAllAuthorization())
+        ref = TableRef.from_dotted("dev", "silver.orders")
+        if not namespace_exists(session, "dev", ref.namespace.joined()):
+            catalog.create_namespace(world.admin, "dev", ref.namespace)
+        catalog.write_batches(
+            world.admin, ref, mode=WriteMode.CREATE, schema=data.schema, batches=data.to_batches()
+        )
+
+
+_MISMATCH = "The result does not match silver.orders's schema (dropped region (string))."
+
+
+def test_a_sql_table_asset_whose_result_lost_a_column_is_told_a_step_it_can_take(
+    world: World,
+) -> None:
+    """A table asset cannot set `evolve_schema`, so it is not told to (#377)."""
+    _outside_table(world, "bronze.events", [1, 2])
+    _orders_with_region(world)
+    world.set_manifest(
+        _entry(
+            "silver.orders",
+            "SELECT id FROM bronze.events",
+            references=["bronze.events"],
+            materialize="table",
+            retries=0,
+        )
+    )
+
+    _start(world)
+    _drain(world)
+
+    task = _task(world, "silver.orders")
+    assert task.status is TaskStatus.FAILED
+    assert task.error_message == (
+        f"{_MISMATCH} A SQL asset that replaces its table cannot drop, rename or retype the "
+        "table's columns: make its SELECT return the columns and types silver.orders has (list "
+        "them instead of `*`), then run it again."
+    )
+
+
+def test_a_sql_append_asset_whose_result_lost_a_column_is_told_its_front_matter_key(
+    world: World,
+) -> None:
+    """An append may set `evolve_schema: true`, in its front matter, not as a CLI flag (#377)."""
+    _outside_table(world, "bronze.events", [1, 2])
+    _orders_with_region(world)
+    _incremental(world, retries=0)
+
+    _start(world)
+    _drain(world)
+
+    task = _task(world, "silver.orders")
+    assert task.status is TaskStatus.FAILED
+    assert task.error_message == (
+        f"{_MISMATCH} To let silver.orders take the new schema, add `evolve_schema: true` to "
+        "the asset's front matter and deploy again (a column the result no longer has is then "
+        "removed from the table); otherwise make its SELECT return the columns and types "
+        "silver.orders has."
+    )

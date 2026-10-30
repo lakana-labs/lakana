@@ -293,6 +293,12 @@ class SchemaDiff:
         return "; ".join(parts)
 
 
+EVOLVE_ADVICE = "Pass evolve_schema (--evolve-schema) to let the table adopt the result's schema."
+"""The next step `SchemaMismatchError` gives a caller of the API, the CLI or the SDK. An asset
+spells the option elsewhere, or cannot set it, so the worker and the task harness replace this
+sentence with the step that asset can take."""
+
+
 class SchemaMismatchError(ValidationError):
     """A write's result is incompatible with its target and `evolve_schema` is off.
 
@@ -306,8 +312,7 @@ class SchemaMismatchError(ValidationError):
 
     def __init__(self, table_name: str, diff: SchemaDiff) -> None:
         super().__init__(
-            f"The result does not match {table_name}'s schema ({diff.describe()}). "
-            "Pass evolve_schema (--evolve-schema) to let the table adopt the result's schema."
+            f"The result does not match {table_name}'s schema ({diff.describe()}). {EVOLVE_ADVICE}"
         )
         self.diff = diff
 

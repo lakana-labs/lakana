@@ -31,6 +31,7 @@ class LogEvent(StrEnum):
     LEASE_LOST = "lease_lost"
     LEASE_RENEWAL_FAILED = "lease_renewal_failed"
     STORAGE_UNREACHABLE = "storage_unreachable"
+    STORAGE_REFUSED = "storage_refused"
     READINESS_FAILED = "readiness_failed"
     READINESS_RECOVERED = "readiness_recovered"
     SCHEDULER_ROLE_TAKEN = "scheduler_role_taken"
@@ -54,6 +55,7 @@ WHERE: dict[LogEvent, str] = {
     LogEvent.LEASE_LOST: "worker",
     LogEvent.LEASE_RENEWAL_FAILED: "worker",
     LogEvent.STORAGE_UNREACHABLE: "server, worker",
+    LogEvent.STORAGE_REFUSED: "server",
     LogEvent.READINESS_FAILED: "server",
     LogEvent.READINESS_RECOVERED: "server",
     LogEvent.SCHEDULER_ROLE_TAKEN: "worker",

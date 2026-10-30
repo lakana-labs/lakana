@@ -158,6 +158,9 @@ def order_totals(orders: pl.DataFrame) -> pl.DataFrame:
 - Only with `write="replace"`, the default. An asset that appends or merges cannot change its
   table's schema; `evolve_schema=True` there fails the deploy with
   ``evolve_schema=True works with write="replace" (the default) only; remove evolve_schema, or replace the table instead of appending or merging``.
+  The first run of an append creates its table; if another writer creates the table with other
+  columns in the meantime, the run fails with
+  ``the asset's output no longer matches the schema of gold.scores. Server detail: The result does not match gold.scores's schema (dropped region (string)). An asset that appends cannot change its table's schema: make the asset return the columns and types gold.scores has, then run it again.``
   It does not apply to an artifact asset either.
 - It must be `True`, `False` or `None`, written out; `None` means `False`, the default.
   `evolve_schema=False` is accepted with every `write`, and on an artifact asset.

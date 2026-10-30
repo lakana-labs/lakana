@@ -624,6 +624,15 @@ def test_a_deployer_deactivated_meanwhile_starts_nothing_even_with_a_bound_accou
         "`lakana job run refresh --repo analytics --env dev`."
     )
     assert _runs(session) == []
+    (dropped,) = _events(session, AuditEventType.JOB_START_DROPPED)
+    assert dropped.principal_id is None
+    assert dropped.detail["reason"] == "requester_inactive"
+    assert (dropped.detail["job"], dropped.detail["repository"]) == ("refresh", "analytics")
+    assert (dropped.detail["trigger"], dropped.detail["requested_by"]) == (
+        "deploy",
+        str(deployer.id),
+    )
+    assert "ci_rule_id" not in dropped.detail
 
 
 def test_the_jobs_come_from_the_project_version_made_current(

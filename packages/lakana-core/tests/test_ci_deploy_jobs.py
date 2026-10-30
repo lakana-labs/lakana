@@ -22,9 +22,17 @@ from test_projects_dag import make_asset
 
 from lakana_core.audit.authorization import AuditingAuthorization
 from lakana_core.audit.denial_limiter import DenialAuditLimiter
-from lakana_core.auth import Action, PrincipalRef, Securable
+from lakana_core.auth import (
+    Action,
+    AllowAllAuthorization,
+    PrincipalRef,
+    Securable,
+    SecurableKind,
+)
 from lakana_core.errors import PermissionDenied
 from lakana_core.grants.authorization import GrantAuthorization
+from lakana_core.grants.service import GrantService
+from lakana_core.jobs import on_deploy as on_deploy_module
 from lakana_core.jobs.on_deploy import start_jobs_after_deploy
 from lakana_core.jobs.service import JobService
 from lakana_core.models import (
@@ -205,6 +213,25 @@ def _events(session: Session, kind: AuditEventType) -> list[AuditEvent]:
     )
 
 
+def _grant_run(session: Session, world: CiWorld) -> None:
+    """Give ``deployer`` `RUN` on ``prod``, so that only a CI trust rule can refuse its start.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    world
+        The world.
+    """
+    GrantService(session, AllowAllAuthorization()).grant(
+        world.admin,
+        principal="deployer",
+        action=Action.RUN,
+        kind=SecurableKind.ENVIRONMENT,
+        environment="prod",
+    )
+
+
 def test_a_rule_that_opts_in_starts_the_on_deploy_job_of_its_deploy(
     session: Session, world: CiWorld
 ) -> None:
@@ -319,6 +346,8 @@ def test_a_waiting_start_is_dropped_once_the_rule_no_longer_allows_it(
     _start(session, ci, first)
     ci_again, second = _ci_deploy(session, sha="1" * 40)
     _start(session, ci_again, second)
+    # The account may RUN on its own: only the rule's re-check can refuse the start.
+    _grant_run(session, world)
     rules(session).update(world.admin, rule_id, start_on_deploy_jobs=False)
     session.execute(update(Run).values(status=RunStatus.SUCCEEDED))
     session.commit()
@@ -433,6 +462,8 @@ def test_a_rule_changed_during_the_deploy_starts_nothing(
     """The rule is read again after the deploy committed, not taken from when it was claimed."""
     rule_id = add_rule(session, world, start_on_deploy_jobs=True)
     ci, run = _ci_deploy(session)
+    # The account may RUN on its own: only the rule's re-check can refuse the start.
+    _grant_run(session, world)
     if change == "opt_out":
         rules(session).update(world.admin, rule_id, start_on_deploy_jobs=False)
     else:
@@ -444,6 +475,12 @@ def test_a_rule_changed_during_the_deploy_starts_nothing(
     assert outcome.message is not None
     assert "changed, disabled or deleted since the deploy began" in outcome.message
     assert _runs(session) == []
+    (dropped,) = _events(session, AuditEventType.JOB_START_DROPPED)
+    assert dropped.principal_id is None
+    assert dropped.detail["reason"] == "requester_lacks_run"
+    assert (dropped.detail["job"], dropped.detail["trigger"]) == ("refresh", "deploy")
+    assert dropped.detail["requested_by"] == str(world.deployer.id)
+    assert dropped.detail["ci_rule_id"] == str(rule_id)
 
 
 def test_a_job_no_longer_on_deploy_in_the_current_version_is_not_started(
@@ -554,3 +591,36 @@ def test_a_ci_start_that_merges_into_a_waiting_scheduled_start_keeps_the_rule_in
         str(rule_id),
         "start_on_deploy_jobs",
     )
+
+
+def test_a_rule_changed_while_the_jobs_start_stops_the_jobs_not_started_yet(
+    session: Session, world: CiWorld, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The rule is read again before each start, not once before the first."""
+    rule_id = add_rule(session, world, start_on_deploy_jobs=True)
+    jobs = {
+        "first": JobConfig(select=["silver.*"], on_deploy=True),
+        "second": JobConfig(select=["silver.*"], on_deploy=True),
+    }
+    ci, run = _ci_deploy(session, jobs=jobs)
+    _grant_run(session, world)
+    real = on_deploy_module._start_one
+
+    def then_disable(*args: object) -> object:
+        outcome = real(*args)  # ty: ignore
+        rules(session).disable(world.admin, rule_id)
+        return outcome
+
+    monkeypatch.setattr(on_deploy_module, "_start_one", then_disable)
+
+    first, second = _start(session, ci, run)
+
+    assert (first.job, first.outcome) == ("first", OUTCOME_STARTED)
+    assert (second.job, second.outcome, second.reason) == (
+        "second",
+        OUTCOME_NOT_STARTED,
+        REASON_LACKS_RUN,
+    )
+    assert len(_runs(session)) == 1
+    (dropped,) = _events(session, AuditEventType.JOB_START_DROPPED)
+    assert (dropped.detail["job"], dropped.detail["reason"]) == ("second", "requester_lacks_run")

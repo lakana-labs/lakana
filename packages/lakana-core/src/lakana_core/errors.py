@@ -51,6 +51,15 @@ class StorageUnavailableError(LakanaError):
     """
 
 
+class StorageRefusedError(LakanaError):
+    """The storage answered, and refused the environment's credentials.
+
+    Asking again does not help until the credentials are fixed, so the server maps it to 502
+    without a `Retry-After` header, apart from `StorageUnavailableError`. The text names no path
+    and none of storage's own words.
+    """
+
+
 class AuditUnavailableError(LakanaError):
     """A read of other people's activity was refused because its audit row could not be written.
 

@@ -19,7 +19,7 @@ from lakana._models import (
     ProjectVersion,
 )
 from lakana._routes import ROUTES
-from lakana.errors import DeployFailed
+from lakana.errors import DeployFailed, JobStartsNotRecorded
 from lakana.resources.queries import waiting_for_from_json
 
 
@@ -331,8 +331,11 @@ class Deploys:
         ------
         lakana.errors.DeployFailed
             If it ends `failed`.
+        lakana.errors.JobStartsNotRecorded
+            If `timeout` elapses after the deploy succeeded, while a job start is still
+            ``pending``; a `TimeoutError` that carries the deploy.
         TimeoutError
-            If `timeout` elapses first.
+            If `timeout` elapses before the deploy ends.
         """
         deadline = None if timeout is None else time.monotonic() + timeout
         interval = poll_interval
@@ -347,9 +350,10 @@ class Deploys:
                 raise DeployFailed(deploy.error_message or "deploy failed", deploy)
             if deadline is not None and time.monotonic() >= deadline:
                 if deploy.status == "succeeded":
-                    raise TimeoutError(
+                    raise JobStartsNotRecorded(
                         f"Deploy {deploy_id} succeeded, but its job starts are not recorded yet "
-                        f"after {timeout}s"
+                        f"after {timeout}s",
+                        deploy,
                     )
                 raise TimeoutError(f"Deploy {deploy_id} still {deploy.status} after {timeout}s")
             time.sleep(interval)

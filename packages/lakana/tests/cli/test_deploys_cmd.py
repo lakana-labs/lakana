@@ -879,6 +879,52 @@ def test_a_start_without_a_message_is_still_named(tmp_path: Path) -> None:
     assert "warning: job `refresh` was not started (not_started)" in _plain(result.stderr)
 
 
+def test_a_deploy_whose_job_starts_are_not_recorded_by_the_timeout_succeeds(
+    tmp_path: Path,
+) -> None:
+    """The deploy succeeded: exit 0, and a warning that says how to look the starts up (#368)."""
+    pending = [_STARTS[0], {"job": "nightly", "outcome": "pending"}]
+    result = invoke(
+        make_state(tmp_path, _api(job_starts=pending)),
+        "deploy",
+        "analytics",
+        "--env",
+        "dev",
+        "--timeout",
+        "0",
+        env=_CI,
+    )
+    assert result.exit_code == 0, result.output
+    assert f"Deployed analytics in dev at {_SHA}" in _plain(result.stdout)
+    assert f"refresh: run {_RUN}" in _plain(result.stdout)
+    err = _plain(result.stderr)
+    assert (
+        "warning: the start of job `nightly` is not recorded yet. See what came of it with "
+        f"'lakana deploys show {_ID} --env dev'."
+    ) in err
+    assert "still in progress" not in err and "error:" not in err
+    assert "not started" not in err
+
+
+def test_a_deploy_whose_only_start_is_not_recorded_does_not_say_to_run_it_by_hand(
+    tmp_path: Path,
+) -> None:
+    """The job may still start: the hint to run what was deployed would start it twice."""
+    pending = [{"job": "nightly", "outcome": "pending"}]
+    result = invoke(
+        make_state(tmp_path, _api(job_starts=pending)),
+        "deploy",
+        "analytics",
+        "--env",
+        "dev",
+        "--timeout",
+        "0",
+        env=_CI,
+    )
+    assert result.exit_code == 0, result.output
+    assert "lakana run" not in _plain(result.stderr)
+
+
 def test_the_job_starts_are_in_the_json_output(tmp_path: Path) -> None:
     """`--output json` carries every start as the API sent it."""
     result = invoke(

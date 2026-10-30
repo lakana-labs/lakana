@@ -543,11 +543,13 @@ OIDC exchange and CI tokens (#15)"; the user's view is
    starts that deploy's jobs (`CiScope.starting_deploy_jobs`, never set from a request), and the
    protected-environment rules of a start by hand still apply (the bound run principal writes;
    without one the start is refused). The token is resolved again after the deploy is recorded,
-   once, before the deploy's jobs start, and again when a start that waited begins, against the
-   same rule revision and the rule's repository, so a rule changed or disabled during the deploy
-   or while a start waits starts nothing (a change in the seconds the start loop takes still lets
-   that deploy's remaining jobs start); and the job must still be `on_deploy` in the project version it runs, so a deploy by
-   hand that moved the pointer meanwhile cannot have its jobs run under the rule.
+   right before each of the deploy's jobs starts, and again when a start that waited begins,
+   against the same rule revision and the rule's repository, so a rule changed or disabled
+   during the deploy, while its jobs start, or while a start waits starts no further job (only
+   a change in the instant between one job's check and its start still lets that job start); a
+   start refused so is audited as `JOB_START_DROPPED`; and the job must still be `on_deploy` in
+   the project version it runs, so a deploy by hand that moved the pointer meanwhile cannot have
+   its jobs run under the rule.
 
 ## Explicitly not defended
 

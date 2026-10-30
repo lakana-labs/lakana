@@ -101,6 +101,23 @@ A run without `--delete` records nothing.
 `older_than_days` is 1 to 3,650. An administrator of one environment is refused (403), because the
 storage root may be shared with other environments.
 
+## When the storage refuses or does not answer
+
+Nothing is deleted when the environment's storage refuses its credentials or does not answer.
+The command fails with the cause and what to do:
+
+- ``The storage of environment 'legacy' refused access, so no directory was listed or deleted.``
+  (REST: 502.) The access key or secret the environment uses is wrong, missing, or may not list
+  its root. Running the command again does not help: check the environment's storage options and
+  the secret they name (see [Manage secrets](manage-secrets.md)), then run it again. The server's
+  log has a `storage_refused` line.
+- ``The storage of environment 'legacy' could not be reached, …`` (REST: 503 with `Retry-After`.)
+  The storage did not answer, or its address is wrong. Try again in a moment; if it keeps
+  failing, check that the storage is running and that the environment's endpoint is right. The
+  server's log has a `storage_unreachable` line.
+
+Neither the message nor the log line has the storage's own text, which can name a host or a path.
+
 ## Related
 
 - [Drop and restore a table](drop-and-restore-a-table.md): what happens to a table's files today.

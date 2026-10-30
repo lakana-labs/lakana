@@ -10,7 +10,7 @@ import pytest
 from lakana._config import ResolvedConfig
 from lakana._http import HttpTransport
 from lakana._models import Deploy
-from lakana.errors import DeployFailed
+from lakana.errors import DeployFailed, JobStartsNotRecorded
 from lakana.resources.deploys import Deploys, deploy_from_json
 
 _CONFIG = ResolvedConfig(url="http://api.example", token="lakana_pat_abc_supersecret")
@@ -187,5 +187,18 @@ def test_wait_gives_up_on_pending_starts_at_its_timeout(monkeypatch: pytest.Monk
     monkeypatch.setattr("lakana.resources.deploys.time.sleep", lambda seconds: None)
     pending = [{"job": "refresh", "outcome": "pending"}]
     deploys = _deploys([{**_BODY, "status": "succeeded", "job_starts": pending}])
-    with pytest.raises(TimeoutError, match="its job starts are not recorded yet"):
+    with pytest.raises(JobStartsNotRecorded, match="its job starts are not recorded yet") as raised:
         deploys.wait("dev", _BODY["id"], timeout=0)
+    assert isinstance(raised.value, TimeoutError)
+    assert raised.value.deploy.status == "succeeded"
+    assert [s.outcome for s in raised.value.deploy.job_starts] == ["pending"]
+
+
+def test_a_deploy_that_has_not_finished_at_the_timeout_is_a_plain_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("lakana.resources.deploys.time.sleep", lambda seconds: None)
+    deploys = _deploys([{**_BODY, "status": "running"}])
+    with pytest.raises(TimeoutError, match="still running") as raised:
+        deploys.wait("dev", _BODY["id"], timeout=0)
+    assert not isinstance(raised.value, JobStartsNotRecorded)

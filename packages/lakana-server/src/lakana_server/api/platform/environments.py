@@ -380,7 +380,9 @@ def environment_usage(
 
 
 @router.get(
-    "/{name}/orphaned-locations", response_model=OrphanedLocationsOut, responses=errors(403, 404)
+    "/{name}/orphaned-locations",
+    response_model=OrphanedLocationsOut,
+    responses=errors(403, 404, 502, 503),
 )
 def list_orphaned_locations(
     name: str,
@@ -392,7 +394,9 @@ def list_orphaned_locations(
 
     Lists the directories that older releases left under the environment's storage with no
     table to own them. Deletes nothing. Needs `MANAGE_ENVIRONMENT` on the instance. Answers
-    404 when there is no such environment and 422 when `older_than_days` is out of range.
+    404 when there is no such environment, 422 when `older_than_days` is out of range, 502 when
+    the environment's storage refused its credentials (fix them; asking again does not help),
+    and 503 when the storage did not answer (ask again after `Retry-After`).
 
     Parameters
     ----------
@@ -416,6 +420,10 @@ def list_orphaned_locations(
         No environment of that name; mapped to 404.
     lakana_core.errors.ValidationError
         `older_than_days` out of range; mapped to 422.
+    lakana_core.errors.StorageRefusedError
+        The storage refused the environment's credentials; mapped to 502.
+    lakana_core.errors.StorageUnavailableError
+        The storage did not answer; mapped to 503.
     """
     found = catalog.find_orphaned_locations(principal, name, older_than_days=older_than_days)
     return OrphanedLocationsOut.model_validate(found)
@@ -424,7 +432,7 @@ def list_orphaned_locations(
 @router.post(
     "/{name}/orphaned-locations/delete",
     response_model=OrphanedLocationsOut,
-    responses=errors(403, 404),
+    responses=errors(403, 404, 502, 503),
 )
 def delete_orphaned_locations(
     name: str,
@@ -436,8 +444,9 @@ def delete_orphaned_locations(
 
     Deletes the directories that older releases left under the environment's storage and
     whose files are older than `older_than_days`. Needs `MANAGE_ENVIRONMENT` on the
-    instance. Answers 404 when there is no such environment and 422 when `older_than_days`
-    is out of range.
+    instance. Answers 404 when there is no such environment, 422 when `older_than_days` is
+    out of range, 502 when the environment's storage refused its credentials, and 503 when it
+    did not answer; either comes before anything is deleted.
 
     Parameters
     ----------
@@ -462,6 +471,10 @@ def delete_orphaned_locations(
         No environment of that name; mapped to 404.
     lakana_core.errors.ValidationError
         `older_than_days` out of range; mapped to 422.
+    lakana_core.errors.StorageRefusedError
+        The storage refused the environment's credentials; mapped to 502.
+    lakana_core.errors.StorageUnavailableError
+        The storage did not answer; mapped to 503.
     """
     report = catalog.delete_orphaned_locations(
         principal, name, older_than_days=body.older_than_days

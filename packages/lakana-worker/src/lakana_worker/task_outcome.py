@@ -15,6 +15,7 @@ from typing import Any, NamedTuple
 
 from sqlalchemy.orm import Session
 
+from lakana_core.catalog.schema_compat import EVOLVE_ADVICE
 from lakana_core.errors import ConflictError, LakanaError, PermissionDenied
 from lakana_core.kept_mark import KeptSeen
 from lakana_core.models import QueryErrorCause, WriteMode
@@ -186,6 +187,45 @@ def failure_message(failure: BaseException | None, text: str | None) -> str:
     if isinstance(failure, PermissionDenied) and not base.lower().startswith("permission denied"):
         return f"permission denied: {base}"
     return base
+
+
+def sql_asset_mismatch_message(text: str, table: str, mode: WriteMode) -> str:
+    """Give a SQL asset's schema mismatch the next step that asset can take.
+
+    The server's text ends with `EVOLVE_ADVICE`, the step of a caller of the API or the CLI. A
+    SQL asset that replaces its table cannot set `evolve_schema` (its front matter allows it
+    with an append only); one that appends sets it in its front matter.
+
+    Parameters
+    ----------
+    text
+        The stored, redacted error of the write run.
+    table
+        The asset's dotted table name.
+    mode
+        The write run's mode.
+
+    Returns
+    -------
+    str
+        The text up to the advice, then the asset's own step; `text` unchanged when the advice
+        is not where it is expected.
+    """
+    if not text.endswith(EVOLVE_ADVICE):
+        return text
+    detail = text[: -len(EVOLVE_ADVICE)].rstrip()
+    if mode is WriteMode.APPEND:
+        return (
+            f"{detail} To let {table} take the new schema, add `evolve_schema: true` to the "
+            "asset's front matter and deploy again (a column the result no longer has is then "
+            "removed from the table); otherwise make its SELECT return the columns and types "
+            f"{table} has."
+        )
+    return (
+        f"{detail} A SQL asset that replaces its table cannot drop, rename or retype the "
+        f"table's columns: make its SELECT return the columns and types {table} has (list them "
+        "instead of `*`), then run it again."
+    )
 
 
 class KeptTable(NamedTuple):

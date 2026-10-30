@@ -35,6 +35,10 @@ ERROR_MEANING: dict[int, str] = {
     408: "No part of the request body arrived within the read timeout.",
     409: "The request conflicts with the current state; the message says what to change.",
     413: "The request body is larger than the server accepts.",
+    502: (
+        "A service behind the server, such as the environment's storage, refused it; the message "
+        "says what to fix. Asking again does not help until then."
+    ),
     503: "The server cannot do this right now; ask again after the time in `Retry-After`.",
 }
 """The meaning of each status the platform API documents besides 422, by status code."""
