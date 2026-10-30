@@ -21,6 +21,7 @@ from pyiceberg.schema import Schema
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
+from lakana_core.catalog.model_metadata import write_model_entry
 from lakana_core.catalog.service import LoadedTable
 from lakana_core.identifiers import NamespacePath, TableRef
 from lakana_core.models import Environment, Namespace, Table, TableType
@@ -693,3 +694,169 @@ def test_table_get_and_list_show_a_kept_table(client: TestClient, settings: Sett
         "fine": ("published", None),
         "sales": ("kept", expected),
     }
+
+
+_GOLD_TABLES = "/api/v1/environments/dev/namespaces/gold/tables"
+
+
+def _star(client: TestClient) -> None:
+    """Create `gold.dim_store`, `gold.fact_sales` that references it, and a plain `gold.notes`.
+
+    The model is written onto the rows as a deploy writes it, with one generated result.
+
+    Parameters
+    ----------
+    client
+        The test client.
+    """
+    create_environment(client)
+    for name in ("dim_store", "fact_sales", "notes"):
+        create_table(client, "dev", "gold", name)
+    with Session(client.app.state.engine) as session:
+        rows = {r.name: r for r in session.scalars(select(Table))}
+        write_model_entry(
+            session,
+            rows["dim_store"],
+            {
+                "write": "replace",
+                "key": ["store_id"],
+                "model": {"kind": "dimension", "grain": "One row per store."},
+            },
+        )
+        write_model_entry(
+            session,
+            rows["fact_sales"],
+            {
+                "write": "replace",
+                "key": ["date", "store_id"],
+                "model": {
+                    "kind": "fact",
+                    "grain": "One row per store and day.",
+                    "references": [
+                        {"column": "store_id", "target": "gold.dim_store", "target_column": "id"}
+                    ],
+                },
+            },
+        )
+        session.commit()
+
+
+def test_a_table_carries_its_model_and_a_plain_table_none(client: TestClient) -> None:
+    _star(client)
+    fact = client.get(f"{_GOLD_TABLES}/fact_sales", headers=AUTH_HEADER)
+    plain = client.get(f"{_GOLD_TABLES}/notes", headers=AUTH_HEADER)
+    assert fact.status_code == 200, fact.text
+    assert fact.json()["model"] == {
+        "kind": "fact",
+        "grain": "One row per store and day.",
+        "key": ["date", "store_id"],
+        "key_none": False,
+        "references": [
+            {
+                "id": "gold.fact_sales/ref_store_id",
+                "table": "gold.fact_sales",
+                "column": "store_id",
+                "target": "gold.dim_store",
+                "target_column": "id",
+                "target_exists": True,
+            }
+        ],
+        "hidden_references": 0,
+        "checks": [],
+    }
+    assert plain.json()["model"] is None
+
+
+def test_the_listing_filters_on_the_model_kind(client: TestClient) -> None:
+    _star(client)
+    facts = client.get(_GOLD_TABLES, headers=AUTH_HEADER, params={"model_kind": "fact"})
+    every = client.get(_GOLD_TABLES, headers=AUTH_HEADER)
+    assert facts.status_code == 200, facts.text
+    assert [t["name"] for t in facts.json()] == ["fact_sales"]
+    assert sorted(t["name"] for t in every.json()) == ["dim_store", "fact_sales", "notes"]
+
+
+def test_an_unknown_model_kind_is_refused_naming_the_kinds(client: TestClient) -> None:
+    _star(client)
+    refused = client.get(_GOLD_TABLES, headers=AUTH_HEADER, params={"model_kind": "cube"})
+    assert refused.status_code == 422
+    assert refused.json()["detail"] == (
+        "model_kind must be one of fact, dimension, wide, staging; got 'cube'"
+    )
+
+
+def test_the_references_route_lists_both_directions(client: TestClient) -> None:
+    _star(client)
+    found = client.get(f"{_GOLD_TABLES}/dim_store/references", headers=AUTH_HEADER)
+    assert found.status_code == 200, found.text
+    assert found.json() == {
+        "table": "gold.dim_store",
+        "outgoing": [],
+        "hidden_outgoing": 0,
+        "incoming": [
+            {
+                "id": "gold.fact_sales/ref_store_id",
+                "table": "gold.fact_sales",
+                "column": "store_id",
+                "target": "gold.dim_store",
+                "target_column": "id",
+                "target_exists": True,
+            }
+        ],
+        "hidden_incoming": 0,
+    }
+
+
+def _table_reader(client: TestClient, name: str, table: str) -> dict[str, str]:
+    """Create a user holding the viewer role on one table of `gold` only.
+
+    Parameters
+    ----------
+    client
+        The test client.
+    name
+        The user's name.
+    table
+        The table it may read.
+
+    Returns
+    -------
+    dict
+        Its `Authorization` header.
+    """
+    client.post("/api/v1/principals", headers=AUTH_HEADER, json={"name": name, "type": "USER"})
+    granted = client.post(
+        "/api/v1/grants",
+        headers=AUTH_HEADER,
+        json={
+            "principal": name,
+            "role": "VIEWER",
+            "kind": "TABLE",
+            "environment": "dev",
+            "namespace": "gold",
+            "table": table,
+        },
+    )
+    assert granted.status_code < 300, granted.text
+    issued = client.post(
+        f"/api/v1/principals/{name}/tokens", headers=AUTH_HEADER, json={"name": name}
+    )
+    return {"Authorization": f"Bearer {issued.json()['token']}"}
+
+
+def test_the_references_route_needs_read_table(client: TestClient) -> None:
+    _star(client)
+    reader = _table_reader(client, "rita", "fact_sales")
+    refused = client.get(f"{_GOLD_TABLES}/dim_store/references", headers=reader)
+    assert refused.status_code == 403
+
+
+def test_a_reader_of_one_table_sees_only_counts_of_the_others(client: TestClient) -> None:
+    _star(client)
+    of_dim = _table_reader(client, "dora", "dim_store")
+    of_fact = _table_reader(client, "fred", "fact_sales")
+    dim = client.get(f"{_GOLD_TABLES}/dim_store/references", headers=of_dim).json()
+    fact = client.get(f"{_GOLD_TABLES}/fact_sales", headers=of_fact).json()
+    assert (dim["incoming"], dim["hidden_incoming"]) == ([], 1)
+    assert (fact["model"]["references"], fact["model"]["hidden_references"]) == ([], 1)
+    assert "dim_store" not in str(fact)

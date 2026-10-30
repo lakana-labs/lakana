@@ -494,6 +494,7 @@ def _denied_calls() -> dict[str, Callable[[_Context], object]]:
             x.principal, x.ref, requirements=[], updates=[]
         ),
         "describe_table": lambda x: x.catalog.describe_table(x.principal, x.ref),
+        "table_references": lambda x: x.catalog.table_references(x.principal, x.ref),
         "table_health": lambda x: x.catalog.table_health(
             x.principal, x.ref, days=30, now=datetime.now(UTC)
         ),
@@ -738,6 +739,7 @@ _ARTIFACT_HANDLING = {
         "commit_table": "refuses",
         "describe_table": "describes",
         "table_health": "describes",
+        "table_references": "describes",
         "set_table_description": "refuses",
         "set_column_description": "refuses",
         "can_read_table": "describes",

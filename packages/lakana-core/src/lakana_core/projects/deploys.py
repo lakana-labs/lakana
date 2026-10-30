@@ -29,6 +29,7 @@ from lakana_core.auth import Action, AuthorizationService, CiScope, PrincipalRef
 from lakana_core.catalog.columns import stored_columns
 from lakana_core.catalog.descriptions import sync_project_descriptions
 from lakana_core.catalog.identity import resolve_table_id
+from lakana_core.catalog.model_metadata import clear_removed_models
 from lakana_core.ci_oidc.exchange import ci_scope_for_run
 from lakana_core.ci_oidc.scope import (
     ALREADY_USED_MESSAGE,
@@ -3299,6 +3300,12 @@ class DeployService:
             db_now(self._session),
         )
         sync_project_descriptions(self._session, environment_id, manifest)
+        clear_removed_models(
+            self._session,
+            environment_id,
+            previous.manifest_json if previous is not None else None,
+            manifest,
+        )
         run.job_version_id = version.id
         run.diff_json = diff.to_json()
         run.checks_json = dict(checks) if checks else None
@@ -3436,6 +3443,12 @@ class DeployService:
             db_now(self._session),
         )
         sync_project_descriptions(self._session, environment_id, target.manifest_json)
+        clear_removed_models(
+            self._session,
+            environment_id,
+            current.manifest_json if current is not None else None,
+            target.manifest_json,
+        )
         run.resolved_sha = target.commit_sha
         run.job_version_id = target.id
         run.diff_json = diff.to_json()

@@ -515,6 +515,24 @@ def test_a_lost_last_attempt_fails_the_task_with_its_message(
     )
 
 
+def test_a_text_the_scheduler_writes_clears_the_check_message_state(
+    session: Session, run_id: uuid.UUID
+) -> None:
+    """The state stored with a check phase's text never describes a text written over it."""
+    scheduler_tick(session, NOW, _half)
+    task = _task(session, "silver.clean")
+    task.status = TaskStatus.RUNNING
+    task.attempt = task.max_attempts
+    task.lease_owner = "w1"
+    task.lease_expires_at = NOW - timedelta(seconds=1)
+    task.error_message = "1 check warned: `positive` (2 rows)."
+    task.check_message_state = {"branch": "passed"}
+    session.commit()
+    scheduler_tick(session, NOW, _half)
+    task = _task(session, "silver.clean")
+    assert (task.error_message, task.check_message_state) == (LOST_MESSAGE, None)
+
+
 def _running_with_open_attempt(session: Session, expires: datetime) -> TaskRun:
     """Put `silver.clean` in `running` under `w1` with an open attempt.
 

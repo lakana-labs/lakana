@@ -145,6 +145,12 @@ from lakana_core.catalog.metadata import (
     read_metadata,
     write_metadata,
 )
+from lakana_core.catalog.model_metadata import (
+    TableModelView,
+    TableReferences,
+    model_view,
+    references_view,
+)
 from lakana_core.catalog.orphaned_locations import (
     AUDITED_LOCATIONS,
     DEFAULT_OLDER_THAN_DAYS,
@@ -266,6 +272,7 @@ from lakana_core.runs.checks import (
     no_checked_snapshot_message,
     not_published_message,
 )
+from lakana_core.runs.hidden_checks import ReferenceCheckFilter
 from lakana_core.runs.kept import kept_message, refused_message, restore_kept, task_may_read
 from lakana_core.runs.lockdown import (
     OTHER_ASSET_MESSAGE,
@@ -622,6 +629,9 @@ class TableDescription:
         every other kind.
     expires_soon
         Whether that is within ``LAKANA_TABLES__EXPIRY_WARNING_DAYS``; never when that is 0.
+    model
+        The model the asset header declares (`kind:`, `grain:`, `key:`, `references:`), with
+        only the references whose target the caller may read; `None` without one.
     """
 
     ref: TableRef
@@ -646,6 +656,7 @@ class TableDescription:
     file_count: int | None = None
     expires_at: datetime | None = None
     expires_soon: bool = False
+    model: TableModelView | None = None
 
 
 _NO_UNPUBLISHING = (
@@ -3224,6 +3235,47 @@ class CatalogService:
             ),
             expires_at=expires_at,
             expires_soon=expires_soon,
+            model=model_view(
+                self._session,
+                row,
+                ref,
+                lambda target: self.can_read_table(p, target),
+                ReferenceCheckFilter(self._session, self._authz, p, ref.environment).hides,
+            ),
+        )
+
+    def table_references(self, p: PrincipalRef, ref: TableRef) -> TableReferences:
+        """Show what a table's header says it references, and which tables reference it.
+
+        These are the references the model declares, not lineage. A reference whose target, or
+        whose referencing table, `p` may not read is counted, never named; a missing target is
+        counted the same way for such a reader, so the answer never says whether it exists.
+
+        Parameters
+        ----------
+        p
+            The acting principal.
+        ref
+            The table reference.
+
+        Returns
+        -------
+        TableReferences
+            Both directions, as `p` may see them.
+
+        Raises
+        ------
+        NotFoundError
+            If the table does not exist.
+        PermissionDenied
+            If `p` may not read it.
+        """
+        self._authz.authorize(
+            p, Action.READ_TABLE, Securable.table_scope(ref.environment, ref.namespace, ref.name)
+        )
+        _, row = self._find_table(ref)
+        return references_view(
+            self._session, row, ref, lambda target: self.can_read_table(p, target)
         )
 
     def table_retention(self, p: PrincipalRef, ref: TableRef) -> TableRetention:
@@ -3497,11 +3549,15 @@ class CatalogService:
                 ),
                 config=self._view_audit,
             )
+        withheld = ReferenceCheckFilter(self._session, self._authz, p, ref.environment)
+        every = latest_checks(self._session, row.id)
+        checks = [c for c in every if not withheld.hides(c.run_id, c.name, c.generated)]
         return TableHealth(
             days=days,
             last_maintenance=last_maintenance(self._session, row.id),
-            checks=latest_checks(self._session, row.id),
+            checks=checks,
             readers=shown,
+            hidden_checks=len(every) - len(checks),
         )
 
     def _describe_row(self, p: PrincipalRef, ref: TableRef, row: Table) -> TableDescription:

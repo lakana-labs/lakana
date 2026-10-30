@@ -16,6 +16,7 @@ from lakana_core.models.namespace import Namespace
 from lakana_core.models.query_run import QueryErrorCause, QueryRun, QueryRunStatus, WriteMode
 from lakana_core.models.table import Table, TableType
 from lakana_core.models.table_column import TableColumn
+from lakana_core.models.declared_reference import DeclaredReference
 from lakana_core.models.table_location import TableLocation, TableLocationState
 from lakana_core.models.table_read import TableRead
 from lakana_core.models.artifact import ArtifactBlob, ArtifactUpload, ArtifactVersion
@@ -77,6 +78,7 @@ __all__ = [
     "ConnectionTest",
     "ConnectionTestOutcome",
     "ConnectionTestState",
+    "DeclaredReference",
     "DeployKind",
     "DeployRun",
     "DeployStatus",

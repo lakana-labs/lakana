@@ -36,6 +36,15 @@ lakana --output json search status --kind column
 out=$(lakana --output json search status --kind column)
 test "$(names "$out")" = "column silver.orders.status"
 
+# docs:start model-kind
+lakana search store --model-kind dimension
+# docs:end model-kind
+
+# The sandbox table declares no kind, so the filter leaves nothing.
+out=$(lakana --output json search order --model-kind dimension)
+test "$(names "$out")" = ""
+if lakana search order --model-kind cube 2>/dev/null; then echo "an unknown kind must be refused" >&2; exit 1; fi
+
 # A text that matches nothing says what search looks at.
 message=$(lakana search zzzzzz 2>&1 | tr -s '\n ' '  ')
 case "$message" in

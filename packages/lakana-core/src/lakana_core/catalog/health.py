@@ -290,15 +290,27 @@ def latest_checks(session: Session, table_id: uuid.UUID) -> list[CheckHealth]:
         One per check, by check name. Of two results that ended together, the one with the
         greater id.
     """
+    # Only the newest row of each check is read, not the table's whole check history.
+    ranked = (
+        select(
+            CheckResult.id,
+            func.row_number()
+            .over(
+                partition_by=CheckResult.check_name,
+                order_by=(CheckResult.finished_at.desc(), CheckResult.id.desc()),
+            )
+            .label("position"),
+        )
+        .where(CheckResult.table_id == table_id)
+        .subquery()
+    )
     rows = session.scalars(
         select(CheckResult)
-        .where(CheckResult.table_id == table_id)
-        .order_by(CheckResult.finished_at.desc(), CheckResult.id.desc())
+        .join(ranked, ranked.c.id == CheckResult.id)
+        .where(ranked.c.position == 1)
         .execution_options(populate_existing=True)
     )
-    newest: dict[str, CheckResult] = {}
-    for row in rows:
-        newest.setdefault(row.check_name, row)
+    newest = {row.check_name: row for row in rows}
     return [
         CheckHealth(
             name=row.check_name,
@@ -380,15 +392,19 @@ class TableHealth:
     last_maintenance
         The last maintenance that changed the table, or `None`.
     checks
-        The newest result of each check.
+        The newest result of each check the caller may see.
     readers
         Who read the table; `None` for a caller who may not see the table's grants.
+    hidden_checks
+        How many results were left out of `checks`: generated reference checks whose target the
+        caller may not read.
     """
 
     days: int
     last_maintenance: LastMaintenance | None
     checks: list[CheckHealth]
     readers: list[Reader] | None
+    hidden_checks: int = 0
 
 
 def record_table_reads(

@@ -1911,3 +1911,28 @@ def test_runs_show_json_keeps_the_failure_and_the_failed_task_count(tmp_path: Pa
 
     assert shown["failed_tasks"] == 1
     assert shown["tasks"][0]["failure"] == _TIMEOUT_FAILURE
+
+
+def test_runs_show_marks_a_generated_check(tmp_path: Path) -> None:
+    """A check from the asset's header says so, as `lakana check list` does."""
+    block = _show(
+        tmp_path,
+        _checked(
+            "gold.fact_sales",
+            result_body("key_unique", generated=True),
+            result_body("positive"),
+        ),
+    )
+    assert block == [
+        "gold.fact_sales          passed   2 of 2 checks passed",
+        "  key_unique (generated) passed",
+        "  positive               passed",
+    ]
+
+
+def test_runs_show_counts_the_checks_it_does_not_show(tmp_path: Path) -> None:
+    block = _show(
+        tmp_path,
+        {**_checked("gold.fact_sales", result_body("positive")), "hidden_checks": 2},
+    )
+    assert block[-1] == "  2 checks of references to tables you cannot read are not shown."

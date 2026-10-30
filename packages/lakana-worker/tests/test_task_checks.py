@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from typing import Any
 
 import pytest
@@ -65,6 +66,7 @@ from lakana_core.catalog.service import (
 )
 from lakana_core.errors import (
     PermissionDenied,
+    ValidationError,
 )
 from lakana_core.identifiers import TableRef
 from lakana_core.models import (
@@ -81,6 +83,9 @@ from lakana_core.models import (
     TaskStatus,
     WriteMode,
 )
+from lakana_core.policy.read_errors import policy_read_failure
+from lakana_core.projects.checks import CheckSpec, GeneratedFrom
+from lakana_core.runs.check_message import BLOCKING, PASSED, CheckMessageState, check_message
 from lakana_core.runs.scheduler import COMMITTED_BEFORE_RECORDED_MESSAGE
 from lakana_core.runs.tasks import (
     FailureKind,
@@ -134,6 +139,30 @@ def test_a_failed_blocking_check_is_permanent_and_the_build_runs_once(world: Wor
     assert not _exists(world, "gold.report")
     (rolled,) = _events(world, AuditEventType.TABLE_ROLLED_BACK)
     assert (rolled["outcome"], rolled["checks"]) == ("unpublished", ["silver.orders/unique_id"])
+
+
+@pytest.mark.parametrize("on_failure", ["block", "warn"])
+def test_the_stored_state_gives_back_the_stored_message_from_the_results(
+    world: World, on_failure: str
+) -> None:
+    """The worker words its message with the builder a reader's view uses, and stores its state."""
+    _checked(world, _check("unique_id", _DUPLICATE_IDS, on_failure=on_failure))
+    run_id = _start(world)
+    _drain(world)
+
+    task = _task(world, "silver.orders")
+    state = CheckMessageState.from_json(task.check_message_state)
+    assert state is not None
+    assert state.branch == (BLOCKING if on_failure == "block" else PASSED)
+    rebuilt = check_message(
+        _results(world, task.id), state, table="silver.orders", run_id=run_id, environment="dev"
+    )
+    assert rebuilt == task.error_message is not None
+    (attempt,) = _attempts(world, task.id)
+    assert (attempt.error_message, attempt.check_message_state) == (
+        task.error_message,
+        task.check_message_state,
+    )
 
 
 @pytest.mark.slow
@@ -1327,3 +1356,79 @@ def test_a_foreign_check_task_names_its_real_failure_before_the_refusal(
         f"{_refused_text('bronze.events', kept)}"
     )
     assert _task(world, "silver.orders").status is TaskStatus.UPSTREAM_FAILED
+
+
+def _spec(generated: GeneratedFrom | None) -> CheckSpec:
+    """Build a check of `gold.fact_sales`.
+
+    Parameters
+    ----------
+    generated
+        Where it comes from; `None` for a hand-written check.
+
+    Returns
+    -------
+    CheckSpec
+        The check.
+    """
+    return CheckSpec(
+        name="gold.fact_sales/ref_store_id",
+        table="gold.fact_sales",
+        check="ref_store_id",
+        path="assets/gold/fact_sales.sql:6",
+        on_failure="block",
+        description=None,
+        sql="SELECT 1",
+        generated=generated,
+    )
+
+
+def test_only_a_reference_check_keeps_its_error_to_its_own_table() -> None:
+    """Its query reads the target, so the error names no table but the checked one."""
+    reference = GeneratedFrom("references", ("store_id",), "gold.dim_store", "store_id")
+    key = GeneratedFrom("key", ("id",))
+    assert task_checks_module._reads_another_table(_spec(reference)) == "gold.fact_sales"
+    assert task_checks_module._reads_another_table(_spec(key)) is None
+    assert task_checks_module._reads_another_table(_spec(None)) is None
+
+
+def test_a_reference_checks_policy_failure_on_its_target_names_no_table(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`_count_one` keeps a reference check's error to the checked table, end to end."""
+    _checked(
+        world,
+        _generated(
+            "ref_station",
+            "SELECT id FROM silver.orders WHERE id IS NULL",
+            {
+                "family": "references",
+                "columns": ["id"],
+                "target": "bronze.stations",
+                "target_column": "id",
+            },
+        ),
+        retries=0,
+    )
+    _start(world)
+    claimed = _run_until(world, "silver.orders")
+    real = checks_module.count_check
+
+    def failing_on_the_target(session: Session, **kwargs: object) -> checks_module.Counted:
+        counted = real(session, **kwargs)  # ty: ignore[invalid-argument-type]
+        return dataclasses.replace(
+            counted,
+            rows=None,
+            failure=ValidationError("conversion"),
+            error_message=policy_read_failure("bronze.stations"),
+            error_cause="invalid_query",
+        )
+
+    monkeypatch.setattr(task_checks_module, "model_problem", lambda *a, **k: None)
+    monkeypatch.setattr(checks_module, "count_check", failing_on_the_target)
+
+    run_claimed(_engine(world), claimed)
+
+    (result,) = _results(world, _task(world, "silver.orders").id)
+    assert result.outcome is CheckOutcome.ERRORED
+    assert result.error == policy_read_failure(None)

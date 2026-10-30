@@ -35,7 +35,7 @@ from lakana_core.models import (
     TaskRun,
     TaskStatus,
 )
-from lakana_core.policy.read_errors import is_policy_read_failure
+from lakana_core.policy.read_errors import is_policy_read_failure, policy_read_failure
 from lakana_core.projects.checks import CheckSpec
 
 if TYPE_CHECKING:
@@ -547,7 +547,9 @@ def verdict(results: Sequence[CheckResult]) -> Verdict:
     )
 
 
-def error_text(cause: str | None, stored: str | None, principal: str) -> str:
+def error_text(
+    cause: str | None, stored: str | None, principal: str, *, checked_table: str | None = None
+) -> str:
     """Word why a check's count failed, without anything the table holds.
 
     The stored text of a failed query can quote a value of the table ("Could not convert string
@@ -564,6 +566,10 @@ def error_text(cause: str | None, stored: str | None, principal: str) -> str:
         read.
     principal
         The run's principal name.
+    checked_table
+        The dotted name of the checked table, for a check whose query also reads a table that a
+        reader of the result may not read (a generated reference check reads its target). The
+        policy message then names a table only when it is this one, and otherwise none.
 
     Returns
     -------
@@ -574,7 +580,10 @@ def error_text(cause: str | None, stored: str | None, principal: str) -> str:
     if cause in {"permission_denied", "not_found"}:
         return ERROR_UNREADABLE.format(principal=shown(principal))
     if is_policy_read_failure(stored):
-        # Fixed wording that names a table and no value: safe to show as it is.
+        # Fixed wording that names a table and no value: safe to show as it is, unless the
+        # table may be one the result's reader may not read.
+        if checked_table is not None and stored != policy_read_failure(checked_table):
+            return policy_read_failure(None)
         return stored or ""
     matched = _ENGINE_ERROR_TYPE.match(stored or "")
     if matched is not None and matched.group(1) in _ENGINE_ERROR_TYPES:
@@ -1226,6 +1235,13 @@ def warning_note(warned: Sequence[CheckResult]) -> str:
         checks="check" if len(warned) == 1 else "checks",
         listing=_listing(warned),
     )
+
+
+WITHHELD_TASK_MESSAGE = (
+    "This task's message is not shown: it names a check of a reference to a table you cannot "
+    "read. The checks you may see are listed with the task."
+)
+"""What a reader sees in place of a task message that still names a withheld check."""
 
 
 def record_result(

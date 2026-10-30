@@ -22,6 +22,31 @@ class Kind(StrEnum):
     principal = "principal"
 
 
+class ModelKind(StrEnum):
+    """The values `--model-kind` accepts."""
+
+    fact = "fact"
+    dimension = "dimension"
+    wide = "wide"
+    staging = "staging"
+
+
+def _name(hit: SearchHit) -> str:
+    """Write a hit's name, with a table's declared kind after it.
+
+    Parameters
+    ----------
+    hit
+        The hit.
+
+    Returns
+    -------
+    str
+        The name, followed by ``[kind]`` for a table that declares one.
+    """
+    return f"{hit.name} [{hit.model_kind}]" if hit.model_kind else hit.name
+
+
 def _where(hit: SearchHit) -> str:
     """Say where a hit is, for a reader who has the name.
 
@@ -49,6 +74,13 @@ def search(
     ctx: typer.Context,
     text: Annotated[str, typer.Argument(metavar="TEXT", help="What to find; 1 to 200 characters.")],
     kind: Annotated[Kind | None, typer.Option("--kind", help="Only this kind of result.")] = None,
+    model_kind: Annotated[
+        ModelKind | None,
+        typer.Option(
+            "--model-kind",
+            help="Only tables whose asset header declares this kind; other results are left out.",
+        ),
+    ] = None,
     limit: Annotated[
         int, typer.Option("--limit", min=1, max=100, help="Most results to show (1 to 100).")
     ] = 20,
@@ -64,7 +96,8 @@ def search(
     Matching ignores case and finds TEXT anywhere in a name or description. Exact matches come
     first, then names that start with TEXT, then names that contain it, then descriptions.
     Runs are found by the first four or more characters of their id, their job or their
-    repository. You see only what you may read. Use --output json for every field.
+    repository. A table is also found by the grain its asset header declares, and shows its kind
+    in brackets after its name. You see only what you may read. Use --output json for every field.
 
     Parameters
     ----------
@@ -74,6 +107,8 @@ def search(
         The text to find.
     kind
         Only this kind of result.
+    model_kind
+        Only tables that declare this kind.
     limit
         Most results to show.
     offset
@@ -87,6 +122,7 @@ def search(
         environment,
         text,
         kind=kind.value if kind is not None else None,
+        model_kind=model_kind.value if model_kind is not None else None,
         limit=limit,
         offset=offset,
     )
@@ -97,15 +133,15 @@ def search(
         _output.emit(
             state,
             f"No match for {_output.inline(repr(text))}. Search looks at table names, column "
-            "names, descriptions, run ids, jobs, repositories and (for admins) people; try a "
-            "shorter text.",
+            "names, descriptions, grains, run ids, jobs, repositories and (for admins) people; "
+            "try a shorter text.",
         )
         return
     _output.emit(
         state,
         page.results,
         columns=["kind", "name", "matched", "where", "snippet"],
-        derived={"where": _where},
+        derived={"where": _where, "name": _name},
         droppable=["snippet", "where"],
     )
     if page.has_more:
@@ -113,6 +149,8 @@ def search(
         options: list[str] = []
         if kind is not None:
             options += ["--kind", kind.value]
+        if model_kind is not None:
+            options += ["--model-kind", model_kind.value]
         if limit != 20:
             options += ["--limit", str(limit)]
         options += [

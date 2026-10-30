@@ -24,6 +24,11 @@ def search(
     env: str,
     q: str = Query(description="The text to find; 1 to 200 characters, case-insensitive."),
     kind: SearchKind | None = Query(default=None, description="Only this kind of hit."),
+    model_kind: str | None = Query(
+        default=None,
+        description="Only tables whose asset header declares this kind: fact, dimension, wide "
+        "or staging.",
+    ),
     limit: int = Query(default=20, description="Hits per page, 1 to 100."),
     offset: int = Query(default=0, description="Hits to skip."),
     principal: PrincipalRef = Depends(get_principal),
@@ -32,11 +37,12 @@ def search(
     """Search an environment.
 
     Finds tables, columns, runs, jobs, repositories and principals whose names or
-    descriptions contain `q` (1 to 200 characters, case-insensitive; run ids need four
-    characters or more), one page at a time. What the caller may not read is left out of the
-    hits, not refused: tables and columns need `READ_TABLE`, runs `READ_ENVIRONMENT`,
-    principals the right to list them. Needs `READ_ENVIRONMENT`. Answers 404 when the
-    environment does not exist and 422 for a `q` or paging value out of range.
+    descriptions, or a table's declared grain, contain `q` (1 to 200 characters,
+    case-insensitive; run ids need four characters or more), one page at a time. What the
+    caller may not read is left out of the hits, not refused: tables and columns need
+    `READ_TABLE`, runs `READ_ENVIRONMENT`, principals the right to list them. Needs
+    `READ_ENVIRONMENT`. Answers 404 when the environment does not
+    exist and 422 for a `q`, `model_kind` or paging value out of range.
 
     Parameters
     ----------
@@ -47,6 +53,8 @@ def search(
         and repositories, and in principal names. Trimmed, 1 to 200 characters.
     kind
         Only hits of this kind.
+    model_kind
+        Only tables that declare this kind in their asset header; other hits are left out.
     limit
         Hits per page, 1 to 100.
     offset
@@ -70,5 +78,7 @@ def search(
     lakana_core.errors.NotFoundError
         Mapped to 404 by `install_exception_handlers`.
     """
-    page = service.search(principal, env, q, kind=kind, limit=limit, offset=offset)
+    page = service.search(
+        principal, env, q, kind=kind, model_kind=model_kind, limit=limit, offset=offset
+    )
     return SearchOut.model_validate(page)

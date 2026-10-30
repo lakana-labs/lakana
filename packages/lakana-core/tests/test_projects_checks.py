@@ -1348,6 +1348,24 @@ def test_the_listing_names_lakana_yaml_only_for_a_default() -> None:
     }
 
 
+def test_the_listing_names_where_a_generated_check_comes_from() -> None:
+    generated = ParsedCheck(
+        name="gold.fact_sales/key_unique",
+        table="gold.fact_sales",
+        check="key_unique",
+        path="models/gold/fact_sales.sql:3",
+        on_failure="block",
+        description=None,
+        sql="SELECT 1",
+        references=("gold.fact_sales",),
+        body_line=1,
+        generated=GeneratedFrom("key", ("id",)),
+    )
+    assert checks_listing([generated]) == {
+        "gold.fact_sales": [{"check": "key_unique", "on_failure": "block", "generated": "key"}]
+    }
+
+
 @pytest.mark.parametrize(
     ("yaml_text", "environment"),
     [

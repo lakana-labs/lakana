@@ -51,6 +51,7 @@ from lakana_core.runs.checks import (
     no_snapshot_not_read_message,
     no_snapshot_of_a_view_message,
 )
+from lakana_core.runs.hidden_checks import ReferenceCheckFilter
 from lakana_core.runs.service import authorize_run_read
 
 
@@ -173,7 +174,11 @@ def submit_check_rows(
         .limit(1)
         .execution_options(populate_existing=True)
     ).scalar_one_or_none()
-    if result is None:
+    # A generated reference check whose target the caller may not read is not shown to them
+    # anywhere, so asking for its rows is answered as for a check the run does not have.
+    if result is None or ReferenceCheckFilter(session, authorization, p, env.name).hides(
+        result.run_id, result.check_name, result.generated
+    ):
         raise CheckNotInRunError(check_not_in_run_message(run.id, check, env.name))
     # The foreign key from a run to its project version removes the run with the version, so
     # a run that is found has one; a manifest that cannot be read holds no checks.

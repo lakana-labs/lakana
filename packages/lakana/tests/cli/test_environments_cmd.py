@@ -584,6 +584,17 @@ def _measured_worker(worker_id: str = "box:1:ab", **caches: object) -> dict[str,
     }
 
 
+def test_env_usage_ignores_a_field_of_a_part_it_does_not_know(tmp_path: Path) -> None:
+    usage = _usage()
+    usage["tables"] = {"count": 2, "bytes": 3 * 1024**3, "unmeasured": 0, "added_later": 1}
+    api = FakeApi()
+    api.on("GET", "/api/v1/environments/dev/usage", json=usage)
+    api.on("GET", "/api/v1/workers", json=[])
+    result = invoke(make_state(tmp_path, api), "env", "usage", "dev", env={"COLUMNS": "200"})
+    assert result.exit_code == 0, result.stderr
+    assert "3.0 GiB in 2" in result.stdout
+
+
 def test_env_usage_of_one_environment_and_the_workers_caches(tmp_path: Path) -> None:
     api = FakeApi()
     api.on("GET", "/api/v1/environments/dev/usage", json=_usage(unmeasured=1))

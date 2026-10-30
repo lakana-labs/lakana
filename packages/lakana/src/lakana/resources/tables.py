@@ -36,10 +36,13 @@ from lakana._models import (
     LineageNode,
     LoadResult,
     MergeResult,
+    ModelReference,
     Reader,
     Table,
     TableHealth,
+    TableModel,
     TableReference,
+    TableReferences,
     TableRetention,
     WriteResult,
 )
@@ -127,6 +130,106 @@ def _when(value: str | None) -> datetime | None:
     return None if value is None else datetime.fromisoformat(value)
 
 
+def _check_from_json(data: dict[str, Any]) -> CheckHealth:
+    """Build a `CheckHealth` from one `CheckHealthOut` JSON object.
+
+    Parameters
+    ----------
+    data
+        The decoded object. An older server sends no `generated`.
+
+    Returns
+    -------
+    CheckHealth
+        The parsed result.
+    """
+    return CheckHealth(
+        name=data["name"],
+        check=data["check"],
+        run_id=data["run_id"],
+        outcome=data["outcome"],
+        on_failure=data["on_failure"],
+        failing_rows=data["failing_rows"],
+        error=data["error"],
+        rollback_outcome=data["rollback_outcome"],
+        kept=data["kept"],
+        not_published=data["not_published"],
+        finished_at=datetime.fromisoformat(data["finished_at"]),
+        generated=data.get("generated", False),
+    )
+
+
+def _model_reference_from_json(data: dict[str, Any]) -> ModelReference:
+    """Build a `ModelReference` from one `ModelReferenceOut` JSON object.
+
+    Parameters
+    ----------
+    data
+        The decoded object.
+
+    Returns
+    -------
+    ModelReference
+        The parsed reference.
+    """
+    return ModelReference(
+        id=data["id"],
+        table=data["table"],
+        column=data["column"],
+        target=data["target"],
+        target_column=data["target_column"],
+        target_exists=data["target_exists"],
+    )
+
+
+def _model_from_json(data: dict[str, Any] | None) -> TableModel | None:
+    """Build a `TableModel` from a `TableModelOut` JSON object.
+
+    Parameters
+    ----------
+    data
+        The decoded object, or `None` for a table without a model (or an older server).
+
+    Returns
+    -------
+    TableModel or None
+        The parsed model.
+    """
+    if data is None:
+        return None
+    return TableModel(
+        kind=data["kind"],
+        grain=data["grain"],
+        key=tuple(data["key"]),
+        key_none=data["key_none"],
+        references=tuple(_model_reference_from_json(r) for r in data["references"]),
+        hidden_references=data["hidden_references"],
+        checks=tuple(_check_from_json(c) for c in data["checks"]),
+    )
+
+
+def _references_from_json(data: dict[str, Any]) -> TableReferences:
+    """Build a `TableReferences` from the platform API's JSON response body.
+
+    Parameters
+    ----------
+    data
+        The decoded `TableReferencesOut` JSON body.
+
+    Returns
+    -------
+    TableReferences
+        The parsed references.
+    """
+    return TableReferences(
+        table=data["table"],
+        outgoing=tuple(_model_reference_from_json(r) for r in data["outgoing"]),
+        hidden_outgoing=data["hidden_outgoing"],
+        incoming=tuple(_model_reference_from_json(r) for r in data["incoming"]),
+        hidden_incoming=data["hidden_incoming"],
+    )
+
+
 def _health_from_json(data: dict[str, Any]) -> TableHealth:
     """Build a `TableHealth` from the platform API's JSON response body.
 
@@ -155,23 +258,8 @@ def _health_from_json(data: dict[str, Any]) -> TableHealth:
             bytes_deleted=maintenance["bytes_deleted"],
             tags_removed=maintenance["tags_removed"],
         ),
-        checks=[
-            CheckHealth(
-                name=c["name"],
-                check=c["check"],
-                run_id=c["run_id"],
-                outcome=c["outcome"],
-                on_failure=c["on_failure"],
-                failing_rows=c["failing_rows"],
-                error=c["error"],
-                rollback_outcome=c["rollback_outcome"],
-                kept=c["kept"],
-                not_published=c["not_published"],
-                finished_at=datetime.fromisoformat(c["finished_at"]),
-                generated=c.get("generated", False),
-            )
-            for c in data["checks"]
-        ],
+        checks=[_check_from_json(c) for c in data["checks"]],
+        hidden_checks=data.get("hidden_checks", 0),
         readers=None
         if readers is None
         else [
@@ -232,6 +320,7 @@ def _table_from_json(data: dict[str, Any]) -> Table:
         file_count=data.get("file_count"),
         expires_at=_when(data.get("expires_at")),
         expires_soon=data.get("expires_soon", False),
+        model=_model_from_json(data.get("model")),
     )
 
 
@@ -470,7 +559,9 @@ class Tables:
     def __init__(self, transport: HttpTransport) -> None:
         self._transport = transport
 
-    def list(self, environment: str, namespace: str) -> _TableList:
+    def list(
+        self, environment: str, namespace: str, *, model_kind: str | None = None
+    ) -> _TableList:
         """List the tables in a namespace.
 
         Parameters
@@ -479,19 +570,26 @@ class Tables:
             The environment name.
         namespace
             Dot-joined namespace path.
+        model_kind
+            Only the tables whose asset header declares this kind: ``fact``, ``dimension``,
+            ``wide`` or ``staging``. Every table when `None`.
 
         Returns
         -------
         list of Table
-            Every table in the namespace.
+            Every table in the namespace that you may read.
 
         Raises
         ------
         lakana.errors.NotFound
             If the namespace does not exist.
+        lakana.errors.ValidationError
+            If `model_kind` is not one of the kinds.
         """
         response = self._transport.request(
-            ROUTES["tables.list"], path_params={"env": environment, "path": namespace}
+            ROUTES["tables.list"],
+            path_params={"env": environment, "path": namespace},
+            params=None if model_kind is None else {"model_kind": model_kind},
         )
         return [_table_from_json(item) for item in response.json()]
 
@@ -1383,6 +1481,38 @@ class Tables:
             params={"direction": direction, "depth": depth},
         )
         return _lineage_from_json(response.json())
+
+    def references(self, environment: str, qualified_name: str) -> TableReferences:
+        """Show what a table's header says it references, and which tables reference it.
+
+        These are the references the model declares (`references:`), not lineage. A reference
+        whose target, or whose referencing table, you may not read is counted, never named.
+
+        Parameters
+        ----------
+        environment
+            The environment name.
+        qualified_name
+            Dot-joined `"namespace.table"` name.
+
+        Returns
+        -------
+        TableReferences
+            Outgoing and incoming references.
+
+        Raises
+        ------
+        lakana.errors.NotFound
+            If the table does not exist.
+        lakana.errors.PermissionDenied
+            If you may not read the table.
+        """
+        namespace, name = _split_namespace_table(qualified_name)
+        response = self._transport.request(
+            ROUTES["tables.references"],
+            path_params={"env": environment, "path": namespace, "name": name},
+        )
+        return _references_from_json(response.json())
 
     def maintain(
         self,

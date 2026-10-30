@@ -431,6 +431,63 @@ def test_a_three_asset_project_runs_with_lineage(
     assert "silver.clean" in repr(admin.tables.lineage(env, "gold.daily"))
 
 
+def test_a_star_with_model_metadata_runs_its_generated_checks(
+    stack: _Stack, sdk: tuple[TestClient, lakana.Client]
+) -> None:
+    """One fact, two dimensions and a stale reference, on Postgres and SeaweedFS.
+
+    The fact's reference to `gold.dim_product` finds an orphan: with `checks: references: warn`
+    the run succeeds with a warning, the check rows show the orphan, the catalog shows the model,
+    search finds the fact by its grain, and the dimension lists the fact as referencing it.
+    """
+    client, admin = sdk
+    env = _name()
+    repo = _project(
+        stack,
+        admin,
+        client,
+        env,
+        {
+            "assets/bronze/sales.sql": (
+                "SELECT * FROM (VALUES (DATE '2026-10-01', 1, 'a'), (DATE '2026-10-01', 2, 'zz'))"
+                " AS t(day, store_id, sku)"
+            ),
+            "assets/gold/dim_store.sql": (
+                "/* lakana\nkind: dimension\ngrain: One row per store.\nkey: store_id\n*/\n"
+                "SELECT * FROM (VALUES (1), (2)) AS t(store_id)"
+            ),
+            "assets/gold/dim_product.sql": (
+                "/* lakana\nkind: dimension\ngrain: One row per product.\nkey: sku\n*/\n"
+                "SELECT * FROM (VALUES ('a')) AS t(sku)"
+            ),
+            "assets/gold/fact_sales.sql": (
+                "/* lakana\nkind: fact\ngrain: One row per store, product and calendar day.\n"
+                "key: [day, store_id, sku]\nreferences:\n  store_id: gold.dim_store\n"
+                "  sku: gold.dim_product\nchecks:\n  references: warn\n*/\n"
+                "SELECT day, store_id, sku FROM bronze.sales"
+            ),
+        },
+    )
+    run = admin.runs.start(env, repo)
+    finished = _until_finished(client, admin, env, run.id)
+    assert finished.status == "succeeded", finished
+    results = {r.name: r for r in admin.checks.for_run(env, run.id)}
+    orphan = results["gold.fact_sales/ref_sku"]
+    assert orphan.outcome == "warned" and orphan.generated
+    assert orphan.failing_rows == 1
+    assert results["gold.fact_sales/ref_store_id"].outcome == "passed"
+    assert results["gold.fact_sales/key_unique"].outcome == "passed"
+    assert results["gold.dim_store/key_unique"].outcome == "passed"
+    orphans = _rows_of_check(admin, env, run.id, "gold.fact_sales/ref_sku")
+    assert [row["sku"] for row in orphans] == ["zz"]
+    table = admin.tables.get(env, "gold.fact_sales")
+    assert table.model is not None and table.model.kind == "fact"
+    refs = admin.tables.references(env, "gold.dim_product")
+    assert [r.id for r in refs.incoming] == ["gold.fact_sales/ref_sku"]
+    hits = admin.search(env, "calendar day").results
+    assert [h.name for h in hits] == ["gold.fact_sales"]
+
+
 def test_the_sql_tasks_of_a_run_execute_in_query_children(
     stack: _Stack, sdk: tuple[TestClient, lakana.Client], monkeypatch: pytest.MonkeyPatch
 ) -> None:

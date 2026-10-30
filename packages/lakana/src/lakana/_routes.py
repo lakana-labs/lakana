@@ -129,6 +129,9 @@ ROUTES: dict[str, Route] = {
     "tables.lineage": Route(
         "GET", "/api/v1/environments/{env}/namespaces/{path}/tables/{name}/lineage"
     ),
+    "tables.references": Route(
+        "GET", "/api/v1/environments/{env}/namespaces/{path}/tables/{name}/references"
+    ),
     "tables.maintain": Route(
         "POST", "/api/v1/environments/{env}/namespaces/{path}/tables/{name}/maintenance"
     ),

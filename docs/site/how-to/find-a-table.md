@@ -11,6 +11,8 @@ terminal, the SDK or through REST. You need an environment with at least one tab
 - the names of columns;
 - the descriptions of tables and of columns (see [Describe a table](describe-a-table.md)); the
   text shown is the one `lakana table get` shows;
+- the grain a table's asset header declares (`grain: One row per store and day`), which shows when
+  you search for a part of that sentence;
 - runs: the first four or more characters of a run's id, its job and its repository;
 - people and service accounts, if you may list them.
 
@@ -41,6 +43,20 @@ lakana search customer --kind table
 Descriptions are searched as part of tables and of columns, so `--kind table` finds a table by its
 description.
 
+## Look for one kind of model table
+
+A table whose asset header declares a `kind` shows it in brackets after its name, as in
+`gold.dim_store [dimension]`. `--model-kind` keeps only the tables of one kind (`fact`,
+`dimension`, `wide` or `staging`) and leaves out columns, runs and people:
+
+<!-- source: docs/examples/find-a-table/run.sh#model-kind -->
+```bash
+lakana search store --model-kind dimension
+```
+
+A table that declares no kind is never kept by this filter. See
+[Asset front-matter](../reference/asset-front-matter.md) for what the header declares.
+
 ## Use the answer in a script
 
 <!-- source: docs/examples/find-a-table/run.sh#json -->
@@ -55,7 +71,7 @@ you pass `--limit` (at most 100).
 ## What you see
 
 You see only what you may read. A table and its columns appear only if you may read the table, and
-so does a description: a text of a table you cannot read is never shown, not even as a piece of a
+so do its description, its grain and its kind: a text of a table you cannot read is never shown, not even as a piece of a
 result. Runs need the right to read the environment. People appear only for a caller who may list
 them (`MANAGE_PRINCIPAL`, which administrators hold). What you may not see is left out, not refused, so a search never tells you
 that something exists.

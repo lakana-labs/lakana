@@ -463,6 +463,7 @@ def test_the_keeper_is_stopped_before_the_outcome_is_recorded(
         rows_written: int | None = None,
         on_committed: str | None = None,
         in_transaction: Callable[[Session], None] | None = None,
+        check_message_state: dict[str, object] | None = None,
     ) -> bool:
         alive.append(any(t.name == "lakana-lease" for t in threading.enumerate()))
         return real(
@@ -477,6 +478,7 @@ def test_the_keeper_is_stopped_before_the_outcome_is_recorded(
             rows_written=rows_written,
             on_committed=on_committed,
             in_transaction=in_transaction,
+            check_message_state=check_message_state,
         )
 
     monkeypatch.setattr(tasks_module, "record_attempt", spying)

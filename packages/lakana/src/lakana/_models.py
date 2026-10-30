@@ -7,9 +7,34 @@ response bodies, field for field — the resource modules in
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from datetime import date, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from _typeshed import DataclassInstance
+
+
+def known_fields(model: type[DataclassInstance], data: dict[str, Any]) -> dict[str, Any]:
+    """Keep the keys of an answer that a model has a field for.
+
+    The REST contract adds fields to an answer without notice; a client ignores the ones it does
+    not know, so that an older SDK keeps working against a newer server.
+
+    Parameters
+    ----------
+    model
+        A dataclass of this module.
+    data
+        One decoded JSON object.
+
+    Returns
+    -------
+    dict
+        The keys of `data` that name a field of `model`, with their values.
+    """
+    names = {f.name for f in fields(model)}
+    return {key: value for key, value in data.items() if key in names}
 
 
 @dataclass(frozen=True)
@@ -306,6 +331,95 @@ class TableReference:
 
 
 @dataclass(frozen=True)
+class ModelReference:
+    """One reference a table's asset header declares (`references:`).
+
+    Parameters
+    ----------
+    id
+        The reference's id, which is also its generated check's name, for example
+        ``gold.fact_sales/ref_store_id``.
+    table
+        Which table declares the reference (``namespace.table``).
+    column
+        Its column whose values point at the target.
+    target
+        Which table the values point at (``namespace.table``), spelled as in the header.
+    target_column
+        Which column of that table every non-null value must appear in.
+    target_exists
+        `True` while a table by the target's name exists. References to tables you may not
+        read are counted on the model, never listed.
+    """
+
+    id: str
+    table: str
+    column: str
+    target: str
+    target_column: str
+    target_exists: bool
+
+
+@dataclass(frozen=True)
+class TableModel:
+    """The model a table's asset header declares.
+
+    Parameters
+    ----------
+    kind
+        The declared kind (``fact``, ``dimension``, ``wide``, ``staging``), or `None` without
+        one.
+    grain
+        The header's one sentence on what a row stands for, or `None` without one.
+    key
+        Which columns identify a row; empty when there is no key or it is `key: none`.
+    key_none
+        `True` for `key: none`, where no set of columns is unique and nothing checks the grain.
+    references
+        The references whose target you may read.
+    hidden_references
+        How many references point at a table you may not read.
+    checks
+        The newest result of each check the header generates.
+    """
+
+    kind: str | None
+    grain: str | None
+    key: tuple[str, ...] = ()
+    key_none: bool = False
+    references: tuple[ModelReference, ...] = ()
+    hidden_references: int = 0
+    checks: tuple[CheckHealth, ...] = ()
+
+
+@dataclass(frozen=True)
+class TableReferences:
+    """What a table's header says it references, and which tables reference it.
+
+    These are the references the model declares, not lineage.
+
+    Parameters
+    ----------
+    table
+        The table's dotted name.
+    outgoing
+        The references its header declares whose target you may read.
+    hidden_outgoing
+        How many of its references point at a table you may not read.
+    incoming
+        The references other tables' headers declare to it, from tables you may read.
+    hidden_incoming
+        How many references to it come from tables you may not read.
+    """
+
+    table: str
+    outgoing: tuple[ModelReference, ...] = ()
+    hidden_outgoing: int = 0
+    incoming: tuple[ModelReference, ...] = ()
+    hidden_incoming: int = 0
+
+
+@dataclass(frozen=True)
 class Table:
     """A managed (Iceberg) table, an external table, or a view.
 
@@ -361,6 +475,9 @@ class Table:
     expires_soon
         Whether that is within the server's warning window (7 days by default); always
         `False` when the server's window is 0.
+    model
+        The model the asset header declares (kind, grain, key, references and the checks they
+        generate); `None` without one, and from a server older than model metadata.
     """
 
     name: str
@@ -383,6 +500,7 @@ class Table:
     file_count: int | None = None
     expires_at: datetime | None = None
     expires_soon: bool = False
+    model: TableModel | None = None
 
 
 @dataclass(frozen=True)
@@ -551,12 +669,16 @@ class TableHealth:
     readers
         Who read the table in the window, most reads first; `None` when the caller may not see
         the table's grants.
+    hidden_checks
+        How many results were left out of `checks`: generated reference checks whose target you
+        may not read; 0 from an older server.
     """
 
     days: int
     last_maintenance: LastMaintenance | None
     checks: list[CheckHealth]
     readers: list[Reader] | None
+    hidden_checks: int = 0
 
 
 @dataclass(frozen=True)
@@ -1943,10 +2065,14 @@ class CheckResultPage:
         The results on this page.
     next_cursor
         Pass back as ``cursor=`` to fetch the next page; ``None`` on the last page.
+    hidden
+        How many results of this page were left out: generated reference checks whose target
+        you may not read; 0 from an older server.
     """
 
     items: list[CheckResult]
     next_cursor: str | None
+    hidden: int = 0
 
 
 @dataclass(frozen=True)
@@ -2033,7 +2159,9 @@ class RunTask:
         ``asset`` for a table the run builds, ``source_check`` for a table it only checks.
     checks
         The task's check results, by name; empty in a listing and for a server that predates
-        checks.
+        checks. A generated reference check whose target you may not read is left out.
+    hidden_checks
+        How many results were left out of `checks` for that reason; 0 from an older server.
     kept_check
         Whether this ``source_check`` task checks a table the project builds, because that table
         was kept after a failed check, rather than a table the project only reads; ``False`` for
@@ -2063,6 +2191,7 @@ class RunTask:
     waiting_for: WaitingFor | None = None
     kind: str = "asset"
     checks: tuple[CheckResult, ...] = ()
+    hidden_checks: int = 0
     kept_check: bool | None = False
     setting_back: bool = False
     failure: Failure | None = None
@@ -2784,15 +2913,19 @@ class SearchHit:
         A display name: ``namespace.table``, ``namespace.table.column``, the run id or the
         principal's name.
     matched
-        The field that matched: ``name``, ``description``, ``id``, ``job`` or ``repository``.
+        The field that matched: ``name``, ``description``, ``grain``, ``id``, ``job`` or
+        ``repository``.
     snippet
-        For a description match, at most 160 characters of the description around the hit.
+        For a description or grain match, at most 160 characters of the text around the hit.
     namespace
         For a table or column, its namespace, dotted.
     table
         For a table or column, the table's name.
     table_kind
         For a table, ``TABLE``, ``EXTERNAL``, ``VIEW`` or ``ARTIFACT``.
+    model_kind
+        For a table whose asset header declares one, its ``kind``: ``fact``, ``dimension``,
+        ``wide`` or ``staging``.
     column
         For a column, its name.
     column_type
@@ -2818,6 +2951,7 @@ class SearchHit:
     namespace: str | None = None
     table: str | None = None
     table_kind: str | None = None
+    model_kind: str | None = None
     column: str | None = None
     column_type: str | None = None
     run_id: str | None = None

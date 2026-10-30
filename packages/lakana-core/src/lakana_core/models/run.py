@@ -238,6 +238,9 @@ class TaskRun(Base):
     """A `lakana_core.runs.failures.FailureCode` value, stored with `error_message`: why the task
     failed. Null for a task that did not fail, and for a row from before the codes existed
     (shown as ``unknown``)."""
+    check_message_state: Mapped[dict | None] = mapped_column(JSON, nullable=True, default=None)
+    """What `error_message` was built from besides the check results, when the check phase built
+    it (`lakana_core.runs.check_message.CheckMessageState`); null for any other message."""
     started_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
 
@@ -262,6 +265,8 @@ class TaskAttempt(Base):
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     failure_code: Mapped[str | None] = mapped_column(String(32), nullable=True)
     """Why this attempt did not succeed (a `FailureCode` value); null otherwise and for old rows."""
+    check_message_state: Mapped[dict | None] = mapped_column(JSON, nullable=True, default=None)
+    """The `CheckMessageState` of this attempt's `error_message`, as on the task run."""
 
 
 class SchedulerLease(Base):

@@ -908,6 +908,9 @@ class TableOut(BaseModel):
         Whether that is within the server's warning window
         (``LAKANA_TABLES__EXPIRY_WARNING_DAYS``, 7 days by default); always `false` when that
         is 0.
+    model
+        The model the asset header declares (kind, grain, key, references and the checks they
+        generate); `None` for a table whose header declares none.
     """
 
     name: str
@@ -930,6 +933,7 @@ class TableOut(BaseModel):
     file_count: int | None = None
     expires_at: datetime | None = None
     expires_soon: bool = False
+    model: TableModelOut | None = None
 
 
 class LastMaintenanceOut(BaseModel):
@@ -1009,6 +1013,90 @@ class CheckHealthOut(BaseModel):
     generated: bool = False
 
 
+class ModelReferenceOut(BaseModel):
+    """One reference a table's header declares, as `ModelReferenceView` holds it.
+
+    Parameters
+    ----------
+    id
+        ``<ns.table>/ref_<column>``: the name of the reference's generated check.
+    table
+        The dotted name of the table that declares it.
+    column
+        The referencing column.
+    target
+        The dotted name of the table it points at, as the header names it.
+    target_column
+        The column of the target it must match.
+    target_exists
+        Whether a table of that name exists now. A reference whose target the caller may not
+        read is never listed, so this says nothing about such a table.
+    """
+
+    id: str
+    table: str
+    column: str
+    target: str
+    target_column: str
+    target_exists: bool
+
+
+class TableModelOut(BaseModel):
+    """The model a table's asset header declares, as the caller may see it.
+
+    Parameters
+    ----------
+    kind
+        ``fact``, ``dimension``, ``wide`` or ``staging``; `None` when the header names none.
+    grain
+        What one row is, in one sentence; `None` when the header says nothing.
+    key
+        The columns that identify one row; empty for no key and for `key: none`.
+    key_none
+        Whether the header says `key: none`: no columns are unique, and the grain is not
+        checked.
+    references
+        The references whose target the caller may read, by id.
+    hidden_references
+        How many references point at a table the caller may not read; they are not listed.
+    checks
+        The newest result of each check the current header generates, by name.
+    """
+
+    kind: str | None
+    grain: str | None
+    key: list[str]
+    key_none: bool
+    references: list[ModelReferenceOut]
+    hidden_references: int
+    checks: list[CheckHealthOut]
+
+
+class TableReferencesOut(BaseModel):
+    """Response body of `GET .../tables/{name}/references`.
+
+    Parameters
+    ----------
+    table
+        The table's dotted name.
+    outgoing
+        The references its header declares whose target the caller may read, by id.
+    hidden_outgoing
+        How many of its references point at a table the caller may not read.
+    incoming
+        The references other tables' headers declare to it, from tables the caller may read,
+        by id.
+    hidden_incoming
+        How many references to it come from tables the caller may not read; never named.
+    """
+
+    table: str
+    outgoing: list[ModelReferenceOut]
+    hidden_outgoing: int
+    incoming: list[ModelReferenceOut]
+    hidden_incoming: int
+
+
 class ReaderOut(BaseModel):
     """A principal's use of a table over the window.
 
@@ -1041,12 +1129,16 @@ class TableHealthOut(BaseModel):
     readers
         Who read the table in the window, most reads first; `None` for a caller who may not see
         the table's grants.
+    hidden_checks
+        How many results were left out of `checks`: generated reference checks whose target the
+        caller may not read.
     """
 
     days: int
     last_maintenance: LastMaintenanceOut | None
     checks: list[CheckHealthOut]
     readers: list[ReaderOut] | None
+    hidden_checks: int = 0
 
 
 class DescriptionIn(BaseModel):
@@ -2753,10 +2845,15 @@ class CheckResultPage(BaseModel):
         The results on this page.
     next_cursor
         Pass back as `?cursor=` to fetch the next page; `None` on the last page.
+    hidden
+        How many results of this page were left out: generated reference checks whose target
+        the caller may not read. A page can hold fewer results than `limit` and still have a
+        next one.
     """
 
     items: list[CheckResultOut]
     next_cursor: str | None
+    hidden: int = 0
 
 
 class FailureOut(BaseModel):
@@ -2825,6 +2922,9 @@ class TaskRunOut(BaseModel):
         ``asset`` for a table the run builds, ``source_check`` for a table it only checks.
     checks
         The task's check results, by name.
+    hidden_checks
+        How many results were left out of `checks`: generated reference checks whose target the
+        caller may not read.
     kept_check
         ``true`` for a ``source_check`` task that checks a table the project builds, because
         that table was kept after a failed check; ``false`` for every other task; ``null`` for a
@@ -2857,6 +2957,7 @@ class TaskRunOut(BaseModel):
     )
     kind: str = "asset"
     checks: list[CheckResultOut] = Field(default_factory=list)
+    hidden_checks: int = 0
     kept_check: bool | None = False
     setting_back: bool = False
     failure: FailureOut | None = None
@@ -3698,15 +3799,19 @@ class SearchHitOut(BaseModel):
         A display name: ``namespace.table``, ``namespace.table.column``, the run id or the
         principal's name.
     matched
-        The field that matched: ``name``, ``description``, ``id``, ``job`` or ``repository``.
+        The field that matched: ``name``, ``description``, ``grain``, ``id``, ``job`` or
+        ``repository``.
     snippet
-        For a description match, at most 160 characters of the description around the hit.
+        For a description or grain match, at most 160 characters of the text around the hit.
     namespace
         For a table or column, its namespace, dotted.
     table
         For a table or column, the table's name.
     table_kind
         For a table, ``TABLE``, ``EXTERNAL``, ``VIEW`` or ``ARTIFACT``.
+    model_kind
+        For a table whose asset header declares one, its ``kind``: ``fact``, ``dimension``,
+        ``wide`` or ``staging``.
     column
         For a column, its name.
     column_type
@@ -3729,11 +3834,12 @@ class SearchHitOut(BaseModel):
 
     kind: Literal["table", "column", "run", "principal"]
     name: str
-    matched: Literal["name", "description", "id", "job", "repository"]
+    matched: Literal["name", "description", "grain", "id", "job", "repository"]
     snippet: str | None
     namespace: str | None
     table: str | None
     table_kind: str | None
+    model_kind: str | None
     column: str | None
     column_type: str | None
     run_id: uuid.UUID | None

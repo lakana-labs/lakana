@@ -4,6 +4,9 @@ A table or column has up to two texts. The *project* text comes from the asset h
 (`description:` and `columns:`) and is written by a deploy, a rollback, or the creation of the
 table by a run. An *edit* is set through the API and is shown instead. A deploy never writes an
 edit; resetting an edit makes the project text show again.
+
+The same writes carry the asset's model (`kind:`, `grain:`, `key:`, `references:`) onto the table,
+through `lakana_core.catalog.model_metadata`.
 """
 
 from __future__ import annotations
@@ -17,13 +20,12 @@ from typing import Any, Literal
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from lakana_core.catalog.model_metadata import find_project_table, write_model_entry
 from lakana_core.errors import ValidationError
-from lakana_core.identifiers import TableRef
 from lakana_core.models import (
     ColumnDescription,
     EnvironmentDeployment,
     JobVersion,
-    Namespace,
     Table,
     TableType,
 )
@@ -170,10 +172,10 @@ def _text(value: object) -> str | None:
 
 
 def _apply_entry(session: Session, row: Table, entry: Mapping[str, Any]) -> None:
-    """Write the project's text of one manifest entry onto a table and its columns.
+    """Write the project's text and model of one manifest entry onto a table and its columns.
 
-    Never touches an edit. A column whose text the header no longer has loses its project text; a
-    row left with no text at all is removed.
+    Never touches an edit, and leaves an artifact alone. A column whose text the header no longer
+    has loses its project text; a row left with no text at all is removed.
 
     Parameters
     ----------
@@ -191,7 +193,7 @@ def _apply_entry(session: Session, row: Table, entry: Mapping[str, Any]) -> None
 
 
 def _write_entry(session: Session, row: Table, entry: Mapping[str, Any]) -> None:
-    """Write the project's text of one manifest entry; `_apply_entry` without its guard.
+    """Write the project's text and model of one manifest entry; `_apply_entry` without its guard.
 
     Parameters
     ----------
@@ -232,6 +234,7 @@ def _write_entry(session: Session, row: Table, entry: Mapping[str, Any]) -> None
         found.description_project = None
         if found.description_edited is None:
             session.delete(found)
+    write_model_entry(session, row, entry)
 
 
 def _entries(manifest: object) -> dict[str, Mapping[str, Any]]:
@@ -258,7 +261,7 @@ def _entries(manifest: object) -> dict[str, Mapping[str, Any]]:
 def sync_project_descriptions(
     session: Session, environment_id: uuid.UUID, manifest: object
 ) -> None:
-    """Write a project's descriptions onto the tables of an environment that exist.
+    """Write a project's descriptions and models onto the tables of an environment that exist.
 
     Called by a deploy and a rollback, in their transaction, with the manifest that becomes
     current. A table the project produces but no run has created yet is skipped; it gets its
@@ -274,19 +277,7 @@ def sync_project_descriptions(
         The manifest of the project version that becomes current.
     """
     for dotted, entry in _entries(manifest).items():
-        try:
-            ref = TableRef.from_dotted("-", dotted)
-        except ValidationError:
-            continue
-        row = session.execute(
-            select(Table)
-            .join(Namespace, Namespace.id == Table.namespace_id)
-            .where(
-                Namespace.environment_id == environment_id,
-                Namespace.path == ref.namespace.joined(),
-                Table.name == ref.name,
-            )
-        ).scalar_one_or_none()
+        row = find_project_table(session, environment_id, dotted)
         if row is not None:
             _apply_entry(session, row, entry)
 
@@ -294,7 +285,7 @@ def sync_project_descriptions(
 def sync_created_table(
     session: Session, environment_id: uuid.UUID, row: Table, dotted: str
 ) -> None:
-    """Give a table that was just created the project text of the deployment that produces it.
+    """Give a table that was just created the project text and model of its deployment.
 
     Nothing is committed here; the caller's commit carries it.
 

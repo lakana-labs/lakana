@@ -394,10 +394,12 @@ def list_checks(
     CheckResultPage
         The page and the cursor of the next one.
     """
-    items, next_cursor = service.list_checks(
+    items, next_cursor, hidden = service.list_checks(
         principal, env, table=table, limit=limit, cursor=cursor
     )
-    return CheckResultPage(items=[_check_out(v) for v in items], next_cursor=next_cursor)
+    return CheckResultPage(
+        items=[_check_out(v) for v in items], next_cursor=next_cursor, hidden=hidden
+    )
 
 
 @router.post("/runs/{run_id}/cancel", response_model=RunOut, responses=errors(403, 404, 409))

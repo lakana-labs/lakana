@@ -36,6 +36,11 @@ from lakana_core.auth import (
     Securable,
     SecurableKind,
 )
+from lakana_core.catalog.model_metadata import (
+    incoming_references,
+    read_table_model,
+    write_model_entry,
+)
 from lakana_core.catalog.service import CatalogService
 from lakana_core.catalog.tombstones import (
     DEFAULT_UNDO_DAYS,
@@ -1138,3 +1143,65 @@ def test_an_undrop_whose_metadata_file_is_gone_is_refused_and_restores_nothing(
     session.rollback()
     assert session.get(Table, table_id) is None
     assert _record(session, table_id).state is TableLocationState.DROPPED
+
+
+_MODEL_ENTRY = {
+    "write": "replace",
+    "key": ["id"],
+    "model": {
+        "kind": "fact",
+        "grain": "One row per order.",
+        "references": [{"column": "region", "target": "gold.regions", "target_column": "code"}],
+    },
+}
+
+
+def test_undrop_restores_the_model_and_its_references(
+    session: Session, catalog: CatalogService, principal: PrincipalRef
+) -> None:
+    """The model columns come back with the row, and the reference rows with them."""
+    table_id = _orders_table(catalog, principal)
+    write_model_entry(session, _fresh(session, Table, table_id), _MODEL_ENTRY)
+    session.commit()
+    environment_id = _fresh(
+        session, Namespace, _fresh(session, Table, table_id).namespace_id
+    ).environment_id
+    before = read_table_model(session, _fresh(session, Table, table_id))
+    assert before is not None
+
+    catalog.drop_table(principal, _ref("gold.orders"))
+    assert incoming_references(session, environment_id, "gold.regions") == []
+    catalog.undrop_table(principal, _ref("gold.orders"))
+
+    assert read_table_model(session, _fresh(session, Table, table_id)) == before
+    assert incoming_references(session, environment_id, "gold.regions") == [
+        (table_id, "region", "code")
+    ]
+
+
+def test_undrop_of_a_tombstone_from_before_references_restores_the_model_without_them(
+    session: Session, catalog: CatalogService, principal: PrincipalRef
+) -> None:
+    """A tombstone written before this release has no `references` key; the row comes back.
+
+    Its model columns come back with it, and no reference row is made up.
+    """
+    table_id = _orders_table(catalog, principal)
+    write_model_entry(session, _fresh(session, Table, table_id), _MODEL_ENTRY)
+    session.commit()
+    environment_id = _fresh(
+        session, Namespace, _fresh(session, Table, table_id).namespace_id
+    ).environment_id
+    catalog.drop_table(principal, _ref("gold.orders"))
+    record = _record(session, table_id)
+    snapshot = dict(record.dropped_table or {})
+    snapshot.pop("references", None)
+    record.dropped_table = snapshot
+    session.commit()
+
+    catalog.undrop_table(principal, _ref("gold.orders"))
+
+    model = read_table_model(session, _fresh(session, Table, table_id))
+    assert model is not None
+    assert (model.kind, model.key, model.references) == ("fact", ("id",), ())
+    assert incoming_references(session, environment_id, "gold.regions") == []

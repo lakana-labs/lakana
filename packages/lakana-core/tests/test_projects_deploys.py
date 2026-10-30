@@ -393,6 +393,48 @@ def test_a_deploy_and_a_rollback_publish_the_assets_descriptions(
     assert catalog.describe_table(principal, events).description == "first"
 
 
+def test_a_deploy_and_a_rollback_that_drop_an_asset_clear_its_tables_model(
+    session: Session, env: None, principal: PrincipalRef
+) -> None:
+    """The model goes with the asset; a deploy or rollback without it clears it, not the text."""
+    repo = _repo(session)
+    other = make_asset("silver.clean", ("bronze.src",))
+    events = make_asset(
+        "bronze.events",
+        metadata=AssetMetadata(
+            materialize="table",
+            kind="dimension",
+            grain="One row per event.",
+            key=("id",),
+            description="Events",
+        ),
+    )
+    row = session.scalars(select(Table).where(Table.name == "events")).one()
+
+    def model() -> tuple[str | None, str | None, object]:
+        session.refresh(row)
+        return row.model_kind, row.model_grain, row.model_key
+
+    _deployed(session, principal, repo, "a" * 40, other)
+    _deployed(session, principal, repo, "b" * 40, other, events)
+    assert model() == ("dimension", "One row per event.", ["id"])
+
+    service = DeployService(session, AllowAllAuthorization())
+    view = service.submit(
+        principal, "dev", repository=repo.name, kind=DeployKind.ROLLBACK, to_previous=True
+    )
+    run = _claimed(session, session.get(DeployRun, view.id))
+    assert run is not None
+    service.execute_rollback(principal, run, worker_id="w1")
+    assert model() == (None, None, None)
+
+    _deployed(session, principal, repo, "c" * 40, other, events)
+    assert model() == ("dimension", "One row per event.", ["id"])
+    _deployed(session, principal, repo, "d" * 40, other)
+    assert model() == (None, None, None)
+    assert row.description_project == "Events"
+
+
 def test_redeploying_a_sha_reuses_the_job_version(
     session: Session, env: None, principal: PrincipalRef
 ) -> None:

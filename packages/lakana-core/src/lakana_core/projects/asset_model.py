@@ -6,6 +6,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from lakana_core.errors import ValidationError
+from lakana_core.identifiers import shown
 from lakana_core.projects.project_config import IDENTIFIER_MESSAGE, unsafe_identifier
 
 if TYPE_CHECKING:
@@ -33,6 +35,29 @@ DEFAULT_DECIMALS = "float"
 MODEL_KINDS = ("fact", "dimension", "wide", "staging")
 """What an asset's `kind:` may say. `lakana.assets.MODEL_KINDS` repeats it (a parity test
 pins both, added with the decorator's arguments)."""
+
+
+def require_model_kind(value: str) -> None:
+    """Refuse a model kind a reader asks for that no header can declare.
+
+    The one place the text lives: the table listing's `model_kind` filter and search's kind
+    filter both call it.
+
+    Parameters
+    ----------
+    value
+        The kind asked for; untrusted.
+
+    Raises
+    ------
+    ValidationError
+        If `value` is not one of `MODEL_KINDS`; the message lists them and repeats the value.
+    """
+    if value not in MODEL_KINDS:
+        raise ValidationError(
+            f"model_kind must be one of {', '.join(MODEL_KINDS)}; got '{shown(value)}'"
+        )
+
 
 CHECK_FAMILIES = ("key", "references")
 """The generated checks an asset's `checks:` may set the failure mode of."""

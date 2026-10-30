@@ -246,3 +246,31 @@ def test_an_artifact_is_no_reference_target_in_either_form() -> None:
             f"Reference `store_id: {raw}`: `gold.model` is an artifact, not a table, so no "
             "column can point at it; point the reference at a table."
         ]
+
+
+def test_a_reference_too_long_to_store_is_refused_with_what_to_shorten() -> None:
+    """The catalog stores each part in 1,024 bytes; a longer one would fail the deploy late."""
+    long_table = "gold." + "n" * 1020 + ".dim"
+    long_column = "c" * 1025
+    targets = {long_table: _DIM, "gold.dim_store": _DIM}
+    cases = {
+        ("store_id", long_table): f"the target table `{long_table}` has 1029 bytes",
+        ("store_id", f"gold.dim_store.{long_column}"): (
+            f"the target column `{long_column}` has 1025 bytes"
+        ),
+        (long_column, "gold.dim_store"): f"the column `{long_column}` has 1025 bytes",
+    }
+    wide = TargetInfo(kind="dimension", key=("store_id",), key_none=False, columns=None)
+    for (column, raw), part in cases.items():
+        lookup = _lookup({**targets, "gold.dim_store": wide})
+        resolved, issues = resolve_references([_fact({column: raw})], lookup, environment="dev")
+        assert resolved == {}
+        assert [i.message for i in issues] == [
+            f"Reference `{column}: {raw}` is too long to store: {part}, and each of the column, "
+            "the target table and the target column may have at most 1024 bytes; shorten that "
+            "name."
+        ]
+    ok, issues = resolve_references(
+        [_fact({"c" * 1024: "gold.dim_store"})], _lookup(targets), environment="dev"
+    )
+    assert issues == [] and ok

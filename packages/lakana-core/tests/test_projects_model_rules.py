@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import pytest
 
+from lakana_core.errors import ValidationError
 from lakana_core.projects.asset_model import (
     key_columns,
     key_issues,
     model_issues,
+    require_model_kind,
     write_rule_issues,
 )
 from lakana_core.projects.frontmatter import AssetMetadata, consistency_issues
@@ -147,3 +149,21 @@ def test_key_columns_reads_none_as_no_columns() -> None:
     """`none` has no columns; a tuple is its columns."""
     assert key_columns("none") == ()
     assert key_columns(("a", "b")) == ("a", "b")
+
+
+@pytest.mark.parametrize("kind", ["fact", "dimension", "wide", "staging"])
+def test_require_model_kind_accepts_each_kind(kind: str) -> None:
+    assert require_model_kind(kind) is None
+
+
+def test_require_model_kind_names_the_kinds_and_the_value() -> None:
+    with pytest.raises(ValidationError) as raised:
+        require_model_kind("cube")
+    assert (
+        str(raised.value) == "model_kind must be one of fact, dimension, wide, staging; got 'cube'"
+    )
+
+
+def test_require_model_kind_escapes_what_it_repeats() -> None:
+    with pytest.raises(ValidationError, match=r"got '\\n'"):
+        require_model_kind("\n")

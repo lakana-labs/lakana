@@ -16,6 +16,13 @@ from lakana_core.projects.issues import ProjectIssue
 _MODELLED = {"fact": "a fact", "dimension": "a dimension", "wide": "a wide table"}
 """The kinds that may not reference a staging table, with the article their message uses."""
 
+MAX_REFERENCE_BYTES = 1024
+"""The most UTF-8 bytes of each part of a stored reference: column, target table, target column.
+
+`table_references` stores each in a column of 1024 characters; counting bytes also keeps the
+index on the target's name within Postgres's limit for one index row.
+"""
+
 
 @dataclass(frozen=True)
 class TargetInfo:
@@ -271,7 +278,42 @@ def _resolve_one(
         )
     if messages:
         return None, messages
+    too_long = _too_long(column, target, target_column)
+    if too_long is not None:
+        return None, [
+            f"Reference `{column}: {raw}` is too long to store: {too_long}, and each of the "
+            f"column, the target table and the target column may have at most {MAX_REFERENCE_BYTES}"
+            " bytes; shorten that name."
+        ]
     return ResolvedReference(column, target, target_column), []
+
+
+def _too_long(column: str, target: str, target_column: str) -> str | None:
+    """Name the first part of a reference that the catalog cannot store.
+
+    Parameters
+    ----------
+    column
+        The referencing column.
+    target
+        The target table's dotted name.
+    target_column
+        The target column.
+
+    Returns
+    -------
+    str or None
+        For example ``the column `…` has 1025 bytes``; `None` when every part fits.
+    """
+    for label, value in (
+        ("the column", column),
+        ("the target table", target),
+        ("the target column", target_column),
+    ):
+        size = len(value.encode("utf-8"))
+        if size > MAX_REFERENCE_BYTES:
+            return f"{label} `{value}` has {size} bytes"
+    return None
 
 
 def resolve_references(

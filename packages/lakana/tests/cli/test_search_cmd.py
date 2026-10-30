@@ -239,3 +239,34 @@ def test_search_as_json_gives_the_whole_page(tmp_path: Path) -> None:
     body = json.loads(result.stdout)
     assert body["has_more"] is True
     assert [(h["kind"], h["name"]) for h in body["results"]] == [("table", "silver.orders")]
+
+
+def test_search_shows_a_tables_kind_after_its_name_and_sends_model_kind(tmp_path: Path) -> None:
+    body = _page(
+        _hit("table", "gold.dim_store", model_kind="dimension", table_kind="TABLE"),
+        _hit("table", "gold.plain", table_kind="TABLE"),
+    )
+
+    api, result = _search(tmp_path, body, "store", "--model-kind", "dimension")
+
+    assert result.exit_code == 0, result.stderr
+    assert api.requests[-1].url.params["model_kind"] == "dimension"
+    plain = _plain(result.stdout)
+    assert "gold.dim_store [dimension]" in plain
+    assert "gold.plain [" not in plain
+
+
+def test_search_without_model_kind_sends_none_and_the_hint_keeps_it(tmp_path: Path) -> None:
+    api, _ = _search(tmp_path, _page(), "x")
+    assert "model_kind" not in api.requests[-1].url.params
+    _, result = _search(
+        tmp_path, _page(_hit("table", "a.b"), has_more=True), "x", "--model-kind", "fact"
+    )
+    assert "--model-kind fact" in _plain(result.stdout)
+
+
+def test_search_refuses_an_unknown_model_kind(tmp_path: Path) -> None:
+    api = FakeApi()
+    refused = invoke(make_state(tmp_path, api), "search", "x", "--model-kind", "cube")
+    assert refused.exit_code != 0
+    assert api.requests == []

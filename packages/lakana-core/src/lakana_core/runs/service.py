@@ -71,6 +71,7 @@ from lakana_core.projects.deploys import DeployService
 from lakana_core.projects.lookups import deployment_row, environment_by_name, repository_by_name
 from lakana_core.projects.manifest import job_on_deploy, manifest_assets, manifest_jobs
 from lakana_core.projects.run_policy import RunCaps, policy_from_manifest
+from lakana_core.runs.check_message import message_for_reader
 from lakana_core.runs.checks import (
     ASSET,
     SOURCE_CHECK,
@@ -78,6 +79,7 @@ from lakana_core.runs.checks import (
     view_of,
 )
 from lakana_core.runs.failures import Failure, attempt_failure, task_failure
+from lakana_core.runs.hidden_checks import ReferenceCheckFilter
 from lakana_core.runs.kept import kept_tables
 from lakana_core.runs.selection import (
     ManifestGraph,
@@ -295,6 +297,9 @@ class TaskRunView:
         ``asset`` for a table the run builds, ``source_check`` for a table it only checks.
     checks
         The results of the task's checks, by name; empty when it has none (and in listings).
+        A generated reference check whose target the reader may not read is left out.
+    hidden_checks
+        How many results were left out of `checks` for that reason.
     kept_check
         Whether this ``source_check`` task checks a table the project builds, because that table
         was kept after a failed check, rather than a table the project only reads;
@@ -323,6 +328,7 @@ class TaskRunView:
     waiting_for: WaitReason | None = None
     kind: str = ASSET
     checks: tuple[CheckResultView, ...] = ()
+    hidden_checks: int = 0
     kept_check: bool | None = False
     setting_back: bool = False
     failure: Failure | None = None
@@ -938,7 +944,13 @@ class RunService:
         return counts
 
     def _view(
-        self, run: Run, env: Environment, *, with_tasks: bool, failed: int | None = None
+        self,
+        run: Run,
+        env: Environment,
+        reader: PrincipalRef,
+        *,
+        with_tasks: bool,
+        failed: int | None = None,
     ) -> RunView:
         """Build a run's view.
 
@@ -948,6 +960,9 @@ class RunService:
             The run.
         env
             Its environment.
+        reader
+            Who reads it: a generated reference check whose target they may not read is left out
+            of its task's checks and counted (`ReferenceCheckFilter`).
         with_tasks
             Include the task runs.
         failed
@@ -998,12 +1013,19 @@ class RunService:
             run_as = self._name(run.run_as_principal_id)
             asset_of = {task.id: task.asset for task, _ in rows}
             checks: dict[uuid.UUID, list[CheckResultView]] = {}
+            hidden: dict[uuid.UUID, set[str]] = {}
+            every: dict[uuid.UUID, list[CheckResult]] = {}
+            withheld = ReferenceCheckFilter(self._session, self._authz, reader, env.name)
             for result in self._session.scalars(
                 select(CheckResult)
                 .where(CheckResult.run_id == run.id)
                 .order_by(CheckResult.check_name)
                 .execution_options(populate_existing=True)
             ):
+                every.setdefault(result.task_run_id, []).append(result)
+                if withheld.hides(result.run_id, result.check_name, result.generated):
+                    hidden.setdefault(result.task_run_id, set()).add(result.check_name)
+                    continue
                 checks.setdefault(result.task_run_id, []).append(
                     view_of(result, asset_of[result.task_run_id], run_as)
                 )
@@ -1017,7 +1039,15 @@ class RunService:
                     next_attempt_at=task.next_attempt_at,
                     started_at=task.started_at,
                     finished_at=task.finished_at,
-                    error_message=task.error_message,
+                    error_message=message_for_reader(
+                        task.error_message,
+                        task.check_message_state,
+                        every.get(task.id, ()),
+                        hidden.get(task.id, set()),
+                        table=task.asset,
+                        run_id=run.id,
+                        environment=env.name,
+                    ),
                     query_run_id=task.query_run_id,
                     rows_written=(
                         rows_written if task.query_run_id is not None else attempted.get(task.id)
@@ -1025,6 +1055,7 @@ class RunService:
                     waiting_for=reasons.get(task.id),
                     kind=task.kind,
                     checks=tuple(checks.get(task.id, ())),
+                    hidden_checks=len(hidden.get(task.id, ())),
                     kept_check=(
                         None
                         if version is None and task.kind == SOURCE_CHECK
@@ -1497,7 +1528,7 @@ class RunService:
             merged=merged,
         )
         self._session.commit()
-        return self._view(run, env, with_tasks=True)
+        return self._view(run, env, p, with_tasks=True)
 
     def _job_selection(
         self, env: Environment, repo: Repository, version: JobVersion, job: str
@@ -1773,7 +1804,7 @@ class RunService:
             If the run does not exist in this environment.
         """
         env = self._authorize_read(p, environment)
-        return self._view(self._run(env, run_id), env, with_tasks=True)
+        return self._view(self._run(env, run_id), env, p, with_tasks=True)
 
     def list_runs(
         self,
@@ -1906,7 +1937,7 @@ class RunService:
         if len(runs) > limit:
             next_cursor = encode_cursor("runs", page[-1].created_at, page[-1].id)
         failed = self._failed_tasks([run.id for run in page])
-        views = [self._view(run, env, with_tasks=False, failed=failed[run.id]) for run in page]
+        views = [self._view(run, env, p, with_tasks=False, failed=failed[run.id]) for run in page]
         return views, next_cursor
 
     # -- check results -------------------------------------------------------
@@ -1926,7 +1957,8 @@ class RunService:
         Returns
         -------
         list of CheckResultView
-            By task, then by check name.
+            By task, then by check name. A generated reference check whose target `p` may not
+            read is left out; `get` counts it on its task.
 
         Raises
         ------
@@ -1945,7 +1977,12 @@ class RunService:
             .order_by(TaskRun.asset, CheckResult.check_name)
             .execution_options(populate_existing=True)
         ).all()
-        return [view_of(result, asset, run_as) for result, asset in rows]
+        withheld = ReferenceCheckFilter(self._session, self._authz, p, env.name)
+        return [
+            view_of(result, asset, run_as)
+            for result, asset in rows
+            if not withheld.hides(result.run_id, result.check_name, result.generated)
+        ]
 
     def list_checks(
         self,
@@ -1955,7 +1992,7 @@ class RunService:
         table: str | None = None,
         limit: int = 50,
         cursor: str | None = None,
-    ) -> tuple[list[CheckResultView], str | None]:
+    ) -> tuple[list[CheckResultView], str | None, int]:
         """List the check results of an environment, newest first, one page at a time.
 
         Parameters
@@ -1973,9 +2010,11 @@ class RunService:
 
         Returns
         -------
-        tuple of (list of CheckResultView, str or None)
-            The page, ordered by finish time and then id, newest first, and the cursor of the
-            next page, or `None` on the last.
+        tuple of (list of CheckResultView, str or None, int)
+            The page, ordered by finish time and then id, newest first; the cursor of the
+            next page, or `None` on the last; and how many results of the page were left out
+            because they are generated reference checks whose target `p` may not read. A page
+            can therefore hold fewer than `limit` results and still have a next one.
 
         Raises
         ------
@@ -2017,7 +2056,13 @@ class RunService:
         if len(rows) > limit:
             last = page[-1][0]
             next_cursor = encode_cursor("checks", last.finished_at, last.id)
-        return [view_of(result, asset, run_as) for result, asset, run_as in page], next_cursor
+        withheld = ReferenceCheckFilter(self._session, self._authz, p, env.name)
+        shown = [
+            view_of(result, asset, run_as)
+            for result, asset, run_as in page
+            if not withheld.hides(result.run_id, result.check_name, result.generated)
+        ]
+        return shown, next_cursor, len(page) - len(shown)
 
     # -- cancel and resume -------------------------------------------------
 
@@ -2064,7 +2109,7 @@ class RunService:
             self._session.rollback()
             current = self._run(env, run_id)
             if current.status in ACTIVE_RUN_STATUSES:
-                return self._view(current, env, with_tasks=True)
+                return self._view(current, env, p, with_tasks=True)
             raise ConflictError(f"Run {run_id} is already {current.status.value}.")
         repo = self._session.get(Repository, run.repository_id)
         AuditService(self._session).record(
@@ -2074,7 +2119,7 @@ class RunService:
             detail={"run_id": str(run_id), "repository": repo.name if repo is not None else None},
         )
         self._session.commit()
-        return self._view(self._run(env, run_id), env, with_tasks=True)
+        return self._view(self._run(env, run_id), env, p, with_tasks=True)
 
     def resume(self, p: PrincipalRef, environment: str, run_id: uuid.UUID) -> RunView:
         """Start a new run of the same project version over what did not succeed.
@@ -2198,6 +2243,13 @@ class RunService:
         ).scalar_one_or_none()
         if task is None:
             raise NotFoundError(f"Run {run_id} has no task {asset!r}.")
+        results = list(
+            self._session.scalars(select(CheckResult).where(CheckResult.task_run_id == task.id))
+        )
+        withheld = ReferenceCheckFilter(self._session, self._authz, p, env.name)
+        hidden = {
+            r.check_name for r in results if withheld.hides(r.run_id, r.check_name, r.generated)
+        }
         attempts = tuple(
             TaskAttemptView(
                 attempt=a.attempt,
@@ -2206,7 +2258,15 @@ class RunService:
                 finished_at=a.finished_at,
                 outcome=a.outcome.value if a.outcome is not None else None,
                 rows_written=a.rows_written,
-                error_message=a.error_message,
+                error_message=message_for_reader(
+                    a.error_message,
+                    a.check_message_state,
+                    results,
+                    hidden,
+                    table=asset,
+                    run_id=run.id,
+                    environment=env.name,
+                ),
                 failure=attempt_failure(a),
             )
             for a in self._session.scalars(

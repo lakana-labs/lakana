@@ -142,6 +142,7 @@ def run_from_json(data: dict[str, Any]) -> Run:
                 waiting_for=waiting_for_from_json(t.get("waiting_for")),
                 kind=t.get("kind", "asset"),
                 checks=tuple(check_result_from_json(c) for c in t.get("checks", ())),
+                hidden_checks=t.get("hidden_checks", 0),
                 kept_check=t.get("kept_check", False),
                 setting_back=t.get("setting_back", False),
                 failure=failure_from_json(t.get("failure")),

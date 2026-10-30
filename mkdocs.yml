@@ -54,6 +54,7 @@ nav:
       - how-to/delete-an-artifact-version.md
       - how-to/filter-rows.md
       - how-to/mask-a-column.md
+      - how-to/declare-a-tables-model.md
       - how-to/describe-a-table.md
       - how-to/drop-and-restore-a-table.md
       - how-to/let-tables-expire.md

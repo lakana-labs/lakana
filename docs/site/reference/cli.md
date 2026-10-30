@@ -170,12 +170,13 @@ Usage: `lakana search [OPTIONS] {TEXT}`
 
 Find tables, columns, descriptions, runs and people that match TEXT.
 
-Matching ignores case and finds TEXT anywhere in a name or description. Exact matches come first, then names that start with TEXT, then names that contain it, then descriptions. Runs are found by the first four or more characters of their id, their job or their repository. You see only what you may read. Use --output json for every field.
+Matching ignores case and finds TEXT anywhere in a name or description. Exact matches come first, then names that start with TEXT, then names that contain it, then descriptions. Runs are found by the first four or more characters of their id, their job or their repository. A table is also found by the grain its asset header declares, and shows its kind in brackets after its name. You see only what you may read. Use --output json for every field.
 
 | Name | Type | Default | Description |
 |---|---|---|---|
 | `TEXT` | text | required | What to find; 1 to 200 characters. |
 | `--kind` | one of `table`, `column`, `run`, `principal` | none | Only this kind of result. |
+| `--model-kind` | one of `fact`, `dimension`, `wide`, `staging` | none | Only tables whose asset header declares this kind; other results are left out. |
 | `--limit` | whole number, 1 to 100 | `20` | Most results to show (1 to 100). |
 | `--offset` | whole number, 0 or more | `0` | Results to skip, to show the next page. |
 | `--env` | text | none | Environment (default: the profile's). |
@@ -481,12 +482,13 @@ Usage: `lakana table list [OPTIONS] {namespace}`
 
 List the tables in NAMESPACE, or with --dropped the tables dropped from it.
 
-A dropped table keeps its files until `purge_after` (the server's undo period, 7 days by default); until then `lakana table undrop` restores it. A table that its retention lets expire within the server's warning window (7 days by default) shows when, in `expires`.
+A dropped table keeps its files until `purge_after` (the server's undo period, 7 days by default); until then `lakana table undrop` restores it. A table that its retention lets expire within the server's warning window (7 days by default) shows when, in `expires`. With --model-kind, only the tables whose asset header says `kind: <that kind>`.
 
 | Name | Type | Default | Description |
 |---|---|---|---|
 | `NAMESPACE` | text | required |  |
 | `--dropped` | flag | off | List the dropped tables that can still be restored, and until when. |
+| `--model-kind` | text | none | Only tables whose asset header declares this kind: fact, dimension, wide or staging. |
 | `--env` | text | none | Environment (default: the profile's). |
 
 ### `lakana table get`
@@ -651,6 +653,19 @@ Show table NAME's lineage as a tree (or JSON with --output json).
 | `--env` | text | none | Environment (default: the profile's). |
 | `--downstream` | flag | off | Show what NAME feeds, not what feeds it. |
 | `--depth` | whole number, 1 to 10 | `3` | Hops to walk. |
+
+### `lakana table references`
+
+Usage: `lakana table references [OPTIONS] {name}`
+
+Show what table NAME's asset header references, and which tables reference it.
+
+These are the references the model declares (`references:` in the asset header), not lineage: lineage is how data flowed, references are what the model says relates. A reference to or from a table you cannot read is counted, never named.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `NAME` | text | required |  |
+| `--env` | text | none | Environment (default: the profile's). |
 
 ### `lakana table retention`
 

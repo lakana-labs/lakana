@@ -11,7 +11,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 from sqlalchemy.orm import Session
 
@@ -258,6 +258,11 @@ class TaskOutcome:
         A successful build that committed nothing (an append or merge whose source had nothing
         new, a merge that changed no row): a failed check then has nothing of this run to set
         back, which is not the same as a write whose record is missing.
+    check_state
+        What the check phase built `message` from besides the check results
+        (`CheckMessageState.to_json`); `None` for a message the check phase did not build. It is
+        stored with the message, so that the message can be built again for a reader from whom a
+        result is withheld.
     """
 
     kind: FailureKind | None
@@ -276,3 +281,4 @@ class TaskOutcome:
     in_transaction: Callable[[Session], None] | None = None
     failure_code: FailureCode | None = None
     wrote_nothing: bool = False
+    check_state: dict[str, Any] | None = None

@@ -26,6 +26,7 @@ from lakana._models import (
     SearchPage,
     TaskTokenScope,
     Whoami,
+    known_fields,
 )
 from lakana._routes import ROUTES
 from lakana._tokens import mask_token
@@ -370,6 +371,7 @@ class Client:
         q: str,
         *,
         kind: Literal["table", "column", "run", "principal"] | None = None,
+        model_kind: Literal["fact", "dimension", "wide", "staging"] | None = None,
         limit: int = 20,
         offset: int = 0,
     ) -> SearchPage:
@@ -377,7 +379,8 @@ class Client:
 
         Matching ignores case and finds the text anywhere in a name or description. Exact matches
         come first, then names that start with the text, then names that contain it, then
-        descriptions; within each, tables come before columns, runs and principals. You see only
+        descriptions and declared grains; within each, tables come before columns, runs and
+        principals. You see only
         what you may read: tables and columns with ``READ_TABLE`` on the table, runs with
         ``READ_ENVIRONMENT`` (found by the first four or more characters of the id, the job or the
         repository), principals if you may list them.
@@ -390,6 +393,9 @@ class Client:
             The text, 1 to 200 characters after trimming.
         kind
             Only this kind of hit: ``table``, ``column``, ``run`` or ``principal``.
+        model_kind
+            Only tables whose asset header declares this ``kind``: ``fact``, ``dimension``,
+            ``wide`` or ``staging``; other hits are left out.
         limit
             Hits per page, 1 to 100.
         offset
@@ -405,16 +411,19 @@ class Client:
         lakana.errors.NotFound
             If the environment does not exist.
         lakana.errors.ValidationError
-            If the text, ``limit`` or ``offset`` is out of range; the message names the range.
+            If the text, ``model_kind``, ``limit`` or ``offset`` is out of range; the message
+            names the range.
         """
         params: dict[str, str | int] = {"q": q, "limit": limit, "offset": offset}
         if kind is not None:
             params["kind"] = kind
+        if model_kind is not None:
+            params["model_kind"] = model_kind
         body = self._transport.request(
             ROUTES["search"], path_params={"env": environment}, params=params
         ).json()
         return SearchPage(
-            results=[SearchHit(**hit) for hit in body["results"]],
+            results=[SearchHit(**known_fields(SearchHit, hit)) for hit in body["results"]],
             limit=body["limit"],
             offset=body["offset"],
             has_more=body["has_more"],

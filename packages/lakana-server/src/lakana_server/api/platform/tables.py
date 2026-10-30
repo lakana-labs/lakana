@@ -46,6 +46,7 @@ from lakana_core.catalog.writes import (
 )
 from lakana_core.errors import LakanaError, ValidationError
 from lakana_core.identifiers import NamespacePath, TableRef
+from lakana_core.projects.asset_model import require_model_kind
 from lakana_server.api.platform.schemas import (
     AppendOut,
     ColumnOut,
@@ -63,8 +64,10 @@ from lakana_server.api.platform.schemas import (
     ReplaceOut,
     TableCreate,
     TableHealthOut,
+    TableModelOut,
     TableOut,
     TableReferenceOut,
+    TableReferencesOut,
     TableRetentionIn,
     TableRetentionOut,
     UndropIn,
@@ -629,6 +632,9 @@ def _describe_out(namespace: str, description: TableDescription) -> TableOut:
         file_count=description.file_count,
         expires_at=description.expires_at,
         expires_soon=description.expires_soon,
+        model=None
+        if description.model is None
+        else TableModelOut.model_validate(description.model, from_attributes=True),
     )
 
 
@@ -961,6 +967,11 @@ def create_table(
 def list_tables(
     env: str,
     path: str,
+    model_kind: str | None = Query(
+        default=None,
+        description="Only tables whose asset header declares this kind: fact, dimension, wide "
+        "or staging.",
+    ),
     principal: PrincipalRef = Depends(get_principal),
     catalog: CatalogService = Depends(get_catalog),
 ) -> list[TableOut]:
@@ -968,8 +979,8 @@ def list_tables(
 
     Lists the tables of the namespace that the caller may read. Needs `READ_TABLE` on the
     namespace; tables the caller may not read are left out. Answers 404 when the namespace
-    does not exist and 503 when the environment's storage cannot be reached (try again after
-    `Retry-After`).
+    does not exist, 422 for a `model_kind` no header can declare, and 503 when the
+    environment's storage cannot be reached (try again after `Retry-After`).
 
     Parameters
     ----------
@@ -977,6 +988,9 @@ def list_tables(
         Environment name.
     path
         Dot-joined namespace path.
+    model_kind
+        Keep only the tables whose header declares this kind (`model.kind`); every table when
+        absent.
     principal
         The authenticated caller.
     catalog
@@ -991,12 +1005,19 @@ def list_tables(
         that declares one asset gets a listing of that one instead of a
         refusal that names another.
     """
+    if model_kind is not None:
+        require_model_kind(model_kind)
     ns = NamespacePath.from_parts(path.split("."))
     refs = catalog.list_tables(principal, env, ns)
-    return [
-        _describe_out(path, catalog.describe_table(principal, ref))
+    described = [
+        catalog.describe_table(principal, ref)
         for ref in refs
         if catalog.can_read_table(principal, ref)
+    ]
+    return [
+        _describe_out(path, d)
+        for d in described
+        if model_kind is None or (d.model is not None and d.model.kind == model_kind)
     ]
 
 
@@ -1292,6 +1313,51 @@ def get_table_lineage(
         hidden_nodes=graph.hidden_nodes,
         truncated=graph.truncated,
     )
+
+
+@router.get("/{name}/references", response_model=TableReferencesOut, responses=errors(403, 404))
+def get_table_references(
+    env: str,
+    path: str,
+    name: str,
+    principal: PrincipalRef = Depends(get_principal),
+    catalog: CatalogService = Depends(get_catalog),
+) -> TableReferencesOut:
+    """Show what a table's header says it references, and which tables reference it.
+
+    Needs `READ_TABLE` on the table. A reference whose target, or whose referencing table, the
+    caller may not read is counted in `hidden_outgoing` or `hidden_incoming`, never named.
+    These are the references the model declares, not lineage. Answers 404 when the table does
+    not exist.
+
+    Parameters
+    ----------
+    env
+        Environment name.
+    path
+        Dot-joined namespace path.
+    name
+        Table name.
+    principal
+        The authenticated caller.
+    catalog
+        The catalog service for this request.
+
+    Returns
+    -------
+    TableReferencesOut
+        Outgoing and incoming references.
+
+    Raises
+    ------
+    lakana_core.errors.NotFoundError
+        Mapped to 404.
+    lakana_core.errors.PermissionDenied
+        Mapped to 403, if the caller can't read the table itself.
+    """
+    ref = TableRef(environment=env, namespace=NamespacePath.from_parts(path.split(".")), name=name)
+    found = catalog.table_references(principal, ref)
+    return TableReferencesOut.model_validate(found, from_attributes=True)
 
 
 @router.post(

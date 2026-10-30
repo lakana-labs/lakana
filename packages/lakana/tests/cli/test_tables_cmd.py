@@ -1795,3 +1795,266 @@ def test_table_health_as_json(tmp_path: Path) -> None:
     assert body["last_maintenance"]["status"] == "complete"
     assert [c["check"] for c in body["checks"]] == ["unique_id", "positive", "few_nulls"]
     assert body["readers"][0]["principal"] == "ada"
+
+
+_FACT_BASE = "/api/v1/environments/dev/namespaces/gold/tables"
+_MODEL: dict[str, Any] = {
+    "kind": "fact",
+    "grain": "One row per store and day.",
+    "key": ["date", "store_id"],
+    "key_none": False,
+    "references": [
+        {
+            "id": "gold.fact_sales/ref_store_id",
+            "table": "gold.fact_sales",
+            "column": "store_id",
+            "target": "gold.dim_store",
+            "target_column": "store_id",
+            "target_exists": True,
+        }
+    ],
+    "hidden_references": 0,
+    "checks": [
+        {
+            "name": "gold.fact_sales/key_unique",
+            "check": "key_unique",
+            "run_id": "3f2c9d1e-8b7a-4c55-9e0a-1b2c3d4e5f60",
+            "outcome": "passed",
+            "on_failure": "block",
+            "failing_rows": 0,
+            "error": None,
+            "rollback_outcome": None,
+            "kept": False,
+            "not_published": False,
+            "finished_at": "2026-10-29T10:00:00Z",
+            "generated": True,
+        }
+    ],
+}
+_FACT = {**_TABLE, "name": "fact_sales", "namespace": "gold", "model": _MODEL}
+
+
+def _get_fact(tmp_path: Path, model: dict[str, Any]) -> str:
+    """Run `table get gold.fact_sales` against a fact with this model.
+
+    Parameters
+    ----------
+    tmp_path
+        Pytest's per-test directory.
+    model
+        The `model` of the body.
+
+    Returns
+    -------
+    str
+        Standard output.
+    """
+    api = FakeApi()
+    api.on("GET", f"{_FACT_BASE}/fact_sales", json={**_FACT, "model": model})
+    result = invoke(
+        make_state(tmp_path, api),
+        "table",
+        "get",
+        "gold.fact_sales",
+        "--env",
+        "dev",
+        env={"COLUMNS": "200"},
+    )
+    assert result.exit_code == 0, result.stderr
+    return result.stdout
+
+
+def test_table_get_shows_the_model_block(tmp_path: Path) -> None:
+    out = _get_fact(tmp_path, _MODEL)
+    assert "Model: fact" in out
+    assert "Grain: One row per store and day." in out
+    assert "Key: date, store_id" in out
+    assert "store_id → gold.dim_store.store_id (exists)" in out
+    assert "key_unique (generated)" in out
+
+
+def test_table_get_says_key_none_and_counts_hidden_references(tmp_path: Path) -> None:
+    out = _get_fact(
+        tmp_path,
+        {
+            **_MODEL,
+            "key": [],
+            "key_none": True,
+            "references": [
+                {**_MODEL["references"][0], "target_exists": False},
+            ],
+            "hidden_references": 2,
+            "checks": [],
+        },
+    )
+    assert "Key: none — grain not checked" in out
+    assert "store_id → gold.dim_store.store_id (missing)" in out
+    assert "2 more references to tables you cannot read" in out
+    assert "key_unique" not in out
+
+
+def test_table_get_without_a_kind_or_a_key(tmp_path: Path) -> None:
+    out = _get_fact(
+        tmp_path,
+        {**_MODEL, "kind": None, "grain": None, "key": [], "references": [], "checks": []},
+    )
+    assert "Model: (no kind)" in out
+    assert "Grain:" not in out
+    assert "Key: (none declared)" in out
+
+
+def test_table_get_of_a_table_without_a_model_shows_no_block(tmp_path: Path) -> None:
+    api = FakeApi()
+    api.on("GET", f"{_BASE}/sales", json=_TABLE)
+    result = invoke(make_state(tmp_path, api), "table", "get", "bronze.sales", "--env", "dev")
+    assert result.exit_code == 0, result.stderr
+    assert "Model:" not in result.stdout
+
+
+def test_table_get_json_carries_the_model(tmp_path: Path) -> None:
+    api = FakeApi()
+    api.on("GET", f"{_FACT_BASE}/fact_sales", json=_FACT)
+    result = invoke(
+        make_state(tmp_path, api),
+        "--output",
+        "json",
+        "table",
+        "get",
+        "gold.fact_sales",
+        "--env",
+        "dev",
+    )
+    assert result.exit_code == 0, result.stderr
+    model = json.loads(result.stdout)["model"]
+    assert model["key"] == ["date", "store_id"]
+    assert model["references"][0]["id"] == "gold.fact_sales/ref_store_id"
+
+
+def test_table_list_passes_the_model_kind(tmp_path: Path) -> None:
+    api = FakeApi()
+    api.on("GET", _FACT_BASE, json=[_FACT])
+    result = invoke(
+        make_state(tmp_path, api), "table", "list", "gold", "--model-kind", "fact", "--env", "dev"
+    )
+    assert result.exit_code == 0, result.stderr
+    assert dict(api.requests[-1].url.params) == {"model_kind": "fact"}
+    assert "fact_sales" in result.stdout
+
+
+_REFERENCES = {
+    "table": "gold.dim_store",
+    "outgoing": [],
+    "hidden_outgoing": 0,
+    "incoming": [_MODEL["references"][0]],
+    "hidden_incoming": 0,
+}
+
+
+def _references(tmp_path: Path, body: dict[str, Any], *options: str) -> Result:
+    """Run `table references gold.dim_store` against a canned answer.
+
+    Parameters
+    ----------
+    tmp_path
+        Pytest's per-test directory.
+    body
+        The answer.
+    *options
+        Options before the command.
+
+    Returns
+    -------
+    Result
+        The result.
+    """
+    api = FakeApi()
+    api.on("GET", f"{_FACT_BASE}/dim_store/references", json=body)
+    return invoke(
+        make_state(tmp_path, api),
+        *options,
+        "table",
+        "references",
+        "gold.dim_store",
+        "--env",
+        "dev",
+        env={"COLUMNS": "200"},
+    )
+
+
+def test_table_references_prints_both_directions(tmp_path: Path) -> None:
+    result = _references(tmp_path, _REFERENCES)
+    assert result.exit_code == 0, result.stderr
+    out = result.stdout
+    assert "References: none." in out
+    assert "Referenced by:" in out
+    assert "gold.fact_sales" in out
+    assert "store_id" in out
+    assert "cannot read" not in out
+
+
+def test_table_references_counts_what_it_hides(tmp_path: Path) -> None:
+    body = {
+        **_REFERENCES,
+        "outgoing": [{**_MODEL["references"][0], "table": "gold.dim_store"}],
+        "hidden_outgoing": 1,
+        "incoming": [],
+        "hidden_incoming": 3,
+    }
+    result = _references(tmp_path, body)
+    assert result.exit_code == 0, result.stderr
+    out = result.stdout
+    assert "References:" in out
+    assert "Referenced by: none." in out
+    assert "1 more reference to a table you cannot read" in out
+    assert "3 more from tables you cannot read" in out
+
+
+def test_table_references_json_keeps_the_object(tmp_path: Path) -> None:
+    result = _references(tmp_path, _REFERENCES, "--output", "json")
+    assert result.exit_code == 0, result.stderr
+    assert json.loads(result.stdout)["incoming"][0]["id"] == "gold.fact_sales/ref_store_id"
+
+
+def test_table_list_names_the_option_when_the_kind_is_refused(tmp_path: Path) -> None:
+    """The server's refusal names its parameter `model_kind`; the CLI names its option."""
+    api = FakeApi()
+    api.on(
+        "GET",
+        _FACT_BASE,
+        status=422,
+        json={"detail": "model_kind must be one of fact, dimension, wide, staging; got 'cube'"},
+    )
+    result = invoke(
+        make_state(tmp_path, api), "table", "list", "gold", "--model-kind", "cube", "--env", "dev"
+    )
+    assert result.exit_code == 8
+    plain = _plain(result.stderr)
+    assert "--model-kind must be one of fact, dimension, wide, staging; got 'cube'" in plain
+    assert "model_kind" not in plain.replace("--model-kind", "")
+
+
+def test_table_list_passes_any_other_refusal_on(tmp_path: Path) -> None:
+    api = FakeApi()
+    api.on("GET", _FACT_BASE, status=422, json={"detail": "something else"})
+    result = invoke(
+        make_state(tmp_path, api), "table", "list", "gold", "--model-kind", "fact", "--env", "dev"
+    )
+    assert result.exit_code == 8
+    assert "something else" in _plain(result.stderr)
+
+
+def test_table_health_counts_the_checks_it_does_not_show(tmp_path: Path) -> None:
+    _, result = _health(tmp_path, {**_HEALTH, "hidden_checks": 1})
+    assert result.exit_code == 0, result.stderr
+    assert "1 check of a reference to a table you cannot read is not shown." in _plain(
+        result.stdout
+    )
+    _, plain = _health(tmp_path, _HEALTH)
+    assert "cannot read" not in plain.stdout
+
+
+def test_table_health_with_only_withheld_checks_says_so_and_not_none(tmp_path: Path) -> None:
+    _, result = _health(tmp_path, {**_HEALTH, "checks": [], "hidden_checks": 2})
+    plain = _plain(result.stdout)
+    assert "2 checks of references to tables you cannot read are not shown." in plain
+    assert "none recorded" not in plain

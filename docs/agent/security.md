@@ -339,6 +339,58 @@ SQLite alike.
 
 Audited in the same transaction (`TABLE_DESCRIBED`, `COLUMN_DESCRIBED`; `detail`: `table`, `column`, `old_length`, `new_length`, `reset`); the text is never in `detail`. A deploy writes only `description_project` and the project rows of `column_descriptions`; it never touches an edit (`catalog/descriptions.py`). Pins: `test_descriptions.py`.
 
+## A table's model and its references (#250)
+
+| Read | Needs | Notes |
+|---|---|---|
+| `TableOut.model` (`GET .../tables/{name}`, the listing, `lakana table get`) | `READ_TABLE` on the table | `CatalogService.describe_table`, then `model_metadata.model_view`. A reference is shown only when `permits(READ_TABLE)` holds on its target's table scope, asked **before** anything is looked up; otherwise it is counted in `hidden_references`. So a missing and an unreadable target look the same to a reader without the right, and `target_exists` (`true`/`false`) is only ever computed for a target the reader may read. The `ref_<column>` check of a hidden reference is left out with it (its outcome and error say something about the target). A shown `ref_` result also passes `ReferenceCheckFilter.hides`, which asks about the target **the result's run** declared, as table health does: after a header points a reference at a new target, a result computed against the old one stays hidden from a reader of the new target who may not read the old one, until a run replaces it. A stored target that is not a table name is counted as hidden. |
+| `?model_kind=` on the listing | as the listing | The filter runs on the described tables the caller may read; `require_model_kind` refuses anything outside `MODEL_KINDS` with one text. |
+| `GET .../tables/{name}/references` | `READ_TABLE` on the table, checked first (403 before the lookup) | `CatalogService.table_references`, `model_metadata.references_view`. Outgoing as above (`hidden_outgoing`). Incoming rows are found by the table's current dotted name (`ix_table_references_environment_target`) and kept only when the caller may read the **source** table; the rest are counted in `hidden_incoming`, never named. |
+
+**Generated reference checks everywhere else.** `runs/hidden_checks.ReferenceCheckFilter`
+withholds a generated `ref_<column>` result (its outcome, `failing_rows` and `error`) from a reader
+who may not read the reference's target, in `CatalogService.table_health` (`hidden_checks`),
+`RunService.get` (each task's `hidden_checks`), `RunService.checks` and `RunService.list_checks`
+(the page's `hidden`), and `submit_check_rows` answers such a check with `CheckNotInRunError`,
+the text of a check the run does not have. The target is the one the run's project version
+declared for the check (`CheckSpec.generated.target`); the right is asked by name before anything
+is looked up, as for a reference. A result whose target cannot be told (no readable entry, or a
+target that is not a table name) is shown only to a reader with READ_TABLE on the whole
+environment. `key_*` and hand-written checks are not filtered. A task's `error_message`, in
+`RunService.get` and in each attempt of `RunService.task_log`, goes through
+`runs/check_message.message_for_reader`. The check phase stores, beside the message, the state it
+was built from besides the results (`check_message_state`: the rollback, the kept note's facts, the
+refusals, the branch); `check_message` is the one builder the worker and the reader's view share.
+For a reader with a withheld result, the message is built again from the visible results only,
+after the state was shown to give back the stored text from every result. The scheduler clears
+the state whenever it writes another text (`store._apply_task`), and `record_attempt` stores the
+pair together. When the state does not give back the text (an earlier attempt whose results were
+counted again), or the visible results need another kind of message, the reader gets
+`WITHHELD_TASK_MESSAGE`; a text without a state is shown only when it names no withheld check.
+`test_check_message.py` proves, over every outcome, mode and state, that the reader's text is the
+worker's own text from the visible results. Residual, accepted for now and tracked in #385: a table's
+`state_message` (`not_published_message`, kept notes), the task's free-text log (one
+`check ref_<column>: …, N rows` line per check), webhook notifications and the `CHECK_FAILED`
+audit event still name a failed `ref_` check and may carry its row count, which tells how many
+rows point at keys the target lacks; none of them names the target. Pins: `test_hidden_reference_checks.py` in
+lakana-core and lakana-server.
+
+The rows are written only by a deploy, a rollback and a run's table creation
+(`catalog/model_metadata.py`); REST, the SDK and the CLI only read them. References are held by
+name, as the header names its target: a table renamed through the Iceberg REST catalog is no longer
+the target of references to its old name, and a later table of that name is, as the reference's
+generated check reads it. A generated reference check's `error` never names the target either:
+the pre-check texts (`runs/model_precheck.py`) name only the asset's path and column, the count's
+refused and missing cases are `ERROR_UNREADABLE`, other failures are the engine's error type or the
+cause in words, and the one fixed text that names a table, the row filter or column mask failure,
+is replaced by its variant that names none unless it names the checked table (`error_text(...,
+checked_table=)`, which the worker passes for a reference check; `test_policy_read_errors.py`).
+The renamed table keeps its model rows (keyed by its id) under its new
+name until it is dropped. Pins: `test_describe_table.py`
+(`test_a_missing_target_and_an_unreadable_target_look_the_same_to_a_reader`,
+`test_incoming_references_count_hidden_sources`, the two rename tests), `test_tables.py` in
+lakana-server, `test_undrop_restores_the_model_and_its_references`.
+
 ## Table health: who sees the readers
 
 | Action | Needs | Notes |
@@ -358,7 +410,7 @@ no text inside it, is read out for a caller who may not read it.
 
 | Result | Needs | Notes |
 |---|---|---|
-| table, column | `READ_TABLE` on the table | `authz.permits` per table (cached per search), as `CatalogService.can_read_table` asks it. A column's name, type and description and a table's description are in the row only after this check; a snippet is cut from the shown description of a permitted row. |
+| table, column | `READ_TABLE` on the table | `authz.permits` per table (cached per search), as `CatalogService.can_read_table` asks it. A column's name, type and description and a table's description, declared grain (`model_grain`) and kind (`model_kind`) are in the row only after this check; a snippet is cut from the shown description or grain of a permitted row. A grain or kind of a table the caller may not read matches nothing for them. Search does not match reference targets; if it ever does, a hit may name only a target the caller may read. |
 | run | `READ_ENVIRONMENT` | Decided once, before the runs are looked for. |
 | principal | `MANAGE_PRINCIPAL` at instance scope | The principal listing's rule as a yes or no; no results, not an error. |
 
@@ -1829,8 +1881,9 @@ landing between the lookup and the delete is in the snapshot, not lost to it), t
 `tombstone`: only for an `ICEBERG` row whose derived root has a record that is `LIVE` **and names
 this table's id**, under `lock_location`: `DROPPED`, `dropped_at = now`, `purge_after = now +
 LAKANA_TABLES__UNDO_DAYS` (`now` for a purge or `UNDO_DAYS=0`), `revoked_policy_ids` = the
-`RevokedPolicy` list, `dropped_table` = every mapped column of the row, of its `column_descriptions`
-and of its `table_columns` (the rows its id cascades to); then `TABLE_DROPPED` and the row delete.
+`RevokedPolicy` list, `dropped_table` = every mapped column of the row, of its `column_descriptions`,
+of its `table_columns` and of its `table_references` (the rows its id cascades to); then
+`TABLE_DROPPED` and the row delete.
 The drop itself deletes no file any more (`purge=True` used to delete the metadata file in the
 request). No tombstone, files kept: an `EXTERNAL` table, a view (no location), a table whose root's
 record names another table (two legacy tables sharing a directory). A `DROPPED` record of another
@@ -1845,7 +1898,8 @@ is refused). It finds the newest `DROPPED` record of the name in the namespace, 
 `purge_started_at` set (409), `db_now >= purge_after` (409), namespace path gone (404), name taken
 (409, `--as`), metadata file gone (409, `FILES_GONE_MESSAGE`). Then, in one transaction: the row from the snapshot (same id and metadata
 location, namespace by path, the new name; an owner or description author deleted since becomes
-`NULL`), its descriptions and columns, `restore_policies`, the record back to `LIVE` (cleared),
+`NULL`), its descriptions and columns, its declared references (with the environment of the
+namespace it comes back into; a tombstone from before #250 has none), `restore_policies`, the record back to `LIVE` (cleared),
 `TABLE_UNDROPPED` with the restored `{kind, id}` list, the guard's `record_pending`, commit. An
 `IntegrityError` (a create won the name between the check and the insert, or the namespace was
 dropped) rolls back and is reported as taken, or as a conflict to retry.

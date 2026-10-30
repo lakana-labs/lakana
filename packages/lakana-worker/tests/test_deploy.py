@@ -2650,8 +2650,8 @@ def test_a_header_key_generates_checks_in_the_manifest_and_the_listing(
     assert run.checks_json == {
         "silver.clean": [
             {"check": "id_present", "on_failure": "warn"},
-            {"check": "key_not_null", "on_failure": "block"},
-            {"check": "key_unique", "on_failure": "block"},
+            {"check": "key_not_null", "on_failure": "block", "generated": "key"},
+            {"check": "key_unique", "on_failure": "block", "generated": "key"},
         ]
     }
 

@@ -2243,7 +2243,7 @@
           "tables"
         ],
         "summary": "List the tables of a namespace",
-        "description": "Lists the tables of the namespace that the caller may read. Needs `READ_TABLE` on the namespace; tables the caller may not read are left out. Answers 404 when the namespace does not exist and 503 when the environment's storage cannot be reached (try again after `Retry-After`).",
+        "description": "Lists the tables of the namespace that the caller may read. Needs `READ_TABLE` on the namespace; tables the caller may not read are left out. Answers 404 when the namespace does not exist, 422 for a `model_kind` no header can declare, and 503 when the environment's storage cannot be reached (try again after `Retry-After`).",
         "operationId": "list_tables_api_v1_environments__env__namespaces__path__tables_get",
         "parameters": [
           {
@@ -2265,6 +2265,24 @@
               "title": "Path"
             },
             "description": "Dot-joined namespace path."
+          },
+          {
+            "name": "model_kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only tables whose asset header declares this kind: fact, dimension, wide or staging.",
+              "title": "Model Kind"
+            },
+            "description": "Only tables whose asset header declares this kind: fact, dimension, wide or staging."
           },
           {
             "name": "authorization",
@@ -3092,6 +3110,118 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/LineageOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token is missing, wrong, expired or revoked.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/environments/{env}/namespaces/{path}/tables/{name}/references": {
+      "get": {
+        "tags": [
+          "tables"
+        ],
+        "summary": "Show what a table's header says it references, and which tables reference it",
+        "description": "Needs `READ_TABLE` on the table. A reference whose target, or whose referencing table, the caller may not read is counted in `hidden_outgoing` or `hidden_incoming`, never named. These are the references the model declares, not lineage. Answers 404 when the table does not exist.",
+        "operationId": "get_table_references_api_v1_environments__env__namespaces__path__tables__name__references_get",
+        "parameters": [
+          {
+            "name": "env",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Env"
+            },
+            "description": "Environment name."
+          },
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            },
+            "description": "Dot-joined namespace path."
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            },
+            "description": "Table name."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TableReferencesOut"
                 }
               }
             }
@@ -4897,7 +5027,7 @@
           "search"
         ],
         "summary": "Search an environment",
-        "description": "Finds tables, columns, runs, jobs, repositories and principals whose names or descriptions contain `q` (1 to 200 characters, case-insensitive; run ids need four characters or more), one page at a time. What the caller may not read is left out of the hits, not refused: tables and columns need `READ_TABLE`, runs `READ_ENVIRONMENT`, principals the right to list them. Needs `READ_ENVIRONMENT`. Answers 404 when the environment does not exist and 422 for a `q` or paging value out of range.",
+        "description": "Finds tables, columns, runs, jobs, repositories and principals whose names or descriptions, or a table's declared grain, contain `q` (1 to 200 characters, case-insensitive; run ids need four characters or more), one page at a time. What the caller may not read is left out of the hits, not refused: tables and columns need `READ_TABLE`, runs `READ_ENVIRONMENT`, principals the right to list them. Needs `READ_ENVIRONMENT`. Answers 404 when the environment does not exist and 422 for a `q`, `model_kind` or paging value out of range.",
         "operationId": "search_api_v1_environments__env__search_get",
         "parameters": [
           {
@@ -4938,6 +5068,24 @@
               "title": "Kind"
             },
             "description": "Only this kind of hit."
+          },
+          {
+            "name": "model_kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only tables whose asset header declares this kind: fact, dimension, wide or staging.",
+              "title": "Model Kind"
+            },
+            "description": "Only tables whose asset header declares this kind: fact, dimension, wide or staging."
           },
           {
             "name": "limit",
@@ -17122,6 +17270,11 @@
               }
             ],
             "title": "Next Cursor"
+          },
+          "hidden": {
+            "type": "integer",
+            "title": "Hidden",
+            "default": 0
           }
         },
         "type": "object",
@@ -17130,7 +17283,7 @@
           "next_cursor"
         ],
         "title": "CheckResultPage",
-        "description": "One page of check results, newest first.\n\nParameters\n----------\nitems\n    The results on this page.\nnext_cursor\n    Pass back as `?cursor=` to fetch the next page; `None` on the last page."
+        "description": "One page of check results, newest first.\n\nParameters\n----------\nitems\n    The results on this page.\nnext_cursor\n    Pass back as `?cursor=` to fetch the next page; `None` on the last page.\nhidden\n    How many results of this page were left out: generated reference checks whose target\n    the caller may not read. A page can hold fewer results than `limit` and still have a\n    next one."
       },
       "CheckRowsRequest": {
         "properties": {
@@ -19882,6 +20035,45 @@
         "title": "MergeOut",
         "description": "Response body for a governed Arrow merge.\n\nParameters\n----------\nsnapshot_id\n    The snapshot the merge committed, or `None` when it changed nothing (no rows, or every\n    row equal to the table's).\nrows_inserted\n    Rows whose key the table did not have.\nrows_updated\n    Rows whose key matched and whose values changed."
       },
+      "ModelReferenceOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "table": {
+            "type": "string",
+            "title": "Table"
+          },
+          "column": {
+            "type": "string",
+            "title": "Column"
+          },
+          "target": {
+            "type": "string",
+            "title": "Target"
+          },
+          "target_column": {
+            "type": "string",
+            "title": "Target Column"
+          },
+          "target_exists": {
+            "type": "boolean",
+            "title": "Target Exists"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "table",
+          "column",
+          "target",
+          "target_column",
+          "target_exists"
+        ],
+        "title": "ModelReferenceOut",
+        "description": "One reference a table's header declares, as `ModelReferenceView` holds it.\n\nParameters\n----------\nid\n    ``<ns.table>/ref_<column>``: the name of the reference's generated check.\ntable\n    The dotted name of the table that declares it.\ncolumn\n    The referencing column.\ntarget\n    The dotted name of the table it points at, as the header names it.\ntarget_column\n    The column of the target it must match.\ntarget_exists\n    Whether a table of that name exists now. A reference whose target the caller may not\n    read is never listed, so this says nothing about such a table."
+      },
       "NamespaceCreate": {
         "properties": {
           "path": {
@@ -21681,6 +21873,7 @@
             "enum": [
               "name",
               "description",
+              "grain",
               "id",
               "job",
               "repository"
@@ -21730,6 +21923,17 @@
               }
             ],
             "title": "Table Kind"
+          },
+          "model_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Kind"
           },
           "column": {
             "anyOf": [
@@ -21830,6 +22034,7 @@
           "namespace",
           "table",
           "table_kind",
+          "model_kind",
           "column",
           "column_type",
           "run_id",
@@ -21840,7 +22045,7 @@
           "principal_type"
         ],
         "title": "SearchHitOut",
-        "description": "One search hit.\n\nParameters\n----------\nkind\n    What was found: ``table``, ``column``, ``run`` or ``principal``.\nname\n    A display name: ``namespace.table``, ``namespace.table.column``, the run id or the\n    principal's name.\nmatched\n    The field that matched: ``name``, ``description``, ``id``, ``job`` or ``repository``.\nsnippet\n    For a description match, at most 160 characters of the description around the hit.\nnamespace\n    For a table or column, its namespace, dotted.\ntable\n    For a table or column, the table's name.\ntable_kind\n    For a table, ``TABLE``, ``EXTERNAL``, ``VIEW`` or ``ARTIFACT``.\ncolumn\n    For a column, its name.\ncolumn_type\n    For a column, its type.\nrun_id\n    For a run, its id.\njob\n    For a run, its job, if it has one.\nrepository\n    For a run, its repository.\nstatus\n    For a run, its status.\nprincipal\n    For a principal, its name.\nprincipal_type\n    For a principal, ``USER`` or ``SERVICE_ACCOUNT``."
+        "description": "One search hit.\n\nParameters\n----------\nkind\n    What was found: ``table``, ``column``, ``run`` or ``principal``.\nname\n    A display name: ``namespace.table``, ``namespace.table.column``, the run id or the\n    principal's name.\nmatched\n    The field that matched: ``name``, ``description``, ``grain``, ``id``, ``job`` or\n    ``repository``.\nsnippet\n    For a description or grain match, at most 160 characters of the text around the hit.\nnamespace\n    For a table or column, its namespace, dotted.\ntable\n    For a table or column, the table's name.\ntable_kind\n    For a table, ``TABLE``, ``EXTERNAL``, ``VIEW`` or ``ARTIFACT``.\nmodel_kind\n    For a table whose asset header declares one, its ``kind``: ``fact``, ``dimension``,\n    ``wide`` or ``staging``.\ncolumn\n    For a column, its name.\ncolumn_type\n    For a column, its type.\nrun_id\n    For a run, its id.\njob\n    For a run, its job, if it has one.\nrepository\n    For a run, its repository.\nstatus\n    For a run, its status.\nprincipal\n    For a principal, its name.\nprincipal_type\n    For a principal, ``USER`` or ``SERVICE_ACCOUNT``."
       },
       "SearchKind": {
         "type": "string",
@@ -22161,6 +22366,11 @@
               }
             ],
             "title": "Readers"
+          },
+          "hidden_checks": {
+            "type": "integer",
+            "title": "Hidden Checks",
+            "default": 0
           }
         },
         "type": "object",
@@ -22171,7 +22381,74 @@
           "readers"
         ],
         "title": "TableHealthOut",
-        "description": "A table's health at a glance.\n\nParameters\n----------\ndays\n    The window `readers` covers.\nlast_maintenance\n    The last maintenance that changed the table; `None` if there is none.\nchecks\n    The newest result of each check of the table.\nreaders\n    Who read the table in the window, most reads first; `None` for a caller who may not see\n    the table's grants."
+        "description": "A table's health at a glance.\n\nParameters\n----------\ndays\n    The window `readers` covers.\nlast_maintenance\n    The last maintenance that changed the table; `None` if there is none.\nchecks\n    The newest result of each check of the table.\nreaders\n    Who read the table in the window, most reads first; `None` for a caller who may not see\n    the table's grants.\nhidden_checks\n    How many results were left out of `checks`: generated reference checks whose target the\n    caller may not read."
+      },
+      "TableModelOut": {
+        "properties": {
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind"
+          },
+          "grain": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Grain"
+          },
+          "key": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Key"
+          },
+          "key_none": {
+            "type": "boolean",
+            "title": "Key None"
+          },
+          "references": {
+            "items": {
+              "$ref": "#/components/schemas/ModelReferenceOut"
+            },
+            "type": "array",
+            "title": "References"
+          },
+          "hidden_references": {
+            "type": "integer",
+            "title": "Hidden References"
+          },
+          "checks": {
+            "items": {
+              "$ref": "#/components/schemas/CheckHealthOut"
+            },
+            "type": "array",
+            "title": "Checks"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "grain",
+          "key",
+          "key_none",
+          "references",
+          "hidden_references",
+          "checks"
+        ],
+        "title": "TableModelOut",
+        "description": "The model a table's asset header declares, as the caller may see it.\n\nParameters\n----------\nkind\n    ``fact``, ``dimension``, ``wide`` or ``staging``; `None` when the header names none.\ngrain\n    What one row is, in one sentence; `None` when the header says nothing.\nkey\n    The columns that identify one row; empty for no key and for `key: none`.\nkey_none\n    Whether the header says `key: none`: no columns are unique, and the grain is not\n    checked.\nreferences\n    The references whose target the caller may read, by id.\nhidden_references\n    How many references point at a table the caller may not read; they are not listed.\nchecks\n    The newest result of each check the current header generates, by name."
       },
       "TableOut": {
         "properties": {
@@ -22365,6 +22642,16 @@
             "type": "boolean",
             "title": "Expires Soon",
             "default": false
+          },
+          "model": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TableModelOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -22376,7 +22663,7 @@
           "schema"
         ],
         "title": "TableOut",
-        "description": "Response body for a table, external table or view, read-only.\n\nParameters\n----------\nname\n    Table name.\nnamespace\n    Dot-joined namespace path the table lives in.\nuuid\n    The table's id (the Iceberg ``table-uuid`` for a managed table).\nkind\n    ``TABLE``, ``EXTERNAL``, ``VIEW`` or ``ARTIFACT``.\nmetadata_location\n    Absolute URI of the current metadata file; `None` for an external\n    table or a view.\ncolumns\n    The columns, serialized as `schema`.\nsql\n    A view's SELECT. `None` if the caller may not read every reference\n    .\nreferences\n    A view's references. Empty if the caller may not read every\n    reference.\nhidden_references\n    The number of the view's references the caller may not read, and\n    so are withheld from `sql` and `references`.\nsnapshot_id\n    The current snapshot of a managed table; `None`\n    without one, and for a view or an external table.\nstate\n    ``not_published`` for a table whose first build did not finish, or failed a blocking\n    check, and that no later run has published; ``published`` for everything else.\nstate_message\n    Why it is not published, naming the check and the run; `None` otherwise.\ndescription\n    The table's description: the edit when it has one, else the project's text; `None`\n    when there is none.\ndescription_source\n    ``edited`` or ``project``; `None` when there is no description.\nlast_write_at\n    When the current snapshot was committed; `None` without one, and for a view, an\n    external table and an artifact.\nrow_count\n    The rows of the current snapshot, from its summary; `None` when missing.\nsize_bytes\n    The size of its data files, from its summary; `None` when missing.\nfile_count\n    Its data files, from its summary; `None` when missing.\nexpires_at\n    When a managed table's retention makes it expire; `None` when it never does.\nexpires_soon\n    Whether that is within the server's warning window\n    (``LAKANA_TABLES__EXPIRY_WARNING_DAYS``, 7 days by default); always `false` when that\n    is 0."
+        "description": "Response body for a table, external table or view, read-only.\n\nParameters\n----------\nname\n    Table name.\nnamespace\n    Dot-joined namespace path the table lives in.\nuuid\n    The table's id (the Iceberg ``table-uuid`` for a managed table).\nkind\n    ``TABLE``, ``EXTERNAL``, ``VIEW`` or ``ARTIFACT``.\nmetadata_location\n    Absolute URI of the current metadata file; `None` for an external\n    table or a view.\ncolumns\n    The columns, serialized as `schema`.\nsql\n    A view's SELECT. `None` if the caller may not read every reference\n    .\nreferences\n    A view's references. Empty if the caller may not read every\n    reference.\nhidden_references\n    The number of the view's references the caller may not read, and\n    so are withheld from `sql` and `references`.\nsnapshot_id\n    The current snapshot of a managed table; `None`\n    without one, and for a view or an external table.\nstate\n    ``not_published`` for a table whose first build did not finish, or failed a blocking\n    check, and that no later run has published; ``published`` for everything else.\nstate_message\n    Why it is not published, naming the check and the run; `None` otherwise.\ndescription\n    The table's description: the edit when it has one, else the project's text; `None`\n    when there is none.\ndescription_source\n    ``edited`` or ``project``; `None` when there is no description.\nlast_write_at\n    When the current snapshot was committed; `None` without one, and for a view, an\n    external table and an artifact.\nrow_count\n    The rows of the current snapshot, from its summary; `None` when missing.\nsize_bytes\n    The size of its data files, from its summary; `None` when missing.\nfile_count\n    Its data files, from its summary; `None` when missing.\nexpires_at\n    When a managed table's retention makes it expire; `None` when it never does.\nexpires_soon\n    Whether that is within the server's warning window\n    (``LAKANA_TABLES__EXPIRY_WARNING_DAYS``, 7 days by default); always `false` when that\n    is 0.\nmodel\n    The model the asset header declares (kind, grain, key, references and the checks they\n    generate); `None` for a table whose header declares none."
       },
       "TableReferenceOut": {
         "properties": {
@@ -22396,6 +22683,46 @@
         ],
         "title": "TableReferenceOut",
         "description": "One table or view a view references.\n\nParameters\n----------\nid\n    Its id.\nname\n    Its dotted name when the view was created."
+      },
+      "TableReferencesOut": {
+        "properties": {
+          "table": {
+            "type": "string",
+            "title": "Table"
+          },
+          "outgoing": {
+            "items": {
+              "$ref": "#/components/schemas/ModelReferenceOut"
+            },
+            "type": "array",
+            "title": "Outgoing"
+          },
+          "hidden_outgoing": {
+            "type": "integer",
+            "title": "Hidden Outgoing"
+          },
+          "incoming": {
+            "items": {
+              "$ref": "#/components/schemas/ModelReferenceOut"
+            },
+            "type": "array",
+            "title": "Incoming"
+          },
+          "hidden_incoming": {
+            "type": "integer",
+            "title": "Hidden Incoming"
+          }
+        },
+        "type": "object",
+        "required": [
+          "table",
+          "outgoing",
+          "hidden_outgoing",
+          "incoming",
+          "hidden_incoming"
+        ],
+        "title": "TableReferencesOut",
+        "description": "Response body of `GET .../tables/{name}/references`.\n\nParameters\n----------\ntable\n    The table's dotted name.\noutgoing\n    The references its header declares whose target the caller may read, by id.\nhidden_outgoing\n    How many of its references point at a table the caller may not read.\nincoming\n    The references other tables' headers declare to it, from tables the caller may read,\n    by id.\nhidden_incoming\n    How many references to it come from tables the caller may not read; never named."
       },
       "TableRetentionIn": {
         "properties": {
@@ -22871,6 +23198,11 @@
             "type": "array",
             "title": "Checks"
           },
+          "hidden_checks": {
+            "type": "integer",
+            "title": "Hidden Checks",
+            "default": 0
+          },
           "kept_check": {
             "anyOf": [
               {
@@ -22914,7 +23246,7 @@
           "rows_written"
         ],
         "title": "TaskRunOut",
-        "description": "One task run.\n\nParameters\n----------\nasset\n    Dotted table name.\nstatus\n    Task status.\nattempt\n    Attempts counted.\nmax_attempts\n    Retries + 1.\ntimeout_seconds\n    Per-attempt limit.\nnext_attempt_at\n    When a pending retry may start.\nstarted_at\n    First claim.\nfinished_at\n    Final state.\nerror_message\n    Last failure, as free text: the detail of `failure`.\nquery_run_id\n    The write that executed the last attempt.\nrows_written\n    Rows it wrote.\nfailure\n    Why the task failed, was cancelled or never ran, with its stable code, the cause and the\n    next step (`FailureOut`); `null` for a task with no error. A task that failed before the\n    codes existed has the code `unknown`.\nwaiting_for\n    Why a `pending` or `ready` task of a running run has not started, or `null`: a stable\n    `code` (`upstream`, `retry`, `setting_back`, `no_worker`, `no_worker_of_kind`,\n    `workers_busy` or `starting`), one sentence in `message`, and the numbers or names it\n    uses. A task is pipeline work: `no_worker_of_kind` means workers are running and none\n    takes pipeline work (`workers` is 0, `other_workers` the workers running), and `workers` in\n    `workers_busy` counts the workers that take pipeline work. For `upstream`, `upstream`\n    lists the first 50 unfinished upstream tasks (raw names) and `upstream_count` is how\n    many there are in all; the sentence names five, escaped.\nkind\n    ``asset`` for a table the run builds, ``source_check`` for a table it only checks.\nchecks\n    The task's check results, by name.\nkept_check\n    ``true`` for a ``source_check`` task that checks a table the project builds, because\n    that table was kept after a failed check; ``false`` for every other task; ``null`` for a\n    ``source_check`` task of a run whose project version is gone, which cannot tell.\nsetting_back\n    ``true`` while the task has not ended and its next claim only sets its table back:\n    its worker was lost after it may have written the table, or its run was cancelled\n    while it waited with rows no check had passed. The task is then ``ready``\n    (`waiting_for` has the code `setting_back`), ``running`` with that claim, or\n    ``pending`` again after that claim's worker drained. ``false`` once it has ended."
+        "description": "One task run.\n\nParameters\n----------\nasset\n    Dotted table name.\nstatus\n    Task status.\nattempt\n    Attempts counted.\nmax_attempts\n    Retries + 1.\ntimeout_seconds\n    Per-attempt limit.\nnext_attempt_at\n    When a pending retry may start.\nstarted_at\n    First claim.\nfinished_at\n    Final state.\nerror_message\n    Last failure, as free text: the detail of `failure`.\nquery_run_id\n    The write that executed the last attempt.\nrows_written\n    Rows it wrote.\nfailure\n    Why the task failed, was cancelled or never ran, with its stable code, the cause and the\n    next step (`FailureOut`); `null` for a task with no error. A task that failed before the\n    codes existed has the code `unknown`.\nwaiting_for\n    Why a `pending` or `ready` task of a running run has not started, or `null`: a stable\n    `code` (`upstream`, `retry`, `setting_back`, `no_worker`, `no_worker_of_kind`,\n    `workers_busy` or `starting`), one sentence in `message`, and the numbers or names it\n    uses. A task is pipeline work: `no_worker_of_kind` means workers are running and none\n    takes pipeline work (`workers` is 0, `other_workers` the workers running), and `workers` in\n    `workers_busy` counts the workers that take pipeline work. For `upstream`, `upstream`\n    lists the first 50 unfinished upstream tasks (raw names) and `upstream_count` is how\n    many there are in all; the sentence names five, escaped.\nkind\n    ``asset`` for a table the run builds, ``source_check`` for a table it only checks.\nchecks\n    The task's check results, by name.\nhidden_checks\n    How many results were left out of `checks`: generated reference checks whose target the\n    caller may not read.\nkept_check\n    ``true`` for a ``source_check`` task that checks a table the project builds, because\n    that table was kept after a failed check; ``false`` for every other task; ``null`` for a\n    ``source_check`` task of a run whose project version is gone, which cannot tell.\nsetting_back\n    ``true`` while the task has not ended and its next claim only sets its table back:\n    its worker was lost after it may have written the table, or its run was cancelled\n    while it waited with rows no check had passed. The task is then ``ready``\n    (`waiting_for` has the code `setting_back`), ``running`` with that claim, or\n    ``pending`` again after that claim's worker drained. ``false`` once it has ended."
       },
       "TaskTokenMintIn": {
         "properties": {
