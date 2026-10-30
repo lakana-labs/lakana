@@ -288,8 +288,9 @@ person is refused, and nothing is shown:
 A column is also replaced when a write with `evolve_schema` changes its type (not a widening, such
 as `int` to `long`): the column gets a new field id, reads of the table are refused until the
 filter is created again, and the rows written before read as NULL in that column. The run whose
-write did it, or removed the column, shows a warning naming the filter's column, and to you, as an
-administrator, the filter's id ([The run that breaks a row filter or column mask says so](../explanation/when-columns-change.md#the-run-that-breaks-a-row-filter-or-column-mask-says-so)).
+write did it, or removed the column, shows you, as an administrator, the filter's id, its column and
+the revoke command; other readers of the run see only that the table's columns changed
+([The run that changes a column says so](../explanation/when-columns-change.md#the-run-that-changes-a-column-says-so)).
 
 A rename therefore goes in this order:
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -840,23 +841,25 @@ def test_an_old_failed_task_without_a_code_is_unknown_over_rest(client: TestClie
     assert task_body["error_message"] == "boom"
 
 
-def test_a_policy_warning_names_the_policy_only_to_an_administrator(client: TestClient) -> None:
-    """A viewer of the table sees kind and column, a reader without the table nothing."""
+def test_a_schema_change_shows_policy_details_only_to_an_administrator(client: TestClient) -> None:
+    """Non-administrators get one neutral line, the same with or without a policy on the column."""
     _deploy(client)
     started = client.post(_RUNS, headers=AUTH_HEADER, json={"repository": "analytics"}).json()
     policy_id = "12345678-1234-1234-1234-123456789abc"
-    with Session(client.app.state.engine) as session:
-        task = session.query(TaskRun).filter(TaskRun.run_id == uuid.UUID(started["id"])).one()
-        task.policy_warnings_json = [
-            {
-                "table": "silver.clean",
-                "kind": "row_filter",
-                "policy_id": policy_id,
-                "column": "region",
-                "change": "replaced",
-            }
-        ]
-        session.commit()
+    broken = {
+        "table": "silver.clean",
+        "kind": "row_filter",
+        "policy_id": policy_id,
+        "column": "region",
+        "change": "replaced",
+    }
+
+    def store(policies: list[dict[str, str]]) -> None:
+        with Session(client.app.state.engine) as session:
+            task = session.query(TaskRun).filter(TaskRun.run_id == uuid.UUID(started["id"])).one()
+            task.schema_change_json = {"tables": ["silver.clean"], "policies": policies}
+            session.commit()
+
     viewer = _token_for(client, "viewer")
     outsider = _token_for(client, "outsider")
     for body in (
@@ -871,21 +874,26 @@ def test_a_policy_warning_names_the_policy_only_to_an_administrator(client: Test
         created = client.post("/api/v1/grants", headers=AUTH_HEADER, json=body)
         assert created.status_code == 201, created.text
 
-    def warnings(headers: dict[str, str]) -> list[dict[str, object]]:
+    def task_of(headers: dict[str, str]) -> dict[str, Any]:
         shown = client.get(f"{_RUNS}/{started['id']}", headers=headers)
         assert shown.status_code == 200, shown.text
         (task_body,) = shown.json()["tasks"]
-        return task_body["policy_warnings"]
+        return task_body
 
-    (admin,) = warnings(AUTH_HEADER)
-    assert admin["policy_id"] == policy_id
-    (seen,) = warnings(viewer)
-    assert {k: seen[k] for k in ("kind", "column", "change", "policy_id")} == {
-        "kind": "row_filter",
-        "column": "region",
-        "change": "replaced",
-        "policy_id": None,
-    }
-    assert policy_id not in str(seen["message"])
-    assert str(seen["message"]).startswith("A row filter on `silver.clean` uses column `region`")
-    assert warnings(outsider) == []
+    neutral = "This run changed the table's columns; an administrator has been told what to check."
+    store([broken])
+    with_policy = {"viewer": task_of(viewer), "outsider": task_of(outsider)}
+    admin = task_of(AUTH_HEADER)
+    store([])
+    without = {"viewer": task_of(viewer), "outsider": task_of(outsider)}
+
+    assert with_policy == without
+    for task_body in with_policy.values():
+        assert (task_body["schema_note"], task_body["policy_warnings"]) == (neutral, [])
+    assert admin["schema_note"] == neutral
+    (warning,) = admin["policy_warnings"]
+    assert (warning["policy_id"], warning["column"], warning["kind"]) == (
+        policy_id,
+        "region",
+        "row_filter",
+    )

@@ -7,16 +7,18 @@ it again (`lakana_core.policy.renames`). The write still lands; this module find
 when the write is planned, so that the run can say so at once rather than when readers' queries
 fail.
 
-What is stored names the table, the policy's kind and id, the column and the change. What a
-reader of the run is shown depends on who they are (`warnings_for_reader`): the policy's id only
-to a principal who may manage policies (the listing of policies needs that right), the kind and
-the column to a reader of the table, nothing to anyone else. The expression is never stored here.
+A task run stores, for its writes that removed or replaced a column, the tables and the policies
+found (`merge_schema_change`): ``{"tables": [...], "policies": [BrokenPolicy.to_json(), ...]}``.
+Only a principal who may manage policies learns from it that a policy exists
+(`schema_change_for_reader`): `lakana table get` shows no policies, and listing them needs that
+right. Everyone else sees one neutral line, the same whether or not a policy is affected, on every
+run that removed or replaced a column. The expression is never stored here.
 """
 
 from __future__ import annotations
 
 import uuid
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 import sqlglot.errors
@@ -59,6 +61,13 @@ _REVOKE_FIRST = {
 """Why the order matters, per kind."""
 
 _FIELDS = ("table", "kind", "policy_id", "column", "change")
+
+COLUMNS_CHANGED_NOTE = (
+    "This run changed the table's columns; an administrator has been told what to check."
+)
+"""What a reader who may not manage policies is shown for a task whose write removed or replaced a
+column, whether or not a row filter or column mask uses it: its presence must not tell that one
+exists."""
 
 
 @dataclass(frozen=True)
@@ -130,7 +139,7 @@ class BrokenPolicy:
 
 @dataclass(frozen=True)
 class PolicyWarningView:
-    """A policy warning of a task, as one reader of the run is shown it.
+    """A policy warning of a task, as a reader who may manage policies is shown it.
 
     Parameters
     ----------
@@ -141,7 +150,7 @@ class PolicyWarningView:
     change
         ``removed`` or ``replaced``.
     policy_id
-        The policy's id; `None` unless the reader may manage policies.
+        The policy's id; only a reader who may manage policies is shown a warning at all.
     message
         One paragraph: what happened and the next step.
     """
@@ -149,7 +158,7 @@ class PolicyWarningView:
     kind: str
     column: str
     change: str
-    policy_id: uuid.UUID | None
+    policy_id: uuid.UUID
     message: str
 
 
@@ -206,7 +215,7 @@ def _read_columns(expression: str) -> set[str]:
 
 
 def broken_policies(
-    session: Session, table_id: uuid.UUID, table: str, before: Schema, after: Schema
+    session: Session, table_id: uuid.UUID, table: str, changed: Mapping[str, str]
 ) -> tuple[BrokenPolicy, ...]:
     """Find the active row filters and column masks a schema change leaves out of date.
 
@@ -218,10 +227,8 @@ def broken_policies(
         The table's id: policies bind to it, never to the name.
     table
         The table's dotted name, for the warnings.
-    before
-        The table's current schema.
-    after
-        The schema the write makes current.
+    changed
+        The removed or replaced columns (`changed_columns`).
 
     Returns
     -------
@@ -229,7 +236,6 @@ def broken_policies(
         One per policy and column, column masks first, then by column and id; empty without a
         removed or replaced column (no policy is read then).
     """
-    changed = changed_columns(before, after)
     if not changed:
         return ()
     used: list[tuple[str, uuid.UUID, set[str]]] = [
@@ -255,15 +261,13 @@ def broken_policies(
     return tuple(sorted(found, key=lambda b: (b.kind, b.column.casefold(), str(b.policy_id))))
 
 
-def _message(warning: BrokenPolicy, *, with_id: bool) -> str:
-    """Word one warning for a reader.
+def _message(warning: BrokenPolicy) -> str:
+    """Word one warning for a reader who may manage policies.
 
     Parameters
     ----------
     warning
         The warning.
-    with_id
-        Whether the reader may manage policies: then the id and the revoke command are named.
 
     Returns
     -------
@@ -277,12 +281,6 @@ def _message(warning: BrokenPolicy, *, with_id: bool) -> str:
         "created again."
     )
     table = f"`{shown(warning.table)}`"
-    if not with_id:
-        return (
-            f"A {name} on {table} {happened} Next: ask an administrator to create the {short} "
-            "again for the column it is meant for and then revoke the old one, in that order "
-            '(see "After a rename" in the documentation).'
-        )
     command = f"lakana {name.replace(' ', '-')} revoke {warning.policy_id}"
     return (
         f"{title} {warning.policy_id} on {table} {happened} Next: create the {short} again for "
@@ -291,42 +289,89 @@ def _message(warning: BrokenPolicy, *, with_id: bool) -> str:
     )
 
 
-def warnings_for_reader(
-    stored: Sequence[object] | None,
-    *,
-    may_read: Callable[[str], bool],
-    manages_policies: bool,
-) -> tuple[PolicyWarningView, ...]:
-    """Show a task's stored policy warnings to one reader of its run.
+def merge_schema_change(
+    held: object, table: str, policies: Sequence[Mapping[str, str]]
+) -> dict[str, list]:
+    """Add one write's schema change to what its task run holds.
+
+    Parameters
+    ----------
+    held
+        `TaskRun.schema_change_json` before the write; anything but this module's shape counts as
+        nothing.
+    table
+        The table whose columns the write removed or replaced.
+    policies
+        The policies it left out of date, as stored (`BrokenPolicy.to_json`).
+
+    Returns
+    -------
+    dict
+        ``{"tables": [...], "policies": [...]}``, each entry once, in the order first seen.
+    """
+    tables = changed_tables(held)
+    old = held.get("policies") if isinstance(held, Mapping) else None
+    merged: list = list(old) if isinstance(old, list) else []
+    merged += [dict(policy) for policy in policies if dict(policy) not in merged]
+    return {"tables": [*tables, *([] if table in tables else [table])], "policies": merged}
+
+
+def changed_tables(stored: object) -> tuple[str, ...]:
+    """Name the tables whose columns a task's writes removed or replaced.
 
     Parameters
     ----------
     stored
-        `TaskRun.policy_warnings_json`; entries this module did not write are skipped.
-    may_read
-        Whether the reader may read a table, by dotted name.
-    manages_policies
-        Whether the reader may manage policies: they see every warning, with the policy's id
-        (they may list the policies anyway). Anyone else sees the warnings of the tables they may
-        read, without the id, and nothing of the others.
+        `TaskRun.schema_change_json`.
 
     Returns
     -------
-    tuple of PolicyWarningView
-        In stored order.
+    tuple of str
+        The tables, in stored order; empty for nothing or anything this module did not write.
     """
+    tables = stored.get("tables") if isinstance(stored, Mapping) else None
+    if not isinstance(tables, list):
+        return ()
+    return tuple(table for table in tables if isinstance(table, str))
+
+
+def schema_change_for_reader(
+    stored: object, *, manages_policies: bool
+) -> tuple[str | None, tuple[PolicyWarningView, ...]]:
+    """Show a task's schema change to one reader of its run.
+
+    Parameters
+    ----------
+    stored
+        `TaskRun.schema_change_json`; entries this module did not write are skipped.
+    manages_policies
+        Whether the reader may manage policies. Only then are the policies shown, with their ids:
+        nobody else may learn that a policy exists.
+
+    Returns
+    -------
+    tuple of (str or None, tuple of PolicyWarningView)
+        `COLUMNS_CHANGED_NOTE` when the task removed or replaced a column (`None` otherwise), the
+        same for every reader; and the warnings, empty unless `manages_policies`.
+    """
+    if not changed_tables(stored):
+        return None, ()
+    if not manages_policies:
+        return COLUMNS_CHANGED_NOTE, ()
+    assert isinstance(stored, Mapping)  # nosec B101 -- changed_tables found a mapping
+    policies = stored.get("policies")
     views: list[PolicyWarningView] = []
-    for entry in stored or ():
+    for entry in policies if isinstance(policies, list) else ():
         warning = BrokenPolicy.from_json(entry)
-        if warning is None or not (manages_policies or may_read(warning.table)):
+        if warning is None:
             continue
         views.append(
             PolicyWarningView(
                 kind=warning.kind,
                 column=warning.column,
                 change=warning.change,
-                policy_id=warning.policy_id if manages_policies else None,
-                message=_message(warning, with_id=manages_policies),
+                policy_id=warning.policy_id,
+                message=_message(warning),
             )
         )
-    return tuple(views)
+    return COLUMNS_CHANGED_NOTE, tuple(views)

@@ -241,11 +241,12 @@ class TaskRun(Base):
     check_message_state: Mapped[dict | None] = mapped_column(JSON, nullable=True, default=None)
     """What `error_message` was built from besides the check results, when the check phase built
     it (`lakana_core.runs.check_message.CheckMessageState`); null for any other message."""
-    policy_warnings_json: Mapped[list | None] = mapped_column(JSON, nullable=True, default=None)
-    """The row filters and column masks the task's writes left out of date by removing or
-    replacing a column they use (`lakana_core.policy.schema_change.BrokenPolicy.to_json`), each
-    once; null when there are none. Recorded in the commit of the write that changed the schema,
-    and kept when a later attempt changes nothing."""
+    schema_change_json: Mapped[dict | None] = mapped_column(JSON, nullable=True, default=None)
+    """What the task's writes did to its table's columns, when one removed or replaced a column
+    (`lakana_core.policy.schema_change.merge_schema_change`): ``{"tables": [...], "policies":
+    [...]}``, the row filters and column masks that use such a column, each once. Null when no
+    write removed or replaced a column. Recorded in the commit of the write, and kept when a later
+    attempt changes nothing."""
     started_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
 

@@ -51,7 +51,8 @@ quoted strings or numbers. `evolve_schema` that changes a column's type (other t
 makes the column a new one: the rows written before read as NULL in it, and the row filters and
 column masks that use it must be created again, as reads under them are refused until then
 ([When a table's columns change](../explanation/when-columns-change.md)). The run that removes or
-retypes such a column says so in `lakana runs show`, with the next step. Each block is at most 64 KiB, and it ends at the first `*/`, even
+retypes a column says so in `lakana runs show`, where an administrator also sees which policies to
+create again. Each block is at most 64 KiB, and it ends at the first `*/`, even
 inside a string or scalar (when the leftover text then fails to parse, the error says so).
 `materialize: table` (the default) makes the asset a table, written as its `write:` says (below);
 `materialize: view` makes it a view, which takes no `write:`.

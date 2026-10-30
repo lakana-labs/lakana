@@ -20,6 +20,7 @@ from lakana_core.models import (
     RunStatus,
     TaskRun,
 )
+from lakana_core.policy.schema_change import changed_tables
 from lakana_core.projects.manifest import JobNotify, job_notify
 
 FAILED = "failed"
@@ -28,9 +29,10 @@ FAILED = "failed"
 RECOVERED = "recovered"
 """The event of a run that succeeded after the previous finished run failed."""
 
-WARNED = "warned"
-"""The event of a run that succeeded, reports no other event, and whose writes left a row filter
-or column mask out of date (`TaskRun.policy_warnings_json`)."""
+COLUMNS_CHANGED = "columns_changed"
+"""The event of a run that succeeded, reports no other event, and whose writes removed or replaced
+a column (`TaskRun.schema_change_json`). Sent whether or not a row filter or column mask uses the
+column: the endpoint is no administrator, so the message must not tell that a policy exists."""
 
 
 def decide_event(session: Session, run: Run) -> str | None:
@@ -40,8 +42,8 @@ def decide_event(session: Session, run: Run) -> str | None:
     names the check. A succeeded run reports `RECOVERED` when the previous finished run of the same
     job (same environment and repository, ordered by `created_at`, then `finished_at`) failed;
     cancelled runs are looked through, and the first run of a job has no previous one. Any other
-    succeeded run reports `WARNED` when a task's write left a row filter or column mask out of
-    date; a failed or recovered run names those tables in its own message instead. A `warn`
+    succeeded run reports `COLUMNS_CHANGED` when a task's write removed or replaced a column; a
+    failed or recovered run names those tables in its own message instead. A `warn`
     check does not fail a run, so it changes nothing here.
 
     Parameters
@@ -54,8 +56,8 @@ def decide_event(session: Session, run: Run) -> str | None:
     Returns
     -------
     str or None
-        `FAILED`, `RECOVERED`, `WARNED`, or `None` for an ad-hoc run (no job), a cancelled run,
-        and a success without a policy warning that follows a success or nothing.
+        `FAILED`, `RECOVERED`, `COLUMNS_CHANGED`, or `None` for an ad-hoc run (no job), a
+        cancelled run, and a success without a column change that follows a success or nothing.
     """
     if run.job is None:
         return None
@@ -84,11 +86,11 @@ def decide_event(session: Session, run: Run) -> str | None:
     ).first()
     if previous is RunStatus.FAILED:
         return RECOVERED
-    return WARNED if policy_warning_tables(session, run.id) else None
+    return COLUMNS_CHANGED if columns_changed_tables(session, run.id) else None
 
 
-def policy_warning_tables(session: Session, run_id: uuid.UUID) -> tuple[str, ...]:
-    """Name the tasks of a run whose writes left a row filter or column mask out of date.
+def columns_changed_tables(session: Session, run_id: uuid.UUID) -> tuple[str, ...]:
+    """Name the tables whose columns a run's writes removed or replaced.
 
     Parameters
     ----------
@@ -100,12 +102,12 @@ def policy_warning_tables(session: Session, run_id: uuid.UUID) -> tuple[str, ...
     Returns
     -------
     tuple of str
-        The tasks' tables, sorted; empty when there are none.
+        The tables, sorted, each once; empty when there are none.
     """
-    rows = session.execute(
-        select(TaskRun.asset, TaskRun.policy_warnings_json).where(TaskRun.run_id == run_id)
+    stored = session.scalars(
+        select(TaskRun.schema_change_json).where(TaskRun.run_id == run_id)
     ).all()
-    return tuple(sorted(asset for asset, warnings in rows if warnings))
+    return tuple(sorted({table for entry in stored for table in changed_tables(entry)}))
 
 
 def new_delivery(
@@ -125,7 +127,7 @@ def new_delivery(
     notify
         The job's `notify:`.
     event
-        ``failed``, ``recovered``, ``warned`` or ``test``.
+        ``failed``, ``recovered``, ``columns_changed`` or ``test``.
     now
         When the first attempt is due.
     run_id

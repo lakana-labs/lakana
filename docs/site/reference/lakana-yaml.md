@@ -148,8 +148,8 @@ would never send.
 
 ### Notify a webhook
 
-`notify:` names where a job reports a run that failed or recovered, or that left a row filter or
-column mask out of date ([the events](../how-to/get-told-when-a-job-fails.md#when-a-message-is-sent)).
+`notify:` names where a job reports a run that failed or recovered, or that removed or retyped a
+column ([the events](../how-to/get-told-when-a-job-fails.md#when-a-message-is-sent)).
 It is optional; a job without it tells nobody.
 
 - `webhook:` is the **name of a secret** of the environment, never the URL: the URL is a

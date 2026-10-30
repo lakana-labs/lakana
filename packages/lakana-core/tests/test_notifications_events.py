@@ -378,8 +378,8 @@ def test_a_success_with_a_failing_warn_check_still_recovers(
     assert decide_event(session, run) == "recovered"
 
 
-def _warned(project: Project, run: Run) -> None:
-    """Add a succeeded task whose write left a row filter out of date.
+def _changed(project: Project, run: Run) -> None:
+    """Add a succeeded task whose write removed or retyped a column.
 
     Parameters
     ----------
@@ -397,28 +397,28 @@ def _warned(project: Project, run: Run) -> None:
             max_attempts=1,
             timeout_seconds=60,
             retry_delay_seconds=0,
-            policy_warnings_json=[{"table": "gold.orders", "kind": "row_filter"}],
+            schema_change_json={"tables": ["gold.orders"], "policies": []},
         )
     )
     project.session.flush()
 
 
-def test_a_success_whose_write_left_a_policy_out_of_date_gives_warned(
+def test_a_success_that_removed_or_retyped_a_column_gives_columns_changed(
     project: Project, session: Session
 ) -> None:
     run = project.run(RunStatus.SUCCEEDED)
-    _warned(project, run)
-    assert decide_event(session, run) == "warned"
+    _changed(project, run)
+    assert decide_event(session, run) == "columns_changed"
     queue_notification(session, run, T0)
-    assert [d.event for d in session.scalars(select(NotificationDelivery))] == ["warned"]
+    assert [d.event for d in session.scalars(select(NotificationDelivery))] == ["columns_changed"]
 
 
-def test_a_failure_or_a_recovery_with_a_policy_warning_keeps_its_own_event(
+def test_a_failure_or_a_recovery_that_changed_columns_keeps_its_own_event(
     project: Project, session: Session
 ) -> None:
     failed = project.run(RunStatus.FAILED)
-    _warned(project, failed)
+    _changed(project, failed)
     assert decide_event(session, failed) == "failed"
     recovered = project.run(RunStatus.SUCCEEDED)
-    _warned(project, recovered)
+    _changed(project, recovered)
     assert decide_event(session, recovered) == "recovered"

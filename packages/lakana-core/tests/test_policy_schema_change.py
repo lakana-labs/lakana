@@ -32,10 +32,12 @@ from lakana_core.models import (
     WriteMode,
 )
 from lakana_core.policy.schema_change import (
+    COLUMNS_CHANGED_NOTE,
     BrokenPolicy,
     broken_policies,
     changed_columns,
-    warnings_for_reader,
+    changed_tables,
+    schema_change_for_reader,
 )
 from lakana_core.storage.resolver import StorageResolver
 
@@ -250,8 +252,8 @@ def _sql_task(session: Session, principal: PrincipalRef) -> tuple[PrincipalRef, 
     return dataclasses.replace(principal, run_context=context), task.id
 
 
-def _stored(session: Session, task_run_id: uuid.UUID) -> list[dict[str, str]] | None:
-    """Read a task run's stored policy warnings.
+def _stored(session: Session, task_run_id: uuid.UUID) -> dict[str, object] | None:
+    """Read a task run's stored schema change.
 
     Parameters
     ----------
@@ -262,11 +264,11 @@ def _stored(session: Session, task_run_id: uuid.UUID) -> list[dict[str, str]] | 
 
     Returns
     -------
-    list of dict or None
+    dict or None
         What the column holds.
     """
     session.expire_all()
-    return session.scalar(select(TaskRun.policy_warnings_json).where(TaskRun.id == task_run_id))
+    return session.scalar(select(TaskRun.schema_change_json).where(TaskRun.id == task_run_id))
 
 
 def _last_write_event(session: Session) -> dict[str, object]:
@@ -319,7 +321,7 @@ def test_a_task_that_drops_a_policys_column_records_a_warning_and_the_write_land
             "change": "removed",
         },
     ]
-    assert _stored(session, task_run_id) == expected
+    assert _stored(session, task_run_id) == {"tables": [_TABLE], "policies": expected}
     assert _last_write_event(session)["broken_policies"] == expected
 
 
@@ -333,15 +335,31 @@ def test_a_retyped_column_is_replaced_and_a_second_write_adds_only_what_is_new(
     _write(catalog, p, WriteMode.REPLACE, _rows(region=pa.array([7])), evolve_schema=True)
     _write(catalog, p, WriteMode.REPLACE, _rows(region=pa.array(["x"])), evolve_schema=True)
 
-    assert _stored(session, task_run_id) == [
-        {
-            "table": _TABLE,
-            "kind": "row_filter",
-            "policy_id": str(row_filter),
-            "column": "REGION",
-            "change": "replaced",
-        }
-    ]
+    assert _stored(session, task_run_id) == {
+        "tables": [_TABLE],
+        "policies": [
+            {
+                "table": _TABLE,
+                "kind": "row_filter",
+                "policy_id": str(row_filter),
+                "column": "REGION",
+                "change": "replaced",
+            }
+        ],
+    }
+
+
+def test_a_task_that_drops_a_column_no_policy_uses_records_the_change_alone(
+    session: Session, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    catalog = _catalog(session, principal, tmp_path)
+    _policy(session, principal, ColumnMask, "NULL", column="id")
+    p, task_run_id = _python_task(session, principal)
+
+    _write(catalog, p, WriteMode.REPLACE, _rows(), evolve_schema=True)
+
+    assert _stored(session, task_run_id) == {"tables": [_TABLE], "policies": []}
+    assert "broken_policies" not in _last_write_event(session)
 
 
 def test_an_added_or_unchanged_column_and_a_write_outside_a_run_record_no_task_warning(
@@ -381,9 +399,7 @@ def test_a_mask_whose_stored_expression_does_not_parse_still_counts_its_own_colu
     table = session.scalars(select(Table)).one()
     mask = _policy(session, principal, ColumnMask, "((", column="region")
     _policy(session, principal, RowFilter, "((")
-    before = _schema((1, "id", LongType()), (2, "region", StringType()))
-
-    found = broken_policies(session, table.id, _TABLE, before, _schema((1, "id", LongType())))
+    found = broken_policies(session, table.id, _TABLE, {"region": "removed"})
 
     assert found == (BrokenPolicy(_TABLE, "column_mask", mask, "region", "removed"),)
 
@@ -392,46 +408,42 @@ _MASK = BrokenPolicy(_TABLE, "column_mask", uuid.UUID(int=7), "ssn", "replaced")
 _FILTER = BrokenPolicy("gold.other", "row_filter", uuid.UUID(int=8), "region", "removed")
 
 
-def test_a_reader_of_the_table_sees_the_kind_and_the_column_but_never_the_policy_id() -> None:
-    shown = warnings_for_reader(
-        [_MASK.to_json(), _FILTER.to_json()],
-        may_read=lambda name: name == _TABLE,
-        manages_policies=False,
-    )
+def test_a_reader_who_manages_no_policies_sees_one_neutral_line_whatever_the_policies() -> None:
+    with_policies = {"tables": [_TABLE], "policies": [_MASK.to_json(), _FILTER.to_json()]}
+    without = {"tables": [_TABLE], "policies": []}
 
-    assert len(shown) == 1
-    (warning,) = shown
-    assert (warning.kind, warning.column, warning.change, warning.policy_id) == (
-        "column_mask",
-        "ssn",
-        "replaced",
-        None,
+    shown = schema_change_for_reader(with_policies, manages_policies=False)
+
+    assert shown == (COLUMNS_CHANGED_NOTE, ())
+    assert shown == schema_change_for_reader(without, manages_policies=False)
+    assert COLUMNS_CHANGED_NOTE == (
+        "This run changed the table's columns; an administrator has been told what to check."
     )
-    assert str(uuid.UUID(int=7)) not in warning.message
-    assert warning.message == (
-        "A column mask on `gold.orders` uses column `ssn`, which this run replaced: its type "
-        "changed in a way that does not widen, so it is a new column under the same name. Reads "
-        "of the table by the people the mask applies to are refused until it is created again. "
-        "Next: ask an administrator to create the mask again for the column it is meant for and "
-        'then revoke the old one, in that order (see "After a rename" in the documentation).'
-    )
+    assert schema_change_for_reader(None, manages_policies=False) == (None, ())
+    assert schema_change_for_reader({"tables": []}, manages_policies=True) == (None, ())
 
 
 def test_a_policy_manager_sees_every_warning_with_the_id_and_the_revoke_command() -> None:
-    shown = warnings_for_reader(
-        [
-            _MASK.to_json(),
-            _FILTER.to_json(),
-            {"kind": "unknown"},
-            "junk",
-            {**_MASK.to_json(), "kind": "grant"},
-            {**_MASK.to_json(), "policy_id": "not an id"},
-        ],
-        may_read=lambda name: False,
+    note, shown = schema_change_for_reader(
+        {
+            "tables": [_TABLE],
+            "policies": [
+                _MASK.to_json(),
+                _FILTER.to_json(),
+                {"kind": "unknown"},
+                "junk",
+                {**_MASK.to_json(), "kind": "grant"},
+                {**_MASK.to_json(), "policy_id": "not an id"},
+            ],
+        },
         manages_policies=True,
     )
 
-    assert [w.policy_id for w in shown] == [uuid.UUID(int=7), uuid.UUID(int=8)]
+    assert note == COLUMNS_CHANGED_NOTE
+    assert [(w.kind, w.column, w.change, w.policy_id) for w in shown] == [
+        ("column_mask", "ssn", "replaced", uuid.UUID(int=7)),
+        ("row_filter", "region", "removed", uuid.UUID(int=8)),
+    ]
     assert shown[1].message == (
         f"Row filter {uuid.UUID(int=8)} on `gold.other` uses column `region`, which this run "
         "removed from the table. Reads of the table by the people the filter applies to are "
@@ -440,4 +452,10 @@ def test_a_policy_manager_sees_every_warning_with_the_id_and_the_revoke_command(
         "that order: revoking it first shows those people every row until the new one exists."
     )
     assert "real values" in shown[0].message
-    assert warnings_for_reader(None, may_read=lambda name: True, manages_policies=True) == ()
+
+
+def test_the_changed_tables_are_read_from_what_is_stored_and_junk_is_ignored() -> None:
+    assert changed_tables({"tables": ["gold.a", 7, "gold.b"]}) == ("gold.a", "gold.b")
+    assert changed_tables(["gold.a"]) == ()
+    assert changed_tables({"tables": "gold.a"}) == ()
+    assert changed_tables(None) == ()

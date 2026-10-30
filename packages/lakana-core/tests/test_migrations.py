@@ -4628,10 +4628,10 @@ _REVISION_0056 = "b6d0f8a2c4e5"
 
 
 @pytest.mark.usefixtures("_without_fsync")
-def test_0056_adds_the_policy_warnings_of_a_task_null_on_old_rows(
+def test_0056_adds_the_schema_change_of_a_task_null_on_old_rows(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Revision `0056`: `policy_warnings_json` on task runs, and back.
+    """Revision `0056`: `schema_change_json` on task runs, and back.
 
     Parameters
     ----------
@@ -4647,7 +4647,7 @@ def test_0056_adds_the_policy_warnings_of_a_task_null_on_old_rows(
     engine = create_engine(f"sqlite:///{db_path}")
     try:
         found = {c["name"]: c for c in inspect(engine).get_columns("task_runs")}
-        assert found["policy_warnings_json"]["nullable"] is True
+        assert found["schema_change_json"]["nullable"] is True
     finally:
         engine.dispose()
 
@@ -4655,6 +4655,6 @@ def test_0056_adds_the_policy_warnings_of_a_task_null_on_old_rows(
     engine = create_engine(f"sqlite:///{db_path}")
     try:
         names = {c["name"] for c in inspect(engine).get_columns("task_runs")}
-        assert "policy_warnings_json" not in names
+        assert "schema_change_json" not in names
     finally:
         engine.dispose()

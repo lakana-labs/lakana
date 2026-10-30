@@ -63,6 +63,7 @@ from lakana_core.models import (
     TaskRun,
     TaskStatus,
 )
+from lakana_core.policy.schema_change import merge_schema_change
 from lakana_core.projects.manifest import entry_output, python_entry
 
 PROTECTED_MESSAGE = (
@@ -332,6 +333,8 @@ class _Evidence:
     policy_warnings
         The row filters and column masks the write leaves out of date, as stored
         (`lakana_core.policy.schema_change.BrokenPolicy.to_json`).
+    changed_table
+        The table whose columns the write removed or replaced, or `None`.
     """
 
     key: tuple[str, Target]
@@ -342,6 +345,7 @@ class _Evidence:
     snapshot_before: int | None
     publishes: bool
     policy_warnings: tuple[dict[str, str], ...] = ()
+    changed_table: str | None = None
 
 
 class ProtectedWriteGuard:
@@ -410,6 +414,7 @@ class ProtectedWriteGuard:
         snapshot_before: int | None = None,
         publishes: bool = False,
         policy_warnings: tuple[dict[str, str], ...] = (),
+        changed_table: str | None = None,
     ) -> None:
         """Remember what the write of `target` is about to commit, for `record_pending`.
 
@@ -437,7 +442,10 @@ class ProtectedWriteGuard:
             Whether the write created the table or found it not published.
         policy_warnings
             The row filters and column masks the write leaves out of date, as stored; recorded on
-            the task run of a write in a run (`_note_policy_warnings`).
+            the task run of a write in a run (`_note_schema_change`).
+        changed_table
+            The table whose columns the write removed or replaced, or `None`; recorded the same
+            way, with or without a policy.
         """
         self._evidence = _Evidence(
             (environment, target),
@@ -448,6 +456,7 @@ class ProtectedWriteGuard:
             snapshot_before,
             publishes,
             policy_warnings,
+            changed_table,
         )
 
     def note_own_commit(
@@ -693,8 +702,10 @@ class ProtectedWriteGuard:
                 self._stamp_written(relied_on.context.task_run_id, noted)
         if noted is not None and relied_on is not None and relied_on.context.claim is not None:
             self._advance_own_tip(relied_on.context.task_run_id, noted)
-        if noted is not None and relied_on is not None and noted.policy_warnings:
-            self._note_policy_warnings(relied_on.context.task_run_id, noted.policy_warnings)
+        if noted is not None and relied_on is not None and noted.changed_table is not None:
+            self._note_schema_change(
+                relied_on.context.task_run_id, noted.changed_table, noted.policy_warnings
+            )
         if self._pending is None:
             return
         key, principal_id, detail = self._pending
@@ -708,32 +719,32 @@ class ProtectedWriteGuard:
             detail=detail,
         )
 
-    def _note_policy_warnings(
-        self, task_run_id: uuid.UUID, warnings: tuple[dict[str, str], ...]
+    def _note_schema_change(
+        self, task_run_id: uuid.UUID, table: str, warnings: tuple[dict[str, str], ...]
     ) -> None:
-        """Add a write's policy warnings to its task run, in the write's own transaction.
+        """Add a write's schema change to its task run, in the write's own transaction.
 
         Both forms of a run context get here (a SQL task's write run and a Python task's own
-        write), after the context held again, so the warnings land with the schema change or not
-        at all. An entry the task run already holds is not added twice: a later write of the same
-        task that changes the same column again tells nothing new.
+        write), after the context held again, so the record lands with the schema change or not
+        at all. It is recorded for every write that removed or replaced a column, with or without
+        a policy (`merge_schema_change` keeps each entry once).
 
         Parameters
         ----------
         task_run_id
             The task run whose write this is.
+        table
+            The table whose columns changed.
         warnings
-            The warnings, as stored.
+            The policies it left out of date, as stored.
         """
         held = self._session.scalar(
-            select(TaskRun.policy_warnings_json).where(TaskRun.id == task_run_id)
+            select(TaskRun.schema_change_json).where(TaskRun.id == task_run_id)
         )
-        merged = list(held or [])
-        merged += [warning for warning in warnings if warning not in merged]
         self._session.execute(
             update(TaskRun)
             .where(TaskRun.id == task_run_id)
-            .values(policy_warnings_json=merged)
+            .values(schema_change_json=merge_schema_change(held, table, warnings))
             .execution_options(synchronize_session=False)
         )
 

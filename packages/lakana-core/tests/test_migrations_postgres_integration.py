@@ -2805,7 +2805,7 @@ def test_0055_on_postgres() -> None:
 
 
 def test_0056_on_postgres() -> None:
-    """0056 adds `policy_warnings_json` to task runs, drops it, and adds it again."""
+    """0056 adds `schema_change_json` to task runs, drops it, and adds it again."""
     revision_0055 = "a5c9e7f1b3d4"
     revision_0056 = "b6d0f8a2c4e5"
 
@@ -2815,12 +2815,12 @@ def test_0056_on_postgres() -> None:
         engine = sqlalchemy.create_engine(url)
         assert _alembic_version(engine) == revision_0056
         columns = {c["name"]: c for c in sqlalchemy.inspect(engine).get_columns("task_runs")}
-        assert columns["policy_warnings_json"]["nullable"] is True
+        assert columns["schema_change_json"]["nullable"] is True
 
         migrate.downgrade(url, revision_0055)
         assert _alembic_version(engine) == revision_0055
         names = {c["name"] for c in sqlalchemy.inspect(engine).get_columns("task_runs")}
-        assert "policy_warnings_json" not in names
+        assert "schema_change_json" not in names
 
         migrate.upgrade(url, revision_0056)
         assert _alembic_version(engine) == revision_0056

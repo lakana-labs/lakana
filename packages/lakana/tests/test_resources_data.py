@@ -2395,11 +2395,18 @@ def test_a_run_task_parses_policy_warnings_and_skips_what_it_cannot_read() -> No
         "started_at": None,
         "finished_at": None,
         "tasks": [
-            {**task, "policy_warnings": [warning, {**warning, "policy_id": "p1"}, {"kind": 1}, 7]},
+            {
+                **task,
+                "schema_note": "This run changed the table's columns.",
+                "policy_warnings": [warning, {**warning, "policy_id": "p1"}, {"kind": 1}, 7],
+            },
+            {**task, "schema_note": 5},
             task,
         ],
     }
-    warned, old = run_from_json(body).tasks
+    warned, odd, old = run_from_json(body).tasks
+    assert warned.schema_note == "This run changed the table's columns."
+    assert (odd.schema_note, old.schema_note) == (None, None)
     assert warned.policy_warnings == (
         PolicyWarning("column_mask", "ssn", "removed", None, warning["message"]),
         PolicyWarning("column_mask", "ssn", "removed", "p1", warning["message"]),

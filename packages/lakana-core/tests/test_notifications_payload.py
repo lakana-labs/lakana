@@ -311,38 +311,41 @@ def test_without_a_failed_reference_check_the_json_has_no_flag() -> None:
     assert "reference_check_failed" not in json.loads(build("json", "failed", _facts())[0])
 
 
-def test_a_policy_warning_names_the_table_and_never_the_policy_or_the_column(
-    session: Session,
+@pytest.mark.parametrize("with_policy", [True, False])
+def test_a_column_change_is_said_neutrally_whether_or_not_a_policy_is_affected(
+    session: Session, with_policy: bool
 ) -> None:
-    """The endpoint is no reader: the run's own table is named, the policy and column are not."""
+    """The endpoint is no administrator: the table is named, nothing says a policy exists."""
     run = _seed(session, [])
     run.status = RunStatus.SUCCEEDED
+    broken = {
+        "table": "silver.clean",
+        "kind": "column_mask",
+        "policy_id": "12345678-1234-1234-1234-123456789abc",
+        "column": "ssn_marker",
+        "change": "removed",
+    }
     for task in session.query(TaskRun).filter(TaskRun.run_id == run.id):
-        task.policy_warnings_json = [
-            {
-                "table": task.asset,
-                "kind": "column_mask",
-                "policy_id": "12345678-1234-1234-1234-123456789abc",
-                "column": "ssn_marker",
-                "change": "removed",
-            }
-        ]
+        task.schema_change_json = {
+            "tables": [task.asset],
+            "policies": [broken] if with_policy and task.asset == "silver.clean" else [],
+        }
     session.flush()
     facts = facts_for_run(session, run, DELIVERY)
-    assert facts.policy_warnings == ("silver.clean", "silver.ok")
-    data = json.loads(build("json", "warned", facts)[0])
-    assert data["event"] == "warned"
-    assert data["policy_warnings"] == ["silver.clean", "silver.ok"]
-    slack = json.loads(build("slack", "warned", facts)[0])["text"]
-    assert slack.startswith("Lakana: job `daily` succeeded with a warning in `prod`")
+    assert facts.columns_changed == ("silver.clean", "silver.ok")
+    data = json.loads(build("json", "columns_changed", facts)[0])
+    assert data["event"] == "columns_changed"
+    assert data["columns_changed"] == ["silver.clean", "silver.ok"]
+    slack = json.loads(build("slack", "columns_changed", facts)[0])["text"]
+    assert slack.startswith("Lakana: job `daily` changed table columns in `prod`")
     assert (
-        "A schema change left row filters or column masks out of date on `silver.clean`, "
-        f"`silver.ok`; see `lakana runs show {facts.run_id} --env prod`"
+        "The run removed or retyped columns of `silver.clean`, `silver.ok`; an administrator "
+        f"has been told what to check; see `lakana runs show {facts.run_id} --env prod`"
     ) in slack
-    teams = build("teams", "warned", facts)[0].decode()
-    assert "Row filters and column masks" in teams
+    teams = build("teams", "columns_changed", facts)[0].decode()
+    assert "Columns changed" in teams
     for fmt in FORMATS:
-        body = build(fmt, "warned", facts)[0].decode()
-        assert "ssn_marker" not in body
-        assert "12345678" not in body
-    assert "policy_warnings" not in json.loads(build("json", "failed", _facts())[0])
+        body = build(fmt, "columns_changed", facts)[0].decode()
+        for word in ("ssn_marker", "12345678", "mask", "filter", "polic"):
+            assert word not in body
+    assert "columns_changed" not in json.loads(build("json", "failed", _facts())[0])

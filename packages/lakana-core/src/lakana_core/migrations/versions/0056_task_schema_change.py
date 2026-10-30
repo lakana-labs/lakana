@@ -1,4 +1,4 @@
-"""task policy warnings: row filters and column masks a task's schema change left out of date.
+"""task schema change: the columns a task removed or replaced, and the policies that use them.
 
 Revision ID: b6d0f8a2c4e5
 Revises: a5c9e7f1b3d4
@@ -21,17 +21,17 @@ depends_on: str | Sequence[str] | None = None
 def upgrade() -> None:
     """Upgrade schema.
 
-    Adds `policy_warnings_json` to `task_runs`, null on every existing row: no warning was
-    recorded before this release.
+    Adds `schema_change_json` to `task_runs`, null on every existing row: nothing was recorded
+    before this release.
     """
     with op.batch_alter_table("task_runs") as batch:
-        batch.add_column(sa.Column("policy_warnings_json", sa.JSON(), nullable=True))
+        batch.add_column(sa.Column("schema_change_json", sa.JSON(), nullable=True))
 
 
 def downgrade() -> None:
     """Downgrade schema.
 
-    Drops the column and the warnings in it; the previous release shows none.
+    Drops the column and what it holds; the previous release shows none of it.
     """
     with op.batch_alter_table("task_runs") as batch:
-        batch.drop_column("policy_warnings_json")
+        batch.drop_column("schema_change_json")

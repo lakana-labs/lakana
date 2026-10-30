@@ -177,6 +177,7 @@ def run_from_json(data: dict[str, Any]) -> Run:
                 kept_check=t.get("kept_check", False),
                 setting_back=t.get("setting_back", False),
                 failure=failure_from_json(t.get("failure")),
+                schema_note=note if isinstance(note := t.get("schema_note"), str) else None,
                 policy_warnings=policy_warnings_from_json(t.get("policy_warnings")),
             )
             for t in data["tasks"]

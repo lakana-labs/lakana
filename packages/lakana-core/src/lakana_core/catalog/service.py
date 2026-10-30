@@ -264,7 +264,7 @@ from lakana_core.models import (
 from lakana_core.models.run import TERMINAL_TASK_STATUSES
 from lakana_core.pagination import escape_like
 from lakana_core.policy.resolver import PolicyResolver
-from lakana_core.policy.schema_change import BrokenPolicy, broken_policies
+from lakana_core.policy.schema_change import BrokenPolicy, broken_policies, changed_columns
 from lakana_core.query_rewrite import ViewDefinition
 from lakana_core.runs.checks import (
     CHECK_ROWS_NOT_FOR_A_TASK,
@@ -6101,13 +6101,8 @@ class CatalogService:
             next_schema_id=max(s.schema_id for s in current.schemas) + 1,
             table_name=ref.dotted(),
         )
-        broken = (
-            ()
-            if plan.schema is None
-            else broken_policies(
-                self._session, table_id, ref.dotted(), current.schema(), plan.schema
-            )
-        )
+        changed = {} if plan.schema is None else changed_columns(current.schema(), plan.schema)
+        broken = broken_policies(self._session, table_id, ref.dotted(), changed)
         schema_updates: list[TableUpdate] = (
             []
             if plan.schema is None
@@ -6169,6 +6164,7 @@ class CatalogService:
                 snapshot_before=current.current_snapshot_id,
                 publishes=unpublished,
                 policy_warnings=broken,
+                columns_changed=bool(changed),
             )
             self.commit_table(
                 p,
@@ -7024,6 +7020,7 @@ class CatalogService:
         publishes: bool = False,
         detail: Mapping[str, object] | None = None,
         policy_warnings: Sequence[BrokenPolicy] = (),
+        columns_changed: bool = False,
     ) -> None:
         """Add a write's `TABLE_WRITE` event and lineage edges to the session, uncommitted.
 
@@ -7063,6 +7060,10 @@ class CatalogService:
             The row filters and column masks the write's schema change leaves out of date: named
             in the event (``broken_policies``, only when there are any) and handed to the guard,
             which records them on the task run of a write in a run.
+        columns_changed
+            Whether the write removed or replaced a column: the guard records that on the task run
+            of a write in a run, with or without a policy, so that what a reader who manages no
+            policies is shown does not tell whether one exists.
         """
         stored = tuple(warning.to_json() for warning in policy_warnings)
         AuditService(self._session).record(
@@ -7104,6 +7105,7 @@ class CatalogService:
             snapshot_before=snapshot_before,
             publishes=publishes,
             policy_warnings=stored,
+            changed_table=ref.dotted() if columns_changed else None,
         )
 
     def _connection_sources(
