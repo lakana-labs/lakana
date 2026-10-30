@@ -57,7 +57,7 @@ dependencies = [
     "cryptography>=50.0.2",
     # Postgres driver for team mode (`postgresql+pg8000://`). BSD-3, pure
     # Python. psycopg is LGPL-3.0 and forbidden (CLAUDE.md rule 4).
-    "pg8000>=1.31",
+    "pg8000>=1.31.6",
     # MIT. Loads `lakana.yaml` and SQL front-matter from deployed repositories
     # through an alias-refusing SafeLoader subclass
     # (`lakana_core.projects.yaml_loader`).
