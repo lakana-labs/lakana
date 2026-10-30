@@ -710,6 +710,28 @@ def test_the_schema_message_names_the_decorators_option_not_the_servers(
     )
 
 
+def test_an_append_whose_first_write_meets_another_schema_is_not_told_to_evolve(
+    world: _World,
+) -> None:
+    """Deploy refuses `evolve_schema=True` on an append, so the advice names what it can do."""
+    world.client.tables.outcome = ValidationError(
+        "The result does not match gold.scores's schema (dropped region). "
+        "Pass evolve_schema (--evolve-schema) to let the table adopt the result's schema.",
+        status=422,
+        error_type="SchemaMismatchError",
+    )
+    record = _failing(
+        world, "return obs", **_v3(watermark={"column": "id", "value": None}, expected="none")
+    )
+    assert record["retryable"] is False
+    assert record["message"] == (
+        "the asset's output no longer matches the schema of gold.scores. Server detail: The "
+        "result does not match gold.scores's schema (dropped region). An asset that appends "
+        "cannot change its table's schema: make the asset return the columns and types "
+        "gold.scores has, then run it again."
+    )
+
+
 def test_the_message_of_an_exception_from_user_code_names_its_type(world: _World) -> None:
     """`KeyError('score')` reads ``'score'`` on its own, which tells the user nothing."""
     assert _failing(world, "return {}['score']")["message"] == "KeyError: 'score'"

@@ -1767,14 +1767,17 @@ def _store_artifact(
     }
 
 
-def _upload_message(exc: ValidationError, table: str) -> str:
+def _upload_message(exc: ValidationError, table: str, write: str) -> str:
     """Word a refused upload for the task's error.
 
     A `table` asset replaces its table with ``evolve_schema`` off unless it
     says ``@asset(evolve_schema=True)``, so without that a changed output schema
     is refused for good. The schema mismatch is recognised by the error type the
     server returns, not by its wording, and the harness writes its own advice,
-    which names the decorator's option.
+    which names the decorator's option. Only a replace may take that option (deploy refuses
+    it otherwise), so an append or a merge is told what it can do instead. An append meets the
+    mismatch only in a race: another writer created the table between its first run's read and
+    its upload.
 
     Parameters
     ----------
@@ -1782,6 +1785,8 @@ def _upload_message(exc: ValidationError, table: str) -> str:
         The refusal.
     table
         The asset's dotted table name.
+    write
+        The asset's ``write``: ``replace``, ``append`` or ``merge``.
 
     Returns
     -------
@@ -1794,9 +1799,14 @@ def _upload_message(exc: ValidationError, table: str) -> str:
     if exc.error_type != "SchemaMismatchError":
         return str(exc)
     detail = str(exc).split(_SERVER_ADVICE, 1)[0].strip().rstrip(".")
+    cause = f"the asset's output no longer matches the schema of {table}. Server detail: {detail}."
+    if write != "replace":
+        return (
+            f"{cause} An asset that {write}s cannot change its table's schema: make the asset "
+            f"return the columns and types {table} has, then run it again."
+        )
     return (
-        f"the asset's output no longer matches the schema of {table}. Server detail: {detail}. "
-        f"To let {table} take the new schema, add evolve_schema=True to the asset's "
+        f"{cause} To let {table} take the new schema, add evolve_schema=True to the asset's "
         "@asset(...) and deploy again (a column the output no longer has is then removed from "
         "the table); otherwise restore the columns and types the table has."
     )
@@ -2006,7 +2016,7 @@ def _upload(client: Client, description: TaskDescription, arrow: pa.Table) -> di
             **lineage,
         )
     except ValidationError as exc:
-        raise UploadRefused(_upload_message(exc, description.table)) from exc
+        raise UploadRefused(_upload_message(exc, description.table, description.write)) from exc
     return {"status": "succeeded", "snapshot_id": written.snapshot_id, "rows": written.rows}
 
 

@@ -115,6 +115,11 @@ and every query, view and downstream asset that names it fails: see
 `evolve_schema=False` with every `write` (see
 [When the output changes shape](python-assets.md#when-the-output-changes-shape)).
 
+Without it, a run whose result lost a column or changed a type fails and leaves the table as it
+was: ``The result does not match silver.orders's schema (dropped region (string)). To let silver.orders take the new schema, add `evolve_schema: true` to the asset's front matter and deploy again (a column the result no longer has is then removed from the table); otherwise make its SELECT return the columns and types silver.orders has.``
+A `materialize: table` asset cannot take `evolve_schema`, so its message says to make its SELECT
+return the columns and types the table has instead.
+
 ### `merge`
 
 <!-- source: docs/examples/write-modes/project/assets/silver/customers.sql -->

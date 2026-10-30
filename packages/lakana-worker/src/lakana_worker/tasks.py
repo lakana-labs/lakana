@@ -42,6 +42,7 @@ from lakana_core.catalog.identity import (
     resolve_table_id,
     resolve_table_with_note,
 )
+from lakana_core.catalog.schema_compat import SchemaMismatchError
 from lakana_core.catalog.service import CatalogService
 from lakana_core.config import QueryLimitsConfig
 from lakana_core.db import db_now, rowcount
@@ -106,6 +107,7 @@ from lakana_worker.task_outcome import (
     classify,
     failure_code_of,
     failure_message,
+    sql_asset_mismatch_message,
     stop_code,
 )
 
@@ -876,6 +878,8 @@ def _execute(
         kind, message, code = FailureKind.TRANSIENT, INTERNAL_ERROR_MESSAGE, FailureCode.INTERNAL
     else:
         kind, message = classify(failure), failure_message(failure, stored)
+        if isinstance(failure, SchemaMismatchError):
+            message = sql_asset_mismatch_message(message, claimed.asset, prepared.mode)
         code = failure_code_of(failure, write.error_cause)
     return TaskOutcome(
         kind,
