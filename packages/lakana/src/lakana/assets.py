@@ -566,7 +566,7 @@ def _check_label(where: str, value: object) -> str:
         With deploy's text for the first rule it breaks.
     """
     if not isinstance(value, str):
-        raise ValueError(f"{where}: must be a string")
+        raise ValueError(f"{where}: Input should be a valid string")
     stripped = value.strip()
     if not stripped:
         raise ValueError(f"{where}: must not be empty")
@@ -605,6 +605,8 @@ def _check_columns(columns: object) -> dict[str, str | dict[str, str]] | None:
     result: dict[str, str | dict[str, str]] = {}
     for name, given in columns.items():
         if isinstance(given, str):
+            if _unsafe_free_text(given):
+                raise ValueError(f"columns: a column description {_FREE_TEXT_MESSAGE}")
             result[name] = given
             continue
         if not isinstance(given, Mapping):
@@ -621,6 +623,12 @@ def _check_columns(columns: object) -> dict[str, str | dict[str, str]] | None:
                 "as a plain string"
             )
         texts = dict(given)
+        description = texts.get("description")
+        if description is not None:
+            if not isinstance(description, str):
+                raise ValueError(f"columns.{name}.description: Input should be a valid string")
+            if _unsafe_free_text(description):
+                raise ValueError(f"columns.{name}.description: {_FREE_TEXT_MESSAGE}")
         if "label" in texts:
             texts["label"] = _check_label(f"columns.{name}.label", texts["label"])
         result[name] = texts

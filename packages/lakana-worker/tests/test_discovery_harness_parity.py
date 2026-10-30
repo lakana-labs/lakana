@@ -264,6 +264,9 @@ _ARGUMENT_CASES: dict[str, str] = {
     "columns-long-form": 'columns={"c": {"label": "C", "description": "the c"}}',
     "columns-empty-long-form": 'columns={"c": {}}',
     "columns-bad-key": 'columns={"c": {"lable": "C"}}',
+    "columns-long-description-bidi": 'columns={"c": {"description": "a\\u202eb"}}',
+    "columns-short-description-bidi": 'columns={"c": "a\\u202eb"}',
+    "columns-long-description-blank": 'columns={"c": {"description": " "}}',
     "output-table": 'output="table"',
     "output-artifact": 'output="artifact"',
     "output-other-string": 'output="model"',
@@ -491,6 +494,8 @@ def test_deploy_and_the_decorator_accept_and_refuse_the_same_arguments(name: str
 
 
 _BOTH_REFUSE = (
+    "columns-long-description-bidi",
+    "columns-short-description-bidi",
     "references-newline-in-target",
     "references-bell-in-target",
     "references-bidi-in-target",
@@ -748,6 +753,15 @@ def test_a_null_not_over_means_no_columns_at_deploy_and_in_the_sdk() -> None:
         {"columns": {"c": {}}},
         {"columns": {"c": {"lable": "C"}}},
         {"columns": {"c": {"label": "a\nb"}}},
+        {"label": "a\u202eb"},
+        {"label": 3},
+        {"columns": {"c": {"label": 3}}},
+        {"columns": {"c": {"label": "a\u202eb"}}},
+        {"columns": {"c": {"description": "a\u202eb"}}},
+        {"columns": {"c": {"description": 3}}},
+        {"columns": {"c": "a\u202eb"}},
+        {"columns": {"c": 3}},
+        {"columns": {"c": ["x"]}},
     ],
 )
 def test_a_bad_text_gets_the_same_words_from_deploy_and_the_sdk(texts: dict[str, Any]) -> None:
@@ -763,3 +777,10 @@ def test_a_bad_text_gets_the_same_words_from_deploy_and_the_sdk(texts: dict[str,
     with pytest.raises(ValueError) as sdk:
         cast("Any", sdk_assets.asset)(**texts)
     assert str(sdk.value) == issue.message
+
+
+def test_the_sdk_words_the_free_text_rule_as_core_does() -> None:
+    """The character rule's text is copied into the SDK; the copy must be core's, word for word."""
+    from lakana_core.projects.project_config import FREE_TEXT_MESSAGE
+
+    assert sdk_assets._FREE_TEXT_MESSAGE == FREE_TEXT_MESSAGE

@@ -650,7 +650,7 @@ def test_the_decorator_records_a_label_and_long_form_columns() -> None:
         ({"label": "a\nb"}, "label: must be one line"),
         ({"label": "x" * 101}, "label: must be at most 100 characters"),
         ({"label": " "}, "label: must not be empty"),
-        ({"label": 3}, "label: must be a string"),
+        ({"label": 3}, "label: Input should be a valid string"),
         ({"label": "a\u202eb"}, "label: must not contain a surrogate"),
         ({"columns": ["c"]}, "columns must be a dict of strings or dicts"),
         ({"columns": {"c": {}}}, "columns.c: needs `label:` or `description:`"),
