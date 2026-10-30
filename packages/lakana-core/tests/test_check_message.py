@@ -22,7 +22,12 @@ from lakana_core.runs.check_message import (
     message_for_log,
     message_for_reader,
 )
-from lakana_core.runs.checks import ERROR_KEPT, WITHHELD_TASK_MESSAGE, log_withheld_message
+from lakana_core.runs.checks import (
+    ERROR_KEPT,
+    WITHHELD_TASK_MESSAGE,
+    log_withheld_message,
+    reference_check_log_line,
+)
 
 _TABLE = "gold.t"
 _RUN = uuid.UUID("00000000-0000-4000-8000-000000000001")
@@ -397,3 +402,9 @@ def test_the_log_points_at_runs_show_when_the_message_cannot_be_worded_again() -
         )
         == "The build failed."
     )
+
+
+def test_the_log_line_of_a_reference_check_is_true_for_every_outcome() -> None:
+    line = reference_check_log_line(_RUN, "dev")
+    assert line == f"outcome withheld from the log; see `lakana runs show {_RUN} --env dev`"
+    assert not any(word in line for word in ("passed", "failed", "done", "row"))

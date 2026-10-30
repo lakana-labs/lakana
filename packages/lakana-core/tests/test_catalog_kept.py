@@ -634,9 +634,10 @@ def test_an_unbound_task_token_is_refused_like_a_pipeline_task(
     assert "own token" in str(caught.value)
 
 
-def test_the_note_shows_more_than_one_check_as_it_was_stored(
+def test_a_note_whose_results_are_gone_names_only_its_first_check(
     session: Session, catalog: CatalogService, principal: PrincipalRef, kept_run_id: uuid.UUID
 ) -> None:
+    """Without the results nothing tells whether "and 2 more" counts reference checks (#385)."""
     session.execute(
         update(Table).where(Table.name == "orders").values(kept_check=f"{_CHECK} and 2 more")
     )
@@ -646,7 +647,7 @@ def test_the_note_shows_more_than_one_check_as_it_was_stored(
     with pytest.raises(KeptAfterCheckError) as caught:
         catalog.load_table(_worker_form(principal, tasks["gold.report"]), _REF)
 
-    assert str(caught.value) == _k4(kept_run_id, check=f"{_CHECK} and 2 more")
+    assert str(caught.value) == _k4(kept_run_id, check=_CHECK)
 
 
 def test_a_table_without_a_note_costs_no_query(
