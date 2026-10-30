@@ -3,8 +3,8 @@ members = ["packages/*"]
 
 [dependency-groups]
 dev = [
-    "hypothesis>=6.170.5",
-    "polars>=1.30",
+    "hypothesis>=6.170.12",
+    "polars>=2.1.0",
     "import-linter>=2",
     "pip-licenses>=5",
     "pytest>=8",
@@ -13,7 +13,7 @@ dev = [
     # The Docker isolation tests drive the engine with it; testcontainers depends on it too.
     # Apache-2.0.
     "docker>=7.1",
-    "pg8000>=1.31",
+    "pg8000>=1.31.6",
     "ruff==0.17.1",
     "ty==0.0.89",
     "uvicorn>=0.54.0",
@@ -59,7 +59,7 @@ check = [
 ]
 # The documentation site (docs/site). Built in CI; published at the public beta.
 docs = [
-    "zensical>=0.0.71",
+    "zensical>=0.0.73",
 ]
 
 [tool.ruff]
