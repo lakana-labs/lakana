@@ -19,6 +19,7 @@ from lakana_core.projects.model_checks import (
     generated_name_issues,
     key_not_null_sql,
     key_unique_sql,
+    measures_sql,
     reference_sql,
 )
 from lakana_core.query_rewrite import check_blacklist, extract_table_refs
@@ -292,3 +293,67 @@ def test_keep_on_a_family_is_refused_once_however_many_checks_it_generates() -> 
         "`checks: key: keep`",
         "`checks: references: keep`",
     ]
+
+
+def _measured(**fields: object) -> ParsedAsset:
+    """Build a fact with two measures, one semi-additive.
+
+    Parameters
+    ----------
+    **fields
+        Overrides of the metadata.
+
+    Returns
+    -------
+    ParsedAsset
+        The asset.
+    """
+    metadata = AssetMetadata.model_validate(
+        {
+            "materialize": "table",
+            "kind": "fact",
+            "grain": "One row per store and day.",
+            "key": ["day", "store_id"],
+            "measures": {
+                "stock": {
+                    "aggregation": "sum",
+                    "additivity": "semi",
+                    "not_over": "day",
+                    "unit": "count",
+                },
+                "amount": {"aggregation": "sum", "currency": "EUR"},
+            },
+            **fields,
+        }
+    )
+    return make_asset("gold.fact_stock", columns=None, metadata=metadata)
+
+
+def test_measures_generate_one_check_that_returns_no_rows() -> None:
+    checks = generated_checks([_measured()], {}, default_on_failure="block")
+    (check,) = [c for c in checks if c.check == "measures"]
+    assert check.name == "gold.fact_stock/measures"
+    assert check.sql == 'SELECT * FROM "gold"."fact_stock" WHERE false'
+    assert check.sql == measures_sql("gold.fact_stock")
+    assert check.generated == GeneratedFrom(
+        "measures", ("amount", "stock"), not_over=("day",), aggregations=("sum", "sum")
+    )
+    assert (check.on_failure, check.description) == ("block", "generated from `measures:`")
+    check_blacklist(check.sql, dialect="duckdb")
+
+
+def test_checks_measures_sets_the_mode_and_a_hand_written_measures_check_is_refused() -> None:
+    (check,) = [
+        c
+        for c in generated_checks(
+            [_measured(checks={"measures": "warn"})], {}, default_on_failure="block"
+        )
+        if c.check == "measures"
+    ]
+    assert check.on_failure == "warn"
+    hand = dataclasses.replace(check, path="checks/gold/fact_stock/measures.sql", generated=None)
+    (issue,) = generated_name_issues([hand], [check])
+    assert issue.message == (
+        "A check named `measures` is generated for `gold.fact_stock`; rename "
+        "`checks/gold/fact_stock/measures.sql`."
+    )

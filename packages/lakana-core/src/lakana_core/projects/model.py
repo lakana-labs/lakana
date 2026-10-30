@@ -461,9 +461,9 @@ def project_model_issues(assets: Sequence[ParsedAsset]) -> list[ProjectIssue]:
     Returns
     -------
     list of ProjectIssue
-        One per key column, then per reference column, that the asset's explicit SELECT does
-        not return, in path order; nothing for a star or a Python asset, whose columns are
-        checked at the run.
+        One per key column, then per reference column, then per measure column and
+        `not_over` column, that the asset's explicit SELECT does not return, in path order;
+        nothing for a star or a Python asset, whose columns are checked at the run.
     """
     issues: list[ProjectIssue] = []
     for asset in sorted(assets, key=lambda a: a.path):
@@ -490,4 +490,25 @@ def project_model_issues(assets: Sequence[ParsedAsset]) -> list[ProjectIssue]:
                         "SELECT; add it to the SELECT, or remove the reference.",
                     )
                 )
+        for column, spec in sorted(asset.metadata.measures.items()):
+            if column not in asset.columns:
+                issues.append(
+                    ProjectIssue(
+                        asset.path,
+                        line,
+                        f"Measure column `{column}` is not a column of `{asset.table}`'s SELECT; "
+                        "add it to the SELECT, or remove it from `measures:`.",
+                    )
+                )
+            for other in spec.not_over:
+                if other not in asset.columns:
+                    issues.append(
+                        ProjectIssue(
+                            asset.path,
+                            line,
+                            f"Column `{other}` in `not_over` of measure `{column}` is not a column "
+                            f"of `{asset.table}`'s SELECT; add it to the SELECT, or change "
+                            "`not_over:`.",
+                        )
+                    )
     return issues

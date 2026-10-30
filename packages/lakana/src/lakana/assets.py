@@ -16,7 +16,7 @@ import unicodedata
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TypeVar
+from typing import Any, TypeVar
 
 F = TypeVar("F", bound=Callable[..., object])
 
@@ -42,7 +42,77 @@ MODEL_KINDS = ("fact", "dimension", "wide", "staging")
 """The values of `kind`; the same as `lakana_core.projects.asset_model.MODEL_KINDS` (a parity
 test pins both)."""
 
-_CHECK_FAMILIES = ("key", "references")
+AGGREGATIONS = ("sum", "count", "min", "max", "avg", "count_distinct", "none")
+"""A measure's aggregations; the same as `lakana_core.projects.measures.AGGREGATIONS` (a parity
+test pins both)."""
+
+ADDITIVITIES = ("additive", "semi", "non")
+"""A measure's additivities (a parity test pins them)."""
+
+UNITS = (
+    "count",
+    "percent",
+    "ratio",
+    "millisecond",
+    "second",
+    "minute",
+    "hour",
+    "day",
+    "byte",
+    "gram",
+    "kilogram",
+    "tonne",
+    "metre",
+    "kilometre",
+    "litre",
+    "kilowatt_hour",
+    "degree_celsius",
+)
+"""A measure's units (a parity test pins them)."""
+
+# jscpd:ignore-start
+# The same two lists as `lakana_core.projects.measures`; the SDK may not import core.
+# `test_the_measure_values_are_the_same_in_core_and_the_sdk` pins them.
+_CURRENT_TEXT = (
+    "AED AFN ALL AMD AOA ARS AUD AWG AZN BAM BBD BDT BHD BIF BMD BND BOB BOV BRL BSD BTN BWP "
+    "BYN BZD CAD CDF CHE CHF CHW CLF CLP CNY COP COU CRC CUP CVE CZK DJF DKK DOP DZD EGP ERN "
+    "ETB EUR FJD FKP GBP GEL GHS GIP GMD GNF GTQ GYD HKD HNL HTG HUF IDR ILS INR IQD IRR ISK "
+    "JMD JOD JPY KES KGS KHR KMF KPW KRW KWD KYD KZT LAK LBP LKR LRD LSL LYD MAD MDL MGA MKD "
+    "MMK MNT MOP MRU MUR MVR MWK MXN MXV MYR MZN NAD NGN NIO NOK NPR NZD OMR PAB PEN PGK PHP "
+    "PKR PLN PYG QAR RON RSD RUB RWF SAR SBD SCR SDG SEK SGD SHP SLE SOS SRD SSP STN SVC SYP "
+    "SZL THB TJS TMT TND TOP TRY TTD TWD TZS UAH UGX USD USN UYI UYU UYW UZS VED VES VND VUV "
+    "WST XAF XAG XAU XBA XBB XBC XBD XCD XCG XDR XOF XPD XPF XPT XSU XUA YER ZAR ZMW ZWG"
+)
+CURRENT_CURRENCIES = frozenset(_CURRENT_TEXT.split())
+"""ISO 4217 List One as of 2026, without XTS and XXX (a parity test pins them)."""
+
+_WITHDRAWN_TEXT = (
+    "ANG ATS AZM BEF BGN BYR CUC CYP DEM EEK ESP FIM FRF GHC GRD HRK IEP ITL LTL LUF LVL MRO "
+    "MTL NLG PTE ROL SIT SKK SLL STD TMM TRL VEB VEF ZMK ZWL"
+)
+WITHDRAWN_CURRENCIES = frozenset(_WITHDRAWN_TEXT.split())
+"""Codes withdrawn since 1999 that historic data still carries (a parity test pins them)."""
+# jscpd:ignore-end
+
+CURRENCY_CODES = CURRENT_CURRENCIES | WITHDRAWN_CURRENCIES
+"""The currencies a measure may declare, in capitals."""
+
+MAX_MEASURES = 100
+"""The most measures one asset declares (a parity test pins the number)."""
+
+_MEASURE_KEYS = (
+    "aggregation",
+    "additivity",
+    "not_over",
+    "unit",
+    "currency",
+    "label",
+    "description",
+)
+_MAX_LABEL_CHARS = 100
+_MAX_DESCRIPTION_CHARS = 4000
+
+_CHECK_FAMILIES = ("key", "references", "measures")
 _CHECK_MODES = ("block", "keep", "warn")
 _MAX_GRAIN_CHARS = 300
 _KEY_NONE = "none"
@@ -159,8 +229,10 @@ class AssetSpec:
     references
         Column of this table → the table it refers to (``ns.table`` or ``ns.table.column``).
     checks
-        Generated-check family (``key``, ``references``) → what a failure does (``block``,
-        ``keep`` or ``warn``).
+        Generated-check family (``key``, ``references``, ``measures``) → what a failure does
+        (``block``, ``keep`` or ``warn``).
+    measures
+        Column → its measure, as given, with ``not_over`` as a list.
     """
 
     inputs: dict[str, str]
@@ -184,6 +256,7 @@ class AssetSpec:
     grain: str | None = None
     references: dict[str, str] = field(default_factory=dict)
     checks: dict[str, str] = field(default_factory=dict)
+    measures: dict[str, dict[str, object]] = field(default_factory=dict)
 
 
 def _unsafe(text: str) -> bool:
@@ -401,7 +474,7 @@ def _check_model(
     modes = dict(checks) if isinstance(checks, Mapping) else {}
     for family, mode in modes.items():
         if family not in _CHECK_FAMILIES:
-            raise ValueError("checks takes only key and references")
+            raise ValueError("checks takes only key, references and measures")
         if mode not in _CHECK_MODES:
             raise ValueError(f"checks: {family} must be block, keep or warn")
     _check_kind_rules(kind, text, key, refs, modes)
@@ -463,6 +536,213 @@ def _check_kind_rules(
             "checks: references sets how the reference checks fail, but the asset declares "
             "no references; declare references=, or remove checks: references"
         )
+
+
+def _check_measure(column: str, spec: Mapping[object, object]) -> dict[str, Any]:
+    """Check one measure with deploy's field rules, in deploy's order and words.
+
+    Parameters
+    ----------
+    column
+        The measure's column.
+    spec
+        Its mapping.
+
+    Returns
+    -------
+    dict
+        A copy, `not_over` as a list (a string is one column).
+
+    Raises
+    ------
+    ValueError
+        With the text the deploy prints for the same measure.
+    """
+    where = f"measures.{column}"
+    for key in spec:
+        if key not in _MEASURE_KEYS:
+            raise ValueError(f"{where}.{key}: Extra inputs are not permitted")
+    given: dict[str, Any] = {str(key): value for key, value in spec.items() if value is not None}
+    for key in ("aggregation", "additivity", "unit", "currency", "label", "description"):
+        if key in given and not isinstance(given[key], str):
+            raise ValueError(f"{where}.{key}: Input should be a valid string")
+    aggregation, additivity = given.get("aggregation"), given.get("additivity")
+    if aggregation is not None and aggregation not in AGGREGATIONS:
+        raise ValueError(
+            f"{where}.aggregation: must be one of {', '.join(AGGREGATIONS)}; "
+            f"got '{ascii(aggregation)[1:-1][:200]}'"
+        )
+    if additivity is not None and additivity not in ADDITIVITIES:
+        raise ValueError(
+            f"{where}.additivity: must be one of {', '.join(ADDITIVITIES)}; "
+            f"got '{ascii(additivity)[1:-1][:200]}'"
+        )
+    raw_not_over = given.get("not_over", [])
+    not_over = [raw_not_over] if isinstance(raw_not_over, str) else raw_not_over
+    if not isinstance(not_over, list | tuple) or not all(isinstance(c, str) for c in not_over):
+        raise ValueError(f"{where}.not_over: must be a column name or a list of column names")
+    seen: set[str] = set()
+    for other in not_over:
+        if not other:
+            raise ValueError(
+                f"{where}.not_over: a column must not be empty; write the name of a column of "
+                "the asset"
+            )
+        if _unsafe(other):
+            raise ValueError(f"{where}.not_over: a column {_IDENTIFIER_MESSAGE}")
+        if other in seen:
+            raise ValueError(f"{where}.not_over: column `{other}` is listed twice")
+        seen.add(other)
+    unit, currency = given.get("unit"), given.get("currency")
+    if unit is not None and unit not in UNITS:
+        raise ValueError(
+            f"{where}.unit: must be one of {', '.join(UNITS)}; got '{ascii(unit)[1:-1][:200]}'. "
+            "For money use `currency:`; to have a unit added, open an issue"
+        )
+    if currency is not None and currency not in CURRENCY_CODES:
+        raise ValueError(
+            f"{where}.currency: must be an ISO 4217 currency code in capitals, such as EUR, USD "
+            f"or CHF; got '{ascii(currency)[1:-1][:200]}'"
+        )
+    for key, limit in (("label", 100), ("description", 4000)):
+        text = given.get(key)
+        if text is None:
+            continue
+        stripped = text.strip()
+        if not stripped:
+            raise ValueError(f"{where}.{key}: must not be empty")
+        if key == "label" and "\n" in stripped:
+            raise ValueError(f"{where}.{key}: must be one line")
+        if len(stripped) > limit:
+            raise ValueError(f"{where}.{key}: must be at most {limit} characters")
+        if _unsafe_free_text(text):
+            raise ValueError(
+                f"{where}.{key}: must not contain a surrogate, a control character other than a "
+                "newline or tab, a bidirectional control or a line separator"
+            )
+    if aggregation is None:
+        raise ValueError(
+            f"{where}: needs `aggregation:`: one of sum, count, min, max, avg, count_distinct or "
+            "none (none for a value that is never aggregated)"
+        )
+    sums = aggregation in ("sum", "count")
+    if additivity is not None and (additivity == "non") is sums:
+        raise ValueError(
+            f"{where}: `aggregation: {aggregation}` adds values up, so `additivity` must be "
+            "`additive` or `semi`; for a value that is never summed, use `aggregation: avg`, "
+            "`min`, `max` or `none`"
+            if sums
+            else f"{where}: `aggregation: {aggregation}` does not add values up, so `additivity` "
+            "must be `non`; leave `additivity:` out, or change `aggregation:`"
+        )
+    if additivity == "semi" and not not_over:
+        raise ValueError(
+            f"{where}: `additivity: semi` needs `not_over:`: the columns the measure must not be "
+            "summed over, such as the date of a balance"
+        )
+    if additivity != "semi" and not_over:
+        raise ValueError(
+            f"{where}: `not_over:` is only for `additivity: semi`; remove `not_over:`, or "
+            "declare `additivity: semi`"
+        )
+    if unit is None and currency is None:
+        raise ValueError(
+            f"{where}: needs `unit:` or `currency:`: `currency:` for money (an ISO 4217 code "
+            "such as EUR), `unit:` for anything else (for a number of things, `unit: count`)"
+        )
+    if unit is not None and currency is not None:
+        raise ValueError(
+            f"{where}: takes `unit:` or `currency:`, not both; money has a currency, every other "
+            "value a unit"
+        )
+    return {**given, **({"not_over": list(not_over)} if "not_over" in given else {})}
+
+
+def _check_measures(
+    measures: object, kind: str | None, key: tuple[str, ...] | str, checks: dict[str, str]
+) -> dict[str, dict[str, object]]:
+    """Read the decorator's `measures` with the rules deploy applies.
+
+    Parameters
+    ----------
+    measures
+        Column → its measure; `None` for none.
+    kind
+        The checked kind, or `None`.
+    key
+        The checked key: its columns, ``"none"`` or empty.
+    checks
+        The checked check families.
+
+    Returns
+    -------
+    dict
+        Column → `_check_measure`'s copy.
+
+    Raises
+    ------
+    ValueError
+        With deploy's text for a field rule, and in decorator words for a rule between fields:
+        measures on a kind other than fact or wide, a key column as a measure, and
+        `checks: measures` without measures.
+    """
+    if measures is not None and not isinstance(measures, Mapping):
+        raise ValueError("measures must be a dict of dicts")
+    given = dict(measures) if isinstance(measures, Mapping) else {}
+    if len(given) > MAX_MEASURES:
+        raise ValueError(
+            f"measures: at most {MAX_MEASURES} measures per table, and `measures:` lists "
+            f"{len(given)}; keep the ones people aggregate, and describe the others in `columns:`"
+        )
+    checked: dict[str, dict[str, Any]] = {}
+    for column, spec in given.items():
+        if not isinstance(column, str):
+            raise ValueError("measures must be a dict of dicts")
+        if not isinstance(spec, Mapping):
+            raise ValueError(
+                f"measures: `{ascii(column)[1:-1][:200]}` must be a mapping such as "
+                "`{aggregation: sum, currency: EUR}`"
+            )
+        if not column:
+            raise ValueError("measures: a measure column must not be empty")
+        if _unsafe(column):
+            raise ValueError(f"measures: a measure column {_IDENTIFIER_MESSAGE}")
+        size = len(column.encode("utf-8"))
+        if size > 1024:
+            raise ValueError(
+                f"measures: measure column `{column[:100]}…` has {size} bytes; a measure column "
+                "may have at most 1024 bytes"
+            )
+        if not _component_ok(f"measure_{column}"):
+            raise ValueError(
+                f"measures: measure column `{column}` cannot name its id `measure_{column}`: a "
+                "measure id must not contain '.', '/', a NUL byte or the unit separator; rename "
+                "the column in the asset"
+            )
+        checked[column] = _check_measure(column, spec)
+        if column in checked[column].get("not_over", []):
+            raise ValueError(
+                f"measures: measure `{column}` names itself in `not_over`; list the other "
+                "columns it must not be summed over, such as a date"
+            )
+    if "measures" in checks and not checked:
+        raise ValueError(
+            "checks: measures sets how the measure checks fail, but the asset declares no "
+            "measures; declare measures=, or remove checks: measures"
+        )
+    if checked and kind not in ("fact", "wide"):
+        raise ValueError(
+            'measures belong on a fact or wide table; declare kind="fact" or kind="wide", or '
+            "remove measures="
+        )
+    keyed = set() if isinstance(key, str) else set(key)
+    for column in sorted(checked):
+        if column in keyed:
+            raise ValueError(
+                f"measure `{column}` is a key column; a key identifies a row and is not a value "
+                "to aggregate. Remove it from measures="
+            )
+    return checked
 
 
 def _check_connections(connections: object) -> tuple[str, ...]:
@@ -562,6 +842,7 @@ def asset(
     grain: str | None = None,
     references: Mapping[str, str] | None = None,
     checks: Mapping[str, str] | None = None,
+    measures: Mapping[str, Mapping[str, object]] | None = None,
 ) -> Callable[[F], F]:
     """Declare a Python asset; returns the function unchanged with its metadata attached.
 
@@ -644,8 +925,12 @@ def asset(
         Column of this table → the table it refers to, as ``ns.table`` (that table's single
         key column) or ``ns.table.column``.
     checks
-        Generated-check family (``key``, ``references``) → ``block``, ``keep`` or ``warn``:
-        what a failure does.
+        Generated-check family (``key``, ``references``, ``measures``) → ``block``, ``keep`` or
+        ``warn``: what a failure does.
+    measures
+        Column → its measure: ``aggregation`` (required), ``additivity``, ``not_over``,
+        ``unit`` or ``currency``, ``label``, ``description``; only with ``kind`` ``fact`` or
+        ``wide``. Not allowed with ``output="artifact"``.
 
     Returns
     -------
@@ -665,8 +950,8 @@ def asset(
         distinct names or holds more than 16, a `write`, `key` or `watermark` deploy
         would refuse (also any of them on an artifact asset), an `evolve_schema` that is
         not a boolean, or is ``True`` on an artifact asset or with an append or a merge, and a
-        `kind`, `grain`, `references` or `checks` deploy would refuse (also any of them on an
-        artifact asset).
+        `kind`, `grain`, `references`, `checks` or `measures` deploy would refuse (also any of them
+        on an artifact asset).
     """
     if function is not None:
         raise TypeError(_PARENTHESES)
@@ -702,6 +987,7 @@ def asset(
             ("grain", grain),
             ("references", references),
             ("checks", checks),
+            ("measures", measures),
         ):
             if given is not None:
                 raise ValueError(f"{name} does not apply to an artifact asset; remove it")
@@ -718,6 +1004,7 @@ def asset(
     declared = _check_connections(connections)
     mode, key_columns, watermark_column = _check_write(write, key, watermark)
     model = _check_model(kind, grain, key_columns, references, checks)
+    measured = _check_measures(measures, model[0], key_columns, model[3])
     if evolves and mode != "replace":
         raise ValueError(EVOLVE_NEEDS_REPLACE)
     spec = AssetSpec(
@@ -742,6 +1029,7 @@ def asset(
         grain=model[1],
         references=model[2],
         checks=model[3],
+        measures=measured,
     )
 
     def decorate(target: F) -> F:
