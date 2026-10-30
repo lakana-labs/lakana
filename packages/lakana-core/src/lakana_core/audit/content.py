@@ -90,10 +90,10 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         # the CI trust rule whose opt-in allowed a start (#102)
         "ci_rule_id",
         "claim",
+        "column",
         # a CI trust rule's claim conditions: claim names and the texts an administrator set
         # (a repository id, a ref, an environment name); configuration, never data.
         "conditions",
-        "column",
         # a connection's name, as a task asked for it
         "connection",
         "credential_secret",
@@ -132,14 +132,14 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "resumed_from_run_id",
         "role",
         "rule_id",
-        # a CI trust rule's opt-in to starting the `on_deploy` jobs of its deploys (#102)
-        "start_on_deploy_jobs",
         "rule_ids",
         "run_as",
         "run_id",
         # the name of the secret a connection uses, never a value
         "secret",
         "sha",
+        # a CI trust rule's opt-in to starting the `on_deploy` jobs of its deploys (#102)
+        "start_on_deploy_jobs",
         "storage_root",
         "subject",
         "submitted_by",

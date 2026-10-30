@@ -366,6 +366,11 @@ Grant the account `RUN` as the warning says, or start the job yourself. Every ou
 the deploy's record, under `job_starts` in the JSON of the deploy
 ([Jobs reference](../reference/jobs.md#after-a-deploy)).
 
+The deployer is checked again right before each job starts. A deployer deactivated since the
+deploy began, or a CI trust rule changed or disabled meanwhile, starts no further job; the deploy
+names each job not started, and the audit log has a `JOB_START_DROPPED` event for each, with the
+reason `requester_inactive` or `requester_lacks_run`.
+
 **A start can be lost.** The worker that ran the deploy starts the jobs right after the deploy
 is recorded. If that worker stops in between (it crashed, or its machine went down), the deploy
 stays succeeded and nothing tries again. The deploy's record then shows the job with the reason

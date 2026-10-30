@@ -10,7 +10,10 @@ text a new event stores.
 from __future__ import annotations
 
 import hashlib
+import inspect
+import itertools
 import json
+import re
 import uuid
 import warnings
 from collections.abc import Iterator
@@ -773,3 +776,19 @@ def test_the_next_cursor_points_after_the_last_event_shown(session: Session) -> 
 
 def test_a_connection_tests_id_is_shown() -> None:
     assert "test_id" in SHOWN_FIELDS
+
+
+def test_each_group_of_shown_fields_is_in_alphabetical_order() -> None:
+    """A reviewer looks a field up by name: only the start of a new group breaks the order."""
+    source = inspect.getsource(content)
+    start = source.index("SHOWN_FIELDS: frozenset[str] = frozenset(")
+    listed = re.findall(r'^\s+"([a-z0-9_]+)",$', source[start : source.index("\n)\n", start)], re.M)
+    assert set(listed) == SHOWN_FIELDS
+    breaks = [(a, b) for a, b in itertools.pairwise(listed) if a > b]
+    # The first field of the groups "states, outcomes and fixed reasons", "counts, sizes and
+    # times" and "settings and changes".
+    assert breaks == [
+        ("waits_for_run_id", "already_deleted"),
+        ("why", "after"),
+        ("versions", "approved_options"),
+    ]
