@@ -3,6 +3,6 @@
   "private": true,
   "description": "Pins jscpd, the copy-paste detector CI runs (scripts/duplication_ratchet.py reads its report).",
   "devDependencies": {
-    "jscpd": "5.4.1"
+    "jscpd": "5.4.2"
   }
 }
