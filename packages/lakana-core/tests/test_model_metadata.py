@@ -620,3 +620,28 @@ def test_a_fact_still_reads_and_writes_its_measures(session: Session, fact_row: 
     seen: list[TableModel | None] = []
     assert _measure_reads(session, lambda: seen.append(read_table_model(session, fact_row)))
     assert seen[0] is not None and [m.column for m in seen[0].measures] == ["stock"]
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [_dimension(_AMOUNT), {"table": "gold.fact_sales", "model": {"measures": [_AMOUNT]}}],
+)
+def test_measures_on_a_kind_that_cannot_carry_them_are_not_written(
+    session: Session, fact_row: Table, entry: dict
+) -> None:
+    """A damaged entry writes no row, so writing it again cannot collide (no 500)."""
+    for _ in range(2):
+        write_model_entry(session, fact_row, entry)
+        session.commit()
+    assert session.scalars(select(DeclaredMeasure)).all() == []
+
+
+def test_a_fact_rewritten_as_a_dimension_with_measures_loses_them(
+    session: Session, fact_row: Table
+) -> None:
+    write_model_entry(session, fact_row, _entry(_AMOUNT))
+    session.commit()
+    for _ in range(2):
+        write_model_entry(session, fact_row, _dimension(_AMOUNT))
+        session.commit()
+    assert session.scalars(select(DeclaredMeasure)).all() == []

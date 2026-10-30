@@ -74,8 +74,9 @@ def write_model_entry(session: Session, row: Table, entry: Mapping[str, Any]) ->
     without a model clears what an earlier deploy wrote. A row that is not in the database yet (a
     run creating its table) has no reference or measure rows, so none are read for it, and the
     namespace is read only when a row is added: a new table without a model costs no statement.
-    Measure rows are read only when the stored kind was one of `MEASURED_KINDS`, the only kinds
-    that have any. Nothing is committed.
+    Measure rows are written only for a kind in `MEASURED_KINDS` (a damaged entry may pair them
+    with another kind, or none) and read only when the stored kind was one of them, so a table of
+    any other kind has none. Nothing is committed.
 
     Parameters
     ----------
@@ -96,7 +97,10 @@ def write_model_entry(session: Session, row: Table, entry: Mapping[str, Any]) ->
     added = [
         *_sync_references(session, row, model.references if model else (), stored=stored),
         *_sync_measures(
-            session, row, model.measures if model else (), stored=stored and had_measures
+            session,
+            row,
+            model.measures if model and model.kind in MEASURED_KINDS else (),
+            stored=stored and had_measures,
         ),
     ]
     if not added:
