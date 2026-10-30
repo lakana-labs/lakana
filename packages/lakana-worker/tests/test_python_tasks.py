@@ -95,7 +95,6 @@ from lakana_core.models import (
     AttemptOutcome,
     AuditEvent,
     AuditEventType,
-    Base,
     CheckOutcome,
     Connection,
     ConnectionTest,
@@ -610,13 +609,17 @@ class PyWorld:
 
 
 @pytest.fixture
-def py(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[PyWorld]:
+def py(
+    tmp_path: Path, catalog_database: Path, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[PyWorld]:
     """Build the world; keepers poll every 20 ms and the idle wait is 20 ms.
 
     Parameters
     ----------
     tmp_path
         Pytest's per-test directory.
+    catalog_database
+        The test's copy of the catalog schema.
     monkeypatch
         Speeds up the keeper and the serve loop.
 
@@ -627,8 +630,7 @@ def py(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[PyWorld]:
     """
     monkeypatch.setattr(task_lease_module, "_POLL_SECONDS", 0.02)
     monkeypatch.setattr(python_tasks_module, "_IDLE_SECONDS", 0.02)
-    engine = create_engine(DatabaseConfig(url=f"sqlite:///{tmp_path}/lakana.db"))
-    Base.metadata.create_all(engine)
+    engine = create_engine(DatabaseConfig(url=f"sqlite:///{catalog_database}"))
     root = f"file://{tmp_path / 'storage'}"
     with Session(engine) as session:
         admin = PrincipalRef(id=uuid.uuid4(), name="admin", type=PrincipalType.USER)

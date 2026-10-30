@@ -170,7 +170,7 @@ The time falls to a fifth on both versions. The memory of this package alone was
 since `core = "ctrace"` (see "Memory, Python 3.14" above) and falls by about 5 %; the 3.14
 processes stay heavier than those of 3.13 by about 20 to 30 MB here.
 
-### The server tests copy one catalog and skip fsync (#327)
+### The server and worker tests copy one catalog and skip fsync (#327)
 
 Every server test still gets its own SQLite file and its own app; two costs are shared instead.
 
@@ -187,6 +187,12 @@ Every server test still gets its own SQLite file and its own app; two costs are 
 - `tests/test_test_hygiene.py` pins both: each test's copy has the full schema and sees no
   other test's write (in either order), the template is read-only, and the production pragmas
   are still in force.
+- **The worker tests do the same.** `packages/lakana-worker/tests/conftest.py` has its own
+  `_sqlite_commits_without_fsync` and `catalog_template`, and `catalog_database` hands a test
+  its copy; the `world` fixture and `py` (`test_python_tasks.py`) build on it.
+  `tests/test_test_databases.py` pins it as `test_test_hygiene.py` does for the server. Two
+  set-back tests of `test_python_tasks.py` that the slow-test ratchet flagged went from 2.0–3.0 s
+  to 0.7–1.0 s on their own (2026-10-30, Python 3.14, `--cov`, `--basetemp` on disk).
 
 Measured 2026-10-24, `packages/lakana-server` alone, Python 3.14, `-n 2 --dist loadfile`, no
 coverage, 6 GB scope, `--basetemp` on disk: 1,099 s before, 116 s after; the 902 tests under
