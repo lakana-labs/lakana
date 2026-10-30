@@ -42,6 +42,7 @@ from lakana_core.identifiers import NAMESPACE_SEPARATOR, NamespacePath
 from lakana_core.models import (
     LIVE_ENVIRONMENT,
     ColumnDescription,
+    DeclaredMeasure,
     Environment,
     Namespace,
     Principal,
@@ -131,11 +132,11 @@ class SearchHit:
         The display name: ``namespace.table`` for a table, ``namespace.table.column`` for a
         column, the id for a run, the name for a principal.
     matched
-        The field that matched: ``name``, ``description``, ``grain``, ``id``, ``job`` or
-        ``repository``.
+        The field that matched: ``name``, ``description``, ``grain``, ``measure`` (a column's
+        measure label or description), ``id``, ``job`` or ``repository``.
     snippet
-        For a description or grain match, at most `SNIPPET_LENGTH` characters of the text around
-        the hit.
+        For a description, grain or measure match, at most `SNIPPET_LENGTH` characters of the
+        text around the hit.
     namespace
         For a table or column, its namespace, dotted.
     table
@@ -669,7 +670,7 @@ def _tables(match: _Match, environment_id: uuid.UUID, model_kind: str | None) ->
 
 
 def _columns(match: _Match, environment_id: uuid.UUID) -> _Candidates:
-    """Select the columns whose name or description matches.
+    """Select the columns whose name, description or measure label or description matches.
 
     Parameters
     ----------
@@ -681,23 +682,37 @@ def _columns(match: _Match, environment_id: uuid.UUID) -> _Candidates:
     Returns
     -------
     Select
-        The candidates.
+        The candidates. A measure's label and description are in the row, so they are read out
+        only after the caller's `READ_TABLE` on the table has been checked, like a description.
     """
     shown = func.coalesce(
         ColumnDescription.description_edited, ColumnDescription.description_project
     )
     named = match.contains(TableColumn.name)
+    in_description = match.contains(shown)
+    in_label = match.contains(func.coalesce(DeclaredMeasure.label, ""))
+    in_measure = or_(in_label, match.contains(func.coalesce(DeclaredMeasure.description, "")))
+    matched = case(
+        (named, _text("name")), (in_description, _text("description")), else_=_text("measure")
+    )
+    # Ordered like `matched`: a null description makes `in_description` null, never true.
+    text = case(
+        (named, shown),
+        (in_description, shown),
+        (in_label, DeclaredMeasure.label),
+        else_=DeclaredMeasure.description,
+    )
     return (
         _row(
             SearchKind.COLUMN,
             match.rank([TableColumn.name], otherwise=3),
             func.lower(TableColumn.name),
             cast(TableColumn.table_id, String),
-            case((named, _text("name")), else_=_text("description")),
+            matched,
             Namespace.path,
             Table.name,
             TableColumn.name,
-            shown,
+            text,
             TableColumn.type,
         )
         .select_from(TableColumn)
@@ -710,7 +725,17 @@ def _columns(match: _Match, environment_id: uuid.UUID) -> _Candidates:
                 ColumnDescription.column == TableColumn.name,
             ),
         )
-        .where(Namespace.environment_id == environment_id, or_(named, match.contains(shown)))
+        .outerjoin(
+            DeclaredMeasure,
+            and_(
+                DeclaredMeasure.table_id == TableColumn.table_id,
+                DeclaredMeasure.column == TableColumn.name,
+            ),
+        )
+        .where(
+            Namespace.environment_id == environment_id,
+            or_(named, in_description, in_measure),
+        )
     )
 
 
@@ -808,7 +833,7 @@ def _hit(row: _Candidate, needle: str) -> SearchHit:
     kind = next(k for k, order in _KIND_ORDER.items() if order == row.kind_order)
     snippet = (
         _snippet(row.f4, needle)
-        if row.matched in ("description", "grain")
+        if row.matched in ("description", "grain", "measure")
         and kind
         in (
             SearchKind.TABLE,

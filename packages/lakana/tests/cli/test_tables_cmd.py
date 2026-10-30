@@ -1873,6 +1873,49 @@ def test_table_get_shows_the_model_block(tmp_path: Path) -> None:
     assert "key_unique (generated)" in out
 
 
+def test_table_get_lists_the_measures_and_their_check(tmp_path: Path) -> None:
+    measure = {"not_over": [], "unit": None, "currency": None, "label": None, "description": None}
+    out = _get_fact(
+        tmp_path,
+        {
+            **_MODEL,
+            "measures": [
+                {
+                    **measure,
+                    "id": "gold.fact_sales/measure_amount",
+                    "column": "amount",
+                    "aggregation": "sum",
+                    "additivity": "additive",
+                    "currency": "EUR",
+                    "label": "Amount",
+                    "description": "Not printed.",
+                },
+                {
+                    **measure,
+                    "id": "gold.fact_sales/measure_stock",
+                    "column": "stock",
+                    "aggregation": "sum",
+                    "additivity": "semi",
+                    "not_over": ["date"],
+                    "unit": "count",
+                },
+            ],
+            "checks": [
+                *_MODEL["checks"],
+                {**_MODEL["checks"][0], "name": "gold.fact_sales/measures", "check": "measures"},
+            ],
+        },
+    )
+    assert (
+        "Measures:\n"
+        "  amount: sum, additive, EUR — Amount\n"
+        "  stock: sum, semi-additive (not over date), count\n"
+    ) in out
+    assert "Not printed." not in out
+    assert "measures (generated)" in out
+    assert "Measures:" not in _get_fact(tmp_path, _MODEL)
+
+
 def test_table_get_says_key_none_and_counts_hidden_references(tmp_path: Path) -> None:
     out = _get_fact(
         tmp_path,

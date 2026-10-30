@@ -32,6 +32,7 @@ from lakana._models import (
     LineageEdge,
     LineageNode,
     LoadResult,
+    Measure,
     MergeResult,
     ModelReference,
     Namespace,
@@ -51,7 +52,7 @@ from lakana.resources.environments import Environments
 from lakana.resources.namespaces import Namespaces
 from lakana.resources.queries import Queries, QueryRun, waiting_for_from_json
 from lakana.resources.runs import failure_from_json, run_from_json
-from lakana.resources.tables import Tables, _split_namespace_table
+from lakana.resources.tables import Tables, _model_from_json, _split_namespace_table
 
 _CONFIG = ResolvedConfig(url="http://api.example", token="lakana_pat_abc_supersecret")
 
@@ -2991,6 +2992,42 @@ def test_tables_get_reads_no_model_from_an_older_server() -> None:
         "dev", "gold.fact_sales"
     )
     assert table.model is None
+
+
+def test_model_from_json_reads_measures_and_an_older_server_without_them() -> None:
+    base = {
+        "kind": "fact",
+        "grain": "g",
+        "key": [],
+        "key_none": True,
+        "references": [],
+        "hidden_references": 0,
+        "checks": [],
+    }
+    older = _model_from_json(base)
+    assert older is not None and older.measures == ()
+    model = _model_from_json(
+        {
+            **base,
+            "measures": [
+                {
+                    "id": "gold.f/measure_a",
+                    "column": "a",
+                    "aggregation": "sum",
+                    "additivity": "semi",
+                    "not_over": ["d"],
+                    "unit": "count",
+                    "currency": None,
+                    "label": "A",
+                    "description": None,
+                }
+            ],
+        }
+    )
+    assert model is not None
+    assert model.measures == (
+        Measure("gold.f/measure_a", "a", "sum", "semi", ("d",), "count", None, "A", None),
+    )
 
 
 def test_tables_list_sends_the_model_kind_only_when_given() -> None:

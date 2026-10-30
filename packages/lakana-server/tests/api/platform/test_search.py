@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import uuid
+
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from lakana_core.models import Table
+from lakana_core.models import DeclaredMeasure, Namespace, Table
 from tests.conftest import AUTH_HEADER
 from tests.server_test_helpers import create_environment
 
@@ -251,3 +253,33 @@ def test_a_grain_of_a_table_the_caller_may_not_read_is_not_found(client: TestCli
     assert [(h["name"], h["matched"], h["snippet"]) for h in hits] == [
         ("silver.payroll", "grain", "One row per secret bonus.")
     ]
+
+
+def test_a_measure_label_matches_through_rest_and_only_for_a_reader(client: TestClient) -> None:
+    _setup(client)
+    with Session(client.app.state.engine) as session:
+        payroll = session.scalars(select(Table).where(Table.name == "payroll")).one()
+        namespace = session.get(Namespace, payroll.namespace_id)
+        assert namespace is not None
+        session.add(
+            DeclaredMeasure(
+                id=uuid.uuid4(),
+                environment_id=namespace.environment_id,
+                table_id=payroll.id,
+                column="salary",
+                aggregation="sum",
+                additivity="additive",
+                not_over=[],
+                currency="EUR",
+                label="Gross pay",
+                description=None,
+            )
+        )
+        session.commit()
+    alice = _person(client, "alice", table="orders")
+
+    hits = client.get(_SEARCH, headers=AUTH_HEADER, params={"q": "gross pay"}).json()["results"]
+    assert [(h["name"], h["matched"], h["snippet"]) for h in hits] == [
+        ("silver.payroll.salary", "measure", "Gross pay")
+    ]
+    assert client.get(_SEARCH, headers=alice, params={"q": "gross pay"}).json()["results"] == []

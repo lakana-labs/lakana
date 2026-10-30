@@ -35,6 +35,7 @@ from lakana._models import (
     LineageEdge,
     LineageNode,
     LoadResult,
+    Measure,
     MergeResult,
     ModelReference,
     Reader,
@@ -205,6 +206,33 @@ def _model_from_json(data: dict[str, Any] | None) -> TableModel | None:
         references=tuple(_model_reference_from_json(r) for r in data["references"]),
         hidden_references=data["hidden_references"],
         checks=tuple(_check_from_json(c) for c in data["checks"]),
+        measures=tuple(_measure_from_json(m) for m in data.get("measures", [])),
+    )
+
+
+def _measure_from_json(data: dict[str, Any]) -> Measure:
+    """Build a `Measure` from one `MeasureOut` JSON object.
+
+    Parameters
+    ----------
+    data
+        The decoded object.
+
+    Returns
+    -------
+    Measure
+        The parsed measure.
+    """
+    return Measure(
+        id=data["id"],
+        column=data["column"],
+        aggregation=data["aggregation"],
+        additivity=data["additivity"],
+        not_over=tuple(data["not_over"]),
+        unit=data["unit"],
+        currency=data["currency"],
+        label=data["label"],
+        description=data["description"],
     )
 
 

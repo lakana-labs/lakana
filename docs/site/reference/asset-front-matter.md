@@ -345,6 +345,14 @@ type suits its aggregation is checked when the table is written (see
 [Generated checks](checks.md#generated-checks)): `sum` and `avg` need a number; `min` and `max`
 take a number, a date or a timestamp; `count`, `count_distinct` and `none` take any type.
 
+**Where they show.** `lakana table get` lists them in its Model block, one line each
+(`  net_amount: sum, additive, EUR — Net revenue`, or for `semi`
+`  stock_level: sum, semi-additive (not over date), count`). `lakana --output json table get`,
+`model.measures` in the table's REST body and `client.tables.get(env, name).model.measures` in the
+SDK carry every field, including the description and the id
+`<namespace>.<table>/measure_<column>`. [Search](search.md) finds a column by its measure's label
+and description. Anyone who may read the table sees all of its measures, also on a masked column.
+
 ### Errors
 
 Each of these fails the deploy with an issue at the block's line:

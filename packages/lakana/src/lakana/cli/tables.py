@@ -17,6 +17,7 @@ from lakana._models import (
     Column,
     DroppedTable,
     Lineage,
+    Measure,
     ModelReference,
     Table,
     TableHealth,
@@ -510,8 +511,36 @@ def _reference_line(ref: ModelReference) -> str:
     return _output.inline(f"  {ref.column} → {ref.target}.{ref.target_column} ({exists})")
 
 
+_ADDITIVITY_SHOWN = {"additive": "additive", "semi": "semi-additive", "non": "non-additive"}
+"""How `table get` writes a measure's additivity."""
+
+
+def _measure_line(measure: Measure) -> str:
+    """Write one measure as `table get` shows it.
+
+    Parameters
+    ----------
+    measure
+        The measure.
+
+    Returns
+    -------
+    str
+        ``  column: aggregation, additivity[ (not over …)], unit or currency[ — label]``, indented,
+        with control characters escaped.
+    """
+    additivity = _ADDITIVITY_SHOWN.get(measure.additivity, measure.additivity)
+    if measure.not_over:
+        additivity += f" (not over {', '.join(measure.not_over)})"
+    label = f" — {measure.label}" if measure.label else ""
+    what = measure.currency or measure.unit or ""
+    return _output.inline(
+        f"  {measure.column}: {measure.aggregation}, {additivity}, {what}{label}", 500
+    )
+
+
 def _emit_model(state: CliState, table: Table) -> None:
-    """Print the Model block: kind, grain, key, references and the generated checks.
+    """Print the Model block: kind, grain, key, references, measures and the generated checks.
 
     Parameters
     ----------
@@ -531,6 +560,10 @@ def _emit_model(state: CliState, table: Table) -> None:
         _output.emit(state, _reference_line(ref))
     if model.hidden_references:
         _output.emit(state, f"  {_hidden_outgoing(model.hidden_references)}")
+    if model.measures:
+        _output.emit(state, "Measures:")
+        for measure in model.measures:
+            _output.emit(state, _measure_line(measure))
     if model.checks:
         _output.emit(
             state,

@@ -25,8 +25,10 @@ from lakana_core.grants.service import GrantService
 from lakana_core.identifiers import NamespacePath, TableRef
 from lakana_core.models import (
     ColumnDescription,
+    DeclaredMeasure,
     Environment,
     JobVersion,
+    Namespace,
     Principal,
     PrincipalType,
     Repository,
@@ -673,3 +675,38 @@ def test_the_grain_and_kind_of_a_table_the_reader_may_not_read_never_appear(worl
     )
     assert only.results == []
     assert [h.name for h in world.search(world.bob, "secret bonus").results] == ["silver.payroll"]
+
+
+def test_a_column_hit_matches_its_measure_label_and_description(world: World) -> None:
+    payroll = world.session.scalars(select(Table).where(Table.name == "payroll")).one()
+    namespace = world.session.get(Namespace, payroll.namespace_id)
+    assert namespace is not None
+    world.session.add(
+        DeclaredMeasure(
+            id=uuid.uuid4(),
+            environment_id=namespace.environment_id,
+            table_id=payroll.id,
+            column="salary",
+            aggregation="sum",
+            additivity="additive",
+            not_over=[],
+            currency="EUR",
+            label="Gross pay",
+            description="Paid before deductions.",
+        )
+    )
+    world.session.commit()
+    (by_label,) = world.search(world.bob, "gross pay").results
+    assert (by_label.kind, by_label.name, by_label.matched, by_label.snippet) == (
+        "column",
+        "silver.payroll.salary",
+        "measure",
+        "Gross pay",
+    )
+    (by_description,) = world.search(world.bob, "deductions").results
+    assert (by_description.matched, by_description.snippet) == (
+        "measure",
+        "Paid before deductions.",
+    )
+    assert world.search(world.alice, "gross pay").results == []
+    assert world.search(world.alice, "deductions").results == []

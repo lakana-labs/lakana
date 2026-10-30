@@ -30,7 +30,7 @@ from lakana_core.identifiers import NamespacePath, TableRef
 from lakana_core.models import DeclaredMeasure, DeclaredReference, Namespace, Table
 from lakana_core.projects.asset_model import KEY_NONE, ResolvedReference
 from lakana_core.projects.manifest import entry_model, manifest_assets
-from lakana_core.projects.measures import MeasureEntry
+from lakana_core.projects.measures import MEASURE_PREFIX, MEASURES_CHECK, MeasureEntry
 from lakana_core.projects.model_checks import KEY_NOT_NULL, KEY_UNIQUE, REF_PREFIX
 
 
@@ -429,6 +429,61 @@ class ModelReferenceView:
 
 
 @dataclass(frozen=True)
+class MeasureView:
+    """One declared measure as a reader is shown it.
+
+    Parameters
+    ----------
+    id
+        ``<ns.table>/measure_<column>``, with the table's current name.
+    column
+        The measure's column.
+    aggregation
+        The default aggregation.
+    additivity
+        ``additive``, ``semi`` or ``non``.
+    not_over
+        The columns a ``semi`` measure must not be summed over.
+    unit
+        The unit, or `None`.
+    currency
+        The ISO 4217 currency, or `None`.
+    label
+        The label, or `None`.
+    description
+        The description, or `None`.
+    """
+
+    id: str
+    column: str
+    aggregation: str
+    additivity: str
+    not_over: tuple[str, ...]
+    unit: str | None
+    currency: str | None
+    label: str | None
+    description: str | None
+
+
+def measure_id(table: str, column: str) -> str:
+    """Build a measure's canonical id.
+
+    Parameters
+    ----------
+    table
+        The dotted name of the table that declares it.
+    column
+        The measure's column.
+
+    Returns
+    -------
+    str
+        ``<ns.table>/measure_<column>``.
+    """
+    return f"{table}/{MEASURE_PREFIX}{column}"
+
+
+@dataclass(frozen=True)
 class TableModelView:
     """The model a table's header declares, filtered for one reader.
 
@@ -447,10 +502,14 @@ class TableModelView:
     hidden_references
         How many references point at a table the reader may not read. A missing target counts
         here too for such a reader, so a hidden reference never says whether its target exists.
+    measures
+        Every declared measure, by column. A measure names only columns of the table, so every
+        reader of the table sees all of them.
     checks
         The newest result of each check the current model generates (`key_unique` and
-        `key_not_null` for a key, `ref_<column>` for each shown reference), by name. A stored
-        result of a generated check the header no longer declares is left out.
+        `key_not_null` for a key, `ref_<column>` for each shown reference, `measures` for
+        declared measures), by name. A stored result of a generated check the header no longer
+        declares is left out.
     """
 
     kind: str | None
@@ -459,6 +518,7 @@ class TableModelView:
     key_none: bool
     references: tuple[ModelReferenceView, ...]
     hidden_references: int
+    measures: tuple[MeasureView, ...]
     checks: tuple[CheckHealth, ...]
 
 
@@ -602,6 +662,7 @@ def model_view(
     references, hidden = _outgoing(session, table, model, may_read)
     generated = {KEY_UNIQUE, KEY_NOT_NULL} if model.key else set()
     generated |= {f"{REF_PREFIX}{r.column}" for r in references}
+    generated |= {MEASURES_CHECK} if model.measures else set()
     return TableModelView(
         kind=model.kind,
         grain=model.grain,
@@ -609,6 +670,20 @@ def model_view(
         key_none=model.key_none,
         references=references,
         hidden_references=hidden,
+        measures=tuple(
+            MeasureView(
+                id=measure_id(table.dotted(), m.column),
+                column=m.column,
+                aggregation=m.aggregation,
+                additivity=m.additivity,
+                not_over=m.not_over,
+                unit=m.unit,
+                currency=m.currency,
+                label=m.label,
+                description=m.description,
+            )
+            for m in model.measures
+        ),
         checks=tuple(
             c
             for c in latest_checks(session, row.id)

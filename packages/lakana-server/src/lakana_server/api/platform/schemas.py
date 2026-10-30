@@ -1041,6 +1041,42 @@ class ModelReferenceOut(BaseModel):
     target_exists: bool
 
 
+class MeasureOut(BaseModel):
+    """One measure a table's header declares, as `MeasureView` holds it.
+
+    Parameters
+    ----------
+    id
+        ``<ns.table>/measure_<column>``.
+    column
+        The measure's column.
+    aggregation
+        ``sum``, ``count``, ``min``, ``max``, ``avg``, ``count_distinct`` or ``none``.
+    additivity
+        ``additive``, ``semi`` (not over `not_over`) or ``non``.
+    not_over
+        The columns a ``semi`` measure must not be summed over.
+    unit
+        The unit, or `None` when it has a currency.
+    currency
+        The ISO 4217 currency, or `None` when it has a unit.
+    label
+        A short name in the main language, or `None`.
+    description
+        What it means, in the main language, or `None`.
+    """
+
+    id: str
+    column: str
+    aggregation: str
+    additivity: str
+    not_over: list[str]
+    unit: str | None
+    currency: str | None
+    label: str | None
+    description: str | None
+
+
 class TableModelOut(BaseModel):
     """The model a table's asset header declares, as the caller may see it.
 
@@ -1059,6 +1095,8 @@ class TableModelOut(BaseModel):
         The references whose target the caller may read, by id.
     hidden_references
         How many references point at a table the caller may not read; they are not listed.
+    measures
+        Every measure the header declares, by column; a reader of the table sees all of them.
     checks
         The newest result of each check the current header generates, by name.
     """
@@ -1069,6 +1107,7 @@ class TableModelOut(BaseModel):
     key_none: bool
     references: list[ModelReferenceOut]
     hidden_references: int
+    measures: list[MeasureOut]
     checks: list[CheckHealthOut]
 
 
@@ -3839,10 +3878,11 @@ class SearchHitOut(BaseModel):
         A display name: ``namespace.table``, ``namespace.table.column``, the run id or the
         principal's name.
     matched
-        The field that matched: ``name``, ``description``, ``grain``, ``id``, ``job`` or
-        ``repository``.
+        The field that matched: ``name``, ``description``, ``grain``, ``measure`` (a column's
+        measure label or description), ``id``, ``job`` or ``repository``.
     snippet
-        For a description or grain match, at most 160 characters of the text around the hit.
+        For a description, grain or measure match, at most 160 characters of the text around the
+        hit.
     namespace
         For a table or column, its namespace, dotted.
     table
@@ -3874,7 +3914,7 @@ class SearchHitOut(BaseModel):
 
     kind: Literal["table", "column", "run", "principal"]
     name: str
-    matched: Literal["name", "description", "grain", "id", "job", "repository"]
+    matched: Literal["name", "description", "grain", "measure", "id", "job", "repository"]
     snippet: str | None
     namespace: str | None
     table: str | None

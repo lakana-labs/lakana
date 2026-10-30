@@ -20045,6 +20045,91 @@
         "title": "MaintenanceIn",
         "description": "Request body for table maintenance.\n\nParameters\n----------\nkeep_days\n    Snapshots younger than this many days are kept.\nkeep_last\n    The most recent this many snapshots are always kept.\ndry_run\n    Report what would happen without changing anything.\nolder_than_hours\n    Unreferenced files younger than this many hours are never deleted;\n    1 to 87600 (ten years)."
       },
+      "MeasureOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "column": {
+            "type": "string",
+            "title": "Column"
+          },
+          "aggregation": {
+            "type": "string",
+            "title": "Aggregation"
+          },
+          "additivity": {
+            "type": "string",
+            "title": "Additivity"
+          },
+          "not_over": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Not Over"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "column",
+          "aggregation",
+          "additivity",
+          "not_over",
+          "unit",
+          "currency",
+          "label",
+          "description"
+        ],
+        "title": "MeasureOut",
+        "description": "One measure a table's header declares, as `MeasureView` holds it.\n\nParameters\n----------\nid\n    ``<ns.table>/measure_<column>``.\ncolumn\n    The measure's column.\naggregation\n    ``sum``, ``count``, ``min``, ``max``, ``avg``, ``count_distinct`` or ``none``.\nadditivity\n    ``additive``, ``semi`` (not over `not_over`) or ``non``.\nnot_over\n    The columns a ``semi`` measure must not be summed over.\nunit\n    The unit, or `None` when it has a currency.\ncurrency\n    The ISO 4217 currency, or `None` when it has a unit.\nlabel\n    A short name in the main language, or `None`.\ndescription\n    What it means, in the main language, or `None`."
+      },
       "MergeOut": {
         "properties": {
           "snapshot_id": {
@@ -21950,6 +22035,7 @@
               "name",
               "description",
               "grain",
+              "measure",
               "id",
               "job",
               "repository"
@@ -22121,7 +22207,7 @@
           "principal_type"
         ],
         "title": "SearchHitOut",
-        "description": "One search hit.\n\nParameters\n----------\nkind\n    What was found: ``table``, ``column``, ``run`` or ``principal``.\nname\n    A display name: ``namespace.table``, ``namespace.table.column``, the run id or the\n    principal's name.\nmatched\n    The field that matched: ``name``, ``description``, ``grain``, ``id``, ``job`` or\n    ``repository``.\nsnippet\n    For a description or grain match, at most 160 characters of the text around the hit.\nnamespace\n    For a table or column, its namespace, dotted.\ntable\n    For a table or column, the table's name.\ntable_kind\n    For a table, ``TABLE``, ``EXTERNAL``, ``VIEW`` or ``ARTIFACT``.\nmodel_kind\n    For a table whose asset header declares one, its ``kind``: ``fact``, ``dimension``,\n    ``wide`` or ``staging``.\ncolumn\n    For a column, its name.\ncolumn_type\n    For a column, its type.\nrun_id\n    For a run, its id.\njob\n    For a run, its job, if it has one.\nrepository\n    For a run, its repository.\nstatus\n    For a run, its status.\nprincipal\n    For a principal, its name.\nprincipal_type\n    For a principal, ``USER`` or ``SERVICE_ACCOUNT``."
+        "description": "One search hit.\n\nParameters\n----------\nkind\n    What was found: ``table``, ``column``, ``run`` or ``principal``.\nname\n    A display name: ``namespace.table``, ``namespace.table.column``, the run id or the\n    principal's name.\nmatched\n    The field that matched: ``name``, ``description``, ``grain``, ``measure`` (a column's\n    measure label or description), ``id``, ``job`` or ``repository``.\nsnippet\n    For a description, grain or measure match, at most 160 characters of the text around the\n    hit.\nnamespace\n    For a table or column, its namespace, dotted.\ntable\n    For a table or column, the table's name.\ntable_kind\n    For a table, ``TABLE``, ``EXTERNAL``, ``VIEW`` or ``ARTIFACT``.\nmodel_kind\n    For a table whose asset header declares one, its ``kind``: ``fact``, ``dimension``,\n    ``wide`` or ``staging``.\ncolumn\n    For a column, its name.\ncolumn_type\n    For a column, its type.\nrun_id\n    For a run, its id.\njob\n    For a run, its job, if it has one.\nrepository\n    For a run, its repository.\nstatus\n    For a run, its status.\nprincipal\n    For a principal, its name.\nprincipal_type\n    For a principal, ``USER`` or ``SERVICE_ACCOUNT``."
       },
       "SearchKind": {
         "type": "string",
@@ -22505,6 +22591,13 @@
             "type": "integer",
             "title": "Hidden References"
           },
+          "measures": {
+            "items": {
+              "$ref": "#/components/schemas/MeasureOut"
+            },
+            "type": "array",
+            "title": "Measures"
+          },
           "checks": {
             "items": {
               "$ref": "#/components/schemas/CheckHealthOut"
@@ -22521,10 +22614,11 @@
           "key_none",
           "references",
           "hidden_references",
+          "measures",
           "checks"
         ],
         "title": "TableModelOut",
-        "description": "The model a table's asset header declares, as the caller may see it.\n\nParameters\n----------\nkind\n    ``fact``, ``dimension``, ``wide`` or ``staging``; `None` when the header names none.\ngrain\n    What one row is, in one sentence; `None` when the header says nothing.\nkey\n    The columns that identify one row; empty for no key and for `key: none`.\nkey_none\n    Whether the header says `key: none`: no columns are unique, and the grain is not\n    checked.\nreferences\n    The references whose target the caller may read, by id.\nhidden_references\n    How many references point at a table the caller may not read; they are not listed.\nchecks\n    The newest result of each check the current header generates, by name."
+        "description": "The model a table's asset header declares, as the caller may see it.\n\nParameters\n----------\nkind\n    ``fact``, ``dimension``, ``wide`` or ``staging``; `None` when the header names none.\ngrain\n    What one row is, in one sentence; `None` when the header says nothing.\nkey\n    The columns that identify one row; empty for no key and for `key: none`.\nkey_none\n    Whether the header says `key: none`: no columns are unique, and the grain is not\n    checked.\nreferences\n    The references whose target the caller may read, by id.\nhidden_references\n    How many references point at a table the caller may not read; they are not listed.\nmeasures\n    Every measure the header declares, by column; a reader of the table sees all of them.\nchecks\n    The newest result of each check the current header generates, by name."
       },
       "TableOut": {
         "properties": {

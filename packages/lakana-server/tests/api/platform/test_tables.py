@@ -763,6 +763,7 @@ def test_a_table_carries_its_model_and_a_plain_table_none(client: TestClient) ->
             }
         ],
         "hidden_references": 0,
+        "measures": [],
         "checks": [],
     }
     assert plain.json()["model"] is None
@@ -861,3 +862,65 @@ def test_a_reader_of_one_table_sees_only_counts_of_the_others(client: TestClient
     assert (dim["incoming"], dim["hidden_incoming"]) == ([], 1)
     assert (fact["model"]["references"], fact["model"]["hidden_references"]) == ([], 1)
     assert "dim_store" not in str(fact)
+
+
+def test_a_reader_sees_every_measure_even_on_a_masked_column(client: TestClient) -> None:
+    """A mask hides values, not names; a caller without READ_TABLE gets 403 (spec section 7)."""
+    _star(client)
+    with Session(client.app.state.engine) as session:
+        row = session.scalars(select(Table).where(Table.name == "fact_sales")).one()
+        write_model_entry(
+            session,
+            row,
+            {
+                "write": "replace",
+                "key": ["date", "store_id"],
+                "model": {
+                    "kind": "fact",
+                    "grain": "One row per store and day.",
+                    "measures": [
+                        {
+                            "column": "id",
+                            "aggregation": "count_distinct",
+                            "additivity": "non",
+                            "not_over": [],
+                            "unit": "count",
+                            "currency": None,
+                            "label": "Sales",
+                            "description": None,
+                        }
+                    ],
+                },
+            },
+        )
+        session.commit()
+    reader = _table_reader(client, "mia", "fact_sales")
+    masked = client.post(
+        "/api/v1/column-masks",
+        headers=AUTH_HEADER,
+        json={
+            "principal": "mia",
+            "environment": "dev",
+            "namespace": "gold",
+            "table": "fact_sales",
+            "column": "id",
+            "expression": "NULL",
+        },
+    )
+    assert masked.status_code == 201, masked.text
+    body = client.get(f"{_GOLD_TABLES}/fact_sales", headers=reader).json()
+    assert body["model"]["measures"] == [
+        {
+            "id": "gold.fact_sales/measure_id",
+            "column": "id",
+            "aggregation": "count_distinct",
+            "additivity": "non",
+            "not_over": [],
+            "unit": "count",
+            "currency": None,
+            "label": "Sales",
+            "description": None,
+        }
+    ]
+    outsider = _table_reader(client, "olga", "notes")
+    assert client.get(f"{_GOLD_TABLES}/fact_sales", headers=outsider).status_code == 403

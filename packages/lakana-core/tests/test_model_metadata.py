@@ -20,6 +20,8 @@ from lakana_core.catalog.model_metadata import (
     TableModel,
     clear_removed_models,
     incoming_references,
+    measure_id,
+    model_view,
     read_table_model,
     write_model_entry,
 )
@@ -525,3 +527,15 @@ def test_a_new_table_with_measures_gets_them_on_creation(
     assert [m.column for m in model.measures] == ["amount", "stock"]
     assert model.measures[1].not_over == ("date",)
     assert model.references == (_REF,)
+
+
+def test_model_view_shows_every_measure_with_its_id(session: Session, fact_row: Table) -> None:
+    write_model_entry(session, fact_row, _entry(_STOCK, _AMOUNT))
+    session.commit()
+    view = model_view(session, fact_row, _FACT, lambda target: False, lambda *_: False)
+    assert view is not None
+    assert [(m.id, m.additivity, m.not_over) for m in view.measures] == [
+        ("gold.fact_sales/measure_amount", "additive", ()),
+        ("gold.fact_sales/measure_stock", "semi", ("date",)),
+    ]
+    assert measure_id("gold.fact_sales", "amount") == "gold.fact_sales/measure_amount"

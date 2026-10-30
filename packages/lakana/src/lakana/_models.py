@@ -361,6 +361,45 @@ class ModelReference:
 
 
 @dataclass(frozen=True)
+class Measure:
+    """One measure a table's asset header declares (`measures:`).
+
+    Parameters
+    ----------
+    id
+        The measure's id, for example ``gold.fact_sales/measure_amount``.
+    column
+        Its column.
+    aggregation
+        Its default aggregation: ``sum``, ``count``, ``min``, ``max``, ``avg``,
+        ``count_distinct`` or ``none``.
+    additivity
+        ``additive`` (sums over everything), ``semi`` (not over `not_over`) or ``non`` (never
+        summed).
+    not_over
+        The columns a ``semi`` measure must not be summed over.
+    unit
+        Its unit, or `None` when it has a currency.
+    currency
+        Its ISO 4217 currency, or `None` when it has a unit.
+    label
+        A short name, or `None`.
+    description
+        What it means, or `None`.
+    """
+
+    id: str
+    column: str
+    aggregation: str
+    additivity: str
+    not_over: tuple[str, ...]
+    unit: str | None
+    currency: str | None
+    label: str | None
+    description: str | None
+
+
+@dataclass(frozen=True)
 class TableModel:
     """The model a table's asset header declares.
 
@@ -381,6 +420,8 @@ class TableModel:
         How many references point at a table you may not read.
     checks
         The newest result of each check the header generates.
+    measures
+        The measures its header declares; empty from an older server.
     """
 
     kind: str | None
@@ -390,6 +431,7 @@ class TableModel:
     references: tuple[ModelReference, ...] = ()
     hidden_references: int = 0
     checks: tuple[CheckHealth, ...] = ()
+    measures: tuple[Measure, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -2958,10 +3000,11 @@ class SearchHit:
         A display name: ``namespace.table``, ``namespace.table.column``, the run id or the
         principal's name.
     matched
-        The field that matched: ``name``, ``description``, ``grain``, ``id``, ``job`` or
-        ``repository``.
+        The field that matched: ``name``, ``description``, ``grain``, ``measure`` (a column's
+        measure label or description), ``id``, ``job`` or ``repository``.
     snippet
-        For a description or grain match, at most 160 characters of the text around the hit.
+        For a description, grain or measure match, at most 160 characters of the text around the
+        hit.
     namespace
         For a table or column, its namespace, dotted.
     table
