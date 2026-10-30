@@ -1916,6 +1916,56 @@ def test_table_get_lists_the_measures_and_their_check(tmp_path: Path) -> None:
     assert "Measures:" not in _get_fact(tmp_path, _MODEL)
 
 
+_AMOUNT = {
+    "id": "gold.fact_sales/measure_amount",
+    "column": "amount",
+    "aggregation": "sum",
+    "additivity": "additive",
+    "not_over": [],
+    "unit": None,
+    "currency": "EUR",
+    "label": None,
+    "description": None,
+}
+"""A measure in the body of `table get`."""
+
+
+def test_table_get_writes_no_trailing_comma_without_a_unit_or_currency(tmp_path: Path) -> None:
+    out = _get_fact(
+        tmp_path,
+        {
+            **_MODEL,
+            "measures": [
+                {**_AMOUNT, "aggregation": "count", "currency": None},
+                {**_AMOUNT, "column": "rows", "currency": None, "label": "Rows"},
+            ],
+        },
+    )
+    assert "  amount: count, additive\n" in out
+    assert "  rows: sum, additive — Rows\n" in out
+
+
+def test_table_get_json_carries_the_measures(tmp_path: Path) -> None:
+    api = FakeApi()
+    api.on(
+        "GET",
+        f"{_FACT_BASE}/fact_sales",
+        json={**_FACT, "model": {**_MODEL, "measures": [_AMOUNT]}},
+    )
+    result = invoke(
+        make_state(tmp_path, api),
+        "--output",
+        "json",
+        "table",
+        "get",
+        "gold.fact_sales",
+        "--env",
+        "dev",
+    )
+    assert result.exit_code == 0, result.stderr
+    assert json.loads(result.stdout)["model"]["measures"] == [_AMOUNT]
+
+
 def test_table_get_says_key_none_and_counts_hidden_references(tmp_path: Path) -> None:
     out = _get_fact(
         tmp_path,

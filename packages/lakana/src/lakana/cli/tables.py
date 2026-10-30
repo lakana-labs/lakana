@@ -526,17 +526,17 @@ def _measure_line(measure: Measure) -> str:
     Returns
     -------
     str
-        ``  column: aggregation, additivity[ (not over …)], unit or currency[ — label]``, indented,
-        with control characters escaped.
+        ``  column: aggregation, additivity[ (not over …)][, unit or currency][ — label]``,
+        indented, with control characters escaped.
     """
     additivity = _ADDITIVITY_SHOWN.get(measure.additivity, measure.additivity)
     if measure.not_over:
         additivity += f" (not over {', '.join(measure.not_over)})"
+    parts = [measure.aggregation, additivity]
+    if what := measure.currency or measure.unit:
+        parts.append(what)
     label = f" — {measure.label}" if measure.label else ""
-    what = measure.currency or measure.unit or ""
-    return _output.inline(
-        f"  {measure.column}: {measure.aggregation}, {additivity}, {what}{label}", 500
-    )
+    return _output.inline(f"  {measure.column}: {', '.join(parts)}{label}", 500)
 
 
 def _emit_model(state: CliState, table: Table) -> None:

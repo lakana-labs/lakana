@@ -864,8 +864,27 @@ def test_a_reader_of_one_table_sees_only_counts_of_the_others(client: TestClient
     assert "dim_store" not in str(fact)
 
 
-def test_a_reader_sees_every_measure_even_on_a_masked_column(client: TestClient) -> None:
-    """A mask hides values, not names; a caller without READ_TABLE gets 403 (spec section 7)."""
+_SALES_MEASURE = {
+    "column": "id",
+    "aggregation": "count_distinct",
+    "additivity": "non",
+    "not_over": [],
+    "unit": "count",
+    "currency": None,
+    "label": "Sales",
+    "description": None,
+}
+"""The measure `_star_with_a_measure` declares on `gold.fact_sales`."""
+
+
+def _star_with_a_measure(client: TestClient) -> None:
+    """Create the star of `_star` and declare `_SALES_MEASURE` on `gold.fact_sales`.
+
+    Parameters
+    ----------
+    client
+        The test client.
+    """
     _star(client)
     with Session(client.app.state.engine) as session:
         row = session.scalars(select(Table).where(Table.name == "fact_sales")).one()
@@ -878,22 +897,16 @@ def test_a_reader_sees_every_measure_even_on_a_masked_column(client: TestClient)
                 "model": {
                     "kind": "fact",
                     "grain": "One row per store and day.",
-                    "measures": [
-                        {
-                            "column": "id",
-                            "aggregation": "count_distinct",
-                            "additivity": "non",
-                            "not_over": [],
-                            "unit": "count",
-                            "currency": None,
-                            "label": "Sales",
-                            "description": None,
-                        }
-                    ],
+                    "measures": [_SALES_MEASURE],
                 },
             },
         )
         session.commit()
+
+
+def test_a_reader_sees_every_measure_even_on_a_masked_column(client: TestClient) -> None:
+    """A mask hides values, not names; a caller without READ_TABLE gets 403 (spec section 7)."""
+    _star_with_a_measure(client)
     reader = _table_reader(client, "mia", "fact_sales")
     masked = client.post(
         "/api/v1/column-masks",
@@ -909,18 +922,22 @@ def test_a_reader_sees_every_measure_even_on_a_masked_column(client: TestClient)
     )
     assert masked.status_code == 201, masked.text
     body = client.get(f"{_GOLD_TABLES}/fact_sales", headers=reader).json()
-    assert body["model"]["measures"] == [
-        {
-            "id": "gold.fact_sales/measure_id",
-            "column": "id",
-            "aggregation": "count_distinct",
-            "additivity": "non",
-            "not_over": [],
-            "unit": "count",
-            "currency": None,
-            "label": "Sales",
-            "description": None,
-        }
-    ]
+    assert body["model"]["measures"] == [{"id": "gold.fact_sales/measure_id", **_SALES_MEASURE}]
     outsider = _table_reader(client, "olga", "notes")
     assert client.get(f"{_GOLD_TABLES}/fact_sales", headers=outsider).status_code == 403
+
+
+def test_a_measure_id_follows_a_rename_of_its_table(client: TestClient) -> None:
+    """The id is built with the table's current name, so it changes with the rename at once."""
+    _star_with_a_measure(client)
+    renamed = client.post(
+        "/v1/dev/tables/rename",
+        headers=AUTH_HEADER,
+        json={
+            "source": {"namespace": ["gold"], "name": "fact_sales"},
+            "destination": {"namespace": ["gold"], "name": "fact_orders"},
+        },
+    )
+    assert renamed.status_code in (200, 204), renamed.text
+    body = client.get(f"{_GOLD_TABLES}/fact_orders", headers=AUTH_HEADER).json()
+    assert body["model"]["measures"] == [{"id": "gold.fact_orders/measure_id", **_SALES_MEASURE}]

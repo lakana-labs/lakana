@@ -909,8 +909,8 @@ class TableOut(BaseModel):
         (``LAKANA_TABLES__EXPIRY_WARNING_DAYS``, 7 days by default); always `false` when that
         is 0.
     model
-        The model the asset header declares (kind, grain, key, references and the checks they
-        generate); `None` for a table whose header declares none.
+        The model the asset header declares (kind, grain, key, references, measures and the
+        checks they generate); `None` for a table whose header declares none.
     """
 
     name: str
