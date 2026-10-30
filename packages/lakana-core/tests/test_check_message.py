@@ -183,6 +183,20 @@ def test_one_shown_check_that_could_not_run_beside_kept_data_says_the_data_is_ke
     assert "The table keeps this run's data" in seen and "1204" not in seen
 
 
+def test_the_kept_data_message_a_reader_sees_word_for_word() -> None:
+    """The text written out by hand: one check that could not run, the table keeps the data."""
+    every = [
+        _result("a", CheckOutcome.ERRORED, "keep"),
+        _result("ref_z", CheckOutcome.FAILED, "keep", rows=1204),
+    ]
+    assert _seen(every, CheckMessageState(KEPT)) == (
+        "Check `gold.t/a` could not run (checks/gold/t/a.sql): boom. The table keeps this run's "
+        "data (`on_failure: keep`), and nothing that reads it was built. Repair the data or the "
+        "asset; after a fix, deploy and run again; if the project did not change: "
+        "`lakana runs resume 00000000-0000-4000-8000-000000000001 --env dev`."
+    )
+
+
 def test_a_message_with_nothing_to_withhold_is_returned_as_stored() -> None:
     every = [
         _result("a", CheckOutcome.FAILED, "block"),
@@ -239,7 +253,9 @@ _TEMPLATES = (
 
 
 def _shown_sets() -> Iterator[list[CheckResult]]:
-    """List the visible results the matrix tries: up to two of every kind, and six of one.
+    """List the visible results the matrix tries: none, one or two of any kind.
+
+    More than five checks of one kind (the "and N more" of a listing) have tests of their own.
 
     Yields
     ------
@@ -249,9 +265,6 @@ def _shown_sets() -> Iterator[list[CheckResult]]:
     for size in (0, 1, 2):
         for combo in itertools.combinations(range(len(_TEMPLATES)), size):
             yield [_result(f"c{i}", *_TEMPLATES[i][:2], refused=_TEMPLATES[i][2]) for i in combo]
-    for i in (1, 4, 7, 8):
-        outcome, mode, refused = _TEMPLATES[i]
-        yield [_result(f"m{n}", outcome, mode, refused=refused) for n in range(6)]
 
 
 def _states(results: list[CheckResult], *, source: bool) -> Iterator[CheckMessageState]:
@@ -278,8 +291,14 @@ def _states(results: list[CheckResult], *, source: bool) -> Iterator[CheckMessag
         for dropped in (False, True):
             yield CheckMessageState(KEPT, dropped=dropped, refusals=refusals)
     elif branch == BLOCKING:
-        for outcome, refused, reason in itertools.product(
-            RollbackOutcome, (False, True), (None, "the reason", ROLLBACK_NOT_KNOWN_REASON)
+        # Each outcome once, then each other part of a rollback once: `_rollback` passes them
+        # through to `failure_message`, whose variants these are.
+        for outcome in RollbackOutcome:
+            yield CheckMessageState(BLOCKING, rollback_outcome=outcome.value)
+        for outcome, reason, refused in (
+            (RollbackOutcome.FAILED, ROLLBACK_NOT_KNOWN_REASON, False),
+            (RollbackOutcome.CHANGED_SINCE, "the reason", False),
+            (RollbackOutcome.FAILED, "the reason", True),
         ):
             yield CheckMessageState(
                 BLOCKING,
@@ -289,8 +308,15 @@ def _states(results: list[CheckResult], *, source: bool) -> Iterator[CheckMessag
             )
     else:
         yield CheckMessageState(SOURCE, source=True, refusals=refusals)
-        for kept_run, unchecked, unknown, without in itertools.product(
-            (None, str(_RUN)), (False, True), (False, True), (False, True)
+        # The check task of a kept table: without its note, with it, and with each of the
+        # note's facts on its own.
+        for kept_run, unchecked, unknown, without in (
+            (None, False, False, False),
+            (str(_RUN), False, False, False),
+            (str(_RUN), True, False, False),
+            (str(_RUN), False, True, False),
+            (str(_RUN), False, False, True),
+            (None, False, False, True),
         ):
             yield CheckMessageState(
                 SOURCE,
@@ -325,4 +351,4 @@ def test_the_reader_sees_the_message_the_worker_writes_from_the_shown_results_al
             assert seen == expected, (shown_results, hidden, state)
             assert "ref_z" not in (seen or "") and "1204" not in (seen or "")
             tried += 1
-    assert tried > 5000
+    assert tried > 1000

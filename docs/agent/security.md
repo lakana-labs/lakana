@@ -362,9 +362,10 @@ environment. `key_*` and hand-written checks are not filtered. A task's `error_m
 was built from besides the results (`check_message_state`: the rollback, the kept note's facts, the
 refusals, the branch); `check_message` is the one builder the worker and the reader's view share.
 For a reader with a withheld result, the message is built again from the visible results only,
-after the state was shown to give back the stored text from every result. When it does not (a
-text written over by a later claim, the scheduler or a set-back; an earlier attempt whose results
-were counted again), or the visible results need another kind of message, the reader gets
+after the state was shown to give back the stored text from every result. The scheduler clears
+the state whenever it writes another text (`store._apply_task`), and `record_attempt` stores the
+pair together. When the state does not give back the text (an earlier attempt whose results were
+counted again), or the visible results need another kind of message, the reader gets
 `WITHHELD_TASK_MESSAGE`; a text without a state is shown only when it names no withheld check.
 `test_check_message.py` proves, over every outcome, mode and state, that the reader's text is the
 worker's own text from the visible results. Residual, accepted for now and tracked in #385: a table's

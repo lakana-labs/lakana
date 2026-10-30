@@ -2752,3 +2752,30 @@ def test_0053_on_postgres() -> None:
         assert _alembic_version(engine) == revision_0053
         assert "table_references" in sqlalchemy.inspect(engine).get_table_names()
         engine.dispose()
+
+
+def test_0054_on_postgres() -> None:
+    """0054 adds `check_message_state` to task runs and attempts, drops it, and adds it again."""
+    revision_0053 = "e3a7c5d9f1b2"
+    revision_0054 = "f4b8d6e0a2c3"
+    tables = ("task_runs", "task_attempts")
+
+    with PostgresContainer("postgres:16", driver="pg8000") as pg:
+        url = pg.get_connection_url()
+        migrate.upgrade(url, revision_0054)
+        engine = sqlalchemy.create_engine(url)
+        assert _alembic_version(engine) == revision_0054
+        inspector = sqlalchemy.inspect(engine)
+        for table in tables:
+            columns = {c["name"]: c for c in inspector.get_columns(table)}
+            assert columns["check_message_state"]["nullable"] is True
+
+        migrate.downgrade(url, revision_0053)
+        assert _alembic_version(engine) == revision_0053
+        inspector = sqlalchemy.inspect(engine)
+        for table in tables:
+            assert "check_message_state" not in {c["name"] for c in inspector.get_columns(table)}
+
+        migrate.upgrade(url, revision_0054)
+        assert _alembic_version(engine) == revision_0054
+        engine.dispose()
