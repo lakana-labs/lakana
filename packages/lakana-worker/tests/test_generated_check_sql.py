@@ -5,7 +5,12 @@ from __future__ import annotations
 import duckdb
 
 from lakana_core.projects.checks import count_query
-from lakana_core.projects.model_checks import key_not_null_sql, key_unique_sql, reference_sql
+from lakana_core.projects.model_checks import (
+    key_not_null_sql,
+    key_unique_sql,
+    measures_sql,
+    reference_sql,
+)
 
 
 def _connection() -> duckdb.DuckDBPyConnection:
@@ -72,3 +77,12 @@ def test_the_run_counts_the_generated_sql_as_it_counts_a_hand_written_check() ->
         (reference_sql("gold.f", "store id", "gold.d", "store id"), 1),
     ):
         assert con.execute(count_query(sql)).fetchone() == (failing,)
+
+
+def test_measures_sql_returns_no_rows_and_quotes_the_table() -> None:
+    con = _connection()
+    con.execute('CREATE SCHEMA "we""ird"')
+    con.execute('CREATE TABLE "we""ird"."order" (amount DECIMAL(10, 2))')
+    con.execute('INSERT INTO "we""ird"."order" VALUES (1.50)')
+    assert con.execute(measures_sql('we"ird.order')).fetchall() == []
+    assert _rows(measures_sql("gold.f")) == []

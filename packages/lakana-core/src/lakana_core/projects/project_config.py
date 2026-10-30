@@ -121,6 +121,48 @@ def unsafe_identifier(text: str) -> bool:
     return any(unicodedata.category(char) in _IDENTIFIER_CATEGORIES for char in text)
 
 
+def checked_text(
+    value: str,
+    *,
+    limit: int,
+    one_line: bool = False,
+    empty: str = "must not be empty",
+) -> str:
+    """Apply the rules of a header's free text: not empty, short, safe.
+
+    Parameters
+    ----------
+    value
+        The text as written.
+    limit
+        The most characters it may have once stripped.
+    one_line
+        Whether it must not span lines.
+    empty
+        The message for a text that is empty once stripped.
+
+    Returns
+    -------
+    str
+        `value` without surrounding whitespace.
+
+    Raises
+    ------
+    ValueError
+        For the first rule it breaks, in that order.
+    """
+    text = value.strip()
+    if not text:
+        raise ValueError(empty)
+    if one_line and "\n" in text:
+        raise ValueError("must be one line")
+    if len(text) > limit:
+        raise ValueError(f"must be at most {limit} characters")
+    if unsafe_free_text(value):
+        raise ValueError(FREE_TEXT_MESSAGE)
+    return text
+
+
 def unsafe_free_text(text: str) -> bool:
     """Say whether a description is unsafe to store or render.
 
