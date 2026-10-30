@@ -49,6 +49,7 @@ PYTHON_SOURCE_PREFIX = "python:sha256:"
 _KNOWN = (
     "inputs",
     "description",
+    "label",
     "owner",
     "tags",
     "materialize",
@@ -72,7 +73,8 @@ _KNOWN = (
 )
 _SHAPES: dict[str, tuple[type | tuple[type, ...], str]] = {
     "inputs": (dict, "a dict of strings"),
-    "columns": (dict, "a dict of strings"),
+    "columns": (dict, "a dict of strings or dicts"),
+    "label": (str, "a string"),
     "tags": (list, "a list of strings"),
     "description": (str, "a string"),
     "owner": (str, "a string"),
@@ -90,6 +92,8 @@ _SHAPES: dict[str, tuple[type | tuple[type, ...], str]] = {
     "watermark": (str, "a string"),
     "evolve_schema": (bool, "True or False"),
 }
+_TWO_LEVEL = frozenset({"measures", "columns"})
+"""Arguments whose values may be dicts of literal dicts, read with `_measures_literal`."""
 _DEFAULTS: dict[str, tuple[object, ...]] = {
     "write": ("replace",),
     "key": ([],),
@@ -97,6 +101,7 @@ _DEFAULTS: dict[str, tuple[object, ...]] = {
 }
 """Values of the write model that an artifact asset may still give: they change nothing."""
 _NOT_FOR_ARTIFACTS = (
+    "label",
     "materialize",
     "columns",
     "write",
@@ -371,7 +376,7 @@ def _measure_literal(node: ast.expr) -> object:
 
 
 def _measures_literal(node: ast.expr) -> object:
-    """Evaluate `measures=`: a dict of column names to `_measure_literal` dicts.
+    """Evaluate `measures=` or `columns=`: a dict of names to literals or `_measure_literal` dicts.
 
     Parameters
     ----------
@@ -439,7 +444,7 @@ def _arguments(
             issues.append(ProjectIssue(path, keyword.lineno, f"repeats argument {name!r}"))
             continue
         seen.add(name)
-        value = _measures_literal(keyword.value) if name == "measures" else _literal(keyword.value)
+        value = _measures_literal(keyword.value) if name in _TWO_LEVEL else _literal(keyword.value)
         if value is _DUPLICATE_KEYS:
             issues.append(ProjectIssue(path, line, f"argument {name!r} repeats a key"))
             dropped.add(name)

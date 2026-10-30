@@ -1091,3 +1091,23 @@ def test_a_model_without_measures_stays_version_9_without_a_measures_key() -> No
     manifest = build_manifest([_modelled()], build_graph([_modelled()]), ResolvedProjectConfig())
     assert manifest["version"] == MODEL_VERSION == 9
     assert "measures" not in manifest["assets"][0]["model"]
+
+
+def test_labels_go_into_the_entry_only_when_declared() -> None:
+    plain = make_asset("gold.a", metadata=AssetMetadata(materialize="table", columns={"a": "x"}))
+    labelled = make_asset(
+        "gold.b",
+        metadata=AssetMetadata(
+            materialize="table",
+            label="B",
+            columns={"a": {"label": "A"}, "c": {"label": "C", "description": "the c"}},
+        ),
+    )
+    manifest = build_manifest(
+        [plain, labelled], build_graph([plain, labelled]), ResolvedProjectConfig()
+    )
+    a, b = manifest["assets"]
+    assert a["metadata"] == {"description": None, "owner": None, "tags": [], "columns": {"a": "x"}}
+    assert b["metadata"]["label"] == "B"
+    assert b["metadata"]["columns"] == {"c": "the c"}
+    assert b["metadata"]["column_labels"] == {"a": "A", "c": "C"}

@@ -8,6 +8,7 @@ An optional `/* lakana … */` block, first in the file:
 <!-- not tested: SQL is not parsed by the block checker; a test in `scripts/tests/test_docs_site.py` parses this header with the front-matter reader -->
 ```sql
 /* lakana
+label: Hourly weather
 description: Cleaned hourly weather observations, nulls dropped.
 owner: data-eng
 tags: [weather, hourly]
@@ -18,14 +19,29 @@ retries: 3                    # run policy, see lakana.yaml: "Retries and timeou
 retry_delay: 1m
 timeout: 5m
 columns:
-  station_id: WMO station identifier.
+  station_id: WMO station identifier.   # short form: a description
+  temp_c:                               # long form: a label, a description or both
+    label: Temperature
+    description: Air temperature in degrees Celsius.
 */
 SELECT station_id, ts, temp_c FROM bronze.weather WHERE temp_c IS NOT NULL
 ```
 
-`description` and `columns` describe the table and its columns. A deploy publishes them as the
+`label` is a short name for people, one line of at most 100 characters; `description` and
+`columns` describe the table and its columns. A column is a description alone (`station_id: WMO
+station identifier.`) or a mapping with `label:`, `description:` or both. Write them in the
+project's main language ([`main_language`](lakana-yaml.md#main_language-and-translations)). A deploy publishes them as the
 project's text, and a description set with `lakana table describe` wins over them and survives
 every deploy; see [Describe a table](../how-to/describe-a-table.md).
+
+A deploy refuses a bad text with its field and the next step:
+
+| Text | Cause |
+|---|---|
+| `label: must not be empty`, `label: must be one line`, `label: must be at most 100 characters` | A bad table label; the same texts apply to `columns.store_id.label`. |
+| ``columns: `store_id` must be a description or a mapping such as `{label: Store, description: The store that sold.}` `` | A column that is neither a string nor a mapping. |
+| ``columns.store_id: needs `label:` or `description:`; write a description alone as a plain string`` | An empty mapping. |
+| `columns.store_id.lable: Extra inputs are not permitted` | A misspelled key. |
 
 An asset may call only the generator table functions `range`, `generate_series` and `unnest`,
 which read no data and are not inputs; every other table function (`read_parquet`, `iceberg_scan`,

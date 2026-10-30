@@ -258,6 +258,12 @@ def _harness(source: str, root: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[
 _HUGE = "9" * 4000
 
 _ARGUMENT_CASES: dict[str, str] = {
+    "label": 'label="Scores"',
+    "label-two-lines": 'label="a\\nb"',
+    "label-long": 'label="' + "x" * 101 + '"',
+    "columns-long-form": 'columns={"c": {"label": "C", "description": "the c"}}',
+    "columns-empty-long-form": 'columns={"c": {}}',
+    "columns-bad-key": 'columns={"c": {"lable": "C"}}',
     "output-table": 'output="table"',
     "output-artifact": 'output="artifact"',
     "output-other-string": 'output="model"',
@@ -731,3 +737,29 @@ def test_a_null_not_over_means_no_columns_at_deploy_and_in_the_sdk() -> None:
     assert deployed.measures["m"].not_over == ()
     spec = cast("Any", sdk_assets.asset)(**fields, measures={"m": measure})(lambda: None)
     assert "not_over" not in getattr(spec, sdk_assets.ASSET_ATTRIBUTE).measures["m"]
+
+
+@pytest.mark.parametrize(
+    "texts",
+    [
+        {"label": "a\nb"},
+        {"label": "x" * 101},
+        {"label": " "},
+        {"columns": {"c": {}}},
+        {"columns": {"c": {"lable": "C"}}},
+        {"columns": {"c": {"label": "a\nb"}}},
+    ],
+)
+def test_a_bad_text_gets_the_same_words_from_deploy_and_the_sdk(texts: dict[str, Any]) -> None:
+    """The label and long-form rules are worded once: the SDK raises the deploy issue's text."""
+    import pydantic
+
+    from lakana_core.projects.frontmatter import AssetMetadata
+    from lakana_core.projects.project_config import pydantic_issues
+
+    with pytest.raises(pydantic.ValidationError) as deploy:
+        AssetMetadata.model_validate(texts)
+    (issue,) = pydantic_issues(deploy.value, path="a.py", line=1)
+    with pytest.raises(ValueError) as sdk:
+        cast("Any", sdk_assets.asset)(**texts)
+    assert str(sdk.value) == issue.message

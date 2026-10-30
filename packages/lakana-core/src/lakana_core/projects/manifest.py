@@ -213,7 +213,7 @@ def _entry(
             "description": asset.metadata.description,
             "owner": asset.metadata.owner,
             "tags": list(asset.metadata.tags),
-            "columns": dict(asset.metadata.columns),
+            "columns": asset.metadata.column_descriptions(),
         },
         "sql": asset.sql,
         "normalized_sql": asset.normalized_sql,
@@ -221,6 +221,11 @@ def _entry(
         "columns": list(asset.columns) if asset.columns is not None else None,
         "lineage": asset.lineage,
     }
+    if asset.metadata.label is not None:
+        entry["metadata"]["label"] = asset.metadata.label
+    labels = asset.metadata.column_labels()
+    if labels:
+        entry["metadata"]["column_labels"] = labels
     if asset.kind == "python":
         entry["inputs"] = dict(asset.inputs)
         entry["output"] = asset.output

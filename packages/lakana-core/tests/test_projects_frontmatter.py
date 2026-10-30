@@ -37,7 +37,7 @@ def test_full_block_parses_and_body_follows() -> None:
     parsed = parse_front_matter(_FULL, path=_PATH)
     assert parsed.metadata.materialize == "incremental"
     assert parsed.metadata.tags == ("weather", "hourly")
-    assert parsed.metadata.columns == {"station_id": "WMO station identifier."}
+    assert parsed.metadata.column_descriptions() == {"station_id": "WMO station identifier."}
     assert parsed.body.strip().startswith("SELECT station_id")
     assert parsed.block_line == 1
     assert parsed.body_line == 10
@@ -480,3 +480,74 @@ def test_a_reference_column_that_cannot_name_its_check_is_refused() -> None:
 def test_an_explicit_null_grain_is_no_grain() -> None:
     """`grain: null` reads as no grain."""
     assert _meta("grain: null").grain is None
+
+
+def _header_issues(block: str) -> list[str]:
+    """Parse a SQL file with the given block that must be refused.
+
+    Parameters
+    ----------
+    block
+        The YAML inside ``/* lakana … */``.
+
+    Returns
+    -------
+    list of str
+        The issue messages.
+    """
+    text = f"/* lakana\n{block}*/\nSELECT 1 AS a\n"
+    with pytest.raises(ProjectValidationError) as caught:
+        parse_front_matter(text, path="assets/gold/t.sql")
+    return [issue.message for issue in caught.value.issues]
+
+
+def test_a_label_and_both_forms_of_columns_parse() -> None:
+    text = (
+        "/* lakana\nlabel: Daily sales\ncolumns:\n  date: The day.\n"
+        "  store_id:\n    label: Store\n    description: The store that sold.\n"
+        "  net_amount:\n    label: Net revenue\n*/\nSELECT 1 AS a\n"
+    )
+    metadata = parse_front_matter(text, path="assets/gold/t.sql").metadata
+    assert metadata.label == "Daily sales"
+    assert metadata.column_descriptions() == {
+        "date": "The day.",
+        "store_id": "The store that sold.",
+    }
+    assert metadata.column_labels() == {"store_id": "Store", "net_amount": "Net revenue"}
+
+
+def test_bad_labels_and_long_forms_are_refused_with_field_texts() -> None:
+    assert _header_issues("label: |\n  a\n  b\n") == ["label: must be one line"]
+    assert _header_issues(f"label: {'x' * 101}\n") == ["label: must be at most 100 characters"]
+    assert _header_issues("columns:\n  store_id: {}\n") == [
+        "columns.store_id: needs `label:` or `description:`; write a description alone as a "
+        "plain string"
+    ]
+    assert _header_issues("columns:\n  store_id: {lable: Store}\n") == [
+        "columns.store_id.lable: Extra inputs are not permitted"
+    ]
+    assert _header_issues("columns:\n  store_id: [a]\n") == [
+        "columns: `store_id` must be a description or a mapping such as "
+        "`{label: Store, description: The store that sold.}`"
+    ]
+    assert _header_issues('columns:\n  store_id: {label: "a\\nb"}\n') == [
+        "columns.store_id.label: must be one line"
+    ]
+
+
+def test_a_short_form_description_keeps_its_text_and_its_old_refusal() -> None:
+    assert _header_issues('columns:\n  a: "x\\u202ey"\n') == [
+        "columns: a column description must not contain a surrogate, a control character other "
+        "than a newline or tab, a bidirectional control or a line separator"
+    ]
+
+
+def test_a_long_form_description_with_an_unsafe_character_is_refused() -> None:
+    assert _header_issues('columns:\n  a:\n    description: "x\\u202ey"\n') == [
+        "columns.a.description: must not contain a surrogate, a control character other than a "
+        "newline or tab, a bidirectional control or a line separator"
+    ]
+
+
+def test_columns_that_are_not_a_mapping_get_pydantic_text() -> None:
+    assert _header_issues("columns: [a]\n") == ["columns: Input should be a valid dictionary"]
