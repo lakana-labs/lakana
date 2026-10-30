@@ -1,0 +1,714 @@
+"""Translation files: `translations/<language>.yaml`, keyed by table, checked against the project.
+
+A file holds one language's texts for tables, their columns and their measures. Each text
+translates one the asset header gives in the main language, so a deploy can refuse a text with
+nothing to translate (a misspelt table, column or measure, Q1) and count what is covered (Q2).
+Only the project's own assets are consulted, never the catalog, so no text here names a table
+the deployer may not see.
+"""
+
+from __future__ import annotations
+
+import difflib
+import os
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Annotated
+
+import pydantic
+from pydantic import AfterValidator, BeforeValidator, Field, model_validator
+
+from lakana_core.identifiers import shown
+from lakana_core.languages import canonical_language, language_problem
+from lakana_core.projects.asset_model import MAX_GRAIN_CHARS, ParsedAsset
+from lakana_core.projects.discovery import (
+    CONFIG_FILE,
+    TRANSLATIONS_DIR,
+    _decode,
+    _display,
+    _is_unsafe,
+    _read,
+)
+from lakana_core.projects.issues import ProjectIssue
+from lakana_core.projects.limits import DeployLimits
+from lakana_core.projects.project_config import (
+    MAX_DESCRIPTION_CHARS,
+    NEEDS_MAIN_LANGUAGE,
+    ProjectConfig,
+    StrictModel,
+    checked_label,
+    checked_text,
+    pydantic_issues,
+)
+from lakana_core.projects.yaml_loader import YamlError, key_line, load_yaml
+
+MAX_LANGUAGES = 50
+"""The most translation files a project may have."""
+
+MAX_MISSING_SHOWN = 20
+"""The most missing keys a strict-mode refusal names."""
+
+MAX_FILE_ENTRIES = 20_000
+"""The most tables, columns and measures one file may name, counted before validation, so a
+1 MiB file of keys cannot cost a deploy tens of thousands of validations and issues."""
+
+_LINK = "symlinks are not allowed under translations/"
+_NO_FOLDERS = (
+    "translations/ holds files, not folders; put each language's texts in one file such as "
+    "translations/de.yaml"
+)
+_ONLY_YAML = (
+    "translations/ holds only one <language>.yaml file per language, such as "
+    "translations/de.yaml; move this file elsewhere"
+)
+_FIELDS = ("label", "description")
+
+
+@dataclass(frozen=True)
+class DiscoveredTranslation:
+    """One translation file as discovery read it.
+
+    Parameters
+    ----------
+    path
+        Repository-relative path.
+    language
+        Its canonical tag, the file's name.
+    text
+        The decoded content.
+    """
+
+    path: str
+    language: str
+    text: str
+
+
+def _name_issue(relative: str, stem: str) -> ProjectIssue | None:
+    """Check a file's name as a language tag.
+
+    Parameters
+    ----------
+    relative
+        The file's path.
+    stem
+        Its name without ``.yaml``.
+
+    Returns
+    -------
+    ProjectIssue or None
+        The refusal with the fix, or `None` for a canonical tag.
+    """
+    problem = language_problem(stem)
+    if problem is None:
+        return None
+    canonical = canonical_language(stem)
+    if canonical is None:
+        fix = "; name the file after the language of its texts, such as translations/de.yaml"
+    else:
+        fix = f": rename the file to translations/{canonical}.yaml"
+    return ProjectIssue(relative, None, problem + fix)
+
+
+def discover_translations(
+    root: Path, *, limits: DeployLimits
+) -> tuple[list[DiscoveredTranslation], list[ProjectIssue]]:
+    """Find every translation file directly under ``translations/``.
+
+    Parameters
+    ----------
+    root
+        The extracted checkout.
+    limits
+        Supplies `translation_bytes`.
+
+    Returns
+    -------
+    tuple of (list of DiscoveredTranslation, list of ProjectIssue)
+        The files sorted by name, and every problem: links, folders, other files, bad names, too
+        many files, oversized or non-UTF-8 content. A project without the folder has neither.
+    """
+    folder = root / TRANSLATIONS_DIR
+    if folder.is_symlink():
+        return [], [ProjectIssue(TRANSLATIONS_DIR, None, _LINK)]
+    if not folder.is_dir():
+        return [], []
+    try:
+        entries = sorted(os.scandir(folder), key=lambda entry: entry.name)
+    except OSError as exc:
+        return [], [ProjectIssue(TRANSLATIONS_DIR, None, f"cannot be read: {exc.strerror}")]
+    found: list[DiscoveredTranslation] = []
+    issues: list[ProjectIssue] = []
+    files = 0
+    for entry in entries:
+        relative = f"{TRANSLATIONS_DIR}/{entry.name}"
+        if _is_unsafe(relative):
+            issues.append(
+                ProjectIssue(
+                    _display(relative), None, "the path has a non-UTF-8 or control character"
+                )
+            )
+            continue
+        if entry.is_symlink():
+            issues.append(ProjectIssue(relative, None, _LINK))
+            continue
+        if entry.is_dir(follow_symlinks=False):
+            issues.append(ProjectIssue(relative, None, _NO_FOLDERS))
+            continue
+        stem, dot, suffix = entry.name.rpartition(".")
+        if dot and suffix == "yml":
+            issues.append(
+                ProjectIssue(
+                    relative,
+                    None,
+                    f"a translation file ends in .yaml; rename it to translations/{stem}.yaml",
+                )
+            )
+            continue
+        if not dot or suffix != "yaml":
+            issues.append(ProjectIssue(relative, None, _ONLY_YAML))
+            continue
+        files += 1
+        if files > MAX_LANGUAGES:
+            continue
+        named = _name_issue(relative, stem)
+        if named is not None:
+            issues.append(named)
+            continue
+        data = _read(Path(entry.path), relative, limits.translation_bytes, issues)
+        text = _decode(data, relative, issues) if data is not None else None
+        if text is not None:
+            found.append(DiscoveredTranslation(relative, stem, text))
+    if files > MAX_LANGUAGES:
+        issues.append(
+            ProjectIssue(
+                TRANSLATIONS_DIR,
+                None,
+                f"translations/ holds {files} files; a project has at most {MAX_LANGUAGES} "
+                "languages besides its main language",
+            )
+        )
+    return found, issues
+
+
+def _description(value: str) -> str:
+    """Apply a translated description's rules: not empty, at most 4,000 characters, safe.
+
+    Parameters
+    ----------
+    value
+        The description.
+
+    Returns
+    -------
+    str
+        The stripped description.
+    """
+    return checked_text(value, limit=MAX_DESCRIPTION_CHARS)
+
+
+def _grain(value: str) -> str:
+    """Apply `grain:`'s rules: one line, at most 300 characters, not empty, safe.
+
+    Parameters
+    ----------
+    value
+        The grain.
+
+    Returns
+    -------
+    str
+        The stripped grain.
+    """
+    return checked_text(value, limit=MAX_GRAIN_CHARS, one_line=True)
+
+
+Label = Annotated[str, AfterValidator(checked_label)]
+"""A translated label: the rules of every label."""
+
+Description = Annotated[str, AfterValidator(_description)]
+"""A translated description."""
+
+Grain = Annotated[str, AfterValidator(_grain)]
+"""A translated grain."""
+
+
+class TextPair(StrictModel):
+    """A column's or a measure's texts in one language.
+
+    Parameters
+    ----------
+    label
+        Its translated label.
+    description
+        Its translated description.
+    """
+
+    label: Label | None = None
+    description: Description | None = None
+
+    @model_validator(mode="after")
+    def _says_something(self) -> TextPair:
+        """Refuse an entry with neither text.
+
+        Returns
+        -------
+        TextPair
+            `self`.
+
+        Raises
+        ------
+        ValueError
+            If both are missing.
+        """
+        if self.label is None and self.description is None:
+            raise ValueError("needs `label:` or `description:`")
+        return self
+
+
+def _pairs_are_mappings(value: object) -> object:
+    """Refuse a column or measure entry that is not a mapping, before pydantic names a class.
+
+    Parameters
+    ----------
+    value
+        The raw `columns:` or `measures:` value.
+
+    Returns
+    -------
+    object
+        `value`, for the type check that follows.
+
+    Raises
+    ------
+    ValueError
+        For the first entry that is not a mapping.
+    """
+    if isinstance(value, Mapping):
+        for name, texts in value.items():
+            if not isinstance(texts, Mapping):
+                raise ValueError(
+                    f"`{shown(name)}` must be a mapping such as `{{label: …, description: …}}`"
+                )
+    return value
+
+
+TextPairs = Annotated[dict[str, TextPair], BeforeValidator(_pairs_are_mappings)]
+"""Column or measure → its texts."""
+
+
+class TableTranslation(StrictModel):
+    """One table's texts in one language.
+
+    Parameters
+    ----------
+    label
+        The table's translated label.
+    description
+        Its translated description.
+    grain
+        Its translated grain.
+    columns
+        Column → its texts.
+    measures
+        Measure column → its texts.
+    """
+
+    label: Label | None = None
+    description: Description | None = None
+    grain: Grain | None = None
+    columns: TextPairs = Field(default_factory=dict)
+    measures: TextPairs = Field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class Translations:
+    """One language's parsed file.
+
+    Parameters
+    ----------
+    path
+        Repository-relative path.
+    language
+        Its canonical tag.
+    text
+        The file's content, for key lines.
+    tables
+        Table → its texts.
+    """
+
+    path: str
+    language: str
+    text: str
+    tables: dict[str, TableTranslation]
+
+
+def _entry_count(raw: Mapping[str, object]) -> int:
+    """Count the tables, columns and measures a file names, before any validation.
+
+    Parameters
+    ----------
+    raw
+        The file's top-level mapping.
+
+    Returns
+    -------
+    int
+        Its keys plus the keys of every table's `columns:` and `measures:` mappings.
+    """
+    count = len(raw)
+    for value in raw.values():
+        if isinstance(value, Mapping):
+            for part in ("columns", "measures"):
+                section = value.get(part)
+                if isinstance(section, Mapping):
+                    count += len(section)
+    return count
+
+
+def parse_translations(
+    found: Sequence[DiscoveredTranslation], *, limits: DeployLimits
+) -> tuple[list[Translations], list[ProjectIssue]]:
+    """Read each file's YAML and validate every table entry.
+
+    Parameters
+    ----------
+    found
+        `discover_translations`' files.
+    limits
+        Supplies `translation_bytes`.
+
+    Returns
+    -------
+    tuple of (list of Translations, list of ProjectIssue)
+        Each readable file with its valid entries, and every problem, ``table.field: message`` at
+        the key's line.
+    """
+    parsed: list[Translations] = []
+    issues: list[ProjectIssue] = []
+    for item in found:
+        try:
+            raw = load_yaml(item.text, what=item.path, max_bytes=limits.translation_bytes)
+        except YamlError as exc:
+            issues.append(ProjectIssue(item.path, exc.line, str(exc)))
+            continue
+        raw = {} if raw is None else raw
+        if not isinstance(raw, dict) or not all(isinstance(key, str) for key in raw):
+            issues.append(
+                ProjectIssue(
+                    item.path,
+                    1,
+                    f"{item.path} must be a mapping of table names to their texts, such as "
+                    "`gold.fact_sales: {label: Ventes}`",
+                )
+            )
+            continue
+        entries = _entry_count(raw)
+        if entries > MAX_FILE_ENTRIES:
+            issues.append(
+                ProjectIssue(
+                    item.path,
+                    None,
+                    f"names {entries} tables, columns and measures, and a translation file names "
+                    f"at most {MAX_FILE_ENTRIES}; keep only the texts of tables, columns and "
+                    "measures the project builds",
+                )
+            )
+            continue
+        tables: dict[str, TableTranslation] = {}
+        for table, value in raw.items():
+            try:
+                tables[table] = TableTranslation.model_validate({} if value is None else value)
+            except pydantic.ValidationError as exc:
+                issues += pydantic_issues(
+                    exc, path=item.path, line=None, text=item.text, prefix=(table,)
+                )
+        parsed.append(Translations(item.path, item.language, item.text, tables))
+    return parsed, issues
+
+
+def _has(text: str | None) -> bool:
+    """Say whether a header text is there to translate (blank counts as none, as it shows).
+
+    Parameters
+    ----------
+    text
+        The text.
+
+    Returns
+    -------
+    bool
+        True for a non-blank string.
+    """
+    return text is not None and bool(text.strip())
+
+
+def header_texts(asset: ParsedAsset) -> list[str]:
+    """List the keys of every text an asset's header gives, in header order.
+
+    Parameters
+    ----------
+    asset
+        The asset; an artifact asset has none (the catalog shows no texts for it).
+
+    Returns
+    -------
+    list of str
+        Keys as a translation file nests them, such as ``gold.t.columns.c.label``.
+    """
+    if asset.output == "artifact":
+        return []
+    meta, table = asset.metadata, asset.table
+    keys = [f"{table}.{f}" for f in ("label", "description", "grain") if _has(getattr(meta, f))]
+    for column, texts in meta.columns.items():
+        keys += [f"{table}.columns.{column}.{f}" for f in _FIELDS if _has(getattr(texts, f))]
+    for column, spec in meta.measures.items():
+        keys += [f"{table}.measures.{column}.{f}" for f in _FIELDS if _has(getattr(spec, f))]
+    return keys
+
+
+def translated_texts(table: str, entry: TableTranslation) -> list[str]:
+    """List the keys of every text one table's entry translates.
+
+    Parameters
+    ----------
+    table
+        The table.
+    entry
+        Its texts in one language.
+
+    Returns
+    -------
+    list of str
+        Keys in `header_texts`' form.
+    """
+    keys = [f"{table}.{f}" for f in ("label", "description", "grain") if getattr(entry, f)]
+    for part, pairs in (("columns", entry.columns), ("measures", entry.measures)):
+        for name, pair in pairs.items():
+            keys += [f"{table}.{part}.{name}.{f}" for f in _FIELDS if getattr(pair, f)]
+    return keys
+
+
+def _unknown_table(table: str, known: Sequence[str]) -> str:
+    """Word the refusal of a table the project does not build, with a close name if there is one.
+
+    Parameters
+    ----------
+    table
+        The key as written.
+    known
+        The project's own table names.
+
+    Returns
+    -------
+    str
+        The text.
+    """
+    close = difflib.get_close_matches(table, known, n=1, cutoff=0.8)
+    hint = f"; did you mean `{close[0]}`? Fix" if close else "; fix"
+    return (
+        f"`{shown(table)}` is not a table this project builds{hint} the name, or remove the entry"
+    )
+
+
+def _entry_issues(
+    t: Translations, table: str, entry: TableTranslation, asset: ParsedAsset
+) -> list[ProjectIssue]:
+    """Check one table's entry against its asset's header.
+
+    Parameters
+    ----------
+    t
+        The file.
+    table
+        The table.
+    entry
+        Its texts.
+    asset
+        The asset that builds it.
+
+    Returns
+    -------
+    list of ProjectIssue
+        A column or measure the header does not declare, and a text without its main-language
+        text, each at its key's line.
+    """
+    meta, source = asset.metadata, asset.path
+    issues: list[ProjectIssue] = []
+
+    def at(*parts: str) -> int | None:
+        """Find the line of a key below the table's.
+
+        Parameters
+        ----------
+        *parts
+            The keys below the table.
+
+        Returns
+        -------
+        int or None
+            Its 1-based line.
+        """
+        return key_line(t.text, [table, *parts])
+
+    for field in ("label", "description", "grain"):
+        if getattr(entry, field) is not None and not _has(getattr(meta, field)):
+            issues.append(
+                ProjectIssue(
+                    t.path,
+                    at(field),
+                    f"the header of `{table}` has no {field} to translate; add `{field}:` in "
+                    f"{source}, or remove this text",
+                )
+            )
+    for column, pair in entry.columns.items():
+        texts = meta.columns.get(column)
+        if texts is None:
+            issues.append(
+                ProjectIssue(
+                    t.path,
+                    at("columns", column),
+                    f"`{shown(column)}` is not a column the header of `{table}` describes "
+                    f"(`columns:` in {source}); fix the name, or describe the column there first",
+                )
+            )
+            continue
+        for field in _FIELDS:
+            if getattr(pair, field) is not None and not _has(getattr(texts, field)):
+                issues.append(
+                    ProjectIssue(
+                        t.path,
+                        at("columns", column, field),
+                        f"the header of `{table}` gives column `{shown(column)}` no {field} to "
+                        f"translate; add `{field}:` for it under `columns:` in {source}, or "
+                        "remove this text",
+                    )
+                )
+    for column, pair in entry.measures.items():
+        spec = meta.measures.get(column)
+        if spec is None:
+            issues.append(
+                ProjectIssue(
+                    t.path,
+                    at("measures", column),
+                    f"`{shown(column)}` is not a measure of `{table}` (`measures:` in {source}); "
+                    "fix the name, or remove the entry",
+                )
+            )
+            continue
+        for field in _FIELDS:
+            if getattr(pair, field) is not None and not _has(getattr(spec, field)):
+                issues.append(
+                    ProjectIssue(
+                        t.path,
+                        at("measures", column, field),
+                        f"measure `{shown(column)}` of `{table}` has no {field} to translate; add "
+                        f"`{field}:` to it under `measures:` in {source}, or remove this text",
+                    )
+                )
+    return issues
+
+
+def _missing_issue(t: Translations, missing: list[str]) -> ProjectIssue:
+    """Word strict mode's refusal for one language.
+
+    Parameters
+    ----------
+    t
+        The file of that language.
+    missing
+        The missing keys, sorted.
+
+    Returns
+    -------
+    ProjectIssue
+        The issue at the file, naming at most `MAX_MISSING_SHOWN` keys.
+    """
+    named = ", ".join(missing[:MAX_MISSING_SHOWN])
+    rest = len(missing) - MAX_MISSING_SHOWN
+    more = f" … and {rest} more" if rest > 0 else ""
+    verb = "is" if len(missing) == 1 else "are"
+    return ProjectIssue(
+        t.path,
+        None,
+        f"translations.require in lakana.yaml needs a `{t.language}` text for every header text, "
+        f"and {len(missing)} {verb} missing: {named}{more}. Add them to {t.path}, or remove "
+        f"`{t.language}` from translations.require.",
+    )
+
+
+def translation_issues(
+    config: ProjectConfig, assets: Sequence[ParsedAsset], translations: Sequence[Translations]
+) -> list[ProjectIssue]:
+    """Check the translation files against `lakana.yaml` and the project's assets.
+
+    Parameters
+    ----------
+    config
+        The whole `lakana.yaml`.
+    assets
+        The parsed assets.
+    translations
+        The parsed files.
+
+    Returns
+    -------
+    list of ProjectIssue
+        A missing `main_language`, a file of the main language, an unknown or artifact table,
+        the per-entry problems, and strict mode's gaps and missing files.
+    """
+    main = config.main_language
+    require = config.translations.require
+    issues: list[ProjectIssue] = []
+    if main is None and translations and not require:
+        issues.append(ProjectIssue(CONFIG_FILE, None, NEEDS_MAIN_LANGUAGE))
+    by_table = {asset.table: asset for asset in assets}
+    every = sorted({key for asset in assets for key in header_texts(asset)})
+    files = {t.language: t for t in translations}
+    for t in translations:
+        if t.language == main:
+            issues.append(
+                ProjectIssue(
+                    t.path,
+                    None,
+                    f"`{main}` is the project's main language (`main_language:` in lakana.yaml); "
+                    "its texts belong in the asset headers. Move them there, or remove the file",
+                )
+            )
+            continue
+        for table, entry in t.tables.items():
+            asset = by_table.get(table)
+            line = key_line(t.text, [table])
+            if asset is None:
+                issues.append(ProjectIssue(t.path, line, _unknown_table(table, sorted(by_table))))
+            elif asset.output == "artifact":
+                issues.append(
+                    ProjectIssue(
+                        t.path,
+                        line,
+                        f"`{table}` is an artifact, which has no catalog texts to translate; "
+                        "remove the entry",
+                    )
+                )
+            else:
+                issues += _entry_issues(t, table, entry, asset)
+    for language in require:
+        if language == main:
+            continue
+        t = files.get(language)
+        if t is None:
+            issues.append(
+                ProjectIssue(
+                    CONFIG_FILE,
+                    None,
+                    f"translations.require lists `{language}`, but there is no "
+                    f"translations/{language}.yaml; add the file with a text for every header "
+                    f"text, or remove `{language}` from the list",
+                )
+            )
+            continue
+        done = {key for table, entry in t.tables.items() for key in translated_texts(table, entry)}
+        missing = [key for key in every if key not in done]
+        if missing:
+            issues.append(_missing_issue(t, missing))
+    return issues
