@@ -1540,7 +1540,7 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "s3fs", specifier = ">=2026.9.0" },
     { name = "sqlalchemy", specifier = ">=2.1.6" },
-    { name = "sqlglot", specifier = ">=30.21.0,<31" },
+    { name = "sqlglot", specifier = ">=30.21.0,<30.25" },
     { name = "tzdata", specifier = ">=2026.5" },
 ]
 
