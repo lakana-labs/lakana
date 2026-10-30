@@ -683,7 +683,8 @@ def test_table_get_and_list_show_a_kept_table(client: TestClient, settings: Sett
     create_table(client, "dev", "gold", "fine")
     run_id = uuid.uuid4()
     _mark_kept(settings, "sales", run_id, "gold.sales/unique_id and 1 more")
-    expected = _kept_text("gold.sales/unique_id and 1 more", run_id)
+    # The note's run left no results, so nothing tells what "and 1 more" counts (#385).
+    expected = _kept_text("gold.sales/unique_id", run_id)
 
     got = client.get("/api/v1/environments/dev/namespaces/gold/tables/sales", headers=AUTH_HEADER)
     listed = client.get("/api/v1/environments/dev/namespaces/gold/tables", headers=AUTH_HEADER)
