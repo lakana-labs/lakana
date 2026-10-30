@@ -22,6 +22,7 @@ from lakana_core.projects.asset_model import (
     normalized_write,
 )
 from lakana_core.projects.dag import ProjectGraph
+from lakana_core.projects.measures import MeasureEntry, measure_entries, read_measure_entries
 from lakana_core.projects.parse import ParsedAsset
 from lakana_core.projects.project_config import (
     SUPPORTED_TASK_PYTHONS,
@@ -34,7 +35,7 @@ if TYPE_CHECKING:
     from lakana_core.projects.checks import ParsedCheck
     from lakana_core.projects.frontmatter import AssetMetadata
 
-MANIFEST_VERSION = 9
+MANIFEST_VERSION = 10
 """Bumped when the manifest's shape changes. Version 2 adds `kind` per asset and
 `lock_sha256`; a version-1 manifest is read as all-SQL. Version 3 adds `output`,
 `keep_versions` and `input_kinds` per Python asset; versions 1 and 2 are read as all-table.
@@ -58,6 +59,8 @@ merge or an append as a replace; it also carries a `checks` list. Every entry ca
 Version 9 is written only when an asset declares a model field (`kind`, `grain`, `key`,
 `references` or `checks`; `MODEL_VERSION`), so that a worker of an earlier release refuses it; such
 an entry carries `model` (read with `entry_model`), and the manifest a `checks` list.
+Version 10 is written only when an asset declares measures (`MEASURES_VERSION`); such an entry's
+`model` carries `measures`, and its `measures` check entry carries `not_over` and `aggregations`.
 The `decimals` key is optional and read with a default (`entry_decimals`), so it needed
 no bump: an entry without it means ``float``. The `package_indexes` key is optional in
 the same way: a manifest without it uses no registered package index. The `python` key is
@@ -92,7 +95,11 @@ MODEL_VERSION = 9
 is version 9. Written only then, so that a worker of an earlier release refuses it instead of
 running the project without the checks its model generates."""
 
-LISTS_CHECKS = (4, 5, 6, 7, 8, 9)
+MEASURES_VERSION = 10
+"""The version of a manifest in which an asset declares measures; a worker of an earlier release
+refuses it instead of reading its `measures` check as damaged."""
+
+LISTS_CHECKS = (4, 5, 6, 7, 8, 9, 10)
 """The versions whose manifest always carries a `checks` list (version 4 a non-empty one). A
 tuple, not a set: a stored version may be any JSON value, a list too, and must not raise."""
 
@@ -146,13 +153,15 @@ def declares_model(metadata: AssetMetadata) -> bool:
     Returns
     -------
     bool
-        `True` for a `kind`, `grain`, `references`, `checks`, or a `key` (columns or ``none``).
+        `True` for a `kind`, `grain`, `references`, `checks`, `measures`, or a `key` (columns
+        or ``none``).
     """
     return bool(
         metadata.kind
         or metadata.grain
         or metadata.references
         or metadata.checks
+        or metadata.measures
         or key_columns(metadata.key)
         or metadata.key == KEY_NONE
     )
@@ -225,7 +234,7 @@ def _entry(
         if asset.output == "artifact":
             entry["materialize"] = entry["write_mode"] = entry["first_write_mode"] = "artifact"
     if declares_model(asset.metadata):
-        entry["model"] = {
+        model: dict[str, Any] = {
             "kind": asset.metadata.kind,
             "grain": asset.metadata.grain,
             "key_none": asset.metadata.key == KEY_NONE,
@@ -235,6 +244,9 @@ def _entry(
             ],
             "checks": dict(sorted(asset.metadata.checks.items())),
         }
+        if asset.metadata.measures:
+            model["measures"] = measure_entries(asset.metadata.measures)
+        entry["model"] = model
     return entry
 
 
@@ -264,6 +276,7 @@ def _version(
     uses_connections: bool,
     uses_new_writes: bool = False,
     uses_model: bool = False,
+    uses_measures: bool = False,
 ) -> int:
     """Pick the lowest manifest version that carries everything the project declares.
 
@@ -279,16 +292,21 @@ def _version(
         Whether an asset spells `write: append` or `merge`.
     uses_model
         Whether an asset declares a model field.
+    uses_measures
+        Whether an asset declares measures.
 
     Returns
     -------
     int
-        `MODEL_VERSION` when an asset declares a model field, else `WRITES_VERSION` when an
+        `MEASURES_VERSION` when an asset declares measures, else `MODEL_VERSION` when an asset
+        declares a model field, else `WRITES_VERSION` when an
         asset uses the new write spelling, else `CONNECTIONS_VERSION`
         when an asset declares a connection, `NOTIFY_VERSION` when a job notifies,
         `JOBS_VERSION` with jobs, `CHECKS_VERSION` with checks, `VERSION_WITHOUT_CHECKS`
         otherwise.
     """
+    if uses_measures:
+        return MEASURES_VERSION
     if uses_model:
         return MODEL_VERSION
     if uses_new_writes:
@@ -333,6 +351,9 @@ def _check_entry(check: ParsedCheck) -> dict[str, Any]:
             "target": check.generated.target,
             "target_column": check.generated.target_column,
         }
+        if check.generated.family == "measures":
+            entry["generated"]["not_over"] = list(check.generated.not_over)
+            entry["generated"]["aggregations"] = list(check.generated.aggregations)
     return entry
 
 
@@ -395,6 +416,7 @@ def build_manifest(
         uses_connections=any(asset.connections for asset in assets),
         uses_new_writes=any(asset.metadata.write in ("append", "merge") for asset in assets),
         uses_model=any(declares_model(asset.metadata) for asset in assets),
+        uses_measures=any(asset.metadata.measures for asset in assets),
     )
     manifest: dict[str, Any] = {
         "version": version,
@@ -418,7 +440,8 @@ def build_manifest(
         manifest["python"] = python
     if package_indexes:
         manifest["package_indexes"] = sorted(package_indexes)
-    if checks or config.jobs or version in (CONNECTIONS_VERSION, WRITES_VERSION, MODEL_VERSION):
+    lists_empty = (CONNECTIONS_VERSION, WRITES_VERSION, MODEL_VERSION, MEASURES_VERSION)
+    if checks or config.jobs or version in lists_empty:
         manifest["checks"] = [_check_entry(check) for check in sorted(checks, key=lambda c: c.name)]
     return manifest
 
@@ -782,6 +805,8 @@ class EntryModel:
         The resolved references.
     checks
         Check family → failure mode.
+    measures
+        The readable measures, sorted by column; empty for an entry without them.
     """
 
     kind: str | None
@@ -790,6 +815,7 @@ class EntryModel:
     key_none: bool
     references: tuple[ResolvedReference, ...]
     checks: dict[str, str]
+    measures: tuple[MeasureEntry, ...] = ()
 
 
 def entry_model(entry: object) -> EntryModel | None:
@@ -806,7 +832,8 @@ def entry_model(entry: object) -> EntryModel | None:
         `None` for an entry without a `model` mapping. Otherwise each value that is not what a
         deploy writes reads as absent: a `kind` outside `MODEL_KINDS`, a `grain` that is not a
         string, a `key_none` other than `true`, a reference that is not a mapping of three
-        strings, and a check family or mode Lakana does not know.
+        strings, a check family or mode Lakana does not know, and a measure
+        `read_measure_entries` cannot read.
     """
     raw = entry.get("model") if isinstance(entry, Mapping) else None
     if not isinstance(raw, Mapping):
@@ -831,6 +858,7 @@ def entry_model(entry: object) -> EntryModel | None:
             for family, mode in (checks.items() if isinstance(checks, Mapping) else ())
             if family in CHECK_FAMILIES and isinstance(mode, str) and mode in CHECK_MODES
         },
+        measures=read_measure_entries(raw.get("measures")),
     )
 
 

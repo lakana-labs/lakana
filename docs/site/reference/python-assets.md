@@ -49,7 +49,8 @@ limits lie is in [Python assets: what they are for and how far they are trusted]
   was deleted since fails the same way. While a deployed version declares a connection, the
   connection cannot be deleted. An asset without `connections` deploys as before. A project
   version in which an asset declares connections has manifest version 7 (8 when an asset also
-  appends or merges, 9 when an asset declares a model field), so a worker of an earlier release refuses its runs instead of running the
+  appends or merges, 9 when an asset declares a model field, 10 when an asset declares
+  measures), so a worker of an earlier release refuses its runs instead of running the
   asset without them: upgrade the workers first. The kinds of connection and the commands that manage them are in
   [Connections](connections.md).
 - **Model fields.** `kind` (`fact`, `dimension`, `wide` or `staging`), `grain`, `key`,
@@ -74,6 +75,28 @@ limits lie is in [Python assets: what they are for and how far they are trusted]
   def fact_orders(orders):
       return orders
   ```
+- **Measures.** `measures` says how the numbers of a fact or wide table are aggregated and what
+  they are measured in. It is a dict of column to measure, with the keys and rules of SQL
+  front matter (see [Measures](asset-front-matter.md#measures)): `aggregation` (required),
+  `additivity`, `not_over`, `unit` or `currency` (exactly one), `label` and `description`. It
+  needs `kind="fact"` or `kind="wide"` and is refused with `output="artifact"`. A deploy reads it
+  without running the file, so it must be written out as a literal: no variables, no calls.
+  `checks={"measures": "warn"}` sets how the generated `measures` check fails:
+
+  ```python
+  from lakana import asset
+
+
+  @asset(
+      inputs={"orders": "silver.orders"},
+      kind="fact",
+      grain="One row per order.",
+      key="order_id",
+      measures={"amount": {"aggregation": "sum", "currency": "EUR"}},
+  )
+  def fact_orders(orders):
+      return orders
+  ```
 - **Write modes.** `write`, `key` and `watermark` say what a run does to the table, with the
   rules of SQL front-matter (see [Write modes](asset-front-matter.md#write-modes)):
   `write="replace"` (the default) replaces every row with what the function returns;
@@ -88,8 +111,8 @@ limits lie is in [Python assets: what they are for and how far they are trusted]
   `materialize="incremental"` is refused with
   ``a Python asset appends with write="append" and watermark="<column>", not materialize='incremental'``.
   A project version in which an asset appends or merges has manifest version 8 (9 when an asset
-  declares a model field, a `key` included, so every merge): a worker of an earlier release
-  refuses it instead of replacing the table.
+  declares a model field, a `key` included, so every merge, and 10 when an asset declares
+  measures): a worker of an earlier release refuses it instead of replacing the table.
 - **Schema changes.** `evolve_schema=True` lets a replace give the table the columns the
   function returns, a removed column included; without it, a changed schema fails the run. See
   [When the output changes shape](#when-the-output-changes-shape).
@@ -305,6 +328,7 @@ there is one, the line, as `path:line: message`. Fix the cause and deploy again.
 | `a Python asset supports only materialize 'table', got …` | `materialize` is neither `table` nor `incremental`. | Remove the argument, or write a SQL asset. |
 | ``write must be one of replace, append, merge; got '…'``, ``` `write: append` needs `watermark:` … ```, ``` `write: merge` needs `key:` … ```, ``` `write: replace` takes no `watermark:`; to add only new rows use `write: append` ```, ``key column `id` is listed twice``, ``a key has at most 8 columns, and `key:` lists 9; …``, ``a key column must not be empty; …`` | A wrong write model. | See [Write modes](asset-front-matter.md#write-modes); the rules are the same as in SQL front-matter. |
 | ``Asset `gold.fact_orders` is a fact and needs `grain:`: …``, ``Reference target `gold.dim_store` does not exist in environment `dev`, or you may not read it; …``, ``Reference `store_id: gold.dim_store`: `gold.dim_store` declares no key. …`` | A model field breaks a rule of its kind, or a reference target cannot be resolved. | See [Model fields](asset-front-matter.md#model-fields-kind-grain-key-and-references): every text and its fix; the rules are the same as in SQL front-matter. |
+| ``measures.amount.currency: must be an ISO 4217 currency code in capitals, …``, ``Asset `gold.x` is a dimension and declares `measures:`; …``, `argument 'measures' must be a literal` | A measure breaks a rule, or the argument is not a literal. | See [Measures](asset-front-matter.md#measures); the rules are the same as in SQL front-matter. |
 | ``evolve_schema=True works with write="replace" (the default) only; …``, `argument 'evolve_schema' must be True or False`, `argument 'evolve_schema' does not apply to an artifact asset; remove it` | `evolve_schema=True` on an asset that appends or merges, or on an artifact asset, or a value that is not `True` or `False`. | Remove it, or write the asset with `write="replace"`. See [When the output changes shape](#when-the-output-changes-shape). |
 | `` `ctx` is the asset's context; give the input another parameter name `` | `inputs` names a parameter `ctx`. | Rename the parameter and its entry in `inputs`. |
 | `assets/a.sql and assets/a.py both produce table 'a'` | A SQL file and a Python file for one table. | Keep one. |

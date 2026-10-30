@@ -67,6 +67,7 @@ _KNOWN = (
     "kind",
     "grain",
     "references",
+    "measures",
     "checks",
 )
 _SHAPES: dict[str, tuple[type | tuple[type, ...], str]] = {
@@ -84,6 +85,7 @@ _SHAPES: dict[str, tuple[type | tuple[type, ...], str]] = {
     "kind": (str, "a string"),
     "grain": (str, "a string"),
     "references": (dict, "a dict of strings"),
+    "measures": (dict, "a dict of dicts"),
     "checks": (dict, "a dict of strings"),
     "watermark": (str, "a string"),
     "evolve_schema": (bool, "True or False"),
@@ -104,6 +106,7 @@ _NOT_FOR_ARTIFACTS = (
     "kind",
     "grain",
     "references",
+    "measures",
     "checks",
 )
 """Arguments that describe a table, refused on an artifact asset unless `_DEFAULTS` has them."""
@@ -316,6 +319,83 @@ def _literal(node: ast.expr) -> object:
     return _NOT_LITERAL
 
 
+def _display_keys(node: ast.Dict) -> list[str] | object:
+    """Read the keys of a dict display that holds nested values.
+
+    Parameters
+    ----------
+    node
+        The dict display.
+
+    Returns
+    -------
+    list of str or object
+        The keys; `_NOT_LITERAL` for a `**` unpacking or a key that is not a string literal;
+        `_DUPLICATE_KEYS` for a repeated key.
+    """
+    if any(key is None for key in node.keys):
+        return _NOT_LITERAL
+    keys = _strings([key for key in node.keys if key is not None])
+    if keys is None:
+        return _NOT_LITERAL
+    if len(set(keys)) != len(keys):
+        return _DUPLICATE_KEYS
+    return keys
+
+
+def _measure_literal(node: ast.expr) -> object:
+    """Evaluate one measure of `measures=`: a dict of strings to strings or lists of strings.
+
+    Parameters
+    ----------
+    node
+        The measure's expression.
+
+    Returns
+    -------
+    object
+        The dict; `_literal`'s result for anything that is not a dict display (the metadata
+        model refuses it with its own text); `_DUPLICATE_KEYS` for a repeated key;
+        `_NOT_LITERAL` for a key that is not a string or a value that is neither `_literal`'s
+        nor a non-dict.
+    """
+    if not isinstance(node, ast.Dict):
+        return _literal(node)
+    keys = _display_keys(node)
+    if not isinstance(keys, list):
+        return keys
+    values = [_literal(value) for value in node.values]
+    if any(v is _NOT_LITERAL or v is _DUPLICATE_KEYS or isinstance(v, dict) for v in values):
+        return _NOT_LITERAL
+    return dict(zip(keys, values, strict=True))
+
+
+def _measures_literal(node: ast.expr) -> object:
+    """Evaluate `measures=`: a dict of column names to `_measure_literal` dicts.
+
+    Parameters
+    ----------
+    node
+        The argument's expression.
+
+    Returns
+    -------
+    object
+        The dict; `_literal`'s result for anything that is not a dict display (the shape check
+        refuses it); `_DUPLICATE_KEYS` or `_NOT_LITERAL` as for one measure.
+    """
+    if not isinstance(node, ast.Dict):
+        return _literal(node)
+    keys = _display_keys(node)
+    if not isinstance(keys, list):
+        return keys
+    values = [_measure_literal(value) for value in node.values]
+    for value in values:
+        if value is _NOT_LITERAL or value is _DUPLICATE_KEYS:
+            return value
+    return dict(zip(keys, values, strict=True))
+
+
 def _arguments(
     call: ast.Call, path: str, issues: list[ProjectIssue]
 ) -> tuple[dict[str, object], set[str]]:
@@ -359,7 +439,7 @@ def _arguments(
             issues.append(ProjectIssue(path, keyword.lineno, f"repeats argument {name!r}"))
             continue
         seen.add(name)
-        value = _literal(keyword.value)
+        value = _measures_literal(keyword.value) if name == "measures" else _literal(keyword.value)
         if value is _DUPLICATE_KEYS:
             issues.append(ProjectIssue(path, line, f"argument {name!r} repeats a key"))
             dropped.add(name)

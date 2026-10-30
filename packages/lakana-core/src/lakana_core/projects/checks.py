@@ -40,6 +40,7 @@ from lakana_core.projects.frontmatter import split_front_matter
 from lakana_core.projects.issues import ProjectIssue, ProjectValidationError
 from lakana_core.projects.limits import DeployLimits
 from lakana_core.projects.manifest import CHECKS_VERSION, LISTS_CHECKS, manifest_assets
+from lakana_core.projects.measures import AGGREGATIONS
 from lakana_core.projects.parse import _sql_issue
 from lakana_core.projects.project_config import SafeTextModel, pydantic_issues
 from lakana_core.query_rewrite import check_blacklist, extract_table_refs
@@ -125,19 +126,27 @@ class GeneratedFrom:
     Parameters
     ----------
     family
-        ``key`` or ``references`` (`CHECK_FAMILIES`).
+        ``key``, ``references`` or ``measures`` (`CHECK_FAMILIES`).
     columns
-        The key's columns, or the one referencing column.
+        The key's columns, the one referencing column, or the measure columns, sorted.
     target
-        The referenced table; `None` for a key check.
+        The referenced table; `None` for a key or measures check.
     target_column
-        The referenced column; `None` for a key check.
+        The referenced column; `None` for a key or measures check.
+    not_over
+        For ``measures``, every column a semi-additive measure must not be summed over,
+        distinct and sorted; empty otherwise.
+    aggregations
+        For ``measures``, each column's aggregation, in the order of `columns`; empty
+        otherwise.
     """
 
     family: str
     columns: tuple[str, ...]
     target: str | None = None
     target_column: str | None = None
+    not_over: tuple[str, ...] = ()
+    aggregations: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -765,7 +774,8 @@ def checks_listing(checks: Sequence[ParsedCheck]) -> dict[str, list[dict[str, st
     dict
         Table to ``[{"check": name, "on_failure": ...}]``, tables and checks sorted. An entry
         whose value came from the project's default also has ``"from": "lakana.yaml"``; one the
-        asset's header generated has ``"generated"``: ``"key"`` or ``"references"``.
+        asset's header generated has ``"generated"``: ``"key"``, ``"references"`` or
+        ``"measures"``.
     """
     listing: dict[str, list[dict[str, str]]] = {}
     for check in sorted(checks, key=lambda c: (c.table, c.check)):
@@ -887,7 +897,7 @@ def read_manifest_checks(manifest: object) -> ManifestChecks:
         return ManifestChecks((), frozenset(), unplaced=False)
     raw = manifest.get("checks")
     version = manifest.get("version")
-    # A version 4 manifest exists because it has checks; a version 5 to 8 one may have only
+    # A version 4 manifest exists because it has checks; a version 5 to 10 one may have only
     # jobs, connections or the new write spelling, so it must carry the list but may leave it
     # empty.
     means_checks = version in LISTS_CHECKS
@@ -954,7 +964,9 @@ def _generated_from(raw: object) -> GeneratedFrom | None:
         The source of a well-formed value, else `None`: a mapping whose ``family`` is in
         `CHECK_FAMILIES`, whose ``columns`` is a non-empty list of strings, and whose
         ``target`` and ``target_column`` are both strings for ``references`` and both absent
-        or null for ``key``.
+        or null for ``key``; for ``measures``, both target fields absent or null, ``not_over``
+        absent or a list of strings, and ``aggregations`` a list of `AGGREGATIONS` as long as
+        ``columns``. ``not_over`` or ``aggregations`` on another family is refused.
     """
     if not isinstance(raw, Mapping):
         return None
@@ -963,6 +975,22 @@ def _generated_from(raw: object) -> GeneratedFrom | None:
     if family not in CHECK_FAMILIES or not isinstance(columns, list) or not columns:
         return None
     if not all(isinstance(column, str) for column in columns):
+        return None
+    not_over, aggregations = raw.get("not_over"), raw.get("aggregations")
+    if family == "measures":
+        if target is not None or target_column is not None:
+            return None
+        listed = [] if not_over is None else not_over
+        if not isinstance(listed, list) or not all(isinstance(c, str) for c in listed):
+            return None
+        if not isinstance(aggregations, list) or len(aggregations) != len(columns):
+            return None
+        if not all(isinstance(a, str) and a in AGGREGATIONS for a in aggregations):
+            return None
+        return GeneratedFrom(
+            "measures", tuple(columns), not_over=tuple(listed), aggregations=tuple(aggregations)
+        )
+    if not_over is not None or aggregations is not None:
         return None
     if family == "references":
         if not isinstance(target, str) or not isinstance(target_column, str):
