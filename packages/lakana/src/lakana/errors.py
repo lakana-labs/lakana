@@ -125,6 +125,26 @@ class DeployFailed(LakanaError):
         self.deploy = deploy
 
 
+class JobStartsNotRecorded(TimeoutError):
+    """A deploy succeeded, but the jobs it starts were not all recorded before the timeout.
+
+    A `TimeoutError`, so code that catches the timeout of `Deploys.wait` still catches it. The
+    deploy itself is done; the worker records each start of an ``on_deploy`` job right after it,
+    so reading the deploy again later shows what came of each.
+
+    Parameters
+    ----------
+    message
+        What happened.
+    deploy
+        The succeeded deploy, with each start not yet recorded as ``pending``.
+    """
+
+    def __init__(self, message: str, deploy: Deploy) -> None:
+        super().__init__(message)
+        self.deploy = deploy
+
+
 class RunFailed(LakanaError):
     """A run ended `failed` or `cancelled`.
 

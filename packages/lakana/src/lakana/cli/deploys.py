@@ -15,7 +15,7 @@ from lakana.cli._project import find_project_root, is_dirty, project_repo
 from lakana.cli._state import CliError, CliState, confirm, resolve_environment, state_of
 from lakana.cli._waiting import WaitLine, clock
 from lakana.client import Client
-from lakana.errors import LakanaError, NotFound
+from lakana.errors import JobStartsNotRecorded, LakanaError, NotFound
 
 _ENV = Annotated[str | None, typer.Option("--env", help="Environment (default: the profile's).")]
 _REPO = Annotated[
@@ -196,13 +196,23 @@ def _report(state: CliState, deploy: Deploy, verb: str) -> None:
     for warning in deploy.warnings:
         typer.echo(f"warning: {_output.inline(warning, 500)}", err=True)
     for start in deploy.job_starts:
-        if start.outcome not in _ACCEPTED:
+        if start.outcome == _PENDING:
+            typer.echo(
+                f"warning: the start of job `{_output.inline(start.job)}` is not recorded yet. "
+                f"See what came of it with 'lakana deploys show {deploy.id} --env "
+                f"{deploy.environment}'.",
+                err=True,
+            )
+        elif start.outcome not in _ACCEPTED:
             text = start.message or f"job `{start.job}` was not started ({start.outcome})"
             typer.echo(f"warning: {_output.inline(text, 500)}", err=True)
 
 
 _ACCEPTED = frozenset({"started", "waiting"})
 """The outcomes of a job start that need nothing from the person who deployed."""
+
+_PENDING = "pending"
+"""A start the worker has not recorded yet: `lakana deploy --timeout` can stop before it does."""
 
 
 def _started(start: DeployJobStart) -> str:
@@ -246,17 +256,20 @@ def _wait(
     Returns
     -------
     Deploy
-        The succeeded run.
+        The succeeded run; a start the worker had not recorded by the timeout is ``pending``
+        in it, and `_report` says how to look it up.
 
     Raises
     ------
     typer.Exit
-        With code 1 if `timeout` elapses first; the run keeps going server-side.
+        With code 1 if `timeout` elapses before the run ends; the run keeps going server-side.
     """
     try:
         return client.deploys.wait(
             environment, deploy_id, timeout=timeout, on_update=WaitLine(state, monotonic=clock)
         )
+    except JobStartsNotRecorded as exc:
+        return exc.deploy
     except TimeoutError as exc:
         typer.echo(
             f"error: {exc}. The deploy is still in progress; check it with "
@@ -352,14 +365,17 @@ def deploy(
         return
     finished = _wait(state, client, environment, accepted.id, timeout)
     _report(state, finished, "Dry run of" if dry_run else "Deployed")
-    if any(start.outcome in _ACCEPTED for start in finished.job_starts):
-        if state.output != "json":
-            typer.echo(
-                f"Hint: follow a run with 'lakana runs show RUN_ID --env {environment}'.", err=True
-            )
-    elif not dry_run and state.output != "json":
+    if state.output == "json":
+        return
+    outcomes = {start.outcome for start in finished.job_starts}
+    if outcomes & _ACCEPTED:
+        typer.echo(
+            f"Hint: follow a run with 'lakana runs show RUN_ID --env {environment}'.", err=True
+        )
+    elif not dry_run and _PENDING not in outcomes:
         # A repository named on the command line must be named again: the short form only
-        # works from inside the project.
+        # works from inside the project. A start not recorded yet may still happen, and a run
+        # by hand next to it would run the job twice.
         target = f"{repo} " if repo else ""
         typer.echo(
             f"Hint: run 'lakana run {target}--env {environment}' to run what you just deployed.",
