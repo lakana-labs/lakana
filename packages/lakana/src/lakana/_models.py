@@ -977,13 +977,13 @@ class WaitingFor:
     ahead: int | None = None
     upstream: tuple[str, ...] | None = None
     upstream_count: int | None = None
-    hidden_upstream: int | None = None
     attempt: int | None = None
     max_attempts: int | None = None
     next_attempt_at: datetime | None = None
     other_workers: int | None = None
     running: int | None = None
     limit: int | None = None
+    hidden_upstream: int | None = None
 
 
 @dataclass(frozen=True)

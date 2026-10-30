@@ -1,6 +1,6 @@
 {
-  "duplicated_lines": 1285,
-  "clones": 66,
+  "duplicated_lines": 1270,
+  "clones": 65,
   "pairs": {
     "lakana/_artifact_manifest.py ↔ lakana_core/artifacts/manifest.py": {
       "clones": 1,
@@ -13,10 +13,6 @@
     "lakana/_models.py ↔ lakana_core/jobs/service.py": {
       "clones": 1,
       "lines": 20
-    },
-    "lakana/_models.py ↔ lakana_core/runs/waiting.py": {
-      "clones": 1,
-      "lines": 15
     },
     "lakana/_models.py ↔ lakana_server/api/platform/schemas.py": {
       "clones": 12,
