@@ -70,6 +70,10 @@ def shown_key(key: object) -> str:
         second line while the other letters stay readable, and cut to `_MAX_KEY_CHARS` with a
         trailing ``…``, never inside an escape.
     """
+    # jscpd:ignore-start
+    # The SDK may not import core, so this cut is copied in lakana/assets.py `_loc`; the cases of
+    # test_a_bad_text_gets_the_same_words_from_deploy_and_the_sdk
+    # (packages/lakana-worker/tests/test_discovery_harness_parity.py) pin the two.
     pieces: list[str] = []
     length = 0
     for char in str(key):
@@ -81,6 +85,7 @@ def shown_key(key: object) -> str:
                 length -= len(pieces.pop())
             return "".join(pieces) + "…"
     return "".join(pieces)
+    # jscpd:ignore-end
 
 
 class _AliasRefused(yaml.MarkedYAMLError):

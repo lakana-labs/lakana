@@ -620,6 +620,11 @@ def _loc(name: object) -> str:
         One line of at most 80 characters: each non-printable character escaped, cut with a
         trailing ``…``, never inside an escape.
     """
+    # jscpd:ignore-start
+    # The SDK may not import core, so this cut is copied from core's `shown_key`
+    # (lakana_core/projects/yaml_loader.py); the cases of
+    # test_a_bad_text_gets_the_same_words_from_deploy_and_the_sdk
+    # (packages/lakana-worker/tests/test_discovery_harness_parity.py) pin the two.
     pieces: list[str] = []
     length = 0
     for char in str(name):
@@ -631,6 +636,7 @@ def _loc(name: object) -> str:
                 length -= len(pieces.pop())
             return "".join(pieces) + "…"
     return "".join(pieces)
+    # jscpd:ignore-end
 
 
 def _check_columns(columns: object) -> dict[str, str | dict[str, str]] | None:
