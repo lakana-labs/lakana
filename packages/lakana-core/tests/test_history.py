@@ -601,3 +601,32 @@ def test_the_run_clock_is_the_runs_start_or_the_servers_time(session: Session) -
     before = datetime.now(UTC)
     assert before <= run_clock(session, None) <= datetime.now(UTC)
     assert before <= run_clock(session, RunContext(task_run_id=uuid.uuid4(), claim=1))
+
+
+def test_shown_type_names_maps_structs_and_types_a_table_cannot_store() -> None:
+    assert shown_type(pa.map_(pa.string(), pa.int64())) == "map<string, long>"
+    assert shown_type(pa.struct([("a", pa.int32())])) == "struct<a: int>"
+    assert shown_type(pa.duration("s")) == "duration[s]"
+
+
+def test_a_fixed_size_binary_key_is_encoded_as_bytes() -> None:
+    start = _micros(1793404800000000)
+    keys = surrogate_keys(pa.table({"k": pa.array([b"ab"], pa.binary(2))}), ["k"], start)
+    assert keys == surrogate_keys(pa.table({"k": pa.array([b"ab"], pa.binary())}), ["k"], start)
+
+
+def test_a_valid_from_column_the_result_returns_passes_the_batch_check() -> None:
+    data = pa.table({"customer_id": ["A"], "changed_at": pa.array([T0], UTC_MICROS)})
+    check_history_batch(
+        data, ["customer_id"], table=TABLE, valid_from="changed_at", close_missing=False
+    )
+
+
+def test_a_returning_key_with_no_closed_version_opens() -> None:
+    plan = _plan(
+        _batch([("D", "north", 1.0)]),
+        _open([]),
+        starts=pa.array([T1], UTC_MICROS),
+        valid_from="changed_at",
+    )
+    assert plan.opened.column("customer_id").to_pylist() == ["D"]
