@@ -1837,7 +1837,6 @@ def _always_die_in_the_check_phase(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(tasks_module, "check_phase", dying)
 
 
-@pytest.mark.slow
 def test_checks_whose_worker_is_lost_every_time_end_set_back_after_the_bound(
     world: World, monkeypatch: pytest.MonkeyPatch
 ) -> None:

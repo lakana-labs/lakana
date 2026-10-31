@@ -115,6 +115,7 @@ from lakana_core.audit.content import stored_query_text
 from lakana_core.audit.service import AuditService
 from lakana_core.auth import Securable
 from lakana_core.db import rowcount
+from lakana_core.identifiers import shown
 from lakana_core.log_events import LogEvent, log_event
 from lakana_core.models import (
     AttemptOutcome,
@@ -757,11 +758,11 @@ def _log_checks_unfinished(session: Session, transition: TaskTransition) -> None
         "with 'lakana runs logs %s --task %s': a lost worker needs a higher memory limit, "
         "checks that could not start need the run's principal or a newer worker.",
         transition.task_id,
-        asset,
+        shown(asset),
         transition.run_id,
         MAX_CHECK_CLAIMS,
         transition.run_id,
-        asset,
+        shown(asset),
         extra=log_event(LogEvent.CHECKS_UNFINISHED),
     )
 
