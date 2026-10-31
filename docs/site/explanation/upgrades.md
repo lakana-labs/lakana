@@ -300,8 +300,9 @@ A task that waits for its checks when you upgrade starts counting from zero. A w
 stopped on purpose (a drain, a restart for a deploy) does not use up a try.
 
 - **Upgrade the workers together with the server.** A worker of the previous release does not
-  know the new code and cannot finish such a set-back: the table is set back, but the task then
-  ends `worker_lost` instead of `checks_unfinished`.
+  know the new code and cannot finish such a set-back: when workers of the previous release take
+  both set-back claims, the table is still set back, but the task may end `worker_lost` instead of
+  `checks_unfinished`.
 - **More than 5 retries:** if you raised `LAKANA_RUN__MAX_RETRIES` above 5 and a project asks for
   `retries` of 6 or more, a check whose count keeps failing for a temporary reason used to end
   `errored` on the last attempt (a `warn` check kept the data). It now reaches the 5 tries first:
