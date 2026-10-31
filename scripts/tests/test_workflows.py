@@ -1279,9 +1279,6 @@ POLARS_EXCLUDED = {
         "needs Postgres and SeaweedFS containers (an integration test, not run in the unit job); "
         "the unit tests of the same code run on Polars 1.30 in the step"
     ),
-    "packages/lakana-core/tests/test_layer_rules.py": (
-        "names Polars only inside the asset source it parses; it never imports or runs Polars"
-    ),
 }
 """Test files that import Polars and are deliberately not in the step, with the reason."""
 

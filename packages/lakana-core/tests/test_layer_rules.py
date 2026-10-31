@@ -11,23 +11,22 @@ from lakana_core.projects.parse import file_references, parse_assets
 from lakana_core.projects.project_config import AssetDefaults
 from lakana_core.projects.python_assets import parse_python_asset
 
-_HEAD = "import polars as pl\nfrom lakana import asset\n\n\n"
+_HEAD = "import lakana\nfrom lakana import asset\n\n\n"
 """Four lines before the decorator, so a Python asset's `block_line` is 5."""
 
 _ARTIFACT = '''\
 from pathlib import Path
 
-import polars as pl
 import lakana
 from lakana import asset
 
 
 @asset(inputs={"train": "SOURCE"}, output="artifact")
-def churn_model(train: pl.DataFrame) -> Path:
+def churn_model(train: DataFrame) -> Path:
     """The churn model."""
     return lakana.output_dir() / "model.json"
 '''
-"""An artifact asset reading SOURCE; its decorator is on line 8."""
+"""An artifact asset reading SOURCE; its decorator is on line 7."""
 
 
 def _sql(table: str, text: str) -> ParsedAsset:
@@ -69,7 +68,7 @@ def _python(table: str, decorator: str, parameters: str = "ctx") -> ParsedAsset:
     """
     name = table.rpartition(".")[2]
     text = (
-        f"{_HEAD}@asset({decorator})\ndef {name}({parameters}) -> pl.DataFrame:\n"
+        f"{_HEAD}@asset({decorator})\ndef {name}({parameters}) -> DataFrame:\n"
         '    """An asset."""\n    return ctx\n'
     )
     return _parsed_python(table, text)
@@ -394,7 +393,7 @@ def test_an_asset_outside_the_layers_is_refused() -> None:
     assert _issues(_artifact("models.churn_model", "gold.training_set")) == [
         (
             "assets/models/churn_model.py",
-            8,
+            7,
             "`models.churn_model` is outside bronze, silver and gold, but a project with `layers:` "
             "builds every asset in one of them. Move it to the layer whose assets read it, such as "
             "assets/gold/churn_model.py for gold.churn_model",
@@ -405,12 +404,12 @@ def test_an_asset_outside_the_layers_is_refused() -> None:
 def test_an_artifact_in_a_layer_obeys_reads_only() -> None:
     assert _issues(_artifact("gold.churn_model", "gold.training_set")) == []
     [(_, line, message)] = _issues(_artifact("gold.churn_model", "bronze.raw"))
-    assert line == 8
+    assert line == 7
     assert message.startswith("`gold.churn_model` reads `bronze.raw` (input `train`), which is in")
     reader = _python(
         "silver.scores",
         'inputs={"model": "models.churn_model"}, kind="staging"',
-        "ctx, model: pl.DataFrame",
+        "ctx, model: DataFrame",
     )
     assert _issues(reader)[0][2].startswith(
         "`silver.scores` reads `models.churn_model` (input `model`), which is outside bronze"
@@ -421,7 +420,7 @@ def test_a_python_input_from_a_layer_not_listed() -> None:
     asset = _python(
         "silver.features",
         'inputs={"train": "gold.sales"}, kind="staging"',
-        "ctx, train: pl.DataFrame",
+        "ctx, train: DataFrame",
     )
     assert _issues(asset) == [
         (
@@ -494,7 +493,7 @@ def test_a_python_asset_gives_one_issue_per_table_then_its_connections() -> None
         "silver.orders",
         'connections=["crm"], inputs={"train": "gold.sales", "again": "gold.sales", '
         '"raw": "raw.exports"}, write="merge", key=["id"], kind="staging"',
-        "ctx, train: pl.DataFrame, again: pl.DataFrame, raw: pl.DataFrame",
+        "ctx, train: DataFrame, again: DataFrame, raw: DataFrame",
     )
     assert _issues(asset) == [
         (
@@ -555,3 +554,77 @@ def test_a_read_issue_is_withheld_from_a_reader_who_may_not_read_the_target() ->
         "a read that is not shown to you"
     )
     assert error_for_reader(error, stored, lambda name: True) == error
+
+
+def test_a_table_in_a_layer_that_allows_views_is_told_to_build_a_view() -> None:
+    views_only = _layers(silver=LayerRules(reads=("bronze",), write=("view",), kinds="none"))
+    table = _sql("silver.orders", "SELECT id FROM bronze.orders\n")
+    assert _issues(table, layers=views_only) == [
+        (
+            "assets/silver/orders.sql",
+            1,
+            "`silver.orders` is written with `replace`, but layers.silver.write allows only view. "
+            "Build it as a view (`materialize: view` in its header), or add replace to "
+            "layers.silver.write in lakana.yaml",
+        )
+    ]
+    python = _python("silver.scores", "")
+    assert _issues(python, layers=views_only)[0][2] == (
+        "`silver.scores` is written with `replace`, but layers.silver.write allows only view. "
+        "A Python asset is never a view, so move it to another layer, or add replace to "
+        "layers.silver.write in lakana.yaml"
+    )
+    mixed = _layers(silver=LayerRules(reads=("bronze",), write=("append", "view"), kinds="none"))
+    assert _issues(table, layers=mixed)[0][2] == (
+        "`silver.orders` is written with `replace`, but layers.silver.write allows only append "
+        "and view. Write it with append (`write:` in its header) or build it as a view "
+        "(`materialize: view` in its header), or add replace to layers.silver.write in "
+        "lakana.yaml"
+    )
+    several = _layers(
+        silver=LayerRules(reads=("bronze",), write=("append", "merge", "view"), kinds="none")
+    )
+    assert _issues(python, layers=several)[0][2] == (
+        "`silver.scores` is written with `replace`, but layers.silver.write allows only append, "
+        "merge and view. Write it with append or merge (`write=` in its decorator), or add "
+        "replace to layers.silver.write in lakana.yaml"
+    )
+
+
+def test_a_read_from_its_own_layer_with_reads_empty() -> None:
+    closed = _layers(gold=LayerRules(reads=(), write=LAYER_WRITES, kinds="none"))
+    gold = _sql("gold.t", "SELECT a FROM gold.x\n")
+    assert _issues(gold, layers=closed) == [
+        (
+            "assets/gold/t.sql",
+            1,
+            "`gold.t` reads `gold.x`, which is in gold, but layers.gold.reads lists no layer, so "
+            "gold reads no table. Move this asset to a layer whose reads list gold, or add gold "
+            "to layers.gold.reads in lakana.yaml",
+        )
+    ]
+    bronze = _sql(
+        "bronze.orders", "/* lakana\nwrite: merge\nkey: [id]\n*/\nSELECT id FROM bronze.raw\n"
+    )
+    assert _issues(bronze)[0][2] == (
+        "`bronze.orders` reads `bronze.raw`, which is in bronze, but layers.bronze.reads lists no "
+        "layer, so bronze reads only sources. Read the sources `bronze.raw` is built from "
+        "instead, or add bronze to layers.bronze.reads in lakana.yaml"
+    )
+
+
+def test_a_source_read_and_a_python_input_are_withheld_by_their_name() -> None:
+    source = _sql("silver.days", "/* lakana\nkind: staging\n*/\nSELECT day FROM raw.pos_exports\n")
+    python = _python(
+        "silver.features",
+        'inputs={"train": "gold.sales"}, kind="staging"',
+        "ctx, train: DataFrame",
+    )
+    for asset, target in ((source, "raw.pos_exports"), (python, "gold.sales")):
+        [issue] = layer_issues(MEDALLION_LAYERS, [asset])
+        assert issue.targets == (target,)
+        assert issue.withheld == (
+            f"`{asset.table}` breaks layers.silver.reads with a read that is not shown to you"
+        )
+        stored = withheld_lines([issue])
+        assert target not in error_for_reader(issue.render(), stored, lambda name: False)

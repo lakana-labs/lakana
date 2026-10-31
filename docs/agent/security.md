@@ -491,7 +491,17 @@ Write, kind, connection and outside-the-layers issues name only the asset, which
 shows anyway, and carry no targets. Pins:
 `test_a_read_issue_is_withheld_from_a_reader_who_may_not_read_the_target`,
 `test_a_long_form_reference_is_classified_by_its_first_part_and_withheld_by_both_readings`,
-`test_layer_issues_come_after_the_reference_issues`.
+`test_layer_issues_come_after_the_reference_issues`,
+`test_a_source_read_and_a_python_input_are_withheld_by_their_name`. Residuals:
+
+- Order: an asset's read issues are sorted by name, so where a withheld line sits among the
+  asset's visible read lines narrows down the hidden name (between visible `gold.sales_2024` and
+  `gold.sales_2026`, it sorts between them).
+- Count: each hidden offending read makes one withheld line, so a reader learns how many reads
+  of the asset break the rule that it may not see.
+- Missing tables: a read of a table that does not exist is already named by the deploy's
+  `table 'x' not found` line at the same place, so withholding protects only tables that exist;
+  a withheld line with no not-found line beside it tells the reader the hidden table exists.
 
 ## Table health: who sees the readers
 

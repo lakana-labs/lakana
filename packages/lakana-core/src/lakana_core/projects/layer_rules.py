@@ -243,9 +243,15 @@ def _read_text(asset: ParsedAsset, layer: str, rules: LayerRules, read: _Read) -
     add = f"add {target} to layers.{layer}.reads in lakana.yaml"
     if not allowed:
         what = "only sources" if layer == SOURCE_LAYER else "no table"
+        if target != layer:
+            instead = f"Build this table in {target}"
+        elif layer == SOURCE_LAYER:
+            instead = f"Read the sources `{read.name}` is built from instead"
+        else:
+            instead = f"Move this asset to a layer whose reads list {target}"
         return (
             f"{head}, which is in {target}, but layers.{layer}.reads lists no layer, so {layer} "
-            f"reads {what}. Build this table in {target}, or {add}"
+            f"reads {what}. {instead}, or {add}"
         )
     fix = (
         f"Point the reference at a {or_list(allowed)} table"
@@ -291,12 +297,24 @@ def _write_text(asset: ParsedAsset, layer: str, rules: LayerRules) -> str | None
             f"only {and_list(allowed)}. Build it as a table, or add view to layers.{layer}.write "
             "in lakana.yaml"
         )
-    those = "one of those" if len(allowed) > 1 else allowed[0]
-    return (
+    head = (
         f"`{asset.table}` is written with `{write}`, but layers.{layer}.write allows only "
-        f"{and_list(allowed)}. Write it with {those} ({_key(asset, 'write')} in its "
-        f"{_home(asset)}), or add {write} to layers.{layer}.write in lakana.yaml"
+        f"{and_list(allowed)}."
     )
+    add = f"add {write} to layers.{layer}.write in lakana.yaml"
+    modes = tuple(mode for mode in allowed if mode != "view")
+    if not modes and asset.kind == "python":
+        return f"{head} A Python asset is never a view, so move it to another layer, or {add}"
+    ways = []
+    if modes:
+        # Without view, the spec's text says "one of those"; with it, the modes are named.
+        those = or_list(modes) if "view" in allowed else "one of those"
+        those = modes[0] if len(allowed) == 1 else those
+        ways.append(f"write it with {those} ({_key(asset, 'write')} in its {_home(asset)})")
+    if "view" in allowed and asset.kind != "python":
+        ways.append("build it as a view (`materialize: view` in its header)")
+    fix = " or ".join(ways)
+    return f"{head} {fix[0].upper()}{fix[1:]}, or {add}"
 
 
 def _kind_text(asset: ParsedAsset, layer: str, rules: LayerRules) -> str | None:
