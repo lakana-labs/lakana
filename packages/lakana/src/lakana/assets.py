@@ -626,14 +626,10 @@ def _loc(name: object) -> str:
         piece = char if char.isprintable() else ascii(char)[1:-1]
         pieces.append(piece)
         length += len(piece)
-        if length > _MAX_KEY_CHARS:
-            kept, used = [], 0
-            for piece in pieces:
-                if used + len(piece) > _MAX_KEY_CHARS - 1:
-                    break
-                kept.append(piece)
-                used += len(piece)
-            return "".join(kept) + "…"
+        if length > _MAX_KEY_CHARS:  # cut: drop whole pieces until the ellipsis fits
+            while length > _MAX_KEY_CHARS - 1:
+                length -= len(pieces.pop())
+            return "".join(pieces) + "…"
     return "".join(pieces)
 
 
