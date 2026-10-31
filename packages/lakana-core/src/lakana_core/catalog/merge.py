@@ -201,6 +201,7 @@ def check_merge_batch(
     table_columns: Collection[str],
     table_name: str,
     advice: MergeAdvice = SDK_ADVICE,
+    composite_cap: bool = True,
 ) -> None:
     """Refuse a batch a merge cannot apply, naming counts and never values.
 
@@ -216,13 +217,17 @@ def check_merge_batch(
         The target's dotted name, for the message.
     advice
         How the caller is told to fix a repeated key or too many rows.
+    composite_cap
+        Refuse a key of several columns with more than `COMPOSITE_KEY_MAX_ROWS` rows. A history
+        write passes `False`: it joins such a key in pyarrow, with no term per row.
 
     Raises
     ------
     ValidationError
         For an empty key, a column named twice in it, a key column missing from the table or
         the data, a key column of a nested type, a key of several columns with more than
-        `COMPOSITE_KEY_MAX_ROWS` rows, a null key, or a key that repeats within the batch.
+        `COMPOSITE_KEY_MAX_ROWS` rows (unless `composite_cap` is off), a null key, or a key that
+        repeats within the batch.
     """
     if not key:
         raise ValidationError("A merge needs at least one key column.")
@@ -242,7 +247,7 @@ def check_merge_batch(
                 f"key column `{column}` has type {kind}; a key column must hold single values "
                 "(a number, a string, a date or a timestamp)"
             )
-    if len(key) > 1 and data.num_rows > COMPOSITE_KEY_MAX_ROWS:
+    if composite_cap and len(key) > 1 and data.num_rows > COMPOSITE_KEY_MAX_ROWS:
         raise ValidationError(
             advice.too_many.format(cap=f"{COMPOSITE_KEY_MAX_ROWS:,}", rows=f"{data.num_rows:,}")
         )
