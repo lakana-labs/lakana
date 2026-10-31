@@ -4034,6 +4034,9 @@ class CatalogService:
         if not isinstance(label, Keep):
             label = check_label(label, what)
         lock_table(self._session, row)
+        if column is None and lang == main:
+            # Loaded before the lock: the audit's old lengths are of the edits the row holds now.
+            self._session.refresh(row, ["description_edited", "label_edited"])
         listed = row.text_languages or []
         if (
             lang != main
