@@ -850,3 +850,11 @@ def test_a_project_without_translations_checks_nothing(monkeypatch: pytest.Monke
 
     monkeypatch.setattr(translations_module, "header_texts", never)
     assert translation_issues(parse_project_config("main_language: en\n"), [_sales()], []) == []
+
+
+def test_a_nested_key_that_is_not_a_string_points_at_its_own_line() -> None:
+    text = "gold.fact_sales:\n  columns:\n    store_id: {label: M}\n    1: {label: N}\n"
+    assert _issues_of({"fr.yaml": text}) == [
+        "translations/fr.yaml:4: gold.fact_sales.columns.1: must be a text; in YAML, quote a "
+        "value that reads as a number, a date, `yes` or `null`"
+    ]

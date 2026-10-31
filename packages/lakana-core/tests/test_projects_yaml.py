@@ -262,3 +262,13 @@ def test_shown_key_escapes_each_character_and_never_cuts_an_escape() -> None:
     assert shown_key("gold." + "é" * 100 + "\u202e") == "gold." + "é" * 74 + "…"
     assert shown_key("a\u202eb") == "a\\u202eb"
     assert shown_key("a" * 77 + "\u202e" + "b") == "a" * 77 + "…"
+
+
+def test_key_lines_find_a_key_by_its_loaded_value() -> None:
+    text = "a:\n  1:\n    b: x\n  null: y\n  '2': z\n"
+    _, lines = load_yaml_with_lines(text, what="t", max_bytes=1024)
+    assert lines.line(["a", 1]) == 2
+    assert lines.line(["a", 1, "b"]) == 3
+    assert lines.line(["a", None]) == 4
+    assert lines.line(["a", "2"]) == 5
+    assert lines.line(["a", 2]) == 1

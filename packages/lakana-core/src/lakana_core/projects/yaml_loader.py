@@ -13,6 +13,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 
 import yaml
+import yaml.constructor
 import yaml.reader
 from yaml.events import AliasEvent, CollectionStartEvent, ScalarEvent
 from yaml.nodes import MappingNode, Node, SequenceNode
@@ -330,6 +331,27 @@ class KeyLines:
         return None
 
 
+_STR_TAG = "tag:yaml.org,2002:str"
+
+
+def _key_value(node: Node) -> object:
+    """Read a key the way the load read it, so a path from the loaded value finds its line.
+
+    Parameters
+    ----------
+    node
+        A key's scalar node.
+
+    Returns
+    -------
+    object
+        The key as loaded: ``1`` for ``1:``, `None` for ``null:``; its text when it is a string.
+    """
+    if node.tag == _STR_TAG:
+        return node.value
+    return yaml.constructor.SafeConstructor().construct_object(node)  # nosec B506
+
+
 def _key_lines(root: Node | None) -> KeyLines:
     """Index the line of every key of a composed document.
 
@@ -341,7 +363,9 @@ def _key_lines(root: Node | None) -> KeyLines:
     Returns
     -------
     KeyLines
-        Every key path and its line; a key's first occurrence wins.
+        Every key path and its line; a key's first occurrence wins. A key that loads as
+        something other than a string (``1:``, ``null:``) is found by its loaded value too, and
+        the keys below it only by that value, as a validation error's location names them.
     """
     lines: dict[tuple[object, ...], int] = {}
     top = tuple(
@@ -354,8 +378,10 @@ def _key_lines(root: Node | None) -> KeyLines:
         if isinstance(node, MappingNode):
             # Every key is a scalar here: the load refused a list or mapping key as unhashable.
             for key_node, value_node in node.value:
-                here = (*path, key_node.value)
-                lines.setdefault(here, key_node.start_mark.line + 1)
+                line = key_node.start_mark.line + 1
+                lines.setdefault((*path, key_node.value), line)
+                here = (*path, _key_value(key_node))
+                lines.setdefault(here, line)
                 stack.append((here, value_node))
         elif isinstance(node, SequenceNode):
             stack.extend(((*path, index), item) for index, item in enumerate(node.value))
