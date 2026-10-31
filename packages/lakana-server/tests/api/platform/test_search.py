@@ -332,10 +332,15 @@ def test_a_label_hit_through_rest_says_its_language(client: TestClient) -> None:
     assert response.status_code == 200, response.text
     (hit,) = response.json()["results"]
     assert (hit["name"], hit["matched"], hit["language"]) == ("gold.t", "label", "fr")
+    assert hit["translated"] is True
     plain = client.get(_SEARCH, params={"q": "ventes"}, headers=AUTH_HEADER)
     assert plain.json()["results"] == []
     (english,) = client.get(_SEARCH, params={"q": "sales"}, headers=AUTH_HEADER).json()["results"]
-    assert (english["matched"], english["language"]) == ("label", "en")
+    assert (english["matched"], english["language"], english["translated"]) == (
+        "label",
+        "en",
+        False,
+    )
 
 
 def test_search_reads_the_profile_and_accept_language_like_table_get(client: TestClient) -> None:

@@ -22466,6 +22466,11 @@
               }
             ],
             "title": "Language"
+          },
+          "translated": {
+            "type": "boolean",
+            "title": "Translated",
+            "default": false
           }
         },
         "type": "object",
@@ -22488,7 +22493,7 @@
           "principal_type"
         ],
         "title": "SearchHitOut",
-        "description": "One search hit.\n\nParameters\n----------\nkind\n    What was found: ``table``, ``column``, ``run`` or ``principal``.\nname\n    A display name: ``namespace.table``, ``namespace.table.column``, the run id or the\n    principal's name.\nmatched\n    The field that matched: ``name``, ``label``, ``description``, ``grain``, ``measure`` (a\n    column's measure label or description), ``id``, ``job`` or ``repository``.\nsnippet\n    For a label, description, grain or measure match, at most 160 characters of the text\n    around the hit.\nnamespace\n    For a table or column, its namespace, dotted.\ntable\n    For a table or column, the table's name.\ntable_kind\n    For a table, ``TABLE``, ``EXTERNAL``, ``VIEW`` or ``ARTIFACT``.\nmodel_kind\n    For a table whose asset header declares one, its ``kind``: ``fact``, ``dimension``,\n    ``wide`` or ``staging``.\ncolumn\n    For a column, its name.\ncolumn_type\n    For a column, its type.\nrun_id\n    For a run, its id.\njob\n    For a run, its job, if it has one.\nrepository\n    For a run, its repository.\nstatus\n    For a run, its status.\nprincipal\n    For a principal, its name.\nprincipal_type\n    For a principal, ``USER`` or ``SERVICE_ACCOUNT``.\nlanguage\n    For a table or column that a text matched, the language of that text (a translation in\n    one of your languages, or the table's main language); ``null`` for a name match and for\n    runs and principals."
+        "description": "One search hit.\n\nParameters\n----------\nkind\n    What was found: ``table``, ``column``, ``run`` or ``principal``.\nname\n    A display name: ``namespace.table``, ``namespace.table.column``, the run id or the\n    principal's name.\nmatched\n    The field that matched: ``name``, ``label``, ``description``, ``grain``, ``measure`` (a\n    column's measure label or description), ``id``, ``job`` or ``repository``.\nsnippet\n    For a label, description, grain or measure match, at most 160 characters of the text\n    around the hit.\nnamespace\n    For a table or column, its namespace, dotted.\ntable\n    For a table or column, the table's name.\ntable_kind\n    For a table, ``TABLE``, ``EXTERNAL``, ``VIEW`` or ``ARTIFACT``.\nmodel_kind\n    For a table whose asset header declares one, its ``kind``: ``fact``, ``dimension``,\n    ``wide`` or ``staging``.\ncolumn\n    For a column, its name.\ncolumn_type\n    For a column, its type.\nrun_id\n    For a run, its id.\njob\n    For a run, its job, if it has one.\nrepository\n    For a run, its repository.\nstatus\n    For a run, its status.\nprincipal\n    For a principal, its name.\nprincipal_type\n    For a principal, ``USER`` or ``SERVICE_ACCOUNT``.\nlanguage\n    For a table or column that a text matched, the language of that text (a translation in\n    one of your languages, or the table's main language); ``null`` for a name match and for\n    runs and principals.\ntranslated\n    Whether the text that matched is a translation, in a language other than the table's main\n    one; ``false`` for a header text, a name, a run and a principal."
       },
       "SearchKind": {
         "type": "string",

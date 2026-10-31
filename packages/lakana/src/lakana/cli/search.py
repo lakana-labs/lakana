@@ -48,7 +48,7 @@ def _name(hit: SearchHit) -> str:
 
 
 def _matched(hit: SearchHit) -> str:
-    """Write what matched, with the language of a matched text after it.
+    """Write what matched, with the language of a translated text after it.
 
     Parameters
     ----------
@@ -58,9 +58,10 @@ def _matched(hit: SearchHit) -> str:
     Returns
     -------
     str
-        The field, followed by ``[language]`` when a text in a language matched.
+        The field, followed by ``[language]`` when a translation matched; a text in the table's
+        main language shows the field alone.
     """
-    return f"{hit.matched} [{hit.language}]" if hit.language else hit.matched
+    return f"{hit.matched} [{hit.language}]" if hit.translated and hit.language else hit.matched
 
 
 def _where(hit: SearchHit) -> str:
@@ -120,7 +121,7 @@ def search(
     come first, then names and labels that start with TEXT, then those that contain it, then
     descriptions. Texts in a table's main language always match; translated ones in your
     language (--lang, else your profile's, else the instance's main language), and the matched
-    column shows the language in brackets. A table or column is listed once.
+    column shows a translation's language in brackets. A table or column is listed once.
     Runs are found by the first four or more characters of their id, their job or their
     repository. A table is also found by the grain its asset header declares, and shows its kind
     in brackets after its name; a column by the label or description of its declared measure.

@@ -4016,6 +4016,9 @@ class SearchHitOut(BaseModel):
         For a table or column that a text matched, the language of that text (a translation in
         one of your languages, or the table's main language); ``null`` for a name match and for
         runs and principals.
+    translated
+        Whether the text that matched is a translation, in a language other than the table's main
+        one; ``false`` for a header text, a name, a run and a principal.
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -4037,6 +4040,7 @@ class SearchHitOut(BaseModel):
     principal: str | None
     principal_type: str | None
     language: str | None = None
+    translated: bool = False
 
 
 class SearchOut(BaseModel):

@@ -11,7 +11,7 @@ terminal, the SDK or through REST. You need an environment with at least one tab
 - the names of columns;
 - the labels of tables and of columns, which rank like names; a translated label, description or
   grain matches in your language (`--lang`, else your profile's language), and the `matched`
-  column shows that language, `label [fr]` (see
+  column shows a translation's language, `label [fr]` (see
   [Translate labels and descriptions](translate-labels-and-descriptions.md#find-a-table-by-its-label));
 - the descriptions of tables and of columns (see [Describe a table](describe-a-table.md)); the
   text shown is the one `lakana table get` shows;

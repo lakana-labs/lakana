@@ -1079,3 +1079,18 @@ def test_matched_says_label_when_the_label_decided_the_rank(world: World) -> Non
     assert (column.name, column.matched, column.language) == ("silver.orders.status", "label", "en")
     by_name = _search(world, world.bob, "orders").results[0]
     assert (by_name.matched, by_name.language) == ("name", None)
+
+
+def test_a_hit_says_whether_a_translation_matched(world: World) -> None:
+    row = world.session.scalars(select(Table).where(Table.name == "orders")).one()
+    row.label_project = "Revenue"
+    world.session.commit()
+    _translate(world, "orders", "fr", "description", "Chiffre d'affaires")
+    _translate(world, "orders", "fr", "label", "Statut", subject="column", column="status")
+    (header,) = _search(world, world.bob, "revenue", ("fr",)).results
+    assert (header.language, header.translated) == ("en", False)
+    (table,) = _search(world, world.bob, "chiffre", ("fr",)).results
+    assert (table.language, table.translated) == ("fr", True)
+    (column,) = _search(world, world.bob, "statut", ("fr",)).results
+    assert (column.language, column.translated) == ("fr", True)
+    assert _search(world, world.bob, "payroll").results[0].translated is False

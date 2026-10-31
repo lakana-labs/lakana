@@ -44,7 +44,9 @@ all match, also those after the main language in your list (with `Accept-Languag
 table in English, a French label is found, though `table get` shows the English one).
 
 Every table and column result carries `language`: the language of the text that matched (`fr`
-for a French label, the table's main language for a header text) or `null` when its name matched.
+for a French label, the table's main language for a header text) or `null` when its name matched,
+and `translated`: `true` only for a translation. `lakana search` shows the language only for a
+translation (`label [fr]`); a header text shows the field alone.
 `matched` names the text that decided the rank: a table named `orders` with the label `Ord` is
 found for `ord` by its label (an exact match), not by its name. A table or column is one result,
 however many of its texts match: the best ranked one; at the same rank its name or a header text
@@ -100,7 +102,7 @@ may read everything; a longer or more exact text finds them.
 
 The answer is `{"results": [...], "limit": N, "offset": N, "has_more": true|false}`. Every result has
 `kind`, `name` (`silver.orders`, `silver.orders.status`, the run id, or the principal's name),
-`matched`, `snippet` and `language`; the rest depends on the kind and is `null` otherwise.
+`matched`, `snippet`, `language` and `translated`; the rest depends on the kind and is `null` (`false` for `translated`) otherwise.
 
 | Kind | Further fields |
 |---|---|
@@ -110,13 +112,13 @@ The answer is `{"results": [...], "limit": N, "offset": N, "has_more": true|fals
 | `principal` | `principal`, `principal_type` |
 
 `snippet` is set when `matched` is `label`, `description`, `grain` or `measure`: at most 160 characters of that text around
-the first hit. `language` is set on a table or column result that a text matched (see [Languages](#languages)). A bad `q`,
+the first hit. `language` is set on a table or column result that a text matched, and `translated` is `true` when that text is a translation rather than a header text (see [Languages](#languages)). A bad `q`,
 `limit`, `offset` or `kind` is `422` and says the range. `matched` may gain values in a later release; a client should treat
 one it does not know as a match in a text.
 
 ## Command and SDK
 
-`lakana search TEXT [--kind KIND] [--model-kind MODEL_KIND] [--lang LANG] [--limit N] [--offset N] [--env ENV]` shows one page and, when more follow, the command for the next; a table that declares a kind shows it as `name [kind]`; a text in a language shows it after the field, `label [fr]`; with `--output json`
+`lakana search TEXT [--kind KIND] [--model-kind MODEL_KIND] [--lang LANG] [--limit N] [--offset N] [--env ENV]` shows one page and, when more follow, the command for the next; a table that declares a kind shows it as `name [kind]`; a translated text shows its language after the field, `label [fr]`, while a text in the table's main language shows the field alone, `grain`; with `--output json`
 it prints the whole answer. `client.search(environment, q, kind=None, model_kind=None, limit=20, offset=0, lang=None)` returns a
 `SearchPage` with `results` (`SearchHit` objects with the fields above), `limit`, `offset` and
 `has_more`.

@@ -170,7 +170,7 @@ Usage: `lakana search [OPTIONS] {TEXT}`
 
 Find tables, columns, labels, descriptions, runs and people that match TEXT.
 
-Matching ignores case and finds TEXT anywhere in a name, label or description. Exact matches come first, then names and labels that start with TEXT, then those that contain it, then descriptions. Texts in a table's main language always match; translated ones in your language (--lang, else your profile's, else the instance's main language), and the matched column shows the language in brackets. A table or column is listed once. Runs are found by the first four or more characters of their id, their job or their repository. A table is also found by the grain its asset header declares, and shows its kind in brackets after its name; a column by the label or description of its declared measure. You see only what you may read. Use --output json for every field.
+Matching ignores case and finds TEXT anywhere in a name, label or description. Exact matches come first, then names and labels that start with TEXT, then those that contain it, then descriptions. Texts in a table's main language always match; translated ones in your language (--lang, else your profile's, else the instance's main language), and the matched column shows a translation's language in brackets. A table or column is listed once. Runs are found by the first four or more characters of their id, their job or their repository. A table is also found by the grain its asset header declares, and shows its kind in brackets after its name; a column by the label or description of its declared measure. You see only what you may read. Use --output json for every field.
 
 | Name | Type | Default | Description |
 |---|---|---|---|

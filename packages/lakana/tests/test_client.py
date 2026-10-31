@@ -368,6 +368,7 @@ def test_search_sends_lang_and_reads_the_language() -> None:
                         "principal": None,
                         "principal_type": None,
                         "language": "fr",
+                        "translated": True,
                     }
                 ],
                 "limit": 20,
@@ -378,6 +379,6 @@ def test_search_sends_lang_and_reads_the_language() -> None:
 
     page = _client(handler).search("dev", "ventes", lang="fr")
     assert dict(seen[0].url.params)["lang"] == "fr"
-    assert page.results[0].language == "fr"
+    assert (page.results[0].language, page.results[0].translated) == ("fr", True)
     _client(handler).search("dev", "ventes")
     assert "lang" not in seen[1].url.params

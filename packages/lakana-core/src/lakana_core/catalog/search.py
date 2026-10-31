@@ -95,6 +95,8 @@ class _Candidate(Protocol):
     """A row of the ranked union, as the checks and `_hit` read it."""
 
     kind_order: int
+    sort_source: int
+    """0 for a row of a main arm, more for a translation."""
     matched: str
     f1: str
     f2: str
@@ -171,6 +173,9 @@ class SearchHit:
     language
         For a table or column hit that a text matched, the language of that text; `None` for a
         name match and for runs and principals.
+    translated
+        Whether the text that matched is a translation (in a language other than the table's
+        main one); `False` for a header text, a name, a run and a principal.
     """
 
     kind: SearchKind
@@ -190,6 +195,7 @@ class SearchHit:
     principal: str | None = None
     principal_type: str | None = None
     language: str | None = None
+    translated: bool = False
 
 
 # jscpd:ignore-end
@@ -1151,6 +1157,7 @@ def _hit(row: _Candidate, needle: str) -> SearchHit:
             table_kind=table_kind(TableType[row.f3]),
             model_kind=row.f5,
             language=row.f6,
+            translated=row.sort_source > 0,
         )
     if kind is SearchKind.COLUMN:
         namespace = str(NamespacePath.parse(row.f1))
@@ -1164,6 +1171,7 @@ def _hit(row: _Candidate, needle: str) -> SearchHit:
             column=row.f3,
             column_type=row.f5,
             language=row.f6,
+            translated=row.sort_source > 0,
         )
     if kind is SearchKind.RUN:
         run_id = uuid.UUID(row.f1)

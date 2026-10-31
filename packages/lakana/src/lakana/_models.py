@@ -3111,6 +3111,9 @@ class SearchHit:
     language
         For a table or column that a text matched, the language of that text; `None` for a name
         match and for runs and principals.
+    translated
+        Whether the text that matched is a translation, in a language other than the table's main
+        one; `False` for a header text, a name, a run and a principal.
     """
 
     kind: str
@@ -3130,6 +3133,7 @@ class SearchHit:
     principal: str | None = None
     principal_type: str | None = None
     language: str | None = None
+    translated: bool = False
 
 
 @dataclass(frozen=True)
