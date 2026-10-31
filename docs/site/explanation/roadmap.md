@@ -167,7 +167,7 @@ beta ships with the ingestion helpers and named connections.
     the public beta, after M6 and before M7. Opinionated support for medallion layers (bronze, silver, gold) and
     Kimball-lite star schemas, with optional wide tables. The parts: model metadata in the asset
     header (#250); translated labels and descriptions with a main language (#251); layer rules,
-    first opt-in and then enforced (#252); the write mode `history` (SCD type 2) (#253); `merge`
+    opt-in and enforced at deploy once declared (#252); the write mode `history` (SCD type 2) (#253); `merge`
     (upsert) came earlier, with M6; a template and a guide (#254); and measures as
     metadata only, with no metrics layer (#255). Decided on 2026-10-28: the model metadata as a
     graph, with lineage, impact and join-path queries (#374), and a business glossary of terms

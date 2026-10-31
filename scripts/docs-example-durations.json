@@ -13,6 +13,7 @@
  "ingest-generic": 25,
  "ingest-rest": 34,
  "ingest-sql": 24.7,
+ "layer-rules": 30,
  "let-tables-expire": 13.7,
  "move-a-sql-project": 42,
  "projects": 31,

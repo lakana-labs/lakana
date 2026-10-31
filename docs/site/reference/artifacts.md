@@ -142,6 +142,10 @@ def big_spenders(rule: Path, customers: pl.DataFrame) -> pl.DataFrame:
     return customers.filter(pl.col("monthly_spend") > threshold)
 ```
 
+With `layers:` in `lakana.yaml`, an artifact asset must be under `assets/bronze/`,
+`assets/silver/` or `assets/gold/`, and follows that layer's `reads`
+([`layers`](lakana-yaml.md#layers)).
+
 ### Failures while a run goes
 
 These are the texts a task or a run shows, as the code prints them. `models.x` stands for the

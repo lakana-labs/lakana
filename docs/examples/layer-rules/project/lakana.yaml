@@ -1,0 +1,15 @@
+# Lakana project. Reference: https://lakana-labs.github.io/lakana/how-to/projects/
+repo: plant
+layers:
+  bronze:
+    reads: []                                # bronze reads only sources
+    write: [append, merge]
+    kinds: none
+  silver:
+    reads: [bronze, silver]
+    write: [replace, append, merge, view]
+    kinds: [staging]
+  gold:
+    reads: [silver, gold]
+    write: [replace, append, merge, view]
+    kinds: [fact, dimension, wide]
