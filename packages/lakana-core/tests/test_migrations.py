@@ -2059,6 +2059,7 @@ def test_0025_adds_the_note_of_a_kept_table(
 _REVISION_0025 = "c9f3d6a8b2e5"
 
 
+@pytest.mark.usefixtures("_without_fsync")
 def test_0026_adds_the_binding_of_a_query_run(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
