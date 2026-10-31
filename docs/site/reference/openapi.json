@@ -2985,7 +2985,7 @@
           "tables"
         ],
         "summary": "Set a column's description and label",
-        "description": "Sets the texts shown for a column in one language (`lang`, else the table's main language), or with `null` removes an edit so that the text of the project shows again. A field left out of the body stays as it is. The table's owner or a holder of `DROP_TABLE` may do this, and must be able to read the table. Answers 404 when the table or column does not exist and 422 for a body with neither field, a blank text, a description over 4,000 characters, a label over 100 characters or on several lines, or a `lang` that is not a language tag.",
+        "description": "Works as the table's route does, for one column, which must be in the table's schema: the texts are set in `lang`, else in the table's main language, `null` removes an edit, and a field left out stays. The caller owns the table or holds `DROP_TABLE` on it, and may read it. Answers 404 for a missing table or column and 422 as the table's route does.",
         "operationId": "describe_column_api_v1_environments__env__namespaces__path__tables__name__columns__column__description_put",
         "parameters": [
           {
@@ -2996,7 +2996,7 @@
               "type": "string",
               "title": "Env"
             },
-            "description": "Environment name."
+            "description": "The environment's name."
           },
           {
             "name": "path",
@@ -3006,7 +3006,7 @@
               "type": "string",
               "title": "Path"
             },
-            "description": "Dot-joined namespace path."
+            "description": "The namespace, its parts joined by dots."
           },
           {
             "name": "name",
@@ -3016,7 +3016,7 @@
               "type": "string",
               "title": "Name"
             },
-            "description": "Table name."
+            "description": "The table's name."
           },
           {
             "name": "column",
@@ -3026,7 +3026,7 @@
               "type": "string",
               "title": "Column"
             },
-            "description": "The column's name; it must be in the table's schema."
+            "description": "The column to edit; it must be in the schema."
           },
           {
             "name": "lang",

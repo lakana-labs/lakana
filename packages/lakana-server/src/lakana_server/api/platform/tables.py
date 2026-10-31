@@ -1272,63 +1272,61 @@ def describe_table(
     "/{name}/columns/{column}/description", response_model=TableOut, responses=errors(403, 404)
 )
 def describe_column(
+    request: Request,
+    body: DescriptionIn,
     env: str,
     path: str,
     name: str,
     column: str,
-    body: DescriptionIn,
-    request: Request,
     lang: str | None = Query(default=None, description=_EDIT_LANG_DESCRIPTION),
-    principal: PrincipalRef = Depends(get_principal),
-    catalog: CatalogService = Depends(get_catalog),
     main_language: str = Depends(get_main_language),
+    catalog: CatalogService = Depends(get_catalog),
+    principal: PrincipalRef = Depends(get_principal),
 ) -> TableOut:
     """Set a column's description and label.
 
-    Sets the texts shown for a column in one language (`lang`, else the table's main language),
-    or with `null` removes an edit so that the text of the project shows again. A field left out
-    of the body stays as it is. The table's owner or a holder of `DROP_TABLE` may do this, and
-    must be able to read the table. Answers 404 when the table or column does not exist and 422
-    for a body with neither field, a blank text, a description over 4,000 characters, a label
-    over 100 characters or on several lines, or a `lang` that is not a language tag.
+    Works as the table's route does, for one column, which must be in the table's schema: the
+    texts are set in `lang`, else in the table's main language, `null` removes an edit, and a
+    field left out stays. The caller owns the table or holds `DROP_TABLE` on it, and may read it.
+    Answers 404 for a missing table or column and 422 as the table's route does.
 
     Parameters
     ----------
-    env
-        Environment name.
-    path
-        Dot-joined namespace path.
-    name
-        Table name.
-    column
-        The column's name; it must be in the table's schema.
-    body
-        The new `description` and/or `label`, each a text or `null`.
     request
-        The current request, for `Accept-Language`.
+        Carries the reader's `Accept-Language`.
+    body
+        The column's new texts: `description`, `label` or both, `null` to reset one.
+    env
+        The environment's name.
+    path
+        The namespace, its parts joined by dots.
+    name
+        The table's name.
+    column
+        The column to edit; it must be in the schema.
     lang
-        The language edited; also the language of the answer's texts.
-    principal
-        The authenticated caller.
-    catalog
-        The catalog service for this request.
+        Which language the edit is in, and the answer's texts are in.
     main_language
-        `LAKANA_MAIN_LANGUAGE`, the last language a reader without a choice gets.
+        The server's `LAKANA_MAIN_LANGUAGE`, the end of the reader's languages.
+    catalog
+        This request's catalog service.
+    principal
+        The caller.
 
     Returns
     -------
     TableOut
-        The table, with the texts it shows now, in the reader's language.
+        The whole table, as the reader reads it after the edit.
 
     Raises
     ------
     lakana_core.errors.NotFoundError
-        Mapped to 404 for a missing table or column.
+        Mapped to 404 when the table or the column is missing.
     lakana_core.errors.PermissionDenied
-        Mapped to 403, unless the caller owns the table or holds `DROP_TABLE` on it, and may
-        read it.
+        Mapped to 403 for a caller who neither owns the table nor holds `DROP_TABLE` on it, or
+        may not read it.
     lakana_core.errors.ValidationError
-        Mapped to 422 for a text that breaks its rules or a `lang` that is not a tag.
+        Mapped to 422 for a bad text or tag.
     """
     languages = reader_languages(request, lang, principal, main_language)
     ref = TableRef(environment=env, namespace=NamespacePath.from_parts(path.split(".")), name=name)
