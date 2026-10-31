@@ -40,7 +40,10 @@ def _key(row: TextTranslation) -> _Key:
 
 
 def lock_table(session: Session, row: Table) -> None:
-    """Lock a stored table's row until the transaction ends, and read its language list again.
+    """Lock a stored table's row until the transaction ends, and read its text state again.
+
+    The language list, the main language and the table's own edits are read again in the same
+    statement, so a writer decides from what another writer committed before the lock.
 
     Every write of a table's texts (an edit, a deploy's sync) takes this lock before it reads
     them, so writers of one table run one after the other: none decides from texts another is
@@ -54,7 +57,11 @@ def lock_table(session: Session, row: Table) -> None:
     row
         The table, already in the database.
     """
-    session.refresh(row, ["text_languages"], with_for_update=True)
+    session.refresh(
+        row,
+        ["text_languages", "text_language", "description_edited", "label_edited"],
+        with_for_update=True,
+    )
 
 
 def translation_rows(session: Session, row: Table) -> list[TextTranslation]:

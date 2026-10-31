@@ -286,13 +286,15 @@ def test_a_measure_label_matches_through_rest_and_only_for_a_reader(client: Test
     assert client.get(_SEARCH, headers=alice, params={"q": "gross pay"}).json()["results"] == []
 
 
-def _translated(client: TestClient) -> None:
+def _translated(client: TestClient, translations: dict | None = None) -> None:
     """Create `gold.t (id)` labelled `Sales`, in French `Ventes`, as a deploy writes it.
 
     Parameters
     ----------
     client
         The test client.
+    translations
+        The asset's `translations`; French `Ventes` when `None`.
     """
     create_environment(client)
     created = client.post(
@@ -312,7 +314,10 @@ def _translated(client: TestClient) -> None:
                 "assets": [
                     {
                         "table": "gold.t",
-                        "metadata": {"label": "Sales", "translations": {"fr": {"label": "Ventes"}}},
+                        "metadata": {
+                            "label": "Sales",
+                            "translations": translations or {"fr": {"label": "Ventes"}},
+                        },
                     }
                 ],
             },
@@ -355,3 +360,25 @@ def test_an_invalid_lang_on_search_is_422_with_the_tag_text(client: TestClient) 
         "and a region (BCP 47), such as en, de, fr-CH or zh-Hant; ask for a language such as de, "
         "or leave lang out"
     )
+
+
+def test_of_two_accepted_languages_that_match_the_first_is_reported(client: TestClient) -> None:
+    _translated(client, {"fr": {"label": "Ventes (fr)"}, "de": {"label": "Ventes (de)"}})
+    for header, expected in (("fr, de", "fr"), ("de, fr;q=0.5", "de")):
+        response = client.get(
+            _SEARCH, params={"q": "ventes"}, headers={**AUTH_HEADER, "Accept-Language": header}
+        )
+        assert [h["language"] for h in response.json()["results"]] == [expected], header
+
+
+def test_a_translation_of_a_table_the_caller_may_not_read_matches_nothing(
+    client: TestClient,
+) -> None:
+    _translated(client)
+    _table(client, "silver", "orders", "order_id")
+    viewer = _person(client, "vic", table="orders")
+    hidden = client.get(_SEARCH, params={"q": "ventes", "lang": "fr"}, headers=viewer)
+    assert hidden.status_code == 200, hidden.text
+    assert hidden.json()["results"] == [] and hidden.json()["has_more"] is False
+    shown = client.get(_SEARCH, params={"q": "ventes", "lang": "fr"}, headers=AUTH_HEADER)
+    assert [h["name"] for h in shown.json()["results"]] == ["gold.t"]

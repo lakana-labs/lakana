@@ -960,3 +960,31 @@ def test_a_main_language_table_edit_audits_the_lengths_it_found_under_the_lock(
         catalog_with_orders.set_table_description(principal, _ORDERS, description="New", label="L")
     event = _events(session, AuditEventType.TABLE_DESCRIBED)[-1]
     assert (event.detail["old_length"], event.detail["label_old_length"]) == (13, 9)
+
+
+def test_an_edit_decides_its_main_language_under_the_lock(
+    catalog_with_orders: CatalogService, principal: PrincipalRef, session: Session
+) -> None:
+    """A main language changed before the lock turns an `en` edit into a translation."""
+    real_lock = service_module.lock_table
+
+    def _deployed_meanwhile(locking: Session, row: Table) -> None:
+        """Commit another main language just before the lock, behind the loaded row's back.
+
+        Parameters
+        ----------
+        locking
+            The session that locks.
+        row
+            The table.
+        """
+        locking.execute(
+            update(Table).values(text_language="fr").execution_options(synchronize_session=False)
+        )
+        real_lock(locking, row)
+
+    with mock.patch.object(service_module, "lock_table", _deployed_meanwhile):
+        catalog_with_orders.set_table_description(principal, _ORDERS, label="Orders", language="en")
+    assert session.scalars(select(Table)).one().label_edited is None
+    (row,) = session.scalars(select(TextTranslation)).all()
+    assert (row.language, row.field, row.text_edited) == ("en", "label", "Orders")

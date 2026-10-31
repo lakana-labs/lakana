@@ -343,6 +343,7 @@ def _row(
     sort_id: _Expr,
     matched: _Expr,
     *fields: _Expr,
+    sort_source: _Expr | None = None,
 ) -> _Candidates:
     """Start a candidate select with the columns every kind shares.
 
@@ -355,11 +356,15 @@ def _row(
     sort_name
         What it sorts by after kind.
     sort_id
-        The final tie-break, unique per kind.
+        The tie-break after the name: the table's id for a table or column, the row's id
+        otherwise.
     matched
         The field that matched.
     *fields
         Up to six payload columns, as text; the rest are null.
+    sort_source
+        The last tie-break, an integer: which text of one table or column comes first. `None`
+        (``0``) for a main-language row, which so comes before every translation.
 
     Returns
     -------
@@ -372,6 +377,7 @@ def _row(
         rank.label("rank"),
         sort_name.label("sort_name"),
         sort_id.label("sort_id"),
+        (literal_column("0") if sort_source is None else sort_source).label("sort_source"),
         matched.label("matched"),
         *(cast(f, Text).label(f"f{i}") for i, f in enumerate(payload, start=1)),
     ]
@@ -533,15 +539,16 @@ class CatalogSearch:
         if model_kind is not None:
             wanted &= {SearchKind.TABLE}
         chain = lookup_chain(languages)
+        main = self._main_language
         selects: list[_Candidates] = []
         if SearchKind.TABLE in wanted:
-            selects.append(_tables(match, environment_id, model_kind, self._main_language))
+            selects.append(_tables(match, environment_id, model_kind, main))
             if chain:
-                selects.append(_table_translations(match, environment_id, model_kind, chain))
+                selects.append(_table_translations(match, environment_id, model_kind, chain, main))
         if SearchKind.COLUMN in wanted:
-            selects.append(_columns(match, environment_id, self._main_language))
+            selects.append(_columns(match, environment_id, main))
             if chain:
-                selects.append(_column_translations(match, environment_id, chain))
+                selects.append(_column_translations(match, environment_id, chain, main))
         if SearchKind.RUN in wanted and may_read_environment:
             selects.append(_runs(match, needle, environment_id))
         if SearchKind.PRINCIPAL in wanted and self._authz.permits(
@@ -586,7 +593,11 @@ class CatalogSearch:
         """
         union = union_all(*selects).subquery("hits")
         ranked = select(union).order_by(
-            union.c.rank, union.c.kind_order, union.c.sort_name, union.c.sort_id
+            union.c.rank,
+            union.c.kind_order,
+            union.c.sort_name,
+            union.c.sort_id,
+            union.c.sort_source,
         )
         readable: dict[tuple[str, str], bool] = {}
         seen: set[tuple[object, ...]] = set()
@@ -703,22 +714,24 @@ def _tables(
     )
     shown = func.coalesce(Table.description_edited, Table.description_project)
     label = func.coalesce(Table.label_edited, Table.label_project)
-    named = or_(match.contains(Table.name), match.contains(qualified))
     in_label = match.contains(label)
     in_description = match.contains(shown)
     in_grain = match.contains(func.coalesce(Table.model_grain, ""))
+    rank, by_name, by_label = _name_or_label(match, [Table.name, qualified], label)
     matched = case(
-        (named, _text("name")),
-        (in_label, _text("label")),
+        (by_name, _text("name")),
+        (by_label, _text("label")),
         (in_description, _text("description")),
         else_=_text("grain"),
     )
     # Ordered like `matched`: a null text makes its comparison null, never true.
-    text = case((named, shown), (in_label, label), (in_description, shown), else_=Table.model_grain)
+    text = case(
+        (by_name, shown), (by_label, label), (in_description, shown), else_=Table.model_grain
+    )
     query = (
         _row(
             SearchKind.TABLE,
-            match.rank([Table.name, qualified, label], otherwise=3),
+            rank,
             func.lower(Table.name),
             cast(Table.id, String),
             matched,
@@ -727,43 +740,101 @@ def _tables(
             cast(Table.table_type, String),
             text,
             Table.model_kind,
-            case((named, null()), else_=_header_language(main_language)),
+            case((by_name, null()), else_=_header_language(main_language)),
         )
         .join(Namespace, Namespace.id == Table.namespace_id)
         .where(
             Namespace.environment_id == environment_id,
-            or_(named, in_label, in_description, in_grain),
+            or_(by_name, in_label, in_description, in_grain),
         )
     )
     return query.where(Table.model_kind == model_kind) if model_kind is not None else query
 
 
-def _translation_sort_id(owner: _Expr) -> ColumnElement[str]:
-    """Write the tie-break of a translation row, which sorts after its owner's main row.
+def _name_or_label(
+    match: _Match, names: Sequence[_Expr], label: _Expr
+) -> tuple[ColumnElement[int], ColumnElement[bool], ColumnElement[bool]]:
+    """Rank a name and a label together, and say which of the two decided the rank.
 
     Parameters
     ----------
-    owner
-        The id the main arm sorts the same table or column by.
+    match
+        The comparisons.
+    names
+        The expressions that count as the name.
+    label
+        The shown label; null when there is none.
+
+    Returns
+    -------
+    tuple
+        The rank (the better of the two, 3 when neither matches); whether the name decided it (it
+        matches and the label does not match better); whether the label decided it.
+    """
+    name_rank = match.rank(names, otherwise=3)
+    label_rank = match.rank([label], otherwise=3)
+    label_wins = label_rank < name_rank
+    rank = case((label_wins, label_rank), else_=name_rank)
+    return rank, and_(name_rank < 3, ~label_wins), label_wins
+
+
+def _translation_order(languages: Sequence[str]) -> ColumnElement[int]:
+    """Order the translations of one table or column: the reader's languages in their order.
+
+    Parameters
+    ----------
+    languages
+        The reader's languages, truncation included, most wanted first.
 
     Returns
     -------
     ColumnElement
-        The owner's id followed by ``/``, the language and the field: the main arm's sort id is a
-        prefix of it, so at the same rank a table or column matched by its name and by a
-        translation keeps the name hit.
+        An integer from 10 up: ten times the language's place in `languages` (from 1), plus the
+        text (a label 0, a description 1, a grain 2; a measure's text 3 more). Main-language rows
+        sort at 0 (`_row`), so at the same rank a name or header text keeps the hit, then the
+        first of the reader's languages, never the spelling of a tag.
     """
-    return (
-        cast(owner, String)
-        .concat("/")
-        .concat(TextTranslation.language)
-        .concat("/")
-        .concat(TextTranslation.field)
+    place = case(
+        *(
+            (TextTranslation.language == language, literal_column(str((index + 1) * 10)))
+            for index, language in enumerate(languages)
+        ),
+        else_=literal_column(str((len(languages) + 1) * 10)),
     )
+    text = case(
+        (TextTranslation.field == "label", literal_column("0")),
+        (TextTranslation.field == "description", literal_column("1")),
+        else_=literal_column("2"),
+    )
+    subject = case(
+        (TextTranslation.subject == "measure", literal_column("3")), else_=literal_column("0")
+    )
+    return place + text + subject
+
+
+def _not_main_language(main_language: str) -> ColumnElement[bool]:
+    """Leave out a translation in its table's own main language, as `table get` does.
+
+    Parameters
+    ----------
+    main_language
+        The instance's main language, for a table whose project declares none.
+
+    Returns
+    -------
+    ColumnElement
+        True for a row in another language. A row in the main language can only be left over from
+        before the main language changed; the header text is the main language's.
+    """
+    return TextTranslation.language != _header_language(main_language)
 
 
 def _table_translations(
-    match: _Match, environment_id: uuid.UUID, model_kind: str | None, languages: Sequence[str]
+    match: _Match,
+    environment_id: uuid.UUID,
+    model_kind: str | None,
+    languages: Sequence[str],
+    main_language: str,
 ) -> _Candidates:
     """Select the tables whose label, description or grain matches in one of the reader's languages.
 
@@ -777,6 +848,8 @@ def _table_translations(
         Keep only tables that declare this kind, or `None`.
     languages
         The reader's languages, truncation included.
+    main_language
+        The instance's main language, for a table whose project declares none.
 
     Returns
     -------
@@ -791,7 +864,7 @@ def _table_translations(
             SearchKind.TABLE,
             case((is_label, match.rank([text], otherwise=3)), else_=literal_column("3")),
             func.lower(Table.name),
-            _translation_sort_id(Table.id),
+            cast(Table.id, String),
             case(
                 (is_label, _text("label")),
                 (TextTranslation.field == "grain", _text("grain")),
@@ -803,6 +876,7 @@ def _table_translations(
             text,
             Table.model_kind,
             TextTranslation.language,
+            sort_source=_translation_order(languages),
         )
         .select_from(TextTranslation)
         .join(Table, Table.id == TextTranslation.table_id)
@@ -811,6 +885,7 @@ def _table_translations(
             Namespace.environment_id == environment_id,
             TextTranslation.subject == "table",
             TextTranslation.language.in_(languages),
+            _not_main_language(main_language),
             match.contains(text),
         )
     )
@@ -843,18 +918,19 @@ def _columns(match: _Match, environment_id: uuid.UUID, main_language: str) -> _C
     named = match.contains(TableColumn.name)
     in_column_label = match.contains(label)
     in_description = match.contains(shown)
+    rank, by_name, by_label = _name_or_label(match, [TableColumn.name], label)
     in_label = match.contains(func.coalesce(DeclaredMeasure.label, ""))
     in_measure = or_(in_label, match.contains(func.coalesce(DeclaredMeasure.description, "")))
     matched = case(
-        (named, _text("name")),
-        (in_column_label, _text("label")),
+        (by_name, _text("name")),
+        (by_label, _text("label")),
         (in_description, _text("description")),
         else_=_text("measure"),
     )
     # Ordered like `matched`: a null text makes its comparison null, never true.
     text = case(
-        (named, shown),
-        (in_column_label, label),
+        (by_name, shown),
+        (by_label, label),
         (in_description, shown),
         (in_label, DeclaredMeasure.label),
         else_=DeclaredMeasure.description,
@@ -862,7 +938,7 @@ def _columns(match: _Match, environment_id: uuid.UUID, main_language: str) -> _C
     return (
         _row(
             SearchKind.COLUMN,
-            match.rank([TableColumn.name, label], otherwise=3),
+            rank,
             func.lower(TableColumn.name),
             cast(TableColumn.table_id, String),
             matched,
@@ -871,7 +947,7 @@ def _columns(match: _Match, environment_id: uuid.UUID, main_language: str) -> _C
             TableColumn.name,
             text,
             TableColumn.type,
-            case((named, null()), else_=_header_language(main_language)),
+            case((by_name, null()), else_=_header_language(main_language)),
         )
         .select_from(TableColumn)
         .join(Table, Table.id == TableColumn.table_id)
@@ -898,7 +974,7 @@ def _columns(match: _Match, environment_id: uuid.UUID, main_language: str) -> _C
 
 
 def _column_translations(
-    match: _Match, environment_id: uuid.UUID, languages: Sequence[str]
+    match: _Match, environment_id: uuid.UUID, languages: Sequence[str], main_language: str
 ) -> _Candidates:
     """Select the columns whose translated label or description, or measure text, matches.
 
@@ -910,6 +986,8 @@ def _column_translations(
         The environment.
     languages
         The reader's languages, truncation included.
+    main_language
+        The instance's main language, for a table whose project declares none.
 
     Returns
     -------
@@ -925,7 +1003,7 @@ def _column_translations(
             SearchKind.COLUMN,
             case((is_label, match.rank([text], otherwise=3)), else_=literal_column("3")),
             func.lower(TableColumn.name),
-            _translation_sort_id(TableColumn.table_id),
+            cast(TableColumn.table_id, String),
             case(
                 (TextTranslation.subject == "measure", _text("measure")),
                 (is_label, _text("label")),
@@ -937,6 +1015,7 @@ def _column_translations(
             text,
             TableColumn.type,
             TextTranslation.language,
+            sort_source=_translation_order(languages),
         )
         .select_from(TextTranslation)
         .join(
@@ -952,6 +1031,7 @@ def _column_translations(
             Namespace.environment_id == environment_id,
             TextTranslation.subject.in_(("column", "measure")),
             TextTranslation.language.in_(languages),
+            _not_main_language(main_language),
             match.contains(text),
         )
     )

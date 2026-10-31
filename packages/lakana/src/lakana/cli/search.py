@@ -114,7 +114,7 @@ def search(
         str | None, typer.Option("--env", help="Environment (default: the profile's).")
     ] = None,
 ) -> None:
-    """Find tables, columns, descriptions, runs and people that match TEXT.
+    """Find tables, columns, labels, descriptions, runs and people that match TEXT.
 
     Matching ignores case and finds TEXT anywhere in a name, label or description. Exact matches
     come first, then names and labels that start with TEXT, then those that contain it, then

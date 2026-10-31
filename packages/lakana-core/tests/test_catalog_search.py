@@ -1012,3 +1012,70 @@ def test_translations_cost_no_statement_per_table(world: World) -> None:
     finally:
         event.remove(engine, "before_cursor_execute", _count)
     assert len(statements) == plain
+
+
+def test_a_leftover_translation_in_the_tables_main_language_is_never_found(world: World) -> None:
+    """A row in the main language is a leftover from before it changed; `table get` ignores it."""
+    _translate(world, "orders", "de", "label", "Alte Bestellungen")
+    _translate(world, "orders", "de", "label", "Alter Status", subject="column", column="status")
+    assert len(_search(world, world.bob, "alte", ("de",)).results) == 2
+    row = world.session.scalars(select(Table).where(Table.name == "orders")).one()
+    row.text_language = "de"
+    row.label_project = "Bestellungen"
+    world.session.commit()
+    assert _search(world, world.bob, "alte", ("de",)).results == []
+    row.text_language = None
+    world.session.commit()
+    by_instance = CatalogSearch(
+        world.session, GrantAuthorization(world.session), main_language="de"
+    ).search(world.bob, "dev", "alte", languages=("de",))
+    assert by_instance.results == []
+
+
+def test_of_two_matching_translations_the_readers_first_language_is_shown(world: World) -> None:
+    _translate(world, "orders", "fr", "label", "Ventes en France")
+    _translate(world, "orders", "de", "label", "Ventes en Allemagne")
+    _translate(world, "orders", "fr", "label", "Statut fr", subject="column", column="status")
+    _translate(world, "orders", "de", "label", "Statut de", subject="column", column="status")
+    for languages, expected in ((("fr", "de"), "fr"), (("de", "fr"), "de")):
+        (table,) = _search(world, world.bob, "ventes", languages).results
+        assert (table.language, table.snippet) == (
+            expected,
+            {"fr": "Ventes en France", "de": "Ventes en Allemagne"}[expected],
+        )
+        (column,) = _search(world, world.bob, "statut", languages).results
+        assert column.language == expected
+
+
+def test_a_regional_tag_and_its_language_are_ordered_by_the_reader_not_by_spelling(
+    world: World,
+) -> None:
+    row = world.session.scalars(select(Table).where(Table.name == "orders")).one()
+    row.text_language = "de"
+    world.session.commit()
+    _translate(world, "orders", "en-US", "label", "Sales US")
+    _translate(world, "orders", "en", "label", "Sales EN")
+    (regional,) = _search(world, world.bob, "sales", ("en-US",)).results
+    assert regional.language == "en-US"
+    (plain,) = _search(world, world.bob, "sales", ("en", "en-US")).results
+    assert plain.language == "en"
+
+
+def test_matched_says_label_when_the_label_decided_the_rank(world: World) -> None:
+    row = world.session.scalars(select(Table).where(Table.name == "orders")).one()
+    row.label_project = "Ord"
+    world.session.add(
+        ColumnDescription(id=uuid.uuid4(), table_id=row.id, column="status", label_project="Stat")
+    )
+    world.session.commit()
+    table = _search(world, world.bob, "ord").results[0]
+    assert (table.name, table.matched, table.language, table.snippet) == (
+        "silver.orders",
+        "label",
+        "en",
+        "Ord",
+    )
+    (column,) = _search(world, world.bob, "stat").results
+    assert (column.name, column.matched, column.language) == ("silver.orders.status", "label", "en")
+    by_name = _search(world, world.bob, "orders").results[0]
+    assert (by_name.matched, by_name.language) == ("name", None)

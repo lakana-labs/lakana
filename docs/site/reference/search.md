@@ -38,10 +38,18 @@ Labels, descriptions, grains and measure texts are matched in two kinds of langu
   also matches its language: `fr-CH` finds `fr` texts. The shown translation is the edit if there is
   one, else the translation file's text.
 
+A translation in the table's own main language is never matched: it can only be left over from
+before the main language changed, and `table get` does not show it either. Your other languages
+all match, also those after the main language in your list (with `Accept-Language: en, fr` on a
+table in English, a French label is found, though `table get` shows the English one).
+
 Every table and column result carries `language`: the language of the text that matched (`fr`
 for a French label, the table's main language for a header text) or `null` when its name matched.
-A table or column is one result, however many of its texts match: the best ranked one, a name
-before a translation at the same rank. Physical names are never translated.
+`matched` names the text that decided the rank: a table named `orders` with the label `Ord` is
+found for `ord` by its label (an exact match), not by its name. A table or column is one result,
+however many of its texts match: the best ranked one; at the same rank its name or a header text
+first, then its texts in the order of your languages (`fr, de` reports `fr` when both match).
+Physical names are never translated.
 
 ## Matching
 
@@ -69,8 +77,13 @@ every translation of them are matched and shown, even as a snippet, only for a t
 not read finds nothing, not even the table. A column mask hides a column's values, not its name or its texts, as in `table get`. An environment that does not exist is `404` for a caller who may read
 environments; for anyone else the answer is an empty page, as for an environment that exists.
 
-The search examines at most 5,000 candidate matches in the order above. A caller who may read only
-a few of very many matches may miss some; a longer or more exact text finds them.
+The search examines at most 5,000 candidate matches in the order above, and then stops; what it
+found by then is the answer, and `has_more` says only whether a further result was among them. A
+candidate is one matching row, not one result: a table found by its name or header texts is one
+candidate, and each matching translation of it one more, so a table found by its name and two
+translations is three candidates, and the two repeats count against the 5,000 like a result you
+may not read. So a short, common text can miss results, also for a caller who
+may read everything; a longer or more exact text finds them.
 
 ## REST
 
