@@ -302,7 +302,8 @@ stopped on purpose (a drain, a restart for a deploy) does not use up a try.
 - **Upgrade the workers together with the server.** A worker of the previous release does not
   know the new code and cannot finish such a set-back: when workers of the previous release take
   both set-back claims, the table is still set back, but the task may end `worker_lost` instead of
-  `checks_unfinished`.
+  `checks_unfinished`. The same happens, with any workers, when both set-back claims are lost: the
+  run still fails and sends its `failed` message, without the "Checks never finished" line.
 - **More than 5 retries:** if you raised `LAKANA_RUN__MAX_RETRIES` above 5 and a project asks for
   `retries` of 6 or more, a check whose count keeps failing for a temporary reason used to end
   `errored` on the last attempt (a `warn` check kept the data). It now reaches the 5 tries first:
