@@ -488,10 +488,11 @@ read issue (a SQL table, a Python input, a `references:` target, a source) carri
 not shown to you```, swapped in by position through `error_for_reader`. A long-form reference
 `a.b.c` carries both readings (`a.b.c` and `a.b`), so a reader sees it only when it may read both.
 Write, kind and outside-the-layers issues name only the asset, and a connection issue the asset and
-its connection; the version view shows both anyway, so they carry no targets. Every name in a layer
-message goes through `shown()`: a quoted SQL identifier may hold a line feed or an escape, and raw it
-would split one issue into two lines, so `error_for_reader`, which swaps a line by position, would
-leave the second half of a withheld read visible
+its connection; the version view shows both anyway, so they carry no targets. A name in a layer
+message that `unsafe_identifier` flags is escaped with `shown()` (plain non-ASCII letters show as
+written, as in the not-found line): a quoted SQL identifier may hold a line feed or an escape, and
+raw it would split one issue into two lines, so `error_for_reader`, which swaps a line by position,
+would leave the second half of a withheld read visible
 (`test_a_read_name_with_a_control_character_is_escaped_and_withheld_whole`). Pins:
 `test_a_read_issue_is_withheld_from_a_reader_who_may_not_read_the_target`,
 `test_a_long_form_reference_is_classified_by_its_first_part_and_withheld_by_both_readings`,

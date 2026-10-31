@@ -691,3 +691,12 @@ def test_a_source_name_with_a_control_character_is_escaped() -> None:
     [issue] = layer_issues(MEDALLION_LAYERS, [asset])
     assert issue.message.startswith("`silver.s` reads `raw.x\\ny`, which is outside bronze")
     assert "\n" not in issue.render()
+
+
+def test_a_name_with_plain_non_ascii_letters_shows_as_written() -> None:
+    asset = _sql("silver.umsätze", "/* lakana\nkind: staging\n*/\nSELECT * FROM gold.verkäufe\n")
+    [issue] = layer_issues(MEDALLION_LAYERS, [asset])
+    assert issue.message.startswith("`silver.umsätze` reads `gold.verkäufe`, which is in gold")
+    assert issue.withheld == (
+        "`silver.umsätze` breaks layers.silver.reads with a read that is not shown to you"
+    )

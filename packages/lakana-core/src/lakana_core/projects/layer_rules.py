@@ -4,7 +4,7 @@ Pure. The check reads the parsed assets and the declared rules and nothing else:
 lookup, no principal. So whether an issue appears never depends on whether a table exists or may
 be read, and every name in a message is one the deployer wrote. A read issue still carries its
 target and a `withheld` line, because a failed deploy's error reaches every reader of the
-environment (`error_for_reader`). Every name goes into a message through `shown`: a quoted SQL
+environment (`error_for_reader`). Every name goes into a message through `_safe`: a quoted SQL
 identifier may hold a line feed, which would otherwise split one issue into two lines and show
 part of a withheld read on the second.
 """
@@ -30,6 +30,7 @@ from lakana_core.projects.layers import (
     or_list,
 )
 from lakana_core.projects.parse import file_references
+from lakana_core.projects.project_config import unsafe_identifier
 
 _EVERY_LAYER = and_list(LAYERS)
 
@@ -53,6 +54,24 @@ def asset_write(asset: ParsedAsset) -> str:
     return normalized_write(asset.metadata)[0]
 
 
+def _safe(text: str) -> str:
+    """Show a name in a message as written, unless it could forge a line.
+
+    Parameters
+    ----------
+    text
+        A name the deployer wrote.
+
+    Returns
+    -------
+    str
+        `text` itself, plain non-ASCII letters included, as the deploy's not-found line shows
+        it; escaped by `shown` when `unsafe_identifier` flags it (a control, format or
+        surrogate character, or a line or paragraph separator).
+    """
+    return shown(text) if unsafe_identifier(text) else text
+
+
 def _name(asset: ParsedAsset) -> str:
     """Show the asset's table name safely in a message.
 
@@ -64,9 +83,9 @@ def _name(asset: ParsedAsset) -> str:
     Returns
     -------
     str
-        Its dotted name through `shown`, so a control character cannot start a second line.
+        Its dotted name through `_safe`, so a control character cannot start a second line.
     """
-    return shown(asset.table)
+    return _safe(asset.table)
 
 
 def _key(asset: ParsedAsset, key: str) -> str:
@@ -164,10 +183,10 @@ class _Read:
             "references", the name and the `references` key for a reference.
         """
         if self.reference:
-            return f"references `{shown(self.name)}` ({_key(asset, 'references')})"
+            return f"references `{_safe(self.name)}` ({_key(asset, 'references')})"
         if self.parameter is not None:
-            return f"reads `{shown(self.name)}` (input `{shown(self.parameter)}`)"
-        return f"reads `{shown(self.name)}`"
+            return f"reads `{_safe(self.name)}` (input `{_safe(self.parameter)}`)"
+        return f"reads `{_safe(self.name)}`"
 
 
 def _reference_tables(target: str) -> tuple[str, ...]:
@@ -266,7 +285,7 @@ def _read_text(asset: ParsedAsset, layer: str, rules: LayerRules, read: _Read) -
         if target != layer:
             instead = f"Build this table in {target}"
         elif layer == SOURCE_LAYER:
-            instead = f"Read the sources `{shown(read.name)}` is built from instead"
+            instead = f"Read the sources `{_safe(read.name)}` is built from instead"
         else:
             instead = f"Move this asset to a layer whose reads list {target}"
         return (
@@ -417,8 +436,8 @@ def _outside_text(asset: ParsedAsset) -> str:
         The message, with the file and name the asset would have in gold.
     """
     gold = LAYERS[-1]
-    file = shown(PurePosixPath(asset.path).name)
-    name = shown(asset.table.rpartition(".")[2])
+    file = _safe(PurePosixPath(asset.path).name)
+    name = _safe(asset.table.rpartition(".")[2])
     return (
         f"`{_name(asset)}` is outside {_EVERY_LAYER}, but a project with `layers:` builds every "
         f"asset in one of them. Move it to the layer whose assets read it, such as "
@@ -465,7 +484,7 @@ def _asset_issues(layers: LayersConfig, asset: ParsedAsset) -> list[ProjectIssue
             ProjectIssue(
                 asset.path,
                 block,
-                f"`{_name(asset)}` declares connection `{shown(connection)}`, a source, and only "
+                f"`{_name(asset)}` declares connection `{_safe(connection)}`, a source, and only "
                 f"{SOURCE_LAYER} reads sources (layers.{layer}.reads). Move the asset to "
                 f"assets/{SOURCE_LAYER}/, then build {layer} from the {SOURCE_LAYER} table",
             )
