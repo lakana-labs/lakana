@@ -7,11 +7,6 @@ cd "$WORK"
 # The page shows tables as a terminal of 100 columns draws them.
 export COLUMNS=100
 
-field() {
-  # field JSON_TEXT PYTHON_EXPRESSION_OF_t: print one value of a command's JSON output.
-  python3 -c 'import json,sys; t=json.loads(sys.argv[1]); print(eval(sys.argv[2]))' "$1" "$2"
-}
-
 # The page quotes the output of several commands. Each is run as it is shown; its output is
 # written to a file between capture_start and capture_end, printed again afterwards, and checked.
 captured=""

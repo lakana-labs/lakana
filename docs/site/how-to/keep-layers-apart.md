@@ -7,7 +7,10 @@ cannot read a raw export, a bronze table cannot be rebuilt from gold, and a stag
 end up beside the facts. Every deploy and dry run then checks every asset against the rules.
 
 The rules are opt-in: a project without `layers:` deploys as before. Once you add them, they apply
-to every asset, in every environment, with no exception per asset.
+to every asset, in every environment, with no exception per asset. An environment's `defaults:`
+still change how an asset that says nothing is written: with `materialize: view` among the
+defaults of `prod` only, such an asset is a view in `prod` and is judged as one there, so set the
+write in the asset's header when a layer allows only some writes.
 
 ## Paste the default
 
@@ -51,7 +54,7 @@ lakana deploy --env dev --dry-run
 ```
 
 A dry run checks everything a deploy checks and changes nothing. When the project follows its
-rules, the output ends with `hint: layer rules: 3 assets follow them (bronze 1, silver 1, gold 1)`.
+rules, the output includes `hint: layer rules: 3 assets follow them (bronze 1, silver 1, gold 1)`.
 
 ## Read what a deploy refuses
 
@@ -99,7 +102,8 @@ says how many more there are. Fix them in passes, with `lakana deploy --dry-run`
 
 1. **Assets outside the layers.** Only an artifact can be outside: move `models.churn_model` to
    `assets/gold/churn_model.py`, so it becomes `gold.churn_model`. An artifact in a layer follows
-   `reads` only; it has no write mode and no kind.
+   `reads` only; it has no write mode and no kind, but a layer whose `write` is empty refuses it
+   like any other asset.
 2. **Write modes.** A bronze asset written with `replace` either merges on a key (`write: merge`
    with `key:`) or appends (`write: append` with `watermark:`), or you add `replace` to
    `layers.bronze.write`.
@@ -116,6 +120,9 @@ says how many more there are. Fix them in passes, with `lakana deploy --dry-run`
 - **Run time.** The rules describe how the project is built. Ad-hoc SQL, the SDK and other tools
   read what their grants allow.
 - **Other repositories.** A table another repository builds is judged by its name like any other.
+- **Views.** A catalog view is judged by its own name and is never opened: a gold asset may read
+  `silver.recent_orders`, a view made through the REST API, even when that view reads a source.
+  Build such views as assets (`materialize: view`) so that the rules see what they read.
 
 Every message a deploy gives about the rules, with its next step:
 
@@ -129,6 +136,7 @@ Every message a deploy gives about the rules, with its next step:
 | A write mode not listed | ``` `bronze.orders` is written with `replace`, but layers.bronze.write allows only append and merge. Write it with one of those (`write:` in its header), or add replace to layers.bronze.write in lakana.yaml``` |
 | A view not listed | ``` `bronze.orders_v` is a view (`materialize: view`), but layers.bronze.write allows only append and merge. Build it as a table, or add view to layers.bronze.write in lakana.yaml``` |
 | An empty `write` | ``` `bronze.orders` is in bronze, but layers.bronze.write is empty, so this project builds no bronze asset. Move the asset to another layer, or list its write mode in layers.bronze.write in lakana.yaml``` |
+| An artifact where `write` is empty | ``` `gold.churn_model` is in gold, but layers.gold.write is empty, so this project builds no gold asset, not even an artifact. Move the asset to another layer, or list a write mode in layers.gold.write in lakana.yaml to open the layer``` |
 | A kind missing | ``` `gold.daily_sales` declares no kind, but layers.gold.kinds needs every gold asset to declare one of fact, dimension, wide. Add `kind:` to its header``` |
 | A kind not listed | ``` `gold.stg_orders` declares `kind: staging`, but layers.gold.kinds allows only fact, dimension, wide. Move it to the layer for staging tables, or declare one of those kinds``` |
 | A kind where `kinds: none` | ``` `bronze.orders` declares `kind: staging`, but layers.bronze.kinds is none, so a bronze asset declares no kind. Remove `kind:` from its header``` |

@@ -4,7 +4,9 @@ Pure. The check reads the parsed assets and the declared rules and nothing else:
 lookup, no principal. So whether an issue appears never depends on whether a table exists or may
 be read, and every name in a message is one the deployer wrote. A read issue still carries its
 target and a `withheld` line, because a failed deploy's error reaches every reader of the
-environment (`error_for_reader`).
+environment (`error_for_reader`). Every name goes into a message through `shown`: a quoted SQL
+identifier may hold a line feed, which would otherwise split one issue into two lines and show
+part of a withheld read on the second.
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 
+from lakana_core.identifiers import shown
 from lakana_core.projects.asset_model import ParsedAsset, normalized_write
 from lakana_core.projects.issues import ProjectIssue
 from lakana_core.projects.layers import (
@@ -48,6 +51,22 @@ def asset_write(asset: ParsedAsset) -> str:
     if asset.metadata.materialize == "view":
         return "view"
     return normalized_write(asset.metadata)[0]
+
+
+def _name(asset: ParsedAsset) -> str:
+    """Show the asset's table name safely in a message.
+
+    Parameters
+    ----------
+    asset
+        The asset.
+
+    Returns
+    -------
+    str
+        Its dotted name through `shown`, so a control character cannot start a second line.
+    """
+    return shown(asset.table)
 
 
 def _key(asset: ParsedAsset, key: str) -> str:
@@ -145,10 +164,10 @@ class _Read:
             "references", the name and the `references` key for a reference.
         """
         if self.reference:
-            return f"references `{self.name}` ({_key(asset, 'references')})"
+            return f"references `{shown(self.name)}` ({_key(asset, 'references')})"
         if self.parameter is not None:
-            return f"reads `{self.name}` (input `{self.parameter}`)"
-        return f"reads `{self.name}`"
+            return f"reads `{shown(self.name)}` (input `{shown(self.parameter)}`)"
+        return f"reads `{shown(self.name)}`"
 
 
 def _reference_tables(target: str) -> tuple[str, ...]:
@@ -227,7 +246,7 @@ def _read_text(asset: ParsedAsset, layer: str, rules: LayerRules, read: _Read) -
     str or None
         The message, or `None` when the read is allowed.
     """
-    head = f"`{asset.table}` {read.phrase(asset)}"
+    head = f"`{_name(asset)}` {read.phrase(asset)}"
     target = layer_of(read.name)
     if target is None:
         if layer == SOURCE_LAYER:
@@ -247,7 +266,7 @@ def _read_text(asset: ParsedAsset, layer: str, rules: LayerRules, read: _Read) -
         if target != layer:
             instead = f"Build this table in {target}"
         elif layer == SOURCE_LAYER:
-            instead = f"Read the sources `{read.name}` is built from instead"
+            instead = f"Read the sources `{shown(read.name)}` is built from instead"
         else:
             instead = f"Move this asset to a layer whose reads list {target}"
         return (
@@ -285,7 +304,7 @@ def _write_text(asset: ParsedAsset, layer: str, rules: LayerRules) -> str | None
     allowed = rules.write
     if not allowed:
         return (
-            f"`{asset.table}` is in {layer}, but layers.{layer}.write is empty, so this project "
+            f"`{_name(asset)}` is in {layer}, but layers.{layer}.write is empty, so this project "
             f"builds no {layer} asset. Move the asset to another layer, or list its write mode in "
             f"layers.{layer}.write in lakana.yaml"
         )
@@ -294,12 +313,12 @@ def _write_text(asset: ParsedAsset, layer: str, rules: LayerRules) -> str | None
         return None
     if write == "view":
         return (
-            f"`{asset.table}` is a view (`materialize: view`), but layers.{layer}.write allows "
+            f"`{_name(asset)}` is a view (`materialize: view`), but layers.{layer}.write allows "
             f"only {and_list(allowed)}. Build it as a table, or add view to layers.{layer}.write "
             "in lakana.yaml"
         )
     head = (
-        f"`{asset.table}` is written with `{write}`, but layers.{layer}.write allows only "
+        f"`{_name(asset)}` is written with `{write}`, but layers.{layer}.write allows only "
         f"{and_list(allowed)}."
     )
     add = f"add {write} to layers.{layer}.write in lakana.yaml"
@@ -316,6 +335,29 @@ def _write_text(asset: ParsedAsset, layer: str, rules: LayerRules) -> str | None
         ways.append("build it as a view (`materialize: view` in its header)")
     fix = " or ".join(ways)
     return f"{head} {fix[0].upper()}{fix[1:]}, or {add}"
+
+
+def _closed_to_artifact_text(asset: ParsedAsset, layer: str) -> str:
+    """Refuse an artifact asset in a layer whose `write` is empty.
+
+    Parameters
+    ----------
+    asset
+        The artifact asset.
+    layer
+        Its layer, whose `write` lists nothing.
+
+    Returns
+    -------
+    str
+        The message: an empty `write` closes the layer to every asset, artifacts included,
+        although an artifact has no write mode of its own.
+    """
+    return (
+        f"`{_name(asset)}` is in {layer}, but layers.{layer}.write is empty, so this "
+        f"project builds no {layer} asset, not even an artifact. Move the asset to another "
+        f"layer, or list a write mode in layers.{layer}.write in lakana.yaml to open the layer"
+    )
 
 
 def _kind_text(asset: ParsedAsset, layer: str, rules: LayerRules) -> str | None:
@@ -340,7 +382,7 @@ def _kind_text(asset: ParsedAsset, layer: str, rules: LayerRules) -> str | None:
         if kind is None:
             return None
         return (
-            f"`{asset.table}` declares {_spelled(asset, 'kind', kind)}, but layers.{layer}.kinds "
+            f"`{_name(asset)}` declares {_spelled(asset, 'kind', kind)}, but layers.{layer}.kinds "
             f"is none, so a {layer} asset declares no kind. Remove {_key(asset, 'kind')} from its "
             f"{_home(asset)}"
         )
@@ -348,14 +390,14 @@ def _kind_text(asset: ParsedAsset, layer: str, rules: LayerRules) -> str | None:
     if kind is None:
         need = f"one of {listed}" if len(kinds) > 1 else kinds[0]
         return (
-            f"`{asset.table}` declares no kind, but layers.{layer}.kinds needs every {layer} "
+            f"`{_name(asset)}` declares no kind, but layers.{layer}.kinds needs every {layer} "
             f"asset to declare {need}. Add {_key(asset, 'kind')} to its {_home(asset)}"
         )
     if kind in kinds:
         return None
     other = "one of those kinds" if len(kinds) > 1 else _spelled(asset, "kind", kinds[0])
     return (
-        f"`{asset.table}` declares {_spelled(asset, 'kind', kind)}, but layers.{layer}.kinds "
+        f"`{_name(asset)}` declares {_spelled(asset, 'kind', kind)}, but layers.{layer}.kinds "
         f"allows only {listed}. Move it to the layer for {kind} tables, or declare {other}"
     )
 
@@ -375,10 +417,10 @@ def _outside_text(asset: ParsedAsset) -> str:
         The message, with the file and name the asset would have in gold.
     """
     gold = LAYERS[-1]
-    file = PurePosixPath(asset.path).name
-    name = asset.table.rpartition(".")[2]
+    file = shown(PurePosixPath(asset.path).name)
+    name = shown(asset.table.rpartition(".")[2])
     return (
-        f"`{asset.table}` is outside {_EVERY_LAYER}, but a project with `layers:` builds every "
+        f"`{_name(asset)}` is outside {_EVERY_LAYER}, but a project with `layers:` builds every "
         f"asset in one of them. Move it to the layer whose assets read it, such as "
         f"assets/{gold}/{file} for {gold}.{name}"
     )
@@ -397,22 +439,21 @@ def _asset_issues(layers: LayersConfig, asset: ParsedAsset) -> list[ProjectIssue
     Returns
     -------
     list of ProjectIssue
-        Outside the layers: that one issue. Otherwise its write and kind issues (not for an
-        artifact), then one per offending read (with `targets` and `withheld`), then one per
-        connection outside bronze.
+        Outside the layers: that one issue. Otherwise its write and kind issues (for an
+        artifact only the refusal of a layer whose `write` is empty), then one per offending
+        read (with `targets` and `withheld`), then one per connection outside bronze.
     """
     block = asset.block_line or asset.body_line
     layer = layer_of(asset.table)
     if layer is None:
         return [ProjectIssue(asset.path, block, _outside_text(asset))]
     rules = layers.for_layer(layer)
-    texts = (
-        []
-        if asset.output == "artifact"
-        else [_write_text(asset, layer, rules), _kind_text(asset, layer, rules)]
-    )
+    if asset.output == "artifact":
+        texts = [] if rules.write else [_closed_to_artifact_text(asset, layer)]
+    else:
+        texts = [_write_text(asset, layer, rules), _kind_text(asset, layer, rules)]
     issues = [ProjectIssue(asset.path, block, text) for text in texts if text is not None]
-    withheld = f"`{asset.table}` breaks layers.{layer}.reads with a read that is not shown to you"
+    withheld = f"`{_name(asset)}` breaks layers.{layer}.reads with a read that is not shown to you"
     for read in _reads(asset):
         text = _read_text(asset, layer, rules, read)
         if text is not None:
@@ -424,7 +465,7 @@ def _asset_issues(layers: LayersConfig, asset: ParsedAsset) -> list[ProjectIssue
             ProjectIssue(
                 asset.path,
                 block,
-                f"`{asset.table}` declares connection `{connection}`, a source, and only "
+                f"`{_name(asset)}` declares connection `{shown(connection)}`, a source, and only "
                 f"{SOURCE_LAYER} reads sources (layers.{layer}.reads). Move the asset to "
                 f"assets/{SOURCE_LAYER}/, then build {layer} from the {SOURCE_LAYER} table",
             )

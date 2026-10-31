@@ -487,8 +487,12 @@ read issue (a SQL table, a Python input, a `references:` target, a source) carri
 `targets=(read,)` and `withheld` = ``` `<asset>` breaks layers.<layer>.reads with a read that is
 not shown to you```, swapped in by position through `error_for_reader`. A long-form reference
 `a.b.c` carries both readings (`a.b.c` and `a.b`), so a reader sees it only when it may read both.
-Write, kind, connection and outside-the-layers issues name only the asset, which the version view
-shows anyway, and carry no targets. Pins:
+Write, kind and outside-the-layers issues name only the asset, and a connection issue the asset and
+its connection; the version view shows both anyway, so they carry no targets. Every name in a layer
+message goes through `shown()`: a quoted SQL identifier may hold a line feed or an escape, and raw it
+would split one issue into two lines, so `error_for_reader`, which swaps a line by position, would
+leave the second half of a withheld read visible
+(`test_a_read_name_with_a_control_character_is_escaped_and_withheld_whole`). Pins:
 `test_a_read_issue_is_withheld_from_a_reader_who_may_not_read_the_target`,
 `test_a_long_form_reference_is_classified_by_its_first_part_and_withheld_by_both_readings`,
 `test_layer_issues_come_after_the_reference_issues`,
@@ -503,6 +507,10 @@ shows anyway, and carry no targets. Pins:
   `table 'x' not found` line at the same place, so withholding protects only tables that exist;
   a withheld line with no not-found line beside it tells the reader that the hidden table exists
   and the deployer may read it, or that this project or another repository builds it.
+- The rule: the withheld line names the rule it breaks (`layers.gold.reads`), and the rules are in
+  every project version's `manifest["layers"]`, which any `READ_ENVIRONMENT` reader sees. So the
+  reader learns which group the hidden read is in: under the medallion default, a withheld line on
+  a gold asset means a bronze table or a source.
 
 ## Table health: who sees the readers
 

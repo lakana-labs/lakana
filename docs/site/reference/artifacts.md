@@ -143,8 +143,8 @@ def big_spenders(rule: Path, customers: pl.DataFrame) -> pl.DataFrame:
 ```
 
 With `layers:` in `lakana.yaml`, an artifact asset must be under `assets/bronze/`,
-`assets/silver/` or `assets/gold/`, and follows that layer's `reads`
-([`layers`](lakana-yaml.md#layers)).
+`assets/silver/` or `assets/gold/`, and follows that layer's `reads`; a layer whose `write` is
+empty refuses it ([`layers`](lakana-yaml.md#layers)).
 
 ### Failures while a run goes
 

@@ -324,6 +324,20 @@ def test_an_empty_write_list_closes_the_layer() -> None:
     ]
 
 
+def test_an_empty_write_list_closes_the_layer_to_an_artifact_too() -> None:
+    closed = _layers(gold=LayerRules(reads=("silver", "gold"), write=(), kinds=("fact",)))
+    assert _issues(_artifact("gold.churn_model", "silver.training_set"), layers=closed) == [
+        (
+            "assets/gold/churn_model.py",
+            7,
+            "`gold.churn_model` is in gold, but layers.gold.write is empty, so this project "
+            "builds no gold asset, not even an artifact. Move the asset to another layer, or "
+            "list a write mode in layers.gold.write in lakana.yaml to open the layer",
+        )
+    ]
+    assert _issues(_artifact("gold.churn_model", "silver.training_set")) == []
+
+
 def test_a_kind_missing() -> None:
     assert _issues(_sql("gold.daily_sales", "SELECT 1 AS day FROM silver.days\n")) == [
         (
@@ -646,3 +660,34 @@ def test_the_hint_counts_the_assets_of_each_layer() -> None:
         "layer rules: 1 asset follows them (bronze 0, silver 1, gold 0)",
     )
     assert layer_hints(None, assets) == ()
+
+
+def test_a_read_name_with_a_control_character_is_escaped_and_withheld_whole() -> None:
+    for raw, escaped in (
+        ("gold.sal\nary", "gold.sal\\nary"),
+        ("gold.sal\x1bary", "gold.sal\\x1bary"),
+    ):
+        quoted = raw.replace("gold.", 'gold."', 1) + '"'
+        asset = _sql("silver.s", f"/* lakana\nkind: staging\n*/\nSELECT * FROM {quoted}\n")
+        [issue] = layer_issues(MEDALLION_LAYERS, [asset])
+        assert issue.targets == (raw,)
+        assert issue.message == (
+            f"`silver.s` reads `{escaped}`, which is in gold, but layers.silver.reads allows only "
+            "bronze and silver. Read the data from bronze or silver instead, or add gold to "
+            "layers.silver.reads in lakana.yaml"
+        )
+        rendered = issue.render()
+        assert "\n" not in rendered and "\x1b" not in rendered
+        shown = error_for_reader(rendered, withheld_lines([issue]), lambda name: False)
+        assert shown == (
+            "assets/silver/s.sql:4: `silver.s` breaks layers.silver.reads with a read that is "
+            "not shown to you"
+        )
+        assert "sal" not in shown and "ary" not in shown
+
+
+def test_a_source_name_with_a_control_character_is_escaped() -> None:
+    asset = _sql("silver.s", '/* lakana\nkind: staging\n*/\nSELECT * FROM raw."x\ny"\n')
+    [issue] = layer_issues(MEDALLION_LAYERS, [asset])
+    assert issue.message.startswith("`silver.s` reads `raw.x\\ny`, which is outside bronze")
+    assert "\n" not in issue.render()

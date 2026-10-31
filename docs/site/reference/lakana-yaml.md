@@ -116,7 +116,7 @@ layers:
 | Rule | Lists | Meaning |
 |---|---|---|
 | `reads` | layers: `bronze`, `silver`, `gold` | The layers an asset of this layer may read: its SQL, its Python inputs and its `references:` targets. A layer reads itself only when it lists itself. A table outside the three layers (a raw-zone table, a catalog artifact) or a connection is a **source**, and only bronze reads sources. `reads: []` means "sources only" for bronze and "nothing" for silver and gold. |
-| `write` | `replace`, `append`, `merge`, `view` | The ways its assets may store their result. `materialize: view` counts as `view`, `materialize: incremental` as `append`; an asset that says nothing is `replace`. `write: []` means the project builds no asset in this layer. |
+| `write` | `replace`, `append`, `merge`, `view` | The ways its assets may store their result. `materialize: view` counts as `view`, `materialize: incremental` as `append`; an asset that says nothing is `replace`. `write: []` means the project builds no asset in this layer, not even an artifact. |
 | `kinds` | `none`, or `fact`, `dimension`, `wide`, `staging` | `none`: no asset of the layer declares `kind:`. A list: every asset declares one of them. There is no `any`. |
 
 - Once `layers:` is there, all three layers and all three rules are required: a rule you did not
@@ -124,7 +124,7 @@ layers:
 - `layers:` applies to the whole project: an `environments:` override cannot set it.
 - No asset can switch a rule off; rules change only here.
 - An artifact asset obeys `reads` only, and must live in a layer (`gold.churn_model`, not
-  `models.churn_model`).
+  `models.churn_model`) whose `write` is not empty.
 - Checks under `checks/` are not reads: a gold check may compare with bronze.
 - How to adopt the rules and fix what a deploy says: [Keep layers apart](../how-to/keep-layers-apart.md).
 
