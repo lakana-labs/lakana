@@ -26,6 +26,7 @@ from lakana_core.catalog.model_metadata import (
     write_model_entry,
 )
 from lakana_core.catalog.service import CatalogService
+from lakana_core.catalog.texts import TextChooser
 from lakana_core.identifiers import NamespacePath, TableRef
 from lakana_core.models import (
     DeclaredMeasure,
@@ -532,7 +533,9 @@ def test_a_new_table_with_measures_gets_them_on_creation(
 def test_model_view_shows_every_measure_with_its_id(session: Session, fact_row: Table) -> None:
     write_model_entry(session, fact_row, _entry(_STOCK, _AMOUNT))
     session.commit()
-    view = model_view(session, fact_row, _FACT, lambda target: False, lambda *_: False)
+    view = model_view(
+        session, fact_row, _FACT, lambda target: False, lambda *_: False, TextChooser("en", [], [])
+    )
     assert view is not None
     assert [(m.id, m.additivity, m.not_over) for m in view.measures] == [
         ("gold.fact_sales/measure_amount", "additive", ()),

@@ -196,12 +196,21 @@ def test_table_get_shows_the_columns(tmp_path: Path) -> None:
 
     assert table_mode.exit_code == 0, table_mode.stderr
     assert "region" in table_mode.stdout
+    header = next(line for line in table_mode.stdout.splitlines() if "nullable" in line)
+    assert header.split() == [
+        "┃", "name", "┃", "type", "┃", "nullable", "┃", "description", "┃",
+        "description_source", "┃",
+    ]  # fmt: skip
     assert json.loads(json_mode.stdout)["columns"][0] == {
         "name": "id",
         "type": "long",
         "nullable": False,
         "description": None,
         "description_source": None,
+        "label": None,
+        "label_source": None,
+        "label_language": None,
+        "description_language": None,
     }
 
 
@@ -304,11 +313,15 @@ def test_table_describe_reset_sends_null_for_a_table_and_for_a_column(tmp_path: 
 
     assert table.exit_code == 0, table.stderr
     assert column.exit_code == 0, column.stderr
-    assert [json.loads(r.content) for r in api.requests] == [{"description": None}] * 2
+    assert [json.loads(r.content) for r in api.requests] == [
+        {"description": None, "label": None}
+    ] * 2
     assert "project" in table.stdout
+    reset_line = "Reset the description and label of bronze.sales in dev (en); it now shows"
+    assert f"{reset_line} the project's text" in _plain(table.stdout)
 
 
-@pytest.mark.parametrize("flags", [[], ["--text", "a", "--reset"]])
+@pytest.mark.parametrize("flags", [[], ["--text", "a", "--reset"], ["--label", "a", "--reset"]])
 def test_table_describe_needs_exactly_one_of_text_and_reset(
     tmp_path: Path, flags: list[str]
 ) -> None:
@@ -319,11 +332,129 @@ def test_table_describe_needs_exactly_one_of_text_and_reset(
     )
 
     assert result.exit_code != 0
-    assert "--text" in _plain(result.stderr) and "--reset" in _plain(result.stderr)
+    assert (
+        "Give --text TEXT and/or --label LABEL to set, or --reset to go back to the project's "
+        "texts."
+    ) in _plain(result.stderr)
     assert api.requests == []
     assert "--text" in _plain(
         invoke(make_state(tmp_path, api), "table", "describe", "--help").stdout
     )
+
+
+def test_table_describe_sets_a_label_in_a_language(tmp_path: Path) -> None:
+    api = FakeApi()
+    api.on(
+        "PATCH",
+        f"{_BASE}/sales",
+        json={**_TABLE, "label": "Ventes", "label_language": "fr", "language": "fr"},
+    )
+    result = invoke(
+        make_state(tmp_path, api),
+        "table",
+        "describe",
+        "bronze.sales",
+        "--label",
+        "Ventes",
+        "--lang",
+        "fr",
+        "--env",
+        "dev",
+    )
+    assert result.exit_code == 0, result.stderr
+    assert json.loads(api.requests[-1].content) == {"label": "Ventes"}
+    assert api.requests[-1].url.params["lang"] == "fr"
+    assert "Described bronze.sales in dev (fr)" in result.stdout
+
+
+def test_table_describe_without_lang_names_the_main_language(tmp_path: Path) -> None:
+    api = FakeApi()
+    api.on(
+        "PATCH",
+        f"{_BASE}/sales",
+        json={
+            **_TABLE,
+            "description": "Hi",
+            "description_source": "edited",
+            "main_language": "de",
+        },
+    )
+    result = invoke(
+        make_state(tmp_path, api),
+        "table",
+        "describe",
+        "bronze.sales",
+        "--text",
+        "Hi",
+        "--env",
+        "dev",
+    )
+    assert result.exit_code == 0, result.stderr
+    assert "lang" not in api.requests[-1].url.params
+    assert "Described bronze.sales in dev (de)" in result.stdout
+
+
+def test_table_describe_reset_of_a_column_in_a_language_says_what_shows(tmp_path: Path) -> None:
+    api = FakeApi()
+    api.on("PUT", f"{_BASE}/sales/columns/id/description", json=_TABLE)
+    result = invoke(
+        make_state(tmp_path, api),
+        "table",
+        "describe",
+        "bronze.sales",
+        "--column",
+        "id",
+        "--reset",
+        "--lang",
+        "fr",
+        "--env",
+        "dev",
+    )
+    assert result.exit_code == 0, result.stderr
+    assert (
+        "Reset the description and label of bronze.sales column id in dev (fr); it now has no text"
+        in (_plain(result.stdout))
+    )
+
+
+@pytest.mark.parametrize(
+    ("answer", "after"),
+    [
+        (
+            {"description": "Hand", "description_source": "edited", "description_language": "en"},
+            "it now shows an edit in en",
+        ),
+        (
+            {
+                "description": "From git",
+                "description_source": "project",
+                "description_language": "en",
+                "label": "Hand",
+                "label_source": "edited",
+                "label_language": "de",
+            },
+            "it now shows an edit and the project's text in de, en",
+        ),
+    ],
+)
+def test_table_describe_reset_says_which_text_shows_now_and_in_which_language(
+    tmp_path: Path, answer: dict[str, str], after: str
+) -> None:
+    api = FakeApi()
+    api.on("PATCH", f"{_BASE}/sales", json={**_TABLE, **answer})
+    result = invoke(
+        make_state(tmp_path, api),
+        "table",
+        "describe",
+        "bronze.sales",
+        "--reset",
+        "--lang",
+        "fr",
+        "--env",
+        "dev",
+    )
+    assert result.exit_code == 0, result.stderr
+    assert f"in dev (fr); {after}" in _plain(result.stdout)
 
 
 def test_table_append_conforms_a_csv_and_streams_it(tmp_path: Path) -> None:
@@ -1963,7 +2094,9 @@ def test_table_get_json_carries_the_measures(tmp_path: Path) -> None:
         "dev",
     )
     assert result.exit_code == 0, result.stderr
-    assert json.loads(result.stdout)["model"]["measures"] == [_AMOUNT]
+    assert json.loads(result.stdout)["model"]["measures"] == [
+        {**_AMOUNT, "label_language": None, "description_language": None}
+    ]
 
 
 def test_table_get_says_key_none_and_counts_hidden_references(tmp_path: Path) -> None:
@@ -2151,3 +2284,97 @@ def test_table_health_with_only_withheld_checks_says_so_and_not_none(tmp_path: P
     plain = _plain(result.stdout)
     assert "2 checks of references to tables you cannot read are not shown." in plain
     assert "none recorded" not in plain
+
+
+def test_table_get_shows_the_label_the_languages_and_the_coverage(tmp_path: Path) -> None:
+    """`table get --lang` sends `lang` and shows the label, a text's language and the coverage."""
+    api = FakeApi()
+    api.on(
+        "GET",
+        f"{_FACT_BASE}/fact_sales",
+        json={
+            **_FACT,
+            "label": "Ventes",
+            "label_source": "project",
+            "label_language": "fr",
+            "description": "One row per sale.",
+            "description_source": "project",
+            "description_language": "en",
+            "language": "fr",
+            "main_language": "en",
+            "translations": [{"language": "fr", "translated": 2, "total": 4}],
+        },
+    )
+    result = invoke(
+        make_state(tmp_path, api),
+        "table",
+        "get",
+        "gold.fact_sales",
+        "--env",
+        "dev",
+        "--lang",
+        "fr",
+        env={"COLUMNS": "200"},
+    )
+    assert result.exit_code == 0, result.stderr
+    assert api.requests[-1].url.params["lang"] == "fr"
+    assert "Label: Ventes" in result.stdout
+    assert "Description (from the project) [en]: One row per sale." in result.stdout
+    assert "Translations: fr 2 of 4" in result.stdout
+
+
+def test_table_get_marks_each_text_in_another_language(tmp_path: Path) -> None:
+    """Column labels get their own column; a text not in the asked-for language says its own."""
+    same = _get_fact(tmp_path, {**_MODEL, "grain_language": "en"})
+    assert "Grain: One row per store and day." in same
+    api = FakeApi()
+    api.on(
+        "GET",
+        f"{_FACT_BASE}/fact_sales",
+        json={
+            **_FACT,
+            "schema": [
+                {**_COLUMNS[0], "label": "Identifiant", "label_language": "fr"},
+                {**_COLUMNS[1], "description": "The region.", "description_language": "en"},
+            ],
+            "label": "Ventes",
+            "label_source": "edited",
+            "label_language": "fr",
+            "language": "fr",
+            "main_language": "en",
+            "model": {
+                **_MODEL,
+                "grain_language": "en",
+                "measures": [{**_AMOUNT, "label": "Amount", "label_language": "en"}],
+            },
+        },
+    )
+    result = invoke(
+        make_state(tmp_path, api),
+        "table",
+        "get",
+        "gold.fact_sales",
+        "--env",
+        "dev",
+        "--lang",
+        "fr",
+        env={"COLUMNS": "200"},
+    )
+    assert result.exit_code == 0, result.stderr
+    assert "Label (edited): Ventes" in result.stdout
+    assert "Grain [en]: One row per store and day." in result.stdout
+    assert "  amount: sum, additive, EUR — Amount [en]\n" in result.stdout
+    plain = _plain(result.stdout)
+    assert "label" in plain
+    assert "Identifiant " in plain and "Identifiant [" not in plain
+    assert "The region. [en]" in plain
+
+
+def test_table_list_passes_lang(tmp_path: Path) -> None:
+    api = FakeApi()
+    api.on("GET", _FACT_BASE, json=[_FACT])
+    result = invoke(
+        make_state(tmp_path, api), "table", "list", "gold", "--lang", "de", "--env", "dev"
+    )
+    assert result.exit_code == 0, result.stderr
+    assert dict(api.requests[-1].url.params) == {"lang": "de"}

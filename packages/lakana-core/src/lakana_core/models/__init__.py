@@ -18,6 +18,7 @@ from lakana_core.models.table import Table, TableType
 from lakana_core.models.table_column import TableColumn
 from lakana_core.models.declared_reference import DeclaredReference
 from lakana_core.models.declared_measure import DeclaredMeasure
+from lakana_core.models.text_translation import TextTranslation
 from lakana_core.models.table_location import TableLocation, TableLocationState
 from lakana_core.models.table_read import TableRead
 from lakana_core.models.artifact import ArtifactBlob, ArtifactUpload, ArtifactVersion
@@ -124,6 +125,7 @@ __all__ = [
     "TaskRun",
     "TaskStatus",
     "TaskToken",
+    "TextTranslation",
     "TimestampMixin",
     "Worker",
     "WriteMode",

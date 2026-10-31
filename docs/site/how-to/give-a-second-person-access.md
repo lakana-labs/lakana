@@ -115,6 +115,7 @@ lakana sql "SELECT count(*) AS visits FROM silver.visits"
 │ type       │ USER  │
 │ task_token │       │
 │ ci_token   │       │
+│ language   │       │
 └────────────┴───────┘
 ┏━━━━━━━━┓
 ┃ visits ┃

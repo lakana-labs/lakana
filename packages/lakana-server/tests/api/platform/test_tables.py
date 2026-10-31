@@ -21,6 +21,7 @@ from pyiceberg.schema import Schema
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
+from lakana_core.catalog.descriptions import sync_project_descriptions
 from lakana_core.catalog.model_metadata import write_model_entry
 from lakana_core.catalog.service import LoadedTable
 from lakana_core.identifiers import NamespacePath, TableRef
@@ -138,9 +139,10 @@ def test_to_out_builds_the_response_body_from_a_loaded_table() -> None:
             uuid=table_uuid,
             metadata_location="file:///tmp/x.json",
             metadata=SimpleNamespace(schema=lambda: Schema(), current_snapshot_id=42),
+            text_language=None,
         ),
     )
-    assert _to_out("gold", loaded) == TableOut(
+    assert _to_out("gold", loaded, language="en", main_language="en") == TableOut(
         name="sales",
         namespace="gold",
         uuid=str(table_uuid),
@@ -750,6 +752,7 @@ def test_a_table_carries_its_model_and_a_plain_table_none(client: TestClient) ->
     assert fact.json()["model"] == {
         "kind": "fact",
         "grain": "One row per store and day.",
+        "grain_language": "en",
         "key": ["date", "store_id"],
         "key_none": False,
         "references": [
@@ -864,6 +867,56 @@ def test_a_reader_of_one_table_sees_only_counts_of_the_others(client: TestClient
     assert "dim_store" not in str(fact)
 
 
+def test_a_withheld_reference_target_leaves_none_of_its_texts_in_the_model(
+    client: TestClient,
+) -> None:
+    _star(client)
+    with Session(client.app.state.engine) as session:
+        env = session.scalars(select(Environment.id).where(Environment.name == "dev")).one()
+        rows = {r.name: r for r in session.scalars(select(Table))}
+        for name, label, translated in (
+            ("dim_store", "Stores", "Magasins"),
+            ("fact_sales", "Sales", "Ventes"),
+        ):
+            sync_project_descriptions(
+                session,
+                env,
+                {
+                    "version": 11,
+                    "main_language": "en",
+                    "assets": [
+                        {
+                            "table": f"gold.{name}",
+                            "metadata": {
+                                "label": label,
+                                "translations": {"fr": {"label": translated}},
+                            },
+                        }
+                    ],
+                },
+            )
+        write_model_entry(
+            session,
+            rows["fact_sales"],
+            {
+                "write": "replace",
+                "key": ["date", "store_id"],
+                "model": {
+                    "kind": "fact",
+                    "grain": "One row per store and day.",
+                    "references": [
+                        {"column": "store_id", "target": "gold.dim_store", "target_column": "id"}
+                    ],
+                },
+            },
+        )
+        session.commit()
+    of_fact = _table_reader(client, "fred", "fact_sales")
+    fact = client.get(f"{_GOLD_TABLES}/fact_sales", params={"lang": "fr"}, headers=of_fact).json()
+    assert (fact["label"], fact["model"]["hidden_references"]) == ("Ventes", 1)
+    assert not any(text in str(fact) for text in ("dim_store", "Magasins", "Stores"))
+
+
 _SALES_MEASURE = {
     "column": "id",
     "aggregation": "count_distinct",
@@ -875,6 +928,9 @@ _SALES_MEASURE = {
     "description": None,
 }
 """The measure `_star_with_a_measure` declares on `gold.fact_sales`."""
+
+_SALES_MEASURE_SHOWN = {**_SALES_MEASURE, "label_language": "en", "description_language": None}
+"""`_SALES_MEASURE` as REST shows it, each text with its language."""
 
 
 def _star_with_a_measure(client: TestClient) -> None:
@@ -922,7 +978,9 @@ def test_a_reader_sees_every_measure_even_on_a_masked_column(client: TestClient)
     )
     assert masked.status_code == 201, masked.text
     body = client.get(f"{_GOLD_TABLES}/fact_sales", headers=reader).json()
-    assert body["model"]["measures"] == [{"id": "gold.fact_sales/measure_id", **_SALES_MEASURE}]
+    assert body["model"]["measures"] == [
+        {"id": "gold.fact_sales/measure_id", **_SALES_MEASURE_SHOWN}
+    ]
     outsider = _table_reader(client, "olga", "notes")
     assert client.get(f"{_GOLD_TABLES}/fact_sales", headers=outsider).status_code == 403
 
@@ -940,4 +998,6 @@ def test_a_measure_id_follows_a_rename_of_its_table(client: TestClient) -> None:
     )
     assert renamed.status_code == 200, renamed.text
     body = client.get(f"{_GOLD_TABLES}/fact_orders", headers=AUTH_HEADER).json()
-    assert body["model"]["measures"] == [{"id": "gold.fact_orders/measure_id", **_SALES_MEASURE}]
+    assert body["model"]["measures"] == [
+        {"id": "gold.fact_orders/measure_id", **_SALES_MEASURE_SHOWN}
+    ]

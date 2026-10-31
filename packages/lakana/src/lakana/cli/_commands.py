@@ -11,6 +11,7 @@ from __future__ import annotations
 
 COMMANDS: dict[str, tuple[str, ...]] = {
     "whoami": ("client.whoami",),
+    "me set": ("client.set_language",),
     "search": ("client.search",),
     "env create": ("environments.create",),
     "env list": ("environments.list",),

@@ -356,4 +356,6 @@ class PatService:
             raise AuthenticationError("This principal is not active.")
         pat.last_used_at = datetime.now(UTC)
         self._session.commit()
-        return PrincipalRef(id=principal.id, name=principal.name, type=principal.type)
+        return PrincipalRef(
+            id=principal.id, name=principal.name, type=principal.type, language=principal.language
+        )

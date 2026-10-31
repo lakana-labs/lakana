@@ -175,3 +175,16 @@ def test_the_server_does_not_start_with_issuers_and_no_audience(
     monkeypatch.setenv("LAKANA_CI_OIDC__ISSUERS", "github")
     with pytest.raises(pydantic.ValidationError, match="LAKANA_CI_OIDC__AUDIENCE is required"):
         Settings()
+
+
+def test_a_main_language_that_is_not_a_tag_stops_the_start(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """`LAKANA_MAIN_LANGUAGE` defaults to `en`, takes a tag and refuses anything else."""
+    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{tmp_path}/p.db")
+    assert Settings().main_language == "en"
+    monkeypatch.setenv("LAKANA_MAIN_LANGUAGE", "de-CH")
+    assert Settings().main_language == "de-CH"
+    monkeypatch.setenv("LAKANA_MAIN_LANGUAGE", "English")
+    with pytest.raises(pydantic.ValidationError, match="is not a language tag Lakana takes"):
+        Settings()

@@ -13,7 +13,7 @@ import pytest
 from core_test_helpers import _prepared_catalog, python_task_run
 from pyiceberg.schema import Schema
 from pyiceberg.types import LongType, NestedField
-from sqlalchemy import select, update
+from sqlalchemy import event, select, update
 from sqlalchemy.orm import Session
 
 from lakana_core.auth import (
@@ -24,6 +24,7 @@ from lakana_core.auth import (
     Securable,
     SecurableKind,
 )
+from lakana_core.catalog.descriptions import sync_project_descriptions
 from lakana_core.catalog.json_schema import ColumnSpec
 from lakana_core.catalog.model_metadata import write_model_entry
 from lakana_core.catalog.service import CatalogService
@@ -788,3 +789,108 @@ def test_a_measures_check_result_shows_while_the_header_declares_measures(star: 
     star.write_model("fact_sales", entry)
     after = catalog.describe_table(star.admin, star.fact_ref).model
     assert after is not None and [c.check for c in after.checks] == ["key_unique", "measures"]
+
+
+def _texts(star: Star) -> None:
+    """Give `gold.fact_sales` an English label, description and grain, and two French texts.
+
+    Parameters
+    ----------
+    star
+        The fixture.
+    """
+    env = star.session.scalars(select(Environment.id).where(Environment.name == "dev")).one()
+    entry = {
+        **_fact_entry(("store_id", "gold.dim_store")),
+        "table": "gold.fact_sales",
+        "metadata": {
+            "label": "Daily sales",
+            "description": "One row per store and day.",
+            "translations": {"fr": {"label": "Ventes", "grain": "Une ligne par magasin et jour."}},
+        },
+    }
+    sync_project_descriptions(
+        star.session, env, {"version": 11, "main_language": "en", "assets": [entry]}
+    )
+    star.session.commit()
+
+
+def test_describe_table_shows_each_text_in_the_readers_language(star: Star) -> None:
+    _texts(star)
+    described = star.catalog(AllowAllAuthorization()).describe_table(
+        star.admin, star.fact_ref, languages=["fr"]
+    )
+    assert (described.label, described.label_language) == ("Ventes", "fr")
+    assert (described.description, described.description_language) == (
+        "One row per store and day.",
+        "en",
+    )
+    assert (described.language, described.main_language) == ("fr", "en")
+    assert described.model is not None
+    assert (described.model.grain, described.model.grain_language) == (
+        "Une ligne par magasin et jour.",
+        "fr",
+    )
+    assert [(c.language, c.translated, c.total) for c in described.translations] == [("fr", 2, 3)]
+
+
+def test_a_table_without_translations_costs_no_extra_statement(star: Star) -> None:
+    seen: list[str] = []
+
+    def record(conn: object, cursor: object, statement: str, *rest: object) -> None:
+        seen.append(statement)
+
+    engine = star.session.get_bind()
+    event.listen(engine, "before_cursor_execute", record)
+    try:
+        star.catalog(AllowAllAuthorization()).describe_table(
+            star.admin, star.dim_ref, languages=["fr"]
+        )
+    finally:
+        event.remove(engine, "before_cursor_execute", record)
+    assert seen and not [s for s in seen if "text_translations" in s]
+
+
+def test_measures_and_columns_show_in_the_readers_language_with_their_coverage(star: Star) -> None:
+    catalog = star.catalog(AllowAllAuthorization())
+    column = catalog.describe_table(star.admin, star.fact_ref).columns[0].name
+    env = star.session.scalars(select(Environment.id).where(Environment.name == "dev")).one()
+    entry = _fact_entry(("store_id", "gold.dim_store"))
+    cast("dict[str, object]", entry["model"])["measures"] = [
+        {
+            "column": "amount",
+            "aggregation": "sum",
+            "additivity": "additive",
+            "not_over": [],
+            "unit": None,
+            "currency": "EUR",
+            "label": "Amount",
+            "description": "Money taken.",
+        }
+    ]
+    entry["table"] = "gold.fact_sales"
+    entry["metadata"] = {
+        "columns": {column: "The first."},
+        "translations": {
+            "fr": {
+                "columns": {column: {"label": "Premier", "description": "La première."}},
+                "measures": {"amount": {"label": "Montant"}},
+            }
+        },
+    }
+    sync_project_descriptions(star.session, env, {"version": 11, "assets": [entry]})
+    star.session.commit()
+    described = catalog.describe_table(star.admin, star.fact_ref, languages=["fr-CH"])
+    assert described.model is not None
+    (measure,) = described.model.measures
+    assert (measure.label, measure.label_language) == ("Montant", "fr")
+    assert (measure.description, measure.description_language) == ("Money taken.", "en")
+    shown = described.column_descriptions[column]
+    assert (shown.text, shown.language) == ("La première.", "fr")
+    assert (described.column_labels[column].text, described.column_labels[column].language) == (
+        "Premier",
+        "fr",
+    )
+    assert [(c.language, c.translated, c.total) for c in described.translations] == [("fr", 2, 4)]
+    assert (described.label, described.label_language) == (None, None)
+    assert described.language == "fr-CH"

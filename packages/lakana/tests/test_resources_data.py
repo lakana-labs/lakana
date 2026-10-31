@@ -41,6 +41,7 @@ from lakana._models import (
     Table,
     TableReference,
     TableReferences,
+    TranslationCoverage,
     WaitingFor,
     WriteResult,
 )
@@ -3030,7 +3031,7 @@ def test_model_from_json_reads_measures_and_an_older_server_without_them() -> No
     )
 
 
-def test_tables_list_sends_the_model_kind_only_when_given() -> None:
+def test_tables_list_sends_the_model_kind_and_lang_only_when_given() -> None:
     seen: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -3040,8 +3041,13 @@ def test_tables_list_sends_the_model_kind_only_when_given() -> None:
     tables = Tables(_transport(handler))
     tables.list("dev", "gold")
     (fact,) = tables.list("dev", "gold", model_kind="fact")
+    tables.list("dev", "gold", model_kind="fact", lang="de")
 
-    assert [dict(r.url.params) for r in seen] == [{}, {"model_kind": "fact"}]
+    assert [dict(r.url.params) for r in seen] == [
+        {},
+        {"model_kind": "fact"},
+        {"model_kind": "fact", "lang": "de"},
+    ]
     assert fact.model is not None
 
 
@@ -3148,3 +3154,41 @@ def test_checks_iter_follows_the_cursor_to_the_last_page() -> None:
     found = list(Checks(_transport(handler)).iter("dev", page_size=1))
     assert [c.check for c in found] == ["c1", "c2"]
     assert [r.url.params.get("cursor") for r in seen] == [None, "c2"]
+
+
+def test_tables_get_sends_lang_and_reads_the_markers() -> None:
+    """`get(lang=)` sends `?lang=` and reads every language marker and the coverage."""
+    seen: list[httpx.Request] = []
+    body = {
+        **_MODEL_TABLE,
+        "label": "Ventes",
+        "label_source": "project",
+        "label_language": "fr",
+        "description_language": "en",
+        "language": "fr",
+        "main_language": "en",
+        "translations": [{"language": "fr", "translated": 2, "total": 4}],
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json=body)
+
+    table = Tables(_transport(handler)).get("dev", "gold.fact_sales", lang="fr")
+    assert dict(seen[0].url.params) == {"lang": "fr"}
+    assert (table.label, table.label_language, table.language, table.main_language) == (
+        "Ventes",
+        "fr",
+        "fr",
+        "en",
+    )
+    assert table.translations == (TranslationCoverage("fr", 2, 4),)
+
+
+def test_tables_get_reads_no_markers_from_an_older_server() -> None:
+    """An answer without the language fields reads as main-language `en` with no texts."""
+    table = Tables(_transport(lambda _: httpx.Response(200, json=_MODEL_TABLE))).get(
+        "dev", "gold.fact_sales"
+    )
+    assert (table.label, table.label_language, table.translations) == (None, None, ())
+    assert table.language == table.main_language == "en"

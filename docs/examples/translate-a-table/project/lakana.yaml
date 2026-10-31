@@ -1,0 +1,5 @@
+# Lakana project. Reference: https://lakana-labs.github.io/lakana/how-to/projects/
+repo: shop
+main_language: en
+defaults:
+  materialize: table

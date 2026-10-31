@@ -31,6 +31,10 @@ class Principal(Base, TimestampMixin):
     type: Mapped[PrincipalType] = mapped_column(Enum(PrincipalType, native_enum=False))
     name: Mapped[str] = mapped_column(String(255), unique=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    language: Mapped[str | None] = mapped_column(String(35), nullable=True, default=None)
+    """The language this principal reads catalog texts in (a canonical BCP 47 tag), or `None`.
+    A reader's order is `?lang=`, then this (when set), then `Accept-Language`, then the main
+    language."""
     query_passed_by_until: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     """Until when workers pass this principal's ad-hoc queries by, written by a worker whose
     claim timed out on the principal's cap lock (`pools.pass_by`). `None` when none was. Read by

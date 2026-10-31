@@ -35,6 +35,10 @@ if TYPE_CHECKING:
 table_app = typer.Typer(help="Manage tables and load data.", no_args_is_help=True)
 
 _ENV = Annotated[str | None, typer.Option("--env", help="Environment (default: the profile's).")]
+_LANG = Annotated[
+    str | None,
+    typer.Option("--lang", help="Show the texts in this language, such as de or fr-CH."),
+]
 _YES = Annotated[bool, typer.Option("--yes", help="Don't ask for confirmation.")]
 _FORMAT = Annotated[
     str | None,
@@ -279,6 +283,7 @@ def list_tables(
             "staging.",
         ),
     ] = None,
+    lang: _LANG = None,
     env: _ENV = None,
 ) -> None:
     """List the tables in NAMESPACE, or with --dropped the tables dropped from it.
@@ -298,6 +303,8 @@ def list_tables(
         List the dropped tables instead.
     model_kind
         Only tables whose header declares this kind.
+    lang
+        The language of the texts.
     env
         The environment.
     """
@@ -312,7 +319,7 @@ def list_tables(
             derived={"restorable": _restorable_cell},
         )
         return
-    tables = _listed(state, environment, namespace, model_kind)
+    tables = _listed(state, environment, namespace, model_kind, lang)
     columns = ["name", "namespace", "kind", "state", "uuid"]
     if any(table.expires_soon for table in tables):
         columns.insert(4, "expires")
@@ -330,7 +337,7 @@ _MODEL_KIND_PARAMETER = "model_kind must be one of "
 
 
 def _listed(
-    state: CliState, environment: str, namespace: str, model_kind: str | None
+    state: CliState, environment: str, namespace: str, model_kind: str | None, lang: str | None
 ) -> list[Table]:
     """List a namespace's tables, naming `--model-kind` when the server refuses the kind.
 
@@ -344,6 +351,8 @@ def _listed(
         The dotted namespace.
     model_kind
         The kind to keep, if any.
+    lang
+        The language of the texts, if any.
 
     Returns
     -------
@@ -359,7 +368,7 @@ def _listed(
         Any other refusal, unchanged.
     """
     try:
-        return state.client().tables.list(environment, namespace, model_kind=model_kind)
+        return state.client().tables.list(environment, namespace, model_kind=model_kind, lang=lang)
     except ValidationError as exc:
         if model_kind is None or not str(exc).startswith(_MODEL_KIND_PARAMETER):
             raise
@@ -384,8 +393,26 @@ def _expires_cell(table: Table) -> str:
     return _retention.expires_cell(table.expires_at) if table.expires_soon else ""
 
 
-def _emit_description(state: CliState, table: Table) -> None:
-    """Print a table's description and where it came from, when it has one.
+def _marker(language: str | None, table: Table) -> str:
+    """Name a text's language when it is not the one asked for.
+
+    Parameters
+    ----------
+    language
+        The text's language.
+    table
+        The table, for the language asked for.
+
+    Returns
+    -------
+    str
+        `` [de]`` or empty.
+    """
+    return f" [{language}]" if language and language != table.language else ""
+
+
+def _emit_texts(state: CliState, table: Table) -> None:
+    """Print a table's label, description and translation coverage, when it has them.
 
     Parameters
     ----------
@@ -394,13 +421,26 @@ def _emit_description(state: CliState, table: Table) -> None:
     table
         The table.
     """
+    if table.label:
+        source = " (edited)" if table.label_source == "edited" else ""
+        _output.emit(
+            state,
+            _output.inline(f"Label{source}{_marker(table.label_language, table)}: {table.label}"),
+        )
     if table.description:
         source = "edited" if table.description_source == "edited" else "from the project"
-        _output.emit(state, f"Description ({source}): {table.description}")
+        marker = _marker(table.description_language, table)
+        _output.emit(state, f"Description ({source}){marker}: {table.description}")
+    if table.translations:
+        counts = ", ".join(f"{c.language} {c.translated} of {c.total}" for c in table.translations)
+        _output.emit(state, f"Translations: {counts}")
 
 
 def _emit_columns(state: CliState, table: Table) -> None:
-    """Print a table's columns, with their descriptions when any has one.
+    """Print a table's columns, with their labels and descriptions when any has one.
+
+    A label or description in another language than the one asked for ends in its language,
+    such as `` [en]``.
 
     Parameters
     ----------
@@ -409,14 +449,31 @@ def _emit_columns(state: CliState, table: Table) -> None:
     table
         The table.
     """
-    if any(c.description for c in table.columns):
-        _output.emit(state, table.columns, columns=_DESCRIBE_COLUMNS, flexible=["description"])
-    else:
-        _output.emit(state, table.columns)
+    labelled = any(c.label for c in table.columns)
+    if not labelled and not any(c.description for c in table.columns):
+        _output.emit(
+            state,
+            table.columns,
+            columns=["name", "type", "nullable", "description", "description_source"],
+        )
+        return
+    columns = ["name", "type", "nullable", *(["label"] if labelled else []), "description"]
+    _output.emit(
+        state,
+        table.columns,
+        columns=columns,
+        flexible=["description"],
+        derived={
+            "label": lambda c: f"{c.label}{_marker(c.label_language, table)}" if c.label else "",
+            "description": lambda c: (
+                f"{c.description}{_marker(c.description_language, table)}" if c.description else ""
+            ),
+        },
+    )
 
 
 @table_app.command("get")
-def get(ctx: typer.Context, name: str, env: _ENV = None) -> None:
+def get(ctx: typer.Context, name: str, lang: _LANG = None, env: _ENV = None) -> None:
     """Show table or view NAME, its columns, and a view's SQL and references.
 
     A table whose first build did not finish, or failed a check, is shown as `not published`;
@@ -430,11 +487,13 @@ def get(ctx: typer.Context, name: str, env: _ENV = None) -> None:
         The Typer context.
     name
         The qualified table name.
+    lang
+        The language of the texts.
     env
         The environment.
     """
     state = state_of(ctx)
-    table = state.client().tables.get(resolve_environment(state, env), name)
+    table = state.client().tables.get(resolve_environment(state, env), name, lang=lang)
     if state.output == "json":
         _output.emit(state, table)
         return
@@ -448,7 +507,7 @@ def get(ctx: typer.Context, name: str, env: _ENV = None) -> None:
         else:
             _output.emit(state, table.sql or "")
         _output.emit(state, table.references)
-        _emit_description(state, table)
+        _emit_texts(state, table)
         _emit_columns(state, table)
         return
     if table.kind == "ARTIFACT":
@@ -470,7 +529,7 @@ def get(ctx: typer.Context, name: str, env: _ENV = None) -> None:
             f"retention {shlex.quote(_output.inline(name))} --env "
             f"{shlex.quote(_output.inline(environment))} --never",
         )
-    _emit_description(state, table)
+    _emit_texts(state, table)
     _emit_columns(state, table)
     if table.model is not None:
         _emit_model(state, table)
@@ -515,18 +574,20 @@ _ADDITIVITY_SHOWN = {"additive": "additive", "semi": "semi-additive", "non": "no
 """How `table get` writes a measure's additivity."""
 
 
-def _measure_line(measure: Measure) -> str:
+def _measure_line(measure: Measure, table: Table) -> str:
     """Write one measure as `table get` shows it.
 
     Parameters
     ----------
     measure
         The measure.
+    table
+        Its table, for the language asked for.
 
     Returns
     -------
     str
-        ``  column: aggregation, additivity[ (not over …)][, unit or currency][ — label]``,
+        ``  column: aggregation, additivity[ (not over …)][, unit or currency][ — label[ [en]]]``,
         indented, with control characters escaped.
     """
     additivity = _ADDITIVITY_SHOWN.get(measure.additivity, measure.additivity)
@@ -535,7 +596,7 @@ def _measure_line(measure: Measure) -> str:
     parts = [measure.aggregation, additivity]
     if what := measure.currency or measure.unit:
         parts.append(what)
-    label = f" — {measure.label}" if measure.label else ""
+    label = f" — {measure.label}{_marker(measure.label_language, table)}" if measure.label else ""
     return _output.inline(f"  {measure.column}: {', '.join(parts)}{label}", 500)
 
 
@@ -553,7 +614,8 @@ def _emit_model(state: CliState, table: Table) -> None:
     assert model is not None  # nosec B101 -- the caller checked
     _output.emit(state, _output.inline(f"Model: {model.kind or '(no kind)'}"))
     if model.grain:
-        _output.emit(state, _output.inline(f"Grain: {model.grain}", 500))
+        marker = _marker(model.grain_language, table)
+        _output.emit(state, _output.inline(f"Grain{marker}: {model.grain}", 500))
     key = "none — grain not checked" if model.key_none else ", ".join(model.key)
     _output.emit(state, _output.inline(f"Key: {key or '(none declared)'}"))
     for ref in model.references:
@@ -563,7 +625,7 @@ def _emit_model(state: CliState, table: Table) -> None:
     if model.measures:
         _output.emit(state, "Measures:")
         for measure in model.measures:
-            _output.emit(state, _measure_line(measure))
+            _output.emit(state, _measure_line(measure, table))
     if model.checks:
         _output.emit(
             state,
@@ -571,10 +633,6 @@ def _emit_model(state: CliState, table: Table) -> None:
             columns=["check", "state", "failing_rows", "finished_at"],
             derived={"check": check_shown, "state": _check_state},
         )
-
-
-_DESCRIBE_COLUMNS = ["name", "type", "nullable", "description"]
-"""The columns of a table's schema listing in `table get`."""
 
 
 def _utc(moment: datetime) -> str:
@@ -726,6 +784,35 @@ def health(
         _output.emit(state, f"Readers, last {found.days} days: none.")
 
 
+def _now_shows(texts: Table | Column | None) -> str:
+    """Say which texts a table or column shows after a reset, and in which languages.
+
+    Parameters
+    ----------
+    texts
+        The `Table` or `Column` the answer holds, or `None` for a column it does not list.
+
+    Returns
+    -------
+    str
+        Such as ``now shows the project's text in en``, or ``now has no text``.
+    """
+    shown = [
+        (getattr(texts, f"{field}_source"), getattr(texts, f"{field}_language"))
+        for field in ("description", "label")
+        if texts is not None and getattr(texts, field) is not None
+    ]
+    if not shown:
+        return "now has no text"
+    sources = {source for source, _ in shown}
+    kind = {
+        frozenset({"project"}): "the project's text",
+        frozenset({"edited"}): "an edit",
+    }.get(frozenset(sources), "an edit and the project's text")
+    languages = sorted({language for _, language in shown if language})
+    return f"now shows {kind}" + (f" in {', '.join(languages)}" if languages else "")
+
+
 @table_app.command("describe")
 def describe(
     ctx: typer.Context,
@@ -738,17 +825,30 @@ def describe(
         str | None,
         typer.Option("--text", help="The description, up to 4,000 characters."),
     ] = None,
+    label: Annotated[
+        str | None,
+        typer.Option("--label", help="The label: one line, up to 100 characters."),
+    ] = None,
+    lang: Annotated[
+        str | None,
+        typer.Option(
+            "--lang",
+            help="The language you write in, such as fr; without it, the table's main language.",
+        ),
+    ] = None,
     reset: Annotated[
         bool,
-        typer.Option("--reset", help="Remove your text, so the project's shows again."),
+        typer.Option(
+            "--reset", help="Remove your description and label, so the project's show again."
+        ),
     ] = False,
     env: _ENV = None,
 ) -> None:
-    """Describe table NAME or one of its columns, or reset the description.
+    """Describe or label table NAME or one of its columns, or reset its texts.
 
-    The text you set is shown instead of the `description:` in the asset's header, and a deploy
-    never replaces it. `--reset` goes back to the header's text. You need to own the table, or
-    hold the right to drop it.
+    The texts you set are shown instead of the asset header's `description:` and `label:` (or a
+    translation file's, with `--lang`), and a deploy never replaces them. `--reset` goes back to
+    the project's texts in that language. You need to own the table, or hold the right to drop it.
 
     Parameters
     ----------
@@ -760,40 +860,43 @@ def describe(
         A column to describe instead of the table.
     text
         The new description.
+    label
+        The new label.
+    lang
+        The language edited; the table's main language without it.
     reset
-        Remove the edit.
+        Remove the edits of the description and the label.
     env
         The environment.
 
     Raises
     ------
     CliError
-        If neither or both of `--text` and `--reset` are given.
+        If neither `--text`, `--label` nor `--reset` is given, or `--reset` with a text.
     """
-    if (text is None) == (not reset):
+    if (reset and (text is not None or label is not None)) or (
+        not reset and text is None and label is None
+    ):
         raise CliError(
-            "Give exactly one of --text TEXT (set the description) and --reset "
-            "(go back to the project's text)."
+            "Give --text TEXT and/or --label LABEL to set, or --reset to go back to the project's "
+            "texts."
         )
     state = state_of(ctx)
     environment = resolve_environment(state, env)
-    table = state.client().tables.describe(
-        environment, name, None if reset else text, column=column
-    )
+    sent = {"description": text, "label": label}
+    fields = sent if reset else {key: value for key, value in sent.items() if value is not None}
+    table = state.client().tables.describe(environment, name, column=column, lang=lang, **fields)
     target = f"{_output.inline(name)}" + (f" column {_output.inline(column)}" if column else "")
+    where = f"{_output.inline(environment)} ({_output.inline(lang or table.main_language)})"
     if not reset:
-        _output.done(state, f"Described {target} in {_output.inline(environment)}", table)
+        _output.done(state, f"Described {target} in {where}", table)
         return
-    shown = (
-        table.description
-        if column is None
-        else next((c.description for c in table.columns if c.name == column), None)
+    texts: Table | Column | None = (
+        table if column is None else next((c for c in table.columns if c.name == column), None)
     )
-    after = "now shows the project's text" if shown else "now has no description"
+    after = _now_shows(texts)
     _output.done(
-        state,
-        f"Reset the description of {target} in {_output.inline(environment)}; it {after}",
-        table,
+        state, f"Reset the description and label of {target} in {where}; it {after}", table
     )
 
 

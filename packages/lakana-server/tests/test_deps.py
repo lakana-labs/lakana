@@ -60,8 +60,10 @@ def test_get_catalog_builds_a_working_catalog_service(session: Session, tmp_path
         undo_days=3,
         expiry_warning_days=5,
         view_audit=ViewAuditConfig(window_minutes=9),
+        main_language="de",
     )
     assert isinstance(catalog, CatalogService)
+    assert catalog._main_language == "de"
     assert catalog._undo_days == 3
     assert catalog._expiry_warning_days == 5
     assert catalog._view_audit == ViewAuditConfig(window_minutes=9)
@@ -341,6 +343,7 @@ def test_get_query_service_uses_the_configured_lease(session: Session, tmp_path:
         undo_days=7,
         expiry_warning_days=7,
         view_audit=ViewAuditConfig(),
+        main_language="en",
     ).create_environment(
         principal, name="dev", storage=StorageConfig(scheme="file", root=f"file://{tmp_path}")
     )
@@ -466,3 +469,18 @@ def test_get_view_audit_reads_the_settings() -> None:
         ),
     )
     assert get_view_audit(request) is configured
+
+
+def test_the_main_language_comes_from_the_settings() -> None:
+    """`get_main_language` reads `LAKANA_MAIN_LANGUAGE`."""
+    from lakana_server.deps import get_main_language
+
+    request = cast(
+        Request,
+        SimpleNamespace(
+            app=SimpleNamespace(
+                state=SimpleNamespace(settings=SimpleNamespace(main_language="fr-CH"))
+            )
+        ),
+    )
+    assert get_main_language(request) == "fr-CH"

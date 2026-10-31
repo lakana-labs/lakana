@@ -115,6 +115,8 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "key_id",
         "kind",
         "kinds",
+        # the language a description or label edit was made in: a tag, never the text
+        "language",
         "location",
         "locations",
         "manifest_sha256",
@@ -204,6 +206,8 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "keep_days",
         "keep_last",
         "kept",
+        "label_new_length",
+        "label_old_length",
         "merged",
         "missed",
         "more_locations",

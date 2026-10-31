@@ -5,7 +5,6 @@ from __future__ import annotations
 import dataclasses
 import difflib
 import os
-import time
 from pathlib import Path
 
 import pytest
@@ -732,7 +731,8 @@ def test_a_worst_case_file_is_checked_in_bounded_time(monkeypatch: pytest.Monkey
     """Adversarial: thousands of unknown tables and nested extra keys cost one parse.
 
     Before, every issue parsed the file again, and a 1 MiB file took hours. The file is kept
-    small enough for the unit-test budget; the structural bound (`_counting`) holds at any size.
+    small enough for the unit-test budget. The bound is structural (one parse, capped
+    suggestions), not a wall-clock limit, which was flaky on loaded CI runners.
     """
     counts = _counting(monkeypatch)
     unknown = "".join(f"gold.fact_sales{i:05}: {{label: X}}\n" for i in range(1500))
@@ -743,14 +743,11 @@ def test_a_worst_case_file_is_checked_in_bounded_time(monkeypatch: pytest.Monkey
     found = [DiscoveredTranslation("translations/fr.yaml", "fr", text)]
     config = parse_project_config("main_language: en\n")
     counts["parses"] = 0
-    started = time.perf_counter()
     parsed, problems = parse_translations(found, limits=_LIMITS)
     issues = translation_issues(config, [_sales()], parsed)
-    elapsed = time.perf_counter() - started
     assert counts["parses"] == 1
     assert counts["suggestions"] <= 50
     assert len(problems) == len(issues) == 51
-    assert elapsed < 1.0, f"took {elapsed:.2f} s"
 
 
 def test_coverage_hints_count_every_header_text() -> None:

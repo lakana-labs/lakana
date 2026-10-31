@@ -1,5 +1,7 @@
 """Tests for the top-level Client: construction, repr masking, and lifecycle."""
 
+import json
+from collections.abc import Callable
 from pathlib import Path
 
 import httpx
@@ -265,3 +267,75 @@ def test_search_ignores_a_field_of_a_hit_it_does_not_know() -> None:
         "0b0e3c5e-6a7e-4f26-9d1e-0a3f0f5f6a11",
     ]
     assert not hasattr(page.results[0], "added_later")
+
+
+def _client(handler: Callable[[httpx.Request], httpx.Response]) -> Client:
+    """Build a client whose requests go to `handler`.
+
+    Parameters
+    ----------
+    handler
+        Answers each request.
+
+    Returns
+    -------
+    Client
+        The client.
+    """
+    http_client = httpx.Client(
+        base_url="http://api.example", transport=httpx.MockTransport(handler)
+    )
+    return Client(url="http://api.example", token="lakana_pat_a_s", http_client=http_client)
+
+
+def test_set_language_patches_whoami() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "name": "admin",
+                "type": "USER",
+                "task_token": None,
+                "ci_token": None,
+                "language": "fr",
+            },
+        )
+
+    who = _client(handler).set_language("fr")
+    assert (seen[0].method, seen[0].url.path, json.loads(seen[0].content)) == (
+        "PATCH",
+        "/api/v1/whoami",
+        {"language": "fr"},
+    )
+    assert who.language == "fr"
+
+
+def test_whoami_from_an_older_server_has_no_language() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"name": "admin", "type": "USER", "task_token": None})
+
+    assert _client(handler).whoami().language is None
+
+
+def test_describe_sends_only_the_given_fields_and_lang() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(
+            200, json={"name": "t", "namespace": "gold", "uuid": "u", "metadata_location": None}
+        )
+
+    client = _client(handler)
+    client.tables.describe("dev", "gold.t", label="Ventes", lang="fr")
+    assert json.loads(seen[0].content) == {"label": "Ventes"}
+    assert dict(seen[0].url.params) == {"lang": "fr"}
+    client.tables.describe("dev", "gold.t", None)
+    assert json.loads(seen[1].content) == {"description": None}
+    assert dict(seen[1].url.params) == {}
+    with pytest.raises(ValueError, match="give description, label or both; None removes an edit"):
+        client.tables.describe("dev", "gold.t")
+    assert len(seen) == 2

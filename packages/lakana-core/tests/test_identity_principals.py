@@ -1,13 +1,21 @@
 """Tests for PrincipalService."""
 
 import uuid
+from dataclasses import replace
+from typing import Any, cast
 
 import pytest
 from core_test_helpers import _RecordThenDeny
 from sqlalchemy.orm import Session
 
 from lakana_core.auth import Action, AllowAllAuthorization, PrincipalRef, Securable, SecurableKind
-from lakana_core.errors import AlreadyExistsError, ConflictError, NotFoundError
+from lakana_core.errors import (
+    AlreadyExistsError,
+    ConflictError,
+    NotFoundError,
+    PermissionDenied,
+    ValidationError,
+)
 from lakana_core.grants.roles import Role
 from lakana_core.grants.service import GrantService
 from lakana_core.identity.principals import PrincipalService
@@ -121,3 +129,39 @@ def test_deactivating_a_non_admin_is_unaffected_by_the_lockout_guard(session: Se
     principals.deactivate_principal(admin, "alice")  # does not raise
 
     assert principals.get_principal_by_name(admin, "alice").is_active is False
+
+
+def test_a_person_sets_and_resets_their_own_language(session: Session) -> None:
+    """The tag is stored canonically, `None` removes it and a non-tag is refused."""
+    me = _admin(session)
+    service = PrincipalService(session, AllowAllAuthorization())
+    assert service.set_own_language(me, "FR-ch") == "fr-CH"
+    assert session.get_one(Principal, me.id).language == "fr-CH"
+    assert service.set_own_language(me, None) is None
+    assert session.get_one(Principal, me.id).language is None
+    with pytest.raises(
+        ValidationError, match="language: `French` is not a language tag Lakana takes"
+    ):
+        service.set_own_language(me, "French")
+
+
+def test_a_task_or_ci_token_may_not_set_a_language(session: Session) -> None:
+    """A task-scoped caller is refused with the token to use instead."""
+    me = _admin(session)
+    service = PrincipalService(session, AllowAllAuthorization())
+    for scoped in (
+        replace(me, task_scope=cast("Any", object())),
+        replace(me, ci_scope=cast("Any", object())),
+    ):
+        with pytest.raises(
+            PermissionDenied, match="a task or CI token cannot change its principal's profile"
+        ):
+            service.set_own_language(scoped, "fr")
+    assert session.get_one(Principal, me.id).language is None
+
+
+def test_a_principal_that_is_gone_cannot_set_a_language(session: Session) -> None:
+    """A caller whose row no longer exists is told so."""
+    ghost = PrincipalRef(id=uuid.uuid4(), name="ghost", type=PrincipalType.USER)
+    with pytest.raises(NotFoundError, match="Your principal no longer exists"):
+        PrincipalService(session, AllowAllAuthorization()).set_own_language(ghost, "fr")

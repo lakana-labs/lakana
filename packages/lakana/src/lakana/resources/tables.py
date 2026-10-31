@@ -9,6 +9,7 @@ distinct path parameters.
 
 from __future__ import annotations
 
+import enum
 import io
 from collections.abc import Mapping, Sequence
 from datetime import date, datetime
@@ -45,6 +46,7 @@ from lakana._models import (
     TableReference,
     TableReferences,
     TableRetention,
+    TranslationCoverage,
     WriteResult,
 )
 from lakana._routes import ROUTES
@@ -69,6 +71,16 @@ many batches a normal
 SDK upload produces, keeping it far below the server's
 `Settings.append.max_arrays` cap without a caller needing to think about
 batching at all."""
+
+
+class _Unset(enum.Enum):
+    """The type of `_UNSET`."""
+
+    UNSET = "unset"
+
+
+_UNSET = _Unset.UNSET
+"""A field `TablesResource.describe` leaves as it is, as opposed to `None`, which resets it."""
 
 
 def _add_source_versions(
@@ -207,6 +219,7 @@ def _model_from_json(data: dict[str, Any] | None) -> TableModel | None:
         hidden_references=data["hidden_references"],
         checks=tuple(_check_from_json(c) for c in data["checks"]),
         measures=tuple(_measure_from_json(m) for m in data.get("measures", [])),
+        grain_language=data.get("grain_language"),
     )
 
 
@@ -233,6 +246,8 @@ def _measure_from_json(data: dict[str, Any]) -> Measure:
         currency=data["currency"],
         label=data["label"],
         description=data["description"],
+        label_language=data.get("label_language"),
+        description_language=data.get("description_language"),
     )
 
 
@@ -328,6 +343,10 @@ def _table_from_json(data: dict[str, Any]) -> Table:
                 nullable=c["nullable"],
                 description=c.get("description"),
                 description_source=c.get("description_source"),
+                label=c.get("label"),
+                label_source=c.get("label_source"),
+                label_language=c.get("label_language"),
+                description_language=c.get("description_language"),
             )
             for c in data.get("schema", [])
         ],
@@ -349,6 +368,16 @@ def _table_from_json(data: dict[str, Any]) -> Table:
         expires_at=_when(data.get("expires_at")),
         expires_soon=data.get("expires_soon", False),
         model=_model_from_json(data.get("model")),
+        label=data.get("label"),
+        label_source=data.get("label_source"),
+        label_language=data.get("label_language"),
+        description_language=data.get("description_language"),
+        language=data.get("language", "en"),
+        main_language=data.get("main_language", "en"),
+        translations=tuple(
+            TranslationCoverage(c["language"], c["translated"], c["total"])
+            for c in data.get("translations", [])
+        ),
     )
 
 
@@ -588,7 +617,12 @@ class Tables:
         self._transport = transport
 
     def list(
-        self, environment: str, namespace: str, *, model_kind: str | None = None
+        self,
+        environment: str,
+        namespace: str,
+        *,
+        model_kind: str | None = None,
+        lang: str | None = None,
     ) -> _TableList:
         """List the tables in a namespace.
 
@@ -601,6 +635,9 @@ class Tables:
         model_kind
             Only the tables whose asset header declares this kind: ``fact``, ``dimension``,
             ``wide`` or ``staging``. Every table when `None`.
+        lang
+            The language of the texts, such as ``de`` or ``fr-CH``; without it, your profile's
+            language, else the instance's main language.
 
         Returns
         -------
@@ -612,16 +649,21 @@ class Tables:
         lakana.errors.NotFound
             If the namespace does not exist.
         lakana.errors.ValidationError
-            If `model_kind` is not one of the kinds.
+            If `model_kind` is not one of the kinds, or `lang` is not a language tag.
         """
+        params = {
+            key: value
+            for key, value in (("model_kind", model_kind), ("lang", lang))
+            if value is not None
+        }
         response = self._transport.request(
             ROUTES["tables.list"],
             path_params={"env": environment, "path": namespace},
-            params=None if model_kind is None else {"model_kind": model_kind},
+            params=params or None,
         )
         return [_table_from_json(item) for item in response.json()]
 
-    def get(self, environment: str, qualified_name: str) -> Table:
+    def get(self, environment: str, qualified_name: str, *, lang: str | None = None) -> Table:
         """Fetch a table by its `"namespace.table"` name.
 
         Parameters
@@ -630,20 +672,27 @@ class Tables:
             The environment name.
         qualified_name
             Dot-joined `"namespace.table"` name, such as `"bronze.sales"`.
+        lang
+            The language of the texts, such as ``de`` or ``fr-CH``; without it, your profile's
+            language, else the instance's main language.
 
         Returns
         -------
         Table
-            The table.
+            The table; each text says which language it is in.
 
         Raises
         ------
         lakana.errors.NotFound
             If no such table exists.
+        lakana.errors.ValidationError
+            If `lang` is not a language tag.
         """
         namespace, name = _split_namespace_table(qualified_name)
         response = self._transport.request(
-            ROUTES["tables.get"], path_params={"env": environment, "path": namespace, "name": name}
+            ROUTES["tables.get"],
+            path_params={"env": environment, "path": namespace, "name": name},
+            params=None if lang is None else {"lang": lang},
         )
         return _table_from_json(response.json())
 
@@ -689,15 +738,18 @@ class Tables:
         self,
         environment: str,
         qualified_name: str,
-        description: str | None,
+        description: str | _Unset | None = _UNSET,
         *,
+        label: str | _Unset | None = _UNSET,
         column: str | None = None,
+        lang: str | None = None,
     ) -> Table:
-        """Set the description of a table or one of its columns, or reset it.
+        """Set the description or label of a table or one of its columns, or reset them.
 
-        The text set here is shown instead of the one a deploy publishes from the asset header,
-        and a deploy never replaces it. Resetting removes it, so the asset header's text shows
-        again. Needs to own the table or hold `DROP_TABLE` on it.
+        A text set here is shown instead of the one a deploy publishes from the asset header or a
+        translation file, and a deploy never replaces it. Resetting (`None`) removes it, so the
+        project's text shows again; a field you leave out stays as it is. Without `lang`, the
+        edit is in the table's main language. Needs to own the table or hold `DROP_TABLE` on it.
 
         Parameters
         ----------
@@ -707,23 +759,38 @@ class Tables:
             Dot-joined `"namespace.table"` name.
         description
             The new text (1 to 4,000 characters, not blank), or `None` to reset.
+        label
+            The new label (one line, 1 to 100 characters), or `None` to reset.
         column
             A column of the table to describe instead of the table.
+        lang
+            The language edited, such as `"fr"`; also the language of the returned texts. Without
+            it, the edit is in the table's main language and the returned texts follow your
+            profile's language, then the server's main language.
 
         Returns
         -------
         Table
-            The table, with the descriptions it shows now.
+            The table, with the texts it shows now.
 
         Raises
         ------
+        ValueError
+            If neither `description` nor `label` is given.
         lakana.errors.NotFound
             If the table, or the column, does not exist.
         lakana.errors.PermissionDenied
             Without the right to describe the table.
         lakana.errors.ValidationError
-            If the text is blank or over 4,000 characters.
+            If a text breaks its rules or `lang` is not a language tag.
         """
+        body: dict[str, str | None] = {}
+        if not isinstance(description, _Unset):
+            body["description"] = description
+        if not isinstance(label, _Unset):
+            body["label"] = label
+        if not body:
+            raise ValueError("give description, label or both; None removes an edit")
         namespace, name = _split_namespace_table(qualified_name)
         path_params = {"env": environment, "path": namespace, "name": name}
         if column is None:
@@ -732,7 +799,10 @@ class Tables:
             route = ROUTES["tables.describe_column"]
             path_params["column"] = column
         response = self._transport.request(
-            route, path_params=path_params, json={"description": description}
+            route,
+            path_params=path_params,
+            json=body,
+            params=None if lang is None else {"lang": lang},
         )
         return _table_from_json(response.json())
 

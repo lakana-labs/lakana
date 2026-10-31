@@ -1,6 +1,6 @@
 {
-  "duplicated_lines": 1270,
-  "clones": 65,
+  "duplicated_lines": 1252,
+  "clones": 64,
   "pairs": {
     "lakana/_artifact_manifest.py ↔ lakana_core/artifacts/manifest.py": {
       "clones": 1,
@@ -53,10 +53,6 @@
     "lakana_core/config.py ↔ lakana_core/config.py": {
       "clones": 2,
       "lines": 38
-    },
-    "lakana_core/config.py ↔ lakana_server/settings.py": {
-      "clones": 1,
-      "lines": 18
     },
     "lakana_core/grants/service.py ↔ lakana_core/identity/groups.py": {
       "clones": 2,

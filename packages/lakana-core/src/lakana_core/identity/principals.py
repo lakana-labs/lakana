@@ -9,8 +9,9 @@ from sqlalchemy.orm import Session
 
 from lakana_core.audit.service import AuditService
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable
-from lakana_core.errors import AlreadyExistsError, NotFoundError
+from lakana_core.errors import AlreadyExistsError, NotFoundError, PermissionDenied, ValidationError
 from lakana_core.grants.service import assert_admin_headroom
+from lakana_core.languages import canonical_language, language_problem
 from lakana_core.models import AuditEventType, Principal, PrincipalType
 from lakana_core.pagination import Page, name_contains, newest_first
 
@@ -192,3 +193,48 @@ class PrincipalService:
             limit=limit,
             cursor=cursor,
         )
+
+    def set_own_language(self, p: PrincipalRef, language: str | None) -> str | None:
+        """Set or reset the caller's own preferred language for catalog texts.
+
+        Not audited: a display preference of one's own, which changes nothing anyone else sees.
+
+        Parameters
+        ----------
+        p
+            The caller.
+        language
+            A tag, any case; `None` to reset.
+
+        Returns
+        -------
+        str or None
+            The stored canonical tag.
+
+        Raises
+        ------
+        PermissionDenied
+            For a caller signed in with a task or CI token.
+        ValidationError
+            For a tag outside the subset.
+        NotFoundError
+            If the caller's principal no longer exists.
+        """
+        if p.task_scope is not None or p.ci_scope is not None:
+            raise PermissionDenied(
+                "a task or CI token cannot change its principal's profile; "
+                "use a personal access token"
+            )
+        canonical = None
+        if language is not None:
+            canonical = canonical_language(language.strip())
+            if canonical is None:
+                raise ValidationError(
+                    f"language: {language_problem(language.strip())}; use the tag, for example `de`"
+                )
+        principal = self._session.get(Principal, p.id)
+        if principal is None:
+            raise NotFoundError("Your principal no longer exists.")
+        principal.language = canonical
+        self._session.commit()
+        return canonical

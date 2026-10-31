@@ -21,6 +21,7 @@ from lakana_core.config import (
     ViewAuditConfig,
     validate_repo_roots,
 )
+from lakana_core.languages import DEFAULT_MAIN_LANGUAGE, language_problem
 
 
 class AppendConfig(BaseModel):
@@ -214,6 +215,13 @@ class Settings(BaseSettings):
     repo_roots
         Absolute directories that local repositories must lie under, as a JSON list, for example
         `["/repos"]`. Empty (the default) refuses every local repository.
+    main_language
+        The language catalog texts are in when a project does not declare its own
+        (`main_language:` in lakana.yaml), and the language a reader without a choice gets
+        (default `en`). A BCP 47 tag such as `de` or `fr-CH`. Nothing stores it: each answer
+        reads it. Set it before the first deploy. Changing it later relabels at once the texts
+        of every project that declares no `main_language:`, and edits made with `--lang` in the
+        new main language stop showing.
     """
 
     model_config = SettingsConfigDict(
@@ -244,6 +252,7 @@ class Settings(BaseSettings):
     host: str = "127.0.0.1"
     port: int = 8000
     repo_roots: list[str] = []
+    main_language: str = DEFAULT_MAIN_LANGUAGE
 
     @field_validator("repo_roots")
     @classmethod
@@ -261,3 +270,28 @@ class Settings(BaseSettings):
             The list, unchanged.
         """
         return validate_repo_roots(value)
+
+    @field_validator("main_language")
+    @classmethod
+    def _main_language_is_a_tag(cls, value: str) -> str:
+        """Refuse a main language that is not a canonical tag.
+
+        Parameters
+        ----------
+        value
+            `LAKANA_MAIN_LANGUAGE`.
+
+        Returns
+        -------
+        str
+            `value`, unchanged.
+
+        Raises
+        ------
+        ValueError
+            With the tag text.
+        """
+        problem = language_problem(value)
+        if problem is not None:
+            raise ValueError(problem)
+        return value

@@ -1,0 +1,3 @@
+SELECT 1 AS store_id, 120.0 AS net_amount
+UNION ALL SELECT 2, 80.0
+UNION ALL SELECT 1, 95.0

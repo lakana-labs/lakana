@@ -923,6 +923,7 @@ class TaskTokenService:
                 id=principal.id,
                 name=principal.name,
                 type=principal.type,
+                language=principal.language,
                 task_scope=scope,
                 run_context=(
                     RunContext(task_run_id=scope.bound.task_run_id, claim=scope.bound.claim)

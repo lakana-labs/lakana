@@ -4714,3 +4714,59 @@ def test_0057_adds_the_table_measures_and_downgrades_cleanly(
         assert "table_measures" not in inspect(engine).get_table_names()
     finally:
         engine.dispose()
+
+
+_REVISION_0058 = "d0f4a6c8e2b3"
+
+
+@pytest.mark.usefixtures("_without_fsync")
+def test_0058_adds_the_texts_and_downgrades_cleanly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Revision `0058`: `text_translations`, labels, the text languages and the profile language.
+
+    Parameters
+    ----------
+    tmp_path
+        Holds the throwaway SQLite file.
+    monkeypatch
+        Points `lakana_core.config.Settings` at that file.
+    """
+    db_path = tmp_path / "migrated.db"
+    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    config = Config(str(ALEMBIC_INI))
+    command.upgrade(config, _REVISION_0058)
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        inspector = inspect(engine)
+        assert {c["name"] for c in inspector.get_columns("text_translations")} == {
+            "id",
+            "table_id",
+            "subject",
+            "name",
+            "language",
+            "field",
+            "text_project",
+            "text_edited",
+            "updated_by",
+            "updated_at",
+        }
+        assert {
+            tuple(c["column_names"]) for c in inspector.get_unique_constraints("text_translations")
+        } == {("table_id", "subject", "name", "language", "field")}
+        tables = {c["name"] for c in inspector.get_columns("tables")}
+        assert {"label_project", "label_edited", "text_language", "text_languages"} <= tables
+        described = {c["name"] for c in inspector.get_columns("column_descriptions")}
+        assert {"label_project", "label_edited"} <= described
+        assert "language" in {c["name"] for c in inspector.get_columns("principals")}
+    finally:
+        engine.dispose()
+    command.downgrade(config, _REVISION_0057)
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        inspector = inspect(engine)
+        assert "text_translations" not in inspector.get_table_names()
+        assert "label_project" not in {c["name"] for c in inspector.get_columns("tables")}
+        assert "language" not in {c["name"] for c in inspector.get_columns("principals")}
+    finally:
+        engine.dispose()

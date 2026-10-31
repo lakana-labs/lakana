@@ -10,7 +10,13 @@ from conftest import TOKEN, FakeApi, invoke, make_state
 
 from lakana._config import resolve_config
 
-_WHOAMI = {"name": "alice", "type": "USER", "task_token": None, "ci_token": None}
+_WHOAMI = {
+    "name": "alice",
+    "type": "USER",
+    "task_token": None,
+    "ci_token": None,
+    "language": None,
+}
 _ENVS: list[dict[str, object]] = [
     {
         "name": "dev",

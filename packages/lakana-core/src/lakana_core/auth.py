@@ -250,6 +250,9 @@ class PrincipalRef:
         Set when this principal was authenticated with a CI token, and by the worker for the
         re-check of a deploy such a token submitted; `None` otherwise. An
         `AuthorizationService` must narrow every check to it before consulting any grant.
+    language
+        The principal's preferred language for catalog texts, read when the credential was
+        verified; `None` for none.
     """
 
     id: uuid.UUID
@@ -260,6 +263,7 @@ class PrincipalRef:
     break_glass_reason: str | None = None
     write_fence: WriteFence | None = None
     ci_scope: CiScope | None = None
+    language: str | None = None
 
 
 class SecurableKind(enum.StrEnum):

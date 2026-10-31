@@ -3,7 +3,9 @@
 A table or column has up to two texts. The *project* text comes from the asset header
 (`description:` and `columns:`) and is written by a deploy, a rollback, or the creation of the
 table by a run. An *edit* is set through the API and is shown instead. A deploy never writes an
-edit; resetting an edit makes the project text show again.
+edit; resetting an edit makes the project text show again. Labels (`label:` and
+`column_labels`) are kept the same way, and the entry's translations are written through
+`lakana_core.catalog.translations`.
 
 The same writes carry the asset's model (`kind:`, `grain:`, `key:`, `references:`) onto the table,
 through `lakana_core.catalog.model_metadata`.
@@ -11,16 +13,18 @@ through `lakana_core.catalog.model_metadata`.
 
 from __future__ import annotations
 
+import enum
 import uuid
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import Any, Final, Literal
 
-from sqlalchemy import select
+from sqlalchemy import inspect, select
 from sqlalchemy.orm import Session
 
 from lakana_core.catalog.model_metadata import find_project_table, write_model_entry
+from lakana_core.catalog.translations import lock_table, write_translations
 from lakana_core.errors import ValidationError
 from lakana_core.models import (
     ColumnDescription,
@@ -29,12 +33,31 @@ from lakana_core.models import (
     Table,
     TableType,
 )
-from lakana_core.projects.project_config import MAX_DESCRIPTION_CHARS
+from lakana_core.projects.manifest import entry_translations, manifest_main_language
+from lakana_core.projects.project_config import (
+    FREE_TEXT_MESSAGE,
+    MAX_DESCRIPTION_CHARS,
+    MAX_LABEL_CHARS,
+    checked_text,
+)
 
 MAX_DESCRIPTION_LENGTH = MAX_DESCRIPTION_CHARS
 """The most characters a description may have, for a table and for a column."""
 
 DescriptionSource = Literal["project", "edited"]
+
+
+class _Keep(enum.Enum):
+    """The type of `KEEP`."""
+
+    KEEP = "keep"
+
+
+Keep = _Keep
+"""The type of `KEEP`, for annotations outside this module: ``str | Keep | None``."""
+
+KEEP: Final = _Keep.KEEP
+"""Leave a text as it is: what an edit passes for a field it does not change."""
 
 
 @dataclass(frozen=True)
@@ -47,10 +70,13 @@ class ShownDescription:
         The description.
     source
         ``"edited"`` for a text set through the API, ``"project"`` for the asset header's.
+    language
+        The language of `text`; set by `catalog.texts.TextChooser`, `None` where nobody chose one.
     """
 
     text: str
     source: DescriptionSource
+    language: str | None = None
 
 
 def shown(project: str | None, edited: str | None) -> ShownDescription | None:
@@ -75,54 +101,70 @@ def shown(project: str | None, edited: str | None) -> ShownDescription | None:
     return None
 
 
-def table_description(row: Table) -> ShownDescription | None:
-    """Choose the description a table shows.
+def _checked(text: str | None, what: str, field: str, limit: int) -> str | None:
+    """Apply a deploy's rules to an edit, and say what to do about a text that breaks one.
+
+    The rules are `checked_text`'s, the very function a deploy runs on header and translation
+    texts: not blank once stripped, at most `limit` characters once stripped, safe characters
+    only, and for a label one line. A description's Windows and lone carriage-return line
+    breaks become newlines first, as a header's do; a label's are refused.
 
     Parameters
     ----------
-    row
-        The table.
+    text
+        The new text, or `None` to reset the edit.
+    what
+        What is described, for the message (``"table silver.orders"``).
+    field
+        ``"description"`` or ``"label"``.
+    limit
+        The most characters the text may have once stripped.
 
     Returns
     -------
-    ShownDescription or None
-        What is shown, or `None` for none.
+    str or None
+        `text` without surrounding whitespace, as it is stored; `None` for a reset.
+
+    Raises
+    ------
+    ValidationError
+        With the cause and the next step.
     """
-    return shown(row.description_project, row.description_edited)
-
-
-def column_descriptions(
-    session: Session, table_id: uuid.UUID, columns: Iterable[str]
-) -> dict[str, ShownDescription]:
-    """Choose the description each of a table's columns shows.
-
-    Parameters
-    ----------
-    session
-        Database session.
-    table_id
-        The table.
-    columns
-        The names of the columns the table has now. The text of any other column is not shown.
-
-    Returns
-    -------
-    dict
-        Column name → description, for the columns that have one.
-    """
-    present = set(columns)
-    result: dict[str, ShownDescription] = {}
-    for row in session.scalars(
-        select(ColumnDescription).where(ColumnDescription.table_id == table_id)
-    ):
-        chosen = shown(row.description_project, row.description_edited)
-        if row.column in present and chosen is not None:
-            result[row.column] = chosen
-    return result
+    if text is None:
+        return None
+    if field == "description":
+        # A form or a file from Windows sends `\r\n`; a header never holds one (YAML and the
+        # header reader normalise line breaks), so an edit is normalised the same way.
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
+    try:
+        return checked_text(text, limit=limit, one_line=field == "label")
+    except ValueError as problem:
+        reason = str(problem)
+    if reason == "must not be empty":
+        message = (
+            f"The {field} of {what} is blank. Write the {field}, or reset it to go back to the "
+            "project's text (`lakana table describe --reset`, or send null)."
+        )
+    elif reason == "must be one line":
+        message = (
+            f"The {field} of {what} has more than one line; a label is one line. Put the longer "
+            "text in the description."
+        )
+    elif reason == FREE_TEXT_MESSAGE:
+        message = (
+            f"The {field} of {what} {FREE_TEXT_MESSAGE}. Remove those characters (a carriage "
+            "return or a line separator included) and send the text again."
+        )
+    else:
+        message = (
+            f"The {field} of {what} has {len(text.strip()):,} characters; the limit is "
+            f"{limit:,}. Write a shorter one."
+        )
+    raise ValidationError(message)
 
 
 def check_text(text: str | None, what: str) -> str | None:
-    """Refuse a description that is blank or too long.
+    """Refuse a description edit that a deploy would refuse in a header or a translation file.
 
     Parameters
     ----------
@@ -134,26 +176,39 @@ def check_text(text: str | None, what: str) -> str | None:
     Returns
     -------
     str or None
-        `text`, unchanged.
+        `text` without surrounding whitespace, as it is stored.
 
     Raises
     ------
     ValidationError
-        If `text` is blank, or longer than `MAX_DESCRIPTION_LENGTH` characters.
+        If `text` is blank, longer than `MAX_DESCRIPTION_LENGTH` characters, or has a character
+        a deploy refuses; the message names the next step.
     """
-    if text is None:
-        return None
-    if not text.strip():
-        raise ValidationError(
-            f"The description of {what} is blank. Write the text, or reset it to go back to the "
-            "project's text (`lakana table describe --reset`, or send null)."
-        )
-    if len(text) > MAX_DESCRIPTION_LENGTH:
-        raise ValidationError(
-            f"The description of {what} has {len(text):,} characters; the limit is "
-            f"{MAX_DESCRIPTION_LENGTH:,}. Write a shorter one."
-        )
-    return text
+    return _checked(text, what, "description", MAX_DESCRIPTION_LENGTH)
+
+
+def check_label(text: str | None, what: str) -> str | None:
+    """Refuse a label edit that a deploy would refuse: `checked_label`'s rules.
+
+    Parameters
+    ----------
+    text
+        The new label, or `None` to reset.
+    what
+        What is labelled, for the message (``"table silver.orders"``).
+
+    Returns
+    -------
+    str or None
+        `text` without surrounding whitespace, as it is stored.
+
+    Raises
+    ------
+    ValidationError
+        If `text` is blank, of more than one line, longer than `MAX_LABEL_CHARS` characters, or
+        has a character a deploy refuses; the message names the next step.
+    """
+    return _checked(text, what, "label", MAX_LABEL_CHARS)
 
 
 def _text(value: object) -> str | None:
@@ -172,11 +227,14 @@ def _text(value: object) -> str | None:
     return value if isinstance(value, str) and value.strip() else None
 
 
-def _apply_entry(session: Session, row: Table, entry: Mapping[str, Any]) -> None:
-    """Write the project's text and model of one manifest entry onto a table and its columns.
+def _apply_entry(
+    session: Session, row: Table, entry: Mapping[str, Any], main_language: str | None
+) -> None:
+    """Write the project's texts and model of one manifest entry onto a table and its columns.
 
-    Never touches an edit, and leaves an artifact alone. A column whose text the header no longer
-    has loses its project text; a row left with no text at all is removed.
+    Never touches an edit, and leaves an artifact alone. A column whose texts the header no longer
+    has loses its project texts; a row left with no text at all is removed. The same holds for
+    the entry's translations (`lakana_core.catalog.translations`).
 
     Parameters
     ----------
@@ -186,15 +244,39 @@ def _apply_entry(session: Session, row: Table, entry: Mapping[str, Any]) -> None
         The table.
     entry
         The manifest entry of the asset that produces it.
+    main_language
+        The manifest's `main_language`, or `None` when it declares none.
     """
     if row.table_type is TableType.ARTIFACT:
         return
     with session.no_autoflush:
-        _write_entry(session, row, entry)
+        _write_entry(session, row, entry, main_language)
 
 
-def _write_entry(session: Session, row: Table, entry: Mapping[str, Any]) -> None:
-    """Write the project's text and model of one manifest entry; `_apply_entry` without its guard.
+def _texts(declared: object) -> dict[str, str]:
+    """Read a name → text map out of a stored manifest, which is untrusted.
+
+    Parameters
+    ----------
+    declared
+        What the manifest holds.
+
+    Returns
+    -------
+    dict
+        Name → text, for the string names whose text is a non-empty string.
+    """
+    return {
+        name: text
+        for name, raw in (declared.items() if isinstance(declared, Mapping) else ())
+        if isinstance(name, str) and (text := _text(raw)) is not None
+    }
+
+
+def _write_entry(
+    session: Session, row: Table, entry: Mapping[str, Any], main_language: str | None
+) -> None:
+    """Write the project's texts and model of one manifest entry; `_apply_entry` without its guard.
 
     Parameters
     ----------
@@ -204,37 +286,51 @@ def _write_entry(session: Session, row: Table, entry: Mapping[str, Any]) -> None
         The table.
     entry
         The manifest entry.
+    main_language
+        The language of the header texts, or `None` for the instance's main language.
     """
+    state = inspect(row)
+    stored = not (state.pending or state.transient)
+    if stored:
+        lock_table(session, row)
     metadata = entry.get("metadata")
     metadata = metadata if isinstance(metadata, Mapping) else {}
     row.description_project = _text(metadata.get("description"))
-    declared = metadata.get("columns")
-    wanted = {
-        name: text
-        for name, raw in (declared.items() if isinstance(declared, Mapping) else ())
-        if isinstance(name, str) and (text := _text(raw)) is not None
-    }
+    row.label_project = _text(metadata.get("label"))
+    row.text_language = main_language
+    wanted = _texts(metadata.get("columns"))
+    wanted_labels = _texts(metadata.get("column_labels"))
     existing = {
         r.column: r
         for r in session.scalars(
             select(ColumnDescription).where(ColumnDescription.table_id == row.id)
         )
     }
-    for name, text in wanted.items():
-        if name in existing:
-            existing[name].description_project = text
-        else:
+    for name in wanted.keys() | wanted_labels.keys():
+        if name not in existing:
             session.add(
                 ColumnDescription(
-                    id=uuid.uuid4(), table_id=row.id, column=name, description_project=text
+                    id=uuid.uuid4(),
+                    table_id=row.id,
+                    column=name,
+                    description_project=wanted.get(name),
+                    label_project=wanted_labels.get(name),
                 )
             )
     for name, found in existing.items():
-        if name in wanted:
-            continue
-        found.description_project = None
-        if found.description_edited is None:
+        found.description_project = wanted.get(name)
+        found.label_project = wanted_labels.get(name)
+        if all(
+            text is None
+            for text in (
+                found.description_project,
+                found.description_edited,
+                found.label_project,
+                found.label_edited,
+            )
+        ):
             session.delete(found)
+    write_translations(session, row, entry_translations(entry), stored=stored)
     write_model_entry(session, row, entry)
 
 
@@ -277,10 +373,11 @@ def sync_project_descriptions(
     manifest
         The manifest of the project version that becomes current.
     """
+    main_language = manifest_main_language(manifest)
     for dotted, entry in _entries(manifest).items():
         row = find_project_table(session, environment_id, dotted)
         if row is not None:
-            _apply_entry(session, row, entry)
+            _apply_entry(session, row, entry, main_language)
 
 
 def sync_created_table(
@@ -315,7 +412,7 @@ def sync_created_table(
     for manifest in manifests:
         entry = _entries(manifest).get(dotted)
         if entry is not None:
-            _apply_entry(session, row, entry)
+            _apply_entry(session, row, entry, manifest_main_language(manifest))
             return
 
 
@@ -339,10 +436,39 @@ def edit_table(row: Table, text: str | None) -> tuple[int, int]:
     return old, len(text or "")
 
 
+def edit_table_label(row: Table, text: str | None) -> tuple[int, int]:
+    """Set or reset the edit of a table's main-language label.
+
+    Parameters
+    ----------
+    row
+        The table.
+    text
+        The new label, or `None` to reset.
+
+    Returns
+    -------
+    tuple of (int, int)
+        The length of the edit before and after (`0` for none).
+    """
+    old = len(row.label_edited or "")
+    row.label_edited = text
+    return old, len(text or "")
+
+
 def edit_column(
-    session: Session, table_id: uuid.UUID, column: str, text: str | None, by: uuid.UUID
+    session: Session,
+    table_id: uuid.UUID,
+    column: str,
+    text: str | None,
+    by: uuid.UUID,
+    *,
+    field: Literal["description", "label"] = "description",
 ) -> tuple[int, int]:
-    """Set or reset the edit of a column's description.
+    """Set or reset the edit of a column's main-language description or label.
+
+    The column's row is removed once none of its four texts (project and edited description and
+    label) is left.
 
     Parameters
     ----------
@@ -356,26 +482,37 @@ def edit_column(
         The new text, or `None` to reset.
     by
         The principal who edits.
+    field
+        Which text: ``"description"`` (the default) or ``"label"``.
 
     Returns
     -------
     tuple of (int, int)
         The length of the edit before and after (`0` for none).
     """
+    attribute = "description_edited" if field == "description" else "label_edited"
     found = session.execute(
-        select(ColumnDescription).where(
-            ColumnDescription.table_id == table_id, ColumnDescription.column == column
-        )
+        select(ColumnDescription)
+        .where(ColumnDescription.table_id == table_id, ColumnDescription.column == column)
+        .execution_options(populate_existing=True)
     ).scalar_one_or_none()
-    old = len((found.description_edited if found is not None else None) or "")
+    old = len((getattr(found, attribute) if found is not None else None) or "")
     if found is None:
         if text is None:
             return 0, 0
         found = ColumnDescription(id=uuid.uuid4(), table_id=table_id, column=column)
         session.add(found)
-    found.description_edited = text
+    setattr(found, attribute, text)
     found.updated_by = by
     found.updated_at = datetime.now(UTC)
-    if text is None and found.description_project is None:
+    if all(
+        value is None
+        for value in (
+            found.description_project,
+            found.description_edited,
+            found.label_project,
+            found.label_edited,
+        )
+    ):
         session.delete(found)
     return old, len(text or "")

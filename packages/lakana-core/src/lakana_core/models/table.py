@@ -212,6 +212,27 @@ class Table(Base, TimestampMixin):
     changes it.
     """
 
+    label_project: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    """The label the project's asset header gives the table (`label:`), in `text_language`.
+
+    Written only by a deploy, a rollback, or the table's creation by a run; never by an edit.
+    """
+
+    label_edited: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    """The label set through the API in the table's main language, shown instead of
+    `label_project`; `None` once reset. A deploy never changes it."""
+
+    text_language: Mapped[str | None] = mapped_column(String(35), nullable=True, default=None)
+    """The main language of the header texts, as the project's `main_language:` declares it;
+    `None` when the project declares none, which means the instance's main language."""
+
+    text_languages: Mapped[list[str] | None] = mapped_column(JSON, nullable=True, default=None)
+    """The sorted languages that have `TextTranslation` rows for this table, or `None` for none.
+
+    Kept with the rows by `lakana_core.catalog.translations`, so a table without translations is
+    never read for them.
+    """
+
     model_kind: Mapped[str | None] = mapped_column(String(16), nullable=True, default=None)
     """The `kind:` the project's asset header declares (``fact``, ``dimension``, ``wide``,
     ``staging``), or `None`.

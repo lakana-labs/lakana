@@ -33,6 +33,7 @@ from lakana.cli import (
     indexes,
     jobs,
     load,
+    me,
     namespaces,
     policies,
     principals,
@@ -411,6 +412,7 @@ def _root(
 
 _REGISTRARS: tuple[Callable[[typer.Typer], None], ...] = (
     auth.register,
+    me.register,
     profile.register,
     environments.register,
     namespaces.register,

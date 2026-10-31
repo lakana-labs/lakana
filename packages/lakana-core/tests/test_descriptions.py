@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+import re
 import uuid
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 from core_test_helpers import ActionAllowList, _prepared_catalog
 from pyiceberg.schema import Schema
 from pyiceberg.types import LongType, NestedField, StringType
-from sqlalchemy import select, update
-from sqlalchemy.orm import Session
+from sqlalchemy import event, select, update
+from sqlalchemy.dialects import postgresql
+from sqlalchemy.orm import ORMExecuteState, Session
 from test_projects_dag import make_asset
 
 from lakana_core.auth import Action, AllowAllAuthorization, PrincipalRef
@@ -18,7 +21,7 @@ from lakana_core.catalog.descriptions import (
     MAX_DESCRIPTION_LENGTH,
     sync_project_descriptions,
 )
-from lakana_core.catalog.service import CatalogService, TableDescription
+from lakana_core.catalog.service import MAX_EDIT_LANGUAGES, CatalogService, TableDescription
 from lakana_core.errors import NotFoundError, PermissionDenied, ValidationError
 from lakana_core.identifiers import NamespacePath, TableRef
 from lakana_core.models import (
@@ -34,6 +37,7 @@ from lakana_core.models import (
     RepositoryKind,
     Table,
     TableType,
+    TextTranslation,
 )
 from lakana_core.projects.dag import build_graph
 from lakana_core.projects.frontmatter import AssetMetadata
@@ -304,11 +308,18 @@ def test_a_deploy_leaves_a_table_that_does_not_exist_yet_alone(
     assert session.scalars(select(Table)).one().description_project is None
 
 
-def test_a_table_created_after_the_deploy_gets_the_projects_text(
-    session: Session, tmp_path: Path, principal: PrincipalRef
-) -> None:
-    """A run creates the table after the deploy; its first read shows the project's text."""
-    catalog = _prepared_catalog(session, tmp_path, AllowAllAuthorization(), namespaces=[_SILVER])
+def _deploy(session: Session, principal: PrincipalRef, manifest: dict) -> None:
+    """Make `manifest` the current deployment of `dev`, without creating its tables.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    principal
+        Who deployed.
+    manifest
+        The manifest.
+    """
     repo = Repository(id=uuid.uuid4(), name="r", kind=RepositoryKind.HTTPS, url="https://h/r")
     session.add(repo)
     session.commit()
@@ -318,7 +329,7 @@ def test_a_table_created_after_the_deploy_gets_the_projects_text(
         repository_id=repo.id,
         environment_id=env_id,
         commit_sha="a" * 40,
-        manifest_json=_manifest(),
+        manifest_json=manifest,
         code_uri="file:///x",
         code_sha256="0" * 64,
         deployed_by=principal.id,
@@ -332,11 +343,31 @@ def test_a_table_created_after_the_deploy_gets_the_projects_text(
     )
     session.commit()
 
+
+def test_a_table_created_after_the_deploy_gets_the_projects_text(
+    session: Session, tmp_path: Path, principal: PrincipalRef
+) -> None:
+    """A run creates the table after the deploy; its first read shows the project's text."""
+    catalog = _prepared_catalog(session, tmp_path, AllowAllAuthorization(), namespaces=[_SILVER])
+    _deploy(session, principal, _manifest())
+
     catalog.create_table(principal, _ORDERS, schema=_SCHEMA)
 
     shown = _described(catalog, principal)
     assert (shown.description, shown.description_source) == ("From the project", "project")
     assert shown.column_descriptions["id"].text == "Order id"
+
+
+def test_a_created_table_says_its_projects_main_language(
+    session: Session, tmp_path: Path, principal: PrincipalRef
+) -> None:
+    """The create's answer carries the `main_language:` the deployed project declares."""
+    catalog = _prepared_catalog(session, tmp_path, AllowAllAuthorization(), namespaces=[_SILVER])
+    _deploy(session, principal, {**_manifest(), "main_language": "de"})
+
+    loaded = catalog.create_table(principal, _ORDERS, schema=_SCHEMA)
+
+    assert loaded.text_language == "de"
 
 
 def _events(session: Session, kind: AuditEventType) -> list[AuditEvent]:
@@ -373,9 +404,27 @@ def test_every_change_is_audited_with_lengths_and_not_the_text(
 
     table_events = _events(session, AuditEventType.TABLE_DESCRIBED)
     assert [e.detail for e in table_events] == [
-        {"table": "silver.orders", "old_length": 0, "new_length": 19, "reset": False},
-        {"table": "silver.orders", "old_length": 19, "new_length": 3, "reset": False},
-        {"table": "silver.orders", "old_length": 3, "new_length": 0, "reset": True},
+        {
+            "table": "silver.orders",
+            "language": "en",
+            "old_length": 0,
+            "new_length": 19,
+            "reset": False,
+        },
+        {
+            "table": "silver.orders",
+            "language": "en",
+            "old_length": 19,
+            "new_length": 3,
+            "reset": False,
+        },
+        {
+            "table": "silver.orders",
+            "language": "en",
+            "old_length": 3,
+            "new_length": 0,
+            "reset": True,
+        },
     ]
     assert table_events[0].securable_table == "orders"
     column_events = _events(session, AuditEventType.COLUMN_DESCRIBED)
@@ -383,6 +432,7 @@ def test_every_change_is_audited_with_lengths_and_not_the_text(
         {
             "table": "silver.orders",
             "column": "id",
+            "language": "en",
             "old_length": 0,
             "new_length": 4,
             "reset": False,
@@ -518,3 +568,364 @@ def test_a_description_needs_the_right_to_read_the_table_and_writes_nothing_with
         catalog.set_table_description(owner, _ORDERS, "No")
     assert session.scalars(select(Table)).one().description_edited is None
     assert _events(session, AuditEventType.TABLE_DESCRIBED) == []
+
+
+def test_a_label_edit_in_the_main_language_and_one_in_french(
+    catalog_with_orders: CatalogService, principal: PrincipalRef, session: Session
+) -> None:
+    """A label edit without a language is the main language's; one in `fr` is a translation."""
+    catalog_with_orders.set_table_description(principal, _ORDERS, label="Orders")
+    catalog_with_orders.set_table_description(
+        principal, _ORDERS, label="Commandes", description="Une ligne.", language="fr"
+    )
+    english = catalog_with_orders.describe_table(principal, _ORDERS)
+    french = catalog_with_orders.describe_table(principal, _ORDERS, languages=["fr"])
+    assert (english.label, english.label_source, english.label_language) == (
+        "Orders",
+        "edited",
+        "en",
+    )
+    assert (french.label, french.description, french.label_language) == (
+        "Commandes",
+        "Une ligne.",
+        "fr",
+    )
+    (event,) = [
+        e for e in _events(session, AuditEventType.TABLE_DESCRIBED) if e.detail["language"] == "fr"
+    ]
+    assert event.detail == {
+        "table": "silver.orders",
+        "language": "fr",
+        "old_length": 0,
+        "new_length": 10,
+        "label_old_length": 0,
+        "label_new_length": 9,
+        "reset": False,
+    }
+
+
+def test_an_edit_in_a_new_language_is_shown_and_listed(
+    catalog_with_orders: CatalogService, principal: PrincipalRef, session: Session
+) -> None:
+    """A column label edit in `it` lists the language; its reset removes it again."""
+    catalog_with_orders.set_column_description(
+        principal, _ORDERS, "status", label="Stato", language="it"
+    )
+    row = session.scalars(select(Table).where(Table.name == "orders")).one()
+    assert row.text_languages == ["it"]
+    described = catalog_with_orders.describe_table(principal, _ORDERS, languages=["it"])
+    assert (described.column_labels["status"].text, described.column_labels["status"].language) == (
+        "Stato",
+        "it",
+    )
+    catalog_with_orders.set_column_description(
+        principal, _ORDERS, "status", label=None, language="it"
+    )
+    assert row.text_languages is None
+
+
+def test_bad_label_edits_and_empty_edits_are_refused_with_the_next_step(
+    catalog_with_orders: CatalogService, principal: PrincipalRef
+) -> None:
+    """Blank, too long and multi-line labels, an edit of nothing and a bad tag are refused."""
+    for label, message in (
+        (" ", "The label of table silver.orders is blank. Write the label, or reset it"),
+        (
+            "x" * 101,
+            "The label of table silver.orders has 101 characters; the limit is 100. "
+            "Write a shorter one.",
+        ),
+        (
+            "a\nb",
+            "The label of table silver.orders has more than one line; a label is one line. "
+            "Put the longer text in the description.",
+        ),
+    ):
+        with pytest.raises(ValidationError, match=re.escape(message)):
+            catalog_with_orders.set_table_description(principal, _ORDERS, label=label)
+    with pytest.raises(
+        ValidationError,
+        match=re.escape("send `description`, `label` or both; null removes an edit"),
+    ):
+        catalog_with_orders.set_table_description(principal, _ORDERS)
+    with pytest.raises(ValidationError, match="is not a language tag Lakana takes"):
+        catalog_with_orders.set_table_description(principal, _ORDERS, label="X", language="fr_FR")
+
+
+def test_an_edit_naming_the_main_language_changes_the_main_text_not_a_translation(
+    catalog_with_orders: CatalogService, principal: PrincipalRef, session: Session
+) -> None:
+    """`language="EN"` on an `en` table is the main-language edit, never a translation row."""
+    catalog_with_orders.set_table_description(principal, _ORDERS, label="Orders", language="EN")
+    catalog_with_orders.set_column_description(
+        principal, _ORDERS, "id", "Order number", label="Number", language="en"
+    )
+    row = session.scalars(select(Table).where(Table.name == "orders")).one()
+    assert (row.label_edited, row.text_languages) == ("Orders", None)
+    column = session.scalars(select(ColumnDescription)).one()
+    assert (column.label_edited, column.description_edited) == ("Number", "Order number")
+    (event,) = _events(session, AuditEventType.COLUMN_DESCRIBED)
+    assert event.detail == {
+        "table": "silver.orders",
+        "column": "id",
+        "language": "en",
+        "old_length": 0,
+        "new_length": 12,
+        "label_old_length": 0,
+        "label_new_length": 6,
+        "reset": False,
+    }
+
+
+def test_a_column_label_reset_keeps_the_description_and_a_full_reset_removes_the_row(
+    catalog_with_orders: CatalogService, principal: PrincipalRef, session: Session
+) -> None:
+    """A column row goes only when none of its four texts is left."""
+    catalog_with_orders.set_column_description(principal, _ORDERS, "id", "Number", label="No.")
+    catalog_with_orders.set_column_description(principal, _ORDERS, "id", label=None)
+    column = session.scalars(select(ColumnDescription)).one()
+    assert (column.label_edited, column.description_edited) == (None, "Number")
+    catalog_with_orders.set_column_description(principal, _ORDERS, "id", None, label=None)
+    assert session.scalars(select(ColumnDescription)).all() == []
+    event = _events(session, AuditEventType.COLUMN_DESCRIBED)[-1]
+    assert event.detail["reset"] is True
+
+
+def test_a_translated_edit_of_a_column_the_table_does_not_have_is_refused(
+    catalog_with_orders: CatalogService, principal: PrincipalRef, session: Session
+) -> None:
+    """The column check runs for every language, before anything is stored."""
+    with pytest.raises(
+        NotFoundError, match=re.escape("has no column 'nope'. Its columns: id, status.")
+    ):
+        catalog_with_orders.set_column_description(
+            principal, _ORDERS, "nope", label="Non", language="fr"
+        )
+    with pytest.raises(
+        ValidationError, match=re.escape("The label of column id of table silver.orders")
+    ):
+        catalog_with_orders.set_column_description(
+            principal, _ORDERS, "id", label=" ", language="fr"
+        )
+    with pytest.raises(ValidationError, match="send `description`, `label` or both"):
+        catalog_with_orders.set_column_description(principal, _ORDERS, "id", language="fr")
+    assert session.scalars(select(Table)).one().text_languages is None
+    assert _events(session, AuditEventType.COLUMN_DESCRIBED) == []
+
+
+def test_a_french_column_description_edit_is_shown_in_french(
+    catalog_with_orders: CatalogService, principal: PrincipalRef
+) -> None:
+    """A description edit in `fr` shows to a French reader with its language."""
+    catalog_with_orders.set_column_description(
+        principal, _ORDERS, "status", "Où elle en est", language="fr"
+    )
+    shown_fr = catalog_with_orders.describe_table(principal, _ORDERS, languages=["fr"])
+    text = shown_fr.column_descriptions["status"]
+    assert (text.text, text.source, text.language) == ("Où elle en est", "edited", "fr")
+
+
+def _selects(session: Session) -> list[str]:
+    """Record the ORM selects of a session, compiled for PostgreSQL.
+
+    Parameters
+    ----------
+    session
+        Database session.
+
+    Returns
+    -------
+    list of str
+        The SQL of each select, in order, filled in as the session runs them.
+    """
+    seen: list[str] = []
+
+    @event.listens_for(session, "do_orm_execute")
+    def _record(state: ORMExecuteState) -> None:
+        """Keep one select.
+
+        Parameters
+        ----------
+        state
+            The statement about to run.
+        """
+        if state.is_select:
+            seen.append(str(cast("Any", state.statement).compile(dialect=postgresql.dialect())))
+
+    return seen
+
+
+def _locked_before_texts(seen: list[str]) -> bool:
+    """Say whether the table row was locked before any translation or column text was read.
+
+    Parameters
+    ----------
+    seen
+        The selects, from `_selects`.
+
+    Returns
+    -------
+    bool
+        True when a `SELECT … FROM tables … FOR UPDATE` comes first.
+    """
+    lock = next(
+        (i for i, sql in enumerate(seen) if "FROM tables" in sql and "FOR UPDATE" in sql), None
+    )
+    texts = next(
+        (
+            i
+            for i, sql in enumerate(seen)
+            if "FROM text_translations" in sql or "FROM column_descriptions" in sql
+        ),
+        None,
+    )
+    return lock is not None and (texts is None or lock < texts)
+
+
+def test_an_edit_locks_the_table_row_before_it_reads_any_text(
+    catalog_with_orders: CatalogService, principal: PrincipalRef, session: Session
+) -> None:
+    """Two edits, or an edit and a deploy, of one table run one after the other."""
+    catalog_with_orders.set_table_description(principal, _ORDERS, label="Commandes", language="fr")
+    seen = _selects(session)
+    catalog_with_orders.set_table_description(principal, _ORDERS, label="Ordini", language="it")
+    assert _locked_before_texts(seen)
+    seen.clear()
+    catalog_with_orders.set_column_description(principal, _ORDERS, "id", label="No.")
+    lock = next(i for i, sql in enumerate(seen) if "FOR UPDATE" in sql)
+    assert "FROM tables" in seen[lock]
+    assert any("FROM column_descriptions" in sql for sql in seen[lock:])
+
+
+def test_a_deploy_locks_a_stored_table_before_it_writes_its_texts(
+    catalog_with_orders: CatalogService, session: Session
+) -> None:
+    """The deploy's sync takes the same lock, so it cannot remove an edit made meanwhile."""
+    seen = _selects(session)
+    sync_project_descriptions(session, _env_id(session), _manifest())
+    assert _locked_before_texts(seen)
+
+
+def test_a_language_missing_from_the_list_is_repaired_by_the_next_edit(
+    catalog_with_orders: CatalogService, principal: PrincipalRef, session: Session
+) -> None:
+    """A row the list does not name is found again by an edit, which lists it once more."""
+    catalog_with_orders.set_table_description(principal, _ORDERS, label="Commandes", language="fr")
+    session.execute(update(Table).values(text_languages=None))
+    session.commit()
+    catalog_with_orders.set_table_description(principal, _ORDERS, label="Ordini", language="it")
+    row = session.scalars(select(Table)).one()
+    assert row.text_languages == ["fr", "it"]
+    session.execute(update(Table).values(text_languages=["it"]))
+    session.commit()
+    catalog_with_orders.set_table_description(principal, _ORDERS, label=None, language="fr")
+    assert row.text_languages == ["it"]
+    assert [r.language for r in session.scalars(select(TextTranslation))] == ["it"]
+
+
+@pytest.mark.parametrize("language", [None, "fr"])
+@pytest.mark.parametrize("column", [None, "status"])
+def test_an_edit_follows_the_deploys_character_rules(
+    catalog_with_orders: CatalogService,
+    principal: PrincipalRef,
+    session: Session,
+    language: str | None,
+    column: str | None,
+) -> None:
+    """Labels and descriptions, in the main language and another, as `checked_label` rules."""
+    what = "table silver.orders" if column is None else "column status of table silver.orders"
+
+    def edit(**texts: str | None) -> None:
+        if column is None:
+            catalog_with_orders.set_table_description(
+                principal, _ORDERS, language=language, **texts
+            )
+        else:
+            catalog_with_orders.set_column_description(
+                principal, _ORDERS, column, language=language, **texts
+            )
+
+    for bad in ("a\rb", "a\u2028b", "a\u2029b", "x\u202eevil", "bell\x07"):
+        # A description's lone `\r` is a line break (see the Windows line endings test).
+        for field in ("label",) if bad == "a\rb" else ("label", "description"):
+            with pytest.raises(
+                ValidationError,
+                match=re.escape(f"The {field} of {what} must not contain a surrogate"),
+            ):
+                edit(**{field: bad})
+    edit(label="  Orders  ", description="  Line one.\n\tLine two.  ")
+    shown_texts = catalog_with_orders.describe_table(
+        principal, _ORDERS, languages=[language or "en"]
+    )
+    if column is None:
+        label, description = shown_texts.label, shown_texts.description
+    else:
+        label = shown_texts.column_labels[column].text
+        description = shown_texts.column_descriptions[column].text
+    assert (label, description) == ("Orders", "Line one.\n\tLine two.")
+
+
+def test_a_label_of_spaces_around_is_measured_without_them(
+    catalog_with_orders: CatalogService, principal: PrincipalRef
+) -> None:
+    """The limit counts the label as stored, without the surrounding spaces."""
+    catalog_with_orders.set_table_description(principal, _ORDERS, label=" " + "x" * 100 + " ")
+    assert catalog_with_orders.describe_table(principal, _ORDERS).label == "x" * 100
+
+
+def test_a_table_has_texts_in_at_most_50_languages_besides_its_main_one(
+    catalog_with_orders: CatalogService, principal: PrincipalRef, session: Session
+) -> None:
+    """A 51st language is refused with the limit and how to free one; listed ones stay editable."""
+    row = session.scalars(select(Table)).one()
+    tags = [f"a{chr(97 + i // 26)}{chr(97 + i % 26)}" for i in range(MAX_EDIT_LANGUAGES)]
+    for tag in tags:
+        session.add(
+            TextTranslation(
+                id=uuid.uuid4(),
+                table_id=row.id,
+                subject="table",
+                name="",
+                language=tag,
+                field="label",
+                text_project="x",
+            )
+        )
+    row.text_languages = sorted(tags)
+    session.commit()
+    with pytest.raises(
+        ValidationError,
+        match=re.escape(
+            "Table silver.orders has texts in 50 languages besides its main language, the most "
+            "a table may have. To add `fr`, first remove another language's texts: reset its "
+            "edits (`lakana table describe silver.orders --lang TAG --reset`, also with "
+            "`--column` for each column that has one) and remove its file from translations/."
+        ),
+    ):
+        catalog_with_orders.set_column_description(
+            principal, _ORDERS, "id", label="Numéro", language="fr"
+        )
+    catalog_with_orders.set_table_description(principal, _ORDERS, label="y", language=tags[0])
+    catalog_with_orders.set_table_description(principal, _ORDERS, label="Orders")
+    catalog_with_orders.set_table_description(principal, _ORDERS, label=None, language="fr")
+    assert len(row.text_languages or []) == MAX_EDIT_LANGUAGES
+
+
+@pytest.mark.parametrize("ending", ["\r\n", "\r"])
+@pytest.mark.parametrize("language", [None, "fr"])
+def test_a_description_with_windows_line_endings_is_stored_with_newlines(
+    catalog_with_orders: CatalogService, principal: PrincipalRef, ending: str, language: str | None
+) -> None:
+    """Windows and old Mac line endings in a description become newlines; a label stays one line."""
+    text = f"Line one.{ending}Line two."
+    catalog_with_orders.set_table_description(principal, _ORDERS, text, language=language)
+    catalog_with_orders.set_column_description(principal, _ORDERS, "id", text, language=language)
+    shown_texts = catalog_with_orders.describe_table(
+        principal, _ORDERS, languages=[language or "en"]
+    )
+    assert shown_texts.description == "Line one.\nLine two."
+    assert shown_texts.column_descriptions["id"].text == "Line one.\nLine two."
+    with pytest.raises(ValidationError, match=re.escape("has more than one line")):
+        catalog_with_orders.set_table_description(
+            principal, _ORDERS, label="Line one.\r\nLine two.", language=language
+        )

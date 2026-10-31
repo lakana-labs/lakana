@@ -93,6 +93,8 @@ def _add_principal(session: Session, name: str) -> Principal:
 def test_mint_then_verify_resolves_the_full_scope(session: Session) -> None:
     """Verify returns the principal, environment, and asset_scope the token was minted with."""
     principal = _add_principal(session, "worker-1")
+    principal.language = "fr"
+    session.commit()
     service = TaskTokenService(session, AllowAllAuthorization())
 
     minted = service.mint(
@@ -103,7 +105,7 @@ def test_mint_then_verify_resolves_the_full_scope(session: Session) -> None:
     _, secret = parsed
 
     scope = service.verify(minted.key_id, secret)
-    assert scope.principal.id == principal.id
+    assert (scope.principal.id, scope.principal.language) == (principal.id, "fr")
     assert scope.environment == "dev"
     assert scope.asset_scope == ["gold.sales"]
     task_token = session.execute(

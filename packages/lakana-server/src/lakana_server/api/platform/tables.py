@@ -32,6 +32,7 @@ from sqlalchemy.orm import Session
 from starlette.requests import ClientDisconnect
 
 from lakana_core.auth import PrincipalRef
+from lakana_core.catalog.descriptions import KEEP, Keep
 from lakana_core.catalog.json_schema import ColumnSpec, from_iceberg_schema, to_iceberg_schema
 from lakana_core.catalog.lineage_graph import LineageDirection, LineageService
 from lakana_core.catalog.loads import require_bronze
@@ -47,6 +48,7 @@ from lakana_core.catalog.writes import (
 from lakana_core.errors import LakanaError, ValidationError
 from lakana_core.identifiers import NamespacePath, TableRef
 from lakana_core.projects.asset_model import require_model_kind
+from lakana_server.api.platform.languages import LANG_DESCRIPTION, reader_languages
 from lakana_server.api.platform.schemas import (
     AppendOut,
     ColumnOut,
@@ -70,6 +72,7 @@ from lakana_server.api.platform.schemas import (
     TableReferencesOut,
     TableRetentionIn,
     TableRetentionOut,
+    TranslationCoverageOut,
     UndropIn,
 )
 from lakana_server.api.responses import errors
@@ -79,6 +82,7 @@ from lakana_server.concurrency import AppendConcurrencyLimiter
 from lakana_server.deps import (
     get_catalog,
     get_lineage_service,
+    get_main_language,
     get_principal,
     get_query_service,
     get_session,
@@ -540,7 +544,7 @@ def _decode_arrow_stream(payload: pa.Buffer, max_bytes: int, max_arrays: int) ->
     return data
 
 
-def _to_out(namespace: str, loaded: LoadedTable) -> TableOut:
+def _to_out(namespace: str, loaded: LoadedTable, *, language: str, main_language: str) -> TableOut:
     """Build a response body from a loaded table.
 
     Parameters
@@ -549,6 +553,10 @@ def _to_out(namespace: str, loaded: LoadedTable) -> TableOut:
         Dot-joined namespace path the table lives in.
     loaded
         The table, as `CatalogService.load_table` returns it.
+    language
+        The reader's first language, for `TableOut.language`.
+    main_language
+        `LAKANA_MAIN_LANGUAGE`; the table's main language unless its project declares one.
 
     Returns
     -------
@@ -566,18 +574,20 @@ def _to_out(namespace: str, loaded: LoadedTable) -> TableOut:
             for c in from_iceberg_schema(loaded.metadata.schema())
         ],
         snapshot_id=loaded.metadata.current_snapshot_id,
+        language=language,
+        main_language=loaded.text_language or main_language,
     )
 
 
 def _column_out(column: ColumnSpec, description: TableDescription) -> ColumnOut:
-    """Build one column of a response body, with its description.
+    """Build one column of a response body, with its label and description.
 
     Parameters
     ----------
     column
         The column.
     description
-        From `CatalogService.describe_table`, which holds the columns' descriptions.
+        From `CatalogService.describe_table`, which holds the columns' chosen texts.
 
     Returns
     -------
@@ -585,12 +595,17 @@ def _column_out(column: ColumnSpec, description: TableDescription) -> ColumnOut:
         The column.
     """
     text = description.column_descriptions.get(column.name)
+    label = description.column_labels.get(column.name)
     return ColumnOut(
         name=column.name,
         type=column.type,
         nullable=column.nullable,
         description=None if text is None else text.text,
         description_source=None if text is None else text.source,
+        description_language=None if text is None else text.language,
+        label=None if label is None else label.text,
+        label_source=None if label is None else label.source,
+        label_language=None if label is None else label.language,
     )
 
 
@@ -626,6 +641,16 @@ def _describe_out(namespace: str, description: TableDescription) -> TableOut:
         state_message=description.state_message,
         description=description.description,
         description_source=description.description_source,
+        description_language=description.description_language,
+        label=description.label,
+        label_source=description.label_source,
+        label_language=description.label_language,
+        language=description.language,
+        main_language=description.main_language,
+        translations=[
+            TranslationCoverageOut.model_validate(c, from_attributes=True)
+            for c in description.translations
+        ],
         last_write_at=description.last_write_at,
         row_count=description.row_count,
         size_bytes=description.size_bytes,
@@ -913,8 +938,10 @@ def create_table(
     env: str,
     path: str,
     body: TableCreate,
+    request: Request,
     principal: PrincipalRef = Depends(get_principal),
     catalog: CatalogService = Depends(get_catalog),
+    main_language: str = Depends(get_main_language),
 ) -> TableOut:
     """Create a table.
 
@@ -931,10 +958,14 @@ def create_table(
         Dot-joined namespace path.
     body
         The table's name and columns.
+    request
+        The current request, for `Accept-Language`.
     principal
         The authenticated caller.
     catalog
         The catalog service for this request.
+    main_language
+        `LAKANA_MAIN_LANGUAGE`, the main language of a table whose project declares none.
 
     Returns
     -------
@@ -960,27 +991,36 @@ def create_table(
     loaded = catalog.create_table(
         with_break_glass(principal, body.break_glass_reason), ref, schema=to_iceberg_schema(columns)
     )
-    return _to_out(path, loaded)
+    return _to_out(
+        path,
+        loaded,
+        language=reader_languages(request, None, principal, main_language)[0],
+        main_language=main_language,
+    )
 
 
 @router.get("", response_model=list[TableOut], responses=errors(403, 404, 503))
 def list_tables(
     env: str,
     path: str,
+    request: Request,
     model_kind: str | None = Query(
         default=None,
         description="Only tables whose asset header declares this kind: fact, dimension, wide "
         "or staging.",
     ),
+    lang: str | None = Query(default=None, description=LANG_DESCRIPTION),
     principal: PrincipalRef = Depends(get_principal),
     catalog: CatalogService = Depends(get_catalog),
+    main_language: str = Depends(get_main_language),
 ) -> list[TableOut]:
     """List the tables of a namespace.
 
-    Lists the tables of the namespace that the caller may read. Needs `READ_TABLE` on the
-    namespace; tables the caller may not read are left out. Answers 404 when the namespace
-    does not exist, 422 for a `model_kind` no header can declare, and 503 when the
-    environment's storage cannot be reached (try again after `Retry-After`).
+    Lists the tables of the namespace that the caller may read, with their texts in the
+    reader's language. Needs `READ_TABLE` on the namespace; tables the caller may not read are
+    left out. Answers 404 when the namespace does not exist, 422 for a `model_kind` no header
+    can declare or a `lang` that is not a language tag, and 503 when the environment's storage
+    cannot be reached (try again after `Retry-After`).
 
     Parameters
     ----------
@@ -988,13 +1028,19 @@ def list_tables(
         Environment name.
     path
         Dot-joined namespace path.
+    request
+        The current request, for `Accept-Language`.
     model_kind
         Keep only the tables whose header declares this kind (`model.kind`); every table when
         absent.
+    lang
+        The language of the texts; see `reader_languages` for the order without it.
     principal
         The authenticated caller.
     catalog
         The catalog service for this request.
+    main_language
+        `LAKANA_MAIN_LANGUAGE`, the last language a reader without a choice gets.
 
     Returns
     -------
@@ -1007,10 +1053,11 @@ def list_tables(
     """
     if model_kind is not None:
         require_model_kind(model_kind)
+    languages = reader_languages(request, lang, principal, main_language)
     ns = NamespacePath.from_parts(path.split("."))
     refs = catalog.list_tables(principal, env, ns)
     described = [
-        catalog.describe_table(principal, ref)
+        catalog.describe_table(principal, ref, languages=languages)
         for ref in refs
         if catalog.can_read_table(principal, ref)
     ]
@@ -1026,13 +1073,18 @@ def get_table(
     env: str,
     path: str,
     name: str,
+    request: Request,
+    lang: str | None = Query(default=None, description=LANG_DESCRIPTION),
     principal: PrincipalRef = Depends(get_principal),
     catalog: CatalogService = Depends(get_catalog),
+    main_language: str = Depends(get_main_language),
 ) -> TableOut:
     """Show a table.
 
-    Needs `READ_TABLE`. Answers 404 when the table does not exist and 503 when the
-    environment's storage cannot be reached (try again after `Retry-After`).
+    Shows its texts in the reader's language, each saying which language it is in. Needs
+    `READ_TABLE`. Answers 404 when the table does not exist, 422 for a `lang` that is not a
+    language tag, and 503 when the environment's storage cannot be reached (try again after
+    `Retry-After`).
 
     Parameters
     ----------
@@ -1042,10 +1094,16 @@ def get_table(
         Dot-joined namespace path.
     name
         Table name.
+    request
+        The current request, for `Accept-Language`.
+    lang
+        The language of the texts; see `reader_languages` for the order without it.
     principal
         The authenticated caller.
     catalog
         The catalog service for this request.
+    main_language
+        `LAKANA_MAIN_LANGUAGE`, the last language a reader without a choice gets.
 
     Returns
     -------
@@ -1056,10 +1114,13 @@ def get_table(
     ------
     lakana_core.errors.NotFoundError
         Mapped to 404 by `install_exception_handlers`.
+    lakana_core.errors.ValidationError
+        Mapped to 422 for a `lang` that is not a language tag.
     """
+    languages = reader_languages(request, lang, principal, main_language)
     ns = NamespacePath.from_parts(path.split("."))
     ref = TableRef(environment=env, namespace=ns, name=name)
-    return _describe_out(path, catalog.describe_table(principal, ref))
+    return _describe_out(path, catalog.describe_table(principal, ref, languages=languages))
 
 
 @router.get("/{name}/health", response_model=TableHealthOut, responses=errors(403, 404, 503))
@@ -1130,21 +1191,52 @@ def get_table_health(
     return TableHealthOut.model_validate(health, from_attributes=True)
 
 
+_EDIT_LANG_DESCRIPTION = (
+    "The language edited, such as fr; without it, the table's main language. The answer's texts "
+    "are in it too."
+)
+"""The description of the `lang` query parameter of the two description routes."""
+
+
+def _sent(body: DescriptionIn, field: Literal["description", "label"]) -> str | Keep | None:
+    """Read one field of a description body, or `KEEP` when it was left out.
+
+    Parameters
+    ----------
+    body
+        The request body.
+    field
+        ``"description"`` or ``"label"``.
+
+    Returns
+    -------
+    str or Keep or None
+        The text, `None` to reset, or `KEEP` for a field the body did not send.
+    """
+    return getattr(body, field) if field in body.model_fields_set else KEEP
+
+
 @router.patch("/{name}", response_model=TableOut, responses=errors(403, 404))
 def describe_table(
     env: str,
     path: str,
     name: str,
     body: DescriptionIn,
+    request: Request,
+    lang: str | None = Query(default=None, description=_EDIT_LANG_DESCRIPTION),
     principal: PrincipalRef = Depends(get_principal),
     catalog: CatalogService = Depends(get_catalog),
+    main_language: str = Depends(get_main_language),
 ) -> TableOut:
-    """Set a table's description.
+    """Set a table's description and label.
 
-    Sets the text shown for the table, or with `null` removes it so that the text of the
-    project shows again. A deploy never replaces a text set here. The table's owner or a
-    holder of `DROP_TABLE` may do this. Answers 404 when the table does not exist and 422
-    for a blank text or one over 4,000 characters.
+    Sets the texts shown for the table in one language (`lang`, else the table's main language),
+    or with `null` removes an edit so that the text of the project shows again. A field left out
+    of the body stays as it is. A deploy never replaces a text set here. The table's owner or a
+    holder of `DROP_TABLE` may do this, and must be able to read the table. Answers 404 when the
+    table does not exist and 422 for a body with neither field, a blank text, a description over
+    4,000 characters, a label over 100 characters or on several lines, or a `lang` that is not a
+    language tag.
 
     Parameters
     ----------
@@ -1155,16 +1247,22 @@ def describe_table(
     name
         Table name.
     body
-        The new `description`, or `null`.
+        The new `description` and/or `label`, each a text or `null`.
+    request
+        The current request, for `Accept-Language`.
+    lang
+        The language edited; also the language of the answer's texts.
     principal
         The authenticated caller.
     catalog
         The catalog service for this request.
+    main_language
+        `LAKANA_MAIN_LANGUAGE`, the last language a reader without a choice gets.
 
     Returns
     -------
     TableOut
-        The table, with the description it shows now.
+        The table, with the texts it shows now, in the reader's language.
 
     Raises
     ------
@@ -1173,67 +1271,91 @@ def describe_table(
     lakana_core.errors.PermissionDenied
         Mapped to 403, unless the caller owns the table or holds `DROP_TABLE` on it.
     lakana_core.errors.ValidationError
-        Mapped to 422 for a blank text or one over 4,000 characters.
+        Mapped to 422 for a text that breaks its rules or a `lang` that is not a tag.
     """
+    languages = reader_languages(request, lang, principal, main_language)
     ref = TableRef(environment=env, namespace=NamespacePath.from_parts(path.split(".")), name=name)
-    catalog.set_table_description(principal, ref, body.description)
-    return _describe_out(path, catalog.describe_table(principal, ref))
+    catalog.set_table_description(
+        principal,
+        ref,
+        _sent(body, "description"),
+        label=_sent(body, "label"),
+        language=lang,
+    )
+    return _describe_out(path, catalog.describe_table(principal, ref, languages=languages))
 
 
 @router.put(
     "/{name}/columns/{column}/description", response_model=TableOut, responses=errors(403, 404)
 )
 def describe_column(
+    request: Request,
+    body: DescriptionIn,
     env: str,
     path: str,
     name: str,
     column: str,
-    body: DescriptionIn,
-    principal: PrincipalRef = Depends(get_principal),
+    lang: str | None = Query(default=None, description=_EDIT_LANG_DESCRIPTION),
+    main_language: str = Depends(get_main_language),
     catalog: CatalogService = Depends(get_catalog),
+    principal: PrincipalRef = Depends(get_principal),
 ) -> TableOut:
-    """Set a column's description.
+    """Set a column's description and label.
 
-    Sets the text shown for a column, or with `null` removes it so that the text of the
-    project shows again. The table's owner or a holder of `DROP_TABLE` may do this, and must
-    be able to read the table. Answers 404 when the table or column does not exist and 422
-    for a blank text or one over 4,000 characters.
+    Works as the table's route does, for one column, which must be in the table's schema: the
+    texts are set in `lang`, else in the table's main language, `null` removes an edit, and a
+    field left out stays. The caller owns the table or holds `DROP_TABLE` on it, and may read it.
+    Answers 404 for a missing table or column and 422 as the table's route does.
 
     Parameters
     ----------
-    env
-        Environment name.
-    path
-        Dot-joined namespace path.
-    name
-        Table name.
-    column
-        The column's name; it must be in the table's schema.
+    request
+        Carries the reader's `Accept-Language`.
     body
-        The new `description`, or `null`.
-    principal
-        The authenticated caller.
+        The column's new texts: `description`, `label` or both, `null` to reset one.
+    env
+        The environment's name.
+    path
+        The namespace, its parts joined by dots.
+    name
+        The table's name.
+    column
+        The column to edit; it must be in the schema.
+    lang
+        Which language the edit is in, and the answer's texts are in.
+    main_language
+        The server's `LAKANA_MAIN_LANGUAGE`, the end of the reader's languages.
     catalog
-        The catalog service for this request.
+        This request's catalog service.
+    principal
+        The caller.
 
     Returns
     -------
     TableOut
-        The table, with the descriptions it shows now.
+        The whole table, as the reader reads it after the edit.
 
     Raises
     ------
     lakana_core.errors.NotFoundError
-        Mapped to 404 for a missing table or column.
+        Mapped to 404 when the table or the column is missing.
     lakana_core.errors.PermissionDenied
-        Mapped to 403, unless the caller owns the table or holds `DROP_TABLE` on it, and may
-        read it.
+        Mapped to 403 for a caller who neither owns the table nor holds `DROP_TABLE` on it, or
+        may not read it.
     lakana_core.errors.ValidationError
-        Mapped to 422 for a blank text or one over 4,000 characters.
+        Mapped to 422 for a bad text or tag.
     """
+    languages = reader_languages(request, lang, principal, main_language)
     ref = TableRef(environment=env, namespace=NamespacePath.from_parts(path.split(".")), name=name)
-    catalog.set_column_description(principal, ref, column, body.description)
-    return _describe_out(path, catalog.describe_table(principal, ref))
+    catalog.set_column_description(
+        principal,
+        ref,
+        column,
+        _sent(body, "description"),
+        label=_sent(body, "label"),
+        language=lang,
+    )
+    return _describe_out(path, catalog.describe_table(principal, ref, languages=languages))
 
 
 @router.get("/{name}/lineage", response_model=LineageOut, responses=errors(403, 404))
@@ -1471,8 +1593,10 @@ def undrop_table(
     path: str,
     name: str,
     body: UndropIn,
+    request: Request,
     principal: PrincipalRef = Depends(get_principal),
     catalog: CatalogService = Depends(get_catalog),
+    main_language: str = Depends(get_main_language),
 ) -> TableOut:
     """Restore a dropped table.
 
@@ -1492,10 +1616,14 @@ def undrop_table(
         The name the table had when it was dropped.
     body
         A new name, if its own is taken, and a break-glass reason.
+    request
+        The current request, for `Accept-Language`.
     principal
         The authenticated caller.
     catalog
         The catalog service for this request.
+    main_language
+        `LAKANA_MAIN_LANGUAGE`, the main language of a table whose project declares none.
 
     Returns
     -------
@@ -1519,7 +1647,12 @@ def undrop_table(
         TableRef(environment=env, namespace=ns, name=name),
         new_name=body.new_name,
     )
-    return _to_out(path, loaded)
+    return _to_out(
+        path,
+        loaded,
+        language=reader_languages(request, None, principal, main_language)[0],
+        main_language=main_language,
+    )
 
 
 @router.get("/{name}/retention", response_model=TableRetentionOut, responses=errors(403, 404))
