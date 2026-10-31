@@ -5,7 +5,7 @@ from __future__ import annotations
 from lakana_core.projects.asset_model import ParsedAsset
 from lakana_core.projects.discovery import DiscoveredAsset
 from lakana_core.projects.issues import error_for_reader, withheld_lines
-from lakana_core.projects.layer_rules import asset_write, layer_issues
+from lakana_core.projects.layer_rules import asset_write, layer_hints, layer_issues
 from lakana_core.projects.layers import LAYER_WRITES, MEDALLION_LAYERS, LayerRules, LayersConfig
 from lakana_core.projects.parse import file_references, parse_assets
 from lakana_core.projects.project_config import AssetDefaults
@@ -628,3 +628,18 @@ def test_a_source_read_and_a_python_input_are_withheld_by_their_name() -> None:
         )
         stored = withheld_lines([issue])
         assert target not in error_for_reader(issue.render(), stored, lambda name: False)
+
+
+def test_the_hint_counts_the_assets_of_each_layer() -> None:
+    assets = [
+        _sql("silver.a", "/* lakana\nkind: staging\n*/\nSELECT 1 AS a\n"),
+        _sql("gold.b", "SELECT 1 AS b\n"),
+        _sql("gold.c", "SELECT 1 AS c\n"),
+    ]
+    assert layer_hints(MEDALLION_LAYERS, assets) == (
+        "layer rules: 0 bronze, 1 silver and 2 gold assets follow them",
+    )
+    assert layer_hints(MEDALLION_LAYERS, assets[:2]) == (
+        "layer rules: 0 bronze, 1 silver and 1 gold asset follows them",
+    )
+    assert layer_hints(None, assets) == ()

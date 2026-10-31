@@ -9,6 +9,7 @@ environment (`error_for_reader`).
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import PurePosixPath
@@ -455,3 +456,27 @@ def layer_issues(layers: LayersConfig | None, assets: Sequence[ParsedAsset]) -> 
     for asset in sorted(assets, key=lambda a: a.path):
         issues.extend(_asset_issues(layers, asset))
     return issues
+
+
+def layer_hints(layers: LayersConfig | None, assets: Sequence[ParsedAsset]) -> tuple[str, ...]:
+    """Say, once per deploy, that the layer rules are on.
+
+    Parameters
+    ----------
+    layers
+        `ProjectConfig.layers`.
+    assets
+        The parsed assets, every one in a layer once the deploy passed.
+
+    Returns
+    -------
+    tuple of str
+        ``layer rules: 3 bronze, 5 silver and 2 gold assets follow them`` (``1 gold asset
+        follows them`` for one); empty without `layers:`.
+    """
+    if layers is None:
+        return ()
+    counts = Counter(layer_of(asset.table) for asset in assets)
+    parts = [f"{counts[layer]} {layer}" for layer in LAYERS]
+    one = counts[LAYERS[-1]] == 1
+    return (f"layer rules: {and_list(parts)} {'asset follows' if one else 'assets follow'} them",)

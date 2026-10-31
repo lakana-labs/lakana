@@ -57,7 +57,7 @@ from lakana_core.models import (
 from lakana_core.models.table import Table, TableType
 from lakana_core.projects.deploys import CONFLICT_MESSAGE, DeployService
 from lakana_core.projects.issues import ProjectIssue, ProjectValidationError
-from lakana_core.projects.layers import MEDALLION_LAYERS_FLOW
+from lakana_core.projects.layers import MEDALLION_LAYERS, MEDALLION_LAYERS_FLOW
 from lakana_core.projects.limits import DeployLimits
 from lakana_core.projects.manifest import manifest_assets
 from lakana_core.projects.package_indexes import PackageIndexService
@@ -3445,3 +3445,46 @@ def test_layer_issues_come_after_the_reference_issues(
         "targets": ["bronze.events"],
     }
     assert session.query(JobVersion).count() == 0
+
+
+@pytest.mark.parametrize("kind", [DeployKind.DEPLOY, DeployKind.DRY_RUN])
+def test_a_layered_project_deploys_with_its_hint_and_its_rules(
+    session: Session, principal: PrincipalRef, world: World, kind: DeployKind
+) -> None:
+    commit(
+        world.repo_path,
+        {
+            "lakana.yaml": _LAYERED_CONFIG,
+            "assets/silver/clean.sql": _STAGING_CLEAN,
+            "assets/gold/total.sql": (
+                "/* lakana\nkind: wide\ngrain: One row for the whole table.\nkey: none\n*/\n"
+                "SELECT count(*) AS n FROM silver.clean\n"
+            ),
+            # A check is no read: a gold table's check may compare with bronze.
+            "checks/gold/total/matches_bronze.sql": (
+                "SELECT n FROM gold.total WHERE n <> (SELECT count(*) FROM bronze.events)\n"
+            ),
+        },
+    )
+    run = _submit_and_run(session, principal, world, kind)
+    assert (run.status, run.error_message) == (DeployStatus.SUCCEEDED, None)
+    assert run.diff_json is not None
+    assert run.diff_json["hints"] == [
+        "layer rules: 0 bronze, 1 silver and 1 gold asset follows them"
+    ]
+    if kind is DeployKind.DEPLOY:
+        version = session.get(JobVersion, run.job_version_id)
+        assert version is not None
+        assert version.manifest_json["layers"] == MEDALLION_LAYERS.model_dump(mode="json")
+
+
+def test_a_project_without_layers_keeps_its_manifest_and_hints(
+    session: Session, principal: PrincipalRef, world: World
+) -> None:
+    run = _submit_and_run(session, principal, world)
+    assert run.status is DeployStatus.SUCCEEDED
+    assert run.diff_json is not None
+    assert run.diff_json.get("hints", []) == []
+    version = session.get(JobVersion, run.job_version_id)
+    assert version is not None
+    assert "layers" not in version.manifest_json

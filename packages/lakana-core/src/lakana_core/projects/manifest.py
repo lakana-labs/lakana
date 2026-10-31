@@ -8,6 +8,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
+import pydantic
+
 from lakana_core.connections.kinds import NAME
 from lakana_core.identifiers import NOTIFY_FORMATS
 from lakana_core.languages import canonical_language
@@ -23,6 +25,7 @@ from lakana_core.projects.asset_model import (
     normalized_write,
 )
 from lakana_core.projects.dag import ProjectGraph
+from lakana_core.projects.layers import LayersConfig
 from lakana_core.projects.measures import MeasureEntry, measure_entries, read_measure_entries
 from lakana_core.projects.parse import ParsedAsset
 from lakana_core.projects.project_config import (
@@ -396,6 +399,7 @@ def build_manifest(
     references: Mapping[str, Sequence[ResolvedReference]] | None = None,
     main_language: str | None = None,
     translations: Mapping[str, Mapping[str, Any]] | None = None,
+    layers: LayersConfig | None = None,
 ) -> dict[str, Any]:
     """Build the manifest stored on a project version.
 
@@ -434,6 +438,10 @@ def build_manifest(
         Table → language → its texts (`translation_entries`), recorded as each entry's
         `metadata.translations`; `None` when the project has no translation files. With
         `main_language`, a label or a translation the manifest is `TEXTS_VERSION`.
+    layers
+        `lakana.yaml`'s `layers:`; recorded as `layers` (`LayersConfig.model_dump(mode="json")`)
+        only when declared, so every other project keeps its manifest byte for byte. No version
+        bump: the rules are enforced while a deploy is validated, never when a run executes.
 
     Returns
     -------
@@ -482,6 +490,8 @@ def build_manifest(
         manifest["package_indexes"] = sorted(package_indexes)
     if main_language is not None:
         manifest["main_language"] = main_language
+    if layers is not None:
+        manifest["layers"] = layers.model_dump(mode="json")
     lists_empty = (
         CONNECTIONS_VERSION,
         WRITES_VERSION,
@@ -1150,3 +1160,26 @@ def manifest_main_language(manifest: object) -> str | None:
     """
     value = manifest.get("main_language") if isinstance(manifest, Mapping) else None
     return value if isinstance(value, str) and canonical_language(value) == value else None
+
+
+def manifest_layers(manifest: object) -> LayersConfig | None:
+    """Read a manifest's declared layer rules back, failing safe.
+
+    Parameters
+    ----------
+    manifest
+        A stored manifest; untrusted.
+
+    Returns
+    -------
+    LayersConfig or None
+        The rules; `None` when the manifest has none or they do not validate as `lakana.yaml`
+        would have them (a missing layer or rule, an unknown value, `kinds: []` or `any`).
+    """
+    raw = manifest.get("layers") if isinstance(manifest, Mapping) else None
+    if raw is None:
+        return None
+    try:
+        return LayersConfig.model_validate(raw)
+    except pydantic.ValidationError:
+        return None
