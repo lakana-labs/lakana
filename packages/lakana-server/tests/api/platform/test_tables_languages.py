@@ -132,3 +132,57 @@ def test_the_listing_takes_lang_too(client: TestClient) -> None:
     _setup(client)
     (body,) = client.get(_TABLES, params={"lang": "fr"}, headers=AUTH_HEADER).json()
     assert body["label"] == "Ventes"
+
+
+def test_the_profile_language_is_read_in_its_canonical_spelling(client: TestClient) -> None:
+    _setup(client)
+    with Session(client.app.state.engine) as session:
+        session.execute(update(Principal).values(language="FR-ch"))
+        session.commit()
+    body = client.get(_TABLE, headers=AUTH_HEADER).json()
+    assert (body["label"], body["language"]) == ("Ventes", "fr-CH")
+
+
+def test_the_lang_refusal_shows_the_tag_without_its_spaces(client: TestClient) -> None:
+    _setup(client)
+    response = client.get(_TABLE, params={"lang": "  de_DE "}, headers=AUTH_HEADER)
+    assert response.status_code == 422
+    assert response.json()["detail"].startswith("lang: `de_DE` is not a language tag")
+
+
+def test_a_profile_language_that_is_not_a_tag_is_skipped(client: TestClient) -> None:
+    _setup(client)
+    with Session(client.app.state.engine) as session:
+        session.execute(update(Principal).values(language="English"))
+        session.commit()
+    body = client.get(_TABLE, headers={**AUTH_HEADER, "Accept-Language": "fr"}).json()
+    assert (body["label"], body["language"]) == ("Ventes", "fr")
+
+
+def test_a_german_project_on_an_english_server_shows_its_english_texts(client: TestClient) -> None:
+    _setup(client)
+    with Session(client.app.state.engine) as session:
+        env = session.scalars(select(Environment.id).where(Environment.name == "dev")).one()
+        sync_project_descriptions(
+            session,
+            env,
+            {
+                "version": 11,
+                "main_language": "de",
+                "assets": [
+                    {
+                        "table": "gold.t",
+                        "metadata": {
+                            "label": "Verkäufe",
+                            "description": "Eine Zeile je Verkauf.",
+                            "translations": {"en": {"label": "Sales"}},
+                        },
+                    }
+                ],
+            },
+        )
+        session.commit()
+    body = client.get(_TABLE, headers=AUTH_HEADER).json()
+    assert (body["language"], body["main_language"]) == ("en", "de")
+    assert (body["label"], body["label_language"]) == ("Sales", "en")
+    assert (body["description"], body["description_language"]) == ("Eine Zeile je Verkauf.", "de")

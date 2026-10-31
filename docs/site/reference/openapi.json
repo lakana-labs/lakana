@@ -23003,8 +23003,7 @@
               "$ref": "#/components/schemas/TranslationCoverageOut"
             },
             "type": "array",
-            "title": "Translations",
-            "default": []
+            "title": "Translations"
           }
         },
         "type": "object",

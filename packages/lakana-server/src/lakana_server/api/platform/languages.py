@@ -21,7 +21,8 @@ def reader_languages(
     """Order the languages a reader wants, most wanted first.
 
     A malformed `Accept-Language` is ignored, never refused: browsers and proxies send it
-    without the reader choosing it.
+    without the reader choosing it. The profile language is read in its canonical spelling; one
+    that is not a tag is skipped.
 
     Parameters
     ----------
@@ -45,12 +46,14 @@ def reader_languages(
         Mapped to 422, for a `lang` that is not a tag.
     """
     if lang is not None:
-        canonical = canonical_language(lang.strip())
+        asked = lang.strip()
+        canonical = canonical_language(asked)
         if canonical is None:
             raise ValidationError(
-                f"lang: {language_problem(lang)}; ask for a language such as de, or leave lang out"
+                f"lang: {language_problem(asked)}; ask for a language such as de, or leave lang out"
             )
         return (canonical,)
-    if principal.language:
-        return (principal.language,)
+    profile = canonical_language(principal.language) if principal.language else None
+    if profile is not None:
+        return (profile,)
     return parse_accept_language(request.headers.get("accept-language")) or (main_language,)

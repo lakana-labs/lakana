@@ -143,8 +143,12 @@ def test_the_token_authenticates_as_the_service_account_with_its_scope(
 ) -> None:
     rule_id = add_rule(session, world)
     issued = exchange(session)
+    session.execute(
+        update(Principal).where(Principal.id == world.deployer.id).values(language="de")
+    )
+    session.commit()
     p = authenticate(session, issued)
-    assert (p.id, p.name) == (world.deployer.id, "deployer")
+    assert (p.id, p.name, p.language) == (world.deployer.id, "deployer", "de")
     scope = scope_of(p)
     assert (scope.environment, scope.repository, scope.sha, scope.rule_id) == (
         "prod",

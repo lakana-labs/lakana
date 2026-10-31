@@ -37,19 +37,30 @@ Each entry of `schema` has `label`, `label_source`, `label_language`, `descripti
 `description_source` and `description_language` for its column. In `model`, `grain_language` is the
 language of `grain`, and each measure has `label_language` and `description_language`.
 
-The texts are chosen in the first language that has one, in this order:
+Your languages come from the first of steps 1 to 4 that gives any; `language` in the answer is
+the first of them. Each text shows in the first of your languages that has it, and step 5 catches
+the rest:
 
 1. `?lang=` (REST), `--lang` (CLI) or `lang=` (SDK), such as `de` or `fr-CH`;
 2. your profile's language, if one is set;
 3. the request's `Accept-Language` header, by its weights (REST only; the CLI and the SDK do not
    send one);
-4. the table's main language.
+4. the server's main language, `LAKANA_MAIN_LANGUAGE` (default `en`);
+5. for a text with no translation in your languages, the **table's** main-language text
+   (`main_language` in the answer: its project's `main_language:`, else the server's), marked
+   with that language.
 
-A regional tag falls back to its language: `fr-CH` shows a `fr` text. A text with no translation in
-any of these languages shows in the main language, so one answer can mix languages; that is what
-the `*_language` fields are for. A `lang` that is not a language tag is `422`, and the message gives
-examples such as `fr-CH`; a malformed `Accept-Language` is ignored. The tags, the files and the
-coverage are described in [Translations](translations.md).
+A regional tag falls back to its language: `fr-CH` shows a `fr` text.
+
+The server's and the table's main language can differ. A project with `main_language: de` and a
+`translations/en.yaml` file, on a server with the default `LAKANA_MAIN_LANGUAGE=en`, shows a reader
+who chose nothing the English texts: `language` is `en`, and a text the English file lacks shows in
+German with `de` as its language (`[de]` in `lakana table get`).
+
+One answer can therefore mix languages; that is what the `*_language` fields are for. A `lang`
+that is not a language tag is `422`, and the message gives examples such as `fr-CH`; a malformed
+`Accept-Language` is ignored. The tags, the files and the coverage are described in
+[Translations](translations.md).
 
 `lakana table get` prints the label and the description, a column table with a `label` column
 when a column has one, and the coverage, such as `Translations: fr 9 of 10`. A text in another

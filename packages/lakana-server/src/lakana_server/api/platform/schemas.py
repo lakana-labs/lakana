@@ -987,7 +987,7 @@ class TableOut(BaseModel):
     description_language: str | None = None
     language: str = "en"
     main_language: str = "en"
-    translations: list[TranslationCoverageOut] = []
+    translations: list[TranslationCoverageOut] = Field(default_factory=list)
 
 
 class LastMaintenanceOut(BaseModel):
