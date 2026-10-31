@@ -75,11 +75,9 @@ from lakana_core.catalog.datafiles import list_data_files
 from lakana_core.catalog.descriptions import (
     ShownDescription,
     check_text,
-    column_descriptions,
     edit_column,
     edit_table,
     sync_created_table,
-    table_description,
 )
 from lakana_core.catalog.environment_deletion import (
     DELETED_HINT_MESSAGE,
@@ -177,6 +175,7 @@ from lakana_core.catalog.retention import (
 )
 from lakana_core.catalog.schema_compat import SchemaDiff, arrow_to_iceberg_schema, plan_schema
 from lakana_core.catalog.schema_inference import infer_schema
+from lakana_core.catalog.texts import LanguageCoverage, TextChooser, column_texts
 from lakana_core.catalog.tombstones import (
     DEFAULT_UNDO_DAYS,
     FILES_GONE_MESSAGE,
@@ -195,6 +194,7 @@ from lakana_core.catalog.tombstones import (
     restore_table,
     revive,
 )
+from lakana_core.catalog.translations import translation_rows
 from lakana_core.catalog.usage import EnvironmentUsage, environment_usage
 from lakana_core.catalog.watermark import Watermark, check_incremental_key, compute_watermark
 from lakana_core.catalog.writes import (
@@ -238,6 +238,7 @@ from lakana_core.identifiers import (
     shown,
     validate_path_component,
 )
+from lakana_core.languages import DEFAULT_MAIN_LANGUAGE
 from lakana_core.log_events import LogEvent, log_event
 from lakana_core.models import (
     LIVE_ENVIRONMENT,
@@ -624,11 +625,13 @@ class TableDescription:
         An external table's stored file format (`"parquet"`, `"csv"`, `"json"`); `None` for
         every other kind.
     description
-        The text the table shows: its edit when it has one, else the project's; `None` for none.
+        The text the table shows, in the reader's language where it has one, else the main
+        language's: its edit when it has one, else the project's; `None` for none.
     description_source
         ``"edited"`` or ``"project"``; `None` when there is no description.
     column_descriptions
-        Column name → text and source, for the columns of `columns` that have a description.
+        Column name → text, source and language, for the columns of `columns` that have a
+        description.
     last_write_at
         When the current snapshot of a managed table was committed; `None` without one, and for
         every other kind.
@@ -646,6 +649,22 @@ class TableDescription:
     model
         The model the asset header declares (`kind:`, `grain:`, `key:`, `references:`), with
         only the references whose target the caller may read; `None` without one.
+    label
+        The label the table shows, chosen like `description`; `None` for none.
+    label_source
+        ``"edited"`` or ``"project"``; `None` when there is no label.
+    label_language
+        The language of `label`; `None` exactly when it is.
+    description_language
+        The language of `description`; `None` exactly when it is.
+    column_labels
+        Column name → label, source and language, for the columns that have a label.
+    language
+        The first language the reader asked for; the table's main language when none.
+    main_language
+        The table's main language: its own `text_language`, else the instance's.
+    translations
+        Per language with texts, how many of the table's main-language texts it has.
     """
 
     ref: TableRef
@@ -671,6 +690,14 @@ class TableDescription:
     expires_at: datetime | None = None
     expires_soon: bool = False
     model: TableModelView | None = None
+    label: str | None = None
+    label_source: Literal["project", "edited"] | None = None
+    label_language: str | None = None
+    description_language: str | None = None
+    column_labels: dict[str, ShownDescription] = dataclass_field(default_factory=dict)
+    language: str = DEFAULT_MAIN_LANGUAGE
+    main_language: str = DEFAULT_MAIN_LANGUAGE
+    translations: tuple[LanguageCoverage, ...] = ()
 
 
 _NO_UNPUBLISHING = (
@@ -1124,6 +1151,8 @@ class CatalogService:
         `LAKANA_VIEW_AUDIT__*`: whether and how often seeing the readers of a table is recorded
         as `ACTIVITY_VIEWED`. `None` (the default) is the settings' default: on, with a window
         of 60 minutes.
+    main_language
+        `LAKANA_MAIN_LANGUAGE`: the language of the texts of a table whose project declares none.
     """
 
     def __init__(
@@ -1135,8 +1164,10 @@ class CatalogService:
         undo_days: int = DEFAULT_UNDO_DAYS,
         expiry_warning_days: int = DEFAULT_EXPIRY_WARNING_DAYS,
         view_audit: ViewAuditConfig | None = None,
+        main_language: str = DEFAULT_MAIN_LANGUAGE,
     ) -> None:
         self._session = session
+        self._main_language = main_language
         self._storage = storage
         self._authz = authz
         self._undo_days = undo_days
@@ -3241,7 +3272,9 @@ class CatalogService:
         _, row = self._find_table(ref)
         return row
 
-    def describe_table(self, p: PrincipalRef, ref: TableRef) -> TableDescription:
+    def describe_table(
+        self, p: PrincipalRef, ref: TableRef, *, languages: Sequence[str] = ()
+    ) -> TableDescription:
         """Describe a table, an external table or a view for the platform API.
 
         Parameters
@@ -3250,6 +3283,8 @@ class CatalogService:
             The acting principal.
         ref
             The table reference.
+        languages
+            The reader's languages, most wanted first; empty: the main language.
 
         Returns
         -------
@@ -3283,7 +3318,35 @@ class CatalogService:
         )
         _, row = self._find_table(ref)
         described = self._describe_row(p, ref, row)
-        shown_text = table_description(row)
+        chooser = TextChooser(
+            row.text_language or self._main_language,
+            languages,
+            translation_rows(self._session, row),
+        )
+        description = chooser.choose(
+            "table", "", "description", row.description_project, row.description_edited
+        )
+        label = chooser.choose("table", "", "label", row.label_project, row.label_edited)
+        columns = column_texts(self._session, row.id, (c.name for c in described.columns), chooser)
+        model = model_view(
+            self._session,
+            row,
+            ref,
+            lambda target: self.can_read_table(p, target),
+            ReferenceCheckFilter(self._session, self._authz, p, ref.environment).hides,
+            texts=chooser,
+        )
+        keys = [
+            ("table", "", field)
+            for field, project, edited in (
+                ("label", row.label_project, row.label_edited),
+                ("description", row.description_project, row.description_edited),
+                ("grain", row.model_grain, None),
+            )
+            if project is not None or edited is not None
+        ]
+        keys += columns.keys
+        keys += list(model.measure_keys) if model is not None else []
         expires_at = None
         expires_soon = False
         if row.table_type is TableType.ICEBERG:
@@ -3296,20 +3359,20 @@ class CatalogService:
             )
         return replace(
             described,
-            description=None if shown_text is None else shown_text.text,
-            description_source=None if shown_text is None else shown_text.source,
-            column_descriptions=column_descriptions(
-                self._session, row.id, (c.name for c in described.columns)
-            ),
+            description=None if description is None else description.text,
+            description_source=None if description is None else description.source,
+            description_language=None if description is None else description.language,
+            label=None if label is None else label.text,
+            label_source=None if label is None else label.source,
+            label_language=None if label is None else label.language,
+            column_descriptions=columns.descriptions,
+            column_labels=columns.labels,
+            language=chooser.requested,
+            main_language=chooser.main,
+            translations=chooser.coverage(keys),
             expires_at=expires_at,
             expires_soon=expires_soon,
-            model=model_view(
-                self._session,
-                row,
-                ref,
-                lambda target: self.can_read_table(p, target),
-                ReferenceCheckFilter(self._session, self._authz, p, ref.environment).hides,
-            ),
+            model=model,
         )
 
     def table_references(self, p: PrincipalRef, ref: TableRef) -> TableReferences:

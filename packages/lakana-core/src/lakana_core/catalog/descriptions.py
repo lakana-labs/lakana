@@ -14,7 +14,7 @@ through `lakana_core.catalog.model_metadata`.
 from __future__ import annotations
 
 import uuid
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal
@@ -51,10 +51,13 @@ class ShownDescription:
         The description.
     source
         ``"edited"`` for a text set through the API, ``"project"`` for the asset header's.
+    language
+        The language of `text`; set by `catalog.texts.TextChooser`, `None` where nobody chose one.
     """
 
     text: str
     source: DescriptionSource
+    language: str | None = None
 
 
 def shown(project: str | None, edited: str | None) -> ShownDescription | None:
@@ -77,52 +80,6 @@ def shown(project: str | None, edited: str | None) -> ShownDescription | None:
     if project is not None:
         return ShownDescription(project, "project")
     return None
-
-
-def table_description(row: Table) -> ShownDescription | None:
-    """Choose the description a table shows.
-
-    Parameters
-    ----------
-    row
-        The table.
-
-    Returns
-    -------
-    ShownDescription or None
-        What is shown, or `None` for none.
-    """
-    return shown(row.description_project, row.description_edited)
-
-
-def column_descriptions(
-    session: Session, table_id: uuid.UUID, columns: Iterable[str]
-) -> dict[str, ShownDescription]:
-    """Choose the description each of a table's columns shows.
-
-    Parameters
-    ----------
-    session
-        Database session.
-    table_id
-        The table.
-    columns
-        The names of the columns the table has now. The text of any other column is not shown.
-
-    Returns
-    -------
-    dict
-        Column name → description, for the columns that have one.
-    """
-    present = set(columns)
-    result: dict[str, ShownDescription] = {}
-    for row in session.scalars(
-        select(ColumnDescription).where(ColumnDescription.table_id == table_id)
-    ):
-        chosen = shown(row.description_project, row.description_edited)
-        if row.column in present and chosen is not None:
-            result[row.column] = chosen
-    return result
 
 
 def check_text(text: str | None, what: str) -> str | None:

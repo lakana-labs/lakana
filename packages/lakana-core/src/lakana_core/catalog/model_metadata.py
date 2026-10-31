@@ -18,7 +18,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import inspect, select
 from sqlalchemy.orm import Session
@@ -37,6 +37,9 @@ from lakana_core.projects.measures import (
     MeasureEntry,
 )
 from lakana_core.projects.model_checks import KEY_NOT_NULL, KEY_UNIQUE, REF_PREFIX
+
+if TYPE_CHECKING:
+    from lakana_core.catalog.texts import TextChooser
 
 
 @dataclass(frozen=True)
@@ -469,9 +472,13 @@ class MeasureView:
     currency
         The ISO 4217 currency, or `None`.
     label
-        The label, or `None`.
+        The label the reader's language chose, or `None`.
     description
-        The description, or `None`.
+        The description the reader's language chose, or `None`.
+    label_language
+        The language of `label`; `None` exactly when it is.
+    description_language
+        The language of `description`; `None` exactly when it is.
     """
 
     id: str
@@ -483,6 +490,8 @@ class MeasureView:
     currency: str | None
     label: str | None
     description: str | None
+    label_language: str | None = None
+    description_language: str | None = None
 
 
 def measure_id(table: str, column: str) -> str:
@@ -512,7 +521,7 @@ class TableModelView:
     kind
         The declared kind, or `None`.
     grain
-        The declared grain, or `None`.
+        The declared grain in the reader's language, or `None`.
     key
         The declared key columns; empty for no key and for `key: none`.
     key_none
@@ -530,6 +539,10 @@ class TableModelView:
         `key_not_null` for a key, `ref_<column>` for each shown reference, `measures` for
         declared measures), by name. A stored result of a generated check the header no longer
         declares is left out.
+    grain_language
+        The language of `grain`; `None` exactly when it is.
+    measure_keys
+        The measures' main-language texts, for coverage; not part of the REST answer.
     """
 
     kind: str | None
@@ -540,6 +553,8 @@ class TableModelView:
     hidden_references: int
     measures: tuple[MeasureView, ...]
     checks: tuple[CheckHealth, ...]
+    grain_language: str | None = None
+    measure_keys: tuple[tuple[str, str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -649,7 +664,12 @@ def _outgoing(
 
 
 def model_view(
-    session: Session, row: Table, table: TableRef, may_read: ReadCheck, withheld: WithheldCheck
+    session: Session,
+    row: Table,
+    table: TableRef,
+    may_read: ReadCheck,
+    withheld: WithheldCheck,
+    texts: TextChooser,
 ) -> TableModelView | None:
     """Show a table's model to a reader who may read the table.
 
@@ -670,6 +690,9 @@ def model_view(
         The reader's read check, asked of each reference's target.
     withheld
         Whether a result is withheld from the reader, by the target of its run.
+    texts
+        The reader's chooser, which picks the grain and each measure's label and description.
+        It holds only this table's own texts, so nothing about a withheld reference reaches it.
 
     Returns
     -------
@@ -683,14 +706,12 @@ def model_view(
     generated = {KEY_UNIQUE, KEY_NOT_NULL} if model.key else set()
     generated |= {f"{REF_PREFIX}{r.column}" for r in references}
     generated |= {MEASURES_CHECK} if model.measures else set()
-    return TableModelView(
-        kind=model.kind,
-        grain=model.grain,
-        key=model.key,
-        key_none=model.key_none,
-        references=references,
-        hidden_references=hidden,
-        measures=tuple(
+    grain = texts.choose("table", "", "grain", model.grain, None)
+    measures = []
+    for m in model.measures:
+        label = texts.choose("measure", m.column, "label", m.label, None)
+        description = texts.choose("measure", m.column, "description", m.description, None)
+        measures.append(
             MeasureView(
                 id=measure_id(table.dotted(), m.column),
                 column=m.column,
@@ -699,10 +720,26 @@ def model_view(
                 not_over=m.not_over,
                 unit=m.unit,
                 currency=m.currency,
-                label=m.label,
-                description=m.description,
+                label=None if label is None else label.text,
+                description=None if description is None else description.text,
+                label_language=None if label is None else label.language,
+                description_language=None if description is None else description.language,
             )
+        )
+    return TableModelView(
+        kind=model.kind,
+        grain=None if grain is None else grain.text,
+        grain_language=None if grain is None else grain.language,
+        key=model.key,
+        key_none=model.key_none,
+        references=references,
+        hidden_references=hidden,
+        measures=tuple(measures),
+        measure_keys=tuple(
+            ("measure", m.column, f)
             for m in model.measures
+            for f, text in (("label", m.label), ("description", m.description))
+            if text
         ),
         checks=tuple(
             c
