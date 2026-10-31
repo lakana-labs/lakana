@@ -31,7 +31,7 @@ from lakana_core.models import (
     TaskRun,
     TaskStatus,
 )
-from lakana_core.runs.checks import RUN_CANCELLED_MESSAGE, RUN_STOPPED_MESSAGE
+from lakana_core.runs.checks import MAX_CHECK_CLAIMS, RUN_CANCELLED_MESSAGE, RUN_STOPPED_MESSAGE
 from lakana_core.runs.failures import FailureCode
 from lakana_core.runs.selection import Selection
 from lakana_core.runs.service import RunService
@@ -822,6 +822,38 @@ def test_a_set_back_claim_of_a_task_that_awaits_its_checks_is_no_check_claim(
     assert task_id in {c.task_run_id for c in claims if c is not None}
     task = _task(session, task_id)
     assert (task.check_claims, task.set_back_claims) == (0, 1)
+
+
+def test_drains_of_check_claims_do_not_use_up_the_bound(
+    session: Session, run_id: uuid.UUID, clock: Clock
+) -> None:
+    """#99, review S1: a drain is no loss; five drained check claims leave the bound untouched.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    run_id
+        The run.
+    clock
+        The pinned database clock.
+    """
+    task_id = _awaiting_checks(session, run_id)
+    session.execute(
+        update(TaskRun)
+        .where(TaskRun.run_id == run_id, TaskRun.id != task_id)
+        .values(status=TaskStatus.PENDING, next_attempt_at=NOW + timedelta(days=1))
+    )
+    session.commit()
+    for _ in range(MAX_CHECK_CLAIMS):
+        claimed = claim_task(session, "w1", 60)
+        assert claimed is not None and claimed.task_run_id == task_id
+        assert record_attempt(
+            session, task_id, "w1", claimed.claim, kind=FailureKind.RELEASED, rand=_half
+        )
+        scheduler_tick(session, clock.now, _half)
+    task = _task(session, task_id)
+    assert (task.check_claims, task.setting_back, task.status) == (0, False, TaskStatus.READY)
 
 
 def test_a_task_setting_its_table_back_is_not_claimed_in_a_finished_run(

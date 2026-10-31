@@ -256,9 +256,9 @@ with `CHECKS_UNFINISHED_MESSAGE`. Without it, both loops would end only by a can
 
 CHECKS_UNFINISHED_MESSAGE = (
     f"The checks of this table did not finish after its write, nor in {MAX_CHECK_CLAIMS} more "
-    "tries: the worker running them was lost each time, or the checks could not start (the run's "
-    "principal no longer exists, or this worker cannot read the deployed project version). "
-    "Lakana stopped trying."
+    "tries: the worker running them was lost each time, the checks could not start (the run's "
+    "principal no longer exists, or this worker cannot read the deployed project version), or "
+    "counting a check kept failing for a temporary reason. Lakana stopped trying."
 )
 """The reason a task ends with when its checks reached `MAX_CHECK_CLAIMS`; the set-back claim
 adds what became of the table."""

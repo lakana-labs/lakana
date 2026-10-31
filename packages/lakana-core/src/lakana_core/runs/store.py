@@ -107,7 +107,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import ColumnElement, Select, and_, or_, select, update
+from sqlalchemy import ColumnElement, Select, and_, case, null, or_, select, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -505,6 +505,19 @@ def _apply_task(session: Session, transition: TaskTransition, now: datetime) -> 
         values["failure_code"] = (
             None if transition.failure_code is None else transition.failure_code.value
         )
+        if not transition.checks_unfinished:
+            # Except that checks which never finished stay the reason when the claim that was to
+            # set the table back is lost and the task is put back for another: the run must
+            # still end, and be announced, as `checks_unfinished`.
+            kept = TaskRun.failure_code == FailureCode.CHECKS_UNFINISHED.value
+            code = values["failure_code"]
+            values["error_message"] = case(
+                (kept, TaskRun.error_message),
+                else_=null() if transition.error_message is None else transition.error_message,
+            )
+            values["failure_code"] = case(
+                (kept, TaskRun.failure_code), else_=null() if code is None else code
+            )
     if transition.terminal:
         values["finished_at"] = now
     committed = transition.lost and transition.status is TaskStatus.SUCCEEDED

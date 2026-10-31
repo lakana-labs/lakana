@@ -3744,3 +3744,32 @@ def test_a_stale_lost_reclaim_at_the_bound_misses_a_task_below_it(
     assert apply_transitions(session, [reclaim], NOW) is False
     _check_claims(session, task, MAX_CHECK_CLAIMS)
     assert apply_transitions(session, [reclaim], NOW) is True
+
+
+def test_a_lost_set_back_claim_keeps_the_reason_that_the_checks_never_finished(
+    session: Session, run_id: uuid.UUID
+) -> None:
+    """#99, review S2: the claim that sets the table back is lost; the next one still says why."""
+    task, _ = _lost_task_with_write(session, run_id, rows=3, attempt=6)
+    _stamp(session, task)
+    _check_claims(session, task, MAX_CHECK_CLAIMS)
+    scheduler_tick(session, NOW, _half)
+    stored = _task(session, "silver.clean")
+    stored.status = TaskStatus.RUNNING
+    stored.lease_owner = "w2"
+    stored.lease_expires_at = NOW - timedelta(seconds=1)
+    stored.claim_count += 1
+    stored.set_back_claims = 1
+    session.add(
+        TaskAttempt(id=uuid.uuid4(), task_run_id=task.id, attempt=6, worker="w2", started_at=NOW)
+    )
+    session.commit()
+
+    scheduler_tick(session, NOW, _half)
+
+    again = _task(session, "silver.clean")
+    assert (again.status, again.setting_back) == (TaskStatus.READY, True)
+    assert (again.error_message, again.failure_code) == (
+        CHECKS_UNFINISHED_MESSAGE,
+        "checks_unfinished",
+    )

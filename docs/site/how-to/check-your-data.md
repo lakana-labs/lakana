@@ -1483,7 +1483,7 @@ Read these before you rely on checks for a table that other people read.
 
 ### A run that does not end
 
-After a task wrote its table, its checks are tried until they give a verdict. Two situations keep
+After a task wrote its table, its checks are tried until they give a verdict. Three situations keep
 them from ever giving one:
 
 - A worker is lost in every attempt of the checks, most often because a check needs more memory
@@ -1493,15 +1493,19 @@ them from ever giving one:
 - The checks cannot start: the run's principal no longer exists, or the worker is too old to read
   the deployed project version. The task waits to try again, and its message says that the table
   holds data that is not checked yet and names the command that stops the run.
+- Counting a check keeps failing for a temporary reason (an object store or a database that does
+  not answer). Usually the task's last attempt ends this, with the check `errored`; only a
+  project that asks for more than 5 retries reaches the bound below.
 
 Lakana stops by itself after 5 more tries of the checks, counted from the write. The next free
 worker then only sets the table back, and the task ends `failed` with the code
 `checks_unfinished` (see [Why did it fail?](../reference/why-did-it-fail.md)). Its message names
 the cause and then says what became of the table, for example: `The checks of this table did not
-finish after its write, nor in 5 more tries: the worker running them was lost each time, or the
+finish after its write, nor in 5 more tries: the worker running them was lost each time, the
 checks could not start (the run's principal no longer exists, or this worker cannot read the
-deployed project version). Lakana stopped trying. The table was set back to before this task
-ran.`
+deployed project version), or counting a check kept failing for a temporary reason. Lakana
+stopped trying. The table was set back to before this task ran.` The set-back reads no check, so
+a worker that cannot read the project version still sets the table back.
 
 When the run's principal no longer exists, the table cannot be set back either, because the
 set-back is a write of that principal. The message then ends with `The table could not be set
@@ -1518,6 +1522,7 @@ code `checks_unfinished` (see [Log events](../reference/log-events.md)). What to
   `LAKANA_WORKER_MEMORY` in the Compose bundle's `.env`), or make the check read less.
 - Checks that could not start: bind a run principal with `lakana deployments set-run-as`, or
   upgrade the worker, as the message says.
+- A count that kept failing: check that the object store and the database answer.
 - Then run the job again.
 
 You do not have to wait for the 5 tries: `lakana runs cancel RUN_ID --env dev` ends the run at

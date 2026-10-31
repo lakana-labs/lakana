@@ -2444,7 +2444,28 @@ def _task_started(engine: FakeEngine) -> bool:
     return sum(path.endswith("/start") for _, path, _ in engine.calls) >= 2
 
 
-def _until(condition: Any, seconds: float = 5.0) -> None:
+_STALLED_RUNNER_SECONDS = 60.0
+"""How long a test that waits for a relay allows: a shared macOS runner has stalled for more than
+10 s (#365), longer than the launcher's own wait for ``ready``. A healthy run takes milliseconds,
+so only a failure waits this long."""
+
+
+@pytest.fixture(autouse=True)
+def _relay_ready_wait(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Lift the launcher's wait for a relay's ``ready`` to the stalled-runner bound (#365).
+
+    The wait still ends at the real condition, the ``ready`` line; a test of a relay that never
+    starts sets its own short bound.
+
+    Parameters
+    ----------
+    monkeypatch
+        pytest's patcher.
+    """
+    monkeypatch.setattr(service_module, "_RELAY_READY_SECONDS", _STALLED_RUNNER_SECONDS)
+
+
+def _until(condition: Any, seconds: float = _STALLED_RUNNER_SECONDS) -> None:
     """Wait for a condition, failing after a bound.
 
     Parameters
@@ -2916,30 +2937,20 @@ def test_the_relay_gets_the_upstream_proxy_of_the_egress_service(tmp_path: Path)
     assert "LAKANA_EGRESS__UPSTREAM_PROXY=http://corp:3128" in relay["Env"]
 
 
-_STALLED_RUNNER_SECONDS = 60.0
-"""How long a test that waits for a relay allows: a shared macOS runner has stalled for more than
-10 s (#365), longer than the launcher's own wait for ``ready``. A healthy run takes milliseconds,
-so only a failure waits this long."""
-
-
 def test_the_relays_lines_reach_the_tasks_log(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ) -> None:
     """Review Focus 3: the relay's refusal is in the run's log, prefixed as the relay wrote it.
 
     Both waits are on the real condition, with a bound a stalled runner stays inside (#365): the
-    launcher's wait for the relay's ``ready`` and the test's wait for the line in the log.
+    launcher's wait for the relay's ``ready`` (`_relay_ready_wait`) and the test's wait for the
+    line in the log.
 
     Parameters
     ----------
     tmp_path
         The state directory.
-    monkeypatch
-        Lifts the launcher's wait for ``ready`` to the stalled-runner bound.
     """
-    from lakana_worker.launcher import service
-
-    monkeypatch.setattr(service, "_RELAY_READY_SECONDS", _STALLED_RUNNER_SECONDS)
     line = b"lakana-relay: refused postgres:5432: it resolves to an internal address\n"
     engine = FakeEngine(hold=True, relay_output=[b"lakana-relay: ready\n", line])
     launcher = _started(engine, tmp_path)
@@ -2964,6 +2975,7 @@ def test_the_relays_lines_reach_the_tasks_log(
     )
     worker.join(_STALLED_RUNNER_SECONDS)
 
+    assert not worker.is_alive()
     assert not failed, failed
     assert line in _logs(emitted)
     assert b"lakana-relay: ready" not in _logs(emitted)
@@ -3023,7 +3035,8 @@ def test_cleanup_spares_the_relay_of_a_live_run_and_removes_an_orphan(tmp_path: 
         v["Labels"]["lakana.launcher.kind"] == "relay" for v in engine.containers.values()
     )
     launcher.stop(StopRequest("t1", "w1"))
-    worker.join(10)
+    worker.join(_STALLED_RUNNER_SECONDS)
+    assert not worker.is_alive()
     engine.containers["c-orphan"] = {
         "Name": "lakana-relay-t9",
         "Labels": {

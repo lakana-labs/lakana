@@ -729,8 +729,9 @@ def record_attempt(
     ``released`` or ``failed`` and as nothing else: any other `kind` is recorded as ``failed``
     with the same message, since a retry would only set the table back again. A release keeps
     `attempt` (the claim added none) and gives back the claim's count against the limit on
-    set-back claims. The memory stop (`stopped`) records nothing for such a claim: it ends no
-    build, so the scheduler takes the claim over when its lease runs out.
+    set-back claims; a release of a claim that only ran the checks gives back its check claim
+    (`TaskRun.check_claims`) the same way. The memory stop (`stopped`) records nothing for such
+    a claim: it ends no build, so the scheduler takes the claim over when its lease runs out.
 
     An ending that would leave rows in the table that no check has passed is not recorded as an
     ending (`_must_be_set_back`): a cancel after the task's write, and a memory stop that ends
@@ -886,6 +887,10 @@ def record_attempt(
             del values["check_message_state"]
         else:
             values.update(status=TaskStatus.PENDING, attempt=attempt - 1, next_attempt_at=now)
+            if awaiting:
+                # Nor is a drain of a claim that only ran the checks a try of them: it gives back
+                # its check claim, so restarts of the workers never use up `MAX_CHECK_CLAIMS`.
+                values["check_claims"] = max(task.check_claims - 1, 0)
         outcome = AttemptOutcome.RELEASED
     elif kind is FailureKind.CONFLICT and not task.conflict_retried:
         values.update(

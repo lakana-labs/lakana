@@ -296,7 +296,17 @@ give a verdict (its worker is lost in every try, or the checks cannot start) use
 again until somebody ran `lakana runs cancel`. After 5 more tries the table is now set back and
 the task fails with the new code `checks_unfinished`, so the run ends `failed` and a job with
 `notify:` sends its `failed` message ([A run that does not end](../how-to/check-your-data.md#a-run-that-does-not-end)).
-A task that waits for its checks when you upgrade starts counting from zero.
+A task that waits for its checks when you upgrade starts counting from zero. A worker that is
+stopped on purpose (a drain, a restart for a deploy) does not use up a try.
+
+- **Upgrade the workers together with the server.** A worker of the previous release does not
+  know the new code and cannot finish such a set-back: the table is set back, but the task then
+  ends `worker_lost` instead of `checks_unfinished`.
+- **More than 5 retries:** if you raised `LAKANA_RUN__MAX_RETRIES` above 5 and a project asks for
+  `retries` of 6 or more, a check whose count keeps failing for a temporary reason used to end
+  `errored` on the last attempt (a `warn` check kept the data). It now reaches the 5 tries first:
+  the table is set back and the task fails with `checks_unfinished`, whose message names that
+  cause.
 
 - **Programs:** a client that branches on failure codes treats a code it does not know like
   `internal`, so nothing breaks; to show it, add `checks_unfinished`

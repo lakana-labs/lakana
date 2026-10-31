@@ -2949,11 +2949,14 @@ record a landed rollback ends it failed from them, without building and without 
   `checks_unfinished` stored for `set_back_only`, and logs `checks_unfinished`. Both statements
   require the bound in their `WHERE` (`store._checks_unfinished`). A cancel wins over the bound.
   The set-back claim runs no check, so a check that kills its worker does not stop it, and it is
-  bounded by `MAX_SET_BACK_CLAIMS` as any set-back. **Not defended:** a run whose principal row is
-  gone cannot be set back either (the rollback is that principal's write); the task ends with
-  `set_back_failed_message` and the table keeps the unchecked rows. The same holds for a manifest
-  version the claiming worker cannot read, because `set_back_only` reads the phase through
-  `_read_phase`. A deactivated principal is not this case: the phase starts, every check is
+  bounded by `MAX_SET_BACK_CLAIMS` as any set-back. It reads the phase with
+  `_read_phase(set_back=True)`, which skips the manifest, so a manifest version the claiming
+  worker cannot read does not stop it. A drain of a check-only claim gives its check claim back
+  (`record_attempt`, as for `set_back_claims`), and a lost set-back claim that is put back keeps a
+  stored `checks_unfinished` reason (`_apply_task`), so the run is still announced as such.
+  **Not defended:** a run whose principal row is gone cannot be set back (the rollback is that
+  principal's write); the task ends with `set_back_failed_message` and the table keeps the
+  unchecked rows. A deactivated principal is not this case: the phase starts, every check is
   `errored` and the table is set back.
 - **A Python asset:** a rollback undoes only the task run's own chain of writes (baseline to tip);
   anything by someone else gives `changed_since` and leaves the table, also with this run's rows in

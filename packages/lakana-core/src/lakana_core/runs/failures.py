@@ -143,7 +143,8 @@ FAILURES: Mapping[FailureCode, tuple[str, str]] = {
         "write, so Lakana stopped trying and set the table back where it could.",
         "Read the attempts with 'lakana runs logs RUN_ID --task ASSET': for a lost worker, raise "
         "its memory limit or make the check cheaper; for checks that could not start, bind a run "
-        "principal or upgrade the worker as the message says. Then run again.",
+        "principal or upgrade the worker as the message says; for a count that kept failing, "
+        "check that the object store and the database answer. Then run again.",
     ),
     FailureCode.QUERY_INVALID: (
         "The task's SQL is invalid or was refused.",
