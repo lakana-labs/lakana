@@ -126,9 +126,82 @@ def test_a_description_over_4000_characters_is_422_with_the_next_step(client: Te
     assert ok.status_code == 200, ok.text
 
 
-def test_a_missing_description_field_is_422(client: TestClient) -> None:
+def test_a_body_with_neither_field_is_422(client: TestClient) -> None:
     _setup(client)
-    assert client.patch(f"{_TABLES}/t", headers=AUTH_HEADER, json={}).status_code == 422
+    response = client.patch(f"{_TABLES}/t", headers=AUTH_HEADER, json={})
+    assert response.status_code == 422
+    assert "send `description`, `label` or both" in response.text
+
+
+def test_patch_sets_a_label_in_french_and_answers_in_french(client: TestClient) -> None:
+    _setup(client)
+    response = client.patch(
+        f"{_TABLES}/t", params={"lang": "fr"}, headers=AUTH_HEADER, json={"label": "Ventes"}
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert (body["label"], body["label_language"], body["language"]) == ("Ventes", "fr", "fr")
+    assert body["description"] is None
+
+
+def test_put_sets_a_column_label_in_french_and_keeps_the_description(client: TestClient) -> None:
+    _setup(client)
+    client.put(
+        f"{_TABLES}/t/columns/id/description", headers=AUTH_HEADER, json={"description": "Id"}
+    )
+    response = client.put(
+        f"{_TABLES}/t/columns/id/description",
+        params={"lang": "FR"},
+        headers=AUTH_HEADER,
+        json={"label": "Numéro"},
+    )
+    assert response.status_code == 200, response.text
+    (column,) = [c for c in response.json()["schema"] if c["name"] == "id"]
+    assert (column["label"], column["label_language"]) == ("Numéro", "fr")
+    assert (column["description"], column["description_language"]) == ("Id", "en")
+
+
+def test_an_edit_without_lang_is_in_the_main_language_and_answers_in_the_readers(
+    client: TestClient,
+) -> None:
+    _setup(client)
+    client.patch(
+        f"{_TABLES}/t", params={"lang": "fr"}, headers=AUTH_HEADER, json={"label": "Ventes"}
+    )
+    response = client.patch(
+        f"{_TABLES}/t",
+        headers={**AUTH_HEADER, "Accept-Language": "fr"},
+        json={"label": "Sales"},
+    )
+    assert response.status_code == 200, response.text
+    assert (response.json()["label"], response.json()["label_language"]) == ("Ventes", "fr")
+    english = client.get(f"{_TABLES}/t", params={"lang": "en"}, headers=AUTH_HEADER).json()
+    assert (english["label"], english["label_source"]) == ("Sales", "edited")
+
+
+def test_a_bad_lang_on_an_edit_is_422_and_stores_nothing(client: TestClient) -> None:
+    _setup(client)
+    for response in (
+        client.patch(
+            f"{_TABLES}/t", params={"lang": "fr_FR"}, headers=AUTH_HEADER, json={"label": "X"}
+        ),
+        client.put(
+            f"{_TABLES}/t/columns/id/description",
+            params={"lang": "fr_FR"},
+            headers=AUTH_HEADER,
+            json={"label": "X"},
+        ),
+    ):
+        assert response.status_code == 422
+        assert "ask for a language such as de, or leave lang out" in response.json()["detail"]
+    with Session(client.app.state.engine) as session:
+        assert session.scalars(select(Table)).one().text_languages is None
+        assert (
+            session.scalars(
+                select(AuditEvent).where(AuditEvent.event_type == AuditEventType.TABLE_DESCRIBED)
+            ).all()
+            == []
+        )
 
 
 def test_a_reader_may_not_describe_and_the_refusal_is_audited(client: TestClient) -> None:

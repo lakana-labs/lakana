@@ -2572,8 +2572,8 @@
         "tags": [
           "tables"
         ],
-        "summary": "Set a table's description",
-        "description": "Sets the text shown for the table, or with `null` removes it so that the text of the project shows again. A deploy never replaces a text set here. The table's owner or a holder of `DROP_TABLE` may do this. Answers 404 when the table does not exist and 422 for a blank text or one over 4,000 characters.",
+        "summary": "Set a table's description and label",
+        "description": "Sets the texts shown for the table in one language (`lang`, else the table's main language), or with `null` removes an edit so that the text of the project shows again. A field left out of the body stays as it is. A deploy never replaces a text set here. The table's owner or a holder of `DROP_TABLE` may do this, and must be able to read the table. Answers 404 when the table does not exist and 422 for a body with neither field, a blank text, a description over 4,000 characters, a label over 100 characters or on several lines, or a `lang` that is not a language tag.",
         "operationId": "describe_table_api_v1_environments__env__namespaces__path__tables__name__patch",
         "parameters": [
           {
@@ -2605,6 +2605,24 @@
               "title": "Name"
             },
             "description": "Table name."
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The language edited, such as fr; without it, the table's main language. The answer's texts are in it too.",
+              "title": "Lang"
+            },
+            "description": "The language edited, such as fr; without it, the table's main language. The answer's texts are in it too."
           },
           {
             "name": "authorization",
@@ -2966,8 +2984,8 @@
         "tags": [
           "tables"
         ],
-        "summary": "Set a column's description",
-        "description": "Sets the text shown for a column, or with `null` removes it so that the text of the project shows again. The table's owner or a holder of `DROP_TABLE` may do this, and must be able to read the table. Answers 404 when the table or column does not exist and 422 for a blank text or one over 4,000 characters.",
+        "summary": "Set a column's description and label",
+        "description": "Sets the texts shown for a column in one language (`lang`, else the table's main language), or with `null` removes an edit so that the text of the project shows again. A field left out of the body stays as it is. The table's owner or a holder of `DROP_TABLE` may do this, and must be able to read the table. Answers 404 when the table or column does not exist and 422 for a body with neither field, a blank text, a description over 4,000 characters, a label over 100 characters or on several lines, or a `lang` that is not a language tag.",
         "operationId": "describe_column_api_v1_environments__env__namespaces__path__tables__name__columns__column__description_put",
         "parameters": [
           {
@@ -3009,6 +3027,24 @@
               "title": "Column"
             },
             "description": "The column's name; it must be in the table's schema."
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The language edited, such as fr; without it, the table's main language. The answer's texts are in it too.",
+              "title": "Lang"
+            },
+            "description": "The language edited, such as fr; without it, the table's main language. The answer's texts are in it too."
           },
           {
             "name": "authorization",
@@ -16119,6 +16155,86 @@
             }
           }
         }
+      },
+      "patch": {
+        "tags": [
+          "whoami"
+        ],
+        "summary": "Set your preferred language",
+        "description": "Catalog texts are then shown in it unless a request asks for another (`lang`). Any person may set their own; a task or CI token may not (403). Answers 422 for a value that is not a language tag.",
+        "operationId": "set_profile_api_v1_whoami_patch",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProfileIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WhoamiOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token is missing, wrong, expired or revoked.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/info": {
@@ -18908,14 +19024,22 @@
               }
             ],
             "title": "Description"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
           }
         },
         "type": "object",
-        "required": [
-          "description"
-        ],
         "title": "DescriptionIn",
-        "description": "Request body that sets or resets a description.\n\nParameters\n----------\ndescription\n    The new text (1 to 4,000 characters, not blank), or `null` to remove the edit so that the\n    project's text shows again. The field must be sent."
+        "description": "Request body that sets or resets a description, a label or both, in one language.\n\nSend one or both; a field left out stays as it is, `null` removes its edit.\n\nParameters\n----------\ndescription\n    The new text (1 to 4,000 characters, not blank), or `null` to remove the edit so that the\n    project's text shows again.\nlabel\n    The new label (one line, 1 to 100 characters, not blank), or `null` to remove the edit so\n    that the project's label shows again."
       },
       "DroppedTableOut": {
         "properties": {
@@ -20890,6 +21014,27 @@
         ],
         "title": "PrincipalOut",
         "description": "Response body for a principal.\n\nParameters\n----------\nname\n    Principal name.\ntype\n    Whether this is a human user or a service account.\nis_active\n    Whether this principal can currently authenticate."
+      },
+      "ProfileIn": {
+        "properties": {
+          "language": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Language"
+          }
+        },
+        "type": "object",
+        "required": [
+          "language"
+        ],
+        "title": "ProfileIn",
+        "description": "Request body that sets or resets the caller's preferred language.\n\nParameters\n----------\nlanguage\n    A language tag such as `fr` or `de-CH`, or `null` to remove the preference. Must be sent."
       },
       "ProjectVersionOut": {
         "properties": {
@@ -24038,6 +24183,17 @@
                 "type": "null"
               }
             ]
+          },
+          "language": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Language"
           }
         },
         "type": "object",
@@ -24047,7 +24203,7 @@
           "task_token"
         ],
         "title": "WhoamiOut",
-        "description": "Response body for `GET /api/v1/whoami`.\n\nParameters\n----------\nname\n    The caller's principal name.\ntype\n    The caller's principal type.\ntask_token\n    The task token's scope when the caller authenticated with one;\n    `None` for a PAT.\nci_token\n    The CI token's scope when the caller authenticated with one; `None` otherwise."
+        "description": "Response body for `GET /api/v1/whoami`.\n\nParameters\n----------\nname\n    The caller's principal name.\ntype\n    The caller's principal type.\ntask_token\n    The task token's scope when the caller authenticated with one;\n    `None` for a PAT.\nci_token\n    The CI token's scope when the caller authenticated with one; `None` otherwise.\nlanguage\n    Your preferred language for catalog texts; `null` for none."
       },
       "WorkerCachesOut": {
         "properties": {

@@ -244,6 +244,7 @@ ROUTES: dict[str, Route] = {
     "package_indexes.delete": Route("DELETE", "/api/v1/package-indexes/{name}"),
     "audit_events.list": Route("GET", "/api/v1/audit-events"),
     "whoami": Route("GET", "/api/v1/whoami"),
+    "whoami.update": Route("PATCH", "/api/v1/whoami"),
     "search": Route("GET", "/api/v1/environments/{env}/search"),
     "info": Route("GET", "/api/v1/info"),
 }

@@ -1246,16 +1246,40 @@ class TableHealthOut(BaseModel):
 
 
 class DescriptionIn(BaseModel):
-    """Request body that sets or resets a description.
+    """Request body that sets or resets a description, a label or both, in one language.
+
+    Send one or both; a field left out stays as it is, `null` removes its edit.
 
     Parameters
     ----------
     description
         The new text (1 to 4,000 characters, not blank), or `null` to remove the edit so that the
-        project's text shows again. The field must be sent.
+        project's text shows again.
+    label
+        The new label (one line, 1 to 100 characters, not blank), or `null` to remove the edit so
+        that the project's label shows again.
     """
 
-    description: str | None
+    description: str | None = None
+    label: str | None = None
+
+    @model_validator(mode="after")
+    def _sends_a_field(self) -> DescriptionIn:
+        """Refuse a body that changes nothing.
+
+        Returns
+        -------
+        DescriptionIn
+            `self`.
+
+        Raises
+        ------
+        ValueError
+            When neither field was sent.
+        """
+        if not self.model_fields_set & {"description", "label"}:
+            raise ValueError("send `description`, `label` or both; null removes an edit")
+        return self
 
 
 class UndropIn(BaseModel):
@@ -2153,12 +2177,27 @@ class WhoamiOut(BaseModel):
         `None` for a PAT.
     ci_token
         The CI token's scope when the caller authenticated with one; `None` otherwise.
+    language
+        Your preferred language for catalog texts; `null` for none.
     """
 
     name: str
     type: Literal["USER", "SERVICE_ACCOUNT"]
     task_token: TaskTokenScopeOut | None
     ci_token: CiTokenScopeOut | None = None
+    language: str | None = None
+
+
+class ProfileIn(BaseModel):
+    """Request body that sets or resets the caller's preferred language.
+
+    Parameters
+    ----------
+    language
+        A language tag such as `fr` or `de-CH`, or `null` to remove the preference. Must be sent.
+    """
+
+    language: str | None
 
 
 class EnvironmentStorageUpdate(BaseModel):

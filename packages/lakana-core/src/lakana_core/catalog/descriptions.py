@@ -13,11 +13,12 @@ through `lakana_core.catalog.model_metadata`.
 
 from __future__ import annotations
 
+import enum
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import Any, Final, Literal
 
 from sqlalchemy import inspect, select
 from sqlalchemy.orm import Session
@@ -33,12 +34,22 @@ from lakana_core.models import (
     TableType,
 )
 from lakana_core.projects.manifest import entry_translations, manifest_main_language
-from lakana_core.projects.project_config import MAX_DESCRIPTION_CHARS
+from lakana_core.projects.project_config import MAX_DESCRIPTION_CHARS, MAX_LABEL_CHARS
 
 MAX_DESCRIPTION_LENGTH = MAX_DESCRIPTION_CHARS
 """The most characters a description may have, for a table and for a column."""
 
 DescriptionSource = Literal["project", "edited"]
+
+
+class _Keep(enum.Enum):
+    """The type of `KEEP`."""
+
+    KEEP = "keep"
+
+
+KEEP: Final = _Keep.KEEP
+"""Leave a text as it is: what an edit passes for a field it does not change."""
 
 
 @dataclass(frozen=True)
@@ -113,6 +124,46 @@ def check_text(text: str | None, what: str) -> str | None:
         raise ValidationError(
             f"The description of {what} has {len(text):,} characters; the limit is "
             f"{MAX_DESCRIPTION_LENGTH:,}. Write a shorter one."
+        )
+    return text
+
+
+def check_label(text: str | None, what: str) -> str | None:
+    """Refuse a label edit that is blank, several lines or too long.
+
+    Parameters
+    ----------
+    text
+        The new label, or `None` to reset.
+    what
+        What is labelled, for the message (``"table silver.orders"``).
+
+    Returns
+    -------
+    str or None
+        `text`, unchanged.
+
+    Raises
+    ------
+    ValidationError
+        With the cause and the next step.
+    """
+    if text is None:
+        return None
+    if not text.strip():
+        raise ValidationError(
+            f"The label of {what} is blank. Write the label, or reset it to go back to the "
+            "project's text (`lakana table describe --reset`, or send null)."
+        )
+    if "\n" in text.strip():
+        raise ValidationError(
+            f"The label of {what} has more than one line; a label is one line. Put the longer "
+            "text in the description."
+        )
+    if len(text) > MAX_LABEL_CHARS:
+        raise ValidationError(
+            f"The label of {what} has {len(text):,} characters; the limit is {MAX_LABEL_CHARS:,}. "
+            "Write a shorter one."
         )
     return text
 
@@ -341,10 +392,39 @@ def edit_table(row: Table, text: str | None) -> tuple[int, int]:
     return old, len(text or "")
 
 
+def edit_table_label(row: Table, text: str | None) -> tuple[int, int]:
+    """Set or reset the edit of a table's main-language label.
+
+    Parameters
+    ----------
+    row
+        The table.
+    text
+        The new label, or `None` to reset.
+
+    Returns
+    -------
+    tuple of (int, int)
+        The length of the edit before and after (`0` for none).
+    """
+    old = len(row.label_edited or "")
+    row.label_edited = text
+    return old, len(text or "")
+
+
 def edit_column(
-    session: Session, table_id: uuid.UUID, column: str, text: str | None, by: uuid.UUID
+    session: Session,
+    table_id: uuid.UUID,
+    column: str,
+    text: str | None,
+    by: uuid.UUID,
+    *,
+    field: Literal["description", "label"] = "description",
 ) -> tuple[int, int]:
-    """Set or reset the edit of a column's description.
+    """Set or reset the edit of a column's main-language description or label.
+
+    The column's row is removed once none of its four texts (project and edited description and
+    label) is left.
 
     Parameters
     ----------
@@ -358,26 +438,37 @@ def edit_column(
         The new text, or `None` to reset.
     by
         The principal who edits.
+    field
+        Which text: ``"description"`` (the default) or ``"label"``.
 
     Returns
     -------
     tuple of (int, int)
         The length of the edit before and after (`0` for none).
     """
+    attribute = "description_edited" if field == "description" else "label_edited"
     found = session.execute(
         select(ColumnDescription).where(
             ColumnDescription.table_id == table_id, ColumnDescription.column == column
         )
     ).scalar_one_or_none()
-    old = len((found.description_edited if found is not None else None) or "")
+    old = len((getattr(found, attribute) if found is not None else None) or "")
     if found is None:
         if text is None:
             return 0, 0
         found = ColumnDescription(id=uuid.uuid4(), table_id=table_id, column=column)
         session.add(found)
-    found.description_edited = text
+    setattr(found, attribute, text)
     found.updated_by = by
     found.updated_at = datetime.now(UTC)
-    if text is None and found.description_project is None:
+    if all(
+        value is None
+        for value in (
+            found.description_project,
+            found.description_edited,
+            found.label_project,
+            found.label_edited,
+        )
+    ):
         session.delete(found)
     return old, len(text or "")

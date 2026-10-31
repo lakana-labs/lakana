@@ -3,18 +3,27 @@
 Describes the authenticated caller back to itself. It needs authentication
 but performs no authorization check: it reveals nothing a 200-versus-401
 probe of any other route doesn't already, and `lakana login` uses it to
-confirm a credential before saving it.
+confirm a credential before saving it. `PATCH` sets the caller's own
+preferred language, a self-service display preference.
 """
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from fastapi import APIRouter, Depends
 
 from lakana_core.auth import PrincipalRef
-from lakana_server.api.platform.schemas import CiTokenScopeOut, TaskTokenScopeOut, WhoamiOut
+from lakana_core.identity.principals import PrincipalService
+from lakana_server.api.platform.schemas import (
+    CiTokenScopeOut,
+    ProfileIn,
+    TaskTokenScopeOut,
+    WhoamiOut,
+)
 from lakana_server.api.responses import errors
 from lakana_server.api.routing import AuthenticateFirstRoute
-from lakana_server.deps import get_principal
+from lakana_server.deps import get_principal, get_principal_service
 
 router = APIRouter(
     route_class=AuthenticateFirstRoute,
@@ -39,8 +48,8 @@ def whoami(principal: PrincipalRef = Depends(get_principal)) -> WhoamiOut:
     Returns
     -------
     WhoamiOut
-        The caller's name and type, plus its task-token scope or its CI token's scope if it
-        authenticated with one of those.
+        The caller's name, type and preferred language, plus its task-token scope or its CI
+        token's scope if it authenticated with one of those.
     """
     scope = principal.task_scope
     ci = principal.ci_scope
@@ -61,4 +70,35 @@ def whoami(principal: PrincipalRef = Depends(get_principal)) -> WhoamiOut:
             expires_at=ci.expires_at,
             used=ci.used,
         ),
+        language=principal.language,
     )
+
+
+@router.patch("", response_model=WhoamiOut, responses=errors(403))
+def set_profile(
+    body: ProfileIn,
+    principal: PrincipalRef = Depends(get_principal),
+    principals: PrincipalService = Depends(get_principal_service),
+) -> WhoamiOut:
+    """Set your preferred language.
+
+    Catalog texts are then shown in it unless a request asks for another (`lang`). Any person may
+    set their own; a task or CI token may not (403). Answers 422 for a value that is not a
+    language tag.
+
+    Parameters
+    ----------
+    body
+        The new `language`, or `null`.
+    principal
+        The authenticated caller.
+    principals
+        The principal service for this request.
+
+    Returns
+    -------
+    WhoamiOut
+        Who you are, with the language now stored.
+    """
+    stored = principals.set_own_language(principal, body.language)
+    return whoami(replace(principal, language=stored))

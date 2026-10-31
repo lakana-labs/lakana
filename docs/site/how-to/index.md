@@ -29,6 +29,7 @@ Pages:
 - [Mask a column for some people](mask-a-column.md): show a replacement value instead of a column, and what masks do not protect.
 - [Declare a table's model](declare-a-tables-model.md): say in an asset's header what a table is, what one row stands for, its key and the tables it points at; get checks from it, and see what each message means.
 - [Describe a table](describe-a-table.md): write a description for a table and its columns, in the project or by hand, and go back to the project's text.
+- [Translate labels and descriptions](translate-labels-and-descriptions.md): show a table's labels and descriptions in more languages, read them in yours, and correct a translation by hand.
 - [Drop and restore a table](drop-and-restore-a-table.md): drop a table, restore it with its data and access rules during the undo period, or delete its files now; delete and restore a whole environment the same way.
 - [Clean up files left by older releases](clean-up-files-left-by-older-releases.md): list the table directories in storage that an older release left behind without a record, and delete them.
 - [Let tables expire](let-tables-expire.md): let a development table, or every table of an environment, be dropped once nobody has used it for a while; see what expires soon, and keep a table.

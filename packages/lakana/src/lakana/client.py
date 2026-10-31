@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from datetime import datetime
-from typing import Literal, overload
+from typing import Any, Literal, overload
 
 import httpx
 import pyarrow as pa
@@ -341,29 +341,34 @@ class Client:
         lakana.errors.AuthenticationError
             If the credential is invalid, expired or revoked.
         """
-        body = self._transport.request(ROUTES["whoami"]).json()
-        scope = body["task_token"]
-        ci = body.get("ci_token")
-        return Whoami(
-            name=body["name"],
-            type=body["type"],
-            task_token=None
-            if scope is None
-            else TaskTokenScope(environment=scope["environment"], asset_scope=scope["asset_scope"]),
-            ci_token=None
-            if ci is None
-            else CiTokenScope(
-                rule_id=ci["rule_id"],
-                environment=ci["environment"],
-                repository=ci["repository"],
-                kinds=list(ci["kinds"]),
-                sha=ci["sha"],
-                expires_at=None
-                if ci["expires_at"] is None
-                else datetime.fromisoformat(ci["expires_at"]),
-                used=bool(ci["used"]),
-            ),
-        )
+        return _whoami_from_json(self._transport.request(ROUTES["whoami"]).json())
+
+    def set_language(self, language: str | None) -> Whoami:
+        """Set the language you see catalog texts in, or remove it with `None`.
+
+        Tables and columns then show their labels and descriptions in it where the project or an
+        edit has them, unless a call asks for another (`lang=`). A task or CI token may not set
+        one.
+
+        Parameters
+        ----------
+        language
+            A language tag such as `"de"` or `"fr-CH"`, any case; `None` removes it.
+
+        Returns
+        -------
+        Whoami
+            Who you are, with the language now stored, in its canonical spelling.
+
+        Raises
+        ------
+        lakana.errors.PermissionDenied
+            For a task or CI token.
+        lakana.errors.ValidationError
+            If `language` is not a language tag.
+        """
+        response = self._transport.request(ROUTES["whoami.update"], json={"language": language})
+        return _whoami_from_json(response.json())
 
     def search(
         self,
@@ -492,3 +497,41 @@ class Client:
             including the token's secret part.
         """
         return f"Client(url={self._config.url!r}, token={mask_token(self._config.token)!r})"
+
+
+def _whoami_from_json(body: dict[str, Any]) -> Whoami:
+    """Read a whoami answer.
+
+    Parameters
+    ----------
+    body
+        The JSON body of `GET` or `PATCH /api/v1/whoami`.
+
+    Returns
+    -------
+    Whoami
+        The caller, as the answer describes it.
+    """
+    scope = body["task_token"]
+    ci = body.get("ci_token")
+    return Whoami(
+        name=body["name"],
+        type=body["type"],
+        task_token=None
+        if scope is None
+        else TaskTokenScope(environment=scope["environment"], asset_scope=scope["asset_scope"]),
+        ci_token=None
+        if ci is None
+        else CiTokenScope(
+            rule_id=ci["rule_id"],
+            environment=ci["environment"],
+            repository=ci["repository"],
+            kinds=list(ci["kinds"]),
+            sha=ci["sha"],
+            expires_at=None
+            if ci["expires_at"] is None
+            else datetime.fromisoformat(ci["expires_at"]),
+            used=bool(ci["used"]),
+        ),
+        language=body.get("language"),
+    )

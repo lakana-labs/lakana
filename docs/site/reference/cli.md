@@ -197,6 +197,25 @@ Nothing is overwritten: if a file it would write exists, or a folder inside the 
 | `--ci-auth` | one of `oidc`, `pat` | `oidc` | How the CI files sign in: oidc exchanges the CI job's ID token, so nothing secret is stored in CI; pat reads a stored Lakana token. |
 | `--template` | one of `python`, `ingest-files`, `ingest-sql`, `ingest-rest` | none | Start from a template. python: the sample plus one Python asset, locked with `uv lock` (needs network access and a few more minutes). ingest-files, ingest-sql or ingest-rest: one asset that ingests from a source, instead of the sample. |
 
+## `lakana me`
+
+Usage: `lakana me [OPTIONS] COMMAND [ARGS]...`
+
+Your own preferences on the instance.
+
+### `lakana me set`
+
+Usage: `lakana me set [OPTIONS]`
+
+Set the language you see catalog texts in, or remove it.
+
+Labels and descriptions of tables and columns are then shown in it where the project or an edit has them; `--lang` on a command still asks for another. A task or CI token cannot set one.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `--language` | text | none | Show catalog texts in this language, such as de or fr-CH. |
+| `--reset` | flag | off | Remove your language. |
+
 ## `lakana profile`
 
 Usage: `lakana profile [OPTIONS] COMMAND [ARGS]...`
@@ -524,16 +543,18 @@ Readers are counted from the queries that succeeded, per person and day. You see
 
 Usage: `lakana table describe [OPTIONS] {name}`
 
-Describe table NAME or one of its columns, or reset the description.
+Describe or label table NAME or one of its columns, or reset its texts.
 
-The text you set is shown instead of the `description:` in the asset's header, and a deploy never replaces it. `--reset` goes back to the header's text. You need to own the table, or hold the right to drop it.
+The texts you set are shown instead of the asset header's `description:` and `label:` (or a translation file's, with `--lang`), and a deploy never replaces them. `--reset` goes back to the project's texts in that language. You need to own the table, or hold the right to drop it.
 
 | Name | Type | Default | Description |
 |---|---|---|---|
 | `NAME` | text | required |  |
 | `--column` | text | none | Describe this column instead of the table. |
 | `--text` | text | none | The description, up to 4,000 characters. |
-| `--reset` | flag | off | Remove your text, so the project's shows again. |
+| `--label` | text | none | The label: one line, up to 100 characters. |
+| `--lang` | text | none | The language you write in, such as fr; without it, the table's main language. |
+| `--reset` | flag | off | Remove your description and label, so the project's show again. |
 | `--env` | text | none | Environment (default: the profile's). |
 
 ### `lakana table delete`

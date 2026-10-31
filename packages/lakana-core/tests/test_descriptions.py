@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import uuid
 from pathlib import Path
 
@@ -373,9 +374,27 @@ def test_every_change_is_audited_with_lengths_and_not_the_text(
 
     table_events = _events(session, AuditEventType.TABLE_DESCRIBED)
     assert [e.detail for e in table_events] == [
-        {"table": "silver.orders", "old_length": 0, "new_length": 19, "reset": False},
-        {"table": "silver.orders", "old_length": 19, "new_length": 3, "reset": False},
-        {"table": "silver.orders", "old_length": 3, "new_length": 0, "reset": True},
+        {
+            "table": "silver.orders",
+            "language": "en",
+            "old_length": 0,
+            "new_length": 19,
+            "reset": False,
+        },
+        {
+            "table": "silver.orders",
+            "language": "en",
+            "old_length": 19,
+            "new_length": 3,
+            "reset": False,
+        },
+        {
+            "table": "silver.orders",
+            "language": "en",
+            "old_length": 3,
+            "new_length": 0,
+            "reset": True,
+        },
     ]
     assert table_events[0].securable_table == "orders"
     column_events = _events(session, AuditEventType.COLUMN_DESCRIBED)
@@ -383,6 +402,7 @@ def test_every_change_is_audited_with_lengths_and_not_the_text(
         {
             "table": "silver.orders",
             "column": "id",
+            "language": "en",
             "old_length": 0,
             "new_length": 4,
             "reset": False,
@@ -518,3 +538,158 @@ def test_a_description_needs_the_right_to_read_the_table_and_writes_nothing_with
         catalog.set_table_description(owner, _ORDERS, "No")
     assert session.scalars(select(Table)).one().description_edited is None
     assert _events(session, AuditEventType.TABLE_DESCRIBED) == []
+
+
+def test_a_label_edit_in_the_main_language_and_one_in_french(
+    catalog_with_orders: CatalogService, principal: PrincipalRef, session: Session
+) -> None:
+    """A label edit without a language is the main language's; one in `fr` is a translation."""
+    catalog_with_orders.set_table_description(principal, _ORDERS, label="Orders")
+    catalog_with_orders.set_table_description(
+        principal, _ORDERS, label="Commandes", description="Une ligne.", language="fr"
+    )
+    english = catalog_with_orders.describe_table(principal, _ORDERS)
+    french = catalog_with_orders.describe_table(principal, _ORDERS, languages=["fr"])
+    assert (english.label, english.label_source, english.label_language) == (
+        "Orders",
+        "edited",
+        "en",
+    )
+    assert (french.label, french.description, french.label_language) == (
+        "Commandes",
+        "Une ligne.",
+        "fr",
+    )
+    (event,) = [
+        e for e in _events(session, AuditEventType.TABLE_DESCRIBED) if e.detail["language"] == "fr"
+    ]
+    assert event.detail == {
+        "table": "silver.orders",
+        "language": "fr",
+        "old_length": 0,
+        "new_length": 10,
+        "label_old_length": 0,
+        "label_new_length": 9,
+        "reset": False,
+    }
+
+
+def test_an_edit_in_a_new_language_is_shown_and_listed(
+    catalog_with_orders: CatalogService, principal: PrincipalRef, session: Session
+) -> None:
+    """A column label edit in `it` lists the language; its reset removes it again."""
+    catalog_with_orders.set_column_description(
+        principal, _ORDERS, "status", label="Stato", language="it"
+    )
+    row = session.scalars(select(Table).where(Table.name == "orders")).one()
+    assert row.text_languages == ["it"]
+    described = catalog_with_orders.describe_table(principal, _ORDERS, languages=["it"])
+    assert (described.column_labels["status"].text, described.column_labels["status"].language) == (
+        "Stato",
+        "it",
+    )
+    catalog_with_orders.set_column_description(
+        principal, _ORDERS, "status", label=None, language="it"
+    )
+    assert row.text_languages is None
+
+
+def test_bad_label_edits_and_empty_edits_are_refused_with_the_next_step(
+    catalog_with_orders: CatalogService, principal: PrincipalRef
+) -> None:
+    """Blank, too long and multi-line labels, an edit of nothing and a bad tag are refused."""
+    for label, message in (
+        (" ", "The label of table silver.orders is blank. Write the label, or reset it"),
+        (
+            "x" * 101,
+            "The label of table silver.orders has 101 characters; the limit is 100. "
+            "Write a shorter one.",
+        ),
+        (
+            "a\nb",
+            "The label of table silver.orders has more than one line; a label is one line. "
+            "Put the longer text in the description.",
+        ),
+    ):
+        with pytest.raises(ValidationError, match=re.escape(message)):
+            catalog_with_orders.set_table_description(principal, _ORDERS, label=label)
+    with pytest.raises(
+        ValidationError,
+        match=re.escape("send `description`, `label` or both; null removes an edit"),
+    ):
+        catalog_with_orders.set_table_description(principal, _ORDERS)
+    with pytest.raises(ValidationError, match="is not a language tag Lakana takes"):
+        catalog_with_orders.set_table_description(principal, _ORDERS, label="X", language="fr_FR")
+
+
+def test_an_edit_naming_the_main_language_changes_the_main_text_not_a_translation(
+    catalog_with_orders: CatalogService, principal: PrincipalRef, session: Session
+) -> None:
+    """`language="EN"` on an `en` table is the main-language edit, never a translation row."""
+    catalog_with_orders.set_table_description(principal, _ORDERS, label="Orders", language="EN")
+    catalog_with_orders.set_column_description(
+        principal, _ORDERS, "id", "Order number", label="Number", language="en"
+    )
+    row = session.scalars(select(Table).where(Table.name == "orders")).one()
+    assert (row.label_edited, row.text_languages) == ("Orders", None)
+    column = session.scalars(select(ColumnDescription)).one()
+    assert (column.label_edited, column.description_edited) == ("Number", "Order number")
+    (event,) = _events(session, AuditEventType.COLUMN_DESCRIBED)
+    assert event.detail == {
+        "table": "silver.orders",
+        "column": "id",
+        "language": "en",
+        "old_length": 0,
+        "new_length": 12,
+        "label_old_length": 0,
+        "label_new_length": 6,
+        "reset": False,
+    }
+
+
+def test_a_column_label_reset_keeps_the_description_and_a_full_reset_removes_the_row(
+    catalog_with_orders: CatalogService, principal: PrincipalRef, session: Session
+) -> None:
+    """A column row goes only when none of its four texts is left."""
+    catalog_with_orders.set_column_description(principal, _ORDERS, "id", "Number", label="No.")
+    catalog_with_orders.set_column_description(principal, _ORDERS, "id", label=None)
+    column = session.scalars(select(ColumnDescription)).one()
+    assert (column.label_edited, column.description_edited) == (None, "Number")
+    catalog_with_orders.set_column_description(principal, _ORDERS, "id", None, label=None)
+    assert session.scalars(select(ColumnDescription)).all() == []
+    event = _events(session, AuditEventType.COLUMN_DESCRIBED)[-1]
+    assert event.detail["reset"] is True
+
+
+def test_a_translated_edit_of_a_column_the_table_does_not_have_is_refused(
+    catalog_with_orders: CatalogService, principal: PrincipalRef, session: Session
+) -> None:
+    """The column check runs for every language, before anything is stored."""
+    with pytest.raises(
+        NotFoundError, match=re.escape("has no column 'nope'. Its columns: id, status.")
+    ):
+        catalog_with_orders.set_column_description(
+            principal, _ORDERS, "nope", label="Non", language="fr"
+        )
+    with pytest.raises(
+        ValidationError, match=re.escape("The label of column id of table silver.orders")
+    ):
+        catalog_with_orders.set_column_description(
+            principal, _ORDERS, "id", label=" ", language="fr"
+        )
+    with pytest.raises(ValidationError, match="send `description`, `label` or both"):
+        catalog_with_orders.set_column_description(principal, _ORDERS, "id", language="fr")
+    assert session.scalars(select(Table)).one().text_languages is None
+    assert _events(session, AuditEventType.COLUMN_DESCRIBED) == []
+
+
+def test_a_french_column_description_edit_is_shown_in_french(
+    catalog_with_orders: CatalogService, principal: PrincipalRef
+) -> None:
+    """A description edit in `fr` shows to a French reader with its language."""
+    catalog_with_orders.set_column_description(
+        principal, _ORDERS, "status", "Où elle en est", language="fr"
+    )
+    shown_fr = catalog_with_orders.describe_table(principal, _ORDERS, languages=["fr"])
+    text = shown_fr.column_descriptions["status"]
+    assert (text.text, text.source, text.language) == ("Où elle en est", "edited", "fr")

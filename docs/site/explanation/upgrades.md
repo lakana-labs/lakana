@@ -251,6 +251,20 @@ labels and descriptions into more languages in `translations/<language>.yaml`
 - Migration `0058` adds the table `text_translations` and the label and language columns. They
   are empty until the next deploy of a project that declares labels or translations: deploy such
   a project once after the upgrade. Existing descriptions show unchanged.
+- Set `LAKANA_MAIN_LANGUAGE` before upgrading if your existing descriptions are not in English:
+  they are shown as texts in that language.
+- `PATCH …/tables/{name}` and `PUT …/tables/{name}/columns/{column}/description` take `label`
+  beside `description`, and `?lang=` for the language edited. `description` is no longer
+  required: send one of the two or both. A body with neither is still `422`, and a body that sends
+  only `description` works as before. Both routes now answer with the texts in the reader's
+  language, as `GET` does.
+- `lakana table describe` takes `--label` and `--lang`; `--reset` removes the label's edit too. Its
+  usage error is now `Give --text TEXT and/or --label LABEL to set, or --reset to go back to the
+  project's texts.` `lakana me set --language` sets your own language
+  ([Descriptions](../reference/descriptions.md#your-own-language)).
+- `TABLE_DESCRIBED` and `COLUMN_DESCRIBED` audit events gain `language`, and `label_old_length`
+  and `label_new_length` when the label was sent; `old_length` and `new_length` are present only
+  when the description was sent.
 
 ### A run that removes or retypes a column says so
 

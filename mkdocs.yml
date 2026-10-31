@@ -56,6 +56,7 @@ nav:
       - how-to/mask-a-column.md
       - how-to/declare-a-tables-model.md
       - how-to/describe-a-table.md
+      - how-to/translate-labels-and-descriptions.md
       - how-to/drop-and-restore-a-table.md
       - how-to/let-tables-expire.md
       - how-to/clean-up-files-left-by-older-releases.md

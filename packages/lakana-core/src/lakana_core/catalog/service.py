@@ -73,10 +73,14 @@ from lakana_core.catalog.connection_lineage import (
 )
 from lakana_core.catalog.datafiles import list_data_files
 from lakana_core.catalog.descriptions import (
+    KEEP,
     ShownDescription,
+    _Keep,
+    check_label,
     check_text,
     edit_column,
     edit_table,
+    edit_table_label,
     sync_created_table,
 )
 from lakana_core.catalog.environment_deletion import (
@@ -194,7 +198,7 @@ from lakana_core.catalog.tombstones import (
     restore_table,
     revive,
 )
-from lakana_core.catalog.translations import translation_rows
+from lakana_core.catalog.translations import edit_translation, translation_rows
 from lakana_core.catalog.usage import EnvironmentUsage, environment_usage
 from lakana_core.catalog.watermark import Watermark, check_incremental_key, compute_watermark
 from lakana_core.catalog.writes import (
@@ -238,7 +242,7 @@ from lakana_core.identifiers import (
     shown,
     validate_path_component,
 )
-from lakana_core.languages import DEFAULT_MAIN_LANGUAGE
+from lakana_core.languages import DEFAULT_MAIN_LANGUAGE, canonical_language, language_problem
 from lakana_core.log_events import LogEvent, log_event
 from lakana_core.models import (
     LIVE_ENVIRONMENT,
@@ -3848,13 +3852,20 @@ class CatalogService:
         return row
 
     def set_table_description(
-        self, p: PrincipalRef, ref: TableRef, description: str | None
+        self,
+        p: PrincipalRef,
+        ref: TableRef,
+        description: str | _Keep | None = KEEP,
+        *,
+        label: str | _Keep | None = KEEP,
+        language: str | None = None,
     ) -> None:
-        """Set the edit of a table's description, or reset it.
+        """Set or reset the edits of a table's description and label, in one language.
 
-        The edit is shown instead of the project's text. `None` removes the edit, so the
-        project's text shows again. One `TABLE_DESCRIBED` audit event records the change with the
-        length of the edit before and after, not the text.
+        An edit is shown instead of the project's text in its language. `None` removes the
+        edit, so the project's text shows again; `KEEP` leaves a field as it is. One
+        `TABLE_DESCRIBED` audit event records the change with the language and the lengths of
+        the edits before and after, never the text.
 
         Parameters
         ----------
@@ -3863,7 +3874,12 @@ class CatalogService:
         ref
             The table reference.
         description
-            The new text, or `None` to reset.
+            The new description, `None` to reset its edit, or `KEEP`.
+        label
+            The new label, `None` to reset its edit, or `KEEP`.
+        language
+            The canonical or any-case tag of the language edited; `None` for the table's main
+            language.
 
         Raises
         ------
@@ -3872,32 +3888,35 @@ class CatalogService:
         PermissionDenied
             If `p` neither owns the table nor holds `DROP_TABLE` on it, or may not read it.
         ValidationError
-            If the text is blank or over `MAX_DESCRIPTION_LENGTH` characters, or the row is an
-            artifact.
+            If both fields are `KEEP`, a text is blank or too long, a label has more than one
+            line, `language` is not a tag Lakana takes, or the row is an artifact.
         """
         row = self._find_table_to_describe(p, ref)
         self._authz.authorize(
             p, Action.READ_TABLE, Securable.table_scope(ref.environment, ref.namespace, ref.name)
         )
-        check_text(description, f"table {ref.dotted()}")
-        old, new = edit_table(row, description)
+        detail = self._edit_texts(
+            p, row, f"table {ref.dotted()}", None, description, label, language
+        )
         AuditService(self._session).record(
             p.id,
             AuditEventType.TABLE_DESCRIBED,
             securable=Securable.table_scope(ref.environment, ref.namespace, ref.name),
-            detail={
-                "table": ref.dotted(),
-                "old_length": old,
-                "new_length": new,
-                "reset": description is None,
-            },
+            detail={"table": ref.dotted(), **detail},
         )
         self._session.commit()
 
     def set_column_description(
-        self, p: PrincipalRef, ref: TableRef, column: str, description: str | None
+        self,
+        p: PrincipalRef,
+        ref: TableRef,
+        column: str,
+        description: str | _Keep | None = KEEP,
+        *,
+        label: str | _Keep | None = KEEP,
+        language: str | None = None,
     ) -> None:
-        """Set the edit of a column's description, or reset it.
+        """Set or reset the edits of a column's description and label, in one language.
 
         Like `set_table_description`, with a `COLUMN_DESCRIBED` event that also names the column.
         The column must be in the table's schema now, and `p` must be able to read the table.
@@ -3911,7 +3930,12 @@ class CatalogService:
         column
             The column's name.
         description
-            The new text, or `None` to reset.
+            The new description, `None` to reset its edit, or `KEEP`.
+        label
+            The new label, `None` to reset its edit, or `KEEP`.
+        language
+            The canonical or any-case tag of the language edited; `None` for the table's main
+            language.
 
         Raises
         ------
@@ -3920,7 +3944,8 @@ class CatalogService:
         PermissionDenied
             If `p` neither owns the table nor holds `DROP_TABLE` on it, or may not read it.
         ValidationError
-            If the text is blank or over `MAX_DESCRIPTION_LENGTH` characters.
+            If both fields are `KEEP`, a text is blank or too long, a label has more than one
+            line, or `language` is not a tag Lakana takes.
         """
         row = self._find_table_to_describe(p, ref)
         names = [c.name for c in self.describe_table(p, ref).columns]
@@ -3929,21 +3954,120 @@ class CatalogService:
             raise NotFoundError(
                 f"Table {ref.dotted()} has no column {shown(column)!r}. Its columns: {have}."
             )
-        check_text(description, f"column {column} of table {ref.dotted()}")
-        old, new = edit_column(self._session, row.id, column, description, p.id)
+        detail = self._edit_texts(
+            p, row, f"column {column} of table {ref.dotted()}", column, description, label, language
+        )
         AuditService(self._session).record(
             p.id,
             AuditEventType.COLUMN_DESCRIBED,
             securable=Securable.table_scope(ref.environment, ref.namespace, ref.name),
-            detail={
-                "table": ref.dotted(),
-                "column": column,
-                "old_length": old,
-                "new_length": new,
-                "reset": description is None,
-            },
+            detail={"table": ref.dotted(), "column": column, **detail},
         )
         self._session.commit()
+
+    def _edit_texts(
+        self,
+        p: PrincipalRef,
+        row: Table,
+        what: str,
+        column: str | None,
+        description: str | _Keep | None,
+        label: str | _Keep | None,
+        language: str | None,
+    ) -> dict[str, object]:
+        """Check and store the edits of a table's or column's texts in one language.
+
+        Everything is checked before anything is written. An edit in the table's main language
+        goes onto the table or column row; one in another language is a translation edit.
+
+        Parameters
+        ----------
+        p
+            The acting principal, recorded as the editor.
+        row
+            The table, already authorized.
+        what
+            What is edited, for the messages (``"table silver.orders"``).
+        column
+            The column's name, already checked; `None` for the table itself.
+        description
+            The new description, `None` to reset its edit, or `KEEP`.
+        label
+            The new label, `None` to reset its edit, or `KEEP`.
+        language
+            The tag of the language edited, any case; `None` for the table's main language.
+
+        Returns
+        -------
+        dict
+            The audit detail: `language`, the lengths of each field sent, and `reset`.
+
+        Raises
+        ------
+        ValidationError
+            If both fields are `KEEP`, a text fails its rules, or `language` is not a tag.
+        """
+        if isinstance(description, _Keep) and isinstance(label, _Keep):
+            raise ValidationError("send `description`, `label` or both; null removes an edit")
+        main = row.text_language or self._main_language
+        lang = main if language is None else self._edit_language(language)
+        if not isinstance(description, _Keep):
+            check_text(description, what)
+        if not isinstance(label, _Keep):
+            check_label(label, what)
+        detail: dict[str, object] = {"language": lang}
+        given: list[str | None] = []
+        fields: tuple[tuple[Literal["description", "label"], str | _Keep | None, str], ...] = (
+            ("description", description, ""),
+            ("label", label, "label_"),
+        )
+        for field, value, prefix in fields:
+            if isinstance(value, _Keep):
+                continue
+            if lang != main:
+                old, new = edit_translation(
+                    self._session,
+                    row,
+                    subject="table" if column is None else "column",
+                    name=column or "",
+                    language=lang,
+                    field=field,
+                    text=value,
+                    by=p.id,
+                )
+            elif column is not None:
+                old, new = edit_column(self._session, row.id, column, value, p.id, field=field)
+            elif field == "description":
+                old, new = edit_table(row, value)
+            else:
+                old, new = edit_table_label(row, value)
+            detail[f"{prefix}old_length"], detail[f"{prefix}new_length"] = old, new
+            given.append(value)
+        detail["reset"] = all(sent is None for sent in given)
+        return detail
+
+    def _edit_language(self, language: str) -> str:
+        """Read the language an edit names.
+
+        Parameters
+        ----------
+        language
+            The tag, any case.
+
+        Returns
+        -------
+        str
+            The canonical tag.
+
+        Raises
+        ------
+        ValidationError
+            With the tag text, for a tag outside the subset.
+        """
+        canonical = canonical_language(language.strip())
+        if canonical is None:
+            raise ValidationError(f"lang: {language_problem(language.strip())}")
+        return canonical
 
     def can_read_table(self, p: PrincipalRef, ref: TableRef) -> bool:
         """Whether `p` holds READ_TABLE on a table, view or artifact, right now.

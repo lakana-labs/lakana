@@ -305,6 +305,7 @@ def test_whoami_shows_what_a_ci_token_may_do(tmp_path: Path) -> None:
             "expires_at": "2026-10-20T13:00:00+00:00",
             "used": False,
         },
+        "language": None,
     }
     api = FakeApi()
     api.on("GET", "/api/v1/whoami", json=body)

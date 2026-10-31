@@ -1,0 +1,5 @@
+gold.sale:
+  label: Ventes par magasin
+  columns:
+    store_id:
+      label: Magasin

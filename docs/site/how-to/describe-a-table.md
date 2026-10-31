@@ -59,8 +59,8 @@ With `--output json` the answer also says where each text came from: `descriptio
 
 ## Go back to the project's text
 
-`--reset` removes your edit, so the project's text shows again. A table the project does not describe
-then shows no description.
+`--reset` removes your edits of the description and the label, so the project's texts show again. A
+table the project does not describe then shows no description.
 
 <!-- source: docs/examples/describe-a-table/run.sh#reset -->
 ```bash

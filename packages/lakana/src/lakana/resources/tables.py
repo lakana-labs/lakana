@@ -9,6 +9,7 @@ distinct path parameters.
 
 from __future__ import annotations
 
+import enum
 import io
 from collections.abc import Mapping, Sequence
 from datetime import date, datetime
@@ -70,6 +71,16 @@ many batches a normal
 SDK upload produces, keeping it far below the server's
 `Settings.append.max_arrays` cap without a caller needing to think about
 batching at all."""
+
+
+class _Unset(enum.Enum):
+    """The type of `_UNSET`."""
+
+    UNSET = "unset"
+
+
+_UNSET = _Unset.UNSET
+"""A field `TablesResource.describe` leaves as it is, as opposed to `None`, which resets it."""
 
 
 def _add_source_versions(
@@ -727,15 +738,18 @@ class Tables:
         self,
         environment: str,
         qualified_name: str,
-        description: str | None,
+        description: str | _Unset | None = _UNSET,
         *,
+        label: str | _Unset | None = _UNSET,
         column: str | None = None,
+        lang: str | None = None,
     ) -> Table:
-        """Set the description of a table or one of its columns, or reset it.
+        """Set the description or label of a table or one of its columns, or reset them.
 
-        The text set here is shown instead of the one a deploy publishes from the asset header,
-        and a deploy never replaces it. Resetting removes it, so the asset header's text shows
-        again. Needs to own the table or hold `DROP_TABLE` on it.
+        A text set here is shown instead of the one a deploy publishes from the asset header or a
+        translation file, and a deploy never replaces it. Resetting (`None`) removes it, so the
+        project's text shows again; a field you leave out stays as it is. Without `lang`, the
+        edit is in the table's main language. Needs to own the table or hold `DROP_TABLE` on it.
 
         Parameters
         ----------
@@ -745,23 +759,36 @@ class Tables:
             Dot-joined `"namespace.table"` name.
         description
             The new text (1 to 4,000 characters, not blank), or `None` to reset.
+        label
+            The new label (one line, 1 to 100 characters), or `None` to reset.
         column
             A column of the table to describe instead of the table.
+        lang
+            The language edited, such as `"fr"`; also the language of the returned texts.
 
         Returns
         -------
         Table
-            The table, with the descriptions it shows now.
+            The table, with the texts it shows now.
 
         Raises
         ------
+        ValueError
+            If neither `description` nor `label` is given.
         lakana.errors.NotFound
             If the table, or the column, does not exist.
         lakana.errors.PermissionDenied
             Without the right to describe the table.
         lakana.errors.ValidationError
-            If the text is blank or over 4,000 characters.
+            If a text breaks its rules or `lang` is not a language tag.
         """
+        body: dict[str, str | None] = {}
+        if not isinstance(description, _Unset):
+            body["description"] = description
+        if not isinstance(label, _Unset):
+            body["label"] = label
+        if not body:
+            raise ValueError("give description, label or both; None removes an edit")
         namespace, name = _split_namespace_table(qualified_name)
         path_params = {"env": environment, "path": namespace, "name": name}
         if column is None:
@@ -770,7 +797,10 @@ class Tables:
             route = ROUTES["tables.describe_column"]
             path_params["column"] = column
         response = self._transport.request(
-            route, path_params=path_params, json={"description": description}
+            route,
+            path_params=path_params,
+            json=body,
+            params=None if lang is None else {"lang": lang},
         )
         return _table_from_json(response.json())
 

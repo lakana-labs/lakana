@@ -32,6 +32,7 @@ from sqlalchemy.orm import Session
 from starlette.requests import ClientDisconnect
 
 from lakana_core.auth import PrincipalRef
+from lakana_core.catalog.descriptions import KEEP, _Keep
 from lakana_core.catalog.json_schema import ColumnSpec, from_iceberg_schema, to_iceberg_schema
 from lakana_core.catalog.lineage_graph import LineageDirection, LineageService
 from lakana_core.catalog.loads import require_bronze
@@ -1173,21 +1174,52 @@ def get_table_health(
     return TableHealthOut.model_validate(health, from_attributes=True)
 
 
+_EDIT_LANG_DESCRIPTION = (
+    "The language edited, such as fr; without it, the table's main language. The answer's texts "
+    "are in it too."
+)
+"""The description of the `lang` query parameter of the two description routes."""
+
+
+def _sent(body: DescriptionIn, field: Literal["description", "label"]) -> str | _Keep | None:
+    """Read one field of a description body, or `KEEP` when it was left out.
+
+    Parameters
+    ----------
+    body
+        The request body.
+    field
+        ``"description"`` or ``"label"``.
+
+    Returns
+    -------
+    str or None or _Keep
+        The text, `None` to reset, or `KEEP` for a field the body did not send.
+    """
+    return getattr(body, field) if field in body.model_fields_set else KEEP
+
+
 @router.patch("/{name}", response_model=TableOut, responses=errors(403, 404))
 def describe_table(
     env: str,
     path: str,
     name: str,
     body: DescriptionIn,
+    request: Request,
+    lang: str | None = Query(default=None, description=_EDIT_LANG_DESCRIPTION),
     principal: PrincipalRef = Depends(get_principal),
     catalog: CatalogService = Depends(get_catalog),
+    main_language: str = Depends(get_main_language),
 ) -> TableOut:
-    """Set a table's description.
+    """Set a table's description and label.
 
-    Sets the text shown for the table, or with `null` removes it so that the text of the
-    project shows again. A deploy never replaces a text set here. The table's owner or a
-    holder of `DROP_TABLE` may do this. Answers 404 when the table does not exist and 422
-    for a blank text or one over 4,000 characters.
+    Sets the texts shown for the table in one language (`lang`, else the table's main language),
+    or with `null` removes an edit so that the text of the project shows again. A field left out
+    of the body stays as it is. A deploy never replaces a text set here. The table's owner or a
+    holder of `DROP_TABLE` may do this, and must be able to read the table. Answers 404 when the
+    table does not exist and 422 for a body with neither field, a blank text, a description over
+    4,000 characters, a label over 100 characters or on several lines, or a `lang` that is not a
+    language tag.
 
     Parameters
     ----------
@@ -1198,16 +1230,22 @@ def describe_table(
     name
         Table name.
     body
-        The new `description`, or `null`.
+        The new `description` and/or `label`, each a text or `null`.
+    request
+        The current request, for `Accept-Language`.
+    lang
+        The language edited; also the language of the answer's texts.
     principal
         The authenticated caller.
     catalog
         The catalog service for this request.
+    main_language
+        `LAKANA_MAIN_LANGUAGE`, the last language a reader without a choice gets.
 
     Returns
     -------
     TableOut
-        The table, with the description it shows now.
+        The table, with the texts it shows now, in the reader's language.
 
     Raises
     ------
@@ -1216,11 +1254,18 @@ def describe_table(
     lakana_core.errors.PermissionDenied
         Mapped to 403, unless the caller owns the table or holds `DROP_TABLE` on it.
     lakana_core.errors.ValidationError
-        Mapped to 422 for a blank text or one over 4,000 characters.
+        Mapped to 422 for a text that breaks its rules or a `lang` that is not a tag.
     """
+    languages = reader_languages(request, lang, principal, main_language)
     ref = TableRef(environment=env, namespace=NamespacePath.from_parts(path.split(".")), name=name)
-    catalog.set_table_description(principal, ref, body.description)
-    return _describe_out(path, catalog.describe_table(principal, ref))
+    catalog.set_table_description(
+        principal,
+        ref,
+        _sent(body, "description"),
+        label=_sent(body, "label"),
+        language=lang,
+    )
+    return _describe_out(path, catalog.describe_table(principal, ref, languages=languages))
 
 
 @router.put(
@@ -1232,15 +1277,20 @@ def describe_column(
     name: str,
     column: str,
     body: DescriptionIn,
+    request: Request,
+    lang: str | None = Query(default=None, description=_EDIT_LANG_DESCRIPTION),
     principal: PrincipalRef = Depends(get_principal),
     catalog: CatalogService = Depends(get_catalog),
+    main_language: str = Depends(get_main_language),
 ) -> TableOut:
-    """Set a column's description.
+    """Set a column's description and label.
 
-    Sets the text shown for a column, or with `null` removes it so that the text of the
-    project shows again. The table's owner or a holder of `DROP_TABLE` may do this, and must
-    be able to read the table. Answers 404 when the table or column does not exist and 422
-    for a blank text or one over 4,000 characters.
+    Sets the texts shown for a column in one language (`lang`, else the table's main language),
+    or with `null` removes an edit so that the text of the project shows again. A field left out
+    of the body stays as it is. The table's owner or a holder of `DROP_TABLE` may do this, and
+    must be able to read the table. Answers 404 when the table or column does not exist and 422
+    for a body with neither field, a blank text, a description over 4,000 characters, a label
+    over 100 characters or on several lines, or a `lang` that is not a language tag.
 
     Parameters
     ----------
@@ -1253,16 +1303,22 @@ def describe_column(
     column
         The column's name; it must be in the table's schema.
     body
-        The new `description`, or `null`.
+        The new `description` and/or `label`, each a text or `null`.
+    request
+        The current request, for `Accept-Language`.
+    lang
+        The language edited; also the language of the answer's texts.
     principal
         The authenticated caller.
     catalog
         The catalog service for this request.
+    main_language
+        `LAKANA_MAIN_LANGUAGE`, the last language a reader without a choice gets.
 
     Returns
     -------
     TableOut
-        The table, with the descriptions it shows now.
+        The table, with the texts it shows now, in the reader's language.
 
     Raises
     ------
@@ -1272,11 +1328,19 @@ def describe_column(
         Mapped to 403, unless the caller owns the table or holds `DROP_TABLE` on it, and may
         read it.
     lakana_core.errors.ValidationError
-        Mapped to 422 for a blank text or one over 4,000 characters.
+        Mapped to 422 for a text that breaks its rules or a `lang` that is not a tag.
     """
+    languages = reader_languages(request, lang, principal, main_language)
     ref = TableRef(environment=env, namespace=NamespacePath.from_parts(path.split(".")), name=name)
-    catalog.set_column_description(principal, ref, column, body.description)
-    return _describe_out(path, catalog.describe_table(principal, ref))
+    catalog.set_column_description(
+        principal,
+        ref,
+        column,
+        _sent(body, "description"),
+        label=_sent(body, "label"),
+        language=lang,
+    )
+    return _describe_out(path, catalog.describe_table(principal, ref, languages=languages))
 
 
 @router.get("/{name}/lineage", response_model=LineageOut, responses=errors(403, 404))

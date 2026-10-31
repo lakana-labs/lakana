@@ -327,12 +327,16 @@ class Whoami:
         The scope, when the credential is a task token; `None` for a PAT.
     ci_token
         The scope, when the credential is a CI token; `None` otherwise.
+    language
+        Your preferred language for catalog texts; `None` when you set none (or the server is
+        older than this field).
     """
 
     name: str
     type: str
     task_token: TaskTokenScope | None
     ci_token: CiTokenScope | None = None
+    language: str | None = None
 
 
 @dataclass(frozen=True)

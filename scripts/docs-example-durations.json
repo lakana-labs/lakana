@@ -22,5 +22,6 @@
  "run-after-deploy": 9,
  "see-a-tables-model": 56,
  "train-and-predict": 119,
+ "translate-a-table": 45,
  "write-modes": 35.7
 }

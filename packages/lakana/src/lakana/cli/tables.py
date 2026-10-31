@@ -792,17 +792,30 @@ def describe(
         str | None,
         typer.Option("--text", help="The description, up to 4,000 characters."),
     ] = None,
+    label: Annotated[
+        str | None,
+        typer.Option("--label", help="The label: one line, up to 100 characters."),
+    ] = None,
+    lang: Annotated[
+        str | None,
+        typer.Option(
+            "--lang",
+            help="The language you write in, such as fr; without it, the table's main language.",
+        ),
+    ] = None,
     reset: Annotated[
         bool,
-        typer.Option("--reset", help="Remove your text, so the project's shows again."),
+        typer.Option(
+            "--reset", help="Remove your description and label, so the project's show again."
+        ),
     ] = False,
     env: _ENV = None,
 ) -> None:
-    """Describe table NAME or one of its columns, or reset the description.
+    """Describe or label table NAME or one of its columns, or reset its texts.
 
-    The text you set is shown instead of the `description:` in the asset's header, and a deploy
-    never replaces it. `--reset` goes back to the header's text. You need to own the table, or
-    hold the right to drop it.
+    The texts you set are shown instead of the asset header's `description:` and `label:` (or a
+    translation file's, with `--lang`), and a deploy never replaces them. `--reset` goes back to
+    the project's texts in that language. You need to own the table, or hold the right to drop it.
 
     Parameters
     ----------
@@ -814,40 +827,44 @@ def describe(
         A column to describe instead of the table.
     text
         The new description.
+    label
+        The new label.
+    lang
+        The language edited; the table's main language without it.
     reset
-        Remove the edit.
+        Remove the edits of the description and the label.
     env
         The environment.
 
     Raises
     ------
     CliError
-        If neither or both of `--text` and `--reset` are given.
+        If neither `--text`, `--label` nor `--reset` is given, or `--reset` with a text.
     """
-    if (text is None) == (not reset):
+    if (reset and (text is not None or label is not None)) or (
+        not reset and text is None and label is None
+    ):
         raise CliError(
-            "Give exactly one of --text TEXT (set the description) and --reset "
-            "(go back to the project's text)."
+            "Give --text TEXT and/or --label LABEL to set, or --reset to go back to the project's "
+            "texts."
         )
     state = state_of(ctx)
     environment = resolve_environment(state, env)
-    table = state.client().tables.describe(
-        environment, name, None if reset else text, column=column
-    )
+    sent = {"description": text, "label": label}
+    fields = sent if reset else {key: value for key, value in sent.items() if value is not None}
+    table = state.client().tables.describe(environment, name, column=column, lang=lang, **fields)
     target = f"{_output.inline(name)}" + (f" column {_output.inline(column)}" if column else "")
+    where = f"{_output.inline(environment)} ({_output.inline(lang or table.main_language)})"
     if not reset:
-        _output.done(state, f"Described {target} in {_output.inline(environment)}", table)
+        _output.done(state, f"Described {target} in {where}", table)
         return
-    shown = (
-        table.description
-        if column is None
-        else next((c.description for c in table.columns if c.name == column), None)
-    )
-    after = "now shows the project's text" if shown else "now has no description"
+    if column is None:
+        shown = (table.description, table.label)
+    else:
+        shown = next(((c.description, c.label) for c in table.columns if c.name == column), ())
+    after = "now shows the project's text" if any(shown) else "now has no text"
     _output.done(
-        state,
-        f"Reset the description of {target} in {_output.inline(environment)}; it {after}",
-        table,
+        state, f"Reset the description and label of {target} in {where}; it {after}", table
     )
 
 
