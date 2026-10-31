@@ -88,8 +88,11 @@ from lakana_core.models import (
     TaskRun,
     TaskStatus,
 )
+from lakana_core.notifications.payload import facts_for_run
 from lakana_core.projects.checks import CheckSpec
 from lakana_core.runs.checks import (
+    CHECKS_UNFINISHED_MESSAGE,
+    MAX_CHECK_CLAIMS,
     RUN_CANCELLED_MESSAGE,
     RUN_STOPPED_MESSAGE,
     SET_BACK_DONE,
@@ -1818,3 +1821,195 @@ def test_a_stamped_task_whose_set_back_is_refused_ends_instead_of_going_round_ag
     assert task.failure_code == "cancelled"
     assert task.written_table_id is not None
     assert _ids(world, "silver.orders") == [11, 11, 12]
+
+
+def _always_die_in_the_check_phase(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make every check phase kill its worker, as a check that needs more memory than it has.
+
+    Parameters
+    ----------
+    monkeypatch
+        pytest's patcher.
+    """
+
+    def dying(*args: object) -> TaskOutcome | None:
+        raise SystemExit("the worker died in the checks")
+
+    monkeypatch.setattr(tasks_module, "check_phase", dying)
+
+
+def test_checks_whose_worker_is_lost_every_time_end_set_back_after_the_bound(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#99, loop 1: after the bound the table is set back and the task fails saying why."""
+    _built_once_then_redeployed(world, _check("unique_id", _DUPLICATE_IDS))
+    run_id = _start(world)
+    claimed = _run_until(world, "silver.orders")
+    _always_die_in_the_check_phase(monkeypatch)
+    with pytest.raises(SystemExit):
+        run_claimed(_engine(world), claimed)
+    for _ in range(MAX_CHECK_CLAIMS):
+        _expire_lease_and_tick(world, "silver.orders")
+        again = _claim_ready(world)
+        assert again is not None and again.asset == "silver.orders" and not again.setting_back
+        with pytest.raises(SystemExit):
+            run_claimed(_engine(world), again)
+    assert _task(world, "silver.orders").check_claims == MAX_CHECK_CLAIMS
+
+    _expire_lease_and_tick(world, "silver.orders")
+    set_back = _claim_ready(world)
+    assert set_back is not None and set_back.setting_back
+    _nothing_but_a_set_back(monkeypatch)
+    run_claimed(_engine(world), set_back)
+
+    task = _task(world, "silver.orders")
+    assert (task.status, task.failure_code) == (TaskStatus.FAILED, "checks_unfinished")
+    assert task.error_message == f"{CHECKS_UNFINISHED_MESSAGE} {SET_BACK_DONE}"
+    assert _ids(world, "silver.orders") == [1, 1, 2]
+    for _ in range(3):
+        _tick(world)
+    with world.session() as session:
+        run = session.get(Run, run_id)
+        assert run is not None and run.status.value == "failed"
+
+
+def test_checks_that_cannot_start_end_after_the_bound_and_say_the_table_was_not_set_back(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#99, loop 2: the run's principal is gone, so the set-back cannot run either; it says so."""
+    _checked(world, _check("unique_id", _DUPLICATE_IDS), retries=0)
+    _start(world)
+    claimed = _run_until(world, "silver.orders")
+    real = tasks_module._dispatch
+
+    def build_then_lose_the_principal(*args: object, **kwargs: object) -> TaskOutcome | None:
+        outcome = real(*args, **kwargs)  # ty: ignore[invalid-argument-type]
+        with world.session() as session:
+            session.execute(update(Run).values(run_as_principal_id=None))
+            session.execute(
+                update(TaskRun)
+                .where(TaskRun.asset == "silver.orders")
+                .values(check_claims=MAX_CHECK_CLAIMS)
+            )
+            session.commit()
+        return outcome
+
+    monkeypatch.setattr(tasks_module, "_dispatch", build_then_lose_the_principal)
+    run_claimed(_engine(world), claimed)
+    assert _task(world, "silver.orders").status is TaskStatus.PENDING
+
+    set_back = _claim_ready(world)
+    assert set_back is not None and set_back.setting_back
+    _nothing_but_a_set_back(monkeypatch)
+    run_claimed(_engine(world), set_back)
+
+    task = _task(world, "silver.orders")
+    assert (task.status, task.failure_code) == (TaskStatus.FAILED, "checks_unfinished")
+    assert task.error_message == set_back_failed_message(CHECKS_UNFINISHED_MESSAGE)
+
+
+def _at_the_bound_after_the_build(world: World, monkeypatch: pytest.MonkeyPatch) -> uuid.UUID:
+    """Rebuild `silver.orders`, lose its worker in the checks, and give it the most check claims.
+
+    Parameters
+    ----------
+    world
+        The world.
+    monkeypatch
+        pytest's patcher.
+
+    Returns
+    -------
+    uuid.UUID
+        The run's id.
+    """
+    _built_once_then_redeployed(world, _check("unique_id", _DUPLICATE_IDS))
+    run_id = _start(world)
+    claimed = _run_until(world, "silver.orders")
+    _always_die_in_the_check_phase(monkeypatch)
+    with pytest.raises(SystemExit):
+        run_claimed(_engine(world), claimed)
+    with world.session() as session:
+        session.execute(
+            update(TaskRun)
+            .where(TaskRun.asset == "silver.orders")
+            .values(check_claims=MAX_CHECK_CLAIMS)
+        )
+        session.commit()
+    _expire_lease_and_tick(world, "silver.orders")
+    assert _task(world, "silver.orders").setting_back
+    return run_id
+
+
+def test_a_lost_set_back_claim_still_ends_the_run_as_checks_that_never_finished(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#99, review S2: the reason survives a lost set-back claim, into the task and the webhook."""
+    run_id = _at_the_bound_after_the_build(world, monkeypatch)
+    lost = _claim_ready(world)
+    assert lost is not None and lost.setting_back
+    _expire_lease_and_tick(world, "silver.orders")
+    set_back = _claim_ready(world)
+    assert set_back is not None and set_back.setting_back
+    _nothing_but_a_set_back(monkeypatch)
+    run_claimed(_engine(world), set_back)
+
+    task = _task(world, "silver.orders")
+    assert (task.status, task.failure_code) == (TaskStatus.FAILED, "checks_unfinished")
+    assert task.error_message == f"{CHECKS_UNFINISHED_MESSAGE} {SET_BACK_DONE}"
+    for _ in range(3):
+        _tick(world)
+    with world.session() as session:
+        run = session.get(Run, run_id)
+        assert run is not None and run.status.value == "failed"
+        assert facts_for_run(session, run, uuid.uuid4()).checks_unfinished == ("silver.orders",)
+
+
+def test_a_manifest_this_worker_cannot_read_does_not_stop_the_set_back(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#99, review N1: the set-back reads no check, so it needs no readable manifest."""
+    _at_the_bound_after_the_build(world, monkeypatch)
+    with world.session() as session:
+        version = session.get(JobVersion, world.version_id)
+        assert version is not None
+        version.manifest_json = {**version.manifest_json, "version": 99}
+        session.commit()
+    set_back = _claim_ready(world)
+    assert set_back is not None and set_back.setting_back
+    _nothing_but_a_set_back(monkeypatch)
+    run_claimed(_engine(world), set_back)
+
+    task = _task(world, "silver.orders")
+    assert (task.status, task.failure_code) == (TaskStatus.FAILED, "checks_unfinished")
+    assert task.error_message == f"{CHECKS_UNFINISHED_MESSAGE} {SET_BACK_DONE}"
+    assert _ids(world, "silver.orders") == [1, 1, 2]
+
+
+def test_a_count_that_keeps_failing_for_a_temporary_reason_ends_at_the_bound_saying_so(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#99, review N2: with attempts to spare, a flaky count ends at the bound; the text says so."""
+    _checked(world, _check("unique_id", _DUPLICATE_IDS))
+    _start(world)
+    claimed = _run_until(world, "silver.orders")
+    with world.session() as session:
+        session.execute(
+            update(TaskRun).where(TaskRun.asset == "silver.orders").values(max_attempts=10)
+        )
+        session.commit()
+    _counting(monkeypatch, *[_transient] * (MAX_CHECK_CLAIMS + 1))
+    run_claimed(_engine(world), claimed)
+    for _ in range(MAX_CHECK_CLAIMS):
+        again = _claim_ready(world)
+        assert again is not None and again.asset == "silver.orders" and not again.setting_back
+        run_claimed(_engine(world), again)
+
+    set_back = _claim_ready(world)
+    assert set_back is not None and set_back.setting_back
+    run_claimed(_engine(world), set_back)
+
+    task = _task(world, "silver.orders")
+    assert (task.status, task.failure_code) == (TaskStatus.FAILED, "checks_unfinished")
+    assert task.error_message is not None
+    assert "counting a check kept failing for a temporary reason" in task.error_message

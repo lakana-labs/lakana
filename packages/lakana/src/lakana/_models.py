@@ -1118,8 +1118,9 @@ class Failure:
     code
         `build_failed`, `code_changed`, `secret_refused`, `no_runtime`, `upstream_failed`,
         `upstream_missing`, `check_blocked`, `check_error`, `query_invalid`, `permission_denied`,
-        `not_found`, `memory`, `timeout`, `cancelled`, `worker_lost`, `conflict` or `internal`;
-        `unknown` for a failure recorded before the codes existed.
+        `not_found`, `memory`, `timeout`, `cancelled`, `worker_lost`, `conflict`, `internal`, or
+        `checks_unfinished` (checks that never finished after the table's write); `unknown` for a
+        failure recorded before the codes existed.
     cause
         One sentence: what happened.
     next_step

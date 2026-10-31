@@ -30,6 +30,7 @@ _FIXED_CODES = [
     "upstream_missing",
     "check_blocked",
     "check_error",
+    "checks_unfinished",
     "query_invalid",
     "permission_denied",
     "not_found",

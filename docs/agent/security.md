@@ -2918,7 +2918,8 @@ records the verdict:
 - the memory stop (`record_attempt(stopped=...)`) puts it back the same way;
 - the sweep of lost query runs ends a count `FAILED`, never `SUCCEEDED`.
 
-Only `lakana runs cancel` ends such a task otherwise. A worker that claims a task whose results
+Only `lakana runs cancel` and the bound on check claims (below) end such a task otherwise. A
+worker that claims a task whose results
 record a landed rollback ends it failed from them, without building and without checking
 (`task_checks.before_build`).
 
@@ -2938,12 +2939,25 @@ record a landed rollback ends it failed from them, without building and without 
   `SET_BACK_LOST` and the table keeps what it holds. A zombie of the old claim fails on the claim
   counter. The sentences are in `lakana_core.runs.checks`, the wait sentence in
   `lakana_core.runs.waiting`.
-- **A worker lost in every check phase** is claimed again once per lease without a bound. **A
-  check phase that cannot start** (the manifest's version; a run's principal whose row no longer
-  exists, or a run without one) is tried again with the task's backoff, which is capped at
-  600 s, also without a bound. Each attempt is recorded, and only `lakana runs cancel` ends
-  either. A deactivated principal is not this case: the phase starts, every check is `errored`
-  and the table is set back.
+- **A worker lost in every check phase** is claimed again once per lease, and **a check phase
+  that cannot start** (the manifest's version; a run's principal whose row no longer exists, or a
+  run without one) is tried again with the task's backoff (capped at 600 s), each up to a bound
+  (#99): `tasks._take` counts a claim of a task that already awaits its checks in
+  `task_runs.check_claims`, and at `MAX_CHECK_CLAIMS` (5, `lakana_core.runs.checks`) the
+  scheduler tick sends the task to set its table back instead (the lost-lease reclaim, or a
+  waiting task without waiting out its backoff), with `CHECKS_UNFINISHED_MESSAGE` and the code
+  `checks_unfinished` stored for `set_back_only`, and logs `checks_unfinished`. Both statements
+  require the bound in their `WHERE` (`store._checks_unfinished`). A cancel wins over the bound.
+  The set-back claim runs no check, so a check that kills its worker does not stop it, and it is
+  bounded by `MAX_SET_BACK_CLAIMS` as any set-back. It reads the phase with
+  `_read_phase(set_back=True)`, which skips the manifest, so a manifest version the claiming
+  worker cannot read does not stop it. A drain of a check-only claim gives its check claim back
+  (`record_attempt`, as for `set_back_claims`), and a lost set-back claim that is put back keeps a
+  stored `checks_unfinished` reason (`_apply_task`), so the run is still announced as such.
+  **Not defended:** a run whose principal row is gone cannot be set back (the rollback is that
+  principal's write); the task ends with `set_back_failed_message` and the table keeps the
+  unchecked rows. A deactivated principal is not this case: the phase starts, every check is
+  `errored` and the table is set back.
 - **A Python asset:** a rollback undoes only the task run's own chain of writes (baseline to tip);
   anything by someone else gives `changed_since` and leaves the table, also with this run's rows in
   it. Between a failed attempt and the next the table holds unchecked data; a table that cannot be

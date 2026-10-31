@@ -349,3 +349,30 @@ def test_a_column_change_is_said_neutrally_whether_or_not_a_policy_is_affected(
         for word in ("ssn_marker", "12345678", "mask", "filter", "polic"):
             assert word not in body
     assert "columns_changed" not in json.loads(build("json", "failed", _facts())[0])
+
+
+def test_checks_that_never_finished_are_named_with_the_next_step(session: Session) -> None:
+    """#99: a task failed by the bound on its checks is named; the message says where to look."""
+    run = _seed(session, [])
+    for task in session.query(TaskRun).filter(TaskRun.run_id == run.id):
+        if task.asset == "silver.clean":
+            task.failure_code = "checks_unfinished"
+    session.flush()
+    facts = facts_for_run(session, run, DELIVERY)
+    assert facts.checks_unfinished == ("silver.clean",)
+    data = json.loads(build("json", "failed", facts)[0])
+    assert data["checks_unfinished"] == ["silver.clean"]
+    slack = json.loads(build("slack", "failed", facts)[0])["text"]
+    assert (
+        "Checks never finished: `silver.clean`. Lakana stopped trying them again; "
+        f"`lakana runs show {facts.run_id} --env prod` says whether each table was set back and "
+        "what to do next"
+    ) in slack
+    teams = build("teams", "failed", facts)[0].decode()
+    assert "Checks never finished" in teams
+    for fmt in FORMATS:
+        assert b"SECRET-MARKER" not in build(fmt, "failed", facts)[0]
+
+
+def test_without_unfinished_checks_the_json_has_no_such_key() -> None:
+    assert "checks_unfinished" not in json.loads(build("json", "failed", _facts())[0])

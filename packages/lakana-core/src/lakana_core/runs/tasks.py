@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import case, exists, func, or_, select, update
+from sqlalchemy import and_, case, exists, func, or_, select, update
 from sqlalchemy.orm import Session
 
 from lakana_core.db import db_now, rowcount
@@ -114,7 +114,8 @@ def _take(
     Refuses a task whose run has a cancel request or is no longer running,
     so a worker cannot start work the scheduler is about to cancel. A task that is to set its
     table back passes a cancel request, because that is the cancel's own work, but not a run
-    that is over; its claim adds no attempt and counts as a set-back claim. Clears
+    that is over; its claim adds no attempt and counts as a set-back claim. A claim of a task
+    that already awaits its checks counts as a check claim (`TaskRun.check_claims`). Clears
     `query_run_id`, so a superseded attempt's QueryRun no longer
     matches the lockdown's run-context check.
 
@@ -158,6 +159,15 @@ def _take(
             set_back_claims=case(
                 (TaskRun.setting_back.is_(True), TaskRun.set_back_claims + 1),
                 else_=TaskRun.set_back_claims,
+            ),
+            # A claim of a task that already awaits its checks runs only them; the scheduler
+            # stops sending such claims at `MAX_CHECK_CLAIMS`. A set-back claim runs no check.
+            check_claims=case(
+                (
+                    and_(TaskRun.setting_back.is_(False), awaiting_checks()),
+                    TaskRun.check_claims + 1,
+                ),
+                else_=TaskRun.check_claims,
             ),
             claim_count=TaskRun.claim_count + 1,
             lease_owner=worker,
@@ -719,8 +729,9 @@ def record_attempt(
     ``released`` or ``failed`` and as nothing else: any other `kind` is recorded as ``failed``
     with the same message, since a retry would only set the table back again. A release keeps
     `attempt` (the claim added none) and gives back the claim's count against the limit on
-    set-back claims. The memory stop (`stopped`) records nothing for such a claim: it ends no
-    build, so the scheduler takes the claim over when its lease runs out.
+    set-back claims; a release of a claim that only ran the checks gives back its check claim
+    (`TaskRun.check_claims`) the same way. The memory stop (`stopped`) records nothing for such
+    a claim: it ends no build, so the scheduler takes the claim over when its lease runs out.
 
     An ending that would leave rows in the table that no check has passed is not recorded as an
     ending (`_must_be_set_back`): a cancel after the task's write, and a memory stop that ends
@@ -876,6 +887,10 @@ def record_attempt(
             del values["check_message_state"]
         else:
             values.update(status=TaskStatus.PENDING, attempt=attempt - 1, next_attempt_at=now)
+            if awaiting:
+                # Nor is a drain of a claim that only ran the checks a try of them: it gives back
+                # its check claim, so restarts of the workers never use up `MAX_CHECK_CLAIMS`.
+                values["check_claims"] = max(task.check_claims - 1, 0)
         outcome = AttemptOutcome.RELEASED
     elif kind is FailureKind.CONFLICT and not task.conflict_retried:
         values.update(

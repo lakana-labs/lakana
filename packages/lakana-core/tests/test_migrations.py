@@ -2059,6 +2059,7 @@ def test_0025_adds_the_note_of_a_kept_table(
 _REVISION_0025 = "c9f3d6a8b2e5"
 
 
+@pytest.mark.usefixtures("_without_fsync")
 def test_0026_adds_the_binding_of_a_query_run(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -4768,5 +4769,63 @@ def test_0058_adds_the_texts_and_downgrades_cleanly(
         assert "text_translations" not in inspector.get_table_names()
         assert "label_project" not in {c["name"] for c in inspector.get_columns("tables")}
         assert "language" not in {c["name"] for c in inspector.get_columns("principals")}
+    finally:
+        engine.dispose()
+
+
+_REVISION_0059 = "e1a5b7c9d3f4"
+
+
+@pytest.mark.usefixtures("_without_fsync")
+def test_0059_adds_the_check_claims_of_a_task_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Revision `0059`: `task_runs.check_claims`, not null, zero on a row written before it.
+
+    Parameters
+    ----------
+    tmp_path
+        Holds the throwaway SQLite file.
+    monkeypatch
+        Points `lakana_core.config.Settings` at that file.
+    """
+    db_path = tmp_path / "migrated.db"
+    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    config = Config(str(ALEMBIC_INI))
+    command.upgrade(config, _REVISION_0058)
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        assert "check_claims" not in {c["name"] for c in inspect(engine).get_columns("task_runs")}
+        with engine.begin() as connection:
+            connection.execute(sa.text("PRAGMA foreign_keys=OFF"))
+            connection.execute(
+                sa.text(
+                    "INSERT INTO task_runs (id, run_id, asset, status, attempt, claim_count,"
+                    " max_attempts, timeout_seconds, retry_delay_seconds, upstream_json,"
+                    " conflict_retried) VALUES (:id, :run, 'silver.a', 'PENDING', 0, 0, 1, 60, 0,"
+                    " '[]', 0)"
+                ),
+                {"id": uuid.uuid4().hex, "run": uuid.uuid4().hex},
+            )
+    finally:
+        engine.dispose()
+
+    command.upgrade(config, _REVISION_0059)
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        found = {c["name"]: c for c in inspect(engine).get_columns("task_runs")}
+        assert found["check_claims"]["nullable"] is False
+        with engine.connect() as connection:
+            claims = connection.execute(sa.text("SELECT check_claims FROM task_runs"))
+            assert claims.scalar_one() == 0
+    finally:
+        engine.dispose()
+
+    command.downgrade(config, _REVISION_0058)
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        assert "check_claims" not in {c["name"] for c in inspect(engine).get_columns("task_runs")}
+        with engine.connect() as connection:
+            assert connection.execute(sa.text("SELECT count(*) FROM task_runs")).scalar_one() == 1
     finally:
         engine.dispose()

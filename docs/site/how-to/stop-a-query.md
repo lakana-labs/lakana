@@ -281,8 +281,10 @@ A worker that is lost while a task counts its checks does not end the task `succ
 table is written but not checked. The platform ends the count with `The worker counting this check
 of a pipeline task was lost, so the count was ended. The check is counted again when the task is
 taken again.` and another worker takes the task, skips the write and counts the checks. This
-repeats each time a worker is lost during the checks, once per lease, until the checks finish or
-you cancel the run; the task shows the lost attempts.
+repeats each time a worker is lost during the checks, once per lease, until the checks finish, you
+cancel the run, or 5 more tries have been lost: then the table is set back and the task fails with
+the code `checks_unfinished` (see [A run that does not
+end](check-your-data.md#a-run-that-does-not-end)). The task shows the lost attempts.
 
 ### A write whose commit was not confirmed
 

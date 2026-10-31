@@ -723,7 +723,7 @@ class _Phase:
     is_asset: bool
 
 
-def _read_phase(session: Session, claimed: ClaimedTask) -> _Phase:
+def _read_phase(session: Session, claimed: ClaimedTask, *, set_back: bool = False) -> _Phase:
     """Read what the check phase needs: the run, its project version's checks and its principal.
 
     The principal is the run's (`runs.run_as_principal_id`), never its trigger or the
@@ -735,6 +735,10 @@ def _read_phase(session: Session, claimed: ClaimedTask) -> _Phase:
         Database session.
     claimed
         The claim.
+    set_back
+        For a claim that only sets the table back (`set_back_only`): it counts no check, so the
+        manifest is not read at all, and a version this worker cannot read does not stop it. The
+        phase then has no checks.
 
     Returns
     -------
@@ -745,27 +749,43 @@ def _read_phase(session: Session, claimed: ClaimedTask) -> _Phase:
     ------
     TaskFailure
         Permanent, if the run or its project version is gone, the manifest's version is not one
-        this worker reads, the run has no principal, or (for a ``source_check`` task, which
-        wrote nothing) the principal is deactivated. `check_phase` makes it retryable for a
-        task that built a table.
+        this worker reads (unless `set_back`), the run has no principal, or (for a
+        ``source_check`` task, which wrote nothing) the principal is deactivated.
+        `check_phase` makes it retryable for a task that built a table.
     """
     run = session.get(Run, claimed.run_id)
     env = session.get(Environment, run.environment_id) if run is not None else None
     version = session.get(JobVersion, run.job_version_id) if run is not None else None
     if run is None or env is None or version is None:
         raise TaskFailure(FailureKind.PERMANENT, NO_RUN_MESSAGE, FailureCode.NOT_FOUND)
-    check_manifest_version(version.manifest_json)
+    if not set_back:
+        check_manifest_version(version.manifest_json)
     row = session.get(Principal, run.run_as_principal_id) if run.run_as_principal_id else None
     if row is None or (claimed.kind == SOURCE_CHECK and not row.is_active):
         raise TaskFailure(
             FailureKind.PERMANENT, NO_PRINCIPAL_MESSAGE, FailureCode.PERMISSION_DENIED
         )
+    ref = TableRef.from_dotted(env.name, claimed.asset)
+    principal = PrincipalRef(id=row.id, name=row.name, type=row.type)
+    if set_back:
+        phase = _Phase(
+            environment_id=env.id,
+            environment=env.name,
+            ref=ref,
+            principal=principal,
+            active=row.is_active,
+            specs=(),
+            unreadable=False,
+            is_asset=True,
+        )
+        session.rollback()
+        return phase
     read = read_manifest_checks(version.manifest_json)
     phase = _Phase(
         environment_id=env.id,
         environment=env.name,
-        ref=TableRef.from_dotted(env.name, claimed.asset),
-        principal=PrincipalRef(id=row.id, name=row.name, type=row.type),
+        ref=ref,
+        principal=principal,
         active=row.is_active,
         specs=read.of(claimed.asset),
         unreadable=read.unreadable_for(claimed.asset),
@@ -863,6 +883,8 @@ def _set_back_to_baseline(
     claimed: ClaimedTask,
     keeper: LeaseKeeper,
     baseline: Baseline,
+    *,
+    set_back: bool = False,
 ) -> _BaselineSetBack | None:
     """Set a Python asset's table back to its recorded baseline, unless it is there already.
 
@@ -883,6 +905,8 @@ def _set_back_to_baseline(
         The phase's running lease keeper.
     baseline
         The table's recorded state before the task run's first process.
+    set_back
+        Whether a claim that only sets the table back calls it (`_read_phase`'s `set_back`).
 
     Returns
     -------
@@ -898,7 +922,7 @@ def _set_back_to_baseline(
         A cancel or a drain found while the catalog refused, or what the run's own state
         lacks (`_read_phase`).
     """
-    phase = _read_phase(session, claimed)
+    phase = _read_phase(session, claimed, set_back=set_back)
     now = _table_now(session, engine, phase.ref)
     if now is None:
         return None
@@ -1122,7 +1146,7 @@ def _set_back_only(
             # already, and the verdict is what the task ends with.
             return landed
         if written is not None:
-            phase = _read_phase(session, claimed)
+            phase = _read_phase(session, claimed, set_back=True)
             tip = read_own_tip(session, claimed.task_run_id)
             session.rollback()
             rollback, refused = _set_back(
@@ -1138,7 +1162,7 @@ def _set_back_only(
             )
             done = _BaselineSetBack(phase, rollback, refused)
         elif baseline is not None:
-            done = _set_back_to_baseline(session, engine, claimed, keeper, baseline)
+            done = _set_back_to_baseline(session, engine, claimed, keeper, baseline, set_back=True)
     except (LeaseLost, SQLAlchemyError):
         raise
     except TaskFailure as failure:

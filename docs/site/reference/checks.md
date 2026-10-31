@@ -371,8 +371,10 @@ checked` under it. A check generated from the asset's header reads `key_unique (
   warn` from lakana.yaml.`` (`1 check takes` for one).
 - `lakana table get` and `lakana table list` show a `state` of `published`, `not published` or
   `kept`, and `table get` says why for the last two.
-- `lakana runs cancel` ends a run whose checks cannot finish; see Limits in
-  [Check your data](../how-to/check-your-data.md#limits). A task whose table may hold rows no
+- `lakana runs cancel` ends a run whose checks cannot finish at once; without it, such a task
+  ends `failed` with the code `checks_unfinished` after 5 more tries of its checks, and its table
+  is set back. See [A run that does not end](../how-to/check-your-data.md#a-run-that-does-not-end).
+  A task whose table may hold rows no
   check has passed is set back first, so the cancelled run ends only once a pipeline worker has
   done that; see [A worker that is lost](../how-to/check-your-data.md#a-worker-that-is-lost).
 - `lakana query cancel` refuses the query of a check and names `lakana runs cancel`; see

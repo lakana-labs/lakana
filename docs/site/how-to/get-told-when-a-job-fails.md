@@ -135,6 +135,13 @@ not be an administrator, and only an administrator may learn that a policy exist
 administrator by itself; one sees the affected policies with `lakana runs show`
 ([When a table's columns change](../explanation/when-columns-change.md#the-run-that-changes-a-column-says-so)).
 
+When a task failed because its checks never finished (the code `checks_unfinished`: its worker
+was lost in every try of the checks, or they could not start; see [A run that does not
+end](check-your-data.md#a-run-that-does-not-end)), the message names its tables: in **json**,
+`"checks_unfinished": ["silver.orders"]`, a field that is there only then; in **slack** and
+**teams**, a line such as
+``Checks never finished: `silver.orders`. Lakana stopped trying them again; `lakana runs show ...` says whether each table was set back and what to do next``.
+
 **slack** is a short text message in Slack's format, which other chat tools accept as
 well. The message is `{"text": "..."}` and the text reads, for the same run:
 

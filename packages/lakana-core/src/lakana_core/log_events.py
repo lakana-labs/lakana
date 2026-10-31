@@ -37,6 +37,7 @@ class LogEvent(StrEnum):
     SCHEDULER_ROLE_TAKEN = "scheduler_role_taken"
     SCHEDULER_ROLE_LOST = "scheduler_role_lost"
     SCHEDULER_STEP_FAILED = "scheduler_step_failed"
+    CHECKS_UNFINISHED = "checks_unfinished"
     SWEEP_FAILED = "sweep_failed"
     SWEEP_HUNG = "sweep_hung"
     POLL_FAILED = "poll_failed"
@@ -61,6 +62,7 @@ WHERE: dict[LogEvent, str] = {
     LogEvent.SCHEDULER_ROLE_TAKEN: "worker",
     LogEvent.SCHEDULER_ROLE_LOST: "worker",
     LogEvent.SCHEDULER_STEP_FAILED: "worker",
+    LogEvent.CHECKS_UNFINISHED: "worker",
     LogEvent.SWEEP_FAILED: "worker",
     LogEvent.SWEEP_HUNG: "worker",
     LogEvent.POLL_FAILED: "worker",

@@ -199,6 +199,10 @@ class TaskRun(Base):
     set_back_claims: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     """Claims taken while `setting_back` was set; the scheduler stops putting the task back for
     another one at a limit, so a set-back that kills its worker every time cannot loop."""
+    check_claims: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    """Claims taken while the task already awaited its checks: claims whose only work is the check
+    phase. The scheduler sends the task to set its table back at a limit
+    (`lakana_core.runs.checks.MAX_CHECK_CLAIMS`), so checks that never finish cannot loop."""
     written_table_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
     written_snapshot_before: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     written_snapshot_after: Mapped[int | None] = mapped_column(BigInteger, nullable=True)

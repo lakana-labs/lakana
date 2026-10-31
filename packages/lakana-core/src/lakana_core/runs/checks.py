@@ -246,6 +246,23 @@ SET_BACK_LOST = (
 )
 """`error_message` of a task whose set-back claims were lost until the limit was reached."""
 
+MAX_CHECK_CLAIMS = 5
+"""Claims a written task may take only to run its checks (`TaskRun.check_claims`).
+
+The first check phase runs inside the claim that built the table and is not counted. After this
+many more claims without a verdict (each lost with its worker, or each unable to start the
+checks), the scheduler stops trying: the next claim only sets the table back, and the task fails
+with `CHECKS_UNFINISHED_MESSAGE`. Without it, both loops would end only by a cancel."""
+
+CHECKS_UNFINISHED_MESSAGE = (
+    f"The checks of this table did not finish after its write, nor in {MAX_CHECK_CLAIMS} more "
+    "tries: the worker running them was lost each time, the checks could not start (the run's "
+    "principal no longer exists, or this worker cannot read the deployed project version), or "
+    "counting a check kept failing for a temporary reason. Lakana stopped trying."
+)
+"""The reason a task ends with when its checks reached `MAX_CHECK_CLAIMS`; the set-back claim
+adds what became of the table."""
+
 _STILL_UNCHECKED = (
     "The table holds data of this run that is not checked yet; the checks are tried again. To "
     "stop: `lakana runs cancel {run} --env {environment}`."
@@ -1196,7 +1213,8 @@ def set_back_failed_message(failure: str | None) -> str:
 def unchecked_retry_message(failure: str | None, run_id: uuid.UUID, environment: str) -> str:
     """Build the message of an attempt that could not run the checks of a written task at all.
 
-    Such a task is tried again without a bound (it cannot run out of attempts), so the message
+    Such a task is tried again, whatever its attempts say, until it took `MAX_CHECK_CLAIMS` claims
+    only for its checks (then its table is set back and it fails), so the message
     says what the table holds meanwhile and how to end it.
 
     Parameters

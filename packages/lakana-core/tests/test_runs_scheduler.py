@@ -10,10 +10,17 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from lakana_core.models import RunStatus, TaskStatus
-from lakana_core.runs.checks import RUN_CANCELLED_MESSAGE, RUN_STOPPED_MESSAGE, SET_BACK_LOST
+from lakana_core.runs.checks import (
+    CHECKS_UNFINISHED_MESSAGE,
+    RUN_CANCELLED_MESSAGE,
+    RUN_STOPPED_MESSAGE,
+    SET_BACK_LOST,
+)
+from lakana_core.runs.failures import FailureCode
 from lakana_core.runs.scheduler import (
     LOST_MESSAGE,
     MAX_BACKOFF_SECONDS,
+    MAX_CHECK_CLAIMS,
     MAX_SET_BACK_CLAIMS,
     RunSnapshot,
     RunTransition,
@@ -1009,3 +1016,112 @@ def test_a_task_put_back_to_set_its_table_back_carries_no_code() -> None:
     task = _expired(setting_back=True, set_back_claims=0)
 
     assert _codes(tick([_run(task)], NOW, _fixed)) == {}
+
+
+def _at_the_bound(task: TaskSnapshot, claims: int = MAX_CHECK_CLAIMS) -> TaskSnapshot:
+    """Give a task the number of claims it took only to run its checks.
+
+    Parameters
+    ----------
+    task
+        The task.
+    claims
+        Its check claims.
+
+    Returns
+    -------
+    TaskSnapshot
+        The task with `check_claims` set.
+    """
+    return dataclasses.replace(task, check_claims=claims)
+
+
+def test_a_task_lost_in_its_checks_at_the_bound_is_sent_to_set_its_table_back() -> None:
+    """#99: the last check claim was lost too; the next worker sets the table back and fails it."""
+    task = _at_the_bound(_unchecked())
+    below = _task("a.b", TaskStatus.PENDING, upstream=("a.a",))
+    out = tick([_run(task, below)], NOW, _fixed)
+
+    move = _only_move(out)
+    assert (move.expected, move.status, move.lost, move.setting_back) == (
+        TaskStatus.RUNNING,
+        TaskStatus.READY,
+        True,
+        True,
+    )
+    assert (move.expected_owner, move.expected_claim, move.ready_at) == ("w1", 1, NOW)
+    assert move.error_message == CHECKS_UNFINISHED_MESSAGE
+    assert move.failure_code is FailureCode.CHECKS_UNFINISHED
+    assert move.checks_unfinished
+    assert [t for t in out if isinstance(t, TaskTransition)] == [move]
+
+
+def test_a_task_lost_in_its_checks_below_the_bound_is_still_put_back_for_its_checks() -> None:
+    """One claim short of the bound: the checks run again, as before."""
+    out = tick([_run(_at_the_bound(_unchecked(), MAX_CHECK_CLAIMS - 1))], NOW, _fixed)
+
+    move = _only_move(out)
+    assert (move.status, move.unchecked, move.setting_back) == (TaskStatus.PENDING, True, False)
+    assert not move.checks_unfinished
+
+
+def test_a_cancel_wins_over_the_bound_on_checks() -> None:
+    """A cancelled run sets the table back for the cancel, with the cancel's own text."""
+    out = tick([_run(_at_the_bound(_unchecked()), cancel=True)], NOW, _fixed)
+
+    move = _only_move(out)
+    assert (move.status, move.setting_back) == (TaskStatus.READY, True)
+    assert (move.error_message, move.failure_code, move.checks_unfinished) == (None, None, False)
+
+
+@pytest.mark.parametrize(
+    ("status", "ready_at"), [(TaskStatus.PENDING, NOW), (TaskStatus.READY, None)]
+)
+def test_a_waiting_task_whose_checks_could_not_start_at_the_bound_is_sent_to_set_back(
+    status: TaskStatus, ready_at: datetime | None
+) -> None:
+    """#99: the checks failed to start on the last check claim; the backoff is not waited out.
+
+    Parameters
+    ----------
+    status
+        The waiting status the snapshot saw.
+    ready_at
+        The ready time the move stamps: a pending task becomes ready now.
+    """
+    later = NOW + timedelta(minutes=10)
+    waiting = _at_the_bound(
+        _task("a.a", status, attempt=6, max_attempts=1, next_attempt_at=later, unchecked=True)
+    )
+    below = _task("a.b", TaskStatus.PENDING, upstream=("a.a",))
+    out = tick([_run(waiting, below)], NOW, _fixed)
+
+    move = _only_move(out)
+    assert (move.expected, move.status, move.lost, move.setting_back) == (
+        status,
+        TaskStatus.READY,
+        False,
+        True,
+    )
+    assert (move.expected_claim, move.ready_at) == (waiting.claim, ready_at)
+    assert (move.error_message, move.failure_code) == (
+        CHECKS_UNFINISHED_MESSAGE,
+        FailureCode.CHECKS_UNFINISHED,
+    )
+    assert move.checks_unfinished
+    assert [t for t in out if isinstance(t, TaskTransition)] == [move]
+
+
+def test_a_waiting_task_below_the_bound_or_already_setting_back_is_left_alone() -> None:
+    """Only a task that awaits its checks, at the bound, and is not setting back yet is moved."""
+    later = NOW + timedelta(minutes=10)
+    below = _at_the_bound(
+        _task("a.a", TaskStatus.PENDING, next_attempt_at=later, unchecked=True),
+        MAX_CHECK_CLAIMS - 1,
+    )
+    setting = _at_the_bound(
+        _task("a.b", TaskStatus.READY, unchecked=True, setting_back=True, set_back_claims=1)
+    )
+    without_write = _at_the_bound(_task("a.c", TaskStatus.PENDING, next_attempt_at=later))
+
+    assert [t for t in tick([_run(below, setting, without_write)], NOW, _fixed) if t.run_id] == []

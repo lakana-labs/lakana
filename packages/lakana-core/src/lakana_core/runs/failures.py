@@ -18,6 +18,7 @@ from dataclasses import dataclass
 
 from lakana_core.models.check_result import CheckOutcome, CheckResult
 from lakana_core.models.run import AttemptOutcome, TaskAttempt, TaskRun, TaskStatus
+from lakana_core.runs.checks import MAX_CHECK_CLAIMS
 
 
 class FailureCode(enum.StrEnum):
@@ -43,6 +44,8 @@ class FailureCode(enum.StrEnum):
     """A check of the table failed."""
     CHECK_ERROR = "check_error"
     """A check could not be counted, so the data was not judged."""
+    CHECKS_UNFINISHED = "checks_unfinished"
+    """The checks of a written table never finished, so the platform stopped trying them."""
     QUERY_INVALID = "query_invalid"
     """The task's SQL is invalid or was refused."""
     PERMISSION_DENIED = "permission_denied"
@@ -134,6 +137,14 @@ FAILURES: Mapping[FailureCode, tuple[str, str]] = {
         "A check could not be counted, so the data was not judged.",
         "Read the check's error with 'lakana runs show RUN_ID', fix its SQL or the access it "
         "needs, then run again.",
+    ),
+    FailureCode.CHECKS_UNFINISHED: (
+        f"The checks of the table did not finish in {MAX_CHECK_CLAIMS} more tries after its "
+        "write, so Lakana stopped trying and set the table back where it could.",
+        "Read the attempts with 'lakana runs logs RUN_ID --task ASSET': for a lost worker, raise "
+        "its memory limit or make the check cheaper; for checks that could not start, bind a run "
+        "principal or upgrade the worker as the message says; for a count that kept failing, "
+        "check that the object store and the database answer. Then run again.",
     ),
     FailureCode.QUERY_INVALID: (
         "The task's SQL is invalid or was refused.",
