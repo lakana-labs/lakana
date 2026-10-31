@@ -3077,11 +3077,12 @@ class SearchHit:
         A display name: ``namespace.table``, ``namespace.table.column``, the run id or the
         principal's name.
     matched
-        The field that matched: ``name``, ``description``, ``grain``, ``measure`` (a column's
-        measure label or description), ``id``, ``job`` or ``repository``.
+        The field that matched: ``name``, ``label``, ``description``, ``grain``, ``measure`` (a
+        column's measure label or description), ``id``, ``job`` or ``repository``. Treat a value
+        you do not know as a match elsewhere; the server may add more.
     snippet
-        For a description, grain or measure match, at most 160 characters of the text around the
-        hit.
+        For a label, description, grain or measure match, at most 160 characters of the text
+        around the hit.
     namespace
         For a table or column, its namespace, dotted.
     table
@@ -3107,6 +3108,9 @@ class SearchHit:
         For a principal, its name.
     principal_type
         For a principal, ``USER`` or ``SERVICE_ACCOUNT``.
+    language
+        For a table or column that a text matched, the language of that text; `None` for a name
+        match and for runs and principals.
     """
 
     kind: str
@@ -3125,6 +3129,7 @@ class SearchHit:
     status: str | None = None
     principal: str | None = None
     principal_type: str | None = None
+    language: str | None = None
 
 
 @dataclass(frozen=True)

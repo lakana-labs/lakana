@@ -3982,11 +3982,11 @@ class SearchHitOut(BaseModel):
         A display name: ``namespace.table``, ``namespace.table.column``, the run id or the
         principal's name.
     matched
-        The field that matched: ``name``, ``description``, ``grain``, ``measure`` (a column's
-        measure label or description), ``id``, ``job`` or ``repository``.
+        The field that matched: ``name``, ``label``, ``description``, ``grain``, ``measure`` (a
+        column's measure label or description), ``id``, ``job`` or ``repository``.
     snippet
-        For a description, grain or measure match, at most 160 characters of the text around the
-        hit.
+        For a label, description, grain or measure match, at most 160 characters of the text
+        around the hit.
     namespace
         For a table or column, its namespace, dotted.
     table
@@ -4012,13 +4012,17 @@ class SearchHitOut(BaseModel):
         For a principal, its name.
     principal_type
         For a principal, ``USER`` or ``SERVICE_ACCOUNT``.
+    language
+        For a table or column that a text matched, the language of that text (a translation in
+        one of your languages, or the table's main language); ``null`` for a name match and for
+        runs and principals.
     """
 
     model_config = ConfigDict(from_attributes=True)
 
     kind: Literal["table", "column", "run", "principal"]
     name: str
-    matched: Literal["name", "description", "grain", "measure", "id", "job", "repository"]
+    matched: Literal["name", "label", "description", "grain", "measure", "id", "job", "repository"]
     snippet: str | None
     namespace: str | None
     table: str | None
@@ -4032,6 +4036,7 @@ class SearchHitOut(BaseModel):
     status: str | None
     principal: str | None
     principal_type: str | None
+    language: str | None = None
 
 
 class SearchOut(BaseModel):
@@ -4040,8 +4045,9 @@ class SearchOut(BaseModel):
     Parameters
     ----------
     results
-        The hits, best first: exact matches, then prefix, then substring, then description
-        matches; within each, tables before columns before runs before principals.
+        The hits, best first: exact matches of a name or label, then prefix, then substring,
+        then description matches; within each, tables before columns before runs before
+        principals. A table or column appears once, however many of its texts match.
     limit
         The page size asked for.
     offset

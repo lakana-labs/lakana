@@ -7,10 +7,10 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
-from core_test_helpers import _config
+from core_test_helpers import FakeColumnCatalog, _config
 from pyiceberg.schema import Schema
 from pyiceberg.types import LongType, NestedField, StringType
-from sqlalchemy import select, update
+from sqlalchemy import event, select, update
 from sqlalchemy.orm import Session
 
 from lakana_core.auth import Action, AllowAllAuthorization, PrincipalRef, SecurableKind
@@ -38,7 +38,9 @@ from lakana_core.models import (
     RunStatus,
     Table,
     TableType,
+    TextTranslation,
 )
+from lakana_core.policy.column_masks import ColumnMaskService
 
 _SILVER = NamespacePath.from_parts(["silver"])
 _GOLD = NamespacePath.from_parts(["gold"])
@@ -710,3 +712,303 @@ def test_a_column_hit_matches_its_measure_label_and_description(world: World) ->
     )
     assert world.search(world.alice, "gross pay").results == []
     assert world.search(world.alice, "deductions").results == []
+
+
+def _translate(
+    world: World,
+    name: str,
+    language: str,
+    field: str,
+    text: str,
+    *,
+    subject: str = "table",
+    column: str = "",
+) -> None:
+    """Write one project translation row on a table, as a deploy does, and list its language.
+
+    Parameters
+    ----------
+    world
+        The fixture.
+    name
+        The table's name.
+    language
+        The tag.
+    field
+        ``label``, ``description`` or ``grain``.
+    text
+        The text.
+    subject
+        ``table``, ``column`` or ``measure``.
+    column
+        The column, for a column or a measure.
+    """
+    row = world.session.scalars(select(Table).where(Table.name == name)).one()
+    world.session.add(
+        TextTranslation(
+            id=uuid.uuid4(),
+            table_id=row.id,
+            subject=subject,
+            name=column,
+            language=language,
+            field=field,
+            text_project=text,
+        )
+    )
+    row.text_languages = sorted({*(row.text_languages or []), language})
+    world.session.commit()
+
+
+def _search(world: World, who: PrincipalRef, q: str, languages: tuple[str, ...] = ()) -> SearchPage:
+    """Search `dev` under the real grants, in the given reader languages.
+
+    Parameters
+    ----------
+    world
+        The fixture.
+    who
+        The caller.
+    q
+        The query.
+    languages
+        The reader's languages.
+
+    Returns
+    -------
+    SearchPage
+        The page.
+    """
+    return CatalogSearch(world.session, GrantAuthorization(world.session)).search(
+        who, "dev", q, languages=languages
+    )
+
+
+def test_a_label_matches_like_a_name_in_the_main_language(world: World) -> None:
+    row = world.session.scalars(select(Table).where(Table.name == "orders")).one()
+    row.label_project = "Revenue"
+    world.session.commit()
+    (hit,) = _search(world, world.bob, "revenue").results
+    assert (hit.name, hit.matched, hit.language, hit.snippet) == (
+        "silver.orders",
+        "label",
+        "en",
+        "Revenue",
+    )
+
+
+def test_a_label_says_the_tables_own_main_language_and_ranks_like_a_name(world: World) -> None:
+    row = world.session.scalars(select(Table).where(Table.name == "payroll")).one()
+    row.label_edited = "Lohn"
+    row.text_language = "de"
+    world.session.commit()
+    search = CatalogSearch(world.session, GrantAuthorization(world.session), main_language="fr")
+    (hit,) = search.search(world.bob, "dev", "lohn").results
+    assert (hit.matched, hit.language) == ("label", "de")
+    world.session.scalars(
+        select(Table).where(Table.name == "orders")
+    ).one().description_project = "Lohn and more"
+    world.session.commit()
+    assert [h.name for h in search.search(world.bob, "dev", "lohn").results] == [
+        "silver.payroll",
+        "silver.orders",
+    ]
+
+
+def test_a_description_match_says_the_main_language_and_a_name_match_none(world: World) -> None:
+    (hit,) = _search(world, world.bob, "customers").results
+    assert (hit.matched, hit.language) == ("description", "en")
+    assert _search(world, world.bob, "payroll").results[0].language is None
+
+
+def test_a_translated_label_matches_only_in_the_readers_language(world: World) -> None:
+    _translate(world, "orders", "fr", "label", "Chiffre d'affaires")
+    (hit,) = _search(world, world.bob, "chiffre", ("fr-CH",)).results
+    assert (hit.name, hit.matched, hit.language) == ("silver.orders", "label", "fr")
+    assert _search(world, world.bob, "chiffre", ("de",)).results == []
+    assert _search(world, world.bob, "chiffre").results == []
+
+
+def test_a_translated_description_and_grain_match_with_a_snippet(world: World) -> None:
+    _translate(world, "orders", "fr", "description", "Achats des clients")
+    _translate(world, "orders", "fr", "grain", "Une ligne par commande")
+    (description,) = _search(world, world.bob, "achats", ("fr",)).results
+    assert (description.matched, description.language, description.snippet) == (
+        "description",
+        "fr",
+        "Achats des clients",
+    )
+    (grain,) = _search(world, world.bob, "par commande", ("fr",)).results
+    assert (grain.matched, grain.language) == ("grain", "fr")
+
+
+def test_an_edited_translation_is_searched_instead_of_the_project_text(world: World) -> None:
+    _translate(world, "orders", "fr", "label", "Commandes")
+    world.session.execute(update(TextTranslation).values(text_edited="Ventes"))
+    world.session.commit()
+    assert _search(world, world.bob, "commandes", ("fr",)).results == []
+    (hit,) = _search(world, world.bob, "ventes", ("fr",)).results
+    assert (hit.snippet, hit.language) == ("Ventes", "fr")
+
+
+def test_a_table_found_twice_is_one_hit(world: World) -> None:
+    _translate(world, "orders", "fr", "label", "Orders")
+    page = _search(world, world.bob, "orders", ("fr",))
+    tables = [h for h in page.results if h.kind is SearchKind.TABLE]
+    assert [(h.name, h.matched, h.language) for h in tables] == [("silver.orders", "name", None)]
+    assert not page.has_more
+
+
+def test_a_better_translated_match_wins_over_a_description_match(world: World) -> None:
+    _translate(world, "orders", "fr", "label", "Customers")
+    (hit,) = _search(world, world.bob, "customers", ("fr",)).results
+    assert (hit.name, hit.matched, hit.language) == ("silver.orders", "label", "fr")
+
+
+def test_a_repeat_is_not_counted_twice_by_paging(world: World) -> None:
+    _translate(world, "orders", "fr", "label", "Orders")
+    _translate(world, "orders", "de", "label", "Orders")
+    first = _search(world, world.bob, "orders", ("fr", "de"))
+    assert [h.name for h in first.results] == ["silver.orders"]
+    page = CatalogSearch(world.session, GrantAuthorization(world.session)).search(
+        world.bob, "dev", "orders", languages=("fr", "de"), limit=1
+    )
+    assert ([h.name for h in page.results], page.has_more) == (["silver.orders"], False)
+
+
+def test_a_translated_column_label_and_measure_text_match(world: World) -> None:
+    _translate(world, "orders", "fr", "label", "Statut", subject="column", column="status")
+    _translate(
+        world, "orders", "fr", "label", "Commandes vendues", subject="measure", column="order_id"
+    )
+    (column,) = _search(world, world.bob, "statut", ("fr",)).results
+    assert (column.name, column.matched, column.language) == ("silver.orders.status", "label", "fr")
+    (measure,) = _search(world, world.bob, "vendues", ("fr",)).results
+    assert (measure.name, measure.matched, measure.language) == (
+        "silver.orders.order_id",
+        "measure",
+        "fr",
+    )
+
+
+def test_a_translated_column_description_matches_and_a_gone_columns_text_does_not(
+    world: World,
+) -> None:
+    _translate(
+        world, "orders", "fr", "description", "Où elle en est", subject="column", column="status"
+    )
+    _translate(world, "orders", "fr", "label", "Disparue", subject="column", column="gone")
+    (hit,) = _search(world, world.bob, "elle en", ("fr",)).results
+    assert (hit.name, hit.matched, hit.snippet) == (
+        "silver.orders.status",
+        "description",
+        "Où elle en est",
+    )
+    assert _search(world, world.bob, "disparue", ("fr",)).results == []
+
+
+def test_a_column_label_in_the_main_language_matches(world: World) -> None:
+    world.session.add(
+        ColumnDescription(
+            id=uuid.uuid4(),
+            table_id=world.session.scalars(select(Table.id).where(Table.name == "orders")).one(),
+            column="status",
+            label_project="State",
+        )
+    )
+    world.session.commit()
+    (hit,) = _search(world, world.bob, "state").results
+    assert (hit.name, hit.matched, hit.language, hit.snippet) == (
+        "silver.orders.status",
+        "label",
+        "en",
+        "State",
+    )
+
+
+def test_a_translated_label_of_a_table_the_reader_cannot_read_is_not_found(world: World) -> None:
+    _translate(world, "payroll", "fr", "label", "Salaires secrets")
+    page = _search(world, world.alice, "secrets", ("fr",))
+    assert page.results == [] and not page.has_more
+    assert [h.name for h in _search(world, world.bob, "secrets", ("fr",)).results] == [
+        "silver.payroll"
+    ]
+
+
+def test_no_label_or_translation_of_a_hidden_tables_column_appears_not_even_as_a_table(
+    world: World,
+) -> None:
+    payroll = world.session.scalars(select(Table).where(Table.name == "payroll")).one()
+    payroll.label_project = "Hidden pay"
+    world.session.add(
+        ColumnDescription(
+            id=uuid.uuid4(), table_id=payroll.id, column="salary", label_project="Hidden wage"
+        )
+    )
+    world.session.commit()
+    _translate(world, "payroll", "fr", "label", "Prime cachée", subject="column", column="salary")
+    _translate(world, "payroll", "fr", "label", "Bonus caché", subject="measure", column="salary")
+    _translate(
+        world, "payroll", "fr", "description", "Texte caché", subject="column", column="salary"
+    )
+    for query in ("hidden", "cachée", "caché", "texte"):
+        page = _search(world, world.alice, query, ("fr",))
+        assert page.results == [] and not page.has_more, query
+    assert "cach" not in repr(_search(world, world.alice, "c", ("fr",)).results)
+    assert {h.name for h in _search(world, world.bob, "caché", ("fr",)).results} == {
+        "silver.payroll.salary"
+    }
+
+
+def test_a_masked_columns_label_is_found_as_its_name_is(world: World) -> None:
+    masks = ColumnMaskService(
+        world.session, AllowAllAuthorization(), FakeColumnCatalog(names=["order_id", "status"])
+    )
+    masks.create(
+        world.admin,
+        principal="alice",
+        environment="dev",
+        namespace="silver",
+        table="orders",
+        column="status",
+        expression="NULL",
+    )
+    _translate(world, "orders", "fr", "label", "Statut", subject="column", column="status")
+    assert [h.name for h in _search(world, world.alice, "status").results] == [
+        "silver.orders.status"
+    ]
+    assert [h.name for h in _search(world, world.alice, "statut", ("fr",)).results] == [
+        "silver.orders.status"
+    ]
+
+
+def test_translations_cost_no_statement_per_table(world: World) -> None:
+    statements: list[str] = []
+
+    def _count(conn: object, cursor: object, statement: str, *args: object) -> None:
+        """Record one statement.
+
+        Parameters
+        ----------
+        conn
+            The connection.
+        cursor
+            The cursor.
+        statement
+            The SQL.
+        *args
+            The rest.
+        """
+        statements.append(statement)
+
+    engine = world.session.get_bind()
+    event.listen(engine, "before_cursor_execute", _count)
+    try:
+        _search(world, world.bob, "o", ("fr",))
+        plain = len(statements)
+        _translate(world, "orders", "fr", "label", "Commandes")
+        _translate(world, "payroll", "fr", "label", "Paie")
+        statements.clear()
+        _search(world, world.bob, "o", ("fr",))
+    finally:
+        event.remove(engine, "before_cursor_execute", _count)
+    assert len(statements) == plain

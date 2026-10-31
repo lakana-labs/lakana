@@ -119,6 +119,29 @@ Translations: fr 2 of 5
 
 A regional tag falls back to its language: `--lang fr-CH` shows the `fr` texts.
 
+## Find a table by its label
+
+`lakana search` matches labels like names. The English texts always match; the French ones match
+when you read in French. The `matched` column says which language matched:
+
+<!-- source: docs/examples/translate-a-table/run.sh#search -->
+```bash
+lakana search "Ventes" --env dev --lang fr
+```
+
+<!-- output: translate-a-table#search -->
+```text
+┏━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━━━━━━━━━┓
+┃ kind  ┃ name       ┃ matched    ┃ where ┃ snippet            ┃
+┡━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━━━━━━━━━┩
+│ table │ gold.sales │ label [fr] │ table │ Ventes par magasin │
+└───────┴────────────┴────────────┴───────┴────────────────────┘
+```
+
+Without French (`--lang en`, and no French profile language), `Ventes` finds nothing; `per store`
+finds the table by its English label in every language. The rules are in
+[Search](../reference/search.md#languages).
+
 ## Set your own language
 
 Instead of passing `--lang` to every command, set your language once. Every command, and every

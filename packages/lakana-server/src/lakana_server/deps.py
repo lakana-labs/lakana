@@ -540,6 +540,7 @@ def get_catalog(
 def get_catalog_search(
     session: Session = Depends(get_session),
     authz: AuthorizationService = Depends(get_grant_authorization),
+    main_language: str = Depends(get_main_language),
 ) -> CatalogSearch:
     """Build a CatalogSearch for the current request.
 
@@ -549,13 +550,15 @@ def get_catalog_search(
         The current request's database session.
     authz
         The real, grant-backed authorization service.
+    main_language
+        `LAKANA_MAIN_LANGUAGE`, the language of header texts whose project declares none.
 
     Returns
     -------
     CatalogSearch
         A search using real authorization.
     """
-    return CatalogSearch(session, authz)
+    return CatalogSearch(session, authz, main_language=main_language)
 
 
 def get_artifact_service(

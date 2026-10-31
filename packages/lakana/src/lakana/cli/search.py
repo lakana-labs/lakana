@@ -47,6 +47,22 @@ def _name(hit: SearchHit) -> str:
     return f"{hit.name} [{hit.model_kind}]" if hit.model_kind else hit.name
 
 
+def _matched(hit: SearchHit) -> str:
+    """Write what matched, with the language of a matched text after it.
+
+    Parameters
+    ----------
+    hit
+        The hit.
+
+    Returns
+    -------
+    str
+        The field, followed by ``[language]`` when a text in a language matched.
+    """
+    return f"{hit.matched} [{hit.language}]" if hit.language else hit.matched
+
+
 def _where(hit: SearchHit) -> str:
     """Say where a hit is, for a reader who has the name.
 
@@ -87,14 +103,24 @@ def search(
     offset: Annotated[
         int, typer.Option("--offset", min=0, help="Results to skip, to show the next page.")
     ] = 0,
+    lang: Annotated[
+        str | None,
+        typer.Option(
+            "--lang",
+            help="Match translated labels and descriptions in this language, such as de or fr-CH.",
+        ),
+    ] = None,
     env: Annotated[
         str | None, typer.Option("--env", help="Environment (default: the profile's).")
     ] = None,
 ) -> None:
     """Find tables, columns, descriptions, runs and people that match TEXT.
 
-    Matching ignores case and finds TEXT anywhere in a name or description. Exact matches come
-    first, then names that start with TEXT, then names that contain it, then descriptions.
+    Matching ignores case and finds TEXT anywhere in a name, label or description. Exact matches
+    come first, then names and labels that start with TEXT, then those that contain it, then
+    descriptions. Texts in a table's main language always match; translated ones in your
+    language (--lang, else your profile's, else the instance's main language), and the matched
+    column shows the language in brackets. A table or column is listed once.
     Runs are found by the first four or more characters of their id, their job or their
     repository. A table is also found by the grain its asset header declares, and shows its kind
     in brackets after its name; a column by the label or description of its declared measure.
@@ -114,6 +140,8 @@ def search(
         Most results to show.
     offset
         Results to skip.
+    lang
+        The language to match translated texts in.
     env
         The environment.
     """
@@ -126,6 +154,7 @@ def search(
         model_kind=model_kind.value if model_kind is not None else None,
         limit=limit,
         offset=offset,
+        lang=lang,
     )
     if state.output == "json":
         _output.emit(state, page)
@@ -134,15 +163,15 @@ def search(
         _output.emit(
             state,
             f"No match for {_output.inline(repr(text))}. Search looks at table names, column "
-            "names, descriptions, grains, run ids, jobs, repositories and (for admins) people; "
-            "try a shorter text.",
+            "names, labels, descriptions, grains, run ids, jobs, repositories and (for admins) "
+            "people; try a shorter text.",
         )
         return
     _output.emit(
         state,
         page.results,
         columns=["kind", "name", "matched", "where", "snippet"],
-        derived={"where": _where, "name": _name},
+        derived={"where": _where, "name": _name, "matched": _matched},
         droppable=["snippet", "where"],
     )
     if page.has_more:
@@ -154,6 +183,8 @@ def search(
             options += ["--model-kind", model_kind.value]
         if limit != 20:
             options += ["--limit", str(limit)]
+        if lang is not None:
+            options += ["--lang", shlex.quote(_output.inline(lang))]
         options += [
             "--offset",
             str(offset + limit),

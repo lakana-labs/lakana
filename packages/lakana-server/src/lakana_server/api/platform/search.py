@@ -1,15 +1,16 @@
-"""The search route of the platform API: tables, columns, descriptions, runs and principals."""
+"""The search route of the platform API: tables, columns, labels, descriptions, runs, principals."""
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 
 from lakana_core.auth import PrincipalRef
 from lakana_core.catalog.search import CatalogSearch, SearchKind
+from lakana_server.api.platform.languages import LANG_DESCRIPTION, reader_languages
 from lakana_server.api.platform.schemas import SearchOut
 from lakana_server.api.responses import errors
 from lakana_server.api.routing import AuthenticateFirstRoute
-from lakana_server.deps import get_catalog_search, get_principal
+from lakana_server.deps import get_catalog_search, get_main_language, get_principal
 
 router = APIRouter(
     route_class=AuthenticateFirstRoute,
@@ -21,6 +22,7 @@ router = APIRouter(
 
 @router.get("/search", response_model=SearchOut, responses=errors(403, 404))
 def search(
+    request: Request,
     env: str,
     q: str = Query(description="The text to find; 1 to 200 characters, case-insensitive."),
     kind: SearchKind | None = Query(default=None, description="Only this kind of hit."),
@@ -31,21 +33,29 @@ def search(
     ),
     limit: int = Query(default=20, description="Hits per page, 1 to 100."),
     offset: int = Query(default=0, description="Hits to skip."),
+    lang: str | None = Query(default=None, description=LANG_DESCRIPTION),
     principal: PrincipalRef = Depends(get_principal),
     service: CatalogSearch = Depends(get_catalog_search),
+    main_language: str = Depends(get_main_language),
 ) -> SearchOut:
     """Search an environment.
 
-    Finds tables, columns, runs, jobs, repositories and principals whose names or
+    Finds tables, columns, runs, jobs, repositories and principals whose names, labels or
     descriptions, a table's declared grain, or the label or description of a column's
     declared measure contain `q` (1 to 200 characters, case-insensitive; run ids need four
-    characters or more), one page at a time. What the caller may not read is left out of the
-    hits, not refused: tables and columns need `READ_TABLE`, runs `READ_ENVIRONMENT`,
-    principals the right to list them. Needs `READ_ENVIRONMENT`. Answers 404 when the
-    environment does not exist and 422 for a `q`, `model_kind` or paging value out of range.
+    characters or more), one page at a time. Texts in a table's main language always match;
+    translated texts match in your languages (`lang`, else your profile's language, else
+    `Accept-Language`, else the instance's main language), and each hit says which language
+    matched. A table or column is one hit, however many of its texts match. What the caller may
+    not read is left out of the hits, not refused: tables and columns need `READ_TABLE`, runs
+    `READ_ENVIRONMENT`, principals the right to list them. Needs `READ_ENVIRONMENT`. Answers 404
+    when the environment does not exist and 422 for a `q`, `model_kind`, `lang` or paging value
+    out of range.
 
     Parameters
     ----------
+    request
+        The request, for `Accept-Language`.
     env
         Environment name.
     q
@@ -59,10 +69,14 @@ def search(
         Hits per page, 1 to 100.
     offset
         Hits to skip.
+    lang
+        The language to match translated texts in, any case; see `reader_languages`.
     principal
         The authenticated caller.
     service
         The search service for this request.
+    main_language
+        The instance's main language, the last language a reader falls back to.
 
     Returns
     -------
@@ -79,6 +93,13 @@ def search(
         Mapped to 404 by `install_exception_handlers`.
     """
     page = service.search(
-        principal, env, q, kind=kind, model_kind=model_kind, limit=limit, offset=offset
+        principal,
+        env,
+        q,
+        kind=kind,
+        model_kind=model_kind,
+        limit=limit,
+        offset=offset,
+        languages=reader_languages(request, lang, principal, main_language),
     )
     return SearchOut.model_validate(page)

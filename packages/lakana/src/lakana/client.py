@@ -379,13 +379,16 @@ class Client:
         model_kind: Literal["fact", "dimension", "wide", "staging"] | None = None,
         limit: int = 20,
         offset: int = 0,
+        lang: str | None = None,
     ) -> SearchPage:
-        """Find tables, columns, descriptions, runs and principals by a text.
+        """Find tables, columns, labels, descriptions, runs and principals by a text.
 
-        Matching ignores case and finds the text anywhere in a name or description. Exact matches
-        come first, then names that start with the text, then names that contain it, then
-        descriptions and declared grains; within each, tables come before columns, runs and
-        principals. You see only
+        Matching ignores case and finds the text anywhere in a name, label or description. Exact
+        matches come first, then names and labels that start with the text, then names and labels
+        that contain it, then descriptions and declared grains; within each, tables come before
+        columns, runs and principals. Texts in a table's main language always match; translated
+        texts match in your language, and each hit's ``language`` says which language matched.
+        A table or column is one hit, however many of its texts match. You see only
         what you may read: tables and columns with ``READ_TABLE`` on the table, runs with
         ``READ_ENVIRONMENT`` (found by the first four or more characters of the id, the job or the
         repository), principals if you may list them.
@@ -405,6 +408,9 @@ class Client:
             Hits per page, 1 to 100.
         offset
             Hits to skip, for the next page.
+        lang
+            The language to match translated texts in, such as ``de`` or ``fr-CH``; without it,
+            your profile's language, else the instance's main language.
 
         Returns
         -------
@@ -416,14 +422,16 @@ class Client:
         lakana.errors.NotFound
             If the environment does not exist.
         lakana.errors.ValidationError
-            If the text, ``model_kind``, ``limit`` or ``offset`` is out of range; the message
-            names the range.
+            If the text, ``model_kind``, ``limit`` or ``offset`` is out of range, the message
+            naming the range, or ``lang`` is not a language tag.
         """
         params: dict[str, str | int] = {"q": q, "limit": limit, "offset": offset}
         if kind is not None:
             params["kind"] = kind
         if model_kind is not None:
             params["model_kind"] = model_kind
+        if lang is not None:
+            params["lang"] = lang
         body = self._transport.request(
             ROUTES["search"], path_params={"env": environment}, params=params
         ).json()
