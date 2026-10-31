@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 import pydantic
-from pydantic import Field, StrictBool, field_validator
+from pydantic import Field, StrictBool, field_validator, model_validator
 
 from lakana_core.artifacts.manifest import shown
 from lakana_core.errors import ValidationError
@@ -44,6 +44,8 @@ from lakana_core.projects.project_config import (
     Materialize,
     PositiveDuration,
     SafeTextModel,
+    StrictModel,
+    checked_label,
     checked_text,
     normalize_source,
     pydantic_issues,
@@ -72,6 +74,88 @@ _PYTHON_ONLY = (
 )
 
 
+_COLUMN_SHAPE = (
+    "`{name}` must be a description or a mapping such as "
+    "`{{label: Store, description: The store that sold.}}`"
+)
+
+
+class ColumnTexts(StrictModel):
+    """One column's texts in the header: the long form of `columns:`, or a short form read into it.
+
+    Parameters
+    ----------
+    label
+        A short name for people, one line of at most 100 characters.
+    description
+        What the column means; the short form's text. Blank is kept, as today, and shows as none.
+    """
+
+    label: str | None = None
+    description: str | None = None
+
+    @field_validator("label")
+    @classmethod
+    def _label_rules(cls, value: str | None) -> str | None:
+        """Apply the label rules.
+
+        Parameters
+        ----------
+        value
+            The label.
+
+        Returns
+        -------
+        str or None
+            The stripped label.
+        """
+        return None if value is None else checked_label(value)
+
+    @field_validator("description")
+    @classmethod
+    def _description_is_safe(cls, value: str | None) -> str | None:
+        """Refuse a description with an unsafe character.
+
+        Parameters
+        ----------
+        value
+            The description.
+
+        Returns
+        -------
+        str or None
+            `value`.
+
+        Raises
+        ------
+        ValueError
+            If it has an unsafe character.
+        """
+        if value is not None and unsafe_free_text(value):
+            raise ValueError(FREE_TEXT_MESSAGE)
+        return value
+
+    @model_validator(mode="after")
+    def _says_something(self) -> ColumnTexts:
+        """Refuse a long form with neither text.
+
+        Returns
+        -------
+        ColumnTexts
+            `self`.
+
+        Raises
+        ------
+        ValueError
+            If both are missing.
+        """
+        if self.label is None and self.description is None:
+            raise ValueError(
+                "needs `label:` or `description:`; write a description alone as a plain string"
+            )
+        return self
+
+
 class AssetMetadata(SafeTextModel):
     """What one asset's front-matter may say.
 
@@ -79,6 +163,8 @@ class AssetMetadata(SafeTextModel):
     ----------
     description
         Human description.
+    label
+        A short name for the table, in the project's main language.
     owner
         Owning team or person.
     tags
@@ -110,7 +196,7 @@ class AssetMetadata(SafeTextModel):
         The column whose largest value the next run starts after, for ``write: append`` (and
         optionally ``merge``).
     columns
-        Column name → description.
+        Column name → its texts; a plain string is its description.
     retries
         Retries after a failed attempt, for this asset.
     retry_delay
@@ -120,6 +206,7 @@ class AssetMetadata(SafeTextModel):
     """
 
     description: str | None = None
+    label: str | None = None
     owner: str | None = None
     tags: tuple[str, ...] = ()
     materialize: Materialize | None = None
@@ -133,7 +220,7 @@ class AssetMetadata(SafeTextModel):
     measures: dict[str, MeasureSpec] = Field(default_factory=dict)
     checks: dict[str, str] = Field(default_factory=dict)
     watermark: str | None = None
-    columns: dict[str, str] = Field(default_factory=dict)
+    columns: dict[str, ColumnTexts] = Field(default_factory=dict)
     retries: int | None = Field(default=None, ge=0, le=MAX_RETRIES, strict=True)
     retry_delay: Duration | None = None
     timeout: PositiveDuration | None = None
@@ -463,10 +550,61 @@ class AssetMetadata(SafeTextModel):
             raise ValueError(WATERMARK_MESSAGE)
         return value
 
+    @field_validator("label")
+    @classmethod
+    def _label_is_one_line(cls, value: str | None) -> str | None:
+        """Apply the label rules to the table's label.
+
+        Parameters
+        ----------
+        value
+            The label.
+
+        Returns
+        -------
+        str or None
+            The stripped label.
+        """
+        return None if value is None else checked_label(value)
+
+    @field_validator("columns", mode="before")
+    @classmethod
+    def _columns_are_texts(cls, value: object) -> object:
+        """Read the short form into `ColumnTexts`, keeping its old refusal of unsafe text.
+
+        Parameters
+        ----------
+        value
+            The raw `columns:` value.
+
+        Returns
+        -------
+        object
+            A mapping of mappings for pydantic, or `value` for its own type error.
+
+        Raises
+        ------
+        ValueError
+            For an unsafe short-form description, or a value that is neither form.
+        """
+        if not isinstance(value, Mapping):
+            return value
+        result: dict[object, object] = {}
+        for name, given in value.items():
+            if isinstance(given, str):
+                if unsafe_free_text(given):
+                    raise ValueError(f"a column description {FREE_TEXT_MESSAGE}")
+                result[name] = {"description": given}
+            elif isinstance(given, (Mapping, ColumnTexts)):
+                result[name] = given
+            else:
+                raise ValueError(_COLUMN_SHAPE.format(name=shown(name)))
+        return result
+
     @field_validator("columns")
     @classmethod
-    def _columns_are_safe(cls, value: dict[str, str]) -> dict[str, str]:
-        """Refuse a column name or description with an unsafe character.
+    def _columns_are_safe(cls, value: dict[str, ColumnTexts]) -> dict[str, ColumnTexts]:
+        """Refuse a column name with an unsafe character.
 
         Parameters
         ----------
@@ -481,13 +619,31 @@ class AssetMetadata(SafeTextModel):
         Raises
         ------
         ValueError
-            If it has an unsafe character.
+            If a name has an unsafe character.
         """
         if any(unsafe_identifier(name) for name in value):
             raise ValueError(f"a column name {IDENTIFIER_MESSAGE}")
-        if any(unsafe_free_text(text) for text in value.values()):
-            raise ValueError(f"a column description {FREE_TEXT_MESSAGE}")
         return value
+
+    def column_descriptions(self) -> dict[str, str]:
+        """List the columns' descriptions, as the manifest's `metadata.columns` stores them.
+
+        Returns
+        -------
+        dict
+            Column → description, for the columns that have one.
+        """
+        return {n: t.description for n, t in self.columns.items() if t.description is not None}
+
+    def column_labels(self) -> dict[str, str]:
+        """List the columns' labels.
+
+        Returns
+        -------
+        dict
+            Column → label, for the columns that have one.
+        """
+        return {n: t.label for n, t in self.columns.items() if t.label is not None}
 
 
 @dataclass(frozen=True)

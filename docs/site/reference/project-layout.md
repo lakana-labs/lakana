@@ -1,6 +1,6 @@
 # Project layout
 
-What a deploy reads from a repository: the files under `assets/` and `checks/`, and the names
+What a deploy reads from a repository: the files under `assets/`, `checks/` and `translations/`, and the names
 they give to tables. For the steps that create and deploy a project, see
 [Projects and deploys](../how-to/projects.md).
 
@@ -31,3 +31,11 @@ writes it, and a check that fails sets the table back and stops what is built fr
 without `checks/` runs as it always did. [Check your data](../how-to/check-your-data.md) writes the first
 check, shows the output of a failing one and gives five checks to copy; the exact rules are in
 [Checks](checks.md).
+
+## The `translations/` directory
+
+`translations/<language>.yaml` holds one language's labels and descriptions of the project's
+tables, columns and measures, keyed by table: `translations/fr.yaml`, `translations/de-CH.yaml`.
+The folder holds nothing else, at most 50 files of at most 1 MiB each. A project with translation
+files declares `main_language:` in `lakana.yaml`. The format and every rule are in
+[Translations](translations.md).

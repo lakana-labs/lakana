@@ -720,3 +720,37 @@ def test_a_check_swapped_for_a_symlink_after_the_listing_is_refused(
     assert _messages(info.value) == [
         "checks/silver/t/a.sql: symlinks are not allowed under checks/"
     ]
+
+
+def test_discover_reads_translations_beside_the_assets(tmp_path: Path) -> None:
+    _write(tmp_path, "assets/gold/t.sql")
+    _write(tmp_path, "translations/fr.yaml", "gold.t:\n  label: T\n")
+    checkout = discover(tmp_path)
+    assert [(t.path, t.language) for t in checkout.translations] == [("translations/fr.yaml", "fr")]
+    _write(tmp_path, "translations/fr.yaml", "x" * 2048)
+    with pytest.raises(ProjectValidationError) as caught:
+        discover(tmp_path, limits=DeployLimits(translation_bytes=1024))
+    assert _messages(caught.value) == ["translations/fr.yaml: larger than 1 KiB"]
+
+
+def test_a_bad_translation_file_name_stops_discovery(tmp_path: Path) -> None:
+    _write(tmp_path, "assets/gold/t.sql")
+    _write(tmp_path, "translations/fr.yml", "{}\n")
+    with pytest.raises(ProjectValidationError) as caught:
+        discover(tmp_path)
+    assert _messages(caught.value) == [
+        "translations/fr.yml: a translation file ends in .yaml; rename it to translations/fr.yaml"
+    ]
+
+
+def test_a_link_under_translations_is_refused_once_in_a_python_project(tmp_path: Path) -> None:
+    _write(tmp_path, "assets/gold/a.py", "x = 1\n")
+    _write(tmp_path, "pyproject.toml", "[project]\nname = 'p'\n")
+    _write(tmp_path, "notes.yaml", "{}\n")
+    (tmp_path / "translations").mkdir()
+    (tmp_path / "translations" / "fr.yaml").symlink_to(tmp_path / "notes.yaml")
+    with pytest.raises(ProjectValidationError) as caught:
+        discover(tmp_path)
+    assert [m for m in _messages(caught.value) if "symlink" in m] == [
+        "translations/fr.yaml: symlinks are not allowed under translations/"
+    ]

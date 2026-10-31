@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from lakana_core.connections.kinds import NAME
 from lakana_core.identifiers import NOTIFY_FORMATS
+from lakana_core.languages import canonical_language
 from lakana_core.projects.asset_model import (
     CHECK_FAMILIES,
     CHECK_MODES,
@@ -35,7 +36,7 @@ if TYPE_CHECKING:
     from lakana_core.projects.checks import ParsedCheck
     from lakana_core.projects.frontmatter import AssetMetadata
 
-MANIFEST_VERSION = 10
+MANIFEST_VERSION = 11
 """Bumped when the manifest's shape changes. Version 2 adds `kind` per asset and
 `lock_sha256`; a version-1 manifest is read as all-SQL. Version 3 adds `output`,
 `keep_versions` and `input_kinds` per Python asset; versions 1 and 2 are read as all-table.
@@ -61,6 +62,9 @@ Version 9 is written only when an asset declares a model field (`kind`, `grain`,
 an entry carries `model` (read with `entry_model`), and the manifest a `checks` list.
 Version 10 is written only when an asset declares measures (`MEASURES_VERSION`); such an entry's
 `model` carries `measures`, and its `measures` check entry carries `not_over` and `aggregations`.
+Version 11 is written only when the project declares `main_language`, a label or a translation
+(`TEXTS_VERSION`); such a manifest has a top-level `main_language` when declared, and its entries'
+`metadata` may carry `label`, `column_labels` and `translations`.
 The `decimals` key is optional and read with a default (`entry_decimals`), so it needed
 no bump: an entry without it means ``float``. The `package_indexes` key is optional in
 the same way: a manifest without it uses no registered package index. The `python` key is
@@ -99,7 +103,11 @@ MEASURES_VERSION = 10
 """The version of a manifest in which an asset declares measures; a worker of an earlier release
 refuses it instead of reading its `measures` check as damaged."""
 
-LISTS_CHECKS = (4, 5, 6, 7, 8, 9, 10)
+TEXTS_VERSION = 11
+"""The version of a manifest whose project declares `main_language`, a label or a translation; a
+worker of an earlier release refuses it instead of creating tables without their texts."""
+
+LISTS_CHECKS = (4, 5, 6, 7, 8, 9, 10, 11)
 """The versions whose manifest always carries a `checks` list (version 4 a non-empty one). A
 tuple, not a set: a stored version may be any JSON value, a list too, and must not raise."""
 
@@ -172,6 +180,7 @@ def _entry(
     caps: RunCaps,
     artifacts: frozenset[str],
     references: Sequence[ResolvedReference] = (),
+    translations: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Serialize one asset.
 
@@ -185,6 +194,9 @@ def _entry(
         Names of every artifact the asset may read, for `input_kinds`.
     references
         The asset's resolved references, recorded in `model`.
+    translations
+        Language → the table's texts in it, recorded as `metadata.translations` when there are
+        any.
 
     Returns
     -------
@@ -213,7 +225,7 @@ def _entry(
             "description": asset.metadata.description,
             "owner": asset.metadata.owner,
             "tags": list(asset.metadata.tags),
-            "columns": dict(asset.metadata.columns),
+            "columns": asset.metadata.column_descriptions(),
         },
         "sql": asset.sql,
         "normalized_sql": asset.normalized_sql,
@@ -221,6 +233,13 @@ def _entry(
         "columns": list(asset.columns) if asset.columns is not None else None,
         "lineage": asset.lineage,
     }
+    if asset.metadata.label is not None:
+        entry["metadata"]["label"] = asset.metadata.label
+    labels = asset.metadata.column_labels()
+    if labels:
+        entry["metadata"]["column_labels"] = labels
+    if translations:
+        entry["metadata"]["translations"] = dict(translations)
     if asset.kind == "python":
         entry["inputs"] = dict(asset.inputs)
         entry["output"] = asset.output
@@ -277,6 +296,7 @@ def _version(
     uses_new_writes: bool = False,
     uses_model: bool = False,
     uses_measures: bool = False,
+    uses_texts: bool = False,
 ) -> int:
     """Pick the lowest manifest version that carries everything the project declares.
 
@@ -294,17 +314,22 @@ def _version(
         Whether an asset declares a model field.
     uses_measures
         Whether an asset declares measures.
+    uses_texts
+        Whether the project declares `main_language`, a label or a translation.
 
     Returns
     -------
     int
-        `MEASURES_VERSION` when an asset declares measures, else `MODEL_VERSION` when an asset
+        `TEXTS_VERSION` when the project uses texts, else `MEASURES_VERSION` when an asset
+        declares measures, else `MODEL_VERSION` when an asset
         declares a model field, else `WRITES_VERSION` when an
         asset uses the new write spelling, else `CONNECTIONS_VERSION`
         when an asset declares a connection, `NOTIFY_VERSION` when a job notifies,
         `JOBS_VERSION` with jobs, `CHECKS_VERSION` with checks, `VERSION_WITHOUT_CHECKS`
         otherwise.
     """
+    if uses_texts:
+        return TEXTS_VERSION
     if uses_measures:
         return MEASURES_VERSION
     if uses_model:
@@ -369,6 +394,8 @@ def build_manifest(
     checks: Sequence[ParsedCheck] = (),
     python: str | None = None,
     references: Mapping[str, Sequence[ResolvedReference]] | None = None,
+    main_language: str | None = None,
+    translations: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Build the manifest stored on a project version.
 
@@ -401,6 +428,12 @@ def build_manifest(
     references
         Table → its resolved references, recorded in the `model` of an asset that declares a
         model field; `None` when there are none.
+    main_language
+        `lakana.yaml`'s `main_language:`; recorded as `main_language` only when set.
+    translations
+        Table → language → its texts (`translation_entries`), recorded as each entry's
+        `metadata.translations`; `None` when the project has no translation files. With
+        `main_language`, a label or a translation the manifest is `TEXTS_VERSION`.
 
     Returns
     -------
@@ -410,6 +443,12 @@ def build_manifest(
     caps = caps or RunCaps()
     resolved = references or {}
     known = artifacts | {asset.table for asset in assets if asset.output == "artifact"}
+    texts = translations or {}
+    uses_texts = (
+        main_language is not None
+        or bool(texts)
+        or any(a.metadata.label is not None or a.metadata.column_labels() for a in assets)
+    )
     version = _version(
         config,
         has_checks=bool(checks),
@@ -417,11 +456,12 @@ def build_manifest(
         uses_new_writes=any(asset.metadata.write in ("append", "merge") for asset in assets),
         uses_model=any(declares_model(asset.metadata) for asset in assets),
         uses_measures=any(asset.metadata.measures for asset in assets),
+        uses_texts=uses_texts,
     )
     manifest: dict[str, Any] = {
         "version": version,
         "assets": [
-            _entry(asset, caps, known, resolved.get(asset.table, ()))
+            _entry(asset, caps, known, resolved.get(asset.table, ()), texts.get(asset.table))
             for asset in sorted(assets, key=lambda a: a.table)
         ],
         "edges": [list(edge) for edge in graph.edges],
@@ -440,7 +480,15 @@ def build_manifest(
         manifest["python"] = python
     if package_indexes:
         manifest["package_indexes"] = sorted(package_indexes)
-    lists_empty = (CONNECTIONS_VERSION, WRITES_VERSION, MODEL_VERSION, MEASURES_VERSION)
+    if main_language is not None:
+        manifest["main_language"] = main_language
+    lists_empty = (
+        CONNECTIONS_VERSION,
+        WRITES_VERSION,
+        MODEL_VERSION,
+        MEASURES_VERSION,
+        TEXTS_VERSION,
+    )
     if checks or config.jobs or version in lists_empty:
         manifest["checks"] = [_check_entry(check) for check in sorted(checks, key=lambda c: c.name)]
     return manifest
@@ -993,3 +1041,112 @@ def manifest_python(manifest: Mapping[str, object]) -> str | None:
     """
     value = manifest.get("python")
     return value if isinstance(value, str) and value in SUPPORTED_TASK_PYTHONS else None
+
+
+_SUBJECT_FIELDS = {
+    "table": ("label", "description", "grain"),
+    "column": ("label", "description"),
+    "measure": ("label", "description"),
+}
+_MAX_NAME_BYTES = 1024
+
+
+@dataclass(frozen=True)
+class EntryText:
+    """One translated text of a manifest entry.
+
+    Parameters
+    ----------
+    subject
+        ``table``, ``column`` or ``measure``.
+    name
+        ``""`` for the table, else the column.
+    field
+        ``label``, ``description`` or ``grain`` (the table only).
+    text
+        The text.
+    """
+
+    subject: str
+    name: str
+    field: str
+    text: str
+
+
+def _entry_texts(subject: str, name: str, form: object) -> list[EntryText]:
+    """Read the texts of one subject from an untrusted mapping.
+
+    Parameters
+    ----------
+    subject
+        ``table``, ``column`` or ``measure``.
+    name
+        Its name.
+    form
+        What the manifest holds for it.
+
+    Returns
+    -------
+    list of EntryText
+        The non-blank string texts of the subject's fields; anything else left out.
+    """
+    if not isinstance(form, Mapping) or len(name.encode()) > _MAX_NAME_BYTES:
+        return []
+    return [
+        EntryText(subject, name, field, text)
+        for field in _SUBJECT_FIELDS[subject]
+        if isinstance(text := form.get(field), str) and text.strip()
+    ]
+
+
+def entry_translations(entry: object) -> dict[str, tuple[EntryText, ...]]:
+    """Read an entry's translations back, failing safe on untrusted values.
+
+    Parameters
+    ----------
+    entry
+        One manifest entry.
+
+    Returns
+    -------
+    dict
+        Canonical language → its texts: the table's, then each column's, then each measure's,
+        in the manifest's order. A non-canonical language, a non-mapping, a non-string or blank
+        text, or a name over 1,024 bytes reads as absent.
+    """
+    metadata = entry.get("metadata") if isinstance(entry, Mapping) else None
+    raw = metadata.get("translations") if isinstance(metadata, Mapping) else None
+    if not isinstance(raw, Mapping):
+        return {}
+    result: dict[str, tuple[EntryText, ...]] = {}
+    for language, form in raw.items():
+        if not isinstance(language, str) or canonical_language(language) != language:
+            continue
+        if not isinstance(form, Mapping):
+            continue
+        texts = _entry_texts("table", "", form)
+        for part, subject in (("columns", "column"), ("measures", "measure")):
+            pairs = form.get(part)
+            for name, pair in pairs.items() if isinstance(pairs, Mapping) else ():
+                if isinstance(name, str):
+                    texts += _entry_texts(subject, name, pair)
+        if texts:
+            result[language] = tuple(texts)
+    return result
+
+
+def manifest_main_language(manifest: object) -> str | None:
+    """Read a manifest's declared main language.
+
+    Parameters
+    ----------
+    manifest
+        A stored manifest; untrusted.
+
+    Returns
+    -------
+    str or None
+        The canonical tag, or `None` when absent or not canonical.
+    """
+    value = manifest.get("main_language") if isinstance(manifest, Mapping) else None
+    return value if isinstance(value, str) and canonical_language(value) == value else None

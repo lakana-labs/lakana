@@ -75,6 +75,12 @@ from lakana_core.projects.package_sources import KnownSources, RegisteredIndex
 from lakana_core.projects.parse import ParsedAsset, parse_assets
 from lakana_core.projects.project_config import normalize_source, parse_project_config
 from lakana_core.projects.run_policy import RunCaps, run_policy_issues
+from lakana_core.projects.translations import (
+    coverage_hints,
+    parse_translations,
+    translation_entries,
+    translation_issues,
+)
 from lakana_core.secrets.crypto import decrypt_secret_row
 from lakana_core.secrets.keys import KeyProvider
 from lakana_core.secrets.uses import SecretUse, plain, require_use
@@ -809,6 +815,21 @@ def _deploy(
         checks = parse_checks(
             checkout.checks, limits=limits, default_on_failure=config.checks.on_failure
         )
+
+        def check_time() -> None:
+            """Stop between translation files once the deploy is past its deadline.
+
+            Raises
+            ------
+            GitError
+                When the deadline has passed.
+            """
+            if clock() > deadline:
+                raise GitError(_TIME_LIMIT_MESSAGE)
+
+        translations, translation_problems = parse_translations(
+            checkout.translations, limits=limits, check_time=check_time
+        )
         graph = build_graph(assets)
         resolved, reference_issues = service.resolve_model_references(
             principal, environment_name, repository_id, assets
@@ -851,6 +872,8 @@ def _deploy(
                 principal, environment_name, repository_id, checks, assets
             )
             + project_model_issues(assets)
+            + translation_problems
+            + translation_issues(project, assets, translations)
             + reference_issues
         )
         if issues:
@@ -867,6 +890,8 @@ def _deploy(
             package_indexes=[index.name for index in used],
             checks=every_check,
             references=resolved,
+            main_language=project.main_language,
+            translations=translation_entries(translations),
             artifacts=service.artifact_inputs(
                 principal, environment_name, graph, repository_id=repository_id
             ),
@@ -880,7 +905,7 @@ def _deploy(
                     principal, environment_name, manifest_tables(manifest)
                 ),
             ),
-            hints=deploy_hints(assets),
+            hints=deploy_hints(assets) + coverage_hints(project, assets, translations),
         )
         if kind is DeployKind.DRY_RUN:
             service.record_dry_run(

@@ -8,6 +8,7 @@ An optional `/* lakana … */` block, first in the file:
 <!-- not tested: SQL is not parsed by the block checker; a test in `scripts/tests/test_docs_site.py` parses this header with the front-matter reader -->
 ```sql
 /* lakana
+label: Hourly weather
 description: Cleaned hourly weather observations, nulls dropped.
 owner: data-eng
 tags: [weather, hourly]
@@ -18,14 +19,30 @@ retries: 3                    # run policy, see lakana.yaml: "Retries and timeou
 retry_delay: 1m
 timeout: 5m
 columns:
-  station_id: WMO station identifier.
+  station_id: WMO station identifier.   # short form: a description
+  temp_c:                               # long form: a label, a description or both
+    label: Temperature
+    description: Air temperature in degrees Celsius.
 */
 SELECT station_id, ts, temp_c FROM bronze.weather WHERE temp_c IS NOT NULL
 ```
 
-`description` and `columns` describe the table and its columns. A deploy publishes them as the
-project's text, and a description set with `lakana table describe` wins over them and survives
+`label` is a short name for people, one line of at most 100 characters; `description` and
+`columns` describe the table and its columns. A column is a description alone (`station_id: WMO
+station identifier.`) or a mapping with `label:`, `description:` or both. Write them in the
+project's main language ([`main_language`](lakana-yaml.md#main_language-and-translations)). A deploy publishes the
+descriptions as the project's text (labels are checked and recorded with the project version; the
+catalog shows them in a later release), and a description set with `lakana table describe` wins over them and survives
 every deploy; see [Describe a table](../how-to/describe-a-table.md).
+
+A deploy refuses a bad text with its field and the next step:
+
+| Text | Cause |
+|---|---|
+| `label: must not be empty`, `label: must be one line`, `label: must be at most 100 characters` | A bad table label; the same texts apply to `columns.store_id.label`. |
+| ``columns: `store_id` must be a description or a mapping such as `{label: Store, description: The store that sold.}` `` | A column that is neither a string nor a mapping. |
+| ``columns.store_id: needs `label:` or `description:`; write a description alone as a plain string`` | An empty mapping. |
+| `columns.store_id.lable: Extra inputs are not permitted` | A misspelled key. |
 
 An asset may call only the generator table functions `range`, `generate_series` and `unnest`,
 which read no data and are not inputs; every other table function (`read_parquet`, `iceberg_scan`,
@@ -432,8 +449,9 @@ You, the deployer, and readers of the objects see the whole text. A deploy that 
 release keeps its text as it was stored.
 
 A project version in which an asset declares a model field (`key:` alone counts, so every project
-with a `write: merge` asset) has manifest version 9, and one in which an asset declares `measures:`
-version 10. Each needs workers of the release that introduced it or later: a worker of an earlier
+with a `write: merge` asset) has manifest version 9, one in which an asset declares `measures:`
+version 10, and one that declares `main_language`, a label or a
+[translation](translations.md) version 11. Each needs workers of the release that introduced it or later: a worker of an earlier
 one refuses its manifest. A deploy's changes list a table whose `kind`, `grain`, `references`,
 `checks`, or the `key` of an asset that does not merge, changed as `model_changed`; the key of a
 merge stays a change of how the table is written.

@@ -595,7 +595,8 @@ def test_checks_measures_needs_measures_in_the_decorator() -> None:
         ),
         (
             {"m": {"aggregation": "sum", "unit": "count", "label": 3}},
-            "measures.m.label: Input should be a valid string",
+            "measures.m.label: must be a text; in YAML, quote a value that reads as a number, "
+            "a date, `yes` or `null`",
         ),
         (
             {"m": {"aggregation": "sum", "additivity": "semi", "not_over": [3], "unit": "count"}},
@@ -633,3 +634,52 @@ def test_the_decorator_keeps_a_label_and_a_description_as_given() -> None:
 
     spec = getattr(decorate(f), ASSET_ATTRIBUTE)
     assert spec.measures == {"amount": {"aggregation": "sum", "currency": "EUR", **texts}}
+
+
+def test_the_decorator_records_a_label_and_long_form_columns() -> None:
+    @asset(label="Scores", columns={"score": {"label": "Score"}, "id": "The id."})
+    def scores() -> None: ...
+
+    spec = getattr(scores, ASSET_ATTRIBUTE)
+    assert spec.label == "Scores"
+    assert spec.columns == {"score": {"label": "Score"}, "id": "The id."}
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"label": "a\nb"}, "label: must be one line"),
+        ({"label": "x" * 101}, "label: must be at most 100 characters"),
+        ({"label": " "}, "label: must not be empty"),
+        ({"label": 3}, "label: must be a text"),
+        ({"label": "a\u202eb"}, "label: must not contain a surrogate"),
+        ({"columns": ["c"]}, "columns must be a dict of strings or dicts"),
+        ({"columns": {"c": {}}}, "columns.c: needs `label:` or `description:`"),
+        ({"columns": {"c": {"lable": "x"}}}, "columns.c.lable: Extra inputs are not permitted"),
+        ({"columns": {"c": ["x"]}}, "columns: `c` must be a description or a mapping"),
+        ({"columns": {"c": {"label": "a\nb"}}}, "columns.c.label: must be one line"),
+    ],
+)
+def test_bad_texts_are_refused_like_the_deploy_refuses_them(
+    kwargs: dict[str, object], message: str
+) -> None:
+    with pytest.raises(ValueError, match=re.escape(message)):
+        cast("Any", asset)(**kwargs)
+
+
+def test_a_label_on_an_artifact_asset_is_refused() -> None:
+    with pytest.raises(ValueError, match="label does not apply to an artifact asset"):
+        asset(output="artifact", label="Model")
+
+
+@pytest.mark.parametrize(
+    ("description", "message"),
+    [
+        (" ", "measures.m.description: must not be empty"),
+        ("a\u202eb", "measures.m.description: must not contain a surrogate"),
+    ],
+)
+def test_a_bad_measure_description_is_refused(description: str, message: str) -> None:
+    measure = {"aggregation": "sum", "unit": "count", "description": description}
+    with pytest.raises(ValueError, match=re.escape(message)):
+        cast("Any", asset)(kind="fact", grain="g", key="none", measures={"m": measure})

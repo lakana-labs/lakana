@@ -122,8 +122,9 @@ limits lie is in [Python assets: what they are for and how far they are trusted]
   nothing new writes nothing and succeeds. With `output="artifact"` it returns a `pathlib.Path` inside
   `lakana.output_dir()` instead, and each run stores a new version of the artifact (see the
   [reference](artifacts.md)).
-- **Metadata.** `description` (default: the first paragraph of the docstring), `owner`, `tags`,
-  `columns` (not for an artifact asset), `retries`, `retry_delay` and `timeout` work as in SQL front-matter, with the same
+- **Metadata.** `description` (default: the first paragraph of the docstring), `label` (a short name,
+  one line of at most 100 characters; not for an artifact asset), `owner`, `tags`,
+  `columns` (not for an artifact asset; a description, or `{"label": "Store", "description": "The store that sold."}`), `retries`, `retry_delay` and `timeout` work as in SQL front-matter, with the same
   defaults from `lakana.yaml` and the same operator maximums (see [Retries and timeouts](lakana-yaml.md#retries-and-timeouts)).
 - **Only literals.** Deploy reads the decorator without running your code, so every argument
   must be written out as a literal: strings, numbers, lists and dicts of strings. Variables,
@@ -304,7 +305,7 @@ there is one, the line, as `path:line: message`. Fix the cause and deploy again.
 | `more than one @asset function; one file is one asset` | Two decorated functions. | Move one into its own file. |
 | `write @asset(...) with parentheses` | `@asset` without `(...)`. | Write `@asset(inputs={...})`; use `@asset()` for none. |
 | `the asset function must have @asset(...) as its only decorator` | Another decorator sits on the function. | Remove it, or call the wrapped code inside the function. |
-| `argument 'x' must be a literal`, `unknown argument 'x'`, `argument 'x' must be a dict of strings` | The decorator has a variable, an unknown name or the wrong type. | Write the value out, and use only the arguments listed above. |
+| `argument 'x' must be a literal`, `unknown argument 'x'`, `argument 'x' must be a dict of strings` (`columns` takes a dict of strings or dicts) | The decorator has a variable, an unknown name or the wrong type. | Write the value out, and use only the arguments listed above. |
 | `parameter 'x' has no entry in inputs`, `inputs names 'x', which is not a parameter` | The function's parameters and `inputs` differ. | Make them the same set of names. |
 | `positional-only parameters are not supported`, `*args is not supported; …`, `**kwargs is not supported; …`, `a parameter must not have a default` | The signature has a shape the harness cannot fill. | Declare every input as a plain parameter. |
 | `an asset function must not be async` | `async def`. | Use `def`. |

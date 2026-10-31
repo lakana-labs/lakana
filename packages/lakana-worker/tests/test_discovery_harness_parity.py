@@ -258,6 +258,15 @@ def _harness(source: str, root: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[
 _HUGE = "9" * 4000
 
 _ARGUMENT_CASES: dict[str, str] = {
+    "label": 'label="Scores"',
+    "label-two-lines": 'label="a\\nb"',
+    "label-long": 'label="' + "x" * 101 + '"',
+    "columns-long-form": 'columns={"c": {"label": "C", "description": "the c"}}',
+    "columns-empty-long-form": 'columns={"c": {}}',
+    "columns-bad-key": 'columns={"c": {"lable": "C"}}',
+    "columns-long-description-bidi": 'columns={"c": {"description": "a\\u202eb"}}',
+    "columns-short-description-bidi": 'columns={"c": "a\\u202eb"}',
+    "columns-long-description-blank": 'columns={"c": {"description": " "}}',
     "output-table": 'output="table"',
     "output-artifact": 'output="artifact"',
     "output-other-string": 'output="model"',
@@ -485,6 +494,8 @@ def test_deploy_and_the_decorator_accept_and_refuse_the_same_arguments(name: str
 
 
 _BOTH_REFUSE = (
+    "columns-long-description-bidi",
+    "columns-short-description-bidi",
     "references-newline-in-target",
     "references-bell-in-target",
     "references-bidi-in-target",
@@ -731,3 +742,80 @@ def test_a_null_not_over_means_no_columns_at_deploy_and_in_the_sdk() -> None:
     assert deployed.measures["m"].not_over == ()
     spec = cast("Any", sdk_assets.asset)(**fields, measures={"m": measure})(lambda: None)
     assert "not_over" not in getattr(spec, sdk_assets.ASSET_ATTRIBUTE).measures["m"]
+
+
+@pytest.mark.parametrize(
+    "texts",
+    [
+        {"label": "a\nb"},
+        {"label": "x" * 101},
+        {"label": " "},
+        {"columns": {"c": {}}},
+        {"columns": {"c": {"lable": "C"}}},
+        {"columns": {"c": {"label": "a\nb"}}},
+        {"label": "a\u202eb"},
+        {"label": 3},
+        {"columns": {"c": {"label": 3}}},
+        {"columns": {"c": {"label": "a\u202eb"}}},
+        {"columns": {"c": {"description": "a\u202eb"}}},
+        {"columns": {"c": {"description": 3}}},
+        {"columns": {"c": "a\u202eb"}},
+        {"columns": {"c": 3}},
+        {"columns": {"c": ["x"]}},
+        {"columns": {"c": {"description": None}}},
+        {"columns": {"c": {"label": None}}},
+        {"columns": {"c\n": 3}},
+        {"columns": {"c\n": {"lable": "C"}}},
+        {"columns": {"c\u202e": "x"}},
+        {"columns": {"c" * 200: {"lable": "C"}}},
+        {"columns": {1: "x"}},
+        {"columns": {1: 3}},
+        {"columns": {"c": {"label": 3}, "d": "x"}},
+        {"columns": {"é" * 100 + "\u202e": {"lable": "C"}}},
+    ],
+)
+def test_a_bad_text_gets_the_same_words_from_deploy_and_the_sdk(texts: dict[str, Any]) -> None:
+    """The label and long-form rules are worded once: the SDK raises the deploy issue's text."""
+    import pydantic
+
+    from lakana_core.projects.frontmatter import AssetMetadata
+    from lakana_core.projects.project_config import pydantic_issues
+
+    with pytest.raises(pydantic.ValidationError) as deploy:
+        AssetMetadata.model_validate(texts)
+    (issue,) = pydantic_issues(deploy.value, path="a.py", line=1)
+    with pytest.raises(ValueError) as sdk:
+        cast("Any", sdk_assets.asset)(**texts)
+    assert str(sdk.value) == issue.message
+
+
+def test_a_none_text_is_absent_at_deploy_and_in_the_sdk() -> None:
+    """`label: None` beside a description is accepted by both, and neither keeps the `None`."""
+    from lakana_core.projects.frontmatter import AssetMetadata
+
+    columns: dict[str, Any] = {"c": {"label": None, "description": "x"}}
+    deployed = AssetMetadata.model_validate({"columns": columns})
+    assert (deployed.columns["c"].label, deployed.columns["c"].description) == (None, "x")
+    spec = cast("Any", sdk_assets.asset)(columns=columns)(lambda: None)
+    assert getattr(spec, sdk_assets.ASSET_ATTRIBUTE).columns == {"c": {"description": "x"}}
+
+
+def test_the_sdk_words_the_type_rule_as_core_does() -> None:
+    """The not-a-string text is copied into the SDK; the copy must be core's."""
+    from lakana_core.projects.project_config import NOT_A_TEXT
+
+    assert sdk_assets._NOT_A_TEXT == NOT_A_TEXT
+
+
+def test_the_sdk_words_the_identifier_rule_as_core_does() -> None:
+    """The column-name rule's text is copied into the SDK; the copy must be core's."""
+    from lakana_core.projects.project_config import IDENTIFIER_MESSAGE
+
+    assert sdk_assets._IDENTIFIER_MESSAGE == IDENTIFIER_MESSAGE
+
+
+def test_the_sdk_words_the_free_text_rule_as_core_does() -> None:
+    """The character rule's text is copied into the SDK; the copy must be core's, word for word."""
+    from lakana_core.projects.project_config import FREE_TEXT_MESSAGE
+
+    assert sdk_assets._FREE_TEXT_MESSAGE == FREE_TEXT_MESSAGE

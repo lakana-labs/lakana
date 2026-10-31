@@ -128,7 +128,7 @@ def test_the_spec_example_parses() -> None:
     assert metadata.tags == ("weather",)
     assert metadata.materialize == "table"
     assert (metadata.retries, metadata.retry_delay, metadata.timeout) == (2, 30, 600)
-    assert metadata.columns == {"score": "Anomaly score, 0-1."}
+    assert metadata.column_descriptions() == {"score": "Anomaly score, 0-1."}
 
 
 def test_the_module_attribute_form_and_no_inputs() -> None:
@@ -563,7 +563,7 @@ def test_free_text_keeps_emoji_zwnj_newlines_and_tabs() -> None:
     literal = repr(_FREE_TEXT)
     parsed = _parsed(_HEAD + f"@asset(description={literal}, columns={{'c': {literal}}})" + _DEF)
     assert parsed.metadata.description == _FREE_TEXT
-    assert parsed.metadata.columns == {"c": _FREE_TEXT}
+    assert parsed.metadata.column_descriptions() == {"c": _FREE_TEXT}
 
 
 def test_a_multi_line_description_is_kept() -> None:
@@ -606,7 +606,7 @@ def test_the_front_matter_keeps_free_text() -> None:
     metadata = parse_front_matter(block, path="a.sql").metadata
     assert "\u200d" in (metadata.description or "")
     assert "\u200c" in (metadata.description or "")
-    assert metadata.columns == {"c": "one\ntwo"}
+    assert metadata.column_descriptions() == {"c": "one\ntwo"}
 
 
 _MODEL = '''\
@@ -1250,3 +1250,26 @@ def test_odd_measures_displays_are_refused_without_running_code(argument: str) -
         "def f():\n    return None\n"
     )
     assert issues
+
+
+def test_the_decorator_takes_a_label_and_long_form_columns() -> None:
+    metadata = _parsed(
+        "from lakana import asset\n\n"
+        '@asset(label="Scores", columns={"score": {"label": "Score", "description": "0-1."},\n'
+        '                                "id": "The id."})\n'
+        "def scores():\n    return None\n"
+    ).metadata
+    assert metadata.label == "Scores"
+    assert metadata.column_labels() == {"score": "Score"}
+    assert metadata.column_descriptions() == {"score": "0-1.", "id": "The id."}
+
+
+def test_a_label_on_an_artifact_asset_is_refused() -> None:
+    issues = _issues(
+        "from lakana import asset\n\n"
+        '@asset(output="artifact", label="Model")\n'
+        "def f():\n    return None\n"
+    )
+    assert "argument 'label' does not apply to an artifact asset; remove it" in [
+        issue.message for issue in issues
+    ]

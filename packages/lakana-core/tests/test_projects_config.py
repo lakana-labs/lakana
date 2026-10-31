@@ -10,12 +10,14 @@ import pytest
 from lakana_core.projects.issues import ProjectIssue, ProjectValidationError
 from lakana_core.projects.limits import DeployLimits
 from lakana_core.projects.project_config import (
+    NEEDS_MAIN_LANGUAGE,
     SUPPORTED_TASK_PYTHONS,
     ChecksDefaults,
     EnvironmentOverride,
     JobOverride,
     ProjectConfig,
     ScheduleOverride,
+    checked_label,
     parse_project_config,
 )
 
@@ -837,3 +839,130 @@ def test_a_python_without_a_task_image_is_refused_at_deploy(text: str, message: 
     with pytest.raises(ProjectValidationError) as caught:
         parse_project_config(text)
     assert message in str(caught.value)
+
+
+_TAG_TEXT = (
+    "is not a language tag Lakana takes: a language, then optionally a script and a region "
+    "(BCP 47), such as en, de, fr-CH or zh-Hant"
+)
+
+
+def _messages_of(text: str) -> list[str]:
+    """Parse a `lakana.yaml` that must be refused and return its issue messages.
+
+    Parameters
+    ----------
+    text
+        The file's content.
+
+    Returns
+    -------
+    list of str
+        The messages, in order (the file's `_issues` returns the issues themselves).
+    """
+    return [issue.message for issue in _issues(text)]
+
+
+def test_main_language_and_require_parse() -> None:
+    config = parse_project_config("main_language: de\ntranslations:\n  require: [fr, it]\n")
+    assert config.main_language == "de"
+    assert config.translations.require == ("fr", "it")
+    assert parse_project_config("repo: x\n").main_language is None
+
+
+def test_a_main_language_that_is_not_a_tag_or_not_canonical_is_refused() -> None:
+    assert _messages_of("main_language: English\n") == [f"main_language: `English` {_TAG_TEXT}"]
+    assert _messages_of("main_language: DE-ch\n") == [
+        "main_language: `DE-ch` is written `de-CH`; use that spelling"
+    ]
+
+
+def test_require_takes_tags_once_each() -> None:
+    assert _messages_of("main_language: de\ntranslations:\n  require: [French]\n") == [
+        f"translations.require.0: `French` {_TAG_TEXT}"
+    ]
+    assert _messages_of("main_language: de\ntranslations:\n  require: [fr, fr]\n") == [
+        "translations.require: lists `fr` twice"
+    ]
+
+
+def test_require_may_not_name_the_main_language() -> None:
+    assert _messages_of("main_language: de\ntranslations:\n  require: [de]\n") == [
+        "translations.require: `de` is the main language, whose texts are the asset headers; "
+        "remove it from the list"
+    ]
+
+
+def test_require_needs_a_main_language() -> None:
+    assert _messages_of("translations:\n  require: [fr]\n") == [NEEDS_MAIN_LANGUAGE]
+
+
+def test_an_environment_may_not_set_the_languages() -> None:
+    messages = _messages_of("main_language: de\nenvironments:\n  prod:\n    main_language: fr\n")
+    assert messages == ["environments.prod.main_language: Extra inputs are not permitted"]
+
+
+def test_the_resolved_configuration_leaves_the_languages_out() -> None:
+    config = parse_project_config("main_language: de\ntranslations:\n  require: [fr]\n")
+    resolved = config.resolved_for("dev")
+    assert "main_language" not in resolved.model_dump()
+    assert "translations" not in resolved.model_dump()
+
+
+def test_checked_label_is_one_short_line() -> None:
+    assert checked_label("  Net revenue ") == "Net revenue"
+    for bad, message in (
+        ("", "must not be empty"),
+        ("a\nb", "must be one line"),
+        ("x" * 101, "must be at most 100 characters"),
+    ):
+        with pytest.raises(ValueError, match=message):
+            checked_label(bad)
+
+
+def test_a_control_character_in_lakana_yaml_names_the_file_and_line() -> None:
+    assert [issue.render() for issue in _issues("repo: a\nname: x\x01\n")] == [
+        "lakana.yaml:2: lakana.yaml is not valid YAML: it holds the character U+0001, which YAML "
+        "does not allow; remove it"
+    ]
+
+
+@pytest.mark.parametrize("key", ["defaults", "checks", "requirements", "translations"])
+def test_a_section_that_is_not_a_mapping_names_no_class(key: str) -> None:
+    assert [issue.render() for issue in _issues(f"main_language: en\n{key}: abc\n")] == [
+        f"lakana.yaml:2: {key}: must be a mapping of keys to values (`key: value`), not a list "
+        "or a single value"
+    ]
+
+
+def test_a_long_key_is_cut_in_an_issue() -> None:
+    (issue,) = _issues(f'? "{"k" * 5000}"\n: 1\n')
+    assert len(issue.render()) < 200
+    assert issue.message.startswith("k" * 79 + "…: ")
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        (
+            "main_language: en\ntranslations: {require: fr}\n",
+            "lakana.yaml:2: translations.require: must be a list, such as `[a, b]`; write a "
+            "single item as `[a]`",
+        ),
+        (
+            "defaults: {owner: [a]}\n",
+            "lakana.yaml:1: defaults.owner: must be a text; in YAML, quote a value that reads as "
+            "a number, a date, `yes` or `null`",
+        ),
+        (
+            "defaults: {retries: abc}\n",
+            "lakana.yaml:1: defaults.retries: must be a whole number, such as `3`",
+        ),
+        (
+            "jobs: {a: {select: [x], on_deploy: maybe}}\n",
+            "lakana.yaml:1: jobs.a.on_deploy: must be true or false",
+        ),
+    ],
+)
+def test_a_value_of_the_wrong_type_names_the_shape(text: str, expected: str) -> None:
+    assert [issue.render() for issue in _issues(text)] == [expected]

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from collections.abc import Sequence
 from typing import Annotated, Any, Literal
 from zoneinfo import ZoneInfoNotFoundError
 
@@ -22,9 +23,10 @@ from lakana_core.errors import ValidationError
 from lakana_core.identifiers import NOTIFY_FORMATS, is_secret_name, shown, validate_path_component
 from lakana_core.jobs.cron import validate_cron_can_fire, validate_cron_syntax
 from lakana_core.jobs.tz import load_zone
+from lakana_core.languages import language_problem
 from lakana_core.projects.issues import ProjectIssue, ProjectValidationError
 from lakana_core.projects.limits import DeployLimits
-from lakana_core.projects.yaml_loader import YamlError, key_line, load_yaml
+from lakana_core.projects.yaml_loader import KeyLines, YamlError, key_line, load_yaml, shown_key
 
 Materialize = Literal["table", "view", "incremental"]
 """How an asset is materialized; mapped onto M5a write modes in `manifest`."""
@@ -161,6 +163,35 @@ def checked_text(
     if unsafe_free_text(value):
         raise ValueError(FREE_TEXT_MESSAGE)
     return text
+
+
+MAX_LABEL_CHARS = 100
+"""The most characters a label may have: a table's, a column's or a measure's, in any language."""
+
+MAX_DESCRIPTION_CHARS = 4000
+"""The most characters of a description where Lakana limits one: a measure's, a translation's and
+an edit's through the API."""
+
+
+def checked_label(value: str) -> str:
+    """Apply the rules of a label: one line, at most `MAX_LABEL_CHARS`, not empty, safe.
+
+    Parameters
+    ----------
+    value
+        The label as written.
+
+    Returns
+    -------
+    str
+        `value` without surrounding whitespace.
+
+    Raises
+    ------
+    ValueError
+        For the first rule it breaks, with `checked_text`'s texts.
+    """
+    return checked_text(value, limit=MAX_LABEL_CHARS, one_line=True)
 
 
 def unsafe_free_text(text: str) -> bool:
@@ -688,6 +719,80 @@ class ResolvedProjectConfig(ProjectSettings):
     jobs: dict[JobName, JobConfig] = {}
 
 
+def _language_tag(value: str) -> str:
+    """Refuse a language tag that is not canonical.
+
+    Parameters
+    ----------
+    value
+        The tag as written.
+
+    Returns
+    -------
+    str
+        `value`, unchanged.
+
+    Raises
+    ------
+    ValueError
+        With `language_problem`'s text.
+    """
+    problem = language_problem(value)
+    if problem is not None:
+        raise ValueError(problem)
+    return value
+
+
+LanguageTag = Annotated[str, AfterValidator(_language_tag)]
+"""A canonical BCP 47 tag of the subset `lakana_core.languages` takes."""
+
+NEEDS_MAIN_LANGUAGE = (
+    "a project with translations must say which language its asset headers are written in; add "
+    "`main_language:` with that language, such as `main_language: en`, to lakana.yaml"
+)
+"""Why a project with `translations/` or `translations.require` needs `main_language:`."""
+
+
+class TranslationsConfig(StrictModel):
+    """`lakana.yaml`'s `translations:` section.
+
+    Parameters
+    ----------
+    require
+        Languages in which every header text must have a translation; a deploy with a gap in one
+        of them is refused. Empty: a gap shows the main language.
+    """
+
+    require: tuple[LanguageTag, ...] = ()
+
+    @field_validator("require")
+    @classmethod
+    def _require_is_distinct(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        """Refuse a language listed twice.
+
+        Parameters
+        ----------
+        value
+            The validated tags.
+
+        Returns
+        -------
+        tuple of str
+            `value`, unchanged.
+
+        Raises
+        ------
+        ValueError
+            For the first repeated tag.
+        """
+        seen: set[str] = set()
+        for tag in value:
+            if tag in seen:
+                raise ValueError(f"lists `{tag}` twice")
+            seen.add(tag)
+        return value
+
+
 class ProjectConfig(ResolvedProjectConfig):
     """The whole `lakana.yaml`.
 
@@ -700,10 +805,17 @@ class ProjectConfig(ResolvedProjectConfig):
         The Python version the project's Python tasks run on, one of
         `SUPPORTED_TASK_PYTHONS`; `None` runs them on the worker's own. Top-level
         only: it chooses the task image, so no environment may change it.
+    main_language
+        The language of the asset headers' texts; `None` means the instance's main language.
+        Top-level only. Required when the project ships `translations/` or requires a language.
+    translations
+        `require`: languages that must translate every header text. Top-level only.
     """
 
     environments: dict[str, EnvironmentOverride] = {}
     python: TaskPython | None = None
+    main_language: LanguageTag | None = None
+    translations: TranslationsConfig = TranslationsConfig()
 
     @field_validator("repo")
     @classmethod
@@ -752,7 +864,7 @@ class ProjectConfig(ResolvedProjectConfig):
         ProjectValidationError
             If the merge does not validate, for example a schedule left without a `cron`.
         """
-        base = self.model_dump(exclude={"environments", "python"})
+        base = self.model_dump(exclude={"environments", "python", "main_language", "translations"})
         override = self.environments.get(environment)
         if override is not None:
             base = _deep_merge(base, override.model_dump(exclude_unset=True))
@@ -816,14 +928,45 @@ def _loc_part(part: object) -> str:
     -------
     str
         `part`, ASCII-escaped when it has a non-printable character, so a key
-        from the repository cannot start a second line.
+        from the repository cannot start a second line, and cut to 80 characters
+        with a trailing ``…`` (`shown_key`).
     """
-    text = str(part)
-    return text if text.isprintable() else ascii(text)[1:-1]
+    return shown_key(part)
+
+
+_NOT_A_MAPPING = "must be a mapping of keys to values (`key: value`), not a list or a single value"
+"""What `pydantic_issues` says instead of pydantic's text, which names an internal class."""
+
+NOT_A_TEXT = (
+    "must be a text; in YAML, quote a value that reads as a number, a date, `yes` or `null`"
+)
+"""What `pydantic_issues` says for a value that is not a string (the SDK copies it)."""
+
+_TYPE_MESSAGES = {
+    "model_type": _NOT_A_MAPPING,
+    "dict_type": _NOT_A_MAPPING,
+    "string_type": NOT_A_TEXT,
+    "list_type": "must be a list, such as `[a, b]`; write a single item as `[a]`",
+    "tuple_type": "must be a list, such as `[a, b]`; write a single item as `[a]`",
+    "set_type": "must be a list, such as `[a, b]`; write a single item as `[a]`",
+    "frozen_set_type": "must be a list, such as `[a, b]`; write a single item as `[a]`",
+    "bool_type": "must be true or false",
+    "bool_parsing": "must be true or false",
+    "int_type": "must be a whole number, such as `3`",
+    "int_parsing": "must be a whole number, such as `3`",
+    "int_from_float": "must be a whole number, such as `3`",
+}
+"""pydantic's type errors, reworded to name the expected shape and how to write it."""
 
 
 def pydantic_issues(
-    exc: pydantic.ValidationError, *, path: str, line: int | None, text: str | None = None
+    exc: pydantic.ValidationError,
+    *,
+    path: str,
+    line: int | None,
+    text: str | None = None,
+    prefix: Sequence[str] = (),
+    lines: KeyLines | None = None,
 ) -> list[ProjectIssue]:
     """Turn a pydantic error into one issue per failing field.
 
@@ -838,6 +981,12 @@ def pydantic_issues(
     text
         The YAML the model was built from. With it, an error without a `line` gets the line
         of the deepest key its location reaches.
+    prefix
+        Keys in front of every location, such as a translation file's table name; used for the
+        message and the line.
+    lines
+        The document's key lines from its one parse; preferred over `text`, which is parsed
+        again for every error.
 
     Returns
     -------
@@ -846,18 +995,55 @@ def pydantic_issues(
     """
     issues = []
     for error in exc.errors():
-        parts = [part for part in error["loc"] if part != "[key]"]
+        parts = [*prefix, *(part for part in error["loc"] if part != "[key]")]
         message = error["msg"]
         if error["type"] == "value_error":  # pydantic prefixes what a validator raised
             message = message.removeprefix("Value error, ")
+        elif error["type"] in _TYPE_MESSAGES:  # pydantic's own: a class name, no next step
+            message = _TYPE_MESSAGES[error["type"]]
         where = line
-        if where is None and text is not None:
+        if where is None and lines is not None:
+            where = lines.line(parts)
+        elif where is None and text is not None:
             where = key_line(text, parts)
         issues.append(
             ProjectIssue(
                 path=path,
                 line=where,
                 message=f"{'.'.join(_loc_part(part) for part in parts)}: {message}",
+            )
+        )
+    return issues
+
+
+def translation_config_issues(config: ProjectConfig, *, text: str, path: str) -> list[ProjectIssue]:
+    """Check `main_language:` and `translations.require` against each other.
+
+    Parameters
+    ----------
+    config
+        The validated configuration.
+    text
+        The file's content, for the line of `translations.require`.
+    path
+        The file's repository-relative path.
+
+    Returns
+    -------
+    list of ProjectIssue
+        A `require` without `main_language`, and a `require` that names the main language.
+    """
+    require = config.translations.require
+    issues: list[ProjectIssue] = []
+    if require and config.main_language is None:
+        issues.append(ProjectIssue(path, None, NEEDS_MAIN_LANGUAGE))
+    if config.main_language is not None and config.main_language in require:
+        issues.append(
+            ProjectIssue(
+                path,
+                key_line(text, ["translations", "require"]),
+                f"translations.require: `{config.main_language}` is the main language, whose "
+                "texts are the asset headers; remove it from the list",
             )
         )
     return issues
@@ -1074,6 +1260,7 @@ def parse_project_config(
     else:
         issues += _schedule_without_cron_issues(config, text=source, path=path)
         issues += _notify_without_webhook_issues(config, text=source, path=path)
+        issues += translation_config_issues(config, text=source, path=path)
     if issues:
         raise ProjectValidationError(issues)
     return config
