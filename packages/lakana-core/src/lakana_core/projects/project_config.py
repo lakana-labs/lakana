@@ -25,6 +25,7 @@ from lakana_core.jobs.cron import validate_cron_can_fire, validate_cron_syntax
 from lakana_core.jobs.tz import load_zone
 from lakana_core.languages import language_problem
 from lakana_core.projects.issues import ProjectIssue, ProjectValidationError
+from lakana_core.projects.layers import LayersConfig, layer_config_issues
 from lakana_core.projects.limits import DeployLimits
 from lakana_core.projects.yaml_loader import KeyLines, YamlError, key_line, load_yaml, shown_key
 
@@ -810,12 +811,16 @@ class ProjectConfig(ResolvedProjectConfig):
         Top-level only. Required when the project ships `translations/` or requires a language.
     translations
         `require`: languages that must translate every header text. Top-level only.
+    layers
+        The rules of the medallion layers (`layers.LayersConfig`), checked at every deploy;
+        `None` deploys without layer rules. Top-level only, so dev and prod check the same rules.
     """
 
     environments: dict[str, EnvironmentOverride] = {}
     python: TaskPython | None = None
     main_language: LanguageTag | None = None
     translations: TranslationsConfig = TranslationsConfig()
+    layers: LayersConfig | None = None
 
     @field_validator("repo")
     @classmethod
@@ -864,7 +869,9 @@ class ProjectConfig(ResolvedProjectConfig):
         ProjectValidationError
             If the merge does not validate, for example a schedule left without a `cron`.
         """
-        base = self.model_dump(exclude={"environments", "python", "main_language", "translations"})
+        base = self.model_dump(
+            exclude={"environments", "python", "main_language", "translations", "layers"}
+        )
         override = self.environments.get(environment)
         if override is not None:
             base = _deep_merge(base, override.model_dump(exclude_unset=True))
@@ -1253,6 +1260,7 @@ def parse_project_config(
     issues = _refuse_keep_as_default(raw, path=path)
     source = normalize_source(text)
     issues += _unknown_job_issues(raw, text=source, path=path)
+    issues += layer_config_issues(raw, text=source, path=path)
     try:
         config = ProjectConfig.model_validate(raw)
     except pydantic.ValidationError as exc:

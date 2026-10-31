@@ -72,6 +72,9 @@ secret ([what each outcome means](../reference/connections.md#test-a-connection)
 
 ## 2. Write the asset
 
+An asset that declares `connections` reads a source, so in a project with `layers:` it belongs in
+`assets/bronze/` ([Keep layers apart](keep-layers-apart.md)).
+
 `lakana init --template` creates a project whose one asset reads a source:
 
 <!-- source: docs/examples/ingest-files/run.sh#init -->

@@ -103,6 +103,10 @@ def churn_model(train: pl.DataFrame) -> Path:
   returns one artifact file; the directory itself returns everything in it.
 - Everything else of a Python asset works as before: `retries`, `timeout`, `owner` and so on.
 
+In a project with `layers:` in `lakana.yaml`, every asset lives in a layer: write the model as
+`assets/gold/churn_model.py` (`gold.churn_model`) and read it as `gold.churn_model`. See
+[Keep layers apart](keep-layers-apart.md).
+
 ## 3. Write the asset that scores
 
 `assets/gold/churn_scores.py` reads the model and a table, and returns a table. The parameter

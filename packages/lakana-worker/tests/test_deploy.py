@@ -57,6 +57,7 @@ from lakana_core.models import (
 from lakana_core.models.table import Table, TableType
 from lakana_core.projects.deploys import CONFLICT_MESSAGE, DeployService
 from lakana_core.projects.issues import ProjectIssue, ProjectValidationError
+from lakana_core.projects.layers import MEDALLION_LAYERS, MEDALLION_LAYERS_FLOW
 from lakana_core.projects.limits import DeployLimits
 from lakana_core.projects.manifest import manifest_assets
 from lakana_core.projects.package_indexes import PackageIndexService
@@ -3403,3 +3404,87 @@ def test_the_deadline_is_checked_between_translation_files(
     run = session.get(DeployRun, view.id)
     assert run is not None
     assert run.error_message == "the deploy exceeded its time limit"
+
+
+_LAYERED_CONFIG = "repo: analytics\n" + MEDALLION_LAYERS_FLOW + "\n"
+_STAGING_CLEAN = "/* lakana\nkind: staging\n*/\nSELECT id FROM bronze.events\n"
+
+
+def test_layer_issues_come_after_the_reference_issues(
+    session: Session, principal: PrincipalRef, world: World
+) -> None:
+    commit(
+        world.repo_path,
+        {
+            "lakana.yaml": _LAYERED_CONFIG,
+            "assets/silver/clean.sql": _STAGING_CLEAN,
+            "assets/gold/fact_visits.sql": (
+                "/* lakana\nkind: fact\ngrain: One row per event.\nkey: [id]\nreferences:\n"
+                "  id: bronze.events\n*/\nSELECT id FROM bronze.events\n"
+            ),
+        },
+    )
+    run = _submit_and_run(session, principal, world)
+    assert run.status is DeployStatus.FAILED
+    layer_line = (
+        "assets/gold/fact_visits.sql:8: `gold.fact_visits` reads `bronze.events`, which is in "
+        "bronze, but layers.gold.reads allows only silver and gold. Read the data from silver or "
+        "gold instead, or add bronze to layers.gold.reads in lakana.yaml"
+    )
+    assert run.error_message == (
+        "assets/gold/fact_visits.sql:1: Reference `id: bronze.events`: `bronze.events` declares "
+        "no key. Declare `key:` in its asset, or name the column: `id: bronze.events.<column>`.\n"
+        + layer_line
+    )
+    assert run.error_withheld_json is not None
+    assert run.error_withheld_json[-1] == {
+        "index": 1,
+        "line": layer_line,
+        "withheld": "assets/gold/fact_visits.sql:8: `gold.fact_visits` breaks layers.gold.reads "
+        "with a read that is not shown to you",
+        "targets": ["bronze.events"],
+    }
+    assert session.query(JobVersion).count() == 0
+
+
+@pytest.mark.parametrize("kind", [DeployKind.DEPLOY, DeployKind.DRY_RUN])
+def test_a_layered_project_deploys_with_its_hint_and_its_rules(
+    session: Session, principal: PrincipalRef, world: World, kind: DeployKind
+) -> None:
+    commit(
+        world.repo_path,
+        {
+            "lakana.yaml": _LAYERED_CONFIG,
+            "assets/silver/clean.sql": _STAGING_CLEAN,
+            "assets/gold/total.sql": (
+                "/* lakana\nkind: wide\ngrain: One row for the whole table.\nkey: none\n*/\n"
+                "SELECT count(*) AS n FROM silver.clean\n"
+            ),
+            # A check is no read: a gold table's check may compare with bronze.
+            "checks/gold/total/matches_bronze.sql": (
+                "SELECT n FROM gold.total WHERE n <> (SELECT count(*) FROM bronze.events)\n"
+            ),
+        },
+    )
+    run = _submit_and_run(session, principal, world, kind)
+    assert (run.status, run.error_message) == (DeployStatus.SUCCEEDED, None)
+    assert run.diff_json is not None
+    assert run.diff_json["hints"] == [
+        "layer rules: 2 assets follow them (bronze 0, silver 1, gold 1)"
+    ]
+    if kind is DeployKind.DEPLOY:
+        version = session.get(JobVersion, run.job_version_id)
+        assert version is not None
+        assert version.manifest_json["layers"] == MEDALLION_LAYERS.model_dump(mode="json")
+
+
+def test_a_project_without_layers_keeps_its_manifest_and_hints(
+    session: Session, principal: PrincipalRef, world: World
+) -> None:
+    run = _submit_and_run(session, principal, world)
+    assert run.status is DeployStatus.SUCCEEDED
+    assert run.diff_json is not None
+    assert run.diff_json.get("hints", []) == []
+    version = session.get(JobVersion, run.job_version_id)
+    assert version is not None
+    assert "layers" not in version.manifest_json

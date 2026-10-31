@@ -12,6 +12,7 @@ from lakana_core.projects.asset_model import ResolvedReference, deploy_hints
 from lakana_core.projects.checks import GeneratedFrom, ParsedCheck, read_manifest_checks
 from lakana_core.projects.dag import build_graph
 from lakana_core.projects.frontmatter import AssetMetadata
+from lakana_core.projects.layers import MEDALLION_LAYERS
 from lakana_core.projects.manifest import (
     CHECKS_VERSION,
     CONNECTIONS_VERSION,
@@ -42,6 +43,7 @@ from lakana_core.projects.manifest import (
     manifest_artifacts,
     manifest_assets,
     manifest_jobs,
+    manifest_layers,
     manifest_lock_sha256,
     manifest_main_language,
     manifest_python,
@@ -1174,3 +1176,46 @@ def test_entry_translations_flattens_and_fails_safe() -> None:
     assert manifest_main_language({"main_language": "de"}) == "de"
     assert manifest_main_language({"main_language": "DE"}) is None
     assert manifest_main_language(None) is None
+
+
+def test_the_declared_layer_rules_are_recorded_only_when_declared() -> None:
+    asset = make_asset("gold.a")
+    plain = build_manifest([asset], build_graph([asset]), ResolvedProjectConfig())
+    assert "layers" not in plain
+    declared = build_manifest(
+        [asset], build_graph([asset]), ResolvedProjectConfig(), layers=MEDALLION_LAYERS
+    )
+    assert declared["layers"] == {
+        "bronze": {"reads": [], "write": ["append", "merge"], "kinds": "none"},
+        "silver": {
+            "reads": ["bronze", "silver"],
+            "write": ["replace", "append", "merge", "view"],
+            "kinds": ["staging"],
+        },
+        "gold": {
+            "reads": ["silver", "gold"],
+            "write": ["replace", "append", "merge", "view"],
+            "kinds": ["fact", "dimension", "wide"],
+        },
+    }
+    assert {key: value for key, value in declared.items() if key != "layers"} == plain
+    assert manifest_layers(declared) == MEDALLION_LAYERS
+
+
+def test_manifest_layers_reads_damaged_rules_as_none() -> None:
+    stored = MEDALLION_LAYERS.model_dump(mode="json")
+    damaged = [
+        None,
+        "layers",
+        {},
+        {"layers": None},
+        {"layers": "gold"},
+        {"layers": {"bronze": {}}},
+        {"layers": {**stored, "gold": {**stored["gold"], "reads": ["raw"]}}},
+        {"layers": {**stored, "silver": {**stored["silver"], "kinds": []}}},
+        {"layers": {**stored, "gold": {**stored["gold"], "kinds": "any"}}},
+        {"layers": {**stored, "platinum": stored["gold"]}},
+        {"layers": {**stored, "bronze": {**stored["bronze"], "write": [3]}}},
+    ]
+    for manifest in damaged:
+        assert manifest_layers(manifest) is None, manifest
