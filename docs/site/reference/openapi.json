@@ -19464,7 +19464,7 @@
           "next_step"
         ],
         "title": "FailureOut",
-        "description": "Why a task or an attempt failed.\n\nParameters\n----------\ncode\n    A stable code: `build_failed`, `code_changed`, `secret_refused`, `no_runtime`,\n    `upstream_failed`, `upstream_missing`, `check_blocked`, `check_error`, `query_invalid`,\n    `permission_denied`, `not_found`, `memory`, `timeout`, `cancelled`, `worker_lost`,\n    `conflict` or `internal`; `unknown` for a failure recorded before the codes existed\n    (never stored). A client treats a code it does not know like `internal`.\ncause\n    One sentence: what happened. The sentences may be reworded; the codes do not change.\nnext_step\n    One sentence: what to do about it."
+        "description": "Why a task or an attempt failed.\n\nParameters\n----------\ncode\n    A stable code: `build_failed`, `code_changed`, `secret_refused`, `no_runtime`,\n    `upstream_failed`, `upstream_missing`, `check_blocked`, `check_error`,\n    `checks_unfinished`, `query_invalid`, `permission_denied`, `not_found`, `memory`,\n    `timeout`, `cancelled`, `worker_lost`, `conflict` or `internal`; `unknown` for a failure\n    recorded before the codes existed\n    (never stored). A client treats a code it does not know like `internal`.\ncause\n    One sentence: what happened. The sentences may be reworded; the codes do not change.\nnext_step\n    One sentence: what to do about it."
       },
       "GrantCreate": {
         "properties": {

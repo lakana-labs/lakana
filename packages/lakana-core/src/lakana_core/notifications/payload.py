@@ -31,9 +31,15 @@ from lakana_core.models import (
     TaskStatus,
 )
 from lakana_core.notifications.events import columns_changed_tables
+from lakana_core.runs.failures import FailureCode
 from lakana_core.runs.hidden_checks import is_reference_check
 
 _CHANGED = "The run removed or retyped columns of"
+_UNFINISHED = "Checks never finished:"
+_UNFINISHED_NEXT = (
+    "Lakana stopped trying them again; {command} says whether each table was set back and what "
+    "to do next"
+)
 
 PAYLOAD_VERSION = 1
 """The `version` of the `json` payload; raised only by a change that breaks a receiver."""
@@ -86,6 +92,9 @@ class Facts:
         The run's own tables whose columns a write removed or replaced, whether or not a row
         filter or column mask uses them. Nothing more is said: the endpoint is no administrator,
         and only an administrator may learn that a policy exists (`lakana runs show` shows them).
+    checks_unfinished
+        The failed tasks whose checks never finished (`FailureCode.CHECKS_UNFINISHED`): the
+        platform stopped trying them and set their tables back where it could.
     """
 
     job: str
@@ -101,6 +110,7 @@ class Facts:
     delivery_id: str
     reference_check_failed: bool = False
     columns_changed: tuple[str, ...] = ()
+    checks_unfinished: tuple[str, ...] = ()
 
     @property
     def command(self) -> str:
@@ -149,11 +159,12 @@ def facts_for_run(session: Session, run: Run, delivery_id: UUID | str) -> Facts:
     environment = session.get(Environment, run.environment_id)
     repository = session.get(Repository, run.repository_id)
     version = session.get(JobVersion, run.job_version_id)
-    tasks = session.scalars(
-        select(TaskRun.asset)
+    failed = session.execute(
+        select(TaskRun.asset, TaskRun.failure_code)
         .where(TaskRun.run_id == run.id, TaskRun.status == TaskStatus.FAILED)
         .order_by(TaskRun.asset)
     ).all()
+    tasks = [asset for asset, _ in failed]
     checks = session.execute(
         select(CheckResult.table_name, CheckResult.check_name, CheckResult.generated)
         .where(
@@ -183,6 +194,9 @@ def facts_for_run(session: Session, run: Run, delivery_id: UUID | str) -> Facts:
             is_reference_check(name, generated) for _, name, generated in checks
         ),
         columns_changed=columns_changed_tables(session, run.id),
+        checks_unfinished=tuple(
+            asset for asset, code in failed if code == FailureCode.CHECKS_UNFINISHED.value
+        ),
     )
 
 
@@ -308,6 +322,7 @@ def _json(event: str, facts: Facts) -> dict[str, Any]:
     } | (
         ({"reference_check_failed": True} if facts.reference_check_failed else {})
         | ({"columns_changed": list(facts.columns_changed)} if facts.columns_changed else {})
+        | ({"checks_unfinished": list(facts.checks_unfinished)} if facts.checks_unfinished else {})
     )
 
 
@@ -398,6 +413,10 @@ def _slack(event: str, facts: Facts) -> str:
         lines.append(
             f"{_CHANGED} {tables}; an administrator can see in {_code(facts.command)} what to check"
         )
+    if facts.checks_unfinished:
+        tables = ", ".join(_code(t) for t in facts.checks_unfinished)
+        next_step = _UNFINISHED_NEXT.format(command=_code(facts.command))
+        lines.append(f"{_UNFINISHED} {tables}. {next_step}")
     lines.append(f"Details: {_code(facts.command)}")
     lines.append(f"Delivery {_code(facts.delivery_id)}")
     return "\n".join(lines)
@@ -466,6 +485,10 @@ def _teams(event: str, facts: Facts) -> dict[str, Any]:
                 f"{_CHANGED} {tables}; an administrator can see in {facts.command} what to check",
             )
         )
+    if facts.checks_unfinished:
+        tables = ", ".join(facts.checks_unfinished)
+        next_step = _UNFINISHED_NEXT.format(command=facts.command)
+        pairs.append(("Checks never finished", f"{tables}. {next_step}"))
     pairs += [("Details", facts.command), ("Delivery", facts.delivery_id)]
     card = {
         "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",

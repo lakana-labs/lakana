@@ -78,7 +78,11 @@ absence, so a write that lands between the snapshot and the statement turns the 
 into a miss. A cancel does not end it either: the table holds unchecked rows, so the task goes
 to `ready` with `setting_back`, uncounted, and the claim after it only sets the table back. That
 holds whether the cancel lands while its worker is lost (the reclaim does it) or while the task
-waits in `pending` or `ready` for its next claim (the cancel loop does it). A live
+waits in `pending` or `ready` for its next claim (the cancel loop does it). The same happens,
+with the reason `CHECKS_UNFINISHED_MESSAGE`, once the task took `MAX_CHECK_CLAIMS` claims only for
+its checks (`task_runs.check_claims`): its worker was lost in each, or the checks could not start.
+Both statements require that bound (`_checks_unfinished`), and the operator's log line
+`checks_unfinished` follows the commit. A live
 worker hands its task back the same way from `record_attempt` (a cancel after the write, a memory
 stop that ends the task for good), and the reclaim clears `error_message`, which that hand-back
 uses for the stop's text.
@@ -131,6 +135,7 @@ from lakana_core.models import (
 )
 from lakana_core.models.run import ACTIVE_RUN_STATUSES, TERMINAL_TASK_STATUSES
 from lakana_core.notifications.events import queue_notification
+from lakana_core.runs.checks import MAX_CHECK_CLAIMS
 from lakana_core.runs.failures import FailureCode
 from lakana_core.runs.scheduler import (
     COMMITTED_BEFORE_LOST_MESSAGE,
@@ -275,6 +280,7 @@ def load_snapshots(session: Session) -> list[RunSnapshot]:
                     and task.written_table_id is None,
                     setting_back=task.setting_back,
                     set_back_claims=task.set_back_claims,
+                    check_claims=task.check_claims,
                 )
                 for task, committed in by_run[run.id]
             ),
@@ -395,12 +401,30 @@ def _run_asked_to_cancel() -> ColumnElement[bool]:
     return select(Run.id).where(Run.id == TaskRun.run_id, Run.cancel_requested.is_(True)).exists()
 
 
+def _checks_unfinished() -> ColumnElement[bool]:
+    """Build "this task still awaits its checks and took the most check claims it may".
+
+    The database form of the scheduler's bound (`MAX_CHECK_CLAIMS`): a set-back that ends a task
+    whose checks never finished requires it, so a snapshot that is stale misses.
+
+    Returns
+    -------
+    ColumnElement[bool]
+        A condition on the `TaskRun` being updated.
+    """
+    return and_(
+        TaskRun.setting_back.is_(False),
+        awaiting_checks(),
+        TaskRun.check_claims >= MAX_CHECK_CLAIMS,
+    )
+
+
 def _set_back_evidence() -> ColumnElement[bool]:
     """Build the evidence a reclaim that puts a task back to set its table back must still find.
 
     One alternative per way the scheduler takes: the task is already setting back (its
-    claim was lost), or it awaits its checks in a run asked to cancel, or it may have written
-    and the run is asked to cancel or no attempts are left.
+    claim was lost), or it awaits its checks in a run asked to cancel or at the bound on check
+    claims, or it may have written and the run is asked to cancel or no attempts are left.
 
     The alternatives are not tied to the path the snapshot took, and that is safe: while a task
     is running under a lapsed lease the facts only move one way (a stamp lands, a cancel
@@ -415,6 +439,7 @@ def _set_back_evidence() -> ColumnElement[bool]:
     return or_(
         TaskRun.setting_back.is_(True),
         and_(awaiting_checks(), _run_asked_to_cancel()),
+        _checks_unfinished(),
         and_(
             may_have_written(),
             or_(_run_asked_to_cancel(), TaskRun.attempt >= TaskRun.max_attempts),
@@ -472,10 +497,13 @@ def _apply_task(session: Session, transition: TaskTransition, now: datetime) -> 
         values["ready_at"] = transition.ready_at
     if transition.setting_back:
         values["setting_back"] = True
-        # The reason the next worker ends the task with is its own: a lost worker, or the cancel.
-        # Whatever an earlier attempt stored is not it (a hand-back stores the stop's text).
+        # The reason the next worker ends the task with is its own: a lost worker, the cancel, or
+        # checks that never finished. Whatever an earlier attempt stored is not it (a hand-back
+        # stores the stop's text).
         values["error_message"] = transition.error_message
-        values["failure_code"] = None
+        values["failure_code"] = (
+            None if transition.failure_code is None else transition.failure_code.value
+        )
     if transition.terminal:
         values["finished_at"] = now
     committed = transition.lost and transition.status is TaskStatus.SUCCEEDED
@@ -496,7 +524,9 @@ def _apply_task(session: Session, transition: TaskTransition, now: datetime) -> 
     if transition.lost:
         # Mirror `tick`: only a lease that is still expired may be reclaimed. A late
         # renewal, or the task re-claimed since the snapshot, leaves it valid again.
-        if transition.setting_back:
+        if transition.checks_unfinished:
+            evidence = _checks_unfinished()
+        elif transition.setting_back:
             evidence = _set_back_evidence()
         elif transition.ends_set_back:
             evidence = TaskRun.setting_back.is_(True)
@@ -517,6 +547,8 @@ def _apply_task(session: Session, transition: TaskTransition, now: datetime) -> 
             or_(TaskRun.lease_expires_at.is_(None), TaskRun.lease_expires_at < now),
             evidence,
         )
+    elif transition.checks_unfinished:
+        statement = statement.where(_checks_unfinished())
     elif transition.setting_back:
         statement = statement.where(_waiting_with_unchecked_rows())
     elif transition.status is TaskStatus.CANCELLED:
@@ -699,7 +731,39 @@ def _apply_group(session: Session, transitions: Sequence[Transition], now: datet
             session.rollback()
             return False
     session.commit()
+    for transition in transitions:
+        if isinstance(transition, TaskTransition) and transition.checks_unfinished:
+            _log_checks_unfinished(session, transition)
     return True
+
+
+def _log_checks_unfinished(session: Session, transition: TaskTransition) -> None:
+    """Tell the operator that a task's checks never finished and its table is being set back.
+
+    Parameters
+    ----------
+    session
+        Database session; the transition is committed.
+    transition
+        A `checks_unfinished` move.
+    """
+    asset = session.execute(
+        select(TaskRun.asset).where(TaskRun.id == transition.task_id)
+    ).scalar_one_or_none()
+    session.rollback()
+    logger.warning(
+        "The checks of task run %s (table %s, run %s) did not finish in %d claims of their own; "
+        "the next claim sets the table back and the task fails. Look at the task's attempts "
+        "with 'lakana runs logs %s --task %s': a lost worker needs a higher memory limit, "
+        "checks that could not start need the run's principal or a newer worker.",
+        transition.task_id,
+        asset,
+        transition.run_id,
+        MAX_CHECK_CLAIMS,
+        transition.run_id,
+        asset,
+        extra=log_event(LogEvent.CHECKS_UNFINISHED),
+    )
 
 
 def _apply_per_run(session: Session, transitions: Sequence[Transition], now: datetime) -> int:

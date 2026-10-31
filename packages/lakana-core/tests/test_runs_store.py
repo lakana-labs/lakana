@@ -42,7 +42,7 @@ from lakana_core.models import (
     WriteMode,
 )
 from lakana_core.runs import store, workers
-from lakana_core.runs.checks import SET_BACK_LOST
+from lakana_core.runs.checks import CHECKS_UNFINISHED_MESSAGE, MAX_CHECK_CLAIMS, SET_BACK_LOST
 from lakana_core.runs.scheduler import LOST_MESSAGE, RunTransition, TaskTransition, tick
 from lakana_core.runs.selection import Selection
 from lakana_core.runs.service import RunService
@@ -3556,3 +3556,191 @@ def test_a_set_back_reclaim_clears_the_code_an_earlier_attempt_stored(
 
     stored = _task(session, "silver.clean")
     assert (stored.error_message, stored.failure_code) == (None, None)
+
+
+# --- #99: checks that never finish are bounded, set back and announced ----------------------
+
+
+def _check_claims(session: Session, task: TaskRun, claims: int) -> None:
+    """Store how many claims a task took only to run its checks.
+
+    Parameters
+    ----------
+    session
+        Database session; committed here.
+    task
+        The task run.
+    claims
+        Its check claims.
+    """
+    stored = session.get(TaskRun, task.id)
+    assert stored is not None
+    stored.check_claims = claims
+    session.commit()
+
+
+def _waiting_for_checks(session: Session, run_id: uuid.UUID, claims: int) -> TaskRun:
+    """Leave `silver.clean` stamped and pending again after a check claim that could not start.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    run_id
+        The pipeline run.
+    claims
+        Its check claims.
+
+    Returns
+    -------
+    TaskRun
+        The task.
+    """
+    task, _ = _lost_task_with_write(session, run_id, rows=3, attempt=6)
+    _stamp(session, task)
+    waiting = _task(session, "silver.clean")
+    waiting.status = TaskStatus.PENDING
+    waiting.lease_owner = waiting.lease_expires_at = None
+    waiting.next_attempt_at = NOW + timedelta(minutes=10)
+    waiting.check_claims = claims
+    session.commit()
+    return waiting
+
+
+def test_the_snapshot_carries_the_check_claims(session: Session, run_id: uuid.UUID) -> None:
+    """The tick reads the counter from the row."""
+    _check_claims(session, _lost_task_with_write(session, run_id, rows=3)[0], 4)
+
+    (snapshot,) = load_snapshots(session)
+    assert {t.asset: t.check_claims for t in snapshot.tasks} == {
+        "silver.clean": 4,
+        "gold.daily": 0,
+    }
+
+
+def test_a_task_lost_in_its_last_check_claim_is_set_back_saying_why(
+    session: Session, run_id: uuid.UUID, caplog: pytest.LogCaptureFixture
+) -> None:
+    """#99, loop 1: at the bound the next claim only sets the table back; the reason waits for it.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    run_id
+        The pipeline run.
+    caplog
+        Captures the operator's log line.
+    """
+    task, _ = _lost_task_with_write(session, run_id, rows=3, attempt=6)
+    _stamp(session, task)
+    _check_claims(session, task, MAX_CHECK_CLAIMS)
+
+    with caplog.at_level("WARNING", logger=store.logger.name):
+        scheduler_tick(session, NOW, _half)
+
+    stored = _task(session, "silver.clean")
+    assert (stored.status, stored.setting_back, stored.ready_at, stored.finished_at) == (
+        TaskStatus.READY,
+        True,
+        NOW,
+        None,
+    )
+    assert (stored.error_message, stored.failure_code) == (
+        CHECKS_UNFINISHED_MESSAGE,
+        "checks_unfinished",
+    )
+    assert (stored.attempt, stored.set_back_claims) == (6, 0)
+    assert _task(session, "gold.daily").status is TaskStatus.PENDING
+    (record,) = [r for r in caplog.records if getattr(r, "event", None) == "checks_unfinished"]
+    assert str(task.id) in record.getMessage() and "silver.clean" in record.getMessage()
+
+
+def test_a_waiting_task_whose_checks_could_not_start_is_set_back_at_the_bound(
+    session: Session, run_id: uuid.UUID, caplog: pytest.LogCaptureFixture
+) -> None:
+    """#99, loop 2: the backoff is not waited out; the task goes to set its table back now.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    run_id
+        The pipeline run.
+    caplog
+        Captures the operator's log line.
+    """
+    waiting = _waiting_for_checks(session, run_id, MAX_CHECK_CLAIMS)
+
+    with caplog.at_level("WARNING", logger=store.logger.name):
+        scheduler_tick(session, NOW, _half)
+
+    stored = _task(session, "silver.clean")
+    assert (stored.status, stored.setting_back, stored.ready_at) == (TaskStatus.READY, True, NOW)
+    assert (stored.error_message, stored.failure_code) == (
+        CHECKS_UNFINISHED_MESSAGE,
+        "checks_unfinished",
+    )
+    assert stored.claim_count == waiting.claim_count
+    assert [r for r in caplog.records if getattr(r, "event", None) == "checks_unfinished"]
+
+
+def test_a_waiting_task_below_the_bound_keeps_its_backoff(
+    session: Session, run_id: uuid.UUID
+) -> None:
+    """One check claim short: nothing moves before its retry time."""
+    _waiting_for_checks(session, run_id, MAX_CHECK_CLAIMS - 1)
+
+    scheduler_tick(session, NOW, _half)
+
+    stored = _task(session, "silver.clean")
+    assert (stored.status, stored.setting_back) == (TaskStatus.PENDING, False)
+
+
+def test_a_stale_unfinished_set_back_misses_a_task_that_no_longer_awaits_its_checks(
+    session: Session, run_id: uuid.UUID
+) -> None:
+    """The waiting set-back repeats its evidence: a task whose stamp and evidence are gone misses.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    run_id
+        The pipeline run.
+    """
+    waiting = _waiting_for_checks(session, run_id, MAX_CHECK_CLAIMS)
+    transitions = tick(load_snapshots(session), NOW, _half)
+    session.rollback()
+    stored = session.get(TaskRun, waiting.id)
+    assert stored is not None
+    stored.written_table_id = None
+    stored.query_run_id = None
+    session.commit()
+
+    assert apply_transitions(session, transitions, NOW) is False
+    assert _task(session, "silver.clean").setting_back is False
+
+
+def test_a_stale_lost_reclaim_at_the_bound_misses_a_task_below_it(
+    session: Session, run_id: uuid.UUID
+) -> None:
+    """The lost set-back repeats the bound: below it, the statement does not match."""
+    task, _ = _lost_task_with_write(session, run_id, rows=3, attempt=6)
+    _stamp(session, task)
+    reclaim = TaskTransition(
+        run_id,
+        task.id,
+        TaskStatus.RUNNING,
+        TaskStatus.READY,
+        expected_owner="w1",
+        expected_claim=6,
+        lost=True,
+        ready_at=NOW,
+        setting_back=True,
+        checks_unfinished=True,
+    )
+    _check_claims(session, task, MAX_CHECK_CLAIMS - 1)
+    assert apply_transitions(session, [reclaim], NOW) is False
+    _check_claims(session, task, MAX_CHECK_CLAIMS)
+    assert apply_transitions(session, [reclaim], NOW) is True

@@ -770,6 +770,60 @@ def test_a_normal_claim_is_not_a_set_back_claim(session: Session, run_id: uuid.U
     assert (task.attempt, task.claim_count, task.set_back_claims) == (1, 1, 0)
 
 
+def _awaiting_checks(
+    session: Session, run_id: uuid.UUID, *, setting_back: bool = False
+) -> uuid.UUID:
+    """Stamp the first ready task of the run written, with checks, as its write's commit would.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    run_id
+        The run.
+    setting_back
+        Whether the task is also to set its table back.
+
+    Returns
+    -------
+    uuid.UUID
+        The task run.
+    """
+    task_id = session.scalars(
+        select(TaskRun.id).where(TaskRun.run_id == run_id).order_by(TaskRun.asset)
+    ).first()
+    assert task_id is not None
+    session.execute(
+        update(TaskRun)
+        .where(TaskRun.id == task_id)
+        .values(has_checks=True, written_table_id=uuid.uuid4(), setting_back=setting_back)
+    )
+    session.commit()
+    return task_id
+
+
+def test_a_claim_of_a_task_that_awaits_its_checks_counts_a_check_claim(
+    session: Session, run_id: uuid.UUID
+) -> None:
+    """#99: such a claim only runs the checks; it is counted for the bound, a build claim is not."""
+    task_id = _awaiting_checks(session, run_id)
+    claims = [claim_task(session, worker, 60) for worker in ("w1", "w2")]
+    assert {c.task_run_id for c in claims if c is not None} >= {task_id}
+    assert {_task(session, c.task_run_id).check_claims for c in claims if c is not None} == {0, 1}
+    assert _task(session, task_id).check_claims == 1
+
+
+def test_a_set_back_claim_of_a_task_that_awaits_its_checks_is_no_check_claim(
+    session: Session, run_id: uuid.UUID
+) -> None:
+    """A claim that only sets the table back runs no check, so the bound does not count it."""
+    task_id = _awaiting_checks(session, run_id, setting_back=True)
+    claims = [claim_task(session, worker, 60) for worker in ("w1", "w2")]
+    assert task_id in {c.task_run_id for c in claims if c is not None}
+    task = _task(session, task_id)
+    assert (task.check_claims, task.set_back_claims) == (0, 1)
+
+
 def test_a_task_setting_its_table_back_is_not_claimed_in_a_finished_run(
     session: Session, run_id: uuid.UUID
 ) -> None:

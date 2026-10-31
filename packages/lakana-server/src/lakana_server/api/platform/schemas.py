@@ -3006,9 +3006,10 @@ class FailureOut(BaseModel):
     ----------
     code
         A stable code: `build_failed`, `code_changed`, `secret_refused`, `no_runtime`,
-        `upstream_failed`, `upstream_missing`, `check_blocked`, `check_error`, `query_invalid`,
-        `permission_denied`, `not_found`, `memory`, `timeout`, `cancelled`, `worker_lost`,
-        `conflict` or `internal`; `unknown` for a failure recorded before the codes existed
+        `upstream_failed`, `upstream_missing`, `check_blocked`, `check_error`,
+        `checks_unfinished`, `query_invalid`, `permission_denied`, `not_found`, `memory`,
+        `timeout`, `cancelled`, `worker_lost`, `conflict` or `internal`; `unknown` for a failure
+        recorded before the codes existed
         (never stored). A client treats a code it does not know like `internal`.
     cause
         One sentence: what happened. The sentences may be reworded; the codes do not change.

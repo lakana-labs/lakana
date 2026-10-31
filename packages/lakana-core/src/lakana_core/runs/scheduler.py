@@ -16,6 +16,8 @@ from datetime import datetime, timedelta
 
 from lakana_core.models import RunStatus, TaskStatus
 from lakana_core.runs.checks import (
+    CHECKS_UNFINISHED_MESSAGE,
+    MAX_CHECK_CLAIMS,
     RUN_CANCELLED_MESSAGE,
     RUN_STOPPED_MESSAGE,
     SET_BACK_LOST,
@@ -169,6 +171,9 @@ class TaskSnapshot:
         Whether the task is only to set its table back before it ends.
     set_back_claims
         Claims taken while it was setting back.
+    check_claims
+        Claims taken while it already awaited its checks (`TaskRun.check_claims`). At
+        `MAX_CHECK_CLAIMS` the scheduler sends a task that still awaits them to set its table back.
     unchecked
         Whether the task's asset has checks, its write is in the table (its commit stamped it, or
         its write run shows the evidence: a rollback clears the stamp but not the evidence) and
@@ -193,6 +198,7 @@ class TaskSnapshot:
     baselined: bool = False
     setting_back: bool = False
     set_back_claims: int = 0
+    check_claims: int = 0
 
 
 @dataclass(frozen=True)
@@ -273,6 +279,11 @@ class TaskTransition:
         Marks the end of a task whose set-back claims were lost up to the limit: it ends
         ``failed``, or ``cancelled`` in a run asked to cancel, with the lost set-back text as
         payload. Its statement requires that the task still is setting back.
+    checks_unfinished
+        Marks a `setting_back` move of a task whose checks reached `MAX_CHECK_CLAIMS` without a
+        verdict, lost or waiting: it carries `CHECKS_UNFINISHED_MESSAGE` and its code for the
+        claim that sets the table back, and its statement requires that bound (and, for a
+        waiting task, that it still awaits its checks and is not setting back).
     """
 
     run_id: uuid.UUID
@@ -289,6 +300,7 @@ class TaskTransition:
     unchecked: bool = False
     setting_back: bool = False
     ends_set_back: bool = False
+    checks_unfinished: bool = False
 
     @property
     def terminal(self) -> bool:
@@ -375,13 +387,16 @@ def _tick_run(run: RunSnapshot, now: datetime, rand: Callable[[], float]) -> lis
     setting = {task.asset for task in run.tasks if task.setting_back}
     stop_text = RUN_STOPPED_MESSAGE if run.stopped_by_check else RUN_CANCELLED_MESSAGE
 
-    def put_back(task: TaskSnapshot) -> None:
+    def put_back(task: TaskSnapshot, *, unfinished: bool = False) -> None:
         """Put a lost task back to ready, to set its table back, without counting an attempt.
 
         Parameters
         ----------
         task
             The task.
+        unfinished
+            Whether its checks reached `MAX_CHECK_CLAIMS`: the set-back then ends the task with
+            `CHECKS_UNFINISHED_MESSAGE`.
         """
         move(
             task,
@@ -391,6 +406,9 @@ def _tick_run(run: RunSnapshot, now: datetime, rand: Callable[[], float]) -> lis
             lost=True,
             ready_at=now,
             setting_back=True,
+            error_message=CHECKS_UNFINISHED_MESSAGE if unfinished else None,
+            failure_code=FailureCode.CHECKS_UNFINISHED if unfinished else None,
+            checks_unfinished=unfinished,
         )
 
     def move(
@@ -407,6 +425,7 @@ def _tick_run(run: RunSnapshot, now: datetime, rand: Callable[[], float]) -> lis
         unchecked: bool = False,
         setting_back: bool = False,
         ends_set_back: bool = False,
+        checks_unfinished: bool = False,
     ) -> None:
         """Record a transition from the task's current working status.
 
@@ -437,6 +456,8 @@ def _tick_run(run: RunSnapshot, now: datetime, rand: Callable[[], float]) -> lis
             As for `TaskTransition`.
         ends_set_back
             As for `TaskTransition`.
+        checks_unfinished
+            As for `TaskTransition`.
         """
         failure_code = failure_code or _ENDING_CODES.get(new)
         out.append(
@@ -455,6 +476,7 @@ def _tick_run(run: RunSnapshot, now: datetime, rand: Callable[[], float]) -> lis
                 unchecked=unchecked,
                 setting_back=setting_back,
                 ends_set_back=ends_set_back,
+                checks_unfinished=checks_unfinished,
             )
         )
         status[task.asset] = new
@@ -489,6 +511,11 @@ def _tick_run(run: RunSnapshot, now: datetime, rand: Callable[[], float]) -> lis
             # The cancel would end it with the rows of its write unchecked in the table. The
             # next worker sets them back first, and the task ends cancelled after that.
             put_back(task)
+        elif task.unchecked and task.check_claims >= MAX_CHECK_CLAIMS:
+            # Its checks were claimed again up to the bound and lost each time. Another claim
+            # would most likely be lost too, so the next one only sets the table back, which runs
+            # no check, and the task fails saying why.
+            put_back(task, unfinished=True)
         elif task.unchecked:
             # Written and not yet checked: nobody but the worker that runs its checks ends it,
             # not as succeeded (downstream would build on unchecked data), not as failed (the
@@ -567,6 +594,26 @@ def _tick_run(run: RunSnapshot, now: datetime, rand: Callable[[], float]) -> lis
             else:
                 move(task, TaskStatus.CANCELLED, error_message=stop_text)
 
+    for task in run.tasks:
+        if (
+            status[task.asset] in _WAITING
+            and task.asset not in setting
+            and task.unchecked
+            and task.check_claims >= MAX_CHECK_CLAIMS
+        ):
+            # Its last check claim could not start the checks (or the memory stop ended it):
+            # trying again after the backoff would only repeat that. The table is set back now.
+            move(
+                task,
+                TaskStatus.READY,
+                expected_claim=task.claim,
+                ready_at=now if status[task.asset] is TaskStatus.PENDING else None,
+                setting_back=True,
+                error_message=CHECKS_UNFINISHED_MESSAGE,
+                failure_code=FailureCode.CHECKS_UNFINISHED,
+                checks_unfinished=True,
+            )
+
     # Failure first, to its own fixed point, and only then cancellation: in
     # one interleaved pass a task below both would take whichever its asset
     # name happened to meet first.
@@ -610,7 +657,9 @@ def tick(runs: Sequence[RunSnapshot], now: datetime, rand: Callable[[], float]) 
       again, or ends with `SET_BACK_LOST` (``cancelled`` in a cancelled run) at
       `MAX_SET_BACK_CLAIMS`;
     - a task that is written and has checks but no verdict goes back to ready to set its table
-      back in a cancelled run, and otherwise to pending at once and uncounted;
+      back in a cancelled run or once it took `MAX_CHECK_CLAIMS` claims only for its checks (the
+      set-back then ends it with `CHECKS_UNFINISHED_MESSAGE`), and otherwise to pending at once
+      and uncounted;
     - a task whose write run shows the evidence of a commit succeeds, whatever else is true;
     - a task that may have written (checks, a baseline, no stamp) goes back to ready to set its
       table back in a cancelled run or on its last attempt;
@@ -619,7 +668,9 @@ def tick(runs: Sequence[RunSnapshot], now: datetime, rand: Callable[[], float]) 
 
     Then, in a cancelled run, each waiting task that is not setting back is cancelled, unless
     its table may hold rows no check has passed (it awaits its checks, or it has checks, a
-    baseline and no stamp): such a task goes to ready to set its table back first. Then
+    baseline and no stamp): such a task goes to ready to set its table back first. A waiting
+    task that awaits its checks and took `MAX_CHECK_CLAIMS` claims for them (its checks could not
+    start) goes to ready to set its table back too, without waiting out its backoff. Then
     propagate failure (``upstream_failed``) downstream to a fixed point and then cancellation to
     its own, so a task below both is ``upstream_failed`` whatever its asset's name; a task that
     is setting back is left out of both, and of the cancel. Ready every pending task whose
