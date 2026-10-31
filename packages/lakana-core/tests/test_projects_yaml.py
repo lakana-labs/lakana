@@ -197,7 +197,9 @@ def _load_value(text: str, *, what: str, max_bytes: int) -> object:
 
 
 @pytest.mark.parametrize("load", [load_yaml, _load_value])
-@pytest.mark.parametrize(("char", "code"), [("\x00", "0000"), ("\x01", "0001"), ("\x0c", "000C")])
+@pytest.mark.parametrize(
+    ("char", "code"), [("\x00", "0000"), ("\x01", "0001"), ("\x0c", "000C"), ("\ufffe", "FFFE")]
+)
 def test_a_control_character_is_not_valid_yaml(
     load: Callable[..., object], char: str, code: str
 ) -> None:
@@ -205,8 +207,8 @@ def test_a_control_character_is_not_valid_yaml(
     with pytest.raises(YamlError) as info:
         load(f"a: 1\nb: x{char}y\n", what="t", max_bytes=1024)
     assert str(info.value) == (
-        f"t is not valid YAML: it holds the control character U+{code}, which YAML does not "
-        "allow; remove it"
+        f"t is not valid YAML: it holds the character U+{code}, which YAML does not allow; "
+        "remove it"
     )
     assert info.value.line == 2
 
@@ -245,7 +247,7 @@ def test_a_long_duplicate_key_is_cut_in_the_message() -> None:
     key = "k" * 5000
     with pytest.raises(YamlError) as info:
         load_yaml(f'? "{key}"\n: 1\n? "{key}"\n: 2\n', what="t", max_bytes=100_000)
-    assert str(info.value) == f"t: duplicate key '{'k' * 78}…."
+    assert str(info.value) == f"t: duplicate key '{'k' * 79}…'."
 
 
 def test_shown_key_is_one_short_line() -> None:
@@ -254,3 +256,9 @@ def test_shown_key_is_one_short_line() -> None:
     assert shown_key(3) == "3"
     assert shown_key("x" * 100) == "x" * 79 + "…"
     assert len(shown_key("x" * 80)) == 80
+
+
+def test_shown_key_escapes_each_character_and_never_cuts_an_escape() -> None:
+    assert shown_key("gold." + "é" * 100 + "\u202e") == "gold." + "é" * 74 + "…"
+    assert shown_key("a\u202eb") == "a\\u202eb"
+    assert shown_key("a" * 77 + "\u202e" + "b") == "a" * 77 + "…"

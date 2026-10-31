@@ -120,6 +120,9 @@ _IDENTIFIER_MESSAGE = (
 )
 _IDENTIFIER_CATEGORIES = ("Cc", "Cf", "Cs", "Zl", "Zp")
 _MAX_KEY_CHARS = 80
+_NOT_A_TEXT = (
+    "must be a text; in YAML, quote a value that reads as a number, a date, `yes` or `null`"
+)
 
 _CHECK_FAMILIES = ("key", "references", "measures")
 _CHECK_MODES = ("block", "keep", "warn")
@@ -571,7 +574,7 @@ def _check_label(where: str, value: object) -> str:
         With deploy's text for the first rule it breaks.
     """
     if not isinstance(value, str):
-        raise ValueError(f"{where}: Input should be a valid string")
+        raise ValueError(f"{where}: {_NOT_A_TEXT}")
     stripped = value.strip()
     if not stripped:
         raise ValueError(f"{where}: must not be empty")
@@ -595,9 +598,12 @@ def _shown(name: object) -> str:
     Returns
     -------
     str
-        The ASCII-escaped text, at most 200 characters.
+        The ASCII-escaped text, at most 200 characters; the type's name for anything that is
+        not a string.
     """
-    return ascii(str(name))[1:-1][:200]
+    if not isinstance(name, str):
+        return type(name).__name__
+    return ascii(name)[1:-1][:200]
 
 
 def _loc(name: object) -> str:
@@ -611,12 +617,24 @@ def _loc(name: object) -> str:
     Returns
     -------
     str
-        One line of at most 80 characters, cut with a trailing ``…``.
+        One line of at most 80 characters: each non-printable character escaped, cut with a
+        trailing ``…``, never inside an escape.
     """
-    text = str(name)
-    if not text.isprintable():
-        text = ascii(text)[1:-1]
-    return text if len(text) <= _MAX_KEY_CHARS else text[: _MAX_KEY_CHARS - 1] + "…"
+    pieces: list[str] = []
+    length = 0
+    for char in str(name):
+        piece = char if char.isprintable() else ascii(char)[1:-1]
+        pieces.append(piece)
+        length += len(piece)
+        if length > _MAX_KEY_CHARS:
+            kept, used = [], 0
+            for piece in pieces:
+                if used + len(piece) > _MAX_KEY_CHARS - 1:
+                    break
+                kept.append(piece)
+                used += len(piece)
+            return "".join(kept) + "…"
+    return "".join(pieces)
 
 
 def _check_columns(columns: object) -> dict[str, str | dict[str, str]] | None:
@@ -644,16 +662,18 @@ def _check_columns(columns: object) -> dict[str, str | dict[str, str]] | None:
         raise ValueError("columns must be a dict of strings or dicts")
     result: dict[str, str | dict[str, str]] = {}
     for name, given in columns.items():
+        if not isinstance(given, (str, Mapping)):
+            raise ValueError(
+                f"columns: `{_shown(name)}` must be a description or a mapping such as "
+                "`{label: Store, description: The store that sold.}`"
+            )
+        if not isinstance(name, str):
+            raise ValueError(f"columns.{_loc(name)}: {_NOT_A_TEXT}")
         if isinstance(given, str):
             if _unsafe_free_text(given):
                 raise ValueError(f"columns: a column description {_FREE_TEXT_MESSAGE}")
             result[name] = given
             continue
-        if not isinstance(given, Mapping):
-            raise ValueError(
-                f"columns: `{_shown(name)}` must be a description or a mapping such as "
-                "`{label: Store, description: The store that sold.}`"
-            )
         where = f"columns.{_loc(name)}"
         for key in given:
             if key not in ("label", "description"):
@@ -667,7 +687,7 @@ def _check_columns(columns: object) -> dict[str, str | dict[str, str]] | None:
         description = texts.get("description")
         if description is not None:
             if not isinstance(description, str):
-                raise ValueError(f"{where}.description: Input should be a valid string")
+                raise ValueError(f"{where}.description: {_NOT_A_TEXT}")
             if _unsafe_free_text(description):
                 raise ValueError(f"{where}.description: {_FREE_TEXT_MESSAGE}")
         if "label" in texts:
@@ -709,7 +729,7 @@ def _check_measure(column: str, spec: Mapping[object, object]) -> dict[str, Any]
     given: dict[str, Any] = {str(key): value for key, value in spec.items() if value is not None}
     for key in ("aggregation", "additivity", "unit", "currency", "label", "description"):
         if key in given and not isinstance(given[key], str):
-            raise ValueError(f"{where}.{key}: Input should be a valid string")
+            raise ValueError(f"{where}.{key}: {_NOT_A_TEXT}")
     aggregation, additivity = given.get("aggregation"), given.get("additivity")
     if aggregation is not None and aggregation not in AGGREGATIONS:
         raise ValueError(

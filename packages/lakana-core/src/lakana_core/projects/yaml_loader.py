@@ -66,13 +66,25 @@ def shown_key(key: object) -> str:
     Returns
     -------
     str
-        Its text, ASCII-escaped when it has a non-printable character so that it cannot start a
-        second line, and cut to `_MAX_KEY_CHARS` with a trailing ``…``.
+        Its text with each non-printable character ASCII-escaped, so that it cannot start a
+        second line while the other letters stay readable, and cut to `_MAX_KEY_CHARS` with a
+        trailing ``…``, never inside an escape.
     """
-    text = str(key)
-    if not text.isprintable():
-        text = ascii(text)[1:-1]
-    return text if len(text) <= _MAX_KEY_CHARS else text[: _MAX_KEY_CHARS - 1] + "…"
+    pieces: list[str] = []
+    length = 0
+    for char in str(key):
+        piece = char if char.isprintable() else ascii(char)[1:-1]
+        pieces.append(piece)
+        length += len(piece)
+        if length > _MAX_KEY_CHARS:  # cut: keep whole pieces that fit beside the ellipsis
+            kept, used = [], 0
+            for piece in pieces:
+                if used + len(piece) > _MAX_KEY_CHARS - 1:
+                    break
+                kept.append(piece)
+                used += len(piece)
+            return "".join(kept) + "…"
+    return "".join(pieces)
 
 
 class _AliasRefused(yaml.MarkedYAMLError):
@@ -134,8 +146,9 @@ class _NoAliasLoader(yaml.SafeLoader):
             try:
                 key = self.construct_object(key_node, deep=True)
                 if key in seen:
+                    shown = f"'{shown_key(key)}'" if isinstance(key, str) else shown_key(repr(key))
                     raise _AmbiguousMapping(
-                        problem=f"duplicate key {shown_key(repr(key))}",
+                        problem=f"duplicate key {shown}",
                         problem_mark=key_node.start_mark,
                     )
                 seen.add(key)
@@ -243,8 +256,8 @@ def _load(
         loader = _NoAliasLoader(text)  # nosec B506 -- a SafeLoader subclass
     except yaml.reader.ReaderError as exc:
         raise YamlError(
-            f"{what} is not valid YAML: it holds the control character "
-            f"U+{exc.character:04X}, which YAML does not allow; remove it",
+            f"{what} is not valid YAML: it holds the character U+{exc.character:04X}, which "
+            "YAML does not allow; remove it",
             _reader_line(text, exc),
         ) from exc
     loader.max_entries = max_entries
@@ -288,9 +301,13 @@ class KeyLines:
     lines
         Path of keys from the top → the 1-based line of its last key. A key inside a list is
         reached through the item's index.
+    top
+        Each top-level key as written in the document, with its line, in document order; the
+        loaded mapping has its keys in the same order.
     """
 
     lines: Mapping[tuple[object, ...], int] = field(default_factory=dict)
+    top: tuple[tuple[str, int], ...] = ()
 
     def line(self, path: Sequence[object]) -> int | None:
         """Find a key's line as `key_line` does: the deepest key of `path` that exists.
@@ -326,6 +343,10 @@ def _key_lines(root: Node | None) -> KeyLines:
         Every key path and its line; a key's first occurrence wins.
     """
     lines: dict[tuple[object, ...], int] = {}
+    top = tuple(
+        (str(key_node.value), key_node.start_mark.line + 1)
+        for key_node, _ in (root.value if isinstance(root, MappingNode) else ())
+    )
     stack: list[tuple[tuple[object, ...], Node | None]] = [((), root)]
     while stack:
         path, node = stack.pop()
@@ -337,7 +358,7 @@ def _key_lines(root: Node | None) -> KeyLines:
                 stack.append((here, value_node))
         elif isinstance(node, SequenceNode):
             stack.extend(((*path, index), item) for index, item in enumerate(node.value))
-    return KeyLines(lines)
+    return KeyLines(lines, top)
 
 
 def load_yaml_with_lines(

@@ -348,6 +348,15 @@ def test_a_key_that_is_not_a_table_name_is_named() -> None:
     ]
 
 
+def test_a_key_that_is_not_a_table_name_is_shown_as_written() -> None:
+    assert _issues_of({"fr.yaml": "null: {label: x}\n0x10: {label: y}\n"}) == [
+        "translations/fr.yaml:1: `null` is not a table name; a key is a table's dotted name, "
+        "such as `gold.fact_sales`",
+        "translations/fr.yaml:2: `0x10` is not a table name; a key is a table's dotted name, "
+        "such as `gold.fact_sales`",
+    ]
+
+
 @pytest.mark.parametrize("value", ["Ventes", "[a, b]", "!!set {a}"])
 def test_a_table_entry_that_is_not_a_mapping_shows_the_shape(value: str) -> None:
     assert _issues_of({"fr.yaml": f"gold.fact_sales: {value}\n"}) == [
@@ -358,8 +367,8 @@ def test_a_table_entry_that_is_not_a_mapping_shows_the_shape(value: str) -> None
 
 def test_a_control_character_in_a_file_names_the_file_and_line() -> None:
     assert _issues_of({"fr.yaml": "gold.fact_sales:\n  label: a\x00b\n"}) == [
-        "translations/fr.yaml:2: translations/fr.yaml is not valid YAML: it holds the control "
-        "character U+0000, which YAML does not allow; remove it"
+        "translations/fr.yaml:2: translations/fr.yaml is not valid YAML: it holds the character "
+        "U+0000, which YAML does not allow; remove it"
     ]
 
 

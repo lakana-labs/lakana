@@ -595,7 +595,8 @@ def test_checks_measures_needs_measures_in_the_decorator() -> None:
         ),
         (
             {"m": {"aggregation": "sum", "unit": "count", "label": 3}},
-            "measures.m.label: Input should be a valid string",
+            "measures.m.label: must be a text; in YAML, quote a value that reads as a number, "
+            "a date, `yes` or `null`",
         ),
         (
             {"m": {"aggregation": "sum", "additivity": "semi", "not_over": [3], "unit": "count"}},
@@ -650,7 +651,7 @@ def test_the_decorator_records_a_label_and_long_form_columns() -> None:
         ({"label": "a\nb"}, "label: must be one line"),
         ({"label": "x" * 101}, "label: must be at most 100 characters"),
         ({"label": " "}, "label: must not be empty"),
-        ({"label": 3}, "label: Input should be a valid string"),
+        ({"label": 3}, "label: must be a text"),
         ({"label": "a\u202eb"}, "label: must not contain a surrogate"),
         ({"columns": ["c"]}, "columns must be a dict of strings or dicts"),
         ({"columns": {"c": {}}}, "columns.c: needs `label:` or `description:`"),

@@ -922,8 +922,8 @@ def test_checked_label_is_one_short_line() -> None:
 
 def test_a_control_character_in_lakana_yaml_names_the_file_and_line() -> None:
     assert [issue.render() for issue in _issues("repo: a\nname: x\x01\n")] == [
-        "lakana.yaml:2: lakana.yaml is not valid YAML: it holds the control character U+0001, "
-        "which YAML does not allow; remove it"
+        "lakana.yaml:2: lakana.yaml is not valid YAML: it holds the character U+0001, which YAML "
+        "does not allow; remove it"
     ]
 
 
@@ -939,3 +939,30 @@ def test_a_long_key_is_cut_in_an_issue() -> None:
     (issue,) = _issues(f'? "{"k" * 5000}"\n: 1\n')
     assert len(issue.render()) < 200
     assert issue.message.startswith("k" * 79 + "…: ")
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        (
+            "main_language: en\ntranslations: {require: fr}\n",
+            "lakana.yaml:2: translations.require: must be a list, such as `[a, b]`; write a "
+            "single item as `[a]`",
+        ),
+        (
+            "defaults: {owner: [a]}\n",
+            "lakana.yaml:1: defaults.owner: must be a text; in YAML, quote a value that reads as "
+            "a number, a date, `yes` or `null`",
+        ),
+        (
+            "defaults: {retries: abc}\n",
+            "lakana.yaml:1: defaults.retries: must be a whole number, such as `3`",
+        ),
+        (
+            "jobs: {a: {select: [x], on_deploy: maybe}}\n",
+            "lakana.yaml:1: jobs.a.on_deploy: must be true or false",
+        ),
+    ],
+)
+def test_a_value_of_the_wrong_type_names_the_shape(text: str, expected: str) -> None:
+    assert [issue.render() for issue in _issues(text)] == [expected]

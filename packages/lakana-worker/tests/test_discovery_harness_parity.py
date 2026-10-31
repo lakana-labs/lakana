@@ -768,6 +768,10 @@ def test_a_null_not_over_means_no_columns_at_deploy_and_in_the_sdk() -> None:
         {"columns": {"c\n": {"lable": "C"}}},
         {"columns": {"c\u202e": "x"}},
         {"columns": {"c" * 200: {"lable": "C"}}},
+        {"columns": {1: "x"}},
+        {"columns": {1: 3}},
+        {"columns": {"c": {"label": 3}, "d": "x"}},
+        {"columns": {"é" * 100 + "\u202e": {"lable": "C"}}},
     ],
 )
 def test_a_bad_text_gets_the_same_words_from_deploy_and_the_sdk(texts: dict[str, Any]) -> None:
@@ -794,6 +798,13 @@ def test_a_none_text_is_absent_at_deploy_and_in_the_sdk() -> None:
     assert (deployed.columns["c"].label, deployed.columns["c"].description) == (None, "x")
     spec = cast("Any", sdk_assets.asset)(columns=columns)(lambda: None)
     assert getattr(spec, sdk_assets.ASSET_ATTRIBUTE).columns == {"c": {"description": "x"}}
+
+
+def test_the_sdk_words_the_type_rule_as_core_does() -> None:
+    """The not-a-string text is copied into the SDK; the copy must be core's."""
+    from lakana_core.projects.project_config import NOT_A_TEXT
+
+    assert sdk_assets._NOT_A_TEXT == NOT_A_TEXT
 
 
 def test_the_sdk_words_the_identifier_rule_as_core_does() -> None:

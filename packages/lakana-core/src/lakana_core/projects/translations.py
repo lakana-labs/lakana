@@ -524,13 +524,15 @@ def parse_translations(
         tables: dict[str, TableTranslation] = {}
         invalid: set[str] = set()
         problems = _FileIssues(item.path)
-        for table, value in raw.items():
+        for index, (table, value) in enumerate(raw.items()):
             if not isinstance(table, str):
+                # The key as written (`null`, `0x10`), not as YAML read it (`None`, `16`).
+                written, line = lines.top[index] if index < len(lines.top) else (table, None)
                 problems.add(
                     ProjectIssue(
                         item.path,
-                        lines.line([str(table)]),
-                        f"`{shown_key(table)}` is not a table name; a key is a table's dotted "
+                        line,
+                        f"`{shown_key(written)}` is not a table name; a key is a table's dotted "
                         "name, such as `gold.fact_sales`",
                     )
                 )

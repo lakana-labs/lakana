@@ -141,7 +141,7 @@ The messages about the two keys themselves are in [`lakana.yaml`](lakana-yaml.md
 | ``` `gold.fact_sales` must be a mapping of its texts, such as `gold.fact_sales: {label: …, description: …, columns: …}` ``` | Write the texts under their keys, such as `label: Ventes`. |
 | ``gold.fact_sales.columns: must be a mapping of names to their texts, such as `{store_id: {label: …, description: …}}` `` (also `measures`) | Key the columns or measures by name. |
 | ``gold.fact_sales.columns: `store_id` must be a mapping such as `{label: …, description: …}` `` | Give the column `label:` or `description:`. |
-| `gold.fact_sales.label: Input should be a valid string` | Write the text as a string; quote it if YAML reads it as a number or a date. |
+| ``gold.fact_sales.label: must be a text; in YAML, quote a value that reads as a number, a date, `yes` or `null` `` | Write the text as a string, quoted if need be. |
 | ``` `gold.fact_sale` is not a table this project builds; did you mean `gold.fact_sales`? Fix the name, or remove the entry``` | Fix the table's name. The suggestion appears only when a name is close. |
 | ``` `ml.model` is an artifact, which has no catalog texts to translate; remove the entry``` | Remove the entry. |
 | `gold.fact_sales.labl: Extra inputs are not permitted` | Fix the misspelt key. |
@@ -166,7 +166,7 @@ The file is read with the rules of every project file. Each message starts with 
 | Message | Next step |
 |---|---|
 | `translations/fr.yaml is not valid YAML: …` | Fix the syntax at the line named. |
-| `translations/fr.yaml is not valid YAML: it holds the control character U+0000, which YAML does not allow; remove it` | Remove the character at the line named. |
+| `translations/fr.yaml is not valid YAML: it holds the character U+0000, which YAML does not allow; remove it` | Remove the character at the line named. |
 | `translations/fr.yaml: anchors and aliases are not allowed.` | Write each text out. |
 | `translations/fr.yaml: merge keys (<<) are not allowed.` | Write each key out. |
 | `translations/fr.yaml: duplicate key 'gold.fact_sales'.` | Keep one entry per key. |

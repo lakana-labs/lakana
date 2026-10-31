@@ -561,5 +561,5 @@ def test_a_control_character_in_a_header_names_the_file_and_line() -> None:
         parse_front_matter(text, path="assets/gold/t.sql")
     assert [issue.render() for issue in caught.value.issues] == [
         "assets/gold/t.sql:2: assets/gold/t.sql front-matter is not valid YAML: it holds the "
-        "control character U+000C, which YAML does not allow; remove it"
+        "character U+000C, which YAML does not allow; remove it"
     ]

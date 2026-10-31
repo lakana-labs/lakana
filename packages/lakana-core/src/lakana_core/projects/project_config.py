@@ -937,6 +937,27 @@ def _loc_part(part: object) -> str:
 _NOT_A_MAPPING = "must be a mapping of keys to values (`key: value`), not a list or a single value"
 """What `pydantic_issues` says instead of pydantic's text, which names an internal class."""
 
+NOT_A_TEXT = (
+    "must be a text; in YAML, quote a value that reads as a number, a date, `yes` or `null`"
+)
+"""What `pydantic_issues` says for a value that is not a string (the SDK copies it)."""
+
+_TYPE_MESSAGES = {
+    "model_type": _NOT_A_MAPPING,
+    "dict_type": _NOT_A_MAPPING,
+    "string_type": NOT_A_TEXT,
+    "list_type": "must be a list, such as `[a, b]`; write a single item as `[a]`",
+    "tuple_type": "must be a list, such as `[a, b]`; write a single item as `[a]`",
+    "set_type": "must be a list, such as `[a, b]`; write a single item as `[a]`",
+    "frozen_set_type": "must be a list, such as `[a, b]`; write a single item as `[a]`",
+    "bool_type": "must be true or false",
+    "bool_parsing": "must be true or false",
+    "int_type": "must be a whole number, such as `3`",
+    "int_parsing": "must be a whole number, such as `3`",
+    "int_from_float": "must be a whole number, such as `3`",
+}
+"""pydantic's type errors, reworded to name the expected shape and how to write it."""
+
 
 def pydantic_issues(
     exc: pydantic.ValidationError,
@@ -978,8 +999,8 @@ def pydantic_issues(
         message = error["msg"]
         if error["type"] == "value_error":  # pydantic prefixes what a validator raised
             message = message.removeprefix("Value error, ")
-        elif error["type"] in ("model_type", "dict_type"):  # pydantic names a class here
-            message = _NOT_A_MAPPING
+        elif error["type"] in _TYPE_MESSAGES:  # pydantic's own: a class name, no next step
+            message = _TYPE_MESSAGES[error["type"]]
         where = line
         if where is None and lines is not None:
             where = lines.line(parts)
