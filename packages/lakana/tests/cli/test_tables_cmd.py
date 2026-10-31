@@ -196,6 +196,11 @@ def test_table_get_shows_the_columns(tmp_path: Path) -> None:
 
     assert table_mode.exit_code == 0, table_mode.stderr
     assert "region" in table_mode.stdout
+    header = next(line for line in table_mode.stdout.splitlines() if "nullable" in line)
+    assert header.split() == [
+        "┃", "name", "┃", "type", "┃", "nullable", "┃", "description", "┃",
+        "description_source", "┃",
+    ]  # fmt: skip
     assert json.loads(json_mode.stdout)["columns"][0] == {
         "name": "id",
         "type": "long",
@@ -410,6 +415,46 @@ def test_table_describe_reset_of_a_column_in_a_language_says_what_shows(tmp_path
         "Reset the description and label of bronze.sales column id in dev (fr); it now has no text"
         in (_plain(result.stdout))
     )
+
+
+@pytest.mark.parametrize(
+    ("answer", "after"),
+    [
+        (
+            {"description": "Hand", "description_source": "edited", "description_language": "en"},
+            "it now shows an edit in en",
+        ),
+        (
+            {
+                "description": "From git",
+                "description_source": "project",
+                "description_language": "en",
+                "label": "Hand",
+                "label_source": "edited",
+                "label_language": "de",
+            },
+            "it now shows an edit and the project's text in de, en",
+        ),
+    ],
+)
+def test_table_describe_reset_says_which_text_shows_now_and_in_which_language(
+    tmp_path: Path, answer: dict[str, str], after: str
+) -> None:
+    api = FakeApi()
+    api.on("PATCH", f"{_BASE}/sales", json={**_TABLE, **answer})
+    result = invoke(
+        make_state(tmp_path, api),
+        "table",
+        "describe",
+        "bronze.sales",
+        "--reset",
+        "--lang",
+        "fr",
+        "--env",
+        "dev",
+    )
+    assert result.exit_code == 0, result.stderr
+    assert f"in dev (fr); {after}" in _plain(result.stdout)
 
 
 def test_table_append_conforms_a_csv_and_streams_it(tmp_path: Path) -> None:

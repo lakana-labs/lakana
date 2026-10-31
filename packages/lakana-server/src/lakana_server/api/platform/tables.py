@@ -32,7 +32,7 @@ from sqlalchemy.orm import Session
 from starlette.requests import ClientDisconnect
 
 from lakana_core.auth import PrincipalRef
-from lakana_core.catalog.descriptions import KEEP, _Keep
+from lakana_core.catalog.descriptions import KEEP, Keep
 from lakana_core.catalog.json_schema import ColumnSpec, from_iceberg_schema, to_iceberg_schema
 from lakana_core.catalog.lineage_graph import LineageDirection, LineageService
 from lakana_core.catalog.loads import require_bronze
@@ -544,7 +544,7 @@ def _decode_arrow_stream(payload: pa.Buffer, max_bytes: int, max_arrays: int) ->
     return data
 
 
-def _to_out(namespace: str, loaded: LoadedTable) -> TableOut:
+def _to_out(namespace: str, loaded: LoadedTable, *, language: str, main_language: str) -> TableOut:
     """Build a response body from a loaded table.
 
     Parameters
@@ -553,6 +553,10 @@ def _to_out(namespace: str, loaded: LoadedTable) -> TableOut:
         Dot-joined namespace path the table lives in.
     loaded
         The table, as `CatalogService.load_table` returns it.
+    language
+        The reader's first language, for `TableOut.language`.
+    main_language
+        `LAKANA_MAIN_LANGUAGE`; the table's main language unless its project declares one.
 
     Returns
     -------
@@ -570,6 +574,8 @@ def _to_out(namespace: str, loaded: LoadedTable) -> TableOut:
             for c in from_iceberg_schema(loaded.metadata.schema())
         ],
         snapshot_id=loaded.metadata.current_snapshot_id,
+        language=language,
+        main_language=loaded.text_language or main_language,
     )
 
 
@@ -932,8 +938,10 @@ def create_table(
     env: str,
     path: str,
     body: TableCreate,
+    request: Request,
     principal: PrincipalRef = Depends(get_principal),
     catalog: CatalogService = Depends(get_catalog),
+    main_language: str = Depends(get_main_language),
 ) -> TableOut:
     """Create a table.
 
@@ -950,10 +958,14 @@ def create_table(
         Dot-joined namespace path.
     body
         The table's name and columns.
+    request
+        The current request, for `Accept-Language`.
     principal
         The authenticated caller.
     catalog
         The catalog service for this request.
+    main_language
+        `LAKANA_MAIN_LANGUAGE`, the main language of a table whose project declares none.
 
     Returns
     -------
@@ -979,7 +991,12 @@ def create_table(
     loaded = catalog.create_table(
         with_break_glass(principal, body.break_glass_reason), ref, schema=to_iceberg_schema(columns)
     )
-    return _to_out(path, loaded)
+    return _to_out(
+        path,
+        loaded,
+        language=reader_languages(request, None, principal, main_language)[0],
+        main_language=main_language,
+    )
 
 
 @router.get("", response_model=list[TableOut], responses=errors(403, 404, 503))
@@ -1181,7 +1198,7 @@ _EDIT_LANG_DESCRIPTION = (
 """The description of the `lang` query parameter of the two description routes."""
 
 
-def _sent(body: DescriptionIn, field: Literal["description", "label"]) -> str | _Keep | None:
+def _sent(body: DescriptionIn, field: Literal["description", "label"]) -> str | Keep | None:
     """Read one field of a description body, or `KEEP` when it was left out.
 
     Parameters
@@ -1193,7 +1210,7 @@ def _sent(body: DescriptionIn, field: Literal["description", "label"]) -> str | 
 
     Returns
     -------
-    str or None or _Keep
+    str or Keep or None
         The text, `None` to reset, or `KEEP` for a field the body did not send.
     """
     return getattr(body, field) if field in body.model_fields_set else KEEP
@@ -1576,8 +1593,10 @@ def undrop_table(
     path: str,
     name: str,
     body: UndropIn,
+    request: Request,
     principal: PrincipalRef = Depends(get_principal),
     catalog: CatalogService = Depends(get_catalog),
+    main_language: str = Depends(get_main_language),
 ) -> TableOut:
     """Restore a dropped table.
 
@@ -1597,10 +1616,14 @@ def undrop_table(
         The name the table had when it was dropped.
     body
         A new name, if its own is taken, and a break-glass reason.
+    request
+        The current request, for `Accept-Language`.
     principal
         The authenticated caller.
     catalog
         The catalog service for this request.
+    main_language
+        `LAKANA_MAIN_LANGUAGE`, the main language of a table whose project declares none.
 
     Returns
     -------
@@ -1624,7 +1647,12 @@ def undrop_table(
         TableRef(environment=env, namespace=ns, name=name),
         new_name=body.new_name,
     )
-    return _to_out(path, loaded)
+    return _to_out(
+        path,
+        loaded,
+        language=reader_languages(request, None, principal, main_language)[0],
+        main_language=main_language,
+    )
 
 
 @router.get("/{name}/retention", response_model=TableRetentionOut, responses=errors(403, 404))

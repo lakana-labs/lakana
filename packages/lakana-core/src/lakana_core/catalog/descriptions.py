@@ -24,7 +24,7 @@ from sqlalchemy import inspect, select
 from sqlalchemy.orm import Session
 
 from lakana_core.catalog.model_metadata import find_project_table, write_model_entry
-from lakana_core.catalog.translations import write_translations
+from lakana_core.catalog.translations import lock_table, write_translations
 from lakana_core.errors import ValidationError
 from lakana_core.models import (
     ColumnDescription,
@@ -34,7 +34,12 @@ from lakana_core.models import (
     TableType,
 )
 from lakana_core.projects.manifest import entry_translations, manifest_main_language
-from lakana_core.projects.project_config import MAX_DESCRIPTION_CHARS, MAX_LABEL_CHARS
+from lakana_core.projects.project_config import (
+    FREE_TEXT_MESSAGE,
+    MAX_DESCRIPTION_CHARS,
+    MAX_LABEL_CHARS,
+    checked_text,
+)
 
 MAX_DESCRIPTION_LENGTH = MAX_DESCRIPTION_CHARS
 """The most characters a description may have, for a table and for a column."""
@@ -47,6 +52,9 @@ class _Keep(enum.Enum):
 
     KEEP = "keep"
 
+
+Keep = _Keep
+"""The type of `KEEP`, for annotations outside this module: ``str | Keep | None``."""
 
 KEEP: Final = _Keep.KEEP
 """Leave a text as it is: what an edit passes for a field it does not change."""
@@ -93,8 +101,65 @@ def shown(project: str | None, edited: str | None) -> ShownDescription | None:
     return None
 
 
+def _checked(text: str | None, what: str, field: str, limit: int) -> str | None:
+    """Apply a deploy's rules to an edit, and say what to do about a text that breaks one.
+
+    The rules are `checked_text`'s, the very function a deploy runs on header and translation
+    texts: not blank once stripped, at most `limit` characters once stripped, safe characters
+    only, and for a label one line.
+
+    Parameters
+    ----------
+    text
+        The new text, or `None` to reset the edit.
+    what
+        What is described, for the message (``"table silver.orders"``).
+    field
+        ``"description"`` or ``"label"``.
+    limit
+        The most characters the text may have once stripped.
+
+    Returns
+    -------
+    str or None
+        `text` without surrounding whitespace, as it is stored; `None` for a reset.
+
+    Raises
+    ------
+    ValidationError
+        With the cause and the next step.
+    """
+    if text is None:
+        return None
+    try:
+        return checked_text(text, limit=limit, one_line=field == "label")
+    except ValueError as problem:
+        reason = str(problem)
+    if reason == "must not be empty":
+        message = (
+            f"The {field} of {what} is blank. Write the {field}, or reset it to go back to the "
+            "project's text (`lakana table describe --reset`, or send null)."
+        )
+    elif reason == "must be one line":
+        message = (
+            f"The {field} of {what} has more than one line; a label is one line. Put the longer "
+            "text in the description."
+        )
+    elif reason == FREE_TEXT_MESSAGE:
+        message = (
+            f"The {field} of {what} {FREE_TEXT_MESSAGE}. Remove those characters (a carriage "
+            "return or a line separator included) and send the text again."
+        )
+    else:
+        message = (
+            f"The {field} of {what} has {len(text.strip()):,} characters; the limit is "
+            f"{limit:,}. Write a shorter one."
+        )
+    raise ValidationError(message)
+
+
 def check_text(text: str | None, what: str) -> str | None:
-    """Refuse a description that is blank or too long.
+    """Refuse a description edit that a deploy would refuse in a header or a translation file.
 
     Parameters
     ----------
@@ -106,30 +171,19 @@ def check_text(text: str | None, what: str) -> str | None:
     Returns
     -------
     str or None
-        `text`, unchanged.
+        `text` without surrounding whitespace, as it is stored.
 
     Raises
     ------
     ValidationError
-        If `text` is blank, or longer than `MAX_DESCRIPTION_LENGTH` characters.
+        If `text` is blank, longer than `MAX_DESCRIPTION_LENGTH` characters, or has a character
+        a deploy refuses; the message names the next step.
     """
-    if text is None:
-        return None
-    if not text.strip():
-        raise ValidationError(
-            f"The description of {what} is blank. Write the text, or reset it to go back to the "
-            "project's text (`lakana table describe --reset`, or send null)."
-        )
-    if len(text) > MAX_DESCRIPTION_LENGTH:
-        raise ValidationError(
-            f"The description of {what} has {len(text):,} characters; the limit is "
-            f"{MAX_DESCRIPTION_LENGTH:,}. Write a shorter one."
-        )
-    return text
+    return _checked(text, what, "description", MAX_DESCRIPTION_LENGTH)
 
 
 def check_label(text: str | None, what: str) -> str | None:
-    """Refuse a label edit that is blank, several lines or too long.
+    """Refuse a label edit that a deploy would refuse: `checked_label`'s rules.
 
     Parameters
     ----------
@@ -141,31 +195,15 @@ def check_label(text: str | None, what: str) -> str | None:
     Returns
     -------
     str or None
-        `text`, unchanged.
+        `text` without surrounding whitespace, as it is stored.
 
     Raises
     ------
     ValidationError
-        With the cause and the next step.
+        If `text` is blank, of more than one line, longer than `MAX_LABEL_CHARS` characters, or
+        has a character a deploy refuses; the message names the next step.
     """
-    if text is None:
-        return None
-    if not text.strip():
-        raise ValidationError(
-            f"The label of {what} is blank. Write the label, or reset it to go back to the "
-            "project's text (`lakana table describe --reset`, or send null)."
-        )
-    if "\n" in text.strip():
-        raise ValidationError(
-            f"The label of {what} has more than one line; a label is one line. Put the longer "
-            "text in the description."
-        )
-    if len(text) > MAX_LABEL_CHARS:
-        raise ValidationError(
-            f"The label of {what} has {len(text):,} characters; the limit is {MAX_LABEL_CHARS:,}. "
-            "Write a shorter one."
-        )
-    return text
+    return _checked(text, what, "label", MAX_LABEL_CHARS)
 
 
 def _text(value: object) -> str | None:
@@ -246,6 +284,10 @@ def _write_entry(
     main_language
         The language of the header texts, or `None` for the instance's main language.
     """
+    state = inspect(row)
+    stored = not (state.pending or state.transient)
+    if stored:
+        lock_table(session, row)
     metadata = entry.get("metadata")
     metadata = metadata if isinstance(metadata, Mapping) else {}
     row.description_project = _text(metadata.get("description"))
@@ -283,10 +325,7 @@ def _write_entry(
             )
         ):
             session.delete(found)
-    state = inspect(row)
-    write_translations(
-        session, row, entry_translations(entry), stored=not (state.pending or state.transient)
-    )
+    write_translations(session, row, entry_translations(entry), stored=stored)
     write_model_entry(session, row, entry)
 
 
@@ -448,9 +487,9 @@ def edit_column(
     """
     attribute = "description_edited" if field == "description" else "label_edited"
     found = session.execute(
-        select(ColumnDescription).where(
-            ColumnDescription.table_id == table_id, ColumnDescription.column == column
-        )
+        select(ColumnDescription)
+        .where(ColumnDescription.table_id == table_id, ColumnDescription.column == column)
+        .execution_options(populate_existing=True)
     ).scalar_one_or_none()
     old = len((getattr(found, attribute) if found is not None else None) or "")
     if found is None:

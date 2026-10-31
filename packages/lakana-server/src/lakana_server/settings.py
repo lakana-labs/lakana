@@ -218,8 +218,10 @@ class Settings(BaseSettings):
     main_language
         The language catalog texts are in when a project does not declare its own
         (`main_language:` in lakana.yaml), and the language a reader without a choice gets
-        (default `en`). A BCP 47 tag such as `de` or `fr-CH`. Set it before the first deploy:
-        existing texts are marked with it.
+        (default `en`). A BCP 47 tag such as `de` or `fr-CH`. Nothing stores it: each answer
+        reads it. Set it before the first deploy. Changing it later relabels at once the texts
+        of every project that declares no `main_language:`, and edits made with `--lang` in the
+        new main language stop showing.
     """
 
     model_config = SettingsConfigDict(

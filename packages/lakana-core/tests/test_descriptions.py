@@ -5,13 +5,15 @@ from __future__ import annotations
 import re
 import uuid
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 from core_test_helpers import ActionAllowList, _prepared_catalog
 from pyiceberg.schema import Schema
 from pyiceberg.types import LongType, NestedField, StringType
-from sqlalchemy import select, update
-from sqlalchemy.orm import Session
+from sqlalchemy import event, select, update
+from sqlalchemy.dialects import postgresql
+from sqlalchemy.orm import ORMExecuteState, Session
 from test_projects_dag import make_asset
 
 from lakana_core.auth import Action, AllowAllAuthorization, PrincipalRef
@@ -19,7 +21,7 @@ from lakana_core.catalog.descriptions import (
     MAX_DESCRIPTION_LENGTH,
     sync_project_descriptions,
 )
-from lakana_core.catalog.service import CatalogService, TableDescription
+from lakana_core.catalog.service import MAX_EDIT_LANGUAGES, CatalogService, TableDescription
 from lakana_core.errors import NotFoundError, PermissionDenied, ValidationError
 from lakana_core.identifiers import NamespacePath, TableRef
 from lakana_core.models import (
@@ -35,6 +37,7 @@ from lakana_core.models import (
     RepositoryKind,
     Table,
     TableType,
+    TextTranslation,
 )
 from lakana_core.projects.dag import build_graph
 from lakana_core.projects.frontmatter import AssetMetadata
@@ -693,3 +696,188 @@ def test_a_french_column_description_edit_is_shown_in_french(
     shown_fr = catalog_with_orders.describe_table(principal, _ORDERS, languages=["fr"])
     text = shown_fr.column_descriptions["status"]
     assert (text.text, text.source, text.language) == ("Où elle en est", "edited", "fr")
+
+
+def _selects(session: Session) -> list[str]:
+    """Record the ORM selects of a session, compiled for PostgreSQL.
+
+    Parameters
+    ----------
+    session
+        Database session.
+
+    Returns
+    -------
+    list of str
+        The SQL of each select, in order, filled in as the session runs them.
+    """
+    seen: list[str] = []
+
+    @event.listens_for(session, "do_orm_execute")
+    def _record(state: ORMExecuteState) -> None:
+        """Keep one select.
+
+        Parameters
+        ----------
+        state
+            The statement about to run.
+        """
+        if state.is_select:
+            seen.append(str(cast("Any", state.statement).compile(dialect=postgresql.dialect())))
+
+    return seen
+
+
+def _locked_before_texts(seen: list[str]) -> bool:
+    """Say whether the table row was locked before any translation or column text was read.
+
+    Parameters
+    ----------
+    seen
+        The selects, from `_selects`.
+
+    Returns
+    -------
+    bool
+        True when a `SELECT … FROM tables … FOR UPDATE` comes first.
+    """
+    lock = next(
+        (i for i, sql in enumerate(seen) if "FROM tables" in sql and "FOR UPDATE" in sql), None
+    )
+    texts = next(
+        (
+            i
+            for i, sql in enumerate(seen)
+            if "FROM text_translations" in sql or "FROM column_descriptions" in sql
+        ),
+        None,
+    )
+    return lock is not None and (texts is None or lock < texts)
+
+
+def test_an_edit_locks_the_table_row_before_it_reads_any_text(
+    catalog_with_orders: CatalogService, principal: PrincipalRef, session: Session
+) -> None:
+    """Two edits, or an edit and a deploy, of one table run one after the other."""
+    catalog_with_orders.set_table_description(principal, _ORDERS, label="Commandes", language="fr")
+    seen = _selects(session)
+    catalog_with_orders.set_table_description(principal, _ORDERS, label="Ordini", language="it")
+    assert _locked_before_texts(seen)
+    seen.clear()
+    catalog_with_orders.set_column_description(principal, _ORDERS, "id", label="No.")
+    lock = next(i for i, sql in enumerate(seen) if "FOR UPDATE" in sql)
+    assert "FROM tables" in seen[lock]
+    assert any("FROM column_descriptions" in sql for sql in seen[lock:])
+
+
+def test_a_deploy_locks_a_stored_table_before_it_writes_its_texts(
+    catalog_with_orders: CatalogService, session: Session
+) -> None:
+    """The deploy's sync takes the same lock, so it cannot remove an edit made meanwhile."""
+    seen = _selects(session)
+    sync_project_descriptions(session, _env_id(session), _manifest())
+    assert _locked_before_texts(seen)
+
+
+def test_a_language_missing_from_the_list_is_repaired_by_the_next_edit(
+    catalog_with_orders: CatalogService, principal: PrincipalRef, session: Session
+) -> None:
+    """A row the list does not name is found again by an edit, which lists it once more."""
+    catalog_with_orders.set_table_description(principal, _ORDERS, label="Commandes", language="fr")
+    session.execute(update(Table).values(text_languages=None))
+    session.commit()
+    catalog_with_orders.set_table_description(principal, _ORDERS, label="Ordini", language="it")
+    row = session.scalars(select(Table)).one()
+    assert row.text_languages == ["fr", "it"]
+    session.execute(update(Table).values(text_languages=["it"]))
+    session.commit()
+    catalog_with_orders.set_table_description(principal, _ORDERS, label=None, language="fr")
+    assert row.text_languages == ["it"]
+    assert [r.language for r in session.scalars(select(TextTranslation))] == ["it"]
+
+
+@pytest.mark.parametrize("language", [None, "fr"])
+@pytest.mark.parametrize("column", [None, "status"])
+def test_an_edit_follows_the_deploys_character_rules(
+    catalog_with_orders: CatalogService,
+    principal: PrincipalRef,
+    session: Session,
+    language: str | None,
+    column: str | None,
+) -> None:
+    """Labels and descriptions, in the main language and another, as `checked_label` rules."""
+    what = "table silver.orders" if column is None else "column status of table silver.orders"
+
+    def edit(**texts: str | None) -> None:
+        if column is None:
+            catalog_with_orders.set_table_description(
+                principal, _ORDERS, language=language, **texts
+            )
+        else:
+            catalog_with_orders.set_column_description(
+                principal, _ORDERS, column, language=language, **texts
+            )
+
+    for bad in ("a\rb", "a\u2028b", "a\u2029b", "x\u202eevil", "bell\x07"):
+        for field in ("label", "description"):
+            with pytest.raises(
+                ValidationError,
+                match=re.escape(f"The {field} of {what} must not contain a surrogate"),
+            ):
+                edit(**{field: bad})
+    edit(label="  Orders  ", description="  Line one.\n\tLine two.  ")
+    shown_texts = catalog_with_orders.describe_table(
+        principal, _ORDERS, languages=[language or "en"]
+    )
+    if column is None:
+        label, description = shown_texts.label, shown_texts.description
+    else:
+        label = shown_texts.column_labels[column].text
+        description = shown_texts.column_descriptions[column].text
+    assert (label, description) == ("Orders", "Line one.\n\tLine two.")
+
+
+def test_a_label_of_spaces_around_is_measured_without_them(
+    catalog_with_orders: CatalogService, principal: PrincipalRef
+) -> None:
+    """The limit counts the label as stored, without the surrounding spaces."""
+    catalog_with_orders.set_table_description(principal, _ORDERS, label=" " + "x" * 100 + " ")
+    assert catalog_with_orders.describe_table(principal, _ORDERS).label == "x" * 100
+
+
+def test_a_table_has_texts_in_at_most_50_languages_besides_its_main_one(
+    catalog_with_orders: CatalogService, principal: PrincipalRef, session: Session
+) -> None:
+    """A 51st language is refused with the limit and how to free one; listed ones stay editable."""
+    row = session.scalars(select(Table)).one()
+    tags = [f"a{chr(97 + i // 26)}{chr(97 + i % 26)}" for i in range(MAX_EDIT_LANGUAGES)]
+    for tag in tags:
+        session.add(
+            TextTranslation(
+                id=uuid.uuid4(),
+                table_id=row.id,
+                subject="table",
+                name="",
+                language=tag,
+                field="label",
+                text_project="x",
+            )
+        )
+    row.text_languages = sorted(tags)
+    session.commit()
+    with pytest.raises(
+        ValidationError,
+        match=re.escape(
+            "Table silver.orders has texts in 50 languages besides its main language, the most "
+            "a table may have. To add `fr`, first remove another language's texts: reset its "
+            "edits (`lakana table describe silver.orders --lang TAG --reset`, also with "
+            "`--column` for each column that has one) and remove its file from translations/."
+        ),
+    ):
+        catalog_with_orders.set_column_description(
+            principal, _ORDERS, "id", label="Numéro", language="fr"
+        )
+    catalog_with_orders.set_table_description(principal, _ORDERS, label="y", language=tags[0])
+    catalog_with_orders.set_table_description(principal, _ORDERS, label="Orders")
+    catalog_with_orders.set_table_description(principal, _ORDERS, label=None, language="fr")
+    assert len(row.text_languages or []) == MAX_EDIT_LANGUAGES

@@ -139,9 +139,10 @@ def test_to_out_builds_the_response_body_from_a_loaded_table() -> None:
             uuid=table_uuid,
             metadata_location="file:///tmp/x.json",
             metadata=SimpleNamespace(schema=lambda: Schema(), current_snapshot_id=42),
+            text_language=None,
         ),
     )
-    assert _to_out("gold", loaded) == TableOut(
+    assert _to_out("gold", loaded, language="en", main_language="en") == TableOut(
         name="sales",
         namespace="gold",
         uuid=str(table_uuid),

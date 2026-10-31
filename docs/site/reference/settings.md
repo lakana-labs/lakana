@@ -28,7 +28,7 @@ Compose](../how-to/deploy-with-compose.md).
 | `LAKANA_HOST` | text | `127.0.0.1` | server | Address the server listens on. `127.0.0.1` (the default) accepts connections from this machine only; the Compose bundle publishes the port through `LAKANA_BIND`. |
 | `LAKANA_PORT` | whole number | `8000` | server | Port the server listens on (default 8000). |
 | `LAKANA_REPO_ROOTS` | list | empty | server, worker | Absolute directories that local repositories must lie under, as a JSON list, for example `["/repos"]`. Empty (the default) refuses every local repository. |
-| `LAKANA_MAIN_LANGUAGE` | text | `en` | server | The language catalog texts are in when a project does not declare its own (`main_language:` in lakana.yaml), and the language a reader without a choice gets (default `en`). A BCP 47 tag such as `de` or `fr-CH`. Set it before the first deploy: existing texts are marked with it. |
+| `LAKANA_MAIN_LANGUAGE` | text | `en` | server | The language catalog texts are in when a project does not declare its own (`main_language:` in lakana.yaml), and the language a reader without a choice gets (default `en`). A BCP 47 tag such as `de` or `fr-CH`. Nothing stores it: each answer reads it. Set it before the first deploy. Changing it later relabels at once the texts of every project that declares no `main_language:`, and edits made with `--lang` in the new main language stop showing. |
 
 ## `LAKANA_SECRETS__*`
 

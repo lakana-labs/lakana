@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from lakana_core.catalog.descriptions import sync_project_descriptions
 from lakana_core.models import Environment, Principal
+from lakana_server.deps import get_main_language
 from tests.conftest import AUTH_HEADER
 from tests.server_test_helpers import create_environment
 
@@ -186,3 +187,36 @@ def test_a_german_project_on_an_english_server_shows_its_english_texts(client: T
     assert (body["language"], body["main_language"]) == ("en", "de")
     assert (body["label"], body["label_language"]) == ("Sales", "en")
     assert (body["description"], body["description_language"]) == ("Eine Zeile je Verkauf.", "de")
+
+
+def test_a_create_answers_with_the_instances_main_language(client: TestClient) -> None:
+    create_environment(client)
+    client.app.dependency_overrides[get_main_language] = lambda: "de"
+    try:
+        created = client.post(
+            _TABLES,
+            headers=AUTH_HEADER,
+            json={"name": "t", "schema": [{"name": "id", "type": "long", "nullable": False}]},
+        )
+    finally:
+        client.app.dependency_overrides.pop(get_main_language)
+    assert created.status_code == 201, created.text
+    assert (created.json()["language"], created.json()["main_language"]) == ("de", "de")
+
+
+def test_an_undrop_answers_with_the_tables_own_main_language(client: TestClient) -> None:
+    _setup(client)
+    with Session(client.app.state.engine) as session:
+        env = session.scalars(select(Environment.id).where(Environment.name == "dev")).one()
+        sync_project_descriptions(
+            session,
+            env,
+            {"version": 11, "main_language": "de", "assets": [{"table": "gold.t", "metadata": {}}]},
+        )
+        session.commit()
+    assert client.delete(_TABLE, headers=AUTH_HEADER).status_code == 204
+    restored = client.post(
+        f"{_TABLE}/undrop", headers={**AUTH_HEADER, "Accept-Language": "fr"}, json={}
+    )
+    assert restored.status_code == 200, restored.text
+    assert (restored.json()["language"], restored.json()["main_language"]) == ("fr", "de")

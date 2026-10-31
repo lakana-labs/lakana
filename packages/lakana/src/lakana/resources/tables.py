@@ -764,7 +764,9 @@ class Tables:
         column
             A column of the table to describe instead of the table.
         lang
-            The language edited, such as `"fr"`; also the language of the returned texts.
+            The language edited, such as `"fr"`; also the language of the returned texts. Without
+            it, the edit is in the table's main language and the returned texts follow your
+            profile's language, then the server's main language.
 
         Returns
         -------

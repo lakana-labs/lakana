@@ -74,8 +74,8 @@ from lakana_core.catalog.connection_lineage import (
 from lakana_core.catalog.datafiles import list_data_files
 from lakana_core.catalog.descriptions import (
     KEEP,
+    Keep,
     ShownDescription,
-    _Keep,
     check_label,
     check_text,
     edit_column,
@@ -198,7 +198,7 @@ from lakana_core.catalog.tombstones import (
     restore_table,
     revive,
 )
-from lakana_core.catalog.translations import edit_translation, translation_rows
+from lakana_core.catalog.translations import edit_translation, lock_table, translation_rows
 from lakana_core.catalog.usage import EnvironmentUsage, environment_usage
 from lakana_core.catalog.watermark import Watermark, check_incremental_key, compute_watermark
 from lakana_core.catalog.writes import (
@@ -271,6 +271,7 @@ from lakana_core.models.run import TERMINAL_TASK_STATUSES
 from lakana_core.pagination import escape_like
 from lakana_core.policy.resolver import PolicyResolver
 from lakana_core.policy.schema_change import BrokenPolicy, broken_policies, changed_columns
+from lakana_core.projects.translations import MAX_LANGUAGES
 from lakana_core.query_rewrite import ViewDefinition
 from lakana_core.runs.checks import (
     CHECK_ROWS_NOT_FOR_A_TASK,
@@ -484,6 +485,10 @@ def _added_records(snapshot: Snapshot | None) -> int:
         return 0
 
 
+MAX_EDIT_LANGUAGES = MAX_LANGUAGES
+"""The most languages besides its main one a table may have texts in, by deploy or by edit."""
+
+
 @dataclass(frozen=True)
 class LoadedTable:
     """A table and the Iceberg metadata it currently points at.
@@ -498,12 +503,16 @@ class LoadedTable:
         Absolute URI of the current metadata file.
     metadata
         The parsed metadata.
+    text_language
+        The language of the table's project texts (its project's `main_language:`), when the
+        row says; `None` for the instance's main language, or where the loader does not read it.
     """
 
     ref: TableRef
     uuid: uuid.UUID
     metadata_location: str
     metadata: TableMetadata
+    text_language: str | None = None
 
 
 @dataclass(frozen=True)
@@ -3855,9 +3864,9 @@ class CatalogService:
         self,
         p: PrincipalRef,
         ref: TableRef,
-        description: str | _Keep | None = KEEP,
+        description: str | Keep | None = KEEP,
         *,
-        label: str | _Keep | None = KEEP,
+        label: str | Keep | None = KEEP,
         language: str | None = None,
     ) -> None:
         """Set or reset the edits of a table's description and label, in one language.
@@ -3889,15 +3898,14 @@ class CatalogService:
             If `p` neither owns the table nor holds `DROP_TABLE` on it, or may not read it.
         ValidationError
             If both fields are `KEEP`, a text is blank or too long, a label has more than one
-            line, `language` is not a tag Lakana takes, or the row is an artifact.
+            line, `language` is not a tag Lakana takes, the edit would add a language past
+            `MAX_EDIT_LANGUAGES`, or the row is an artifact.
         """
         row = self._find_table_to_describe(p, ref)
         self._authz.authorize(
             p, Action.READ_TABLE, Securable.table_scope(ref.environment, ref.namespace, ref.name)
         )
-        detail = self._edit_texts(
-            p, row, f"table {ref.dotted()}", None, description, label, language
-        )
+        detail = self._edit_texts(p, row, ref.dotted(), None, description, label, language)
         AuditService(self._session).record(
             p.id,
             AuditEventType.TABLE_DESCRIBED,
@@ -3911,9 +3919,9 @@ class CatalogService:
         p: PrincipalRef,
         ref: TableRef,
         column: str,
-        description: str | _Keep | None = KEEP,
+        description: str | Keep | None = KEEP,
         *,
-        label: str | _Keep | None = KEEP,
+        label: str | Keep | None = KEEP,
         language: str | None = None,
     ) -> None:
         """Set or reset the edits of a column's description and label, in one language.
@@ -3945,7 +3953,8 @@ class CatalogService:
             If `p` neither owns the table nor holds `DROP_TABLE` on it, or may not read it.
         ValidationError
             If both fields are `KEEP`, a text is blank or too long, a label has more than one
-            line, or `language` is not a tag Lakana takes.
+            line, `language` is not a tag Lakana takes, or the edit would add a language past
+            `MAX_EDIT_LANGUAGES`.
         """
         row = self._find_table_to_describe(p, ref)
         names = [c.name for c in self.describe_table(p, ref).columns]
@@ -3954,9 +3963,7 @@ class CatalogService:
             raise NotFoundError(
                 f"Table {ref.dotted()} has no column {shown(column)!r}. Its columns: {have}."
             )
-        detail = self._edit_texts(
-            p, row, f"column {column} of table {ref.dotted()}", column, description, label, language
-        )
+        detail = self._edit_texts(p, row, ref.dotted(), column, description, label, language)
         AuditService(self._session).record(
             p.id,
             AuditEventType.COLUMN_DESCRIBED,
@@ -3969,10 +3976,10 @@ class CatalogService:
         self,
         p: PrincipalRef,
         row: Table,
-        what: str,
+        dotted: str,
         column: str | None,
-        description: str | _Keep | None,
-        label: str | _Keep | None,
+        description: str | Keep | None,
+        label: str | Keep | None,
         language: str | None,
     ) -> dict[str, object]:
         """Check and store the edits of a table's or column's texts in one language.
@@ -3986,8 +3993,8 @@ class CatalogService:
             The acting principal, recorded as the editor.
         row
             The table, already authorized.
-        what
-            What is edited, for the messages (``"table silver.orders"``).
+        dotted
+            The table's dotted name, for the messages.
         column
             The column's name, already checked; `None` for the table itself.
         description
@@ -4005,24 +4012,41 @@ class CatalogService:
         Raises
         ------
         ValidationError
-            If both fields are `KEEP`, a text fails its rules, or `language` is not a tag.
+            If both fields are `KEEP`, a text fails its rules, `language` is not a tag, or the
+            edit would give the table a language past `MAX_EDIT_LANGUAGES`.
         """
-        if isinstance(description, _Keep) and isinstance(label, _Keep):
+        if isinstance(description, Keep) and isinstance(label, Keep):
             raise ValidationError("send `description`, `label` or both; null removes an edit")
+        what = f"table {dotted}" if column is None else f"column {column} of table {dotted}"
         main = row.text_language or self._main_language
         lang = main if language is None else self._edit_language(language)
-        if not isinstance(description, _Keep):
-            check_text(description, what)
-        if not isinstance(label, _Keep):
-            check_label(label, what)
+        if not isinstance(description, Keep):
+            description = check_text(description, what)
+        if not isinstance(label, Keep):
+            label = check_label(label, what)
+        lock_table(self._session, row)
+        listed = row.text_languages or []
+        if (
+            lang != main
+            and lang not in listed
+            and len(listed) >= MAX_EDIT_LANGUAGES
+            and any(isinstance(sent, str) for sent in (description, label))
+        ):
+            raise ValidationError(
+                f"Table {shown(dotted)} has texts in {MAX_EDIT_LANGUAGES} languages besides its "
+                "main language, the most a table may have. To add "
+                f"`{lang}`, first remove another language's texts: reset its edits "
+                f"(`lakana table describe {shown(dotted)} --lang TAG --reset`, also with "
+                "`--column` for each column that has one) and remove its file from translations/."
+            )
         detail: dict[str, object] = {"language": lang}
         given: list[str | None] = []
-        fields: tuple[tuple[Literal["description", "label"], str | _Keep | None, str], ...] = (
+        fields: tuple[tuple[Literal["description", "label"], str | Keep | None, str], ...] = (
             ("description", description, ""),
             ("label", label, "label_"),
         )
         for field, value, prefix in fields:
-            if isinstance(value, _Keep):
+            if isinstance(value, Keep):
                 continue
             if lang != main:
                 old, new = edit_translation(
@@ -4327,7 +4351,11 @@ class CatalogService:
                 TABLE_STORAGE_UNREACHABLE.format(environment=shown(ref.environment))
             ) from None
         return LoadedTable(
-            ref=ref, uuid=row.id, metadata_location=row.metadata_location, metadata=metadata
+            ref=ref,
+            uuid=row.id,
+            metadata_location=row.metadata_location,
+            metadata=metadata,
+            text_language=row.text_language,
         )
 
     def commit_table(

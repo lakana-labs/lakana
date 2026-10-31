@@ -21,7 +21,15 @@ longer has loses its project text at the next deploy. The text of a column that 
 table's schema is kept and is not shown; it shows again if the column comes back.
 
 A description is at most 4,000 characters and is not blank. A label is one line of at most 100
-characters and is not blank. A table the project describes, but that
+characters and is not blank. An edit follows the same rules as a text in a header or a translation
+file, in every language: the text is stored without surrounding spaces, the limits count it so,
+and a control character other than a newline or tab, a carriage return, a line or paragraph
+separator (U+2028, U+2029) or a bidirectional control is refused, with a request to remove it.
+
+A table has texts in at most 50 languages besides its main language, the languages of its
+translation files and of its edits together. An edit that would add a 51st is refused with the
+limit; to free a slot, reset another language's edits (`--lang TAG --reset`, for the table and
+each column that has one) and remove its file from `translations/`. A table the project describes, but that
 does not exist yet, gets the text when a run creates it.
 
 ## What the table shows, and in which language

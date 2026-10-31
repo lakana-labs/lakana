@@ -94,6 +94,7 @@ Strict mode reads the project's files only: a text typed into the catalog does n
 | Limit | Value |
 |---|---|
 | Translation files | 50 (languages besides the main one) |
+| Languages of one table, translation files and edits together | 50 besides the main one; an edit that would add a 51st is refused ([Descriptions](descriptions.md#two-sources)) |
 | Size of one file | 1 MiB |
 | Size of all files together | 10 MiB |
 | Keys and list items of one file, counted at every depth while it is read | 50,000 |

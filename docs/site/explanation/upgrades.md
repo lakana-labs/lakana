@@ -262,6 +262,13 @@ labels and descriptions into more languages in `translations/<language>.yaml`
   usage error is now `Give --text TEXT and/or --label LABEL to set, or --reset to go back to the
   project's texts.` `lakana me set --language` sets your own language
   ([Descriptions](../reference/descriptions.md#your-own-language)).
+- An edit of a description or a label through the API now follows the rules a deploy applies to
+  header and translation texts: it is stored without surrounding spaces, and a carriage return,
+  a line or paragraph separator, a bidirectional control or another control character than a
+  newline or tab is refused (`… must not contain a surrogate, a control character other than a
+  newline or tab, a bidirectional control or a line separator. Remove those characters …`). An
+  existing edit is shown as it is; only a new edit is checked. A table has texts in at most 50
+  languages besides its main one, by deploy and by edit together.
 - `TABLE_DESCRIBED` and `COLUMN_DESCRIBED` audit events gain `language`, and `label_old_length`
   and `label_new_length` when the label was sent; `old_length` and `new_length` are present only
   when the description was sent.

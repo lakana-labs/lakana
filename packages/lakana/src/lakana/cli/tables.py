@@ -451,7 +451,11 @@ def _emit_columns(state: CliState, table: Table) -> None:
     """
     labelled = any(c.label for c in table.columns)
     if not labelled and not any(c.description for c in table.columns):
-        _output.emit(state, table.columns)
+        _output.emit(
+            state,
+            table.columns,
+            columns=["name", "type", "nullable", "description", "description_source"],
+        )
         return
     columns = ["name", "type", "nullable", *(["label"] if labelled else []), "description"]
     _output.emit(
@@ -780,6 +784,35 @@ def health(
         _output.emit(state, f"Readers, last {found.days} days: none.")
 
 
+def _now_shows(texts: Table | Column | None) -> str:
+    """Say which texts a table or column shows after a reset, and in which languages.
+
+    Parameters
+    ----------
+    texts
+        The `Table` or `Column` the answer holds, or `None` for a column it does not list.
+
+    Returns
+    -------
+    str
+        Such as ``now shows the project's text in en``, or ``now has no text``.
+    """
+    shown = [
+        (getattr(texts, f"{field}_source"), getattr(texts, f"{field}_language"))
+        for field in ("description", "label")
+        if texts is not None and getattr(texts, field) is not None
+    ]
+    if not shown:
+        return "now has no text"
+    sources = {source for source, _ in shown}
+    kind = {
+        frozenset({"project"}): "the project's text",
+        frozenset({"edited"}): "an edit",
+    }.get(frozenset(sources), "an edit and the project's text")
+    languages = sorted({language for _, language in shown if language})
+    return f"now shows {kind}" + (f" in {', '.join(languages)}" if languages else "")
+
+
 @table_app.command("describe")
 def describe(
     ctx: typer.Context,
@@ -858,11 +891,10 @@ def describe(
     if not reset:
         _output.done(state, f"Described {target} in {where}", table)
         return
-    if column is None:
-        shown = (table.description, table.label)
-    else:
-        shown = next(((c.description, c.label) for c in table.columns if c.name == column), ())
-    after = "now shows the project's text" if any(shown) else "now has no text"
+    texts: Table | Column | None = (
+        table if column is None else next((c for c in table.columns if c.name == column), None)
+    )
+    after = _now_shows(texts)
     _output.done(
         state, f"Reset the description and label of {target} in {where}; it {after}", table
     )

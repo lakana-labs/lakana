@@ -1,7 +1,10 @@
 """The translated texts of a table: written by a deploy, edited through the API, read guarded.
 
-Every read is guarded by `Table.text_languages`: a table that has no rows is never read for them,
-so a project without translations costs no statement here.
+Every read for showing a table is guarded by `Table.text_languages`: a table that has no rows is
+never read for them, so a project without translations costs no statement here. A writer locks
+the table row first (`lock_table`), so two writers of one table's texts run one after the other
+and the list cannot lose a language. An edit reads the rows without the guard and lists their
+languages again, so a list that misses a language is repaired by the next edit.
 """
 
 from __future__ import annotations
@@ -34,6 +37,24 @@ def _key(row: TextTranslation) -> _Key:
         Its language, subject, name and field.
     """
     return (row.language, row.subject, row.name, row.field)
+
+
+def lock_table(session: Session, row: Table) -> None:
+    """Lock a stored table's row until the transaction ends, and read its language list again.
+
+    Every write of a table's texts (an edit, a deploy's sync) takes this lock before it reads
+    them, so writers of one table run one after the other: none decides from texts another is
+    changing. On PostgreSQL it is `SELECT … FOR UPDATE`; SQLite, which has no row locks,
+    serialises writers on the whole database.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    row
+        The table, already in the database.
+    """
+    session.refresh(row, ["text_languages"], with_for_update=True)
 
 
 def translation_rows(session: Session, row: Table) -> list[TextTranslation]:
@@ -141,7 +162,8 @@ def edit_translation(
     name
         ``""`` for the table, else the column.
     language
-        The canonical tag; never the table's main language.
+        The canonical tag; never the table's main language. The caller has locked the table
+        (`lock_table`) and checked every argument; nothing is checked here.
     field
         ``label`` or ``description``.
     text
@@ -154,7 +176,13 @@ def edit_translation(
     tuple of (int, int)
         The length of the edit before and after (`0` for none).
     """
-    rows = translation_rows(session, row)
+    rows = list(
+        session.scalars(
+            select(TextTranslation)
+            .where(TextTranslation.table_id == row.id)
+            .execution_options(populate_existing=True)
+        )
+    )
     found = next((r for r in rows if _key(r) == (language, subject, name, field)), None)
     old = len((found.text_edited if found is not None else None) or "")
     if found is None:
