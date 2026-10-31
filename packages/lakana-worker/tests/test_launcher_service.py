@@ -2916,26 +2916,55 @@ def test_the_relay_gets_the_upstream_proxy_of_the_egress_service(tmp_path: Path)
     assert "LAKANA_EGRESS__UPSTREAM_PROXY=http://corp:3128" in relay["Env"]
 
 
-@pytest.mark.quarantine(issue=365)
-def test_the_relays_lines_reach_the_tasks_log(tmp_path: Path) -> None:
-    """Review Focus 3: the relay's refusal is in the run's log, prefixed as the relay wrote it."""
+_STALLED_RUNNER_SECONDS = 60.0
+"""How long a test that waits for a relay allows: a shared macOS runner has stalled for more than
+10 s (#365), longer than the launcher's own wait for ``ready``. A healthy run takes milliseconds,
+so only a failure waits this long."""
+
+
+def test_the_relays_lines_reach_the_tasks_log(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Review Focus 3: the relay's refusal is in the run's log, prefixed as the relay wrote it.
+
+    Both waits are on the real condition, with a bound a stalled runner stays inside (#365): the
+    launcher's wait for the relay's ``ready`` and the test's wait for the line in the log.
+
+    Parameters
+    ----------
+    tmp_path
+        The state directory.
+    monkeypatch
+        Lifts the launcher's wait for ``ready`` to the stalled-runner bound.
+    """
+    from lakana_worker.launcher import service
+
+    monkeypatch.setattr(service, "_RELAY_READY_SECONDS", _STALLED_RUNNER_SECONDS)
     line = b"lakana-relay: refused postgres:5432: it resolves to an internal address\n"
     engine = FakeEngine(hold=True, relay_output=[b"lakana-relay: ready\n", line])
     launcher = _started(engine, tmp_path)
     emitted: list[dict[str, object]] = []
-    worker = threading.Thread(
-        target=lambda: launcher.run(_egress_run(relay=(_DB,)), emitted.append)
-    )
+    failed: list[BaseException] = []
+
+    def run() -> None:
+        try:
+            launcher.run(_egress_run(relay=(_DB,)), emitted.append)
+        except BaseException as exc:  # reported by the waits below, not as a stray thread error
+            failed.append(exc)
+
+    worker = threading.Thread(target=run)
     worker.start()
-    _until(lambda: line in _logs(emitted))
-    _until(lambda: _task_running(engine))
+    _until(lambda: failed or line in _logs(emitted), _STALLED_RUNNER_SECONDS)
+    assert not failed, failed
+    _until(lambda: _task_running(engine), _STALLED_RUNNER_SECONDS)
     engine.release(
         next(
             c for c, v in engine.containers.items() if v["Labels"]["lakana.launcher.kind"] == "task"
         )
     )
-    worker.join(10)
+    worker.join(_STALLED_RUNNER_SECONDS)
 
+    assert not failed, failed
     assert line in _logs(emitted)
     assert b"lakana-relay: ready" not in _logs(emitted)
 
