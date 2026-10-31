@@ -51,6 +51,7 @@ from lakana_core.catalog.tombstones import (
     PERIOD_PASSED_MESSAGE,
     PURGE_STARTED_MESSAGE,
 )
+from lakana_core.catalog.translations import edit_translation, write_translations
 from lakana_core.config import DatabaseConfig, StorageConfig
 from lakana_core.db import create_engine
 from lakana_core.errors import AlreadyExistsError, ConflictError, NotFoundError, PermissionDenied
@@ -73,10 +74,12 @@ from lakana_core.models import (
     TableLocation,
     TableLocationState,
     TableType,
+    TextTranslation,
     WriteMode,
 )
 from lakana_core.policy.column_masks import ColumnMaskService
 from lakana_core.policy.row_filters import RowFilterService
+from lakana_core.projects.manifest import EntryText
 from lakana_core.runs.lockdown import PROTECTED_MESSAGE
 from lakana_core.storage.resolver import StorageResolver
 
@@ -1228,6 +1231,57 @@ def test_undrop_restores_the_measures(
 
     assert read_table_model(session, _fresh(session, Table, table_id)) == before
     assert session.scalars(select(DeclaredMeasure.id)).all() == ids
+
+
+def test_undrop_restores_the_translations(
+    session: Session, catalog: CatalogService, principal: PrincipalRef
+) -> None:
+    """The label, the translated languages and the translation rows come back with the table.
+
+    The author of an edited translation comes back with it.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    catalog
+        The catalog.
+    principal
+        Who drops, undrops and edits.
+    """
+    table_id = _orders_table(catalog, principal)
+    row = _fresh(session, Table, table_id)
+    row.label_project = "Orders"
+    write_translations(
+        session, row, {"fr": (EntryText("table", "", "label", "Commandes"),)}, stored=True
+    )
+    session.commit()
+    edit_translation(
+        session,
+        row,
+        subject="table",
+        name="",
+        language="fr",
+        field="label",
+        text="Commandes (édité)",
+        by=principal.id,
+    )
+    session.commit()
+    ids = session.scalars(select(TextTranslation.id)).all()
+
+    catalog.drop_table(principal, _ref("gold.orders"))
+    assert session.scalars(select(TextTranslation.id)).all() == []
+    catalog.undrop_table(principal, _ref("gold.orders"))
+
+    restored = _fresh(session, Table, table_id)
+    assert (restored.label_project, restored.text_languages) == ("Orders", ["fr"])
+    assert session.scalars(select(TextTranslation.id)).all() == ids
+    (back,) = session.scalars(select(TextTranslation)).all()
+    assert (back.text_project, back.text_edited, back.updated_by) == (
+        "Commandes",
+        "Commandes (édité)",
+        principal.id,
+    )
 
 
 def test_undrop_of_a_tombstone_from_before_references_restores_the_model_without_them(

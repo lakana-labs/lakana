@@ -37,6 +37,7 @@ from sqlalchemy.orm import Session, class_mapper
 from lakana_core.audit.service import AuditService
 from lakana_core.auth import PrincipalRef, Securable
 from lakana_core.catalog.locations import lock_location
+from lakana_core.catalog.translations import translation_rows
 from lakana_core.grants.revocation import POLICY_MODELS, RevokedPolicy, revoke_attached
 from lakana_core.identifiers import NamespacePath, TableRef
 from lakana_core.models import (
@@ -54,6 +55,7 @@ from lakana_core.models import (
     TableLocation,
     TableLocationState,
     TableType,
+    TextTranslation,
 )
 from lakana_core.models.table import table_kind
 from lakana_core.projects.measures import MEASURED_KINDS
@@ -300,7 +302,8 @@ def snapshot_table(session: Session, row: Table, namespace: NamespacePath) -> di
         ``namespace`` (the path's parts), ``row`` (every column of the row),
         ``column_descriptions`` and ``columns`` (their rows without the table id) and
         ``references`` and ``measures`` (the model's reference and measure rows without the table
-        and environment ids); the rows a table's id cascades to and that only describe it.
+        and environment ids) and ``translations`` (its translated texts without the table id); the
+        rows a table's id cascades to and that only describe it.
     """
     descriptions = session.scalars(
         select(ColumnDescription).where(ColumnDescription.table_id == row.id)
@@ -314,6 +317,7 @@ def snapshot_table(session: Session, row: Table, namespace: NamespacePath) -> di
         if row.model_kind in MEASURED_KINDS
         else ()
     )
+    translations = translation_rows(session, row)
     leave_out = frozenset({"table_id"})
     return {
         "namespace": list(namespace.parts),
@@ -327,6 +331,7 @@ def snapshot_table(session: Session, row: Table, namespace: NamespacePath) -> di
         "measures": [
             _row_json(m, leave_out=frozenset({"table_id", "environment_id"})) for m in measures
         ],
+        "translations": [_row_json(t, leave_out=leave_out) for t in translations],
     }
 
 
@@ -603,10 +608,10 @@ def _known_principals(session: Session, ids: Iterable[object]) -> set[str]:
 def restore_table(
     session: Session, snapshot: Mapping[str, Any], *, namespace_id: uuid.UUID, name: str
 ) -> Table:
-    """Insert a dropped table's row, descriptions, columns, references and measures, uncommitted.
+    """Insert a dropped table's row, descriptions, columns, model and translations, uncommitted.
 
-    A principal deleted since the drop (the owner, the author of a description, who set its
-    retention) is left out, as the row's foreign key would have done had the row stayed.
+    A principal deleted since the drop (the owner, the author of a description or a translation,
+    who set its retention) is left out, as the row's foreign key would have done had the row stayed.
 
     Parameters
     ----------
@@ -626,12 +631,15 @@ def restore_table(
     """
     stored = snapshot["row"]
     descriptions = snapshot["column_descriptions"]
+    # A tombstone written before translations were kept has none.
+    translations = snapshot.get("translations", ())
     known = _known_principals(
         session,
         [
             stored.get("owner_id"),
             stored.get("retention_set_by"),
             *(d.get("updated_by") for d in descriptions),
+            *(t.get("updated_by") for t in translations),
         ],
     )
     owner = stored.get("owner_id")
@@ -678,6 +686,16 @@ def restore_table(
                 measure,
                 table_id=row.id,
                 environment_id=namespace.environment_id,
+            )
+        )
+    for translation in translations:
+        author = translation.get("updated_by")
+        session.add(
+            _row_from_json(
+                TextTranslation,
+                translation,
+                table_id=row.id,
+                updated_by=uuid.UUID(author) if author in known else None,
             )
         )
     session.flush()

@@ -3,7 +3,9 @@
 A table or column has up to two texts. The *project* text comes from the asset header
 (`description:` and `columns:`) and is written by a deploy, a rollback, or the creation of the
 table by a run. An *edit* is set through the API and is shown instead. A deploy never writes an
-edit; resetting an edit makes the project text show again.
+edit; resetting an edit makes the project text show again. Labels (`label:` and
+`column_labels`) are kept the same way, and the entry's translations are written through
+`lakana_core.catalog.translations`.
 
 The same writes carry the asset's model (`kind:`, `grain:`, `key:`, `references:`) onto the table,
 through `lakana_core.catalog.model_metadata`.
@@ -17,10 +19,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-from sqlalchemy import select
+from sqlalchemy import inspect, select
 from sqlalchemy.orm import Session
 
 from lakana_core.catalog.model_metadata import find_project_table, write_model_entry
+from lakana_core.catalog.translations import write_translations
 from lakana_core.errors import ValidationError
 from lakana_core.models import (
     ColumnDescription,
@@ -29,6 +32,7 @@ from lakana_core.models import (
     Table,
     TableType,
 )
+from lakana_core.projects.manifest import entry_translations, manifest_main_language
 from lakana_core.projects.project_config import MAX_DESCRIPTION_CHARS
 
 MAX_DESCRIPTION_LENGTH = MAX_DESCRIPTION_CHARS
@@ -172,11 +176,14 @@ def _text(value: object) -> str | None:
     return value if isinstance(value, str) and value.strip() else None
 
 
-def _apply_entry(session: Session, row: Table, entry: Mapping[str, Any]) -> None:
-    """Write the project's text and model of one manifest entry onto a table and its columns.
+def _apply_entry(
+    session: Session, row: Table, entry: Mapping[str, Any], main_language: str | None
+) -> None:
+    """Write the project's texts and model of one manifest entry onto a table and its columns.
 
-    Never touches an edit, and leaves an artifact alone. A column whose text the header no longer
-    has loses its project text; a row left with no text at all is removed.
+    Never touches an edit, and leaves an artifact alone. A column whose texts the header no longer
+    has loses its project texts; a row left with no text at all is removed. The same holds for
+    the entry's translations (`lakana_core.catalog.translations`).
 
     Parameters
     ----------
@@ -186,15 +193,39 @@ def _apply_entry(session: Session, row: Table, entry: Mapping[str, Any]) -> None
         The table.
     entry
         The manifest entry of the asset that produces it.
+    main_language
+        The manifest's `main_language`, or `None` when it declares none.
     """
     if row.table_type is TableType.ARTIFACT:
         return
     with session.no_autoflush:
-        _write_entry(session, row, entry)
+        _write_entry(session, row, entry, main_language)
 
 
-def _write_entry(session: Session, row: Table, entry: Mapping[str, Any]) -> None:
-    """Write the project's text and model of one manifest entry; `_apply_entry` without its guard.
+def _texts(declared: object) -> dict[str, str]:
+    """Read a name → text map out of a stored manifest, which is untrusted.
+
+    Parameters
+    ----------
+    declared
+        What the manifest holds.
+
+    Returns
+    -------
+    dict
+        Name → text, for the string names whose text is a non-empty string.
+    """
+    return {
+        name: text
+        for name, raw in (declared.items() if isinstance(declared, Mapping) else ())
+        if isinstance(name, str) and (text := _text(raw)) is not None
+    }
+
+
+def _write_entry(
+    session: Session, row: Table, entry: Mapping[str, Any], main_language: str | None
+) -> None:
+    """Write the project's texts and model of one manifest entry; `_apply_entry` without its guard.
 
     Parameters
     ----------
@@ -204,37 +235,50 @@ def _write_entry(session: Session, row: Table, entry: Mapping[str, Any]) -> None
         The table.
     entry
         The manifest entry.
+    main_language
+        The language of the header texts, or `None` for the instance's main language.
     """
     metadata = entry.get("metadata")
     metadata = metadata if isinstance(metadata, Mapping) else {}
     row.description_project = _text(metadata.get("description"))
-    declared = metadata.get("columns")
-    wanted = {
-        name: text
-        for name, raw in (declared.items() if isinstance(declared, Mapping) else ())
-        if isinstance(name, str) and (text := _text(raw)) is not None
-    }
+    row.label_project = _text(metadata.get("label"))
+    row.text_language = main_language
+    wanted = _texts(metadata.get("columns"))
+    wanted_labels = _texts(metadata.get("column_labels"))
     existing = {
         r.column: r
         for r in session.scalars(
             select(ColumnDescription).where(ColumnDescription.table_id == row.id)
         )
     }
-    for name, text in wanted.items():
-        if name in existing:
-            existing[name].description_project = text
-        else:
+    for name in wanted.keys() | wanted_labels.keys():
+        if name not in existing:
             session.add(
                 ColumnDescription(
-                    id=uuid.uuid4(), table_id=row.id, column=name, description_project=text
+                    id=uuid.uuid4(),
+                    table_id=row.id,
+                    column=name,
+                    description_project=wanted.get(name),
+                    label_project=wanted_labels.get(name),
                 )
             )
     for name, found in existing.items():
-        if name in wanted:
-            continue
-        found.description_project = None
-        if found.description_edited is None:
+        found.description_project = wanted.get(name)
+        found.label_project = wanted_labels.get(name)
+        if all(
+            text is None
+            for text in (
+                found.description_project,
+                found.description_edited,
+                found.label_project,
+                found.label_edited,
+            )
+        ):
             session.delete(found)
+    state = inspect(row)
+    write_translations(
+        session, row, entry_translations(entry), stored=not (state.pending or state.transient)
+    )
     write_model_entry(session, row, entry)
 
 
@@ -277,10 +321,11 @@ def sync_project_descriptions(
     manifest
         The manifest of the project version that becomes current.
     """
+    main_language = manifest_main_language(manifest)
     for dotted, entry in _entries(manifest).items():
         row = find_project_table(session, environment_id, dotted)
         if row is not None:
-            _apply_entry(session, row, entry)
+            _apply_entry(session, row, entry, main_language)
 
 
 def sync_created_table(
@@ -315,7 +360,7 @@ def sync_created_table(
     for manifest in manifests:
         entry = _entries(manifest).get(dotted)
         if entry is not None:
-            _apply_entry(session, row, entry)
+            _apply_entry(session, row, entry, manifest_main_language(manifest))
             return
 
 

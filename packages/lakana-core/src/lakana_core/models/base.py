@@ -1,8 +1,9 @@
 """Declarative base and shared column types."""
 
+import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, MetaData
+from sqlalchemy import DateTime, ForeignKey, MetaData
 from sqlalchemy.engine import Dialect
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.types import TypeDecorator
@@ -121,3 +122,20 @@ class TimestampMixin:
         default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
     )
+
+
+class EditTrailMixin:
+    """Adds who last set or reset an edit through the API, and when.
+
+    Attributes
+    ----------
+    updated_by : uuid.UUID or None
+        The principal who last set or reset the edit; `None` once they are deleted.
+    updated_at : datetime or None
+        When the edit was last set or reset.
+    """
+
+    updated_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("principals.id", ondelete="SET NULL"), nullable=True, default=None
+    )
+    updated_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True, default=None)

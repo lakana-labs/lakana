@@ -2846,3 +2846,26 @@ def test_0057_on_postgres() -> None:
         migrate.upgrade(url, revision_0057)
         assert _alembic_version(engine) == revision_0057
         engine.dispose()
+
+
+def test_0058_on_postgres() -> None:
+    """0058 adds `text_translations` and the label columns, drops them, and adds them again."""
+    revision_0057 = "c8e2f4a6b0d1"
+    revision_0058 = "d0f4a6c8e2b3"
+
+    with PostgresContainer("postgres:16", driver="pg8000") as pg:
+        url = pg.get_connection_url()
+        migrate.upgrade(url, revision_0058)
+        engine = sqlalchemy.create_engine(url)
+        assert _alembic_version(engine) == revision_0058
+        assert "text_translations" in sqlalchemy.inspect(engine).get_table_names()
+
+        migrate.downgrade(url, revision_0057)
+        assert _alembic_version(engine) == revision_0057
+        inspector = sqlalchemy.inspect(engine)
+        assert "text_translations" not in inspector.get_table_names()
+        assert "label_project" not in {c["name"] for c in inspector.get_columns("tables")}
+
+        migrate.upgrade(url, revision_0058)
+        assert _alembic_version(engine) == revision_0058
+        engine.dispose()

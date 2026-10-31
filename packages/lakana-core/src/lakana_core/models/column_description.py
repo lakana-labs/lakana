@@ -1,16 +1,15 @@
 """The column description model."""
 
 import uuid
-from datetime import datetime
 
 from sqlalchemy import ForeignKey, String, Text, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from lakana_core.models.base import Base, UTCDateTime
+from lakana_core.models.base import Base, EditTrailMixin
 from lakana_core.models.table import Table
 
 
-class ColumnDescription(Base):
+class ColumnDescription(Base, EditTrailMixin):
     """The description of one column of a table, from the project and from an edit.
 
     Two texts, like `Table.description_project` and `Table.description_edited`: a deploy writes
@@ -30,6 +29,10 @@ class ColumnDescription(Base):
         The text of the asset header's `columns:` map.
     description_edited : str or None
         The text set through the API.
+    label_project : str or None
+        The label of the asset header's `columns:` map, in the table's main language.
+    label_edited : str or None
+        The label set through the API, shown instead of `label_project`.
     updated_by : uuid.UUID or None
         The principal who last set or reset the edit; `None` once they are deleted.
     updated_at : datetime or None
@@ -44,10 +47,8 @@ class ColumnDescription(Base):
     column: Mapped[str] = mapped_column(String(1024))
     description_project: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     description_edited: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
-    updated_by: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("principals.id", ondelete="SET NULL"), nullable=True, default=None
-    )
-    updated_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True, default=None)
+    label_project: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    label_edited: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
 
     table: Mapped[Table] = relationship()
     """The table. Declared so that the unit of work inserts a table before its descriptions
