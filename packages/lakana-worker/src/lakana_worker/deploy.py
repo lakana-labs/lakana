@@ -58,6 +58,7 @@ from lakana_core.projects.diff import diff_manifests
 from lakana_core.projects.discovery import discover
 from lakana_core.projects.issues import ProjectIssue, ProjectValidationError, withheld_lines
 from lakana_core.projects.jobs import job_issues
+from lakana_core.projects.layer_rules import layer_hints, layer_issues
 from lakana_core.projects.limits import DeployLimits
 from lakana_core.projects.lockfile import (
     LOCK_FILE,
@@ -875,6 +876,7 @@ def _deploy(
             + translation_problems
             + translation_issues(project, assets, translations)
             + reference_issues
+            + layer_issues(project.layers, assets)
         )
         if issues:
             raise ProjectValidationError(issues)
@@ -892,6 +894,7 @@ def _deploy(
             references=resolved,
             main_language=project.main_language,
             translations=translation_entries(translations),
+            layers=project.layers,
             artifacts=service.artifact_inputs(
                 principal, environment_name, graph, repository_id=repository_id
             ),
@@ -905,7 +908,9 @@ def _deploy(
                     principal, environment_name, manifest_tables(manifest)
                 ),
             ),
-            hints=deploy_hints(assets) + coverage_hints(project, assets, translations),
+            hints=deploy_hints(assets)
+            + coverage_hints(project, assets, translations)
+            + layer_hints(project.layers, assets),
         )
         if kind is DeployKind.DRY_RUN:
             service.record_dry_run(

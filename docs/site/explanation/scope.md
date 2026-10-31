@@ -64,15 +64,17 @@ How the larger pieces are meant to work:
   is a named address and secret, and the asset's helper does the reading. Configuring a
   recurring load without writing an asset (no-code loads, #86) is an idea for after v1.0.0
   only.
-- **Data modelling.** Lakana is opinionated about how tables are laid out: medallion layers
-  (bronze, silver, gold) and Kimball-lite star schemas, with wide tables allowed where a star is
-  too much. Model metadata sits in the asset header (#250), labels and descriptions can be
-  translated with a main language (#251), and layer rules are opt-in first and enforced later
-  (#252). The write mode `history` (SCD type 2) builds tables whose rows
-  change (#253); `merge` (upsert) came earlier, with ingestion in M6, and a template and a guide start a new team (#254). A measure is metadata on a
-  column, not a computed metric (#255). The metadata forms a graph with lineage, impact and
-  join-path queries (#374), which the MCP server offers to agents, and a business glossary links
-  terms to tables, columns and measures (#375). All of it comes before the web interface and the public beta (epic #249), so that nobody builds projects on Lakana before the rules exist and the interface shows model metadata from its first version.
+- **Data modelling.** Lakana is opinionated about how tables are laid out: medallion layers (bronze,
+  silver, gold) and Kimball-lite star schemas, with wide tables allowed where a star is too much.
+  Model metadata sits in the asset header (#250), labels and descriptions can be translated with a
+  main language (#251), and layer rules are opt-in, and enforced at every deploy once a project
+  declares them (#252). The write mode `history` (SCD type 2) builds tables whose rows change
+  (#253); `merge` (upsert) came earlier, with ingestion in M6, and a template and a guide start a
+  new team (#254). A measure is metadata on a column, not a computed metric (#255). The metadata
+  forms a graph with lineage, impact and join-path queries (#374), which the MCP server offers to
+  agents, and a business glossary links terms to tables, columns and measures (#375). All of it
+  comes before the web interface and the public beta (epic #249), so that nobody builds projects on
+  Lakana before the rules exist and the interface shows model metadata from its first version.
 - **Data quality.** A check is a SQL file that must return no rows. It has one of three modes.
   `block` sets the table back to what it was before the run, and what reads it is not built.
   `warn` only reports. `keep` leaves the data, marks the table as kept and stops what reads it.

@@ -61,6 +61,9 @@ point at another column, write it out (`sku: gold.dim_product.sku`). The rules f
 each kind are in
 [Model fields](../reference/asset-front-matter.md#model-fields-kind-grain-key-and-references).
 
+A project can require a kind per layer, such as `staging` in silver and `fact`, `dimension` or
+`wide` in gold: see [Keep layers apart](keep-layers-apart.md).
+
 ## Deploy, and see the generated checks
 
 <!-- source: docs/examples/see-a-tables-model/run.sh#deploy -->

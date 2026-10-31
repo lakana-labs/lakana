@@ -68,15 +68,17 @@ from lakana_core.projects.issues import (
     error_for_reader,
     withheld_lines,
 )
+from lakana_core.projects.layers import MEDALLION_LAYERS
 from lakana_core.projects.manifest import (
     build_manifest,
     entry_input_kinds,
     manifest_assets,
+    manifest_layers,
     manifest_tables,
 )
 from lakana_core.projects.model import resolve_references
 from lakana_core.projects.model_checks import reference_sql
-from lakana_core.projects.parse import ParsedAsset
+from lakana_core.projects.parse import ParsedAsset, file_references
 from lakana_core.projects.project_config import (
     JobConfig,
     NotifyConfig,
@@ -751,6 +753,38 @@ def test_manifest_sql_is_hidden_from_a_reader_without_access(
     full = DeployService(session, AllowAllAuthorization()).job_version(principal, "dev", version.id)
     assert full.manifest["assets"][0]["sql"].startswith("SELECT")
     assert full.manifest["assets"][0]["input_kinds"] == {"x": "artifact"}
+
+
+def test_the_layer_rules_survive_the_view_of_a_reader_with_limited_rights(
+    session: Session, env: None, principal: PrincipalRef
+) -> None:
+    """The declared rules name layers, never tables, so a reader who sees no SQL still sees them."""
+    repo = _repo(session)
+    version = _deployed(
+        session,
+        principal,
+        repo,
+        "a" * 40,
+        make_asset("silver.clean", ("bronze.events",)),
+    )
+    version.manifest_json = {
+        **version.manifest_json,
+        "layers": MEDALLION_LAYERS.model_dump(mode="json"),
+    }
+    session.commit()
+    reader = _principal(session, "reader")
+    GrantService(session, AllowAllAuthorization()).grant(
+        principal,
+        principal="reader",
+        action=Action.READ_ENVIRONMENT,
+        kind=SecurableKind.ENVIRONMENT,
+        environment="dev",
+    )
+    view = DeployService(session, GrantAuthorization(session)).job_version(
+        reader, "dev", version.id
+    )
+    assert view.manifest["assets"][0]["hidden_references"] == 1
+    assert manifest_layers(view.manifest) == MEDALLION_LAYERS
 
 
 def test_orphans_after_removing_an_asset(
@@ -1913,7 +1947,7 @@ def test_a_python_asset_has_no_file_references() -> None:
         kind="python",
         inputs=(("obs", "silver.clean"),),
     )
-    assert deploys_module._file_references(asset) == set()
+    assert file_references(asset) == set()
 
 
 def _as_artifact(session: Session, namespace: str, name: str) -> None:

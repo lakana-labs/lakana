@@ -271,6 +271,7 @@ from lakana_core.models.run import TERMINAL_TASK_STATUSES
 from lakana_core.pagination import escape_like
 from lakana_core.policy.resolver import PolicyResolver
 from lakana_core.policy.schema_change import BrokenPolicy, broken_policies, changed_columns
+from lakana_core.projects.layers import LAYERS
 from lakana_core.projects.translations import MAX_LANGUAGES
 from lakana_core.query_rewrite import ViewDefinition
 from lakana_core.runs.checks import (
@@ -343,7 +344,7 @@ LOCK_TIMEOUT_SECONDS = 5
 table's pointer (Postgres); a longer wait makes the outcome unknown, never "not landed"."""
 
 
-_MEDALLION_TOP_LEVEL_NAMESPACES = frozenset({"bronze", "silver", "gold"})
+_MEDALLION_TOP_LEVEL_NAMESPACES = frozenset(LAYERS)
 """The only top-level namespaces an ICEBERG (managed-zone) table may live under.
 
 Enforced only for ICEBERG tables, in `create_table` — `create_external_table` (raw

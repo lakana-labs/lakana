@@ -163,17 +163,16 @@ beta ships with the ingestion helpers and named connections.
    `lakana load`: the Compose smoke test runs the three templates on a schedule against a file
    directory, a PostgreSQL database and a REST API outside the stack, and every helper has a
    tested recipe.
-5. **M8d, data modelling (epic #249).** Decided on 2026-10-20; on 2026-10-24 it moved before
-    the public beta, after M6 and before M7. Opinionated support for medallion layers (bronze, silver, gold) and
-    Kimball-lite star schemas, with optional wide tables. The parts: model metadata in the asset
-    header (#250); translated labels and descriptions with a main language (#251); layer rules,
-    first opt-in and then enforced (#252); the write mode `history` (SCD type 2) (#253); `merge`
-    (upsert) came earlier, with M6; a template and a guide (#254); and measures as
+5. **M8d, data modelling (epic #249).** Decided on 2026-10-20; on 2026-10-24 it moved before the
+    public beta, after M6 and before M7. Opinionated support for medallion layers (bronze, silver,
+    gold) and Kimball-lite star schemas, with optional wide tables. The parts: model metadata in the
+    asset header (#250); translated labels and descriptions with a main language (#251); layer
+    rules, opt-in and enforced at deploy once declared (#252); the write mode `history` (SCD type 2)
+    (#253); `merge` (upsert) came earlier, with M6; a template and a guide (#254); and measures as
     metadata only, with no metrics layer (#255). Decided on 2026-10-28: the model metadata as a
     graph, with lineage, impact and join-path queries (#374), and a business glossary of terms
-    linked to tables, columns and measures (#375). Done when a new team can start from the
-    template, build a star schema with a history dimension, and see its layers and labels in the
-    catalog.
+    linked to tables, columns and measures (#375). Done when a new team can start from the template,
+    build a star schema with a history dimension, and see its layers and labels in the catalog.
 6. **M7, web interface and sign-in.** Comes after M8d, so the interface shows model metadata
    (kind, grain, key, references, layers and labels) from its first version. A web
    interface with OIDC sign-in, or an invite link and a passkey for teams without an identity
