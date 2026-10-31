@@ -308,11 +308,18 @@ def test_a_deploy_leaves_a_table_that_does_not_exist_yet_alone(
     assert session.scalars(select(Table)).one().description_project is None
 
 
-def test_a_table_created_after_the_deploy_gets_the_projects_text(
-    session: Session, tmp_path: Path, principal: PrincipalRef
-) -> None:
-    """A run creates the table after the deploy; its first read shows the project's text."""
-    catalog = _prepared_catalog(session, tmp_path, AllowAllAuthorization(), namespaces=[_SILVER])
+def _deploy(session: Session, principal: PrincipalRef, manifest: dict) -> None:
+    """Make `manifest` the current deployment of `dev`, without creating its tables.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    principal
+        Who deployed.
+    manifest
+        The manifest.
+    """
     repo = Repository(id=uuid.uuid4(), name="r", kind=RepositoryKind.HTTPS, url="https://h/r")
     session.add(repo)
     session.commit()
@@ -322,7 +329,7 @@ def test_a_table_created_after_the_deploy_gets_the_projects_text(
         repository_id=repo.id,
         environment_id=env_id,
         commit_sha="a" * 40,
-        manifest_json=_manifest(),
+        manifest_json=manifest,
         code_uri="file:///x",
         code_sha256="0" * 64,
         deployed_by=principal.id,
@@ -336,11 +343,31 @@ def test_a_table_created_after_the_deploy_gets_the_projects_text(
     )
     session.commit()
 
+
+def test_a_table_created_after_the_deploy_gets_the_projects_text(
+    session: Session, tmp_path: Path, principal: PrincipalRef
+) -> None:
+    """A run creates the table after the deploy; its first read shows the project's text."""
+    catalog = _prepared_catalog(session, tmp_path, AllowAllAuthorization(), namespaces=[_SILVER])
+    _deploy(session, principal, _manifest())
+
     catalog.create_table(principal, _ORDERS, schema=_SCHEMA)
 
     shown = _described(catalog, principal)
     assert (shown.description, shown.description_source) == ("From the project", "project")
     assert shown.column_descriptions["id"].text == "Order id"
+
+
+def test_a_created_table_says_its_projects_main_language(
+    session: Session, tmp_path: Path, principal: PrincipalRef
+) -> None:
+    """The create's answer carries the `main_language:` the deployed project declares."""
+    catalog = _prepared_catalog(session, tmp_path, AllowAllAuthorization(), namespaces=[_SILVER])
+    _deploy(session, principal, {**_manifest(), "main_language": "de"})
+
+    loaded = catalog.create_table(principal, _ORDERS, schema=_SCHEMA)
+
+    assert loaded.text_language == "de"
 
 
 def _events(session: Session, kind: AuditEventType) -> list[AuditEvent]:
@@ -819,7 +846,8 @@ def test_an_edit_follows_the_deploys_character_rules(
             )
 
     for bad in ("a\rb", "a\u2028b", "a\u2029b", "x\u202eevil", "bell\x07"):
-        for field in ("label", "description"):
+        # A description's lone `\r` is a line break (see the Windows line endings test).
+        for field in ("label",) if bad == "a\rb" else ("label", "description"):
             with pytest.raises(
                 ValidationError,
                 match=re.escape(f"The {field} of {what} must not contain a surrogate"),
@@ -881,3 +909,23 @@ def test_a_table_has_texts_in_at_most_50_languages_besides_its_main_one(
     catalog_with_orders.set_table_description(principal, _ORDERS, label="Orders")
     catalog_with_orders.set_table_description(principal, _ORDERS, label=None, language="fr")
     assert len(row.text_languages or []) == MAX_EDIT_LANGUAGES
+
+
+@pytest.mark.parametrize("ending", ["\r\n", "\r"])
+@pytest.mark.parametrize("language", [None, "fr"])
+def test_a_description_with_windows_line_endings_is_stored_with_newlines(
+    catalog_with_orders: CatalogService, principal: PrincipalRef, ending: str, language: str | None
+) -> None:
+    """Windows and old Mac line endings in a description become newlines; a label stays one line."""
+    text = f"Line one.{ending}Line two."
+    catalog_with_orders.set_table_description(principal, _ORDERS, text, language=language)
+    catalog_with_orders.set_column_description(principal, _ORDERS, "id", text, language=language)
+    shown_texts = catalog_with_orders.describe_table(
+        principal, _ORDERS, languages=[language or "en"]
+    )
+    assert shown_texts.description == "Line one.\nLine two."
+    assert shown_texts.column_descriptions["id"].text == "Line one.\nLine two."
+    with pytest.raises(ValidationError, match=re.escape("has more than one line")):
+        catalog_with_orders.set_table_description(
+            principal, _ORDERS, label="Line one.\r\nLine two.", language=language
+        )

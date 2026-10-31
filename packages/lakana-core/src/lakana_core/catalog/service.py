@@ -486,7 +486,10 @@ def _added_records(snapshot: Snapshot | None) -> int:
 
 
 MAX_EDIT_LANGUAGES = MAX_LANGUAGES
-"""The most languages besides its main one a table may have texts in, by deploy or by edit."""
+"""An edit may not add a language once a table has texts in this many besides its main one.
+
+A deploy is bounded separately, by its 50 translation files (`MAX_LANGUAGES`); it does not
+count the languages of edits."""
 
 
 @dataclass(frozen=True)
@@ -2618,6 +2621,8 @@ class CatalogService:
         )
         self._session.add(row)
         sync_created_table(self._session, prepared.environment_id, row, ref.dotted())
+        # Read now: after the commit the row is expired, and reading it would cost a statement.
+        text_language = row.text_language
         sync_table_columns(self._session, row.id, from_iceberg_schema(metadata.schema()))
         try:
             self._session.flush()  # a name collision raises here, and SQLite's write lock is held
@@ -2672,7 +2677,11 @@ class CatalogService:
                 "the write failed for a reason other than a name collision."
             ) from exc
         return LoadedTable(
-            ref=ref, uuid=metadata.table_uuid, metadata_location=written, metadata=metadata
+            ref=ref,
+            uuid=metadata.table_uuid,
+            metadata_location=written,
+            metadata=metadata,
+            text_language=text_language,
         )
 
     def create_external_table(

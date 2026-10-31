@@ -106,7 +106,8 @@ def _checked(text: str | None, what: str, field: str, limit: int) -> str | None:
 
     The rules are `checked_text`'s, the very function a deploy runs on header and translation
     texts: not blank once stripped, at most `limit` characters once stripped, safe characters
-    only, and for a label one line.
+    only, and for a label one line. A description's Windows and lone carriage-return line
+    breaks become newlines first, as a header's do; a label's are refused.
 
     Parameters
     ----------
@@ -131,6 +132,10 @@ def _checked(text: str | None, what: str, field: str, limit: int) -> str | None:
     """
     if text is None:
         return None
+    if field == "description":
+        # A form or a file from Windows sends `\r\n`; a header never holds one (YAML and the
+        # header reader normalise line breaks), so an edit is normalised the same way.
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
     try:
         return checked_text(text, limit=limit, one_line=field == "label")
     except ValueError as problem:

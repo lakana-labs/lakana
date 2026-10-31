@@ -23,13 +23,16 @@ table's schema is kept and is not shown; it shows again if the column comes back
 A description is at most 4,000 characters and is not blank. A label is one line of at most 100
 characters and is not blank. An edit follows the same rules as a text in a header or a translation
 file, in every language: the text is stored without surrounding spaces, the limits count it so,
-and a control character other than a newline or tab, a carriage return, a line or paragraph
-separator (U+2028, U+2029) or a bidirectional control is refused, with a request to remove it.
+and a control character other than a newline or tab, a line or paragraph separator (U+2028,
+U+2029) or a bidirectional control is refused, with a request to remove it. In a description,
+Windows line endings (`\r\n`) and a lone carriage return become newlines; a label with either
+is refused as more than one line.
 
-A table has texts in at most 50 languages besides its main language, the languages of its
-translation files and of its edits together. An edit that would add a 51st is refused with the
-limit; to free a slot, reset another language's edits (`--lang TAG --reset`, for the table and
-each column that has one) and remove its file from `translations/`. A table the project describes, but that
+A deploy brings at most 50 translation files. An edit cannot add a language once the table has
+texts in 50 languages besides its main one, from its translation files and its edits together;
+it is refused with the limit. To free a slot, reset another language's edits (`--lang TAG
+--reset`, for the table and each column that has one), or remove a language's file from
+`translations/` and deploy. A deploy does not count the languages of edits. A table the project describes, but that
 does not exist yet, gets the text when a run creates it.
 
 ## What the table shows, and in which language
