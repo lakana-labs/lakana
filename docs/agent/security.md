@@ -472,6 +472,27 @@ name until it is dropped. Pins: `test_describe_table.py`
 `test_incoming_references_count_hidden_sources`, the two rename tests), `test_tables.py` in
 lakana-server, `test_undrop_restores_the_model_and_its_references`.
 
+### Layer rules (#252)
+
+`layer_rules.layer_issues` reads only the parsed assets and `lakana.yaml`'s `layers:`. It looks
+nothing up: a table's layer is the first part of its name (`layers.layer_of`), so whether an
+issue appears never depends on whether a table exists or whether the deployer may read it, and
+every name in a message is one the deployer wrote. Nothing is enforced at run time, in ad-hoc
+SQL, through the SDK or over the Iceberg REST catalog: layer rules describe how a project is
+built, not who may read what.
+
+A failed deploy's error reaches every reader of the environment, and a read issue names what an
+asset reads, which the project version view hides from a reader who may not read it. So every
+read issue (a SQL table, a Python input, a `references:` target, a source) carries
+`targets=(read,)` and `withheld` = ``` `<asset>` breaks layers.<layer>.reads with a read that is
+not shown to you```, swapped in by position through `error_for_reader`. A long-form reference
+`a.b.c` carries both readings (`a.b.c` and `a.b`), so a reader sees it only when it may read both.
+Write, kind, connection and outside-the-layers issues name only the asset, which the version view
+shows anyway, and carry no targets. Pins:
+`test_a_read_issue_is_withheld_from_a_reader_who_may_not_read_the_target`,
+`test_a_long_form_reference_is_classified_by_its_first_part_and_withheld_by_both_readings`,
+`test_layer_issues_come_after_the_reference_issues`.
+
 ## Table health: who sees the readers
 
 | Action | Needs | Notes |

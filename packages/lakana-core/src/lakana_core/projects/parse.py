@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from typing import cast
 
 import sqlglot
@@ -93,6 +93,61 @@ def _output_columns(sql: str) -> tuple[str, ...] | None:
             return None
         names.append(projection.alias_or_name)
     return tuple(names)
+
+
+def file_references(asset: ParsedAsset) -> set[str]:
+    """Find the references of an asset that read a file, not a catalog table.
+
+    A Python asset reads only declared tables, so it has none; for a SQL asset see
+    `sql_file_references`.
+
+    Parameters
+    ----------
+    asset
+        The parsed asset.
+
+    Returns
+    -------
+    set of str
+        The references that are not catalog tables.
+    """
+    if asset.kind == "python":
+        return set()
+    return sql_file_references(asset.sql, asset.references)
+
+
+def sql_file_references(sql: str, references: Iterable[str]) -> set[str]:
+    """Find the references of a query that read a file, not a catalog table.
+
+    ``FROM 'file.csv'``, ``FROM "a.b"`` (one quoted component containing a
+    dot) and ``read_csv('x')`` all reach the parser's reference list as a
+    dotted-looking name; only the AST tells them from ``file.csv`` the table.
+
+    Parameters
+    ----------
+    sql
+        The query.
+    references
+        The names the parser listed for it.
+
+    Returns
+    -------
+    set of str
+        The references that are not catalog tables. If the SQL cannot be
+        parsed again, every reference is treated that way.
+    """
+    try:
+        tree = sqlglot.parse_one(sql, dialect="duckdb")
+    except sqlglot.errors.SqlglotError:
+        return set(references)
+    found: set[str] = set()
+    for table in tree.find_all(exp.Table):
+        parts = [
+            part for part in (table.args.get("catalog"), table.args.get("db"), table.this) if part
+        ]
+        if any(not isinstance(part, exp.Identifier) or "." in part.name for part in parts):
+            found.add(".".join(part.name for part in parts))
+    return found
 
 
 def _sql_issue(

@@ -76,7 +76,7 @@ from lakana_core.projects.manifest import (
 )
 from lakana_core.projects.model import resolve_references
 from lakana_core.projects.model_checks import reference_sql
-from lakana_core.projects.parse import ParsedAsset
+from lakana_core.projects.parse import ParsedAsset, file_references
 from lakana_core.projects.project_config import (
     JobConfig,
     NotifyConfig,
@@ -1913,7 +1913,7 @@ def test_a_python_asset_has_no_file_references() -> None:
         kind="python",
         inputs=(("obs", "silver.clean"),),
     )
-    assert deploys_module._file_references(asset) == set()
+    assert file_references(asset) == set()
 
 
 def _as_artifact(session: Session, namespace: str, name: str) -> None:

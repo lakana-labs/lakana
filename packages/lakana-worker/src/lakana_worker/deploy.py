@@ -58,6 +58,7 @@ from lakana_core.projects.diff import diff_manifests
 from lakana_core.projects.discovery import discover
 from lakana_core.projects.issues import ProjectIssue, ProjectValidationError, withheld_lines
 from lakana_core.projects.jobs import job_issues
+from lakana_core.projects.layer_rules import layer_issues
 from lakana_core.projects.limits import DeployLimits
 from lakana_core.projects.lockfile import (
     LOCK_FILE,
@@ -875,6 +876,7 @@ def _deploy(
             + translation_problems
             + translation_issues(project, assets, translations)
             + reference_issues
+            + layer_issues(project.layers, assets)
         )
         if issues:
             raise ProjectValidationError(issues)

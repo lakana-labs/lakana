@@ -16,13 +16,11 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
-import sqlglot
 from sqlalchemy import and_, delete, func, insert, or_, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.exc import ObjectDeletedError, StaleDataError
-from sqlglot import exp
 
 from lakana_core.audit.service import AuditService
 from lakana_core.auth import Action, AuthorizationService, CiScope, PrincipalRef, Securable
@@ -91,7 +89,7 @@ from lakana_core.projects.manifest import (
     read_entry_connections,
 )
 from lakana_core.projects.model import TargetInfo, resolve_references
-from lakana_core.projects.parse import ParsedAsset
+from lakana_core.projects.parse import ParsedAsset, file_references, sql_file_references
 from lakana_core.runs.kept import kept_tables
 from lakana_core.runs.pools import PIPELINE
 from lakana_core.runs.waiting import (
@@ -260,61 +258,6 @@ harness (`lakana.runner`, which keeps the same pattern) refuses any other name w
 status 2. A parameter that reads a table may be any Python name."""
 
 _HIDDEN_KEYS = ("sql", "normalized_sql", "references", "lineage", "inputs", "input_kinds")
-
-
-def _file_references(asset: ParsedAsset) -> set[str]:
-    """Find the references of an asset that read a file, not a catalog table.
-
-    A Python asset reads only declared tables, so it has none; for a SQL asset see
-    `_sql_file_references`.
-
-    Parameters
-    ----------
-    asset
-        The parsed asset.
-
-    Returns
-    -------
-    set of str
-        The references that are not catalog tables.
-    """
-    if asset.kind == "python":
-        return set()
-    return _sql_file_references(asset.sql, asset.references)
-
-
-def _sql_file_references(sql: str, references: Iterable[str]) -> set[str]:
-    """Find the references of a query that read a file, not a catalog table.
-
-    ``FROM 'file.csv'``, ``FROM "a.b"`` (one quoted component containing a
-    dot) and ``read_csv('x')`` all reach the parser's reference list as a
-    dotted-looking name; only the AST tells them from ``file.csv`` the table.
-
-    Parameters
-    ----------
-    sql
-        The query.
-    references
-        The names the parser listed for it.
-
-    Returns
-    -------
-    set of str
-        The references that are not catalog tables. If the SQL cannot be
-        parsed again, every reference is treated that way.
-    """
-    try:
-        tree = sqlglot.parse_one(sql, dialect="duckdb")
-    except sqlglot.errors.SqlglotError:
-        return set(references)
-    found: set[str] = set()
-    for table in tree.find_all(exp.Table):
-        parts = [
-            part for part in (table.args.get("catalog"), table.args.get("db"), table.this) if part
-        ]
-        if any(not isinstance(part, exp.Identifier) or "." in part.name for part in parts):
-            found.add(".".join(part.name for part in parts))
-    return found
 
 
 def _artifact_parameter_issues(
@@ -2482,7 +2425,7 @@ class DeployService:
         files: dict[str, ParsedAsset] = {}
         first_reader: dict[str, ParsedAsset] = {}
         for asset in ordered:
-            for name in sorted(_file_references(asset)):
+            for name in sorted(file_references(asset)):
                 files.setdefault(name, asset)
             for reference in asset.references:
                 first_reader.setdefault(reference, asset)
@@ -2556,7 +2499,7 @@ class DeployService:
         )
         issues: list[ProjectIssue] = []
         for check in ordered:
-            files = _sql_file_references(check.sql, check.references)
+            files = sql_file_references(check.sql, check.references)
             for name in check.references:
                 if name in artifacts:
                     # A reader who may not read a catalog artifact is shown a missing table's
