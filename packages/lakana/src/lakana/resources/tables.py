@@ -45,6 +45,7 @@ from lakana._models import (
     TableReference,
     TableReferences,
     TableRetention,
+    TranslationCoverage,
     WriteResult,
 )
 from lakana._routes import ROUTES
@@ -207,6 +208,7 @@ def _model_from_json(data: dict[str, Any] | None) -> TableModel | None:
         hidden_references=data["hidden_references"],
         checks=tuple(_check_from_json(c) for c in data["checks"]),
         measures=tuple(_measure_from_json(m) for m in data.get("measures", [])),
+        grain_language=data.get("grain_language"),
     )
 
 
@@ -233,6 +235,8 @@ def _measure_from_json(data: dict[str, Any]) -> Measure:
         currency=data["currency"],
         label=data["label"],
         description=data["description"],
+        label_language=data.get("label_language"),
+        description_language=data.get("description_language"),
     )
 
 
@@ -328,6 +332,10 @@ def _table_from_json(data: dict[str, Any]) -> Table:
                 nullable=c["nullable"],
                 description=c.get("description"),
                 description_source=c.get("description_source"),
+                label=c.get("label"),
+                label_source=c.get("label_source"),
+                label_language=c.get("label_language"),
+                description_language=c.get("description_language"),
             )
             for c in data.get("schema", [])
         ],
@@ -349,6 +357,16 @@ def _table_from_json(data: dict[str, Any]) -> Table:
         expires_at=_when(data.get("expires_at")),
         expires_soon=data.get("expires_soon", False),
         model=_model_from_json(data.get("model")),
+        label=data.get("label"),
+        label_source=data.get("label_source"),
+        label_language=data.get("label_language"),
+        description_language=data.get("description_language"),
+        language=data.get("language", "en"),
+        main_language=data.get("main_language", "en"),
+        translations=tuple(
+            TranslationCoverage(c["language"], c["translated"], c["total"])
+            for c in data.get("translations", [])
+        ),
     )
 
 
@@ -588,7 +606,12 @@ class Tables:
         self._transport = transport
 
     def list(
-        self, environment: str, namespace: str, *, model_kind: str | None = None
+        self,
+        environment: str,
+        namespace: str,
+        *,
+        model_kind: str | None = None,
+        lang: str | None = None,
     ) -> _TableList:
         """List the tables in a namespace.
 
@@ -601,6 +624,9 @@ class Tables:
         model_kind
             Only the tables whose asset header declares this kind: ``fact``, ``dimension``,
             ``wide`` or ``staging``. Every table when `None`.
+        lang
+            The language of the texts, such as ``de`` or ``fr-CH``; without it, your profile's
+            language, else the instance's main language.
 
         Returns
         -------
@@ -612,16 +638,21 @@ class Tables:
         lakana.errors.NotFound
             If the namespace does not exist.
         lakana.errors.ValidationError
-            If `model_kind` is not one of the kinds.
+            If `model_kind` is not one of the kinds, or `lang` is not a language tag.
         """
+        params = {
+            key: value
+            for key, value in (("model_kind", model_kind), ("lang", lang))
+            if value is not None
+        }
         response = self._transport.request(
             ROUTES["tables.list"],
             path_params={"env": environment, "path": namespace},
-            params=None if model_kind is None else {"model_kind": model_kind},
+            params=params or None,
         )
         return [_table_from_json(item) for item in response.json()]
 
-    def get(self, environment: str, qualified_name: str) -> Table:
+    def get(self, environment: str, qualified_name: str, *, lang: str | None = None) -> Table:
         """Fetch a table by its `"namespace.table"` name.
 
         Parameters
@@ -630,20 +661,27 @@ class Tables:
             The environment name.
         qualified_name
             Dot-joined `"namespace.table"` name, such as `"bronze.sales"`.
+        lang
+            The language of the texts, such as ``de`` or ``fr-CH``; without it, your profile's
+            language, else the instance's main language.
 
         Returns
         -------
         Table
-            The table.
+            The table; each text says which language it is in.
 
         Raises
         ------
         lakana.errors.NotFound
             If no such table exists.
+        lakana.errors.ValidationError
+            If `lang` is not a language tag.
         """
         namespace, name = _split_namespace_table(qualified_name)
         response = self._transport.request(
-            ROUTES["tables.get"], path_params={"env": environment, "path": namespace, "name": name}
+            ROUTES["tables.get"],
+            path_params={"env": environment, "path": namespace, "name": name},
+            params=None if lang is None else {"lang": lang},
         )
         return _table_from_json(response.json())
 

@@ -829,6 +829,15 @@ class ColumnOut(BaseModel):
         when there is none.
     description_source
         ``edited`` or ``project``; `None` when there is no description.
+    label
+        The column's short name for people, in the reader's language where it has one, else
+        the main language's; `None` when there is none.
+    label_source
+        ``edited`` or ``project``; `None` when there is no label.
+    label_language
+        The language of `label`; `None` exactly when `label` is.
+    description_language
+        The language of `description`; `None` exactly when `description` is.
     """
 
     name: str
@@ -836,6 +845,28 @@ class ColumnOut(BaseModel):
     nullable: bool
     description: str | None = None
     description_source: Literal["project", "edited"] | None = None
+    label: str | None = None
+    label_source: Literal["project", "edited"] | None = None
+    label_language: str | None = None
+    description_language: str | None = None
+
+
+class TranslationCoverageOut(BaseModel):
+    """How many of a table's main-language texts one language has.
+
+    Parameters
+    ----------
+    language
+        The language.
+    translated
+        Texts it has.
+    total
+        Texts the table shows in its main language.
+    """
+
+    language: str
+    translated: int
+    total: int
 
 
 class TableReferenceOut(BaseModel):
@@ -911,6 +942,22 @@ class TableOut(BaseModel):
     model
         The model the asset header declares (kind, grain, key, references, measures and the
         checks they generate); `None` for a table whose header declares none.
+    label
+        The table's short name for people, chosen like `description`; `None` for none.
+    label_source
+        Where `label` came from (``edited`` or ``project``); `None` without a label.
+    label_language
+        Which language `label` is in; `None` exactly when there is no label.
+    description_language
+        Which language `description` is in; `None` exactly when there is no description.
+    language
+        The language the texts were chosen for: `lang`, else your profile's, else the first of
+        Accept-Language, else the instance's main language.
+    main_language
+        The table's main language: its project's `main_language`, else the instance's; a text
+        with no translation is shown in it.
+    translations
+        Per language that has texts for the table, how many of its main-language texts it has.
     """
 
     name: str
@@ -934,6 +981,13 @@ class TableOut(BaseModel):
     expires_at: datetime | None = None
     expires_soon: bool = False
     model: TableModelOut | None = None
+    label: str | None = None
+    label_source: Literal["project", "edited"] | None = None
+    label_language: str | None = None
+    description_language: str | None = None
+    language: str = "en"
+    main_language: str = "en"
+    translations: list[TranslationCoverageOut] = []
 
 
 class LastMaintenanceOut(BaseModel):
@@ -1061,9 +1115,14 @@ class MeasureOut(BaseModel):
     currency
         The ISO 4217 currency, or `None` when it has a unit.
     label
-        A short name in the main language, or `None`.
+        A short name in the reader's language where it has one, else the main language's, or
+        `None`.
     description
-        What it means, in the main language, or `None`.
+        What it means, chosen like `label`, or `None`.
+    label_language
+        The language of `label`; `None` exactly when `label` is.
+    description_language
+        The language of `description`; `None` exactly when `description` is.
     """
 
     id: str
@@ -1075,6 +1134,8 @@ class MeasureOut(BaseModel):
     currency: str | None
     label: str | None
     description: str | None
+    label_language: str | None = None
+    description_language: str | None = None
 
 
 class TableModelOut(BaseModel):
@@ -1085,7 +1146,8 @@ class TableModelOut(BaseModel):
     kind
         ``fact``, ``dimension``, ``wide`` or ``staging``; `None` when the header names none.
     grain
-        What one row is, in one sentence; `None` when the header says nothing.
+        What one row is, in one sentence, in the reader's language where it has one, else the
+        main language's; `None` when the header says nothing.
     key
         The columns that identify one row; empty for no key and for `key: none`.
     key_none
@@ -1099,6 +1161,8 @@ class TableModelOut(BaseModel):
         Every measure the header declares, by column; a reader of the table sees all of them.
     checks
         The newest result of each check the current header generates, by name.
+    grain_language
+        The language of `grain`; `None` exactly when `grain` is.
     """
 
     kind: str | None
@@ -1109,6 +1173,7 @@ class TableModelOut(BaseModel):
     hidden_references: int
     measures: list[MeasureOut]
     checks: list[CheckHealthOut]
+    grain_language: str | None = None
 
 
 class TableReferencesOut(BaseModel):

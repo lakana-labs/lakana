@@ -461,6 +461,22 @@ def get_expiry_warning_days(request: Request) -> int:
     return request.app.state.settings.tables.expiry_warning_days
 
 
+def get_main_language(request: Request) -> str:
+    """Read the instance's main language.
+
+    Parameters
+    ----------
+    request
+        The current request, used to reach `app.state.settings`.
+
+    Returns
+    -------
+    str
+        `LAKANA_MAIN_LANGUAGE`.
+    """
+    return request.app.state.settings.main_language
+
+
 def get_view_audit(request: Request) -> ViewAuditConfig:
     """Read whether and how often a view of other people's activity is audited.
 
@@ -484,6 +500,7 @@ def get_catalog(
     undo_days: int = Depends(get_undo_days),
     expiry_warning_days: int = Depends(get_expiry_warning_days),
     view_audit: ViewAuditConfig = Depends(get_view_audit),
+    main_language: str = Depends(get_main_language),
 ) -> CatalogService:
     """Build a CatalogService for the current request.
 
@@ -501,6 +518,8 @@ def get_catalog(
         How many days ahead a table's expiry is described as soon.
     view_audit
         Whether and how often seeing the readers of a table is audited.
+    main_language
+        The language of the texts of a table whose project declares none.
 
     Returns
     -------
@@ -514,6 +533,7 @@ def get_catalog(
         undo_days=undo_days,
         expiry_warning_days=expiry_warning_days,
         view_audit=view_audit,
+        main_language=main_language,
     )
 
 

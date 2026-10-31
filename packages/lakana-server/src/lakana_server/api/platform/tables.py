@@ -47,6 +47,7 @@ from lakana_core.catalog.writes import (
 from lakana_core.errors import LakanaError, ValidationError
 from lakana_core.identifiers import NamespacePath, TableRef
 from lakana_core.projects.asset_model import require_model_kind
+from lakana_server.api.platform.languages import LANG_DESCRIPTION, reader_languages
 from lakana_server.api.platform.schemas import (
     AppendOut,
     ColumnOut,
@@ -70,6 +71,7 @@ from lakana_server.api.platform.schemas import (
     TableReferencesOut,
     TableRetentionIn,
     TableRetentionOut,
+    TranslationCoverageOut,
     UndropIn,
 )
 from lakana_server.api.responses import errors
@@ -79,6 +81,7 @@ from lakana_server.concurrency import AppendConcurrencyLimiter
 from lakana_server.deps import (
     get_catalog,
     get_lineage_service,
+    get_main_language,
     get_principal,
     get_query_service,
     get_session,
@@ -570,14 +573,14 @@ def _to_out(namespace: str, loaded: LoadedTable) -> TableOut:
 
 
 def _column_out(column: ColumnSpec, description: TableDescription) -> ColumnOut:
-    """Build one column of a response body, with its description.
+    """Build one column of a response body, with its label and description.
 
     Parameters
     ----------
     column
         The column.
     description
-        From `CatalogService.describe_table`, which holds the columns' descriptions.
+        From `CatalogService.describe_table`, which holds the columns' chosen texts.
 
     Returns
     -------
@@ -585,12 +588,17 @@ def _column_out(column: ColumnSpec, description: TableDescription) -> ColumnOut:
         The column.
     """
     text = description.column_descriptions.get(column.name)
+    label = description.column_labels.get(column.name)
     return ColumnOut(
         name=column.name,
         type=column.type,
         nullable=column.nullable,
         description=None if text is None else text.text,
         description_source=None if text is None else text.source,
+        description_language=None if text is None else text.language,
+        label=None if label is None else label.text,
+        label_source=None if label is None else label.source,
+        label_language=None if label is None else label.language,
     )
 
 
@@ -626,6 +634,16 @@ def _describe_out(namespace: str, description: TableDescription) -> TableOut:
         state_message=description.state_message,
         description=description.description,
         description_source=description.description_source,
+        description_language=description.description_language,
+        label=description.label,
+        label_source=description.label_source,
+        label_language=description.label_language,
+        language=description.language,
+        main_language=description.main_language,
+        translations=[
+            TranslationCoverageOut.model_validate(c, from_attributes=True)
+            for c in description.translations
+        ],
         last_write_at=description.last_write_at,
         row_count=description.row_count,
         size_bytes=description.size_bytes,
@@ -967,20 +985,24 @@ def create_table(
 def list_tables(
     env: str,
     path: str,
+    request: Request,
     model_kind: str | None = Query(
         default=None,
         description="Only tables whose asset header declares this kind: fact, dimension, wide "
         "or staging.",
     ),
+    lang: str | None = Query(default=None, description=LANG_DESCRIPTION),
     principal: PrincipalRef = Depends(get_principal),
     catalog: CatalogService = Depends(get_catalog),
+    main_language: str = Depends(get_main_language),
 ) -> list[TableOut]:
     """List the tables of a namespace.
 
-    Lists the tables of the namespace that the caller may read. Needs `READ_TABLE` on the
-    namespace; tables the caller may not read are left out. Answers 404 when the namespace
-    does not exist, 422 for a `model_kind` no header can declare, and 503 when the
-    environment's storage cannot be reached (try again after `Retry-After`).
+    Lists the tables of the namespace that the caller may read, with their texts in the
+    reader's language. Needs `READ_TABLE` on the namespace; tables the caller may not read are
+    left out. Answers 404 when the namespace does not exist, 422 for a `model_kind` no header
+    can declare or a `lang` that is not a language tag, and 503 when the environment's storage
+    cannot be reached (try again after `Retry-After`).
 
     Parameters
     ----------
@@ -988,13 +1010,19 @@ def list_tables(
         Environment name.
     path
         Dot-joined namespace path.
+    request
+        The current request, for `Accept-Language`.
     model_kind
         Keep only the tables whose header declares this kind (`model.kind`); every table when
         absent.
+    lang
+        The language of the texts; see `reader_languages` for the order without it.
     principal
         The authenticated caller.
     catalog
         The catalog service for this request.
+    main_language
+        `LAKANA_MAIN_LANGUAGE`, the last language a reader without a choice gets.
 
     Returns
     -------
@@ -1007,10 +1035,11 @@ def list_tables(
     """
     if model_kind is not None:
         require_model_kind(model_kind)
+    languages = reader_languages(request, lang, principal, main_language)
     ns = NamespacePath.from_parts(path.split("."))
     refs = catalog.list_tables(principal, env, ns)
     described = [
-        catalog.describe_table(principal, ref)
+        catalog.describe_table(principal, ref, languages=languages)
         for ref in refs
         if catalog.can_read_table(principal, ref)
     ]
@@ -1026,13 +1055,18 @@ def get_table(
     env: str,
     path: str,
     name: str,
+    request: Request,
+    lang: str | None = Query(default=None, description=LANG_DESCRIPTION),
     principal: PrincipalRef = Depends(get_principal),
     catalog: CatalogService = Depends(get_catalog),
+    main_language: str = Depends(get_main_language),
 ) -> TableOut:
     """Show a table.
 
-    Needs `READ_TABLE`. Answers 404 when the table does not exist and 503 when the
-    environment's storage cannot be reached (try again after `Retry-After`).
+    Shows its texts in the reader's language, each saying which language it is in. Needs
+    `READ_TABLE`. Answers 404 when the table does not exist, 422 for a `lang` that is not a
+    language tag, and 503 when the environment's storage cannot be reached (try again after
+    `Retry-After`).
 
     Parameters
     ----------
@@ -1042,10 +1076,16 @@ def get_table(
         Dot-joined namespace path.
     name
         Table name.
+    request
+        The current request, for `Accept-Language`.
+    lang
+        The language of the texts; see `reader_languages` for the order without it.
     principal
         The authenticated caller.
     catalog
         The catalog service for this request.
+    main_language
+        `LAKANA_MAIN_LANGUAGE`, the last language a reader without a choice gets.
 
     Returns
     -------
@@ -1056,10 +1096,13 @@ def get_table(
     ------
     lakana_core.errors.NotFoundError
         Mapped to 404 by `install_exception_handlers`.
+    lakana_core.errors.ValidationError
+        Mapped to 422 for a `lang` that is not a language tag.
     """
+    languages = reader_languages(request, lang, principal, main_language)
     ns = NamespacePath.from_parts(path.split("."))
     ref = TableRef(environment=env, namespace=ns, name=name)
-    return _describe_out(path, catalog.describe_table(principal, ref))
+    return _describe_out(path, catalog.describe_table(principal, ref, languages=languages))
 
 
 @router.get("/{name}/health", response_model=TableHealthOut, responses=errors(403, 404, 503))

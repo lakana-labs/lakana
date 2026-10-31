@@ -489,6 +489,7 @@ A dropped table keeps its files until `purge_after` (the server's undo period, 7
 | `NAMESPACE` | text | required |  |
 | `--dropped` | flag | off | List the dropped tables that can still be restored, and until when. |
 | `--model-kind` | text | none | Only tables whose asset header declares this kind: fact, dimension, wide or staging. |
+| `--lang` | text | none | Show the texts in this language, such as de or fr-CH. |
 | `--env` | text | none | Environment (default: the profile's). |
 
 ### `lakana table get`
@@ -502,6 +503,7 @@ A table whose first build did not finish, or failed a check, is shown as `not pu
 | Name | Type | Default | Description |
 |---|---|---|---|
 | `NAME` | text | required |  |
+| `--lang` | text | none | Show the texts in this language, such as de or fr-CH. |
 | `--env` | text | none | Environment (default: the profile's). |
 
 ### `lakana table health`

@@ -223,6 +223,17 @@ class Column:
     description_source
         ``project`` for the text of the asset header, ``edited`` for one set through the API;
         `None` without a description.
+    label
+        The column's short name for people, in your language where it has one, else the main
+        language's; `None` when it has none, and from a server older than translations.
+    label_source
+        ``project`` or ``edited``; `None` without a label.
+    label_language
+        The language of `label`; `None` exactly when `label` is, and from a server older than
+        translations.
+    description_language
+        The language of `description`; `None` exactly when `description` is, and from a server
+        older than translations.
     """
 
     name: str
@@ -230,6 +241,29 @@ class Column:
     nullable: bool
     description: str | None = None
     description_source: str | None = None
+    label: str | None = None
+    label_source: str | None = None
+    label_language: str | None = None
+    description_language: str | None = None
+
+
+@dataclass(frozen=True)
+class TranslationCoverage:
+    """How many of a table's main-language texts one language has.
+
+    Parameters
+    ----------
+    language
+        The language.
+    translated
+        Texts it has.
+    total
+        Texts the table shows in its main language.
+    """
+
+    language: str
+    translated: int
+    total: int
 
 
 @dataclass(frozen=True)
@@ -383,9 +417,15 @@ class Measure:
     currency
         Its ISO 4217 currency, or `None` when it has a unit.
     label
-        A short name, or `None`.
+        A short name, in your language where it has one, else the main language's; or `None`.
     description
-        What it means, or `None`.
+        What it means, chosen like `label`; or `None`.
+    label_language
+        The language of `label`; `None` exactly when `label` is, and from a server older than
+        translations.
+    description_language
+        The language of `description`; `None` exactly when `description` is, and from a server
+        older than translations.
     """
 
     id: str
@@ -397,6 +437,8 @@ class Measure:
     currency: str | None
     label: str | None
     description: str | None
+    label_language: str | None = None
+    description_language: str | None = None
 
 
 @dataclass(frozen=True)
@@ -422,6 +464,9 @@ class TableModel:
         The newest result of each check the header generates.
     measures
         The measures its header declares; empty from an older server.
+    grain_language
+        The language of `grain`; `None` exactly when `grain` is, and from a server older than
+        translations.
     """
 
     kind: str | None
@@ -432,6 +477,7 @@ class TableModel:
     hidden_references: int = 0
     checks: tuple[CheckHealth, ...] = ()
     measures: tuple[Measure, ...] = ()
+    grain_language: str | None = None
 
 
 @dataclass(frozen=True)
@@ -520,6 +566,26 @@ class Table:
     model
         The model the asset header declares (kind, grain, key, references and the checks they
         generate); `None` without one, and from a server older than model metadata.
+    label
+        The table's short name for people, chosen like `description`; `None` for none, and from
+        a server older than translations.
+    label_source
+        Where `label` came from (``project`` or ``edited``); `None` without a label.
+    label_language
+        Which language `label` is in; `None` without a label, and from a server older than
+        translations.
+    description_language
+        Which language `description` is in; `None` without a description, and from a server
+        older than translations.
+    language
+        The language the texts were chosen for: the one you asked for, else your profile's,
+        else the instance's main language; ``en`` from a server older than translations.
+    main_language
+        The table's main language, which a text without a translation is shown in; ``en`` from
+        a server older than translations.
+    translations
+        Per language that has texts for the table, how many of its main-language texts it has;
+        empty without translations, and from a server older than them.
     """
 
     name: str
@@ -543,6 +609,13 @@ class Table:
     expires_at: datetime | None = None
     expires_soon: bool = False
     model: TableModel | None = None
+    label: str | None = None
+    label_source: str | None = None
+    label_language: str | None = None
+    description_language: str | None = None
+    language: str = "en"
+    main_language: str = "en"
+    translations: tuple[TranslationCoverage, ...] = ()
 
 
 @dataclass(frozen=True)

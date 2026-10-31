@@ -734,5 +734,9 @@ class CiTokenService:
         # resolve_ci_scope has just read this row as an active service account.
         assert principal is not None  # nosec B101 -- narrows the type only
         return PrincipalRef(
-            id=principal.id, name=principal.name, type=principal.type, ci_scope=scope
+            id=principal.id,
+            name=principal.name,
+            type=principal.type,
+            ci_scope=scope,
+            language=principal.language,
         )

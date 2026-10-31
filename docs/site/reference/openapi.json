@@ -2283,7 +2283,7 @@
           "tables"
         ],
         "summary": "List the tables of a namespace",
-        "description": "Lists the tables of the namespace that the caller may read. Needs `READ_TABLE` on the namespace; tables the caller may not read are left out. Answers 404 when the namespace does not exist, 422 for a `model_kind` no header can declare, and 503 when the environment's storage cannot be reached (try again after `Retry-After`).",
+        "description": "Lists the tables of the namespace that the caller may read, with their texts in the reader's language. Needs `READ_TABLE` on the namespace; tables the caller may not read are left out. Answers 404 when the namespace does not exist, 422 for a `model_kind` no header can declare or a `lang` that is not a language tag, and 503 when the environment's storage cannot be reached (try again after `Retry-After`).",
         "operationId": "list_tables_api_v1_environments__env__namespaces__path__tables_get",
         "parameters": [
           {
@@ -2323,6 +2323,24 @@
               "title": "Model Kind"
             },
             "description": "Only tables whose asset header declares this kind: fact, dimension, wide or staging."
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The language of the texts, such as de or fr-CH; without it, your profile's language, then Accept-Language, then the instance's main language.",
+              "title": "Lang"
+            },
+            "description": "The language of the texts, such as de or fr-CH; without it, your profile's language, then Accept-Language, then the instance's main language."
           },
           {
             "name": "authorization",
@@ -2417,7 +2435,7 @@
           "tables"
         ],
         "summary": "Show a table",
-        "description": "Needs `READ_TABLE`. Answers 404 when the table does not exist and 503 when the environment's storage cannot be reached (try again after `Retry-After`).",
+        "description": "Shows its texts in the reader's language, each saying which language it is in. Needs `READ_TABLE`. Answers 404 when the table does not exist, 422 for a `lang` that is not a language tag, and 503 when the environment's storage cannot be reached (try again after `Retry-After`).",
         "operationId": "get_table_api_v1_environments__env__namespaces__path__tables__name__get",
         "parameters": [
           {
@@ -2449,6 +2467,24 @@
               "title": "Name"
             },
             "description": "Table name."
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The language of the texts, such as de or fr-CH; without it, your profile's language, then Accept-Language, then the instance's main language.",
+              "title": "Lang"
+            },
+            "description": "The language of the texts, such as de or fr-CH; without it, your profile's language, then Accept-Language, then the instance's main language."
           },
           {
             "name": "authorization",
@@ -17993,6 +18029,54 @@
               }
             ],
             "title": "Description Source"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "label_source": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "project",
+                  "edited"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label Source"
+          },
+          "label_language": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label Language"
+          },
+          "description_language": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description Language"
           }
         },
         "type": "object",
@@ -18002,7 +18086,7 @@
           "nullable"
         ],
         "title": "ColumnOut",
-        "description": "One column of a table's schema, in the JSON column form.\n\nParameters\n----------\nname\n    Column name.\ntype\n    The Iceberg type in the JSON form (`\"long\"`, `\"decimal(10,2)\"`, ...),\n    or the Iceberg string for a nested type.\nnullable\n    Whether the column accepts nulls.\ndescription\n    The column's description: the edit when it has one, else the project's text; `None`\n    when there is none.\ndescription_source\n    ``edited`` or ``project``; `None` when there is no description."
+        "description": "One column of a table's schema, in the JSON column form.\n\nParameters\n----------\nname\n    Column name.\ntype\n    The Iceberg type in the JSON form (`\"long\"`, `\"decimal(10,2)\"`, ...),\n    or the Iceberg string for a nested type.\nnullable\n    Whether the column accepts nulls.\ndescription\n    The column's description: the edit when it has one, else the project's text; `None`\n    when there is none.\ndescription_source\n    ``edited`` or ``project``; `None` when there is no description.\nlabel\n    The column's short name for people, in the reader's language where it has one, else\n    the main language's; `None` when there is none.\nlabel_source\n    ``edited`` or ``project``; `None` when there is no label.\nlabel_language\n    The language of `label`; `None` exactly when `label` is.\ndescription_language\n    The language of `description`; `None` exactly when `description` is."
       },
       "ConnectionCreate": {
         "properties": {
@@ -20113,6 +20197,28 @@
               }
             ],
             "title": "Description"
+          },
+          "label_language": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label Language"
+          },
+          "description_language": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description Language"
           }
         },
         "type": "object",
@@ -20128,7 +20234,7 @@
           "description"
         ],
         "title": "MeasureOut",
-        "description": "One measure a table's header declares, as `MeasureView` holds it.\n\nParameters\n----------\nid\n    ``<ns.table>/measure_<column>``.\ncolumn\n    The measure's column.\naggregation\n    ``sum``, ``count``, ``min``, ``max``, ``avg``, ``count_distinct`` or ``none``.\nadditivity\n    ``additive``, ``semi`` (not over `not_over`) or ``non``.\nnot_over\n    The columns a ``semi`` measure must not be summed over.\nunit\n    The unit, or `None` when it has a currency.\ncurrency\n    The ISO 4217 currency, or `None` when it has a unit.\nlabel\n    A short name in the main language, or `None`.\ndescription\n    What it means, in the main language, or `None`."
+        "description": "One measure a table's header declares, as `MeasureView` holds it.\n\nParameters\n----------\nid\n    ``<ns.table>/measure_<column>``.\ncolumn\n    The measure's column.\naggregation\n    ``sum``, ``count``, ``min``, ``max``, ``avg``, ``count_distinct`` or ``none``.\nadditivity\n    ``additive``, ``semi`` (not over `not_over`) or ``non``.\nnot_over\n    The columns a ``semi`` measure must not be summed over.\nunit\n    The unit, or `None` when it has a currency.\ncurrency\n    The ISO 4217 currency, or `None` when it has a unit.\nlabel\n    A short name in the reader's language where it has one, else the main language's, or\n    `None`.\ndescription\n    What it means, chosen like `label`, or `None`.\nlabel_language\n    The language of `label`; `None` exactly when `label` is.\ndescription_language\n    The language of `description`; `None` exactly when `description` is."
       },
       "MergeOut": {
         "properties": {
@@ -22604,6 +22710,17 @@
             },
             "type": "array",
             "title": "Checks"
+          },
+          "grain_language": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Grain Language"
           }
         },
         "type": "object",
@@ -22618,7 +22735,7 @@
           "checks"
         ],
         "title": "TableModelOut",
-        "description": "The model a table's asset header declares, as the caller may see it.\n\nParameters\n----------\nkind\n    ``fact``, ``dimension``, ``wide`` or ``staging``; `None` when the header names none.\ngrain\n    What one row is, in one sentence; `None` when the header says nothing.\nkey\n    The columns that identify one row; empty for no key and for `key: none`.\nkey_none\n    Whether the header says `key: none`: no columns are unique, and the grain is not\n    checked.\nreferences\n    The references whose target the caller may read, by id.\nhidden_references\n    How many references point at a table the caller may not read; they are not listed.\nmeasures\n    Every measure the header declares, by column; a reader of the table sees all of them.\nchecks\n    The newest result of each check the current header generates, by name."
+        "description": "The model a table's asset header declares, as the caller may see it.\n\nParameters\n----------\nkind\n    ``fact``, ``dimension``, ``wide`` or ``staging``; `None` when the header names none.\ngrain\n    What one row is, in one sentence, in the reader's language where it has one, else the\n    main language's; `None` when the header says nothing.\nkey\n    The columns that identify one row; empty for no key and for `key: none`.\nkey_none\n    Whether the header says `key: none`: no columns are unique, and the grain is not\n    checked.\nreferences\n    The references whose target the caller may read, by id.\nhidden_references\n    How many references point at a table the caller may not read; they are not listed.\nmeasures\n    Every measure the header declares, by column; a reader of the table sees all of them.\nchecks\n    The newest result of each check the current header generates, by name.\ngrain_language\n    The language of `grain`; `None` exactly when `grain` is."
       },
       "TableOut": {
         "properties": {
@@ -22822,6 +22939,72 @@
                 "type": "null"
               }
             ]
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "label_source": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "project",
+                  "edited"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label Source"
+          },
+          "label_language": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label Language"
+          },
+          "description_language": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description Language"
+          },
+          "language": {
+            "type": "string",
+            "title": "Language",
+            "default": "en"
+          },
+          "main_language": {
+            "type": "string",
+            "title": "Main Language",
+            "default": "en"
+          },
+          "translations": {
+            "items": {
+              "$ref": "#/components/schemas/TranslationCoverageOut"
+            },
+            "type": "array",
+            "title": "Translations",
+            "default": []
           }
         },
         "type": "object",
@@ -22833,7 +23016,7 @@
           "schema"
         ],
         "title": "TableOut",
-        "description": "Response body for a table, external table or view, read-only.\n\nParameters\n----------\nname\n    Table name.\nnamespace\n    Dot-joined namespace path the table lives in.\nuuid\n    The table's id (the Iceberg ``table-uuid`` for a managed table).\nkind\n    ``TABLE``, ``EXTERNAL``, ``VIEW`` or ``ARTIFACT``.\nmetadata_location\n    Absolute URI of the current metadata file; `None` for an external\n    table or a view.\ncolumns\n    The columns, serialized as `schema`.\nsql\n    A view's SELECT. `None` if the caller may not read every reference\n    .\nreferences\n    A view's references. Empty if the caller may not read every\n    reference.\nhidden_references\n    The number of the view's references the caller may not read, and\n    so are withheld from `sql` and `references`.\nsnapshot_id\n    The current snapshot of a managed table; `None`\n    without one, and for a view or an external table.\nstate\n    ``not_published`` for a table whose first build did not finish, or failed a blocking\n    check, and that no later run has published; ``published`` for everything else.\nstate_message\n    Why it is not published, naming the check and the run; `None` otherwise.\ndescription\n    The table's description: the edit when it has one, else the project's text; `None`\n    when there is none.\ndescription_source\n    ``edited`` or ``project``; `None` when there is no description.\nlast_write_at\n    When the current snapshot was committed; `None` without one, and for a view, an\n    external table and an artifact.\nrow_count\n    The rows of the current snapshot, from its summary; `None` when missing.\nsize_bytes\n    The size of its data files, from its summary; `None` when missing.\nfile_count\n    Its data files, from its summary; `None` when missing.\nexpires_at\n    When a managed table's retention makes it expire; `None` when it never does.\nexpires_soon\n    Whether that is within the server's warning window\n    (``LAKANA_TABLES__EXPIRY_WARNING_DAYS``, 7 days by default); always `false` when that\n    is 0.\nmodel\n    The model the asset header declares (kind, grain, key, references, measures and the\n    checks they generate); `None` for a table whose header declares none."
+        "description": "Response body for a table, external table or view, read-only.\n\nParameters\n----------\nname\n    Table name.\nnamespace\n    Dot-joined namespace path the table lives in.\nuuid\n    The table's id (the Iceberg ``table-uuid`` for a managed table).\nkind\n    ``TABLE``, ``EXTERNAL``, ``VIEW`` or ``ARTIFACT``.\nmetadata_location\n    Absolute URI of the current metadata file; `None` for an external\n    table or a view.\ncolumns\n    The columns, serialized as `schema`.\nsql\n    A view's SELECT. `None` if the caller may not read every reference\n    .\nreferences\n    A view's references. Empty if the caller may not read every\n    reference.\nhidden_references\n    The number of the view's references the caller may not read, and\n    so are withheld from `sql` and `references`.\nsnapshot_id\n    The current snapshot of a managed table; `None`\n    without one, and for a view or an external table.\nstate\n    ``not_published`` for a table whose first build did not finish, or failed a blocking\n    check, and that no later run has published; ``published`` for everything else.\nstate_message\n    Why it is not published, naming the check and the run; `None` otherwise.\ndescription\n    The table's description: the edit when it has one, else the project's text; `None`\n    when there is none.\ndescription_source\n    ``edited`` or ``project``; `None` when there is no description.\nlast_write_at\n    When the current snapshot was committed; `None` without one, and for a view, an\n    external table and an artifact.\nrow_count\n    The rows of the current snapshot, from its summary; `None` when missing.\nsize_bytes\n    The size of its data files, from its summary; `None` when missing.\nfile_count\n    Its data files, from its summary; `None` when missing.\nexpires_at\n    When a managed table's retention makes it expire; `None` when it never does.\nexpires_soon\n    Whether that is within the server's warning window\n    (``LAKANA_TABLES__EXPIRY_WARNING_DAYS``, 7 days by default); always `false` when that\n    is 0.\nmodel\n    The model the asset header declares (kind, grain, key, references, measures and the\n    checks they generate); `None` for a table whose header declares none.\nlabel\n    The table's short name for people, chosen like `description`; `None` for none.\nlabel_source\n    Where `label` came from (``edited`` or ``project``); `None` without a label.\nlabel_language\n    Which language `label` is in; `None` exactly when there is no label.\ndescription_language\n    Which language `description` is in; `None` exactly when there is no description.\nlanguage\n    The language the texts were chosen for: `lang`, else your profile's, else the first of\n    Accept-Language, else the instance's main language.\nmain_language\n    The table's main language: its project's `main_language`, else the instance's; a text\n    with no translation is shown in it.\ntranslations\n    Per language that has texts for the table, how many of its main-language texts it has."
       },
       "TableReferenceOut": {
         "properties": {
@@ -23579,6 +23762,30 @@
         ],
         "title": "TokenOut",
         "description": "Response body for a listed PAT. Never includes a secret.\n\nParameters\n----------\nkey_id\n    The public lookup key.\nname\n    The label given at issuance.\nlast_used_at\n    When this PAT last successfully authenticated a request, or `None`\n    if never."
+      },
+      "TranslationCoverageOut": {
+        "properties": {
+          "language": {
+            "type": "string",
+            "title": "Language"
+          },
+          "translated": {
+            "type": "integer",
+            "title": "Translated"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "language",
+          "translated",
+          "total"
+        ],
+        "title": "TranslationCoverageOut",
+        "description": "How many of a table's main-language texts one language has.\n\nParameters\n----------\nlanguage\n    The language.\ntranslated\n    Texts it has.\ntotal\n    Texts the table shows in its main language."
       },
       "UndropIn": {
         "properties": {

@@ -43,6 +43,12 @@ class LanguageCoverage:
 class TextChooser:
     """Pick the text a reader sees, with its language.
 
+    A translation row in the table's own main language is ignored, both when choosing and when
+    counting coverage. The main language's texts are the asset header and the main-language
+    edits; such a row can only be left over from before the main language changed (the
+    project's `main_language:` or `LAKANA_MAIN_LANGUAGE`), so showing it would let a stale text
+    win over the header that now speaks for that language.
+
     Parameters
     ----------
     main_language
@@ -121,7 +127,7 @@ class TextChooser:
             By language; empty for a table without rows.
         """
         wanted = list(keys)
-        languages = sorted({key[3] for key in self._texts})
+        languages = sorted({key[3] for key in self._texts} - {self.main})
         return tuple(
             LanguageCoverage(
                 language,

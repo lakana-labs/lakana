@@ -114,3 +114,10 @@ def test_coverage_counts_the_main_texts_each_language_has() -> None:
     chooser = TextChooser("en", ["fr"], rows)
     keys = [("table", "", "label"), ("table", "", "description"), ("column", "id", "label")]
     assert chooser.coverage(keys) == (LanguageCoverage("fr", 2, 3), LanguageCoverage("it", 1, 3))
+
+
+def test_a_row_in_the_main_language_is_ignored_and_never_counted() -> None:
+    rows = [_row("en", "label", "Stale"), _row("fr", "label", "Ventes")]
+    chooser = TextChooser("en", ["en"], rows)
+    assert _chose(chooser, "label", "Sales", None).text == "Sales"
+    assert chooser.coverage([("table", "", "label")]) == (LanguageCoverage("fr", 1, 1),)

@@ -326,3 +326,15 @@ def test_issue_with_a_fixed_key_id_surfaces_a_non_key_id_integrity_error(
 
     with pytest.raises(IntegrityError):
         service.issue(_unpersisted_actor(), "alice", name="laptop", key_id="k1", secret="s1")
+
+
+def test_verify_carries_the_principals_language(session: Session) -> None:
+    """`verify` reads the principal's profile language into the `PrincipalRef`."""
+    principal = _add_principal(session, "alice")
+    principal.language = "fr"
+    session.commit()
+    service = PatService(session, AllowAllAuthorization())
+    issued = service.issue(_admin(session), "alice", name="laptop")
+    parsed = parse_token(issued.token, "lakana_pat")
+    assert parsed is not None
+    assert service.verify(issued.key_id, parsed[1]).language == "fr"

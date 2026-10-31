@@ -5,8 +5,9 @@ main language, in the asset headers. To show them in more languages, it adds one
 language under `translations/`. This page lists the file format, the rules a deploy checks, the
 limits, and every message a deploy gives with its next step.
 
-A deploy checks the files and records their texts with the project version. The catalog does not
-show the translated texts yet; a later release shows each reader the texts in their language.
+A deploy checks the files and records their texts with the project version. The catalog then shows
+each reader the texts in their language, and says which language each text is in; see
+[Descriptions](descriptions.md#what-the-table-shows-and-in-which-language).
 
 ## The main language
 
@@ -72,8 +73,9 @@ per file saying how many of them the file translates:
 - ``translations/fr.yaml: 45 of 48 texts translated; the other 3 show in `de` ``
 - `translations/fr.yaml: 48 of 48 texts translated`
 
-A text without a translation shows in the main language. To refuse a deploy with gaps in a
-language instead, list it under `translations.require`:
+A text without a translation shows in the main language. `lakana table get` prints the same count
+per language for one table (`Translations: fr 9 of 10`), and REST returns it as `translations`. To
+refuse a deploy with gaps in a language instead, list it under `translations.require`:
 
 ```yaml
 main_language: de
