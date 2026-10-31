@@ -637,9 +637,12 @@ def test_the_hint_counts_the_assets_of_each_layer() -> None:
         _sql("gold.c", "SELECT 1 AS c\n"),
     ]
     assert layer_hints(MEDALLION_LAYERS, assets) == (
-        "layer rules: 0 bronze, 1 silver and 2 gold assets follow them",
+        "layer rules: 3 assets follow them (bronze 0, silver 1, gold 2)",
     )
     assert layer_hints(MEDALLION_LAYERS, assets[:2]) == (
-        "layer rules: 0 bronze, 1 silver and 1 gold asset follows them",
+        "layer rules: 2 assets follow them (bronze 0, silver 1, gold 1)",
+    )
+    assert layer_hints(MEDALLION_LAYERS, assets[:1]) == (
+        "layer rules: 1 asset follows them (bronze 0, silver 1, gold 0)",
     )
     assert layer_hints(None, assets) == ()

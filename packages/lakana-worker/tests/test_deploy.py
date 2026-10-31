@@ -3470,7 +3470,7 @@ def test_a_layered_project_deploys_with_its_hint_and_its_rules(
     assert (run.status, run.error_message) == (DeployStatus.SUCCEEDED, None)
     assert run.diff_json is not None
     assert run.diff_json["hints"] == [
-        "layer rules: 0 bronze, 1 silver and 1 gold asset follows them"
+        "layer rules: 2 assets follow them (bronze 0, silver 1, gold 1)"
     ]
     if kind is DeployKind.DEPLOY:
         version = session.get(JobVersion, run.job_version_id)

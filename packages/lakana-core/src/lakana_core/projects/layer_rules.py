@@ -471,12 +471,13 @@ def layer_hints(layers: LayersConfig | None, assets: Sequence[ParsedAsset]) -> t
     Returns
     -------
     tuple of str
-        ``layer rules: 3 bronze, 5 silver and 2 gold assets follow them`` (``1 gold asset
+        ``layer rules: 10 assets follow them (bronze 3, silver 5, gold 2)`` (``1 asset
         follows them`` for one); empty without `layers:`.
     """
     if layers is None:
         return ()
     counts = Counter(layer_of(asset.table) for asset in assets)
-    parts = [f"{counts[layer]} {layer}" for layer in LAYERS]
-    one = counts[LAYERS[-1]] == 1
-    return (f"layer rules: {and_list(parts)} {'asset follows' if one else 'assets follow'} them",)
+    per_layer = ", ".join(f"{layer} {counts[layer]}" for layer in LAYERS)
+    total = len(assets)
+    verb = "asset follows" if total == 1 else "assets follow"
+    return (f"layer rules: {total} {verb} them ({per_layer})",)

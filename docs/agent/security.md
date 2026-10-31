@@ -501,7 +501,8 @@ shows anyway, and carry no targets. Pins:
   of the asset break the rule that it may not see.
 - Missing tables: a read of a table that does not exist is already named by the deploy's
   `table 'x' not found` line at the same place, so withholding protects only tables that exist;
-  a withheld line with no not-found line beside it tells the reader the hidden table exists.
+  a withheld line with no not-found line beside it tells the reader that the hidden table exists
+  and the deployer may read it, or that this project or another repository builds it.
 
 ## Table health: who sees the readers
 
