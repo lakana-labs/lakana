@@ -4,17 +4,19 @@
 anything that runs again belongs in an asset. So a load lands in the raw layer, `bronze`, and
 nowhere else: the target's first namespace segment must be `bronze` (any deeper `bronze.…`
 namespace too). The server's load route checks it before it reads a byte of the body, so the
-CLI, the SDK and a plain HTTP client get the same refusal. Until data modelling declares layers,
-this is a name rule; the declared layer replaces it here without changing the command.
+CLI, the SDK and a plain HTTP client get the same refusal. The layers are fixed
+(`lakana_core.projects.layers.LAYERS`, #252), so a table's layer is its first namespace segment and
+this stays a name rule.
 """
 
 from __future__ import annotations
 
 from lakana_core.errors import ValidationError
 from lakana_core.identifiers import TableRef, shown
+from lakana_core.projects.layers import LAYERS
 
-LOAD_LAYER = "bronze"
-"""The first namespace segment every load target must have."""
+LOAD_LAYER = LAYERS[0]
+"""The first namespace segment every load target must have: the first of `LAYERS`, bronze."""
 
 
 def require_bronze(ref: TableRef) -> None:

@@ -10,6 +10,7 @@ from lakana_core.errors import ValidationError
 from lakana_core.identifiers import shown
 from lakana_core.projects.measures import measure_issues
 from lakana_core.projects.project_config import IDENTIFIER_MESSAGE, unsafe_identifier
+from lakana_core.projects.vocabulary import MODEL_KINDS, WRITE_CHOICES
 
 if TYPE_CHECKING:
     from lakana_core.projects.frontmatter import AssetMetadata
@@ -32,10 +33,6 @@ MAX_CONNECTIONS = 16
 
 DEFAULT_DECIMALS = "float"
 """What an asset without the option, and a manifest entry without the key, means."""
-
-MODEL_KINDS = ("fact", "dimension", "wide", "staging")
-"""What an asset's `kind:` may say. `lakana.assets.MODEL_KINDS` repeats it (a parity test
-pins both, added with the decorator's arguments)."""
 
 
 def require_model_kind(value: str) -> None:
@@ -74,10 +71,6 @@ MAX_KEY_COLUMNS = 8
 
 MAX_GRAIN_CHARS = 300
 """The longest `grain:`, in characters."""
-
-WRITE_CHOICES = ("replace", "append", "merge")
-"""What a run does to an asset's table: replace every row, append the rows past the watermark, or
-merge the rows on a key. `lakana.assets.WRITE_CHOICES` is the same (a parity test pins both)."""
 
 APPEND_NEEDS_WATERMARK = (
     "`write: append` needs `watermark:` — the column whose largest value the next run starts after"
