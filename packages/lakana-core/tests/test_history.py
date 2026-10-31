@@ -19,6 +19,7 @@ from lakana_core.catalog.history import (
     VALID_FROM,
     VALID_TO,
     HistoryPlan,
+    _payloads,
     added_columns,
     check_history_batch,
     first_versions,
@@ -630,3 +631,172 @@ def test_a_returning_key_with_no_closed_version_opens() -> None:
         valid_from="changed_at",
     )
     assert plan.opened.column("customer_id").to_pylist() == ["D"]
+
+
+def _payload(column: pa.Array) -> tuple[bytes, list[bytes]]:
+    """Encode one key column the way the surrogate key takes it.
+
+    Parameters
+    ----------
+    column
+        The column's values.
+
+    Returns
+    -------
+    tuple
+        The tag byte and each row's payload.
+    """
+    return _payloads(column, "k")
+
+
+def test_every_tag_pins_its_payload() -> None:
+    assert _payload(pa.array(["Ada "], pa.large_string())) == (b"s", [b"Ada "])
+    assert _payload(pa.array([-7, 0, 42], pa.int16())) == (b"i", [b"-7", b"0", b"42"])
+    assert _payload(pa.array([decimal.Decimal("12.5")], pa.decimal128(10, 2))) == (b"n", [b"12.50"])
+    assert _payload(pa.array([date(2026, 10, 31)], pa.date32())) == (b"d", [b"2026-10-31"])
+    assert _payload(pa.array([True, False])) == (b"b", [b"true", b"false"])
+    assert _payload(pa.array([b"\x00\x01"], pa.binary())) == (b"x", [b"\x00\x01"])
+    assert _payload(pa.array([b"ab"], pa.binary(2))) == (b"x", [b"ab"])
+    raw = uuid.UUID(int=1).bytes
+    assert _payload(pa.ExtensionArray.from_storage(pa.uuid(), pa.array([raw], pa.binary(16)))) == (
+        b"u",
+        [raw],
+    )
+    assert _payload(_micros(1793428200123456)) == (b"t", [b"1793428200123456"])
+
+
+def test_a_decimal_is_written_in_plain_digits_with_exactly_its_scale() -> None:
+    wide = pa.decimal128(38, 10)
+    values = [decimal.Decimal(0), decimal.Decimal("1E-10"), decimal.Decimal("-0.0000000001")]
+    values += [decimal.Decimal("-12.5"), decimal.Decimal("12345678901234567890123456.7890123456")]
+    assert _payload(pa.array(values, wide)) == (
+        b"n",
+        [
+            b"0.0000000000",
+            b"0.0000000001",
+            b"-0.0000000001",
+            b"-12.5000000000",
+            b"12345678901234567890123456.7890123456",
+        ],
+    )
+    assert _payload(pa.array([decimal.Decimal("0.00000001")], pa.decimal128(20, 8))) == (
+        b"n",
+        [b"0.00000001"],
+    )
+    assert _payload(pa.array([decimal.Decimal(5)], pa.decimal128(5, 0))) == (b"n", [b"5"])
+    negative = pa.array([decimal.Decimal("1.23E+4"), decimal.Decimal(0)], pa.decimal128(5, -2))
+    assert _payload(negative) == (b"n", [b"12300", b"0"])
+
+
+@pytest.mark.parametrize("unit", ["s", "ms", "us", "ns"])
+def test_a_timestamp_key_is_the_same_instant_in_every_unit(unit: str) -> None:
+    instant = datetime(2026, 10, 31, 6, 30, tzinfo=UTC)
+    column = pa.array([instant], pa.timestamp("us", tz="UTC")).cast(pa.timestamp(unit, tz="UTC"))
+    assert _payload(column) == (b"t", [b"1793428200000000"])
+    naive = pa.array([instant.replace(tzinfo=None)], pa.timestamp("us")).cast(pa.timestamp(unit))
+    assert _payload(naive) == (b"t", [b"1793428200000000"])
+
+
+def test_a_timestamp_key_finer_than_microseconds_is_refused_with_the_cast() -> None:
+    nanos = pa.array([1793428200000000001], pa.timestamp("ns"))
+    with pytest.raises(ValidationError) as info:
+        _payload(nanos)
+    assert str(info.value) == (
+        "key column `k` has timestamps finer than microseconds, which a key cannot hold; cast it "
+        "in the SELECT, for example `CAST(k AS TIMESTAMP)`."
+    )
+    whole = pa.array([1793428200000000000], pa.timestamp("ns"))
+    assert _payload(whole) == (b"t", [b"1793428200000000"])
+
+
+def test_an_older_run_cannot_reopen_a_key_a_newer_run_closed() -> None:
+    def ends(wanted: pa.Table) -> pa.Table:
+        return pa.table({"customer_id": ["D"], VALID_TO: pa.array([T2], UTC_MICROS)})
+
+    with pytest.raises(ValidationError) as info:
+        _plan(_batch([("D", "north", 1.0)]), _open([]), clock=T1, last_ends=ends)
+    assert str(info.value) == (
+        "1 row that opens a key again would start at this run's start time (2026-02-01T00:00:00Z), "
+        "before the end of the key's last version; a newer run already changed "
+        "gold.dim_customer. Start a new run."
+    )
+
+
+def test_a_key_may_come_back_at_the_run_clock_when_its_last_version_ended_then() -> None:
+    def ends(wanted: pa.Table) -> pa.Table:
+        return pa.table({"customer_id": ["D"], VALID_TO: pa.array([T1], UTC_MICROS)})
+
+    plan = _plan(_batch([("D", "north", 1.0)]), _open([]), clock=T1, last_ends=ends)
+    assert plan.opened.column("customer_id").to_pylist() == ["D"]
+
+
+def test_an_open_version_starting_at_the_clock_is_not_replaced_by_the_same_clock() -> None:
+    with pytest.raises(ValidationError, match="start at or after this run's start time"):
+        _plan(
+            _batch([("A", "south", 1.0)]),
+            _open([("A", "north", 1.0)], start=T1),
+            clock=T1,
+        )
+
+
+def test_the_diff_works_when_a_key_column_has_an_internal_looking_name() -> None:
+    schema = pa.schema(
+        [
+            pa.field("__lakana_row", pa.int64()),
+            pa.field("__lakana_open", pa.int64()),
+            pa.field("v", pa.string()),
+            pa.field("t_key", pa.string(), nullable=False),
+            pa.field(VALID_FROM, UTC_MICROS, nullable=False),
+            pa.field(VALID_TO, UTC_MICROS),
+            pa.field(IS_CURRENT, pa.bool_(), nullable=False),
+        ]
+    )
+    names = ["__lakana_row", "__lakana_open"]
+    batch = pa.table({"__lakana_row": [5, 9], "__lakana_open": [1, 1], "v": ["new", "x"]})
+    open_rows = pa.table(
+        {
+            "__lakana_row": [9, 5],
+            "__lakana_open": [1, 1],
+            "v": ["x", "old"],
+            "t_key": ["a", "b"],
+            VALID_FROM: pa.array([T0, T0], UTC_MICROS),
+            VALID_TO: pa.nulls(2, UTC_MICROS),
+            IS_CURRENT: [True, True],
+        },
+        schema=schema,
+    )
+
+    def ends(wanted: pa.Table) -> pa.Table:
+        return pa.table(
+            {n: pa.array([], pa.int64()) for n in names} | {VALID_TO: pa.array([], UTC_MICROS)}
+        )
+
+    plan = plan_history(
+        batch,
+        open_rows,
+        key=names,
+        table="gold.t",
+        schema=schema,
+        starts=pa.array([T1, T1], UTC_MICROS),
+        clock=T1,
+        valid_from=None,
+        close_missing=True,
+        last_ends=ends,
+    )
+    assert plan.opened.column("v").to_pylist() == ["new"]
+    assert plan.closed.column("v").to_pylist() == ["old"]
+    assert plan.closed_missing == 0
+
+
+def test_two_open_versions_of_one_key_are_refused() -> None:
+    twice = pa.concat_tables([_open([("A", "north", 1.0)]), _open([("A", "north", 1.0)])])
+    with pytest.raises(ValidationError) as info:
+        _plan(_batch([("A", "south", 1.0)]), twice)
+    assert str(info.value) == (
+        "1 key of gold.dim_customer has more than one open version; there must be one per key, "
+        "so nothing was written. Close all but the newest version of each such key, then run "
+        "again."
+    )
+    thrice = pa.concat_tables([twice, _open([("B", "n", 1.0)]), _open([("B", "n", 1.0)])])
+    with pytest.raises(ValidationError, match=r"2 keys of gold\.dim_customer have more than one"):
+        _plan(_batch([("A", "south", 1.0)]), thrice)

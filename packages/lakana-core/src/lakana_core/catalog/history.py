@@ -15,8 +15,9 @@ so `CatalogService.history` commits one snapshot through the governed compare-an
 
 from __future__ import annotations
 
+import decimal
 import hashlib
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -44,6 +45,9 @@ from lakana_core.projects.history_columns import (
 
 pc: Any = _compute
 # pyarrow ships no stubs; its compute functions are registered at import time, which ty cannot see.
+# One alias for the ~30 calls here is a deliberate departure from the per-line ty-ignore
+# precedent (unresolved-attribute) in `lakana/cli/load.py` and `lakana/cli/_files.py`: it reads
+# better, at the price of unchecked arguments to `pc` functions.
 
 HISTORY_KEY_PROPERTY = "lakana.history-key"
 """The table property a history table's create sets: its key columns, as a JSON list."""
@@ -61,10 +65,13 @@ _KEY_PREFIX = b"lakana-history-key-v1\x00"
 """The bytes every surrogate key's input starts with; `v1` names the encoding."""
 
 _ROW = "__lakana_row"
-"""The batch's row number in the diff's join."""
+"""The batch's row number in the diff's join (made unique among the key columns by `_unused`)."""
 
 _OPEN = "__lakana_open"
-"""The open version's row number in the diff's join."""
+"""The open version's row number in the diff's join (made unique by `_unused`)."""
+
+_END = "__lakana_end"
+"""A returning key's last `valid_to` in its join (made unique by `_unused`)."""
 
 
 def shown_type(kind: pa.DataType) -> str:
@@ -141,6 +148,56 @@ def _plain(column: pa.Array) -> pa.Array:
     return column.storage if isinstance(column, pa.ExtensionArray) else column
 
 
+def _unused(name: str, taken: Collection[str]) -> str:
+    """Pick a name for an internal column that no key column carries.
+
+    Parameters
+    ----------
+    name
+        The preferred name.
+    taken
+        The names of the columns it joins.
+
+    Returns
+    -------
+    str
+        `name`, with underscores put in front until it is not in `taken`.
+    """
+    while name in taken:
+        name = f"_{name}"
+    return name
+
+
+def _decimal_text(value: decimal.Decimal, scale: int) -> bytes:
+    """Write a decimal as plain ASCII digits with exactly its column's scale.
+
+    The text is made from the unscaled integer, never from pyarrow's formatting (which switches
+    to an exponent for small values). A negative scale has no fractional digits: the value is
+    written as the integer it stands for (`12300` in `decimal(5, -2)`).
+
+    Parameters
+    ----------
+    value
+        The value, as pyarrow reads it from the column.
+    scale
+        The column's scale.
+
+    Returns
+    -------
+    bytes
+        ``-12.5000000000`` for -12.5 at scale 10; ``0.0000000001`` for 1E-10 at scale 10; ``0``
+        for zero at scale 0.
+    """
+    sign, digits, exponent = value.as_tuple()
+    unscaled = int("".join(map(str, digits))) * 10 ** max(int(exponent) + scale, 0)
+    if scale <= 0:
+        text = str(unscaled * 10 ** (-scale))
+    else:
+        whole, fraction = divmod(unscaled, 10**scale)
+        text = f"{whole}.{fraction:0{scale}d}"
+    return (("-" if sign and unscaled else "") + text).encode("ascii")
+
+
 def _payloads(column: pa.Array, name: str) -> tuple[bytes, list[bytes]]:
     """Encode a natural key column's values as the surrogate key's parts take them.
 
@@ -166,19 +223,28 @@ def _payloads(column: pa.Array, name: str) -> tuple[bytes, list[bytes]]:
         return b"u", _plain(column).to_pylist()
     if pa.types.is_string(kind) or pa.types.is_large_string(kind) or pa.types.is_string_view(kind):
         return b"s", [value.encode("utf-8") for value in column.to_pylist()]
+    if pa.types.is_decimal(kind):
+        return b"n", [_decimal_text(value, kind.scale) for value in column.to_pylist()]
     for tag, matches in (
         (b"i", pa.types.is_integer),
-        (b"n", pa.types.is_decimal),
         (b"d", pa.types.is_date),
         (b"b", pa.types.is_boolean),
     ):
         if matches(kind):
-            # pyarrow writes integers without leading zeros, a decimal with exactly its scale,
-            # a date as YYYY-MM-DD and a boolean as true or false.
+            # pyarrow writes integers without leading zeros, a date as YYYY-MM-DD and a boolean
+            # as true or false.
             as_text = pc.cast(column, pa.string()).to_pylist()
             return tag, [value.encode("ascii") for value in as_text]
     if pa.types.is_timestamp(kind):
-        micros = pc.cast(column, pa.int64()).to_pylist()
+        # Whatever the column's unit, the payload is microseconds since the epoch (UTC; a
+        # timestamp without zone is read as UTC), so one instant gives one key.
+        try:
+            micros = column.cast(pa.timestamp("us", tz=kind.tz)).cast(pa.int64()).to_pylist()
+        except pa.ArrowInvalid:
+            raise ValidationError(
+                f"key column `{name}` has timestamps finer than microseconds, which a key cannot "
+                f"hold; cast it in the SELECT, for example `CAST({name} AS TIMESTAMP)`."
+            ) from None
         return b"t", [str(value).encode("ascii") for value in micros]
     if pa.types.is_binary(kind) or pa.types.is_large_binary(kind):
         return b"x", column.to_pylist()
@@ -248,7 +314,7 @@ def unchanged_rows(new: pa.Table, old: pa.Table, columns: Sequence[str]) -> pa.A
     pa.Array
         One boolean per row, never null; true where every column is the same.
     """
-    same = pa.array([True] * new.num_rows, pa.bool_())
+    same = pa.repeat(pa.scalar(True), new.num_rows)
     for column in columns:
         ours = _plain(new.column(column).combine_chunks())
         theirs = _plain(old.column(column).combine_chunks())
@@ -358,7 +424,7 @@ def version_starts(data: pa.Table, valid_from: str | None, clock: datetime) -> p
         microseconds.
     """
     if valid_from is None:
-        return pa.array([clock] * data.num_rows, UTC_MICROS)
+        return pa.repeat(pa.scalar(clock, UTC_MICROS), data.num_rows)
     column = data.column(valid_from).combine_chunks()
     if not (pa.types.is_date(column.type) or pa.types.is_timestamp(column.type)):
         raise ValidationError(
@@ -408,7 +474,7 @@ def first_versions(data: pa.Table, *, key: Sequence[str], table: str, starts: pa
         surrogate_keys(data, key, starts),
         starts,
         pa.nulls(count, UTC_MICROS),
-        pa.array([True] * count, pa.bool_()),
+        pa.repeat(pa.scalar(True), count),
     ]
     schema = pa.schema([*data.schema, *added])
     return pa.Table.from_arrays([*data.columns, *columns], schema=schema)
@@ -570,8 +636,11 @@ def _check_returning(
     new_rows: pa.Array,
     starts: pa.Array,
     key: Sequence[str],
-    valid_from: str,
+    valid_from: str | None,
     last_ends: Callable[[pa.Table], pa.Table],
+    *,
+    table: str,
+    clock: datetime,
 ) -> None:
     """Refuse a key that comes back with a start before its last version ended.
 
@@ -586,32 +655,46 @@ def _check_returning(
     key
         The natural key's columns.
     valid_from
-        The `valid_from:` column, for the message.
+        The `valid_from:` column, or `None` when every start is the run clock; for the message.
     last_ends
         Reads the key columns and `valid_to` of the closed versions of the keys it is given.
+    table
+        The table's dotted name, for the message.
+    clock
+        The run clock, for the message.
 
     Raises
     ------
     ValidationError
-        If a returning key's start is before the latest `valid_to` of its closed versions.
+        If a returning key's start is before the latest `valid_to` of its closed versions. With
+        the run clock as the start, that means a newer run closed the key.
     """
     wanted = data.select(list(key)).take(new_rows)
     ends = last_ends(wanted)
     if ends.num_rows == 0:
         return
     latest = ends.group_by(list(key)).aggregate([(VALID_TO, "max")])
-    met = _numbered(wanted, key, _ROW).join(
+    row_name = _unused(_ROW, key)
+    end_name = _unused(_END, [*key, row_name])
+    met = _numbered(wanted, key, row_name).join(
         pa.table(
             {
                 **{column: _plain(latest.column(column).combine_chunks()) for column in key},
-                "__lakana_end": latest.column(f"{VALID_TO}_max"),
+                end_name: latest.column(f"{VALID_TO}_max"),
             }
         ),
         keys=list(key),
         join_type="inner",
     )
-    returning = starts.take(new_rows).take(met.column(_ROW).combine_chunks())
-    overlap = _count(pc.less(returning, met.column("__lakana_end").combine_chunks()))
+    returning = starts.take(new_rows).take(met.column(row_name).combine_chunks())
+    overlap = _count(pc.less(returning, met.column(end_name).combine_chunks()))
+    if overlap and valid_from is None:
+        opens = "row that opens" if overlap == 1 else "rows that open"
+        raise ValidationError(
+            f"{overlap} {opens} a key again would start at this run's start time "
+            f"({shown_clock(clock)}), before the end of the key's last version; a newer run "
+            f"already changed {table}. Start a new run."
+        )
     if overlap:
         opens = "row that opens" if overlap == 1 else "rows that open"
         raise ValidationError(
@@ -661,8 +744,8 @@ def plan_history(
     close_missing
         Whether keys the batch lacks are closed.
     last_ends
-        Reads the closed versions of keys that come back; called only with `valid_from:` and
-        only for batch keys without an open version.
+        Reads the closed versions of keys that come back; called only for batch keys
+        without an open version.
 
     Returns
     -------
@@ -675,16 +758,30 @@ def plan_history(
         For an opened version without a start or starting after `clock` (with `valid_from:`),
         a changed key whose new start is at or before its open version's, an open version that
         `clock` would close or replace although it starts at or after it, and a returning key
-        that would start before its last version ended.
+        that would start before its last version ended (with the run clock too: a newer run
+        closed it), and a key with more than one open version.
     """
     values = [column for column in data.column_names if column not in key]
-    joined = _numbered(data, key, _ROW).join(
-        _numbered(open_versions, key, _OPEN),
+    row_name = _unused(_ROW, key)
+    open_name = _unused(_OPEN, [*key, row_name])
+    numbered_open = _numbered(open_versions, key, open_name)
+    repeated = numbered_open.group_by(list(key)).aggregate([(open_name, "count")])
+    twice = _count(pc.greater(repeated.column(f"{open_name}_count"), 1))
+    if twice:
+        keys = "key of" if twice == 1 else "keys of"
+        have = "has" if twice == 1 else "have"
+        raise ValidationError(
+            f"{twice} {keys} {table} {have} more than one open version; there must be one per "
+            "key, so nothing was written. Close all but the newest version of each such key, "
+            "then run again."
+        )
+    joined = _numbered(data, key, row_name).join(
+        numbered_open,
         keys=list(key),
         join_type="full outer" if close_missing else "left outer",
     )
-    rows = joined.column(_ROW).combine_chunks()
-    opens = joined.column(_OPEN).combine_chunks()
+    rows = joined.column(row_name).combine_chunks()
+    opens = joined.column(open_name).combine_chunks()
     both = pc.and_(pc.is_valid(rows), pc.is_valid(opens))
     new_rows = pc.filter(rows, pc.and_(pc.is_valid(rows), pc.is_null(opens)))
     pair_rows, pair_opens = pc.filter(rows, both), pc.filter(opens, both)
@@ -717,20 +814,22 @@ def plan_history(
             f"({shown_clock(clock)}); a run that started earlier cannot replace or close them. "
             "Start a new run."
         )
-    if valid_from is not None and len(new_rows):
-        _check_returning(data, new_rows, starts, key, valid_from, last_ends)
+    if len(new_rows):
+        _check_returning(
+            data, new_rows, starts, key, valid_from, last_ends, table=table, clock=clock
+        )
     opened_starts = starts.take(opening)
     opened = first_versions(data.take(opening), key=key, table=table, starts=opened_starts)
     closing = pa.concat_arrays([changed_opens, missing])
     ends = pa.concat_arrays(
-        [starts.take(changed_rows), pa.array([clock] * len(missing), UTC_MICROS)]
+        [starts.take(changed_rows), pa.repeat(pa.scalar(clock, UTC_MICROS), len(missing))]
     )
     closed = open_versions.take(closing)
     closed = closed.set_column(closed.schema.get_field_index(VALID_TO), VALID_TO, ends)
     closed = closed.set_column(
         closed.schema.get_field_index(IS_CURRENT),
         IS_CURRENT,
-        pa.array([False] * len(closing), pa.bool_()),
+        pa.repeat(pa.scalar(False), len(closing)),
     )
     return HistoryPlan(
         closed=closed.select(schema.names).cast(schema),
