@@ -270,3 +270,54 @@ def test_search_refuses_an_unknown_model_kind(tmp_path: Path) -> None:
     refused = invoke(make_state(tmp_path, api), "search", "x", "--model-kind", "cube")
     assert refused.exit_code != 0
     assert api.requests == []
+
+
+def test_search_sends_lang_and_shows_which_language_matched(tmp_path: Path) -> None:
+    body = _page(
+        _hit("table", "gold.sales", "label", snippet="Ventes", language="fr", translated=True),
+        _hit("table", "gold.orders"),
+        has_more=True,
+    )
+
+    api, result = _search(tmp_path, body, "ventes", "--lang", "fr")
+
+    assert result.exit_code == 0, result.stderr
+    assert api.requests[-1].url.params["lang"] == "fr"
+    plain = _plain(result.stdout)
+    assert "label [fr]" in plain
+    assert "name [" not in plain
+    assert "--lang fr" in plain.split("More results:")[1]
+    api, _ = _search(tmp_path, _page(), "x")
+    assert "lang" not in api.requests[-1].url.params
+
+
+def test_search_shows_no_language_for_a_text_in_the_tables_main_language(tmp_path: Path) -> None:
+    body = _page(
+        _hit(
+            "table",
+            "gold.fact_sales",
+            "grain",
+            snippet="One row per store, product and calendar day.",
+            language="en",
+            translated=False,
+        )
+    )
+
+    _, result = _search(tmp_path, body, "calendar")
+
+    plain = _plain(result.stdout)
+    assert "grain [" not in plain and " grain " in plain
+    assert "One row per store, product and calendar day." in plain
+
+
+def test_search_shows_the_language_of_a_translated_text(tmp_path: Path) -> None:
+    body = _page(
+        _hit("column", "gold.sales.store_id", "label", language="fr", translated=True),
+        _hit("table", "gold.sales", "label", language="en"),
+    )
+
+    _, result = _search(tmp_path, body, "magasin", "--lang", "fr")
+
+    plain = _plain(result.stdout)
+    assert plain.count("label [fr]") == 1
+    assert "label [en]" not in plain

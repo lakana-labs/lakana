@@ -64,6 +64,21 @@ out=$(lakana --output json table get gold.sales --env dev --lang fr)
 test "$(field "$out" '(t["label"], t["label_language"], t["description_language"])')" = "('Ventes par magasin', 'fr', 'en')"
 test "$(field "$out" '[(c["label"], c["label_language"]) for c in t["columns"] if c["name"] == "store_id"][0]')" = "('Magasin', 'fr')"
 
+# Find the table by its French label: the matched column says which language matched.
+capture_start
+# docs:start search
+lakana search "Ventes" --env dev --lang fr
+# docs:end search
+capture_end
+grep -Eq 'gold\.sales .* label \[fr\]' "$captured"
+out=$(lakana --output json search "Ventes" --env dev --lang fr)
+test "$(field "$out" '[(h["name"], h["matched"], h["language"]) for h in t["results"]]')" = "[('gold.sales', 'label', 'fr')]"
+# Without French, the French label is not searched; the English one always is.
+out=$(lakana --output json search "Ventes" --env dev --lang en)
+test "$(field "$out" 't["results"]')" = "[]"
+out=$(lakana --output json search "per store" --env dev)
+test "$(field "$out" '[(h["name"], h["matched"], h["language"]) for h in t["results"]]')" = "[('gold.sales', 'label', 'en')]"
+
 # Set your own language once: every command then shows French where there is a French text.
 capture_start
 # docs:start me

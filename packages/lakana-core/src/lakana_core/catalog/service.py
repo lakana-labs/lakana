@@ -4027,13 +4027,16 @@ class CatalogService:
         if isinstance(description, Keep) and isinstance(label, Keep):
             raise ValidationError("send `description`, `label` or both; null removes an edit")
         what = f"table {dotted}" if column is None else f"column {column} of table {dotted}"
-        main = row.text_language or self._main_language
-        lang = main if language is None else self._edit_language(language)
+        asked = None if language is None else self._edit_language(language)
         if not isinstance(description, Keep):
             description = check_text(description, what)
         if not isinstance(label, Keep):
             label = check_label(label, what)
+        # Read again under the lock: the main language, the list and the table's edits as they
+        # are now, not as the row was loaded.
         lock_table(self._session, row)
+        main = row.text_language or self._main_language
+        lang = asked or main
         listed = row.text_languages or []
         if (
             lang != main

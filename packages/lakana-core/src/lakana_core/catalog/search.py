@@ -1,11 +1,13 @@
-"""Search an environment for tables, columns, descriptions, runs and principals.
+"""Search an environment for tables, columns, labels, descriptions, runs and principals.
 
-One query ranks every kind of hit together in the database: an exact match first, then a prefix,
-then a substring, then a match in a description; within a rank tables come before columns before
-runs before principals, then by name. The rights are applied afterwards, hit by hit, with the
-checks the listings make, over chunks of the ranked candidates, so no hit, and no text of one, is
-read out for a caller who may not read it, and the work is bounded by `MAX_SCANNED` candidates,
-not by the size of the environment.
+One query ranks every kind of hit together in the database: an exact match of a name or label
+first, then a prefix, then a substring, then a match in a description; within a rank tables come
+before columns before runs before principals, then by name. The rights are applied afterwards,
+hit by hit, with the checks the listings make, over chunks of the ranked candidates, so no hit,
+and no text of one, is read out for a caller who may not read it, and the work is bounded by
+`MAX_SCANNED` candidates, not by the size of the environment. Texts in the main language always
+match; translated texts match only in the reader's languages, and a table or column found by
+several texts is one hit.
 """
 
 from __future__ import annotations
@@ -39,6 +41,7 @@ from sqlalchemy.orm import InstrumentedAttribute, Session
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable
 from lakana_core.errors import NotFoundError, ValidationError
 from lakana_core.identifiers import NAMESPACE_SEPARATOR, NamespacePath
+from lakana_core.languages import DEFAULT_MAIN_LANGUAGE, lookup_chain
 from lakana_core.models import (
     LIVE_ENVIRONMENT,
     ColumnDescription,
@@ -53,6 +56,7 @@ from lakana_core.models import (
     Table,
     TableColumn,
     TableType,
+    TextTranslation,
 )
 from lakana_core.models.table import table_kind
 from lakana_core.pagination import escape_like
@@ -91,12 +95,16 @@ class _Candidate(Protocol):
     """A row of the ranked union, as the checks and `_hit` read it."""
 
     kind_order: int
+    sort_source: int
+    """0 for a row of a main arm, more for a translation."""
     matched: str
     f1: str
     f2: str
     f3: str
     f4: str
     f5: str
+    f6: str | None
+    """The language of a matched text, for a table or column hit not matched by its name."""
 
 
 class SearchKind(enum.StrEnum):
@@ -132,11 +140,11 @@ class SearchHit:
         The display name: ``namespace.table`` for a table, ``namespace.table.column`` for a
         column, the id for a run, the name for a principal.
     matched
-        The field that matched: ``name``, ``description``, ``grain``, ``measure`` (a column's
-        measure label or description), ``id``, ``job`` or ``repository``.
+        The field that matched: ``name``, ``label``, ``description``, ``grain``, ``measure`` (a
+        column's measure label or description), ``id``, ``job`` or ``repository``.
     snippet
-        For a description, grain or measure match, at most `SNIPPET_LENGTH` characters of the
-        text around the hit.
+        For a label, description, grain or measure match, at most `SNIPPET_LENGTH` characters of
+        the text around the hit.
     namespace
         For a table or column, its namespace, dotted.
     table
@@ -162,6 +170,12 @@ class SearchHit:
         For a principal, its name.
     principal_type
         For a principal, ``USER`` or ``SERVICE_ACCOUNT``.
+    language
+        For a table or column hit that a text matched, the language of that text; `None` for a
+        name match and for runs and principals.
+    translated
+        Whether the text that matched is a translation (in a language other than the table's
+        main one); `False` for a header text, a name, a run and a principal.
     """
 
     kind: SearchKind
@@ -180,6 +194,8 @@ class SearchHit:
     status: str | None = None
     principal: str | None = None
     principal_type: str | None = None
+    language: str | None = None
+    translated: bool = False
 
 
 # jscpd:ignore-end
@@ -333,6 +349,7 @@ def _row(
     sort_id: _Expr,
     matched: _Expr,
     *fields: _Expr,
+    sort_source: _Expr | None = None,
 ) -> _Candidates:
     """Start a candidate select with the columns every kind shares.
 
@@ -345,23 +362,28 @@ def _row(
     sort_name
         What it sorts by after kind.
     sort_id
-        The final tie-break, unique per kind.
+        The tie-break after the name: the table's id for a table or column, the row's id
+        otherwise.
     matched
         The field that matched.
     *fields
-        Up to five payload columns, as text; the rest are null.
+        Up to six payload columns, as text; the rest are null.
+    sort_source
+        The last tie-break, an integer: which text of one table or column comes first. `None`
+        (``0``) for a main-language row, which so comes before every translation.
 
     Returns
     -------
     Select
         A select with the columns of the union.
     """
-    payload = [*fields, *(cast(null(), Text) for _ in range(5 - len(fields)))]
+    payload = [*fields, *(cast(null(), Text) for _ in range(6 - len(fields)))]
     columns = [
         literal_column(str(_KIND_ORDER[kind])).label("kind_order"),
         rank.label("rank"),
         sort_name.label("sort_name"),
         sort_id.label("sort_id"),
+        (literal_column("0") if sort_source is None else sort_source).label("sort_source"),
         matched.label("matched"),
         *(cast(f, Text).label(f"f{i}") for i, f in enumerate(payload, start=1)),
     ]
@@ -420,10 +442,18 @@ class CatalogSearch:
         Database session.
     authz
         The authorization service the listings use.
+    main_language
+        The instance's main language, which a table's header texts are in when its project
+        declares none.
     """
 
-    def __init__(self, session: Session, authz: AuthorizationService) -> None:
-        """Bind the session and the authorization.
+    def __init__(
+        self,
+        session: Session,
+        authz: AuthorizationService,
+        main_language: str = DEFAULT_MAIN_LANGUAGE,
+    ) -> None:
+        """Bind the session, the authorization and the main language.
 
         Parameters
         ----------
@@ -431,9 +461,13 @@ class CatalogSearch:
             Database session.
         authz
             The authorization service the listings use.
+        main_language
+            The instance's main language, which a table's header texts are in when its project
+            declares none.
         """
         self._session = session
         self._authz = authz
+        self._main_language = main_language
 
     def search(
         self,
@@ -445,8 +479,9 @@ class CatalogSearch:
         model_kind: str | None = None,
         limit: int = 20,
         offset: int = 0,
+        languages: Sequence[str] = (),
     ) -> SearchPage:
-        """Find tables, columns, descriptions, runs and principals that match a text.
+        """Find tables, columns, labels, descriptions, runs and principals that match a text.
 
         Rights are those of the listings. A table or column appears only where `READ_TABLE` is
         permitted for its table, a run needs `READ_ENVIRONMENT`, a principal needs the right to
@@ -469,11 +504,14 @@ class CatalogSearch:
             The page size, 1 to 100.
         offset
             How many permitted hits to skip.
+        languages
+            The reader's canonical languages, most wanted first; translated texts match only in
+            these (and their shorter forms), main-language texts always.
 
         Returns
         -------
         SearchPage
-            The page.
+            The page; a table or column found by several texts is one hit, the best ranked.
 
         Raises
         ------
@@ -506,11 +544,17 @@ class CatalogSearch:
         wanted = {kind} if kind is not None else set(SearchKind)
         if model_kind is not None:
             wanted &= {SearchKind.TABLE}
+        chain = lookup_chain(languages)
+        main = self._main_language
         selects: list[_Candidates] = []
         if SearchKind.TABLE in wanted:
-            selects.append(_tables(match, environment_id, model_kind))
+            selects.append(_tables(match, environment_id, model_kind, main))
+            if chain:
+                selects.append(_table_translations(match, environment_id, model_kind, chain, main))
         if SearchKind.COLUMN in wanted:
-            selects.append(_columns(match, environment_id))
+            selects.append(_columns(match, environment_id, main))
+            if chain:
+                selects.append(_column_translations(match, environment_id, chain, main))
         if SearchKind.RUN in wanted and may_read_environment:
             selects.append(_runs(match, needle, environment_id))
         if SearchKind.PRINCIPAL in wanted and self._authz.permits(
@@ -555,9 +599,14 @@ class CatalogSearch:
         """
         union = union_all(*selects).subquery("hits")
         ranked = select(union).order_by(
-            union.c.rank, union.c.kind_order, union.c.sort_name, union.c.sort_id
+            union.c.rank,
+            union.c.kind_order,
+            union.c.sort_name,
+            union.c.sort_id,
+            union.c.sort_source,
         )
         readable: dict[tuple[str, str], bool] = {}
+        seen: set[tuple[object, ...]] = set()
         counted = scanned = position = 0
         hits: list[SearchHit] = []
         done = False
@@ -571,6 +620,13 @@ class CatalogSearch:
                     done = True
                     break
                 scanned += 1
+                if row.kind_order in (0, 1):
+                    # A table or column found by a second text: the first, better ranked row
+                    # stands for it. Skipped before `_may_see`, as a hidden one would be.
+                    identity = (row.kind_order, row.f1, row.f2, row.f3)
+                    if identity in seen:
+                        continue
+                    seen.add(identity)
                 if not self._may_see(p, environment, row, readable):
                     continue
                 counted += 1
@@ -620,8 +676,26 @@ class CatalogSearch:
         return readable[key]
 
 
-def _tables(match: _Match, environment_id: uuid.UUID, model_kind: str | None) -> _Candidates:
-    """Select the tables, views, external tables and artifacts that match.
+def _header_language(main_language: str) -> ColumnElement[str]:
+    """Say which language a table's header texts are in.
+
+    Parameters
+    ----------
+    main_language
+        The instance's main language, for a project that declares none.
+
+    Returns
+    -------
+    ColumnElement
+        The table's `text_language`, else `main_language`.
+    """
+    return func.coalesce(Table.text_language, literal(main_language, String))
+
+
+def _tables(
+    match: _Match, environment_id: uuid.UUID, model_kind: str | None, main_language: str
+) -> _Candidates:
+    """Select the tables, views, external tables and artifacts whose main-language texts match.
 
     Parameters
     ----------
@@ -631,29 +705,39 @@ def _tables(match: _Match, environment_id: uuid.UUID, model_kind: str | None) ->
         The environment.
     model_kind
         Keep only tables that declare this kind, or `None` for every table.
+    main_language
+        The instance's main language, for a table whose project declares none.
 
     Returns
     -------
     Select
-        The candidates. Grain and kind are in the row, so they are read out only after the
-        caller's `READ_TABLE` on the table has been checked, like a description.
+        The candidates. Label, grain and kind are in the row, so they are read out only after the
+        caller's `READ_TABLE` on the table has been checked, like a description. A label ranks
+        like a name.
     """
     qualified = (
         func.replace(Namespace.path, NAMESPACE_SEPARATOR, ".").concat(".").concat(Table.name)
     )
     shown = func.coalesce(Table.description_edited, Table.description_project)
-    named = or_(match.contains(Table.name), match.contains(qualified))
+    label = func.coalesce(Table.label_edited, Table.label_project)
+    in_label = match.contains(label)
     in_description = match.contains(shown)
     in_grain = match.contains(func.coalesce(Table.model_grain, ""))
+    rank, by_name, by_label = _name_or_label(match, [Table.name, qualified], label)
     matched = case(
-        (named, _text("name")), (in_description, _text("description")), else_=_text("grain")
+        (by_name, _text("name")),
+        (by_label, _text("label")),
+        (in_description, _text("description")),
+        else_=_text("grain"),
     )
-    # Ordered like `matched`: a null description makes `in_description` null, never true.
-    text = case((named, shown), (in_description, shown), else_=Table.model_grain)
+    # Ordered like `matched`: a null text makes its comparison null, never true.
+    text = case(
+        (by_name, shown), (by_label, label), (in_description, shown), else_=Table.model_grain
+    )
     query = (
         _row(
             SearchKind.TABLE,
-            match.rank([Table.name, qualified], otherwise=3),
+            rank,
             func.lower(Table.name),
             cast(Table.id, String),
             matched,
@@ -662,15 +746,103 @@ def _tables(match: _Match, environment_id: uuid.UUID, model_kind: str | None) ->
             cast(Table.table_type, String),
             text,
             Table.model_kind,
+            case((by_name, null()), else_=_header_language(main_language)),
         )
         .join(Namespace, Namespace.id == Table.namespace_id)
-        .where(Namespace.environment_id == environment_id, or_(named, in_description, in_grain))
+        .where(
+            Namespace.environment_id == environment_id,
+            or_(by_name, in_label, in_description, in_grain),
+        )
     )
     return query.where(Table.model_kind == model_kind) if model_kind is not None else query
 
 
-def _columns(match: _Match, environment_id: uuid.UUID) -> _Candidates:
-    """Select the columns whose name, description or measure label or description matches.
+def _name_or_label(
+    match: _Match, names: Sequence[_Expr], label: _Expr
+) -> tuple[ColumnElement[int], ColumnElement[bool], ColumnElement[bool]]:
+    """Rank a name and a label together, and say which of the two decided the rank.
+
+    Parameters
+    ----------
+    match
+        The comparisons.
+    names
+        The expressions that count as the name.
+    label
+        The shown label; null when there is none.
+
+    Returns
+    -------
+    tuple
+        The rank (the better of the two, 3 when neither matches); whether the name decided it (it
+        matches and the label does not match better); whether the label decided it.
+    """
+    name_rank = match.rank(names, otherwise=3)
+    label_rank = match.rank([label], otherwise=3)
+    label_wins = label_rank < name_rank
+    rank = case((label_wins, label_rank), else_=name_rank)
+    return rank, and_(name_rank < 3, ~label_wins), label_wins
+
+
+def _translation_order(languages: Sequence[str]) -> ColumnElement[int]:
+    """Order the translations of one table or column: the reader's languages in their order.
+
+    Parameters
+    ----------
+    languages
+        The reader's languages, truncation included, most wanted first.
+
+    Returns
+    -------
+    ColumnElement
+        An integer from 10 up: ten times the language's place in `languages` (from 1), plus the
+        text (a label 0, a description 1, a grain 2; a measure's text 3 more). Main-language rows
+        sort at 0 (`_row`), so at the same rank a name or header text keeps the hit, then the
+        first of the reader's languages, never the spelling of a tag.
+    """
+    place = case(
+        *(
+            (TextTranslation.language == language, literal_column(str((index + 1) * 10)))
+            for index, language in enumerate(languages)
+        ),
+        else_=literal_column(str((len(languages) + 1) * 10)),
+    )
+    text = case(
+        (TextTranslation.field == "label", literal_column("0")),
+        (TextTranslation.field == "description", literal_column("1")),
+        else_=literal_column("2"),
+    )
+    subject = case(
+        (TextTranslation.subject == "measure", literal_column("3")), else_=literal_column("0")
+    )
+    return place + text + subject
+
+
+def _not_main_language(main_language: str) -> ColumnElement[bool]:
+    """Leave out a translation in its table's own main language, as `table get` does.
+
+    Parameters
+    ----------
+    main_language
+        The instance's main language, for a table whose project declares none.
+
+    Returns
+    -------
+    ColumnElement
+        True for a row in another language. A row in the main language can only be left over from
+        before the main language changed; the header text is the main language's.
+    """
+    return TextTranslation.language != _header_language(main_language)
+
+
+def _table_translations(
+    match: _Match,
+    environment_id: uuid.UUID,
+    model_kind: str | None,
+    languages: Sequence[str],
+    main_language: str,
+) -> _Candidates:
+    """Select the tables whose label, description or grain matches in one of the reader's languages.
 
     Parameters
     ----------
@@ -678,26 +850,93 @@ def _columns(match: _Match, environment_id: uuid.UUID) -> _Candidates:
         The comparisons.
     environment_id
         The environment.
+    model_kind
+        Keep only tables that declare this kind, or `None`.
+    languages
+        The reader's languages, truncation included.
+    main_language
+        The instance's main language, for a table whose project declares none.
 
     Returns
     -------
     Select
-        The candidates. A measure's label and description are in the row, so they are read out
-        only after the caller's `READ_TABLE` on the table has been checked, like a description.
+        Candidates of the table kind, so `_may_see` checks `READ_TABLE` before any text is read.
+        A label ranks like a name; a description or grain after names.
+    """
+    text = func.coalesce(TextTranslation.text_edited, TextTranslation.text_project)
+    is_label = TextTranslation.field == "label"
+    query = (
+        _row(
+            SearchKind.TABLE,
+            case((is_label, match.rank([text], otherwise=3)), else_=literal_column("3")),
+            func.lower(Table.name),
+            cast(Table.id, String),
+            case(
+                (is_label, _text("label")),
+                (TextTranslation.field == "grain", _text("grain")),
+                else_=_text("description"),
+            ),
+            Namespace.path,
+            Table.name,
+            cast(Table.table_type, String),
+            text,
+            Table.model_kind,
+            TextTranslation.language,
+            sort_source=_translation_order(languages),
+        )
+        .select_from(TextTranslation)
+        .join(Table, Table.id == TextTranslation.table_id)
+        .join(Namespace, Namespace.id == Table.namespace_id)
+        .where(
+            Namespace.environment_id == environment_id,
+            TextTranslation.subject == "table",
+            TextTranslation.language.in_(languages),
+            _not_main_language(main_language),
+            match.contains(text),
+        )
+    )
+    return query.where(Table.model_kind == model_kind) if model_kind is not None else query
+
+
+def _columns(match: _Match, environment_id: uuid.UUID, main_language: str) -> _Candidates:
+    """Select the columns whose name, label, description or measure label or description matches.
+
+    Parameters
+    ----------
+    match
+        The comparisons.
+    environment_id
+        The environment.
+    main_language
+        The instance's main language, for a table whose project declares none.
+
+    Returns
+    -------
+    Select
+        The candidates, in the main language. A label and a measure's label and description are
+        in the row, so they are read out only after the caller's `READ_TABLE` on the table has
+        been checked, like a description. A label ranks like a name.
     """
     shown = func.coalesce(
         ColumnDescription.description_edited, ColumnDescription.description_project
     )
+    label = func.coalesce(ColumnDescription.label_edited, ColumnDescription.label_project)
     named = match.contains(TableColumn.name)
+    in_column_label = match.contains(label)
     in_description = match.contains(shown)
+    rank, by_name, by_label = _name_or_label(match, [TableColumn.name], label)
     in_label = match.contains(func.coalesce(DeclaredMeasure.label, ""))
     in_measure = or_(in_label, match.contains(func.coalesce(DeclaredMeasure.description, "")))
     matched = case(
-        (named, _text("name")), (in_description, _text("description")), else_=_text("measure")
+        (by_name, _text("name")),
+        (by_label, _text("label")),
+        (in_description, _text("description")),
+        else_=_text("measure"),
     )
-    # Ordered like `matched`: a null description makes `in_description` null, never true.
+    # Ordered like `matched`: a null text makes its comparison null, never true.
     text = case(
-        (named, shown),
+        (by_name, shown),
+        (by_label, label),
         (in_description, shown),
         (in_label, DeclaredMeasure.label),
         else_=DeclaredMeasure.description,
@@ -705,7 +944,7 @@ def _columns(match: _Match, environment_id: uuid.UUID) -> _Candidates:
     return (
         _row(
             SearchKind.COLUMN,
-            match.rank([TableColumn.name], otherwise=3),
+            rank,
             func.lower(TableColumn.name),
             cast(TableColumn.table_id, String),
             matched,
@@ -714,6 +953,7 @@ def _columns(match: _Match, environment_id: uuid.UUID) -> _Candidates:
             TableColumn.name,
             text,
             TableColumn.type,
+            case((by_name, null()), else_=_header_language(main_language)),
         )
         .select_from(TableColumn)
         .join(Table, Table.id == TableColumn.table_id)
@@ -734,7 +974,71 @@ def _columns(match: _Match, environment_id: uuid.UUID) -> _Candidates:
         )
         .where(
             Namespace.environment_id == environment_id,
-            or_(named, in_description, in_measure),
+            or_(named, in_column_label, in_description, in_measure),
+        )
+    )
+
+
+def _column_translations(
+    match: _Match, environment_id: uuid.UUID, languages: Sequence[str], main_language: str
+) -> _Candidates:
+    """Select the columns whose translated label or description, or measure text, matches.
+
+    Parameters
+    ----------
+    match
+        The comparisons.
+    environment_id
+        The environment.
+    languages
+        The reader's languages, truncation included.
+    main_language
+        The instance's main language, for a table whose project declares none.
+
+    Returns
+    -------
+    Select
+        Candidates of the column kind, so `_may_see` checks `READ_TABLE` before any text is read.
+        A column the table no longer has is never found: the rows join its `table_columns` row.
+        A column's label ranks like a name; a description or a measure text after names.
+    """
+    text = func.coalesce(TextTranslation.text_edited, TextTranslation.text_project)
+    is_label = and_(TextTranslation.subject == "column", TextTranslation.field == "label")
+    return (
+        _row(
+            SearchKind.COLUMN,
+            case((is_label, match.rank([text], otherwise=3)), else_=literal_column("3")),
+            func.lower(TableColumn.name),
+            cast(TableColumn.table_id, String),
+            case(
+                (TextTranslation.subject == "measure", _text("measure")),
+                (is_label, _text("label")),
+                else_=_text("description"),
+            ),
+            Namespace.path,
+            Table.name,
+            TableColumn.name,
+            text,
+            TableColumn.type,
+            TextTranslation.language,
+            sort_source=_translation_order(languages),
+        )
+        .select_from(TextTranslation)
+        .join(
+            TableColumn,
+            and_(
+                TableColumn.table_id == TextTranslation.table_id,
+                TableColumn.name == TextTranslation.name,
+            ),
+        )
+        .join(Table, Table.id == TableColumn.table_id)
+        .join(Namespace, Namespace.id == Table.namespace_id)
+        .where(
+            Namespace.environment_id == environment_id,
+            TextTranslation.subject.in_(("column", "measure")),
+            TextTranslation.language.in_(languages),
+            _not_main_language(main_language),
+            match.contains(text),
         )
     )
 
@@ -833,7 +1137,7 @@ def _hit(row: _Candidate, needle: str) -> SearchHit:
     kind = next(k for k, order in _KIND_ORDER.items() if order == row.kind_order)
     snippet = (
         _snippet(row.f4, needle)
-        if row.matched in ("description", "grain", "measure")
+        if row.matched in ("label", "description", "grain", "measure")
         and kind
         in (
             SearchKind.TABLE,
@@ -852,6 +1156,8 @@ def _hit(row: _Candidate, needle: str) -> SearchHit:
             table=row.f2,
             table_kind=table_kind(TableType[row.f3]),
             model_kind=row.f5,
+            language=row.f6,
+            translated=row.sort_source > 0,
         )
     if kind is SearchKind.COLUMN:
         namespace = str(NamespacePath.parse(row.f1))
@@ -864,6 +1170,8 @@ def _hit(row: _Candidate, needle: str) -> SearchHit:
             table=row.f2,
             column=row.f3,
             column_type=row.f5,
+            language=row.f6,
+            translated=row.sort_source > 0,
         )
     if kind is SearchKind.RUN:
         run_id = uuid.UUID(row.f1)

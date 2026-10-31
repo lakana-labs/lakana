@@ -5,10 +5,11 @@ from __future__ import annotations
 import uuid
 
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from lakana_core.models import DeclaredMeasure, Namespace, Table
+from lakana_core.catalog.descriptions import sync_project_descriptions
+from lakana_core.models import DeclaredMeasure, Environment, Namespace, Principal, Table
 from tests.conftest import AUTH_HEADER
 from tests.server_test_helpers import create_environment
 
@@ -283,3 +284,106 @@ def test_a_measure_label_matches_through_rest_and_only_for_a_reader(client: Test
         ("silver.payroll.salary", "measure", "Gross pay")
     ]
     assert client.get(_SEARCH, headers=alice, params={"q": "gross pay"}).json()["results"] == []
+
+
+def _translated(client: TestClient, translations: dict | None = None) -> None:
+    """Create `gold.t (id)` labelled `Sales`, in French `Ventes`, as a deploy writes it.
+
+    Parameters
+    ----------
+    client
+        The test client.
+    translations
+        The asset's `translations`; French `Ventes` when `None`.
+    """
+    create_environment(client)
+    created = client.post(
+        "/api/v1/environments/dev/namespaces/gold/tables",
+        headers=AUTH_HEADER,
+        json={"name": "t", "schema": [{"name": "id", "type": "long", "nullable": False}]},
+    )
+    assert created.status_code == 201, created.text
+    with Session(client.app.state.engine) as session:
+        env = session.scalars(select(Environment.id).where(Environment.name == "dev")).one()
+        sync_project_descriptions(
+            session,
+            env,
+            {
+                "version": 11,
+                "main_language": "en",
+                "assets": [
+                    {
+                        "table": "gold.t",
+                        "metadata": {
+                            "label": "Sales",
+                            "translations": translations or {"fr": {"label": "Ventes"}},
+                        },
+                    }
+                ],
+            },
+        )
+        session.commit()
+
+
+def test_a_label_hit_through_rest_says_its_language(client: TestClient) -> None:
+    """`matched: "label"` must be in `SearchHitOut`'s Literal, or this answers 500."""
+    _translated(client)
+    response = client.get(_SEARCH, params={"q": "ventes", "lang": "fr"}, headers=AUTH_HEADER)
+    assert response.status_code == 200, response.text
+    (hit,) = response.json()["results"]
+    assert (hit["name"], hit["matched"], hit["language"]) == ("gold.t", "label", "fr")
+    assert hit["translated"] is True
+    plain = client.get(_SEARCH, params={"q": "ventes"}, headers=AUTH_HEADER)
+    assert plain.json()["results"] == []
+    (english,) = client.get(_SEARCH, params={"q": "sales"}, headers=AUTH_HEADER).json()["results"]
+    assert (english["matched"], english["language"], english["translated"]) == (
+        "label",
+        "en",
+        False,
+    )
+
+
+def test_search_reads_the_profile_and_accept_language_like_table_get(client: TestClient) -> None:
+    _translated(client)
+    by_header = client.get(
+        _SEARCH, params={"q": "ventes"}, headers={**AUTH_HEADER, "Accept-Language": "fr-CH"}
+    )
+    assert [h["language"] for h in by_header.json()["results"]] == ["fr"]
+    with Session(client.app.state.engine) as session:
+        session.execute(update(Principal).values(language="fr"))
+        session.commit()
+    by_profile = client.get(_SEARCH, params={"q": "ventes"}, headers=AUTH_HEADER)
+    assert [h["language"] for h in by_profile.json()["results"]] == ["fr"]
+
+
+def test_an_invalid_lang_on_search_is_422_with_the_tag_text(client: TestClient) -> None:
+    _translated(client)
+    response = client.get(_SEARCH, params={"q": "ventes", "lang": " de_DE "}, headers=AUTH_HEADER)
+    assert response.status_code == 422
+    assert response.json()["detail"] == (
+        "lang: `de_DE` is not a language tag Lakana takes: a language, then optionally a script "
+        "and a region (BCP 47), such as en, de, fr-CH or zh-Hant; ask for a language such as de, "
+        "or leave lang out"
+    )
+
+
+def test_of_two_accepted_languages_that_match_the_first_is_reported(client: TestClient) -> None:
+    _translated(client, {"fr": {"label": "Ventes (fr)"}, "de": {"label": "Ventes (de)"}})
+    for header, expected in (("fr, de", "fr"), ("de, fr;q=0.5", "de")):
+        response = client.get(
+            _SEARCH, params={"q": "ventes"}, headers={**AUTH_HEADER, "Accept-Language": header}
+        )
+        assert [h["language"] for h in response.json()["results"]] == [expected], header
+
+
+def test_a_translation_of_a_table_the_caller_may_not_read_matches_nothing(
+    client: TestClient,
+) -> None:
+    _translated(client)
+    _table(client, "silver", "orders", "order_id")
+    viewer = _person(client, "vic", table="orders")
+    hidden = client.get(_SEARCH, params={"q": "ventes", "lang": "fr"}, headers=viewer)
+    assert hidden.status_code == 200, hidden.text
+    assert hidden.json()["results"] == [] and hidden.json()["has_more"] is False
+    shown = client.get(_SEARCH, params={"q": "ventes", "lang": "fr"}, headers=AUTH_HEADER)
+    assert [h["name"] for h in shown.json()["results"]] == ["gold.t"]

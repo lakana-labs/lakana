@@ -339,3 +339,46 @@ def test_describe_sends_only_the_given_fields_and_lang() -> None:
     with pytest.raises(ValueError, match="give description, label or both; None removes an edit"):
         client.tables.describe("dev", "gold.t")
     assert len(seen) == 2
+
+
+def test_search_sends_lang_and_reads_the_language() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "results": [
+                    {
+                        "kind": "table",
+                        "name": "gold.t",
+                        "matched": "label",
+                        "snippet": "Ventes",
+                        "namespace": "gold",
+                        "table": "t",
+                        "table_kind": "TABLE",
+                        "model_kind": None,
+                        "column": None,
+                        "column_type": None,
+                        "run_id": None,
+                        "job": None,
+                        "repository": None,
+                        "status": None,
+                        "principal": None,
+                        "principal_type": None,
+                        "language": "fr",
+                        "translated": True,
+                    }
+                ],
+                "limit": 20,
+                "offset": 0,
+                "has_more": False,
+            },
+        )
+
+    page = _client(handler).search("dev", "ventes", lang="fr")
+    assert dict(seen[0].url.params)["lang"] == "fr"
+    assert (page.results[0].language, page.results[0].translated) == ("fr", True)
+    _client(handler).search("dev", "ventes")
+    assert "lang" not in seen[1].url.params

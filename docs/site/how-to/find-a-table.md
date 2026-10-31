@@ -9,6 +9,10 @@ terminal, the SDK or through REST. You need an environment with at least one tab
 - the names of tables, views, external tables and artifacts, with or without the namespace
   (`silver.ord` finds `silver.orders`);
 - the names of columns;
+- the labels of tables and of columns, which rank like names; a translated label, description or
+  grain matches in your language (`--lang`, else your profile's language), and the `matched`
+  column shows a translation's language, `label [fr]` (see
+  [Translate labels and descriptions](translate-labels-and-descriptions.md#find-a-table-by-its-label));
 - the descriptions of tables and of columns (see [Describe a table](describe-a-table.md)); the
   text shown is the one `lakana table get` shows;
 - the grain a table's asset header declares (`grain: One row per store and day`), which shows when
@@ -30,8 +34,9 @@ Each row says what was found (`kind`), its name, which field matched, and where 
 a table, the type of a column, the repository and job of a run. A description that matched shows a
 piece of it, at most 160 characters around the hit.
 
-The best matches come first: a name that is exactly your text, then names that start with it, then
-names that contain it, then descriptions that contain it. Among equals, tables come before columns,
+The best matches come first: a name or label that is exactly your text, then names and labels that
+start with it, then those that contain it, then descriptions that contain it. A table or column is
+listed once, under its best match. Among equals, tables come before columns,
 columns before runs and runs before people.
 
 ## Look for one kind of thing

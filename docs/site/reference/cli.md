@@ -168,9 +168,9 @@ Run REPO's deployed project version; exit 0 on success, 1 otherwise, 7 if one is
 
 Usage: `lakana search [OPTIONS] {TEXT}`
 
-Find tables, columns, descriptions, runs and people that match TEXT.
+Find tables, columns, labels, descriptions, runs and people that match TEXT.
 
-Matching ignores case and finds TEXT anywhere in a name or description. Exact matches come first, then names that start with TEXT, then names that contain it, then descriptions. Runs are found by the first four or more characters of their id, their job or their repository. A table is also found by the grain its asset header declares, and shows its kind in brackets after its name; a column by the label or description of its declared measure. You see only what you may read. Use --output json for every field.
+Matching ignores case and finds TEXT anywhere in a name, label or description. Exact matches come first, then names and labels that start with TEXT, then those that contain it, then descriptions. Texts in a table's main language always match; translated ones in your language (--lang, else your profile's, else the instance's main language), and the matched column shows a translation's language in brackets. A table or column is listed once. Runs are found by the first four or more characters of their id, their job or their repository. A table is also found by the grain its asset header declares, and shows its kind in brackets after its name; a column by the label or description of its declared measure. You see only what you may read. Use --output json for every field.
 
 | Name | Type | Default | Description |
 |---|---|---|---|
@@ -179,6 +179,7 @@ Matching ignores case and finds TEXT anywhere in a name or description. Exact ma
 | `--model-kind` | one of `fact`, `dimension`, `wide`, `staging` | none | Only tables whose asset header declares this kind; other results are left out. |
 | `--limit` | whole number, 1 to 100 | `20` | Most results to show (1 to 100). |
 | `--offset` | whole number, 0 or more | `0` | Results to skip, to show the next page. |
+| `--lang` | text | none | Match translated labels and descriptions in this language, such as de or fr-CH. |
 | `--env` | text | none | Environment (default: the profile's). |
 
 ## `lakana init`
