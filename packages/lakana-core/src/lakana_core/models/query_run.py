@@ -49,7 +49,8 @@ class WriteMode(enum.StrEnum):
     """What a write run does to its target.
 
     The database stores the member *names* (SQLAlchemy's default for a
-    non-native enum); the lowercase *values* are the REST API's spelling.
+    non-native enum); the lowercase *values* are the REST API's spelling. `HISTORY` is written
+    only by a history asset's run (`write: history`).
     """
 
     CREATE = "create"
@@ -58,6 +59,7 @@ class WriteMode(enum.StrEnum):
     MERGE = "merge"
     VIEW = "view"
     MAINTAIN = "maintain"
+    HISTORY = "history"
 
 
 class QueryRun(Base, TimestampMixin):

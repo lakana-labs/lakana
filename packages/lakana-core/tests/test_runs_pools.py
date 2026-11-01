@@ -69,6 +69,7 @@ MODE_KINDS: dict[WriteMode | None, str] = {
     WriteMode.MERGE: INTERACTIVE,
     WriteMode.VIEW: INTERACTIVE,
     WriteMode.MAINTAIN: PIPELINE,
+    WriteMode.HISTORY: INTERACTIVE,
 }
 """The kind of a query run without a task run, by write mode: one entry per mode that exists."""
 

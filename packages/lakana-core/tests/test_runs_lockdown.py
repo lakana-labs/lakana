@@ -1467,6 +1467,7 @@ _ALLOWED = {
     WriteOperation.WRITE,
     WriteOperation.APPEND,
     WriteOperation.MERGE,
+    WriteOperation.HISTORY,
     WriteOperation.COMMIT,
     WriteOperation.CREATE_VIEW,
     WriteOperation.ARTIFACT_VERSION,
@@ -1532,7 +1533,7 @@ def _own_asset_text(operation: str, subject: str) -> str:
     return (
         f"Task 'models.churn' may not do '{operation}' to {subject}; "
         "a task may only materialize its own asset: for a table, sql write, write, append, merge, "
-        "commit, create view; for an artifact, artifact version. Do this outside the task."
+        "history, commit, create view; for an artifact, artifact version. Do this outside the task."
     )
 
 

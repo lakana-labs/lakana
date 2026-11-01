@@ -117,6 +117,7 @@ def test_write_mode_values_are_the_api_spelling() -> None:
         "merge",
         "view",
         "maintain",
+        "history",
     ]
 
 

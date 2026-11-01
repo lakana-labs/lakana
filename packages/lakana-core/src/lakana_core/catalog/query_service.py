@@ -155,6 +155,11 @@ MERGE_IS_NOT_A_QUERY_MODE = (
 )
 """Why a write run refuses `merge`: the key and the checks belong to an asset or a merge call."""
 
+HISTORY_IS_NOT_A_QUERY_MODE = (
+    "history is written by assets (`write: history`); a query writes with create, replace or append"
+)
+"""Why a write run refuses `history`: the key, the versions and the checks belong to an asset."""
+
 
 @dataclass(frozen=True)
 class WriteTarget:
@@ -183,14 +188,16 @@ class WriteTarget:
         Raises
         ------
         ValidationError
-            If `mode` is `MAINTAIN` or `MERGE` (assets and `tables.merge` merge, a query
-            does not), `incremental_key` is set for a mode other than `APPEND`, or
-            `evolve_schema` for a mode other than `REPLACE`/`APPEND`.
+            If `mode` is `MAINTAIN`, `MERGE` or `HISTORY` (assets, `tables.merge` and history
+            assets write those, a query does not), `incremental_key` is set for a mode other
+            than `APPEND`, or `evolve_schema` for a mode other than `REPLACE`/`APPEND`.
         """
         if self.mode is WriteMode.MAINTAIN:
             raise ValidationError("maintain is not a query target mode.")
         if self.mode is WriteMode.MERGE:
             raise ValidationError(MERGE_IS_NOT_A_QUERY_MODE)
+        if self.mode is WriteMode.HISTORY:
+            raise ValidationError(HISTORY_IS_NOT_A_QUERY_MODE)
         if self.incremental_key is not None and self.mode is not WriteMode.APPEND:
             raise ValidationError("incremental_key applies to mode append only.")
         if self.evolve_schema and self.mode not in (WriteMode.REPLACE, WriteMode.APPEND):

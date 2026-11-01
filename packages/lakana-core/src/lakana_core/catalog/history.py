@@ -16,20 +16,41 @@ so `CatalogService.history` commits one snapshot through the governed compare-an
 from __future__ import annotations
 
 import decimal
+import functools
 import hashlib
-from collections.abc import Callable, Collection, Sequence
+import json
+import uuid
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
 import pyarrow as pa
 import pyarrow.compute as _compute
+from pyiceberg.expressions import And, EqualTo, GreaterThan, In
+from pyiceberg.io import FileIO
+from pyiceberg.schema import Schema
+from pyiceberg.table import DataScan
+from pyiceberg.table.metadata import TableMetadata
+from pyiceberg.table.update import TableRequirement, TableUpdate
+from pyiceberg.types import BooleanType, StringType, TimestamptzType
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from lakana_core.auth import RunContext
-from lakana_core.catalog.merge import SDK_ADVICE, MergeAdvice, check_merge_batch
+from lakana_core.catalog.append import validate_arrow_schema
+from lakana_core.catalog.merge import (
+    SDK_ADVICE,
+    MergeAdvice,
+    _delete_staged,
+    _repeated_rows,
+    _shown,
+    _static,
+    check_merge_batch,
+    fold_snapshots,
+)
 from lakana_core.catalog.schema_compat import arrow_to_iceberg_schema, arrow_to_iceberg_type
+from lakana_core.catalog.writes import max_rows_message
 from lakana_core.errors import ValidationError
 from lakana_core.models import Run, TaskRun
 from lakana_core.projects.history_columns import (
@@ -842,3 +863,359 @@ def plan_history(
         opened=opened.select(schema.names).cast(schema),
         closed_missing=len(missing),
     )
+
+
+def not_history_message(table: str, environment: str) -> str:
+    """Refuse a history write into a table its first history run did not create.
+
+    Parameters
+    ----------
+    table
+        The table's dotted name.
+    environment
+        The environment, for the command.
+
+    Returns
+    -------
+    str
+        The message, naming the command that drops the table.
+    """
+    return (
+        f"{table} exists without the columns `write: history` adds; a history table is created "
+        f"by its first history run. Drop it (`lakana table delete {table} --env {environment}`) "
+        "so that the next run creates it with every row as an open version, or build the history "
+        "into a new asset."
+    )
+
+
+def key_changed_message(table: str, stored: Sequence[str], declared: Sequence[str]) -> str:
+    """Refuse a history write whose key is not the key the table was built with.
+
+    Parameters
+    ----------
+    table
+        The table's dotted name.
+    stored
+        The key in the table's `lakana.history-key` property.
+    declared
+        The key the asset declares now.
+
+    Returns
+    -------
+    str
+        The message.
+    """
+    return (
+        f"{table} keeps its history by {_shown(stored)}, and the asset now declares `key: "
+        f"[{', '.join(declared)}]`; a history table keeps its key. Declare the old key again, or "
+        "build the new key into a new asset (its history starts with its first run)."
+    )
+
+
+_ADDED_TYPES = {
+    VALID_FROM: (TimestamptzType, True),
+    VALID_TO: (TimestamptzType, False),
+    IS_CURRENT: (BooleanType, True),
+}
+"""The type and requiredness of the added columns besides the surrogate key (a required string)."""
+
+
+def check_history_table(
+    schema: Schema,
+    properties: Mapping[str, str],
+    *,
+    key: Sequence[str],
+    table: str,
+    environment: str,
+) -> None:
+    """Refuse a history write into a table that is not a history table of this key.
+
+    Parameters
+    ----------
+    schema
+        The table's current schema.
+    properties
+        The table's properties.
+    key
+        The key the asset declares.
+    table
+        The table's dotted name.
+    environment
+        The environment, for the command in the message.
+
+    Raises
+    ------
+    ValidationError
+        If an added column is missing or has another type or requiredness, the key property is
+        missing or unreadable (`not_history_message`), or it names another key.
+    """
+    fields = {field.name: field for field in schema.fields}
+    wanted = {surrogate_column(table): (StringType, True), **_ADDED_TYPES}
+    for name, (kind, required) in wanted.items():
+        field = fields.get(name)
+        if field is None or not isinstance(field.field_type, kind) or field.required != required:
+            raise ValidationError(not_history_message(table, environment))
+    try:
+        stored = json.loads(properties.get(HISTORY_KEY_PROPERTY, ""))
+    except ValueError:
+        stored = None
+    if not isinstance(stored, list) or not stored or not all(isinstance(c, str) for c in stored):
+        raise ValidationError(not_history_message(table, environment))
+    if stored != list(key):
+        raise ValidationError(key_changed_message(table, stored, key))
+
+
+def conform_batch(schema: Schema, data: pa.Table, *, table: str) -> pa.Table:
+    """Check a batch against a history table's columns and cast it to their types.
+
+    Parameters
+    ----------
+    schema
+        The table's current schema.
+    data
+        The batch without its `valid_from:` column.
+    table
+        The table's dotted name.
+
+    Returns
+    -------
+    pa.Table
+        The batch in the table's column order and Arrow types (the added columns left out).
+
+    Raises
+    ------
+    ValidationError
+        If the batch adds a column the table does not have or lacks one it has (named, with the
+        added column's type), or a type does not fit (`validate_arrow_schema`'s texts).
+    """
+    added = set(added_columns(table))
+    stored = Schema(*[field for field in schema.fields if field.name not in added])
+    names = set(stored.column_names)
+    extra = [name for name in data.column_names if name not in names]
+    gone = [name for name in stored.column_names if name not in data.column_names]
+    if extra or gone:
+        changes = [f"added {n} ({shown_type(data.schema.field(n).type)})" for n in extra]
+        changes += [f"removed {n}" for n in gone]
+        raise ValidationError(
+            f"The result does not match {table}'s columns ({', '.join(changes)}); a history "
+            f"table keeps its columns. Make the SELECT return the columns and types {table} "
+            "has; to add a column, build a new history asset (its history starts with its first "
+            "run)."
+        )
+    validate_arrow_schema(stored, data)
+    target = stored.as_arrow()
+    return data.select(target.names).cast(target)
+
+
+def read_open_versions(
+    metadata: TableMetadata,
+    file_io: FileIO,
+    *,
+    key: Sequence[str],
+    table: str,
+    max_rows: int | None,
+) -> pa.Table:
+    """Read a history table's open versions, every column.
+
+    One scan filtered on `is_current`: a data file whose rows are all closed has `false` as
+    both bounds of the column and is skipped, so a long history costs nothing here.
+
+    Parameters
+    ----------
+    metadata
+        The table's current metadata.
+    file_io
+        The environment's `FileIO`.
+    key
+        The natural key's columns.
+    table
+        The table's dotted name, for the messages.
+    max_rows
+        Most open versions to read (`QueryLimitsConfig.max_write_rows`), or `None`.
+
+    Returns
+    -------
+    pa.Table
+        The open versions, in the table's Arrow schema.
+
+    Raises
+    ------
+    ValidationError
+        For more open versions than `max_rows` (`max_rows_message`, refused while reading), or a
+        key or a surrogate key with more than one open version.
+    """
+    schema = metadata.schema().as_arrow()
+    if metadata.current_snapshot_id is None:
+        return schema.empty_table()
+    reader = DataScan(
+        table_metadata=metadata, io=file_io, row_filter=EqualTo(term=IS_CURRENT, value=True)
+    ).to_arrow_batch_reader()
+    batches: list[pa.RecordBatch] = []
+    rows = 0
+    for batch in reader:
+        rows += batch.num_rows
+        if max_rows is not None and rows > max_rows:
+            raise ValidationError(max_rows_message(max_rows))
+        batches.append(batch)
+    found = pa.Table.from_batches(batches, schema=reader.schema).cast(schema)
+    repeated = max(_repeated_rows(found, key), _repeated_rows(found, [surrogate_column(table)]))
+    if repeated:
+        raise ValidationError(
+            f"key {_shown(key)} has more than one open version in {repeated} rows of {table}; a "
+            "history table has one open version per key. Drop it and let the next run create it "
+            "again."
+        )
+    return found
+
+
+def read_last_ends(
+    metadata: TableMetadata,
+    file_io: FileIO,
+    wanted: pa.Table,
+    after: datetime,
+    *,
+    key: Sequence[str],
+) -> pa.Table:
+    """Read the key columns and `valid_to` of the closed versions of some keys that end late.
+
+    Only closed versions that end after `after` are read: an earlier or equal end cannot
+    overlap a version starting at or after `after`, so a long history of a returning key costs
+    no more than its recent versions (files whose `valid_to` bounds are all at or before it are
+    skipped).
+
+    Parameters
+    ----------
+    metadata
+        The table's current metadata.
+    file_io
+        The environment's `FileIO`.
+    wanted
+        The keys, one column per key column.
+    after
+        The earliest start among the rows that open these keys again (`plan_history`'s lower
+        bound): the run clock, or the smallest declared `valid_from`.
+    key
+        The natural key's columns.
+
+    Returns
+    -------
+    pa.Table
+        The closed versions ending after `after` whose every key column is among the wanted
+        values: a superset of the exact keys for a key of several columns, which
+        `plan_history` joins exactly.
+    """
+    columns = (*key, VALID_TO)
+    if metadata.current_snapshot_id is None or wanted.num_rows == 0:
+        return metadata.schema().select(*columns).as_arrow().empty_table()
+    terms = [
+        In(term=column, literals=list(dict.fromkeys(wanted.column(column).to_pylist())))
+        for column in key
+    ]
+    closed = And(EqualTo(term=IS_CURRENT, value=False), GreaterThan(term=VALID_TO, value=after))
+    return DataScan(
+        table_metadata=metadata,
+        io=file_io,
+        row_filter=functools.reduce(And, terms, closed),
+        selected_fields=columns,
+    ).to_arrow()
+
+
+@dataclass(frozen=True)
+class StagedHistory:
+    """A history write staged against a table, ready for `CatalogService.commit_table`.
+
+    Parameters
+    ----------
+    requirements
+        What must still hold at the commit.
+    updates
+        One `AddSnapshotUpdate` and the move of `main` to it.
+    discarded
+        Files pyiceberg wrote for the snapshots that were folded into one; deleted whether or
+        not the commit lands.
+    """
+
+    requirements: Sequence[TableRequirement]
+    updates: Sequence[TableUpdate]
+    discarded: Sequence[str] = ()
+
+
+def stage_history(
+    metadata: TableMetadata,
+    metadata_location: str,
+    file_io: FileIO,
+    plan: HistoryPlan,
+    *,
+    table: str,
+) -> StagedHistory:
+    """Stage a history write as one snapshot, without a catalog behind it.
+
+    The open versions to close are rewritten copy-on-write with an overwrite whose filter
+    matches exactly them (open, and one of their surrogate keys), which adds them back closed;
+    then the new versions are appended. pyiceberg stages up to three snapshots; `fold_snapshots`
+    turns them into one on the table's current snapshot.
+
+    Parameters
+    ----------
+    metadata
+        The table's current metadata.
+    metadata_location
+        Its location; an identifier here.
+    file_io
+        The environment's `FileIO`.
+    plan
+        What the write changes; `plan.changed` is true.
+    table
+        The table's dotted name.
+
+    Returns
+    -------
+    StagedHistory
+        What to commit and the files to delete afterwards.
+    """
+    surrogate = surrogate_column(table)
+    tx = _static(metadata, metadata_location, file_io).transaction()
+    try:
+        if plan.versions_closed:
+            closing = plan.closed.column(surrogate).to_pylist()
+            tx.overwrite(
+                plan.closed,
+                overwrite_filter=And(
+                    EqualTo(term=IS_CURRENT, value=True), In(term=surrogate, literals=closing)
+                ),
+            )
+        if plan.versions_opened:
+            tx.append(plan.opened)
+        requirements, updates, discarded = fold_snapshots(tx, metadata, metadata_location, file_io)
+    except Exception:
+        _delete_staged(tx, file_io)
+        raise
+    return StagedHistory(requirements=requirements, updates=updates, discarded=discarded)
+
+
+@dataclass(frozen=True)
+class HistoryResult:
+    """What `CatalogService.history` committed.
+
+    Parameters
+    ----------
+    snapshot_id
+        The new current snapshot; `None` when nothing changed.
+    versions_opened
+        Versions opened: one per new key and per key whose values changed.
+    versions_closed
+        Open versions closed: one per key whose values changed and per missing key closed.
+    closed_missing
+        How many of `versions_closed` were keys the batch no longer returns.
+    created
+        Whether the write created the table.
+    table_id
+        The table's id; `None` only where a caller built the result itself.
+    """
+
+    snapshot_id: int | None
+    versions_opened: int
+    versions_closed: int
+    closed_missing: int
+    created: bool = False
+    table_id: uuid.UUID | None = None

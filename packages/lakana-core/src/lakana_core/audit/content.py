@@ -110,7 +110,7 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "issuer",
         "job",
         "jti_sha256",
-        # a merge's key: column names, as `column` and a schema diff hold
+        # a merge's or a history write's key: column names, as `column` and a schema diff hold
         "key",
         "key_id",
         "kind",
@@ -153,6 +153,8 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "type",
         "url",
         "use",
+        # the column a history write took each version's start from, or "run" for the run clock
+        "valid_from",
         "version",
         "waits_for_run_id",
         # states, outcomes and fixed reasons
@@ -190,6 +192,7 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "bytes",
         "bytes_deleted",
         "claimed_at",
+        "closed_missing",
         "count",
         "counts",
         "days",
@@ -228,6 +231,7 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "rows_inserted",
         "rows_shown",
         "rows_updated",
+        "run_started_at",
         "scheduled_for",
         "size_bytes",
         "snapshot_id",
@@ -239,6 +243,8 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "tags_removed",
         "tasks",
         "versions",
+        "versions_closed",
+        "versions_opened",
         # settings and changes
         "approved_options",
         # policy kinds, ids and column names of a write's schema change, never an expression

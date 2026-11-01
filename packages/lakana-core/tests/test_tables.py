@@ -1502,6 +1502,8 @@ def test_no_new_catalog_method_builds_a_loaded_table_without_a_decision() -> Non
         "check_can_load",
         # A writer's: a create whose commit raised but landed returns the table it created.
         "create_table",
+        # A writer's: it reads the open versions to compare them and returns counts only.
+        "history",
         "load_table",
         # A reader that names one snapshot a check result recorded, never the current state.
         "load_table_at_check",

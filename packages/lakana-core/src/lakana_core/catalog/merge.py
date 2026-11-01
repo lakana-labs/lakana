@@ -482,6 +482,50 @@ def _delete_staged(tx: Transaction, file_io: FileIO) -> None:
             )
 
 
+def fold_snapshots(
+    tx: Transaction, metadata: TableMetadata, metadata_location: str, file_io: FileIO
+) -> tuple[Sequence[TableRequirement], Sequence[TableUpdate], list[str]]:
+    """Fold the snapshots pyiceberg staged on a transaction into one on the target's current one.
+
+    A merge's upsert and a history write's overwrite and append each stage up to three
+    snapshots, each moving `main`. When there is more than one, the data files of the last are
+    compared with the target's: one overwrite on the target's current snapshot deletes the files
+    that went and adds the ones that came.
+
+    Parameters
+    ----------
+    tx
+        A transaction on the target's `StaticTable`, with the staged snapshots.
+    metadata
+        The target's current metadata.
+    metadata_location
+        Its location.
+    file_io
+        The environment's `FileIO`.
+
+    Returns
+    -------
+    tuple
+        The requirements and updates to commit (the transaction's own when it staged at most one
+        snapshot), and the files of the folded snapshots no committed snapshot names.
+    """
+    staged: list[Snapshot] = [u.snapshot for u in tx._updates if isinstance(u, AddSnapshotUpdate)]
+    if len(staged) <= 1:
+        return tx._requirements, tx._updates, []
+    before, after = _live_files(metadata, file_io), _live_files(tx.table_metadata, file_io)
+    folded = _static(metadata, metadata_location, file_io).transaction()
+    with folded.update_snapshot().overwrite() as overwrite:
+        for path in before.keys() - after.keys():
+            overwrite.delete_data_file(before[path])
+        for path in after.keys() - before.keys():
+            overwrite.append_data_file(after[path])
+    discarded: list[str] = []
+    for snapshot in staged:
+        discarded.extend(new_manifest_paths(snapshot, file_io))
+        discarded.extend(p for p in new_data_file_paths(snapshot, file_io) if p not in after)
+    return folded._requirements, folded._updates, discarded
+
+
 def _upsert_folded(
     tx: Transaction,
     metadata: TableMetadata,
@@ -514,24 +558,7 @@ def _upsert_folded(
     """
     result = tx.upsert(data, join_cols=list(key))
     counts = MergeCounts(rows_inserted=result.rows_inserted, rows_updated=result.rows_updated)
-    staged: list[Snapshot] = [u.snapshot for u in tx._updates if isinstance(u, AddSnapshotUpdate)]
-    if len(staged) <= 1:
-        return StagedMerge(requirements=tx._requirements, updates=tx._updates, counts=counts)
-
-    before, after = _live_files(metadata, file_io), _live_files(tx.table_metadata, file_io)
-    folded = _static(metadata, metadata_location, file_io).transaction()
-    with folded.update_snapshot().overwrite() as overwrite:
-        for path in before.keys() - after.keys():
-            overwrite.delete_data_file(before[path])
-        for path in after.keys() - before.keys():
-            overwrite.append_data_file(after[path])
-    discarded: list[str] = []
-    for snapshot in staged:
-        discarded.extend(new_manifest_paths(snapshot, file_io))
-        discarded.extend(p for p in new_data_file_paths(snapshot, file_io) if p not in after)
+    requirements, updates, discarded = fold_snapshots(tx, metadata, metadata_location, file_io)
     return StagedMerge(
-        requirements=folded._requirements,
-        updates=folded._updates,
-        counts=counts,
-        discarded=discarded,
+        requirements=requirements, updates=updates, counts=counts, discarded=discarded
     )

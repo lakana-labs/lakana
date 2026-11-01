@@ -2510,6 +2510,14 @@ refusal still runs against the principal the task acts for, so a task of a filte
 principal cannot merge (`test_a_task_of_a_filtered_principal_may_not_merge_into_its_own_asset`,
 core and server).
 
+A **history write** (`CatalogService.history`, #253) has the same pre-check through
+`check_can_history`, which shares `_check_can_compare` with `check_can_merge`: `WRITE_TABLE`, then
+`READ_TABLE` (the bound-token own-asset exception included), `CREATE_TABLE` for a create, and the
+row filter and column mask refusal, because it reads every open version and its counts tell what
+it found. The guard sees it as `WriteOperation.HISTORY`, a materialising operation of its own (so
+a break-glass event names it), never as `MERGE`. The run clock comes from the run context that
+authentication or the worker set (`run_clock`); no request field can move it.
+
 **An Iceberg REST commit never removes snapshots** (`_NO_SNAPSHOT_REMOVAL`, 403 for every caller).
 `commit_table` refuses `remove-snapshots`, and `remove-snapshot-ref` for a ref named
 `lakana-check-failed-*` (`_is_maintenance_update` is the one definition of what that is), unless
