@@ -36,8 +36,8 @@ MAX_CONNECTIONS = 16
 """The most connections one asset declares; deploy refuses more (a parity test pins both)."""
 
 WRITE_CHOICES = ("replace", "append", "merge", "history")
-"""The values of `write`; deploy accepts the same four (a parity test pins both). A Python asset is
-refused `history` at deploy until its harness writes it."""
+"""The values of `write`; deploy accepts the same four (a parity test pins both). The harness
+writes `history` through `client.tables.history` (task description version 4)."""
 
 MODEL_KINDS = ("fact", "dimension", "wide", "staging")
 """The values of `kind`; the same as `lakana_core.projects.asset_model.MODEL_KINDS` (a parity

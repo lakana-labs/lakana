@@ -45,6 +45,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
+from lakana_core.projects.history_columns import HistorySpec
 from lakana_core.runs.failures import FailureCode
 from lakana_worker.git import HFS_IGNORABLE, fold_name
 from lakana_worker.launcher.requests import EGRESS_MISSING, EGRESS_TOKEN_TOO_LONG, allowed_roots
@@ -96,7 +97,11 @@ _DESCRIPTION_VERSION = 2
 harness of the release before the write modes reads it."""
 _WRITES_DESCRIPTION_VERSION = 3
 """The version that adds ``write``, ``key``, ``watermark`` and ``connections``; sent only to an
-asset that uses one of them (`lakana.runner.parse_description` reads 2 and 3)."""
+asset that uses one of them (`lakana.runner.parse_description` reads 2, 3 and 4)."""
+_HISTORY_DESCRIPTION_VERSION = 4
+"""The description version of a history asset: version 3 and a ``history`` object. A harness of
+an earlier release refuses it, so a project that pins an older `lakana` fails with the harness's
+own message instead of writing the dimension as something else."""
 _DESCRIPTION_REFUSED = 2
 """The exit status with which the harness refuses a task description it cannot use."""
 _DESCRIPTION_MESSAGE = (
@@ -239,6 +244,8 @@ class PythonTask:
         Whether the harness's replace lets the table take the result's schema: the asset
         opted in with ``evolve_schema=True``. Always `False` for an append, a merge and an
         artifact.
+    history
+        How a history asset writes (``write: history``); `None` for every other asset.
     """
 
     code_dir: Path
@@ -271,6 +278,7 @@ class PythonTask:
     roots: tuple[str, ...] = ()
     root_users: Mapping[str, str] = field(default_factory=dict)
     evolve_schema: bool = False
+    history: HistorySpec | None = None
 
 
 @dataclass(frozen=True)
@@ -753,8 +761,9 @@ def task_description(
     -------
     bytes
         The JSON document: version `_WRITES_DESCRIPTION_VERSION` for an asset that appends,
-        merges or declares a connection, else version `_DESCRIPTION_VERSION`, unchanged, so a
-        harness of the previous release still runs every other asset. ``evolve_schema`` is
+        merges or declares a connection, version `_HISTORY_DESCRIPTION_VERSION` for a history
+        asset, else version `_DESCRIPTION_VERSION`, unchanged, so a harness of the previous
+        release still runs every other asset. ``evolve_schema`` is
         sent only when it is on, in either version. A harness without the option never gets
         it: its `asset()` lacks the argument, so the asset fails at import, and before 1.0 a
         deploy refuses a lock with another minor version anyway.
@@ -783,8 +792,8 @@ def task_description(
         document["version"] = _WRITES_DESCRIPTION_VERSION
         document["write"] = task.write
         # A model's key on an append or a replace only identifies a row; the harness of the
-        # `lakana` a project pinned takes a key for a merge only.
-        document["key"] = list(task.key) if task.write == "merge" else []
+        # `lakana` a project pinned takes a key for a merge or a history write only.
+        document["key"] = list(task.key) if task.write in ("merge", "history") else []
         document["watermark"] = (
             None
             if task.watermark_column is None
@@ -793,6 +802,12 @@ def task_description(
         document["table_exists"] = task.table_exists
         document["connections"] = {
             name: dict(routing) for name, routing in task.connections.items()
+        }
+    if task.history is not None:
+        document["version"] = _HISTORY_DESCRIPTION_VERSION
+        document["history"] = {
+            "valid_from": task.history.valid_from,
+            "close_missing": task.history.close_missing,
         }
     return json.dumps(document).encode("utf-8")
 

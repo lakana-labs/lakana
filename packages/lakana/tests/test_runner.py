@@ -38,6 +38,7 @@ from lakana._models import (
     AppendResult,
     ArtifactDownload,
     ArtifactVersion,
+    HistoryResult,
     MergeResult,
     WriteResult,
 )
@@ -165,6 +166,9 @@ class _Tables:
         self.merged: MergeResult | Exception = MergeResult(
             snapshot_id=44, rows_inserted=1, rows_updated=1
         )
+        self.kept: HistoryResult | Exception = HistoryResult(
+            snapshot_id=45, versions_opened=1, versions_closed=1, closed_missing=0, created=False
+        )
         self.calls: list[dict[str, object]] = []
 
     def _record(
@@ -259,6 +263,31 @@ class _Tables:
         """
         result = self._record("merge", environment, qualified_name, data, options, self.merged)
         assert isinstance(result, MergeResult)
+        return result
+
+    def history(
+        self, environment: str, qualified_name: str, data: object, **options: object
+    ) -> HistoryResult:
+        """Record a history write.
+
+        Parameters
+        ----------
+        environment
+            The environment.
+        qualified_name
+            The table.
+        data
+            The rows.
+        **options
+            Keyword options.
+
+        Returns
+        -------
+        HistoryResult
+            The scripted result.
+        """
+        result = self._record("history", environment, qualified_name, data, options, self.kept)
+        assert isinstance(result, HistoryResult)
         return result
 
     def replace(
@@ -3053,11 +3082,11 @@ _ARTIFACT_INPUT = {
 @pytest.mark.parametrize(
     ("overrides", "fragment"),
     [
-        ({"version": 1}, "expected a version 2 or 3 document"),
-        ({"version": 4}, "expected a version 2 or 3 document"),
-        ({"version": 2.0}, "expected a version 2 or 3 document"),
-        ({"version": True}, "expected a version 2 or 3 document"),
-        ({"version": "2"}, "expected a version 2 or 3 document"),
+        ({"version": 1}, "expected a version 2, 3 or 4 document"),
+        ({"version": 5}, "expected a version 2, 3 or 4 document"),
+        ({"version": 2.0}, "expected a version 2, 3 or 4 document"),
+        ({"version": True}, "expected a version 2, 3 or 4 document"),
+        ({"version": "2"}, "expected a version 2, 3 or 4 document"),
         ({"output": "model"}, "output must be 'table' or 'artifact'"),
         ({"output": None}, "output must be 'table' or 'artifact'"),
         ({"output": ["table"]}, "output must be 'table' or 'artifact'"),
@@ -3373,13 +3402,13 @@ def test_a_description_may_leave_decimals_out(world: _World) -> None:
     assert parse_description(world.description(decimals=None)).decimals is None
 
 
-def test_the_harness_reads_versions_2_and_3() -> None:
+def test_the_harness_reads_versions_2_3_and_4() -> None:
     """`decimals`, read with a default on both sides, needed no new version; the write mode did.
 
-    A worker sends version 3 only to an asset that uses its fields, so a harness of the previous
-    release keeps running every other asset.
+    A worker sends version 3 only to an asset that uses its fields, and version 4 only to a
+    history asset, so a harness of the previous release keeps running every other asset.
     """
-    assert DESCRIPTION_VERSIONS == (2, 3)
+    assert DESCRIPTION_VERSIONS == (2, 3, 4)
 
 
 def _nested() -> pa.Table:
@@ -3757,6 +3786,154 @@ def _v3(
     }
 
 
+def _v4(
+    *,
+    key: list[str] | None = None,
+    valid_from: str | None = None,
+    close_missing: bool = False,
+    expected: int | str = 17,
+) -> dict[str, object]:
+    """Build the version 4 keys of a history asset's description.
+
+    Parameters
+    ----------
+    key
+        The natural key; `["id"]` by default.
+    valid_from
+        The `valid_from` column, or `None`.
+    close_missing
+        Whether missing keys are closed.
+    expected
+        The expected snapshot id.
+
+    Returns
+    -------
+    dict
+        Overrides for `_World.run` and `_World.description`.
+    """
+    return {
+        **_v3("history", key=key or ["id"], expected=expected),
+        "version": 4,
+        "history": {"valid_from": valid_from, "close_missing": close_missing},
+    }
+
+
+def test_a_version_4_description_is_parsed(world: _World) -> None:
+    description = parse_description(world.description(**_v4(valid_from="at", close_missing=True)))
+    assert (description.write, description.key) == ("history", ("id",))
+    assert (description.valid_from, description.close_missing) == ("at", True)
+
+
+@pytest.mark.parametrize(
+    ("overrides", "fragment"),
+    [
+        ({"history": None}, "history must be an object with valid_from"),
+        ({"history": {"valid_from": None}}, "history must be an object with valid_from"),
+        ({"history": {"valid_from": 3, "close_missing": False}}, "history must be an object"),
+        ({"history": {"valid_from": "", "close_missing": False}}, "history must be an object"),
+        ({"history": {"valid_from": "a\nt", "close_missing": False}}, "history must be an object"),
+        ({"history": {"valid_from": None, "close_missing": 1}}, "history must be an object"),
+        ({"key": []}, "key must name the columns of a merge or a history write"),
+    ],
+)
+def test_a_version_4_description_checks_its_history(
+    world: _World, overrides: dict[str, object], fragment: str
+) -> None:
+    with pytest.raises(ValueError, match=fragment):
+        parse_description(world.description(**{**_v4(), **overrides}))
+
+
+def test_a_history_object_on_another_write_is_refused(world: _World) -> None:
+    history = {"history": {"valid_from": None, "close_missing": False}}
+    with pytest.raises(ValueError, match="history is for a history write only"):
+        parse_description(world.description(**{**_v3("merge", key=["id"]), **history}))
+
+
+def test_history_calls_history_with_its_options(world: _World) -> None:
+    _write_asset(world, "return obs")
+    assert world.run(**_v4(valid_from=None, close_missing=True)) == 0
+    (call,) = world.client.tables.calls
+    assert call["method"] == "history"
+    assert (call["key"], call["valid_from"], call["close_missing"]) == (["id"], None, True)
+    assert call["expected_snapshot_id"] == 17
+    assert world.record() == {"status": "succeeded", "snapshot_id": 45, "rows": 2}
+
+
+def test_an_empty_result_of_a_history_asset_without_close_missing_is_not_sent(
+    world: _World,
+) -> None:
+    _write_asset(world, "return obs.head(0)")
+    assert world.run(**_v4()) == 0
+    assert world.client.tables.calls == []
+    assert world.record() == {"status": "succeeded", "snapshot_id": None, "rows": 0}
+
+
+def test_an_empty_result_with_close_missing_is_sent_so_the_server_refuses_it(
+    world: _World,
+) -> None:
+    _write_asset(world, "return obs.head(0)")
+    world.client.tables.kept = ValidationError(
+        "The asset's result is empty, and `close_missing: true` would close every open version",
+        status=422,
+    )
+    assert world.run(**_v4(close_missing=True)) != 0
+    assert [call["method"] for call in world.client.tables.calls] == ["history"]
+
+
+def test_a_history_asset_that_changes_its_schema_is_told_it_keeps_history(
+    world: _World,
+) -> None:
+    _write_asset(world, "return obs")
+    world.client.tables.kept = ValidationError(
+        "The result does not match gold.scores's schema (dropped region).",
+        status=422,
+        error_type="SchemaMismatchError",
+    )
+    record = _failing(world, "return obs", **_v4())
+    assert record["message"] == (
+        "the asset's output no longer matches the schema of gold.scores. Server detail: The "
+        "result does not match gold.scores's schema (dropped region). An asset that keeps "
+        "history cannot change its table's schema: make the asset return the columns and types "
+        "gold.scores has, then run it again."
+    )
+
+
+@pytest.mark.parametrize(
+    ("body", "message"),
+    [
+        (
+            "return obs.with_columns(pl.lit(True).alias('Is_Current'))",
+            "Column `Is_Current` of what the asset returned has a name `write: history` adds "
+            "itself (valid_from, valid_to, is_current, scores_key); rename it, for example with "
+            "`df.rename({'Is_Current': 'source_Is_Current'})`",
+        ),
+        (
+            "return obs.with_columns(pl.lit(None, dtype=pl.Int64).alias('id'))",
+            "key column `id` is null in 2 rows of what the asset returned; every version needs "
+            "its key",
+        ),
+        (
+            "return pl.concat([obs, obs])",
+            "key `id` repeats in 4 rows of what the asset returned; return one row per key, for "
+            "example with `df.unique(subset=['id'], keep='last')`",
+        ),
+    ],
+)
+def test_a_history_result_the_server_would_refuse_is_refused_before_the_upload(
+    world: _World, body: str, message: str
+) -> None:
+    record = _failing(world, body, **_v4())
+    assert (record["error_type"], record["retryable"]) == ("InvalidResult", False)
+    assert record["message"] == message
+    assert world.client.tables.calls == []
+
+
+def test_a_history_result_without_its_key_column_is_left_to_the_server(world: _World) -> None:
+    _write_asset(world, "return obs.rename({'id': 'other'})")
+    assert world.run(**_v4()) == 0
+    assert [call["method"] for call in world.client.tables.calls] == ["history"]
+
+
 _WATERMARK_ID = {"column": "id", "value": "long:41"}
 
 
@@ -4058,12 +4235,21 @@ def test_a_version_3_description_is_parsed(world: _World) -> None:
 @pytest.mark.parametrize(
     ("overrides", "fragment"),
     [
-        ({"write": "upsert"}, "write must be 'replace', 'append' or 'merge'"),
-        ({"write": None}, "write must be 'replace', 'append' or 'merge'"),
-        ({"write": "merge", "key": []}, "key must name the columns of a merge"),
-        ({"write": "append", "key": ["id"]}, "key must name the columns of a merge"),
-        ({"write": "merge", "key": ["id", 1]}, "key must name the columns of a merge"),
-        ({"write": "merge", "key": "id"}, "key must name the columns of a merge"),
+        ({"write": "upsert"}, "write must be 'replace', 'append', 'merge' or 'history'"),
+        ({"write": None}, "write must be 'replace', 'append', 'merge' or 'history'"),
+        ({"write": "merge", "key": []}, "key must name the columns of a merge or a history write"),
+        (
+            {"write": "append", "key": ["id"]},
+            "key must name the columns of a merge or a history write",
+        ),
+        (
+            {"write": "merge", "key": ["id", 1]},
+            "key must name the columns of a merge or a history write",
+        ),
+        (
+            {"write": "merge", "key": "id"},
+            "key must name the columns of a merge or a history write",
+        ),
         ({"watermark": "id"}, "watermark must be null or"),
         ({"watermark": {"column": ""}}, "watermark must be null or"),
         ({"watermark": {"column": "id", "value": 41}}, "watermark must be null or"),
@@ -4073,7 +4259,7 @@ def test_a_version_3_description_is_parsed(world: _World) -> None:
         ({"connections": {"crm": "postgresql"}}, "connections must map each declared connection"),
         ({"connections": {"crm": {}}}, "connections must map each declared connection"),
         ({"connections": {"crm": {"kind": 3}}}, "connections must map each declared connection"),
-        ({"version": 4}, "expected a version 2 or 3 document"),
+        ({"version": 5}, "expected a version 2, 3 or 4 document"),
     ],
 )
 def test_a_version_3_description_checks_its_fields(
@@ -4212,8 +4398,8 @@ def test_a_merge_with_null_keys_is_left_to_the_server_which_names_the_nulls(worl
 @pytest.mark.parametrize(
     ("overrides", "fragment"),
     [
-        ({"key": ["id\n"]}, "key must name the columns of a merge"),
-        ({"key": ["i\u202ed"]}, "key must name the columns of a merge"),
+        ({"key": ["id\n"]}, "key must name the columns of a merge or a history write"),
+        ({"key": ["i\u202ed"]}, "key must name the columns of a merge or a history write"),
         ({"watermark": {"column": "at\x00", "value": None}}, "watermark must be null or"),
         ({"watermark": {"column": "a\u2028t", "value": None}}, "watermark must be null or"),
     ],
