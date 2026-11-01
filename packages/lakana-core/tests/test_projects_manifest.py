@@ -1300,3 +1300,19 @@ def test_a_history_spec_round_trips_through_json() -> None:
     spec = HistorySpec(("id", "country"), None, False)
     assert HistorySpec.from_json(spec.to_json()) == spec
     assert HistorySpec.from_json({"key": ["id"], "valid_from": None}) is None
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        None,
+        ["id"],
+        {"key": "id", "valid_from": None, "close_missing": False},
+        {"key": ["id", 3], "valid_from": None, "close_missing": False},
+        {"key": ["id", ""], "valid_from": None, "close_missing": False},
+        {"key": ["id"], "valid_from": 3, "close_missing": False},
+        {"key": ["id"], "valid_from": None, "close_missing": "no"},
+    ],
+)
+def test_a_stored_history_spec_that_no_deploy_wrote_reads_as_none(raw: object) -> None:
+    assert HistorySpec.from_json(raw) is None

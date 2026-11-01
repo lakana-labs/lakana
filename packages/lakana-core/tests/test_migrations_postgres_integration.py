@@ -2869,3 +2869,53 @@ def test_0058_on_postgres() -> None:
         migrate.upgrade(url, revision_0058)
         assert _alembic_version(engine) == revision_0058
         engine.dispose()
+
+
+def test_0060_on_postgres() -> None:
+    """0060 adds `query_runs.history`; a downgrade records a history run as a merge."""
+    revision_0059 = "e1a5b7c9d3f4"
+    revision_0060 = "f2b6c8d0e4a5"
+    now = datetime.now(UTC)
+
+    with PostgresContainer("postgres:16", driver="pg8000") as pg:
+        url = pg.get_connection_url()
+        migrate.upgrade(url, revision_0059)
+        migrate.upgrade(url, revision_0060)
+        engine = sqlalchemy.create_engine(url)
+        assert _alembic_version(engine) == revision_0060
+        kept, replaced = uuid.uuid4(), uuid.uuid4()
+        spec = '{"key": ["id"], "valid_from": null, "close_missing": false}'
+        with engine.begin() as conn:
+            conn.execute(sqlalchemy.text("SET LOCAL session_replication_role = replica"))
+            for run_id, mode, history in ((kept, "HISTORY", spec), (replaced, "REPLACE", None)):
+                conn.execute(
+                    sqlalchemy.text(
+                        "INSERT INTO query_runs (id, environment_id, sql_text, status, "
+                        "cancel_requested, write_mode, history, created_at, updated_at) VALUES "
+                        "(:id, :env, 'SELECT 1', 'SUCCEEDED', false, :mode, "
+                        "CAST(:history AS json), :now, :now)"
+                    ),
+                    {
+                        "id": run_id,
+                        "env": uuid.uuid4(),
+                        "mode": mode,
+                        "history": history,
+                        "now": now,
+                    },
+                )
+        with engine.connect() as conn:
+            stored = conn.execute(
+                sqlalchemy.text("SELECT history FROM query_runs WHERE id = :id"), {"id": kept}
+            ).scalar_one()
+        assert stored == {"key": ["id"], "valid_from": None, "close_missing": False}
+
+        migrate.downgrade(url, revision_0059)
+        assert _alembic_version(engine) == revision_0059
+        columns = {c["name"] for c in sqlalchemy.inspect(engine).get_columns("query_runs")}
+        assert "history" not in columns
+        with engine.connect() as conn:
+            modes = dict(
+                conn.execute(sqlalchemy.text("SELECT id, write_mode FROM query_runs")).all()
+            )
+        assert modes == {kept: "MERGE", replaced: "REPLACE"}
+        engine.dispose()
