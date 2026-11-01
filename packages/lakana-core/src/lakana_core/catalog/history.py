@@ -32,7 +32,7 @@ from pyiceberg.io import FileIO
 from pyiceberg.schema import Schema
 from pyiceberg.table import DataScan
 from pyiceberg.table.metadata import TableMetadata
-from pyiceberg.table.update import TableRequirement, TableUpdate
+from pyiceberg.table.update import AddSnapshotUpdate, TableRequirement, TableUpdate
 from pyiceberg.types import BooleanType, StringType, TimestamptzType
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -43,8 +43,8 @@ from lakana_core.catalog.attempt_stamp import TASK_RUN_PROPERTY
 from lakana_core.catalog.merge import (
     SDK_ADVICE,
     MergeAdvice,
+    _delete_snapshot_files,
     _delete_staged,
-    _repeated_rows,
     _shown,
     _static,
     check_merge_batch,
@@ -350,17 +350,35 @@ def unchanged_rows(new: pa.Table, old: pa.Table, columns: Sequence[str]) -> pa.A
     """
     same = pa.repeat(pa.scalar(True), new.num_rows)
     for column in columns:
-        ours = _plain(new.column(column).combine_chunks())
-        theirs = _plain(old.column(column).combine_chunks())
-        equal = pc.or_(
-            pc.fill_null(pc.equal(ours, theirs), False),
-            pc.and_(pc.is_null(ours), pc.is_null(theirs)),
-        )
-        if pa.types.is_floating(ours.type):
-            both_nan = pc.fill_null(pc.and_(pc.is_nan(ours), pc.is_nan(theirs)), False)
-            equal = pc.or_(equal, both_nan)
-        same = pc.and_(same, equal)
+        same = pc.and_(same, _same_values(new.column(column), old.column(column)))
     return same
+
+
+def _same_values(new: pa.ChunkedArray, old: pa.ChunkedArray) -> pa.Array:
+    """Say, value by value, whether two columns of one type hold the same values.
+
+    Parameters
+    ----------
+    new
+        The batch's values.
+    old
+        The open versions' values, row for row.
+
+    Returns
+    -------
+    pa.Array
+        One boolean per value, never null, as `unchanged_rows` compares.
+    """
+    ours = _plain(new.combine_chunks())
+    theirs = _plain(old.combine_chunks())
+    equal = pc.or_(
+        pc.fill_null(pc.equal(ours, theirs), False),
+        pc.and_(pc.is_null(ours), pc.is_null(theirs)),
+    )
+    if pa.types.is_floating(ours.type):
+        both_nan = pc.fill_null(pc.and_(pc.is_nan(ours), pc.is_nan(theirs)), False)
+        equal = pc.or_(equal, both_nan)
+    return equal
 
 
 def check_history_batch(
@@ -828,7 +846,14 @@ def plan_history(
     both = pc.and_(pc.is_valid(rows), pc.is_valid(opens))
     new_rows = pc.filter(rows, pc.and_(pc.is_valid(rows), pc.is_null(opens)))
     pair_rows, pair_opens = pc.filter(rows, both), pc.filter(opens, both)
-    same = unchanged_rows(data.take(pair_rows), open_versions.take(pair_opens), values)
+    same = pa.repeat(pa.scalar(True), len(pair_rows))
+    for column in values:  # one column at a time: the surrogate and added columns are never copied
+        same = pc.and_(
+            same,
+            _same_values(
+                data.column(column).take(pair_rows), open_versions.column(column).take(pair_opens)
+            ),
+        )
     changed_rows, changed_opens = (
         pc.filter(pair_rows, pc.invert(same)),
         pc.filter(pair_opens, pc.invert(same)),
@@ -852,9 +877,12 @@ def plan_history(
         replaced = pa.concat_arrays([changed_opens, missing])
     late = _count(pc.greater_equal(old_starts.take(replaced), at_clock))
     if late:
+        versions, start, them = (
+            ("open version", "starts", "it") if late == 1 else ("open versions", "start", "them")
+        )
         raise ValidationError(
-            f"{late} open versions of {table} start at or after this run's start time "
-            f"({shown_clock(clock)}); a run that started earlier cannot replace or close them. "
+            f"{late} {versions} of {table} {start} at or after this run's start time "
+            f"({shown_clock(clock)}); a run that started earlier cannot replace or close {them}. "
             "Start a new run."
         )
     if len(new_rows):
@@ -1023,7 +1051,12 @@ def conform_batch(schema: Schema, data: pa.Table, *, table: str) -> pa.Table:
     return data.select(target.names).cast(target)
 
 
-def _read_capped(scan: DataScan, max_rows: int | None, message: Callable[[int], str]) -> pa.Table:
+def _read_capped(
+    scan: DataScan,
+    max_rows: int | None,
+    message: Callable[[int], str],
+    keep: Callable[[pa.Table], pa.Table] | None = None,
+) -> pa.Table:
     """Read a scan batch by batch, refusing as soon as it passes a row limit.
 
     Parameters
@@ -1031,43 +1064,46 @@ def _read_capped(scan: DataScan, max_rows: int | None, message: Callable[[int], 
     scan
         The scan.
     max_rows
-        Most rows to read, or `None`.
+        Most rows to keep, or `None`.
     message
         Builds the refusal from `max_rows`.
+    keep
+        Picks the rows of each batch that are kept and counted, or `None` for every row.
 
     Returns
     -------
     pa.Table
-        The rows.
+        The rows kept.
 
     Raises
     ------
     ValidationError
-        For more rows than `max_rows`, with `message`'s text, before the rest is read.
+        For more rows kept than `max_rows`, with `message`'s text, before the rest is read.
     """
     reader = scan.to_arrow_batch_reader()
-    batches: list[pa.RecordBatch] = []
+    empty = reader.schema.empty_table()
+    parts = [empty if keep is None else keep(empty)]  # gives the result its schema
     rows = 0
     for batch in reader:
-        rows += batch.num_rows
+        part = pa.Table.from_batches([batch])
+        if keep is not None:
+            part = keep(part)
+        rows += part.num_rows
         if max_rows is not None and rows > max_rows:
             raise ValidationError(message(max_rows))
-        batches.append(batch)
-    return pa.Table.from_batches(batches, schema=reader.schema)
+        parts.append(part)
+    return pa.concat_tables(parts)
 
 
 def read_open_versions(
-    metadata: TableMetadata,
-    file_io: FileIO,
-    *,
-    key: Sequence[str],
-    table: str,
-    max_rows: int | None,
+    metadata: TableMetadata, file_io: FileIO, *, max_rows: int | None
 ) -> pa.Table:
     """Read a history table's open versions, every column.
 
     One scan filtered on `is_current`: a data file whose rows are all closed has `false` as
-    both bounds of the column and is skipped, so a long history costs nothing here.
+    both bounds of the column and is skipped, so a long history costs nothing here. Nothing is
+    checked here: `plan_history` refuses a key with two open versions, and `stage_history` a
+    surrogate key shared by two (the rows a write removes and adds must match its plan).
 
     Parameters
     ----------
@@ -1075,10 +1111,6 @@ def read_open_versions(
         The table's current metadata.
     file_io
         The environment's `FileIO`.
-    key
-        The natural key's columns.
-    table
-        The table's dotted name, for the messages.
     max_rows
         Most open versions to read (`QueryLimitsConfig.max_write_rows`), or `None`.
 
@@ -1090,8 +1122,7 @@ def read_open_versions(
     Raises
     ------
     ValidationError
-        For more open versions than `max_rows` (`max_rows_message`, refused while reading), or a
-        key or a surrogate key with more than one open version.
+        For more open versions than `max_rows` (`max_rows_message`, refused while reading).
     """
     schema = metadata.schema().as_arrow()
     if metadata.current_snapshot_id is None:
@@ -1099,15 +1130,15 @@ def read_open_versions(
     scan = DataScan(
         table_metadata=metadata, io=file_io, row_filter=EqualTo(term=IS_CURRENT, value=True)
     )
-    found = _read_capped(scan, max_rows, max_rows_message).cast(schema)
-    repeated = max(_repeated_rows(found, key), _repeated_rows(found, [surrogate_column(table)]))
-    if repeated:
-        raise ValidationError(
-            f"key {_shown(key)} has more than one open version in {repeated} rows of {table}; a "
-            "history table has one open version per key. Drop it and let the next run create it "
-            "again."
-        )
-    return found
+    return _read_capped(scan, max_rows, max_rows_message).cast(schema)
+
+
+IN_LIMIT = 10_000
+"""Most distinct keys `read_last_ends` narrows its scan with an `In` for.
+
+pyiceberg builds one literal object per value (about 420 MiB per million); above this the
+files left by the cheap filter are read whole and joined with the keys.
+"""
 
 
 def read_last_ends(
@@ -1125,7 +1156,10 @@ def read_last_ends(
     Only closed versions that end after `after` are read: an earlier or equal end cannot
     overlap a version starting at or after `after`, so a long history of a returning key costs
     no more than its recent versions (files whose `valid_to` bounds are all at or before it are
-    skipped).
+    skipped). The files are planned with that filter alone first: when none is left, which is
+    the usual case under the run clock, nothing is read and no key filter is built. Otherwise
+    an `In` per key column narrows the scan for at most `IN_LIMIT` keys, and each batch is
+    joined with the exact keys before it counts against `max_rows`.
 
     Parameters
     ----------
@@ -1148,30 +1182,36 @@ def read_last_ends(
     Returns
     -------
     pa.Table
-        The closed versions ending after `after` whose every key column is among the wanted
-        values: a superset of the exact keys for a key of several columns, which
-        `plan_history` joins exactly.
+        The closed versions of exactly the wanted keys that end after `after`.
 
     Raises
     ------
     ValidationError
-        For more such closed versions than `max_rows`, refused while reading.
+        For more such closed versions than `max_rows` in total, refused while reading.
     """
     columns = (*key, VALID_TO)
+    target = metadata.schema().select(*columns).as_arrow()
     if metadata.current_snapshot_id is None or wanted.num_rows == 0:
-        return metadata.schema().select(*columns).as_arrow().empty_table()
-    terms = [
-        In(term=column, literals=list(dict.fromkeys(wanted.column(column).to_pylist())))
-        for column in key
-    ]
-    closed = And(EqualTo(term=IS_CURRENT, value=False), GreaterThan(term=VALID_TO, value=after))
+        return target.empty_table()
+    late = And(EqualTo(term=IS_CURRENT, value=False), GreaterThan(term=VALID_TO, value=after))
+    planned = DataScan(table_metadata=metadata, io=file_io, row_filter=late).plan_files()
+    if next(iter(planned), None) is None:
+        return target.empty_table()
+    keys = wanted.select(list(key)).group_by(list(key)).aggregate([]).select(list(key))
+    keys = keys.cast(pa.schema([target.field(column) for column in key]))
+    row_filter = late
+    if keys.num_rows <= IN_LIMIT:
+        terms = [In(term=column, literals=keys.column(column).to_pylist()) for column in key]
+        row_filter = functools.reduce(And, terms, late)
     scan = DataScan(
-        table_metadata=metadata,
-        io=file_io,
-        row_filter=functools.reduce(And, terms, closed),
-        selected_fields=columns,
+        table_metadata=metadata, io=file_io, row_filter=row_filter, selected_fields=columns
     )
-    return _read_capped(scan, max_rows, lambda cap: _too_many_ends(cap, table, after))
+    return _read_capped(
+        scan,
+        max_rows,
+        lambda cap: _too_many_ends(cap, table, after),
+        keep=lambda part: part.cast(target).join(keys, keys=list(key), join_type="left semi"),
+    )
 
 
 def _too_many_ends(cap: int, table: str, after: datetime) -> str:
@@ -1194,10 +1234,11 @@ def _too_many_ends(cap: int, table: str, after: datetime) -> str:
     versions = "closed version" if cap == 1 else "closed versions"
     end = "ends" if cap == 1 else "end"
     return (
-        f"The keys this run opens again have more than {cap} {versions} in {table} that {end} "
-        f"after {shown_clock(after)}. That is more rows than one write may read (the "
-        "max_write_rows setting), so nothing was committed. Start the returning versions later "
-        "(a later `valid_from`), or ask an operator to raise max_write_rows."
+        f"Together, the keys this run opens again have more than {cap} {versions} in {table} "
+        f"that {end} after {shown_clock(after)}. That is more rows than one write may read (the "
+        "max_write_rows setting, a total for all keys), so nothing was committed. Start the "
+        "returning versions later (a later `valid_from`), or ask an operator to raise "
+        "max_write_rows."
     )
 
 
@@ -1259,7 +1300,10 @@ def stage_history(
     The open versions to close are rewritten copy-on-write with an overwrite whose filter
     matches exactly them (open, and one of their surrogate keys), which adds them back closed;
     then the new versions are appended. pyiceberg stages up to three snapshots; `fold_snapshots`
-    turns them into one on the table's current snapshot.
+    turns them into one on the table's current snapshot. Each closed row replaces its open self
+    one for one, so the staged snapshot must add exactly `versions_opened` rows net; any other
+    count means the filter matched an open version the plan did not close (two open versions
+    sharing a surrogate key), and the write is refused with every staged file deleted.
 
     Parameters
     ----------
@@ -1278,6 +1322,11 @@ def stage_history(
     -------
     StagedHistory
         What to commit and the files to delete afterwards.
+
+    Raises
+    ------
+    ValidationError
+        If the staged rows do not add `versions_opened` rows net (a shared surrogate key).
     """
     surrogate = surrogate_column(table)
     tx = _static(metadata, metadata_location, file_io).transaction()
@@ -1296,7 +1345,38 @@ def stage_history(
     except Exception:
         _delete_staged(tx, file_io)
         raise
+    net = _net_records(updates)
+    if net != plan.versions_opened:
+        _delete_snapshot_files([*tx._updates, *updates], file_io)
+        versions = "version" if plan.versions_opened == 1 else "versions"
+        raise ValidationError(
+            f"This write would change the number of rows in {table} by {net}, but it opens "
+            f"{plan.versions_opened} {versions}: an open version shares its surrogate key "
+            f"(`{surrogate}`) with another, so closing one would remove both. Nothing was "
+            "written. Drop the table and let the next run create it again."
+        )
     return StagedHistory(requirements=requirements, updates=updates, discarded=discarded)
+
+
+def _net_records(updates: Sequence[TableUpdate]) -> int:
+    """Count the rows the staged snapshots among some updates add, less the rows they remove.
+
+    Parameters
+    ----------
+    updates
+        The updates to commit; only the `AddSnapshotUpdate`s are looked at.
+
+    Returns
+    -------
+    int
+        The summaries' `added-records` less their `deleted-records`.
+    """
+    net = 0
+    for update in updates:
+        if isinstance(update, AddSnapshotUpdate):
+            summary = update.snapshot.summary or {}
+            net += int(summary.get("added-records") or 0) - int(summary.get("deleted-records") or 0)
+    return net
 
 
 @dataclass(frozen=True)

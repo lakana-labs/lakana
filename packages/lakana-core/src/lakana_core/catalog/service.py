@@ -961,6 +961,24 @@ def _storage_errors_as_lakana(active: bool) -> Generator[None]:
         raise _RollbackReason(_STORAGE_FAILED.format(error=type(exc).__name__)) from exc
 
 
+@contextlib.contextmanager
+def _arrow_memory_returned() -> Generator[None]:
+    """Hand the Arrow pool's freed pages back to the system once a write is over.
+
+    pyarrow's default pool keeps the pages a large write freed; in a worker process, which
+    its memory watchdog cannot end on its own, they would count against every later query.
+
+    Yields
+    ------
+    None
+        While the write runs; the pages are returned whether or not it succeeds.
+    """
+    try:
+        yield
+    finally:
+        pa.default_memory_pool().release_unused()
+
+
 def failed_snapshot_tag(run_id: uuid.UUID) -> str:
     """Name the tag that keeps the snapshot a run's failed check saw.
 
@@ -6112,6 +6130,7 @@ class CatalogService:
             pin=pin,
         )
 
+    @_arrow_memory_returned()
     def merge(
         self,
         p: PrincipalRef,
@@ -6284,6 +6303,7 @@ class CatalogService:
             table_id=row.id,
         )
 
+    @_arrow_memory_returned()
     def history(
         self,
         p: PrincipalRef,
@@ -6389,6 +6409,7 @@ class CatalogService:
         clock = run_clock(self._session, p.run_context)
         starts = version_starts(data, valid_from, clock)
         rows = data.drop_columns([valid_from]) if valid_from is not None else data
+        del data  # `rows` is the batch from here on; a cast copy must not sit next to it
         if self._existing_table(ref) is None and expected_snapshot_id == "none":
             check_starts(starts, clock, valid_from)
             first = first_versions(rows, key=key, table=ref.dotted(), starts=starts)
@@ -6431,7 +6452,7 @@ class CatalogService:
         file_io = resolved.file_io
         plan = plan_history(
             rows,
-            read_open_versions(current, file_io, key=key, table=ref.dotted(), max_rows=max_rows),
+            read_open_versions(current, file_io, max_rows=max_rows),
             key=key,
             table=ref.dotted(),
             schema=schema.as_arrow(),

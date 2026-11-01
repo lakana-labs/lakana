@@ -741,7 +741,7 @@ def test_a_key_may_come_back_at_the_run_clock_when_its_last_version_ended_then()
 
 
 def test_an_open_version_starting_at_the_clock_is_not_replaced_by_the_same_clock() -> None:
-    with pytest.raises(ValidationError, match="start at or after this run's start time"):
+    with pytest.raises(ValidationError, match="starts at or after this run's start time"):
         _plan(
             _batch([("A", "south", 1.0)]),
             _open([("A", "north", 1.0)], start=T1),

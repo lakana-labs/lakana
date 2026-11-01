@@ -2521,7 +2521,10 @@ table's history once: when the table's current snapshot carries the acting run c
 as `lakana.task-run-id` (the attempt stamp, which only the catalog sets), a write that would change
 the table again is refused (`written_by_run`, `RUN_WROTE_MESSAGE`); one that changes nothing
 returns nothing. Without a claim-form run context there is no stamp and no such refusal (a SQL
-task's write run carries `query_run_id` and is not stamped either).
+task's write run carries `query_run_id` and is not stamped either). A history write never removes
+a row it did not plan to: its staged snapshot must add exactly `versions_opened` rows net, so a
+table whose open versions share a surrogate key (only a commit outside `CatalogService.history`
+can make one) is refused after staging, with every staged file deleted (`stage_history`).
 
 **Limit: `lakana.history-key` is an ordinary table property.** An Iceberg REST commit with
 `WRITE_TABLE` can set or remove it (`SetPropertiesUpdate`, `RemovePropertiesUpdate`):

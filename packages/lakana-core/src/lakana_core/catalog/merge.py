@@ -455,8 +455,23 @@ def _delete_staged(tx: Transaction, file_io: FileIO) -> None:
     file_io
         The environment's `FileIO`.
     """
+    _delete_snapshot_files(tx._updates, file_io)
+
+
+def _delete_snapshot_files(updates: Sequence[TableUpdate], file_io: FileIO) -> None:
+    """Best-effort delete the files the staged snapshots among some updates wrote.
+
+    As `_delete_staged`, for updates of more than one transaction (a write and its fold).
+
+    Parameters
+    ----------
+    updates
+        The updates; only the `AddSnapshotUpdate`s are looked at.
+    file_io
+        The environment's `FileIO`.
+    """
     paths: list[str] = []
-    for update in tx._updates:
+    for update in updates:
         if not isinstance(update, AddSnapshotUpdate):
             continue
         # Every snapshot is listed before any file is deleted: a later snapshot reads the

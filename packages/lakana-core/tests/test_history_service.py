@@ -314,9 +314,9 @@ def test_a_change_seen_twice_in_one_run_is_refused(hist: Hist) -> None:
         hist.run([("A", "east")], T2)
 
     assert str(info.value) == (
-        "1 open versions of gold.dim_customer start at or after this run's start time "
-        "(2026-03-01T00:00:00Z); a run that started earlier cannot replace or close them. Start "
-        "a new run."
+        "1 open version of gold.dim_customer starts at or after this run's start time "
+        "(2026-03-01T00:00:00Z); a run that started earlier cannot replace or close it. Start a "
+        "new run."
     )
 
 
@@ -564,10 +564,42 @@ def test_two_open_versions_of_a_key_are_refused(hist: Hist) -> None:
         hist.run([("A", "south")], T2)
 
     assert str(info.value) == (
-        "key `customer_id` has more than one open version in 2 rows of gold.dim_customer; a "
-        "history table has one open version per key. Drop it and let the next run create it "
+        "1 key of gold.dim_customer has more than one open version; there must be one per key, "
+        "so nothing was written. Close all but the newest version of each such key, then run "
         "again."
     )
+
+
+def test_open_versions_sharing_a_surrogate_key_are_refused_after_staging(hist: Hist) -> None:
+    hist.run([("A", "north")], T1, first=True)
+    twin = hist.static().scan().to_arrow()
+    twin = twin.set_column(0, "customer_id", pa.array(["B"], twin.schema.field(0).type))
+    hist.service.append(hist.admin, hist.ref(), twin)  # B's open version has A's surrogate key
+    parquet, avro = hist.files(".parquet"), hist.files(".avro")
+    location = hist.service.load_table(hist.admin, hist.ref()).metadata_location
+
+    with pytest.raises(ValidationError) as info:
+        hist.run([("A", "south"), ("B", "north")], T2)
+
+    assert str(info.value) == (
+        "This write would change the number of rows in gold.dim_customer by 0, but it opens 1 "
+        "version: an open version shares its surrogate key (`dim_customer_key`) with another, "
+        "so closing one would remove both. Nothing was written. Drop the table and let the next "
+        "run create it again."
+    )
+    assert hist.service.load_table(hist.admin, hist.ref()).metadata_location == location
+    assert (hist.files(".parquet"), hist.files(".avro")) == (parquet, avro)
+
+
+def test_the_arrow_pool_returns_its_unused_memory_after_a_write_that_fails(hist: Hist) -> None:
+    pool = mock.Mock()
+    with (
+        mock.patch.object(service_module.pa, "default_memory_pool", return_value=pool),
+        pytest.raises(ValidationError),
+    ):
+        hist.run([], T1, first=True, close_missing=True)
+
+    pool.release_unused.assert_called_once_with()
 
 
 def test_more_open_versions_than_max_rows_are_refused(hist: Hist) -> None:
@@ -890,12 +922,58 @@ def test_the_closed_versions_a_returning_key_reads_are_capped(hist: Hist) -> Non
 
     assert sorted(ends.column("valid_to").to_pylist()) == [T2, t4]
     assert str(one.value) == (
-        "The keys this run opens again have more than 1 closed version in gold.dim_customer "
-        "that ends after 2026-02-01T00:00:00Z. That is more rows than one write may read (the "
-        "max_write_rows setting), so nothing was committed. Start the returning versions later "
-        "(a later `valid_from`), or ask an operator to raise max_write_rows."
+        "Together, the keys this run opens again have more than 1 closed version in "
+        "gold.dim_customer that ends after 2026-02-01T00:00:00Z. That is more rows than one "
+        "write may read (the max_write_rows setting, a total for all keys), so nothing was "
+        "committed. Start the returning versions later (a later `valid_from`), or ask an "
+        "operator to raise max_write_rows."
     )
     assert str(none.value).startswith(
-        "The keys this run opens again have more than 0 closed versions in gold.dim_customer "
-        "that end after 2026-02-01T00:00:00Z. That is more rows"
+        "Together, the keys this run opens again have more than 0 closed versions in "
+        "gold.dim_customer that end after 2026-02-01T00:00:00Z. That is more rows"
     )
+
+
+def test_no_key_filter_is_built_when_no_closed_version_ends_late(hist: Hist) -> None:
+    hist.run([("A", "north")], T1, first=True)
+    hist.run([("A", "south")], T2)  # A's first version is closed at T2
+    metadata = hist.static().metadata
+    file_io = StorageResolver(hist.session).for_environment("dev").file_io
+    wanted = pa.table({"customer_id": ["A", "B"]})
+
+    with mock.patch.object(history_module, "In", wraps=history_module.In) as built:
+        ends = read_last_ends(
+            metadata, file_io, wanted, T2, key=["customer_id"], table=DIM, max_rows=None
+        )
+
+    assert ends.num_rows == 0
+    built.assert_not_called()
+
+
+@pytest.mark.parametrize("in_limit", [10_000, 0], ids=["with-in", "without-in"])
+def test_only_the_exact_returning_keys_count_against_the_cap(hist: Hist, in_limit: int) -> None:
+    def run(rows: list[tuple[int, str]], clock: datetime, **options: object) -> None:
+        data = pa.table({"id": [r[0] for r in rows], "country": [r[1] for r in rows]})
+        data = data.append_column("v", pa.array(["x"] * len(rows)))
+        with mock.patch.object(service_module, "run_clock", return_value=clock):
+            hist.service.history(
+                hist.admin,
+                hist.ref(),
+                data,
+                key=["id", "country"],
+                close_missing=True,
+                **options,  # ty: ignore[invalid-argument-type]
+            )
+
+    run([(1, "DE"), (1, "FR"), (2, "FR")], T1, expected_snapshot_id="none")
+    run([(2, "DE")], T2)  # every version closed at T2; (2, DE) opened
+    metadata = hist.static().metadata
+    file_io = StorageResolver(hist.session).for_environment("dev").file_io
+    wanted = pa.table({"id": [1, 2], "country": ["DE", "FR"]})
+
+    with mock.patch.object(history_module, "IN_LIMIT", in_limit):
+        ends = read_last_ends(
+            metadata, file_io, wanted, T1, key=["id", "country"], table=DIM, max_rows=2
+        )
+
+    assert sorted((r["id"], r["country"]) for r in ends.to_pylist()) == [(1, "DE"), (2, "FR")]
