@@ -56,6 +56,7 @@ nav:
       - how-to/mask-a-column.md
       - how-to/declare-a-tables-model.md
       - how-to/keep-layers-apart.md
+      - how-to/keep-the-history-of-a-dimension.md
       - how-to/describe-a-table.md
       - how-to/translate-labels-and-descriptions.md
       - how-to/drop-and-restore-a-table.md

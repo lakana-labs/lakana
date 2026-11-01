@@ -2286,8 +2286,9 @@ async def write_table_history(
     Sends the current state of every row as an Arrow IPC stream. Against the table's open
     versions, a new key opens a version, a key whose values changed closes its version and opens
     a new one, an unchanged key is left alone, and with `close_missing=true` a key the rows lack
-    is closed. Nothing is deleted. A Python asset with `write="history"` calls this; there is no
-    CLI command. Takes the same `source`, `source_version` and `expected_snapshot_id` as the
+    is closed. Nothing is deleted. A key's first version always starts at 0001-01-01 UTC, so
+    that every row of a fact finds it; `valid_from` and the run's start time date later versions.
+    A Python asset with `write="history"` calls this; there is no CLI command. Takes the same `source`, `source_version` and `expected_snapshot_id` as the
     merge, and the same body limits. Needs `WRITE_TABLE` and `READ_TABLE` (and `CREATE_TABLE` to
     create the table with `expected_snapshot_id=none`); refused (422) while a row filter or
     column mask on the table applies to the caller. Answers 404 when the table or a source does
@@ -2308,8 +2309,9 @@ async def write_table_history(
     key
         The natural key's columns; repeat the parameter for a key of several columns.
     valid_from
-        The column each version's start is read from; without it, the time the run began (or
-        the server's time for a call outside a run).
+        The column each later version's start is read from; without it, the time the run began
+        (or the server's time for a call outside a run). A key's first version always starts at
+        0001-01-01 UTC.
     source
         Dotted names of the tables the rows came from.
     source_version

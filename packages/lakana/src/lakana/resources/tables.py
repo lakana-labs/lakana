@@ -1580,8 +1580,9 @@ class Tables:
         Against the table's open versions, a new key opens a version, a key whose values changed
         closes its version and opens a new one, and an unchanged key is left alone; with
         `close_missing`, a key the rows lack is closed. Nothing is deleted. One snapshot. A
-        Python asset with ``write="history"`` calls this for you; a history version sent by hand
-        starts at the time of the call unless `valid_from` names a column. Needs `WRITE_TABLE`
+        Python asset with ``write="history"`` calls this for you. A key's first version always
+        starts at 0001-01-01 UTC, so that every row of a fact finds it; a later version sent by
+        hand starts at the time of the call unless `valid_from` names a column. Needs `WRITE_TABLE`
         and `READ_TABLE`, and is refused while a row filter or column mask on the table applies
         to you. Serialised, sent and retried exactly like `merge` (a write sent twice changes
         nothing the second time).
@@ -1597,8 +1598,9 @@ class Tables:
         key
             The column, or the columns, that identify a row (the natural key).
         valid_from
-            The column each version's start is read from (a date or a timestamp), or `None` for
-            the time the call's run began.
+            The column each later version's start is read from (a date or a timestamp), or `None`
+            for the time the call's run began; a key's first version starts at 0001-01-01 UTC
+            either way.
         close_missing
             Close the open version of each key the rows lack.
         sources

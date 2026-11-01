@@ -58,6 +58,14 @@ check_outcome() {
 }
 test "$(check_outcome)" = "passed"
 
+# docs:start current
+lakana sql "SELECT customer_id, name, region FROM gold.dim_customer WHERE is_current ORDER BY customer_id" --env dev
+# docs:end current
+
+# docs:start joined
+lakana sql "SELECT f.order_id, d.region FROM gold.fact_orders AS f JOIN gold.dim_customer AS d ON d.customer_id = f.customer_id AND d.valid_from <= f.ordered_at AND (d.valid_to IS NULL OR f.ordered_at < d.valid_to) ORDER BY f.order_id" --env dev
+# docs:end joined
+
 # A reference to a table that keeps history must say which version each row means.
 cp "$EXAMPLE_DIR/refused/fact_orders.sql" assets/gold/fact_orders.sql
 git commit -q -am "A reference without its time"

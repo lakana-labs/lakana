@@ -54,6 +54,10 @@ Each key's first version, Edsger's too, starts at 0001-01-01: a first version re
 earliest time, so that every order finds its customer ([When a version starts](#when-a-version-starts)).
 Grace's move starts at the `changed_at` the CRM gave it.
 
+A first version's `valid_from` is outside the range of a nanosecond timestamp (the years 1677 to
+2262). Reading the column as `timestamp[ns]` raises `ArrowInvalid` in pyarrow, and pandas before
+version 2 fails the same way; read it as microseconds, or keep the Arrow type.
+
 ## The header
 
 | Key | Meaning | Rules |
@@ -62,7 +66,8 @@ Grace's move starts at the `changed_at` the CRM gave it.
 | `valid_from:` | The column that says when a row's values took effect. | Optional. Without it a change starts its new version at the run's start time. A key's first version starts at the earliest time either way ([When a version starts](#when-a-version-starts)). A `date` (midnight UTC), a `timestamp` (read as UTC) or a `timestamptz`; never a key column. The column is not stored: its value is the version's `valid_from`, so `columns:` may not describe it and `references:` may not name it. |
 | `close_missing:` | Close the open version of a key the `SELECT` no longer returns. | `true` or `false` (the default). The version is closed at the run's start time, never deleted. |
 
-A Python asset gives the same keys to `@asset(write="history", valid_from=…, close_missing=…)`. The deploy's other rules for these keys are in
+A Python asset gives the same keys to `@asset(write="history", valid_from=…, close_missing=…)`
+([Python assets](#python-assets)). The deploy's other rules for these keys are in
 [Asset front-matter](asset-front-matter.md#rules).
 
 ## The columns Lakana adds
@@ -156,11 +161,77 @@ The messages give counts, never values. Nothing is written.
 | A second write of one run | ``This run already wrote this table's history (the current snapshot of gold.dim_customer is its write), and a run opens at most one version per key. Start a new run to record the newer values.`` |
 | A table its first history run did not create | ``gold.dim_customer exists without the columns `write: history` adds; a history table is created by its first history run. Drop it (`lakana table delete gold.dim_customer --env dev`) so that the next run creates it with every row as an open version, or build the history into a new asset.`` |
 | Another key than the table was built with | ``gold.dim_customer keeps its history by `customer_id`, and the asset now declares `key: [customer_id, region]`; a history table keeps its key. Declare the old key again, or build the new key into a new asset (its history starts with its first run).`` |
-| Columns added or removed | ``The result does not match gold.dim_customer's columns (added segment (string)); a history table keeps its columns. Make the SELECT return the columns and types gold.dim_customer has; to add a column, build a new history asset (its history starts with its first run).`` |
+| Columns added or removed | ``The result does not match gold.dim_customer's columns (added segment (string)); a history table keeps its columns. Make the SELECT (or the Python asset's result) return the columns and types gold.dim_customer has; to add a column, build a new history asset (its history starts with its first run).`` |
 | Two open versions of a key | ``2 keys of gold.dim_customer have more than one open version; there must be one per key, so nothing was written. Drop the table (`lakana table delete gold.dim_customer --env dev`) and let the next run create it again (its history starts again with that run).`` Lakana's own runs never leave two open versions; a writer outside Lakana did. Drop the table as the text says, and the next run creates it with one open version per key. |
 | Delete files from another Iceberg writer | ``gold.dim_customer has row-level delete files, which an Iceberg writer outside Lakana added; a history write cannot keep its versions right with them, so nothing was read or written. Compact the table with that writer so that no delete files remain, or drop it (`lakana table delete gold.dim_customer --env dev`) and let the next run create it again (its history starts again with that run).`` |
-| More open versions than the setting allows | ``gold.dim_customer has 1200000 open versions, more than LAKANA_RUN__MAX_HISTORY_OPEN_VERSIONS (1000000) allows. A history write holds every open version in the worker's memory, roughly 2 GiB per million open versions of 8 columns and more for wider rows, so nothing was read or written. Ask an operator to raise LAKANA_RUN__MAX_HISTORY_OPEN_VERSIONS together with the worker's memory limit (LAKANA_WORKER__MEMORY_LIMIT).`` The same text starts ``The asset's result for gold.dim_customer has 1200000 rows, and each can open a version: more than …`` for a result with more rows than the setting, and ``gold.dim_customer would have 1000004 open versions after this write, more than …`` (ending "so nothing was written") for a write that would leave more open versions; see [Limits](#limits). |
+| More open versions than the setting allows | ``gold.dim_customer has 1200000 open versions, more than LAKANA_RUN__MAX_HISTORY_OPEN_VERSIONS (1000000) allows. A history write holds every open version in the worker's memory, roughly 2 GiB per million open versions of 8 columns and more for wider rows, so nothing was read or written. Ask an operator to raise LAKANA_RUN__MAX_HISTORY_OPEN_VERSIONS together with the worker's memory limit (LAKANA_WORKER__MEMORY_LIMIT).`` A Python asset writes over the REST API, where the server holds the versions, and the text says "in the server's memory" and ends "together with the memory the server has". The same text starts ``The asset's result for gold.dim_customer has 1200000 rows, and each can open a version: more than …`` for a result with more rows than the setting, and ``gold.dim_customer would have 1000004 open versions after this write, more than …`` (ending "so nothing was written") for a write that would leave more open versions; see [Limits](#limits). |
 | A null or repeated key | as for a merge, with the `QUALIFY` to write ([Merging rows](merge.md#errors)) |
+
+## Python assets
+
+A Python asset keeps history with the same three settings, as arguments of `@asset(...)`:
+
+```python
+import polars as pl
+
+from lakana import asset
+
+
+@asset(
+    inputs={"customers": "silver.customers"},
+    kind="dimension",
+    grain="One row per customer and version of their details.",
+    key="customer_id",
+    write="history",
+    valid_from="changed_at",
+    close_missing=True,
+)
+def dim_customer(customers: pl.DataFrame) -> pl.DataFrame:
+    """Every version of every customer."""
+    return customers.select("customer_id", "name", "region", "changed_at")
+```
+
+The function returns the current state of every row, as a SQL asset's `SELECT` does. Before it
+uploads, the task refuses a column named like one Lakana adds, a null key and a key that
+repeats, with advice in Python terms (``key `customer_id` repeats in 4 rows of what the asset
+returned; return one row per key, for example with
+`df.unique(subset=['customer_id'], keep='last')` ``). The project's lock must hold `lakana` of
+this release or later: an earlier `lakana` in the task refuses the task's description, and the
+task fails with ``task description: expected a version 2 or 3 document``.
+
+## REST route and SDK
+
+A history asset's task sends its rows through the route below; a person rarely does, and there is
+no CLI command, because a version loaded by hand starts at the time of the call unless
+`valid_from` names a column. A key's first version always starts at 0001-01-01 UTC, as above.
+
+| Method and path | Body | Query parameters | Answer |
+|---|---|---|---|
+| `POST /api/v1/environments/{env}/namespaces/{path}/tables/{name}/history` | the rows, as an Arrow IPC stream | `key` (repeat it for a key of several columns, required), `valid_from`, `close_missing` (`true` or `false`, default `false`), `expected_snapshot_id` (`none` creates a missing table), `source`, `source_version` | `snapshot_id`, `versions_opened`, `versions_closed`, `closed_missing`, `created` |
+
+Statuses as for a merge: 422 for what the write refuses (the texts above), 404 for a missing table
+or source, 403 without `WRITE_TABLE`, `READ_TABLE` (or `CREATE_TABLE` for a create), 409 when
+another writer committed first or `expected_snapshot_id` no longer matches, and 413, 408, 503 for
+the body. A 503 also means the server's history slot is taken
+([Limits](#limits)). In the SDK:
+
+```python
+import pyarrow as pa
+
+import lakana
+
+client = lakana.Client()
+result = client.tables.history(
+    "dev",
+    "gold.dim_customer",
+    pa.table({"customer_id": ["C-001"], "name": ["Ada"], "region": ["north"]}),
+    key="customer_id",
+)
+print(result.versions_opened, result.versions_closed)
+```
+
+A conflict is retried once without `expected_snapshot_id`, as for `merge`: the second try
+compares with the table as the other writer left it, so it cannot open a second version.
 
 ## Checks
 
@@ -233,15 +304,17 @@ time. The first run, which creates the table, records the event of a create.
 
 ## Limits
 
-- The run holds its whole result and the table's open versions in the worker's memory while it
-  compares them, so a large dimension counts against the worker's memory limit
-  (`LAKANA_WORKER__MEMORY_LIMIT`). The result may have at most
+- The run holds its whole result and the table's open versions in memory while it compares
+  them, so a large dimension counts against the worker's memory limit
+  (`LAKANA_WORKER__MEMORY_LIMIT`); for a Python asset, the server holds the rows it receives and
+  the open versions, and the server's memory counts. The result may have at most
   `LAKANA_QUERY_LIMITS__MAX_WRITE_ROWS` rows. The open versions may number at most
   `LAKANA_RUN__MAX_HISTORY_OPEN_VERSIONS` (1,000,000 by default). Before a run reads any
   version, both the table's open versions and the rows of its result must be within it (each
   row can open a version; the first run is checked before it creates the table). After the
   comparison, the open versions the write would leave must be within it too. A run over it
-  writes nothing and names the setting. Raise it together with the worker's memory limit.
+  writes nothing and names the setting. Raise it together with the memory of the process that
+  holds the versions: the worker's memory limit, or the memory the server has.
   On the REST path (a Python asset) the server holds the open versions, and
   `LAKANA_APPEND__MAX_CONCURRENT_HISTORY` (1 by default) bounds how many such writes run at once;
   one past it is refused with 503; a run of the asset fails as retryable and is run again.

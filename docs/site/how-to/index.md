@@ -29,6 +29,7 @@ Pages:
 - [Mask a column for some people](mask-a-column.md): show a replacement value instead of a column, and what masks do not protect.
 - [Declare a table's model](declare-a-tables-model.md): say in an asset's header what a table is, what one row stands for, its key and the tables it points at; get checks from it, and see what each message means.
 - [Keep layers apart](keep-layers-apart.md): write down which layers each layer may read, how its tables are written and which kinds they declare; every deploy checks them.
+- [Keep the history of a dimension](keep-the-history-of-a-dimension.md): keep every version of a dimension's rows, and join each fact to the version valid when it happened.
 - [Describe a table](describe-a-table.md): write a description for a table and its columns, in the project or by hand, and go back to the project's text.
 - [Translate labels and descriptions](translate-labels-and-descriptions.md): show a table's labels and descriptions in more languages, read them in yours, and correct a translation by hand.
 - [Drop and restore a table](drop-and-restore-a-table.md): drop a table, restore it with its data and access rules during the undo period, or delete its files now; delete and restore a whole environment the same way.

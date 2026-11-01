@@ -347,8 +347,8 @@ gold.dim_customer, at: ordered_at}}`. See [Keeping the history of a dimension](.
   run's task. A history write uses it to refuse a second write of one run. Nothing you set or
   read is affected.
 - `lakana table references` shows an `at` column when a reference has a time.
-- Python assets cannot write history yet: `write="history"` is refused at deploy until the next
-  step of this work.
+- A Python asset keeps history with `@asset(write="history", ...)`: its project's lock needs
+  `lakana` of this release, since an earlier `lakana` in the task refuses the task's description.
 
 ## Notes for 0.21.0
 
