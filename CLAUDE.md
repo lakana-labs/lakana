@@ -125,9 +125,10 @@ credential scoping, not by blacklisting DuckDB functions.
 </important>
 
 <important if="you are looking for where something is defined or what calls it">
-`docs/agent/graphify.md`. `graphify explain <symbol>` is a cheap first hop for
-structural questions. It is a lead generator, never an authority: it cannot show
-that something is **absent**, so completeness checks still belong to `grep`.
+Use `git grep -n` on a narrow path (`-l` or `-c` first when you expect many hits) and read the
+call sites. We tried a code graph (graphify) during #253 and dropped it: it cannot show that
+something is **absent**, a graph built from main misses a branch's own symbols and still
+answers confidently, and agents' own greps returned less text than its answers.
 </important>
 
 <important if="you are adding or upgrading a dependency">
