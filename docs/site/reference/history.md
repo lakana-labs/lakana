@@ -142,7 +142,7 @@ The messages give counts, never values. Nothing is written.
 | A table its first history run did not create | ``gold.dim_customer exists without the columns `write: history` adds; a history table is created by its first history run. Drop it (`lakana table delete gold.dim_customer --env dev`) so that the next run creates it with every row as an open version, or build the history into a new asset.`` |
 | Another key than the table was built with | ``gold.dim_customer keeps its history by `customer_id`, and the asset now declares `key: [customer_id, region]`; a history table keeps its key. Declare the old key again, or build the new key into a new asset (its history starts with its first run).`` |
 | Columns added or removed | ``The result does not match gold.dim_customer's columns (added segment (string)); a history table keeps its columns. Make the SELECT return the columns and types gold.dim_customer has; to add a column, build a new history asset (its history starts with its first run).`` |
-| Two open versions of a key | ``2 keys of gold.dim_customer have more than one open version; there must be one per key, so nothing was written. Drop the table (`lakana table delete gold.dim_customer --env dev`) and let the next run create it again (its history starts again with that run).`` |
+| Two open versions of a key | ``2 keys of gold.dim_customer have more than one open version; there must be one per key, so nothing was written. Drop the table (`lakana table delete gold.dim_customer --env dev`) and let the next run create it again (its history starts again with that run).`` Lakana's own runs never leave two open versions; a writer outside Lakana did. Drop the table as the text says, and the next run creates it with one open version per key. |
 | Delete files from another Iceberg writer | ``gold.dim_customer has row-level delete files, which an Iceberg writer outside Lakana added; a history write cannot keep its versions right with them, so nothing was read or written. Compact the table with that writer so that no delete files remain, or drop it (`lakana table delete gold.dim_customer --env dev`) and let the next run create it again (its history starts again with that run).`` |
 | More open versions than the setting allows | ``gold.dim_customer has 1200000 open versions, more than LAKANA_RUN__MAX_HISTORY_OPEN_VERSIONS (1000000) allows. …`` (see [Limits](#limits)) |
 | A null or repeated key | as for a merge, with the `QUALIFY` to write ([Merging rows](merge.md#errors)) |
@@ -226,7 +226,8 @@ time. The first run, which creates the table, records the event of a create.
   did: roughly 2 GiB per million open versions, and more for wider rows.
 - After a history write the worker frees the memory it held (a garbage collection and a trim of
   the heap, about 2.5 s for a million versions; other threads of the worker pause during the
-  collection). A worker that has written two such dimensions still holds about 0.3 GiB more than
-  after one (741 MiB resident after two writes of a million versions each).
+  collection). This is not a leak that grows with every write: a worker that started at 401 MiB held 659 MiB
+  after one write of a million versions and 741 MiB after a second, so the second added about
+  82 MiB, and the worker stays about 0.34 GiB above where it started.
 - A key of several columns has no cap on its rows, unlike a merge.
 - Adding a column to a history table is not possible yet: build a new history asset.
