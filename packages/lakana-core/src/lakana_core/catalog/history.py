@@ -1171,15 +1171,33 @@ def read_last_ends(
         row_filter=functools.reduce(And, terms, closed),
         selected_fields=columns,
     )
-    return _read_capped(
-        scan,
-        max_rows,
-        lambda cap: (
-            f"The keys this run opens again have more than {cap} closed versions in {table} "
-            f"that end after {shown_clock(after)}, more than one write reads (max_write_rows); "
-            "nothing was committed. Start the returning versions later (a later `valid_from`), "
-            "or ask an operator to raise max_write_rows."
-        ),
+    return _read_capped(scan, max_rows, lambda cap: _too_many_ends(cap, table, after))
+
+
+def _too_many_ends(cap: int, table: str, after: datetime) -> str:
+    """Say that the keys a run opens again have more closed versions than one write reads.
+
+    Parameters
+    ----------
+    cap
+        The limit (`QueryLimitsConfig.max_write_rows`).
+    table
+        The table's dotted name.
+    after
+        The earliest start among the returning rows.
+
+    Returns
+    -------
+    str
+        The refusal, its counts agreeing in number, naming the setting and the two ways out.
+    """
+    versions = "closed version" if cap == 1 else "closed versions"
+    end = "ends" if cap == 1 else "end"
+    return (
+        f"The keys this run opens again have more than {cap} {versions} in {table} that {end} "
+        f"after {shown_clock(after)}. That is more rows than one write may read (the "
+        "max_write_rows setting), so nothing was committed. Start the returning versions later "
+        "(a later `valid_from`), or ask an operator to raise max_write_rows."
     )
 
 

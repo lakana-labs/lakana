@@ -883,13 +883,19 @@ def test_the_closed_versions_a_returning_key_reads_are_capped(hist: Hist) -> Non
     wanted = pa.table({"customer_id": ["A"]})
 
     ends = read_last_ends(metadata, file_io, wanted, T1, key=["customer_id"], table=DIM, max_rows=2)
-    with pytest.raises(ValidationError) as info:
+    with pytest.raises(ValidationError) as one:
         read_last_ends(metadata, file_io, wanted, T1, key=["customer_id"], table=DIM, max_rows=1)
+    with pytest.raises(ValidationError) as none:
+        read_last_ends(metadata, file_io, wanted, T1, key=["customer_id"], table=DIM, max_rows=0)
 
     assert sorted(ends.column("valid_to").to_pylist()) == [T2, t4]
-    assert str(info.value) == (
-        "The keys this run opens again have more than 1 closed versions in gold.dim_customer "
-        "that end after 2026-02-01T00:00:00Z, more than one write reads (max_write_rows); "
-        "nothing was committed. Start the returning versions later (a later `valid_from`), or "
-        "ask an operator to raise max_write_rows."
+    assert str(one.value) == (
+        "The keys this run opens again have more than 1 closed version in gold.dim_customer "
+        "that ends after 2026-02-01T00:00:00Z. That is more rows than one write may read (the "
+        "max_write_rows setting), so nothing was committed. Start the returning versions later "
+        "(a later `valid_from`), or ask an operator to raise max_write_rows."
+    )
+    assert str(none.value).startswith(
+        "The keys this run opens again have more than 0 closed versions in gold.dim_customer "
+        "that end after 2026-02-01T00:00:00Z. That is more rows"
     )
