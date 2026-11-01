@@ -666,6 +666,11 @@ class AssetMetadata(SafeTextModel):
         ValueError
             If it has an unsafe character.
         """
+        if value == "":
+            raise ValueError(
+                "valid_from must not be empty; name the column that says when the row's values "
+                "took effect, or leave `valid_from:` out to use the run's start time"
+            )
         if value is not None and unsafe_identifier(value):
             raise ValueError(f"valid_from {IDENTIFIER_MESSAGE}")
         return value

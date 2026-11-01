@@ -124,6 +124,7 @@ from lakana_core.models import (
     TaskToken,
     WriteMode,
 )
+from lakana_core.projects.history_columns import HistorySpec
 from lakana_core.projects.issues import ProjectIssue
 from lakana_core.projects.manifest import MANIFEST_VERSION, VERSION_WITHOUT_CHECKS
 from lakana_core.projects.package_sources import RegisteredIndex
@@ -8551,3 +8552,36 @@ def test_a_task_and_a_connection_test_get_the_same_routes_for_one_connection(
     ]
     assert request["roots"] == list(task.roots)
     assert json.loads(request["stdin"])["routing"] == task.connections["src"]
+
+
+def test_a_history_write_is_logged_as_history() -> None:
+    assert python_tasks_module._LOGGED_MODES["history"] is WriteMode.HISTORY
+
+
+def test_a_history_python_asset_gets_its_history(py: PyWorld) -> None:
+    py.deploy(
+        write="history",
+        key=["id"],
+        write_mode="history",
+        history={"valid_from": "changed_at", "close_missing": True},
+    )
+    engine = py.engine(
+        lambda _task, _log, _stop: RunOutcome(succeeded=False, error_message="x", retryable=False)
+    )
+    claimed = py.claim_python(engine)
+    run_claimed(engine, claimed)
+
+    (task,) = py.runner.tasks
+    assert (task.write, task.key) == ("history", ("id",))
+    assert task.history == HistorySpec(("id",), "changed_at", True)
+    assert "write mode: history" in _log(py.world, claimed.run_id, "gold.scores")
+
+
+def test_a_merging_python_asset_gets_no_history(py: PyWorld) -> None:
+    py.deploy(write="merge", key=["id"], write_mode="merge")
+    engine = py.engine(
+        lambda _task, _log, _stop: RunOutcome(succeeded=False, error_message="x", retryable=False)
+    )
+    run_claimed(engine, py.claim_python(engine))
+    (task,) = py.runner.tasks
+    assert task.history is None

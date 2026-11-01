@@ -926,6 +926,31 @@ class MergeResult:
 
 
 @dataclass(frozen=True)
+class HistoryResult:
+    """The outcome of a governed Arrow history write.
+
+    Parameters
+    ----------
+    snapshot_id
+        The id of the snapshot the write committed, or `None` when it changed nothing.
+    versions_opened
+        Versions opened: one per new key and per key whose values changed.
+    versions_closed
+        Open versions closed: one per key whose values changed and per missing key closed.
+    closed_missing
+        How many of `versions_closed` were keys the rows no longer contain.
+    created
+        Whether the write created the table.
+    """
+
+    snapshot_id: int | None
+    versions_opened: int
+    versions_closed: int
+    closed_missing: int
+    created: bool
+
+
+@dataclass(frozen=True)
 class WriteResult:
     """The outcome of a governed Arrow replace.
 

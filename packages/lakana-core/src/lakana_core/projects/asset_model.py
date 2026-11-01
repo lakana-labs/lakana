@@ -82,10 +82,10 @@ USE_ONE_SPELLING = "use one: `write: append` with `watermark:` replaces `materia
 EVOLVE_NEEDS_APPEND = "`evolve_schema` works with `write: append` only"
 EVOLVE_NEEDS_REPLACE = (
     'evolve_schema=True works with write="replace" (the default) only; remove evolve_schema, '
-    "or replace the table instead of appending or merging"
+    "or replace the table instead of appending, merging or keeping its history"
 )
-"""A Python asset evolves its schema only when it replaces its table: its upload of an append
-or a merge cannot change the schema."""
+"""A Python asset evolves its schema only when it replaces its table: its upload of an append,
+a merge or a history write cannot change the schema."""
 REPLACE_TAKES_NO_WATERMARK = (
     "`write: replace` takes no `watermark:`; to add only new rows use `write: append`"
 )
@@ -103,11 +103,6 @@ HISTORY_TAKES_NO_WATERMARK = (
 )
 VALID_FROM_NEEDS_HISTORY = "`valid_from:` works with `write: history` only"
 CLOSE_MISSING_NEEDS_HISTORY = "`close_missing:` works with `write: history` only"
-PYTHON_HISTORY_LATER = (
-    'write="history" is not available for Python assets yet; build the dimension as a SQL asset '
-    "with `write: history` in its header"
-)
-"""Refused at the decorator until the harness uploads a history write (#253's third PR)."""
 KEY_NONE_NEEDS_KIND = (
     "`key: none` is for a fact or a wide table whose rows no columns identify; declare "
     "`kind: fact` or `kind: wide`, or remove `key: none`"

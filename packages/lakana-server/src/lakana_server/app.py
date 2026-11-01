@@ -175,6 +175,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.append_concurrency_limiter = AppendConcurrencyLimiter(
             resolved_settings.append.max_concurrent
         )
+        app.state.history_concurrency_limiter = AppendConcurrencyLimiter(
+            resolved_settings.append.max_concurrent_history
+        )
         app.state.manifest_decode_slots = asyncio.Semaphore(MANIFEST_DECODE_SLOTS)
         app.state.manifest_principals = set()
         app.state.download_slots = AppendConcurrencyLimiter(MAX_CONCURRENT_DOWNLOADS)

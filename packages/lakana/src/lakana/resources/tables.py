@@ -31,6 +31,7 @@ from lakana._models import (
     Column,
     DroppedTable,
     ExternalTable,
+    HistoryResult,
     LastMaintenance,
     Lineage,
     LineageEdge,
@@ -99,6 +100,37 @@ def _add_source_versions(
         params["source_version"] = [
             f"{version}:{name}" for name, version in sorted(source_versions.items())
         ]
+
+
+def _write_params(
+    params: dict[str, object],
+    sources: Sequence[str] | None,
+    source_versions: Mapping[str, int] | None,
+    break_glass_reason: str | None,
+    expected_snapshot_id: int | str | None,
+) -> None:
+    """Add the parameters every keyed Arrow write takes to a request's parameters.
+
+    Parameters
+    ----------
+    params
+        The request's parameters; changed in place.
+    sources
+        Dotted names of the tables the rows came from.
+    source_versions
+        The version of each source that is an artifact.
+    break_glass_reason
+        The break-glass reason, if any.
+    expected_snapshot_id
+        The table's snapshot as the caller read it, or ``"none"``, if any.
+    """
+    if sources:
+        params["source"] = list(sources)
+    _add_source_versions(params, source_versions)
+    if break_glass_reason is not None:
+        params["break_glass_reason"] = break_glass_reason
+    if expected_snapshot_id is not None:
+        params["expected_snapshot_id"] = str(expected_snapshot_id)
 
 
 def _split_namespace_table(qualified_name: str) -> tuple[str, str]:
@@ -1513,13 +1545,7 @@ class Tables:
         if not columns:
             raise ValueError('A merge needs at least one key column: pass key="id".')
         params: dict[str, object] = {"key": columns}
-        if sources:
-            params["source"] = list(sources)
-        _add_source_versions(params, source_versions)
-        if break_glass_reason is not None:
-            params["break_glass_reason"] = break_glass_reason
-        if expected_snapshot_id is not None:
-            params["expected_snapshot_id"] = str(expected_snapshot_id)
+        _write_params(params, sources, source_versions, break_glass_reason, expected_snapshot_id)
         response = self._send_arrow(
             "tables.merge",
             environment,
@@ -1533,6 +1559,103 @@ class Tables:
             snapshot_id=body["snapshot_id"],
             rows_inserted=body["rows_inserted"],
             rows_updated=body["rows_updated"],
+        )
+
+    def history(
+        self,
+        environment: str,
+        qualified_name: str,
+        data: pa.Table | pa.RecordBatch | object,
+        *,
+        key: str | Sequence[str],
+        valid_from: str | None = None,
+        close_missing: bool = False,
+        sources: Sequence[str] | None = None,
+        source_versions: Mapping[str, int] | None = None,
+        break_glass_reason: str | None = None,
+        expected_snapshot_id: int | str | None = None,
+    ) -> HistoryResult:
+        """Keep the versions of a dimension's rows: send the current state of every row.
+
+        Against the table's open versions, a new key opens a version, a key whose values changed
+        closes its version and opens a new one, and an unchanged key is left alone; with
+        `close_missing`, a key the rows lack is closed. Nothing is deleted. One snapshot. A
+        Python asset with ``write="history"`` calls this for you. A key's first version always
+        starts at 0001-01-01 UTC, so that every row of a fact finds it; a later version sent by
+        hand starts at the time of the call unless `valid_from` names a column. Needs `WRITE_TABLE`
+        and `READ_TABLE`, and is refused while a row filter or column mask on the table applies
+        to you. Serialised, sent and retried exactly like `merge` (a write sent twice changes
+        nothing the second time).
+
+        Parameters
+        ----------
+        environment
+            The environment name.
+        qualified_name
+            Dot-joined `"namespace.table"` name.
+        data
+            The rows: a `pa.Table`, a `pa.RecordBatch`, or anything `pyarrow.table()` accepts.
+        key
+            The column, or the columns, that identify a row (the natural key).
+        valid_from
+            The column each later version's start is read from (a date or a timestamp), or `None`
+            for the time the call's run began; a key's first version starts at 0001-01-01 UTC
+            either way.
+        close_missing
+            Close the open version of each key the rows lack.
+        sources
+            Dotted names of the tables `data` was derived from, recorded as lineage.
+        source_versions
+            The version of each source that is an artifact, by dotted name.
+        break_glass_reason
+            Write to a protected environment outside a run: 10-500 characters, audited.
+        expected_snapshot_id
+            The table's current snapshot as you read it, or ``"none"``, which also creates a
+            missing table with every row as an open version.
+
+        Returns
+        -------
+        HistoryResult
+            The committed snapshot's id and the counts.
+
+        Raises
+        ------
+        ValueError
+            If `key` names no column; nothing is sent.
+        lakana.errors.NotFound
+            If the table or a source does not exist.
+        lakana.errors.PermissionDenied
+            If the caller may not write or read the table or read a source.
+        lakana.errors.Conflict
+            If a second attempt, after one retry, still conflicts; or at once when
+            `expected_snapshot_id` no longer matches.
+        lakana.errors.ValidationError
+            For what a history write refuses (the message gives counts, never values).
+        """
+        columns = [key] if isinstance(key, str) else list(key)
+        if not columns:
+            raise ValueError('A history write needs at least one key column: pass key="id".')
+        params: dict[str, object] = {"key": columns}
+        if valid_from is not None:
+            params["valid_from"] = valid_from
+        if close_missing:
+            params["close_missing"] = "true"
+        _write_params(params, sources, source_versions, break_glass_reason, expected_snapshot_id)
+        response = self._send_arrow(
+            "tables.history",
+            environment,
+            qualified_name,
+            data,
+            params,
+            retry_conflict=expected_snapshot_id is None,
+        )
+        body = response.json()
+        return HistoryResult(
+            snapshot_id=body["snapshot_id"],
+            versions_opened=body["versions_opened"],
+            versions_closed=body["versions_closed"],
+            closed_missing=body["closed_missing"],
+            created=body["created"],
         )
 
     def lineage(
@@ -1691,7 +1814,8 @@ class Tables:
         Parameters
         ----------
         route
-            `"tables.append"`, `"tables.replace"`, `"tables.merge"` or `"tables.load"`.
+            `"tables.append"`, `"tables.replace"`, `"tables.merge"`, `"tables.history"` or
+            `"tables.load"`.
         environment
             The environment name.
         qualified_name

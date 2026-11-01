@@ -197,6 +197,14 @@ def test_the_added_columns_follow_the_last_part_of_the_name() -> None:
     assert added_columns(TABLE) == ("dim_customer_key", VALID_FROM, VALID_TO, IS_CURRENT)
 
 
+def test_the_surrogate_key_of_a_first_version_is_the_one_the_reference_shows() -> None:
+    """`reference/history.md` shows this key for `C-001` at 0001-01-01T00:00:00Z."""
+    one = pa.table({"customer_id": ["C-001"]})
+    assert surrogate_keys(one, ["customer_id"], _micros(-62135596800000000)).to_pylist() == [
+        "fe8185b5f5c48867dc8170a32ef03416"
+    ]
+
+
 def test_the_surrogate_key_matches_the_specs_vectors() -> None:
     one = pa.table({"customer_id": ["C-001"]})
     assert surrogate_keys(one, ["customer_id"], _micros(1793404800000000)).to_pylist() == [

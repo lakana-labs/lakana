@@ -50,7 +50,7 @@ limits lie is in [Python assets: what they are for and how far they are trusted]
   connection cannot be deleted. An asset without `connections` deploys as before. A project
   version in which an asset declares connections has manifest version 7 (8 when an asset also
   appends or merges, 9 when an asset declares a model field, 10 when an asset declares
-  measures), so a worker of an earlier release refuses its runs instead of running the
+  measures, 12 when an asset keeps history), so a worker of an earlier release refuses its runs instead of running the
   asset without them: upgrade the workers first. The kinds of connection and the commands that manage them are in
   [Connections](connections.md).
 - **Model fields.** `kind` (`fact`, `dimension`, `wide` or `staging`), `grain`, `key`,
@@ -102,8 +102,11 @@ limits lie is in [Python assets: what they are for and how far they are trusted]
   `write="replace"` (the default) replaces every row with what the function returns;
   `write="append", watermark="updated_at"` creates the table on the first run and adds the rows
   of each later run; `write="merge", key=["id"]` updates the rows whose key the table has and
-  adds the others, deleting none (`watermark` is optional). A key of one column may be written
-  as a string: `key="id"`. A key of several columns takes at most 5,000 rows per run. The platform does not filter what a Python asset returns: an append
+  adds the others, deleting none (`watermark` is optional); `write="history", key="customer_id"`
+  on a `kind="dimension"` asset keeps every version of each row (with `valid_from=` and
+  `close_missing=`, see [Keeping the history of a dimension](history.md#python-assets)). A key of
+  one column may be written as a string: `key="id"`. A key of several columns takes at most 5,000
+  rows per run. The platform does not filter what a Python asset returns: an append
   must return only the rows past `ctx.watermark()` (see [The asset's context](#the-assets-context)),
   or it adds every row again. A merge holds its whole result in memory while it compares it with
   the table, so what it returns counts against the worker's memory limit
@@ -111,14 +114,14 @@ limits lie is in [Python assets: what they are for and how far they are trusted]
   `materialize="incremental"` is refused with
   ``a Python asset appends with write="append" and watermark="<column>", not materialize='incremental'``.
   A project version in which an asset appends or merges has manifest version 8 (9 when an asset
-  declares a model field, a `key` included, so every merge, and 10 when an asset declares
-  measures): a worker of an earlier release refuses it instead of replacing the table.
+  declares a model field, a `key` included, so every merge, 10 when an asset declares
+  measures, and 12 when an asset keeps history): a worker of an earlier release refuses it instead of replacing the table.
 - **Schema changes.** `evolve_schema=True` lets a replace give the table the columns the
   function returns, a removed column included; without it, a changed schema fails the run. See
   [When the output changes shape](#when-the-output-changes-shape).
 - **Output.** The function returns a `polars.DataFrame` or a `pyarrow.Table`; both get the same
   checks of their columns. It is written into the asset's table in one snapshot, as `write` says.
-  Zero rows are fine: a replace empties the table, and an append or a merge whose source had
+  Zero rows are fine: a replace empties the table, and an append, a merge or a history write whose source had
   nothing new writes nothing and succeeds. With `output="artifact"` it returns a `pathlib.Path` inside
   `lakana.output_dir()` instead, and each run stores a new version of the artifact (see the
   [reference](artifacts.md)).
@@ -179,9 +182,9 @@ def order_totals(orders: pl.DataFrame) -> pl.DataFrame:
   every column of that table the function does not return.
 - A run that returns no rows works the same way: the table is emptied and takes the result's
   columns.
-- Only with `write="replace"`, the default. An asset that appends or merges cannot change its
+- Only with `write="replace"`, the default. An asset that appends, merges or keeps history cannot change its
   table's schema; `evolve_schema=True` there fails the deploy with
-  ``evolve_schema=True works with write="replace" (the default) only; remove evolve_schema, or replace the table instead of appending or merging``.
+  ``evolve_schema=True works with write="replace" (the default) only; remove evolve_schema, or replace the table instead of appending, merging or keeping its history``.
   The first run of an append creates its table; if another writer creates the table with other
   columns in the meantime, the run fails with
   ``the asset's output no longer matches the schema of gold.scores. Server detail: The result does not match gold.scores's schema (dropped region (string)). An asset that appends cannot change its table's schema: make the asset return the columns and types gold.scores has, then run it again.``
@@ -327,10 +330,11 @@ there is one, the line, as `path:line: message`. Fix the cause and deploy again.
 | `the file does not parse: …` | A syntax error. | Fix the line it names. |
 | ``a Python asset appends with write="append" and watermark="<column>", not materialize='incremental'`` | `materialize="incremental"`. | Write `write="append", watermark="<column>"`. |
 | `a Python asset supports only materialize 'table', got …` | `materialize` is neither `table` nor `incremental`. | Remove the argument, or write a SQL asset. |
-| ``write must be one of replace, append, merge, history; got '…'``, ``` `write: append` needs `watermark:` … ```, ``` `write: merge` needs `key:` … ```, ``` `write: replace` takes no `watermark:`; to add only new rows use `write: append` ```, ``key column `id` is listed twice``, ``a key has at most 8 columns, and `key:` lists 9; …``, ``a key column must not be empty; …``, ``write="history" is not available for Python assets yet; build the dimension as a SQL asset with `write: history` in its header`` | A wrong write model. | See [Write modes](asset-front-matter.md#write-modes); the rules are the same as in SQL front-matter. |
+| ``write must be one of replace, append, merge, history; got '…'``, ``` `write: append` needs `watermark:` … ```, ``` `write: merge` needs `key:` … ```, ``` `write: replace` takes no `watermark:`; to add only new rows use `write: append` ```, ``key column `id` is listed twice``, ``a key has at most 8 columns, and `key:` lists 9; …``, ``a key column must not be empty; …`` | A wrong write model. | See [Write modes](asset-front-matter.md#write-modes); the rules are the same as in SQL front-matter. |
 | ``Asset `gold.fact_orders` is a fact and needs `grain:`: …``, ``Reference target `gold.dim_store` does not exist in environment `dev`, or you may not read it; …``, ``Reference `store_id: gold.dim_store`: `gold.dim_store` declares no key. …`` | A model field breaks a rule of its kind, or a reference target cannot be resolved. | See [Model fields](asset-front-matter.md#model-fields-kind-grain-key-and-references): every text and its fix; the rules are the same as in SQL front-matter. |
 | ``measures.amount.currency: must be an ISO 4217 currency code in capitals, …``, ``Asset `gold.x` is a dimension and declares `measures:`; …``, `argument 'measures' must be a literal` | A measure breaks a rule, or the argument is not a literal. | See [Measures](asset-front-matter.md#measures); the rules are the same as in SQL front-matter. |
-| ``evolve_schema=True works with write="replace" (the default) only; …``, `argument 'evolve_schema' must be True or False`, `argument 'evolve_schema' does not apply to an artifact asset; remove it` | `evolve_schema=True` on an asset that appends or merges, or on an artifact asset, or a value that is not `True` or `False`. | Remove it, or write the asset with `write="replace"`. See [When the output changes shape](#when-the-output-changes-shape). |
+| ``` `write: history` keeps the versions of a dimension's rows; declare `kind: dimension`, with `grain:` and `key:` ```, ``` `write: history` takes no `watermark:`; its SELECT returns the current state of every row, and each run compares it with the open versions ```, ``` `valid_from:` works with `write: history` only ```, ``` `close_missing:` works with `write: history` only ```, `argument 'close_missing' must be True or False`, ``` `valid_from: changed_at` names a key column; name the column that says when the row's values took effect, or leave `valid_from:` out to use the run's start time ```, `argument 'valid_from' must be a string`, `valid_from must not be empty; name the column that says when the row's values took effect, or leave `valid_from:` out to use the run's start time` | `write="history"` without `kind="dimension"`, `grain` and `key`, with a `watermark`, or `valid_from` or `close_missing` on another write mode, a `close_missing` that is not `True` or `False`, or a `valid_from` that is empty, not a string or a key column. | Declare the dimension's model, remove `watermark`, or write `write="history"`. See [Keeping the history of a dimension](history.md#python-assets). |
+| ``evolve_schema=True works with write="replace" (the default) only; …``, `argument 'evolve_schema' must be True or False`, `argument 'evolve_schema' does not apply to an artifact asset; remove it` | `evolve_schema=True` on an asset that appends, merges or keeps history, or on an artifact asset, or a value that is not `True` or `False`. | Remove it, or write the asset with `write="replace"`. See [When the output changes shape](#when-the-output-changes-shape). |
 | `` `ctx` is the asset's context; give the input another parameter name `` | `inputs` names a parameter `ctx`. | Rename the parameter and its entry in `inputs`. |
 | `assets/a.sql and assets/a.py both produce table 'a'` | A SQL file and a Python file for one table. | Keep one. |
 | `every .py file under assets/ is an asset; put helper code outside assets/ …` | `__init__.py` or a helper module under `assets/`. | Move helper code to the repository root or `src/`. |

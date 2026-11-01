@@ -25,7 +25,6 @@ from lakana_core.projects.asset_model import (
     KEY_NONE,
     MAX_CONNECTIONS,
     MAX_KEEP_VERSIONS,
-    PYTHON_HISTORY_LATER,
     WATERMARK_MESSAGE,
     WRITE_CHOICES,
     ParsedAsset,
@@ -66,6 +65,8 @@ _KNOWN = (
     "key",
     "watermark",
     "evolve_schema",
+    "valid_from",
+    "close_missing",
     "kind",
     "grain",
     "references",
@@ -92,6 +93,8 @@ _SHAPES: dict[str, tuple[type | tuple[type, ...], str]] = {
     "checks": (dict, "a dict of strings"),
     "watermark": (str, "a string"),
     "evolve_schema": (bool, "True or False"),
+    "valid_from": (str, "a string"),
+    "close_missing": (bool, "True or False"),
 }
 _TWO_LEVEL = frozenset({"measures", "columns", "references"})
 """Arguments whose values may be dicts of literal dicts (a measure, a column's texts, a
@@ -110,6 +113,8 @@ _NOT_FOR_ARTIFACTS = (
     "key",
     "watermark",
     "evolve_schema",
+    "valid_from",
+    "close_missing",
     "kind",
     "grain",
     "references",
@@ -680,6 +685,10 @@ def _write_model(
         key = tuple(listed)
     marked = values.get("watermark")
     watermark = marked if isinstance(marked, str) else None
+    named = values.get("valid_from")
+    valid_from = named if isinstance(named, str) else None
+    closing = values.get("close_missing")
+    close_missing = closing if isinstance(closing, bool) else None
     messages = key_issues(key)
     if watermark is not None and unsafe_identifier(watermark):
         messages.append(WATERMARK_MESSAGE)
@@ -687,14 +696,18 @@ def _write_model(
         messages.insert(0, write_choice_message(shown(write)))
     else:
         messages.extend(
-            write_rule_issues(write, key, watermark, materialize="table", evolve_schema=None)
+            write_rule_issues(
+                write,
+                key,
+                watermark,
+                materialize="table",
+                evolve_schema=None,
+                valid_from=valid_from,
+                close_missing=close_missing,
+            )
         )
     if values.get("evolve_schema") is True and (write or "replace") != "replace":
         messages.append(EVOLVE_NEEDS_REPLACE)
-    if write == "history":
-        # Not a `messages` entry: the key and the rest are valid, so the metadata keeps them and
-        # no second, misleading "needs key" follows.
-        issues.append(ProjectIssue(path, line, PYTHON_HISTORY_LATER))
     issues.extend(ProjectIssue(path, line, message) for message in messages)
     if messages:
         return None, (), None  # the issues stand; nothing unsafe reaches the metadata

@@ -155,8 +155,7 @@ beta ships with the ingestion helpers and named connections.
    its header, and an ingestion task reaches only those connections and nothing else on the
    network (#308). Helpers in `lakana[assets]` read files (S3, GCS, Azure, HTTPS and
    directories), SQL databases (PostgreSQL, SQLite, MariaDB and MySQL) and REST APIs. The write modes
-   are `replace`, `append` and `merge` (an upsert), and `history` (SCD type 2) from M8d, for SQL assets
-   first. `lakana load` loads a local file into bronze, and stays as a convenience for exploration and tests. A
+   are `replace`, `append` and `merge` (an upsert), and `history` (SCD type 2) from M8d, for SQL and Python assets. `lakana load` loads a local file into bronze, and stays as a convenience for exploration and tests. A
    connection is only a name for an address and a secret: Lakana runs no connectors, and the
    asset's helper does the reading. Done when a new team loads data from each kind of source
    with a short asset, merges a changing source into a table, or loads a local file with

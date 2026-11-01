@@ -341,7 +341,7 @@ stacks the records of every page into one table.
 | `retry_budget_seconds` | `300` | No attempt of a request starts later than this many seconds after its first. |
 
 A key that holds dots (`@odata.nextLink`) is looked up whole first, then as a dotted path. No
-records at all is a table without columns, which an `append` or `merge` asset may return.
+records at all is a table without columns, which an `append`, `merge` or `history` asset may return (with `close_missing=True` a history asset is refused an empty result, rather than close every version).
 
 A page must be UTF-8, as JSON exchanged between systems is (RFC 8259); a UTF-8 byte order mark
 is dropped. A page in UTF-16 or UTF-32, or with bytes that are no UTF-8, fails for good, before

@@ -11,26 +11,30 @@ file or directory inside `lakana.output_dir()` that it returned, through
 `client.artifacts.upload`. It never touches the database or the object store,
 and it never prints the token.
 
-The description is version 2 or 3. Version 2 is version 1's keys plus ``output``
+The description is version 2, 3 or 4. Version 2 is version 1's keys plus ``output``
 (``"table"`` or ``"artifact"``), ``input_kinds`` (every input to ``"table"`` or
 ``"artifact"``), ``input_versions`` (exactly the artifact inputs, each to the
 version the worker resolved) and ``work_dir`` (the attempt's private directory:
 absolute, owned by this user, not accessible to group or others). The harness
 creates ``<work_dir>/inputs`` (0700) when an input is an artifact and
 ``<work_dir>/output`` (0700) for an artifact asset. Version 3 adds ``write``
-(``"replace"``, ``"append"`` or ``"merge"``), ``key`` (the merge key's columns, empty
-unless ``write`` is ``"merge"``), ``watermark`` (``null`` or ``{"column": str, "value":
-str | null}``, the value in the worker's ``<type>:<value>`` form) and ``connections``
-(each declared connection's name to an object with at least its ``kind``); the worker
-sends it only to an asset that uses one of them, and a version 2 document replaces.
-Either version may carry ``evolve_schema`` (``true`` when the asset says
+(``"replace"``, ``"append"``, ``"merge"`` or ``"history"``), ``key`` (the key's columns,
+empty unless ``write`` is ``"merge"`` or ``"history"``), ``watermark`` (``null`` or
+``{"column": str, "value": str | null}``, the value in the worker's ``<type>:<value>``
+form) and ``connections`` (each declared connection's name to an object with at least its
+``kind``); the worker sends it only to an asset that uses one of them, and a version 2
+document replaces. Version 4 is version 3 with ``write`` ``"history"``, a ``key`` (the
+natural key) and ``history`` (``{"valid_from": str | null, "close_missing": bool}``); the
+worker sends it only to a history asset.
+Every version may carry ``evolve_schema`` (``true`` when the asset says
 ``@asset(evolve_schema=True)``; the worker sends it only then): a replace then lets the table
 take the result's schema.
 
 An append uploads with `client.tables.append` against ``expected_snapshot_id`` (the
 snapshot the worker read the watermark from), except on a first run (``"none"``), which
 creates the table with `client.tables.replace`; a merge always uses `client.tables.merge`,
-which creates a missing table after the same key checks. An append or merge whose
+which creates a missing table after the same key checks; a history write always uses
+`client.tables.history`. An append, merge or history write (without ``close_missing``) whose
 function returned no rows (or no columns) on a table that exists uploads nothing and
 succeeds with ``rows`` 0. The function gets an `lakana.context.AssetContext` as its
 parameter ``ctx`` when it declares one (unless the project version is from before
@@ -116,8 +120,9 @@ if TYPE_CHECKING:
 
     _DataType = pl.DataType | pl.datatypes.DataTypeClass
 
-DESCRIPTION_VERSIONS = (2, 3)
-"""The task description versions this harness reads; the worker sends 3 only when needed."""
+DESCRIPTION_VERSIONS = (2, 3, 4)
+"""The task description versions this harness reads; the worker sends 3 or 4 only when needed (4
+for a history asset)."""
 COMPOSITE_KEY_MAX_ROWS = 5_000
 """Most rows a merge on a key of several columns takes; the server refuses more, and this
 harness says so first, in words a Python asset can act on."""
@@ -134,6 +139,12 @@ _NOTHING_TO_CREATE = (
     "no data yet (check the pattern or the query); the first run must find data"
 )
 """Why a first append or merge without columns fails: a table needs its columns."""
+_NOTHING_TO_CLOSE = (
+    "the asset returned no columns, and `close_missing=True` would close every open version of "
+    "{table}; nothing was written. If the source really is empty, remove `close_missing=True` "
+    "from `@asset(...)` for this run"
+)
+"""Why a history asset with `close_missing` and no columns fails on a table that exists."""
 _READER = (
     "the asset returned a pyarrow RecordBatchReader; read it with `.read_all()` and return the "
     "table"
@@ -366,9 +377,9 @@ class TaskDescription:
         ``float`` or ``exact`` from the deployed manifest, or `None` when the
         worker sent none (an older worker): the decorator's own value then applies.
     write
-        ``replace``, ``append`` or ``merge``; ``replace`` for a version 2 document.
+        ``replace``, ``append``, ``merge`` or ``history``; ``replace`` for a version 2 document.
     key
-        The merge key's columns; empty unless `write` is ``merge``.
+        The key's columns; empty unless `write` is ``merge`` or ``history``.
     watermark_column
         The asset's `watermark` column, if the worker sent one.
     watermark
@@ -383,6 +394,10 @@ class TaskDescription:
     evolve_schema
         Whether a replace lets the table take the result's schema (the asset says
         ``evolve_schema=True``). Either version may carry it; an absent key means `False`.
+    valid_from
+        A history asset's `valid_from` column, or `None`.
+    close_missing
+        Whether a history asset closes the keys it no longer returns.
     """
 
     server_url: str
@@ -407,6 +422,8 @@ class TaskDescription:
     connections: dict[str, dict[str, object]] = field(default_factory=dict)
     table_exists: bool = False
     evolve_schema: bool = False
+    valid_from: str | None = None
+    close_missing: bool = False
 
 
 def _text(document: dict[str, object], key: str) -> str:
@@ -569,14 +586,14 @@ def _work_dir(document: dict[str, object]) -> str:
 
 @dataclass(frozen=True)
 class _Writes:
-    """How the asset writes its table, from a version 3 document.
+    """How the asset writes its table, from a version 3 or 4 document.
 
     Parameters
     ----------
     write
-        ``replace``, ``append`` or ``merge``.
+        ``replace``, ``append``, ``merge`` or ``history``.
     key
-        The merge key's columns.
+        The key's columns, of a merge or a history write.
     watermark_column
         The watermark column, if any.
     watermark
@@ -585,6 +602,10 @@ class _Writes:
         Each declared connection's routing.
     table_exists
         Whether the asset's table existed when the worker read it.
+    valid_from
+        A history asset's `valid_from` column, or `None`.
+    close_missing
+        Whether a history asset closes the keys it no longer returns.
     """
 
     write: str = "replace"
@@ -593,10 +614,12 @@ class _Writes:
     watermark: WatermarkValue | None = None
     connections: dict[str, dict[str, object]] = field(default_factory=dict)
     table_exists: bool = False
+    valid_from: str | None = None
+    close_missing: bool = False
 
 
 def _write_fields(document: dict[str, object]) -> _Writes:
-    """Check the fields version 3 adds.
+    """Check the fields version 3 adds, and the ``history`` object of version 4.
 
     Parameters
     ----------
@@ -606,26 +629,30 @@ def _write_fields(document: dict[str, object]) -> _Writes:
     Returns
     -------
     _Writes
-        The write mode, key, watermark and connections.
+        The write mode, key, watermark, connections and a history write's options.
 
     Raises
     ------
     ValueError
         If a field is missing or has the wrong type, the key is not given exactly for a
-        merge, or the watermark's value is not one the worker encodes. The message names the
-        field and never contains a value.
+        merge or a history write, the watermark's value is not one the worker encodes, or a
+        history object is missing or malformed for a history write, or present for another.
+        The message names the field and never contains a value.
     """
     write = document.get("write")
     if not isinstance(write, str) or write not in WRITE_CHOICES:
-        raise ValueError("task description: write must be 'replace', 'append' or 'merge'")
+        raise ValueError(
+            "task description: write must be 'replace', 'append', 'merge' or 'history'"
+        )
     key = document.get("key")
     if (
         not isinstance(key, list)
         or not all(isinstance(column, str) and column and not _unsafe(column) for column in key)
-        or bool(key) != (write == "merge")
+        or bool(key) != (write in ("merge", "history"))
     ):
         raise ValueError(
-            "task description: key must name the columns of a merge, and only of a merge"
+            "task description: key must name the columns of a merge or a history write, and "
+            "only of those"
         )
     watermark = document.get("watermark")
     column: str | None = None
@@ -662,6 +689,24 @@ def _write_fields(document: dict[str, object]) -> _Writes:
     table_exists = document.get("table_exists")
     if not isinstance(table_exists, bool):
         raise ValueError("task description: table_exists must be true or false")
+    history = document.get("history")
+    valid_from: str | None = None
+    close_missing = False
+    if write == "history":
+        named = history.get("valid_from") if isinstance(history, dict) else None
+        closing = history.get("close_missing") if isinstance(history, dict) else None
+        if (
+            not isinstance(history, dict)
+            or not isinstance(closing, bool)
+            or not (named is None or (isinstance(named, str) and named and not _unsafe(named)))
+        ):
+            raise ValueError(
+                "task description: history must be an object with valid_from (a column name or "
+                "null) and close_missing (true or false)"
+            )
+        valid_from, close_missing = named, closing
+    elif history is not None:
+        raise ValueError("task description: history is for a history write only")
     return _Writes(
         table_exists=table_exists,
         write=write,
@@ -669,6 +714,8 @@ def _write_fields(document: dict[str, object]) -> _Writes:
         watermark_column=column,
         watermark=value,
         connections={name: dict(routing) for name, routing in connections.items()},
+        valid_from=valid_from,
+        close_missing=close_missing,
     )
 
 
@@ -689,7 +736,7 @@ def parse_description(text: str) -> TaskDescription:
     ------
     ValueError
         If the document is not JSON (an integer of thousands of digits and a
-        document nested too deeply are not), not version 2 or 3, or a field has the
+        document nested too deeply are not), not version 2, 3 or 4, or a field has the
         wrong type, value or relation to another. The message names the field
         and never contains a value.
     """
@@ -702,7 +749,7 @@ def parse_description(text: str) -> TaskDescription:
         or type(document.get("version")) is not int
         or document["version"] not in DESCRIPTION_VERSIONS
     ):
-        raise ValueError("task description: expected a version 2 or 3 document")
+        raise ValueError("task description: expected a version 2, 3 or 4 document")
     inputs = document.get("inputs")
     if not isinstance(inputs, dict) or not all(
         isinstance(key, str) and isinstance(value, str) for key, value in inputs.items()
@@ -731,7 +778,7 @@ def parse_description(text: str) -> TaskDescription:
     decimals = document.get("decimals")
     if decimals is not None and decimals not in DECIMALS_MODES:
         raise ValueError("task description: decimals must be 'float' or 'exact'")
-    writes = _write_fields(document) if document["version"] == 3 else _Writes()
+    writes = _write_fields(document) if document["version"] in (3, 4) else _Writes()
     evolve_schema = document.get("evolve_schema", False)
     if not isinstance(evolve_schema, bool):
         raise ValueError("task description: evolve_schema must be true or false")
@@ -758,6 +805,8 @@ def parse_description(text: str) -> TaskDescription:
         connections=writes.connections,
         table_exists=writes.table_exists,
         evolve_schema=evolve_schema,
+        valid_from=writes.valid_from,
+        close_missing=writes.close_missing,
     )
 
 
@@ -1462,10 +1511,28 @@ def _check_merge_rows(table: pa.Table, key: tuple[str, ...]) -> None:
             "watermark= and return only the rows past ctx.watermark(), and load the history in "
             f"parts of at most {COMPOSITE_KEY_MAX_ROWS:,} rows"
         )
+    if set(key) <= set(table.column_names) and any(table.column(c).null_count for c in key):
+        return  # the server names null keys first, with their count
+    _check_repeated_keys(table, key)
+
+
+def _check_repeated_keys(table: pa.Table, key: tuple[str, ...]) -> None:
+    """Refuse a result whose key repeats, with advice a Python asset can follow.
+
+    Parameters
+    ----------
+    table
+        The converted result.
+    key
+        The key's columns.
+
+    Raises
+    ------
+    InvalidResult
+        For a key that repeats; a key type pyarrow cannot group is left to the server.
+    """
     if not set(key) <= set(table.column_names) or table.num_rows < 2:
         return
-    if any(table.column(column).null_count for column in key):
-        return  # the server names null keys first, with their count
     try:
         groups = table.select(list(key)).group_by(list(key)).aggregate([([], "count_all")])
     except (pa.ArrowNotImplementedError, pa.ArrowInvalid, pa.ArrowTypeError):
@@ -1478,6 +1545,53 @@ def _check_merge_rows(table: pa.Table, key: tuple[str, ...]) -> None:
             f"key {columns} repeats in {repeated} rows of what the asset returned; return one "
             f"row per key, for example with `df.unique(subset=[{subset}], keep='last')`"
         )
+
+
+def _check_history_rows(
+    table: pa.Table, key: tuple[str, ...], dotted: str, valid_from: str | None = None
+) -> None:
+    """Refuse a history write the server would refuse, with advice a Python asset can follow.
+
+    Parameters
+    ----------
+    table
+        The converted result.
+    key
+        The natural key's columns.
+    dotted
+        The asset's table, which names its surrogate key column.
+    valid_from
+        The asset's `valid_from` column, or `None`; when it is a reserved name, the advice says
+        to change it too.
+
+    Raises
+    ------
+    InvalidResult
+        For a column named like one a history write adds (in any case), a null key, or a key
+        that repeats. Missing key columns and key types are left to the server.
+    """
+    surrogate = f"{dotted.rsplit('.', 1)[-1]}_key"
+    reserved = {"valid_from", "valid_to", "is_current", surrogate.casefold()}
+    for name in table.column_names:
+        if name.casefold() in reserved:
+            also = (
+                f", and set `valid_from='source_{shown(name)}'` in `@asset(...)` too"
+                if name == valid_from
+                else ""
+            )
+            raise InvalidResult(
+                f"Column `{shown(name)}` of what the asset returned has a name "
+                f'`write="history"` adds itself (valid_from, valid_to, is_current, {surrogate}); '
+                f"rename it, for example with `df.rename({{{name!r}: 'source_{shown(name)}'}})`"
+                f"{also}"
+            )
+    for column in key:
+        if column in table.column_names and table.column(column).null_count:
+            raise InvalidResult(
+                f"key column `{shown(column)}` is null in {table.column(column).null_count} rows "
+                "of what the asset returned; every version needs its key"
+            )
+    _check_repeated_keys(table, key)
 
 
 def _returned_text(result: object) -> str:
@@ -1775,9 +1889,9 @@ def _upload_message(exc: ValidationError, table: str, write: str) -> str:
     is refused for good. The schema mismatch is recognised by the error type the
     server returns, not by its wording, and the harness writes its own advice,
     which names the decorator's option. Only a replace may take that option (deploy refuses
-    it otherwise), so an append or a merge is told what it can do instead. An append meets the
-    mismatch only in a race: another writer created the table between its first run's read and
-    its upload.
+    it otherwise), so an append, a merge or a history write is told what it can do instead. An
+    append meets the mismatch only in a race: another writer created the table between its first
+    run's read and its upload.
 
     Parameters
     ----------
@@ -1786,7 +1900,7 @@ def _upload_message(exc: ValidationError, table: str, write: str) -> str:
     table
         The asset's dotted table name.
     write
-        The asset's ``write``: ``replace``, ``append`` or ``merge``.
+        The asset's ``write``: ``replace``, ``append``, ``merge`` or ``history``.
 
     Returns
     -------
@@ -1800,6 +1914,14 @@ def _upload_message(exc: ValidationError, table: str, write: str) -> str:
         return str(exc)
     detail = str(exc).split(_SERVER_ADVICE, 1)[0].strip().rstrip(".")
     cause = f"the asset's output no longer matches the schema of {table}. Server detail: {detail}."
+    if write == "history":
+        surrogate = f"{table.rsplit('.', 1)[-1]}_key"
+        return (
+            f"{cause} An asset that keeps history cannot change its table's schema: make the "
+            f"asset return the columns and types {table} has, except the four columns "
+            f'`write="history"` adds (valid_from, valid_to, is_current, {surrogate}), then run '
+            "it again."
+        )
     if write != "replace":
         return (
             f"{cause} An asset that {write}s cannot change its table's schema: make the asset "
@@ -1891,17 +2013,26 @@ def run_asset(description: TaskDescription, client: Client, root: Path) -> dict[
     with _Phase("validate"):
         replaces = description.write == "replace"
         arrow = _to_arrow(result, columns_optional=not replaces)
-        if not replaces and arrow.num_rows == 0 and _table_exists(description):
+        skips_empty = description.write in ("append", "merge") or (
+            description.write == "history" and not description.close_missing
+        )
+        if skips_empty and arrow.num_rows == 0 and _table_exists(description):
             # Nothing new since the last run: the table stays as it is. The watermark column is
             # not checked here (an empty result may have no columns at all), so an empty result
             # with a wrongly typed watermark column passes; the next run that has rows fails.
+            # A history asset with `close_missing` sends an empty result: the server refuses it,
+            # rather than close every version.
             return {"status": "succeeded", "snapshot_id": None, "rows": 0}
+        if arrow.num_columns == 0 and description.write == "history" and _table_exists(description):
+            raise InvalidResult(_NOTHING_TO_CLOSE.format(table=description.table))
         if arrow.num_columns == 0:
             raise InvalidResult(_NOTHING_TO_CREATE.format(table=description.table))
         if description.watermark_column is not None:
             _check_watermark_column(arrow, description.watermark_column)
         if description.write == "merge":
             _check_merge_rows(arrow, description.key)
+        if description.write == "history":
+            _check_history_rows(arrow, description.key, description.table, description.valid_from)
     with _Phase("upload"):
         return _upload(client, description, arrow)
 
@@ -1967,7 +2098,7 @@ def _upload(client: Client, description: TaskDescription, arrow: pa.Table) -> di
     -------
     dict
         The ``succeeded`` record of a table asset; a merge's rows are those it inserted and
-        updated.
+        updated, a history write's the versions it opened and closed.
 
     Raises
     ------
@@ -1981,6 +2112,19 @@ def _upload(client: Client, description: TaskDescription, arrow: pa.Table) -> di
     }
     expected = description.expected_snapshot_id
     try:
+        if description.write == "history":
+            kept = client.tables.history(
+                description.environment,
+                description.table,
+                arrow,
+                key=list(description.key),
+                valid_from=description.valid_from,
+                close_missing=description.close_missing,
+                expected_snapshot_id=expected,
+                **lineage,
+            )
+            rows = kept.versions_opened + kept.versions_closed
+            return {"status": "succeeded", "snapshot_id": kept.snapshot_id, "rows": rows}
         if description.write == "merge":
             merged = client.tables.merge(
                 description.environment,

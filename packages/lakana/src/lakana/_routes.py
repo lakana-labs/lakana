@@ -126,6 +126,9 @@ ROUTES: dict[str, Route] = {
     "tables.merge": Route(
         "POST", "/api/v1/environments/{env}/namespaces/{path}/tables/{name}/merge"
     ),
+    "tables.history": Route(
+        "POST", "/api/v1/environments/{env}/namespaces/{path}/tables/{name}/history"
+    ),
     "tables.lineage": Route(
         "GET", "/api/v1/environments/{env}/namespaces/{path}/tables/{name}/lineage"
     ),

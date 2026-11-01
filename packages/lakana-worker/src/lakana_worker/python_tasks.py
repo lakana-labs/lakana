@@ -79,6 +79,7 @@ from lakana_core.models import (
     TableType,
     WriteMode,
 )
+from lakana_core.projects.history_columns import HistorySpec
 from lakana_core.projects.issues import ProjectIssue
 from lakana_core.projects.limits import DeployLimits
 from lakana_core.projects.lockfile import (
@@ -96,6 +97,7 @@ from lakana_core.projects.manifest import (
     asset_kind,
     entry_connections,
     entry_decimals,
+    entry_history,
     entry_input_kinds,
     entry_output,
     manifest_lock_sha256,
@@ -645,9 +647,10 @@ class _Prepared:
     principal
         The run principal, bound to this attempt; reads the watermark.
     write
-        ``replace``, ``append`` or ``merge`` (always ``replace`` for an artifact asset).
+        ``replace``, ``append``, ``merge`` or ``history`` (always ``replace`` for an artifact
+        asset).
     key
-        The merge key's columns.
+        The key's columns, of a merge or a history write.
     watermark_column
         The asset's `watermark` column, if it has one.
     plan
@@ -656,6 +659,8 @@ class _Prepared:
     evolve_schema
         Whether the replace lets the table take the result's schema: the manifest entry says
         ``true`` and the asset replaces a table.
+    history
+        How a history asset writes (``write: history``); `None` for every other asset.
     """
 
     environment: str
@@ -679,6 +684,7 @@ class _Prepared:
     watermark_column: str | None = None
     plan: ConnectionPlan = field(default_factory=lambda: ConnectionPlan())
     evolve_schema: bool = False
+    history: HistorySpec | None = None
 
     @property
     def connections(self) -> dict[str, dict[str, object]]:
@@ -811,7 +817,12 @@ class _Shown:
     watermark: str | None = None
 
 
-_LOGGED_MODES = {"replace": WriteMode.REPLACE, "append": WriteMode.APPEND, "merge": WriteMode.MERGE}
+_LOGGED_MODES = {
+    "replace": WriteMode.REPLACE,
+    "append": WriteMode.APPEND,
+    "merge": WriteMode.MERGE,
+    "history": WriteMode.HISTORY,
+}
 
 
 @dataclass
@@ -1491,6 +1502,7 @@ class PythonRuntime:
                     roots=prepared.plan.roots,
                     root_users=prepared.plan.root_users,
                     evolve_schema=prepared.evolve_schema,
+                    history=prepared.history,
                 ),
                 sink,
                 stop,
@@ -1626,7 +1638,7 @@ class PythonRuntime:
             )
             nothing_new = (
                 after.table_id is not None
-                and prepared.write in ("append", "merge")
+                and prepared.write in ("append", "merge", "history")
                 and outcome.rows == 0
                 and outcome.snapshot_id is None
             )
@@ -1660,9 +1672,9 @@ class PythonRuntime:
                     ),
                 )
             if after == before and nothing_new:
-                # Nothing new since the last run: an append or merge that writes nothing has
-                # done its work. A record can claim this without running the asset, which then
-                # left the table as it was, the outcome a run that found nothing has.
+                # Nothing new since the last run: an append, merge or history write that writes
+                # nothing has done its work. A record can claim this without running the asset,
+                # which then left the table as it was, the outcome a run that found nothing has.
                 return self._wrote_nothing(before, start, baseline, ended)
         stop = cancel_kind(session, keeper, claimed.run_id)
         if stop is not None:
@@ -1732,7 +1744,7 @@ class PythonRuntime:
         baseline: Baseline | None,
         ended: Callable[..., TaskOutcome],
     ) -> TaskOutcome:
-        """End an append or merge that found nothing new, as succeeded.
+        """End an append, merge or history write that found nothing new, as succeeded.
 
         What counts is the table as this attempt found it (`before`): a change somebody else
         made while it ran is not this task run's write.
@@ -2001,6 +2013,7 @@ class PythonRuntime:
             evolve_schema=output == "table"
             and write == "replace"
             and entry.get("evolve_schema") is True,
+            history=entry_history(entry) if write == "history" else None,
         )
         return prepared, tarball
 

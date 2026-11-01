@@ -1061,7 +1061,7 @@ def test_an_artifact_asset_takes_no_write_model(argument: str) -> None:
 
 _EVOLVE_NEEDS_REPLACE = (
     'evolve_schema=True works with write="replace" (the default) only; remove evolve_schema, '
-    "or replace the table instead of appending or merging"
+    "or replace the table instead of appending, merging or keeping its history"
 )
 
 
@@ -1275,15 +1275,53 @@ def test_a_label_on_an_artifact_asset_is_refused() -> None:
     ]
 
 
-def test_a_python_asset_cannot_keep_history_yet() -> None:
+_DIMENSION = (
+    'write="history", kind="dimension", grain="One row per station and version.", '
+    'key=["station_id"], '
+)
+
+
+def test_a_python_asset_keeps_history_with_its_options() -> None:
     source = _GOOD.replace(
-        "@asset(", '@asset(write="history", kind="dimension", grain="g", key=["id"], ', 1
+        "@asset(", f'@asset({_DIMENSION}valid_from="observed_at", close_missing=True, ', 1
     )
+    metadata = _parsed(source).metadata
+    assert (metadata.write, metadata.valid_from, metadata.close_missing) == (
+        "history",
+        "observed_at",
+        True,
+    )
+
+
+@pytest.mark.parametrize(
+    ("argument", "message"),
+    [
+        (
+            'write="history", key=["station_id"]',
+            "`write: history` keeps the versions of a dimension's rows; declare `kind: "
+            "dimension`, with `grain:` and `key:`",
+        ),
+        (
+            f'{_DIMENSION}watermark="ts"',
+            "`write: history` takes no `watermark:`; its SELECT returns the current state of "
+            "every row, and each run compares it with the open versions",
+        ),
+        ("close_missing=True", "`close_missing:` works with `write: history` only"),
+        ("close_missing=1", "argument 'close_missing' must be True or False"),
+        ("valid_from=3", "argument 'valid_from' must be a string"),
+    ],
+)
+def test_a_wrong_history_model_is_a_deploy_issue_at_the_decorator(
+    argument: str, message: str
+) -> None:
+    source = _GOOD.replace("@asset(", f"@asset({argument}, ", 1)
+    assert message in [issue.message for issue in _issues(source)]
+
+
+def test_an_artifact_asset_takes_no_history_options() -> None:
+    source = _MODEL.replace("keep_versions=2", "close_missing=True")
     messages = [issue.message for issue in _issues(source)]
-    assert messages == [
-        'write="history" is not available for Python assets yet; build the dimension as a SQL '
-        "asset with `write: history` in its header"
-    ]
+    assert "argument 'close_missing' does not apply to an artifact asset; remove it" in messages
 
 
 def test_a_python_reference_may_name_the_rows_time() -> None:

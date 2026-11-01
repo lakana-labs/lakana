@@ -25,6 +25,7 @@ import pytest
 
 import lakana_worker.runners as runners_module
 from lakana.runner import TaskDescription, parse_description
+from lakana_core.projects.history_columns import HistorySpec
 from lakana_core.runs.failures import FailureCode
 from lakana_core.secrets.forms import secret_forms
 from lakana_worker.processes import remove_private_tree
@@ -852,6 +853,37 @@ def test_an_evolving_replace_says_so_and_keeps_description_version_2(harness: Ha
     description = _description(harness, evolve_schema=True)
     assert description["version"] == 2
     assert description["evolve_schema"] is True
+
+
+def test_a_history_asset_gets_description_version_4(harness: Harness) -> None:
+    description = _description(
+        harness, write="history", key=("id",), history=HistorySpec(("id",), "changed_at", True)
+    )
+    assert description["version"] == 4
+    assert description["key"] == ["id"]
+    assert description["history"] == {"valid_from": "changed_at", "close_missing": True}
+
+
+def test_only_a_history_asset_gets_a_history_object(harness: Harness) -> None:
+    description = _description(harness, write="merge", key=("id",))
+    assert description["version"] == 3
+    assert "history" not in description
+
+
+def test_the_sdk_parses_a_version_4_description(harness: Harness) -> None:
+    harness.fields = {
+        "write": "history",
+        "key": ("id",),
+        "history": HistorySpec(("id",), None, False),
+        "expected_snapshot_id": 17,
+    }
+    parsed = _real_parse(harness)
+    assert (parsed.write, parsed.key, parsed.valid_from, parsed.close_missing) == (
+        "history",
+        ("id",),
+        None,
+        False,
+    )
 
 
 def test_the_sdk_parses_the_evolve_schema_of_a_task(harness: Harness) -> None:

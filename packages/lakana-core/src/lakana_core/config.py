@@ -415,6 +415,9 @@ DEFAULT_MAINTENANCE_TIMEOUT = 1800.0
 DEFAULT_MAX_HISTORY_OPEN_VERSIONS = 1_000_000
 """Most open versions a history write takes on by default (`max_history_open_versions`)."""
 
+DEFAULT_MAX_HISTORY_OPEN_BYTES = 512 * 1024**2
+"""Most bytes of Arrow data a history write reads its open versions into by default (512 MiB)."""
+
 
 class RunConfig(BaseModel):
     """Operator settings of the run engine (`LAKANA_RUN__*`; Python assets too).
@@ -464,11 +467,24 @@ class RunConfig(BaseModel):
         timeout cause; running maintenance again continues where it stopped.
     max_history_open_versions
         Most open versions a table built with `write: history` may have for a run to write it,
-        its first run included. A history write holds every open version in the worker's memory,
-        roughly 2 GiB per million at 8 columns and more for wider rows. A run is refused before
+        its first run included. A history write holds every open version in memory, roughly 2 GiB
+        per million at 8 columns and more for wider rows: the worker's for a SQL asset, the
+        server's for a Python asset, which writes over the REST API. A run is refused before
         it reads them when the table's open versions or its result's rows exceed it (a first run
         before it creates the table), and before it writes when the open versions it would leave
-        exceed it. Raise it together with `LAKANA_WORKER__MEMORY_LIMIT`.
+        exceed it. Raise it together with `LAKANA_WORKER__MEMORY_LIMIT` (SQL asset) or the
+        memory the server has (Python asset).
+    max_history_open_bytes
+        Most bytes of Arrow data a history write may read the open versions of its table into,
+        512 MiB by default. The open-versions cap counts rows; this bounds their width too, since
+        a version holds whatever columns the dimension has: the worker's memory for a SQL asset,
+        the server's for a Python asset. The bytes are counted file by file while the open
+        versions are read; as soon as they pass it, the read stops and the run is refused, and
+        nothing is written, so at most this plus one data file is held (a file holds one write's
+        new versions: one request body over REST, `LAKANA_APPEND__MAX_BYTES`, or one SQL run's).
+        It also bounds the latest ends of the keys that return. Raise it if that memory allows
+        it, or narrow the dimension's columns (wide text such as descriptions in a table of its
+        own, joined by the key).
     index_url
         An extra package index for building the environment of a Python project, as a URL. It may
         carry a password, which is hidden in logs and error messages.
@@ -524,6 +540,7 @@ class RunConfig(BaseModel):
     sweep_interval: float = Field(default=3600.0, ge=0)
     maintenance_timeout: float = Field(default=DEFAULT_MAINTENANCE_TIMEOUT, gt=0)
     max_history_open_versions: int = Field(default=DEFAULT_MAX_HISTORY_OPEN_VERSIONS, gt=0)
+    max_history_open_bytes: int = Field(default=DEFAULT_MAX_HISTORY_OPEN_BYTES, gt=0)
     index_url: SecretStr | None = None
     https_proxy: SecretStr | None = None
     no_proxy: str | None = None

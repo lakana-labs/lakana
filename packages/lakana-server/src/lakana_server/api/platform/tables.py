@@ -33,6 +33,7 @@ from starlette.requests import ClientDisconnect
 
 from lakana_core.auth import PrincipalRef
 from lakana_core.catalog.descriptions import KEEP, Keep
+from lakana_core.catalog.history import HistoryResult
 from lakana_core.catalog.json_schema import ColumnSpec, from_iceberg_schema, to_iceberg_schema
 from lakana_core.catalog.lineage_graph import LineageDirection, LineageService
 from lakana_core.catalog.loads import require_bronze
@@ -46,6 +47,7 @@ from lakana_core.catalog.writes import (
     parse_source_versions,
 )
 from lakana_core.errors import LakanaError, ValidationError
+from lakana_core.heap import trim_heap
 from lakana_core.identifiers import NamespacePath, TableRef
 from lakana_core.projects.asset_model import require_model_kind
 from lakana_server.api.platform.languages import LANG_DESCRIPTION, reader_languages
@@ -56,6 +58,7 @@ from lakana_server.api.platform.schemas import (
     DroppedTableOut,
     ExternalTableCreate,
     ExternalTableOut,
+    HistoryOut,
     LineageEdgeOut,
     LineageNodeOut,
     LineageOut,
@@ -773,13 +776,15 @@ async def _governed_arrow_write(
     ref: TableRef,
     write: Callable[[pa.Table], _T],
     precheck: Callable[[], None],
+    history: bool = False,
 ) -> _T:
     """Read, bound and decode an Arrow IPC body, then hand it to a catalog write.
 
-    Shared by `append_table_data`, `replace_table_data` and `merge_table_data` so every body
-    control applies to all three.
+    Shared by `append_table_data`, `replace_table_data`, `merge_table_data` and
+    `write_table_history` so every body control applies to all four.
 
-    `precheck` (`check_can_append`, `check_can_replace` or `check_can_merge`) runs
+    `precheck` (`check_can_append`, `check_can_replace`, `check_can_merge` or
+    `check_can_history`) runs
     first — before the body is read at all — so an unauthorized or
     nonexistent-table request is refused
     without spending any time or memory on a body that was never going to
@@ -870,6 +875,12 @@ async def _governed_arrow_write(
     precheck
         The catalog's cheap authorization and existence check, run in the
         threadpool before the body is read.
+    history
+        Whether this is a history write. It then also takes a slot of
+        `app.state.history_concurrency_limiter` (`Settings.append.max_concurrent_history`,
+        `LAKANA_APPEND__MAX_CONCURRENT_HISTORY`), without waiting, after the precheck and before
+        the body is read, so a request the precheck refuses never holds it; both slots are
+        released however the function exits.
 
     Returns
     -------
@@ -895,9 +906,18 @@ async def _governed_arrow_write(
     limiter: AppendConcurrencyLimiter = request.app.state.append_concurrency_limiter
     if not limiter.try_acquire():
         raise AppendConcurrencyLimitError("Too many concurrent appends; retry shortly.")
+    history_limiter: AppendConcurrencyLimiter | None = None
     try:
         await run_in_threadpool(precheck)
         await run_in_threadpool(session.rollback)
+        if history:
+            if not request.app.state.history_concurrency_limiter.try_acquire():
+                raise AppendConcurrencyLimitError(
+                    "Too many concurrent history writes; retry shortly. The server holds a "
+                    "history table's open versions in memory, so it runs few at once "
+                    "(LAKANA_APPEND__MAX_CONCURRENT_HISTORY, default 1)."
+                )
+            history_limiter = request.app.state.history_concurrency_limiter
 
         append_config = request.app.state.settings.append
         max_bytes = append_config.max_bytes
@@ -931,6 +951,8 @@ async def _governed_arrow_write(
         return await run_in_threadpool(write, data)
     finally:
         limiter.release()
+        if history_limiter is not None:
+            history_limiter.release()
 
 
 @router.post("", response_model=TableOut, status_code=201, responses=errors(403, 404, 409))
@@ -2236,6 +2258,152 @@ async def merge_table_data(
         snapshot_id=result.snapshot_id,
         rows_inserted=result.rows_inserted,
         rows_updated=result.rows_updated,
+    )
+
+
+@router.post(
+    "/{name}/history", response_model=HistoryOut, responses=errors(403, 404, 409, 408, 413, 503)
+)
+@streams_its_own_body
+async def write_table_history(
+    env: str,
+    path: str,
+    name: str,
+    request: Request,
+    key: list[str] = Query(min_length=1),
+    valid_from: str | None = Query(default=None, max_length=1024),
+    source: list[str] | None = Query(default=None),
+    source_version: list[str] | None = Query(default=None),
+    expected_snapshot_id: str | None = Query(default=None, max_length=64),
+    close_missing: bool = Query(default=False),
+    principal: PrincipalRef = Depends(get_write_principal),
+    catalog: CatalogService = Depends(get_catalog),
+    session: Session = Depends(get_session),
+) -> HistoryOut:
+    """Keep the versions of a dimension's rows: open, close and leave alone, in one snapshot.
+
+    Sends the current state of every row as an Arrow IPC stream. Against the table's open
+    versions, a new key opens a version, a key whose values changed closes its version and opens
+    a new one, an unchanged key is left alone, and with `close_missing=true` a key the rows lack
+    is closed. Nothing is deleted. A key's first version always starts at 0001-01-01 UTC, so
+    that every row of a fact finds it; `valid_from` and the run's start time date later
+    versions. A Python asset with `write="history"` calls this; there is no CLI command. Takes
+    the same `source`, `source_version` and `expected_snapshot_id` as the merge, and the same
+    body limits. Needs `WRITE_TABLE` and `READ_TABLE` (and `CREATE_TABLE` to create the table
+    with `expected_snapshot_id=none`); refused (422) while a row filter or column mask on the
+    table applies to the caller. Answers 404 when the table or a source does not exist, 409 when
+    `expected_snapshot_id` no longer matches or another writer committed first, 413/408/503 as
+    the merge, and 422 for what the history write refuses (counts, never values), including more
+    open versions than `LAKANA_RUN__MAX_HISTORY_OPEN_VERSIONS` allows.
+
+    Parameters
+    ----------
+    env
+        Environment name.
+    path
+        Dot-joined namespace path.
+    name
+        Table name.
+    request
+        The current request.
+    key
+        The natural key's columns; repeat the parameter for a key of several columns.
+    valid_from
+        The column each later version's start is read from; without it, the time the run began
+        (or the server's time for a call outside a run). A key's first version always starts at
+        0001-01-01 UTC.
+    source
+        Dotted names of the tables the rows came from.
+    source_version
+        ``<version>:<dotted name>`` for each source that is an artifact.
+    expected_snapshot_id
+        The table's current snapshot as the caller read it, or `none`, which also creates a
+        missing table.
+    close_missing
+        Close the open version of each key the rows lack.
+    principal
+        The authenticated caller, with any `?break_glass_reason=` attached.
+    catalog
+        The catalog service for this request.
+    session
+        The request's session.
+
+    Returns
+    -------
+    HistoryOut
+        The committed snapshot's id and the counts.
+
+    Raises
+    ------
+    lakana_core.errors.ValidationError
+        Mapped to 422.
+    lakana_core.errors.NotFoundError
+        Mapped to 404.
+    lakana_core.errors.PermissionDenied
+        Mapped to 403.
+    lakana_core.errors.ConflictError
+        Mapped to 409.
+
+    Notes
+    -----
+    The body controls are shared with `append_table_data` through `_governed_arrow_write`. The
+    write runs with the server's `max_write_rows`, `max_history_open_versions` and
+    `max_history_open_bytes`, as a run's
+    does in the worker, and hands the memory it freed back afterwards (`trim_heap`), whether or
+    not it lands; a request refused before its body is read never gets that far.
+    """
+    expected, versions, ref = _arrow_write_target(
+        request, env, path, name, source, source_version, expected_snapshot_id
+    )
+    settings = request.app.state.settings
+
+    def write(data: pa.Table) -> HistoryResult:
+        """Run the history write, then give its memory back.
+
+        Parameters
+        ----------
+        data
+            The decoded rows.
+
+        Returns
+        -------
+        HistoryResult
+            The catalog's outcome.
+        """
+        try:
+            return catalog.history(
+                principal,
+                ref,
+                data,
+                key=key,
+                valid_from=valid_from,
+                close_missing=close_missing,
+                sources=source or [],
+                source_versions=versions,
+                expected_snapshot_id=expected,
+                max_rows=settings.query_limits.max_write_rows,
+                max_open_versions=settings.run.max_history_open_versions,
+                max_open_bytes=settings.run.max_history_open_bytes,
+            )
+        finally:
+            trim_heap()
+
+    result = await _governed_arrow_write(
+        request,
+        principal,
+        catalog,
+        session,
+        ref,
+        write,
+        precheck=lambda: catalog.check_can_history(principal, ref, expected_snapshot_id=expected),
+        history=True,
+    )
+    return HistoryOut(
+        snapshot_id=result.snapshot_id,
+        versions_opened=result.versions_opened,
+        versions_closed=result.versions_closed,
+        closed_missing=result.closed_missing,
+        created=result.created,
     )
 
 

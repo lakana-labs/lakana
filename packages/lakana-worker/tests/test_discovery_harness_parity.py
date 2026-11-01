@@ -33,6 +33,7 @@ from lakana.assets import ASSET_ATTRIBUTE
 from lakana_core.connections.kinds import NAME
 from lakana_core.projects.asset_model import (
     EVOLVE_NEEDS_REPLACE,
+    HISTORY_NEEDS_DIMENSION,
     MAX_CONNECTIONS,
     MAX_KEEP_VERSIONS,
     MODEL_KINDS,
@@ -819,3 +820,56 @@ def test_the_sdk_words_the_free_text_rule_as_core_does() -> None:
     from lakana_core.projects.project_config import FREE_TEXT_MESSAGE
 
     assert sdk_assets._FREE_TEXT_MESSAGE == FREE_TEXT_MESSAGE
+
+
+def _deploy_messages(source: str) -> list[str]:
+    """Run deploy discovery on a source and collect what it refuses.
+
+    Parameters
+    ----------
+    source
+        The asset file's text.
+
+    Returns
+    -------
+    list of str
+        The issues' texts; empty when discovery accepts the file.
+    """
+    parsed = parse_python_asset(
+        DiscoveredAsset(
+            path=_PATH, table="gold.scores", text=normalize_source(source), kind="python"
+        ),
+        AssetDefaults(),
+    )
+    return [] if isinstance(parsed, ParsedAsset) else [issue.message for issue in parsed]
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        'write="history", key=["id"]',
+        'write="history", kind="dimension", grain="g", key=["id"], watermark="ts"',
+        'valid_from="changed_at"',
+        "close_missing=True",
+        'write="history", kind="dimension", grain="g", key=["id"], valid_from="id"',
+        'write="history", kind="dimension", grain="g", key=["id"], evolve_schema=True',
+    ],
+)
+def test_the_history_rules_read_the_same_in_core_and_the_sdk(arguments: str) -> None:
+    source = _PLAIN.replace("@asset()", f"@asset({arguments})")
+    refusal = _call(source)
+    assert refusal is not None
+    assert refusal in _deploy_messages(source)
+
+
+def test_a_history_asset_is_accepted_by_both() -> None:
+    source = _PLAIN.replace(
+        "@asset()",
+        '@asset(write="history", kind="dimension", grain="g", key=["id"], '
+        'valid_from="changed_at", close_missing=True)',
+    )
+    assert _call(source) is None
+    parsed = _discovered(source)
+    assert parsed is not None
+    assert (parsed.metadata.valid_from, parsed.metadata.close_missing) == ("changed_at", True)
+    assert sdk_assets.HISTORY_NEEDS_DIMENSION == HISTORY_NEEDS_DIMENSION

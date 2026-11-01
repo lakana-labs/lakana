@@ -814,6 +814,40 @@ def test_the_references_route_lists_both_directions(client: TestClient) -> None:
     }
 
 
+def test_a_valid_at_reference_answers_its_at_column(client: TestClient) -> None:
+    """A reference to a history dimension carries the column that says when its row happened."""
+    _star(client)
+    with Session(client.app.state.engine) as session:
+        row = session.scalars(select(Table).where(Table.name == "fact_sales")).one()
+        write_model_entry(
+            session,
+            row,
+            {
+                "write": "replace",
+                "key": ["date", "store_id"],
+                "model": {
+                    "kind": "fact",
+                    "grain": "One row per store and day.",
+                    "references": [
+                        {
+                            "column": "store_id",
+                            "target": "gold.dim_store",
+                            "target_column": "id",
+                            "at": "date",
+                        }
+                    ],
+                },
+            },
+        )
+        session.commit()
+
+    fact = client.get(f"{_GOLD_TABLES}/fact_sales", headers=AUTH_HEADER)
+    found = client.get(f"{_GOLD_TABLES}/dim_store/references", headers=AUTH_HEADER)
+
+    assert [r["at"] for r in fact.json()["model"]["references"]] == ["date"]
+    assert [r["at"] for r in found.json()["incoming"]] == ["date"]
+
+
 def _table_reader(client: TestClient, name: str, table: str) -> dict[str, str]:
     """Create a user holding the viewer role on one table of `gold` only.
 

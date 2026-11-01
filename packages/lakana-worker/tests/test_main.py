@@ -1180,9 +1180,10 @@ def test_main_installs_the_maintenance_timeout_from_the_environment(
 def test_main_installs_the_history_open_versions_cap_from_the_environment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`LAKANA_RUN__MAX_HISTORY_OPEN_VERSIONS` reaches the cap of every history write."""
+    """`LAKANA_RUN__MAX_HISTORY_OPEN_VERSIONS` and `…_OPEN_BYTES` reach every history write."""
     monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{tmp_path}/lakana.db")
     monkeypatch.setenv("LAKANA_RUN__MAX_HISTORY_OPEN_VERSIONS", "2500000")
+    monkeypatch.setenv("LAKANA_RUN__MAX_HISTORY_OPEN_BYTES", "1073741824")
     with (
         mock.patch("lakana_worker.__main__.poll_forever"),
         mock.patch("lakana_worker.__main__.SchedulerLoop") as scheduler_mock,
@@ -1192,6 +1193,7 @@ def test_main_installs_the_history_open_versions_cap_from_the_environment(
         scheduler_mock.return_value.start.return_value.is_alive.return_value = False
         main()
     assert pipeline._MAX_HISTORY_OPEN_VERSIONS == 2_500_000
+    assert pipeline._MAX_HISTORY_OPEN_BYTES == 1_073_741_824
 
 
 def test_main_installs_what_the_audit_stores_of_query_text(
