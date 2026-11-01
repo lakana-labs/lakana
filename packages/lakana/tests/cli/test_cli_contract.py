@@ -117,11 +117,16 @@ _TASK_ONLY = frozenset({"task_connections.get"})
 the refusal. `lakana.ingest` calls them inside the task; a person reads connections with
 `lakana connection show`."""
 
+_ASSET_ONLY = frozenset({"tables.history"})
+"""SDK methods a Python asset's harness calls and no person runs by hand: a history version
+loaded by hand would start at the request's time and invite one-off versions (#253). The route and
+the SDK call are documented in the reference "Keeping the history of a dimension"."""
+
 
 def test_every_public_sdk_method_has_a_command() -> None:
     """Completeness: no SDK capability is missing from the CLI (plan ruling 2)."""
     covered = {key for keys in COMMANDS.values() for key in keys}
-    missing = _public_sdk_methods() - covered - _TASK_ONLY
+    missing = _public_sdk_methods() - covered - _TASK_ONLY - _ASSET_ONLY
     assert not missing, f"SDK methods with no CLI command: {sorted(missing)}"
 
 

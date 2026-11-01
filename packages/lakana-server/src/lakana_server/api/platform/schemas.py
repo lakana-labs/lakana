@@ -791,6 +791,30 @@ class MergeOut(BaseModel):
     rows_updated: int
 
 
+class HistoryOut(BaseModel):
+    """What a history write answers: the snapshot and how many versions it opened and closed.
+
+    Parameters
+    ----------
+    snapshot_id
+        The committed snapshot; `None` when the rows matched the open versions already.
+    versions_opened
+        New versions: a key seen for the first time, or a key with changed values.
+    versions_closed
+        Ended versions: a key with changed values, or a key the rows lack (`close_missing`).
+    closed_missing
+        The part of `versions_closed` that ended because the key is gone from the rows.
+    created
+        `True` when this write created the table (`expected_snapshot_id=none`).
+    """
+
+    snapshot_id: int | None
+    versions_opened: int
+    versions_closed: int
+    closed_missing: int
+    created: bool
+
+
 class ReplaceOut(BaseModel):
     """The outcome of an Arrow replace.
 

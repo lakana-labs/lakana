@@ -28,6 +28,7 @@ from lakana._models import (
     Environment,
     ExternalTable,
     Failure,
+    HistoryResult,
     Lineage,
     LineageEdge,
     LineageNode,
@@ -1105,6 +1106,85 @@ def test_tables_merge_route_is_registered() -> None:
     """The route table names the merge route."""
     assert ROUTES["tables.merge"] == Route(
         "POST", "/api/v1/environments/{env}/namespaces/{path}/tables/{name}/merge"
+    )
+
+
+# --- Tables: history -------------------------------------------------------
+
+
+def test_tables_history_posts_the_stream_with_its_parameters() -> None:
+    """The key, `valid_from`, `close_missing` and the sources travel as query parameters."""
+    seen: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["path"] = request.url.path
+        seen["params"] = request.url.params.multi_items()
+        return httpx.Response(
+            200,
+            json={
+                "snapshot_id": 11,
+                "versions_opened": 2,
+                "versions_closed": 1,
+                "closed_missing": 0,
+                "created": False,
+            },
+        )
+
+    result = Tables(_transport(handler)).history(
+        "dev",
+        "gold.dim_customer",
+        pa.table({"customer_id": ["A"], "changed_at": [datetime(2026, 1, 1, tzinfo=UTC)]}),
+        key=["customer_id"],
+        valid_from="changed_at",
+        close_missing=True,
+        sources=["silver.customers"],
+    )
+
+    assert seen["path"] == "/api/v1/environments/dev/namespaces/gold/tables/dim_customer/history"
+    assert seen["params"] == [
+        ("key", "customer_id"),
+        ("valid_from", "changed_at"),
+        ("close_missing", "true"),
+        ("source", "silver.customers"),
+    ]
+    assert result == HistoryResult(
+        snapshot_id=11, versions_opened=2, versions_closed=1, closed_missing=0, created=False
+    )
+
+
+def test_tables_history_refuses_an_empty_key_and_retries_a_conflict_once() -> None:
+    """An empty key is refused before sending; a conflict without a precondition is retried."""
+    with pytest.raises(ValueError, match="at least one key column"):
+        Tables(_transport(lambda r: httpx.Response(200, json={}))).history(
+            "dev", "gold.dim_customer", pa.table({"customer_id": ["A"]}), key=[]
+        )
+    attempts = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            return httpx.Response(409, json={"detail": "conflict"})
+        return httpx.Response(
+            200,
+            json={
+                "snapshot_id": None,
+                "versions_opened": 0,
+                "versions_closed": 0,
+                "closed_missing": 0,
+                "created": False,
+            },
+        )
+
+    Tables(_transport(handler)).history(
+        "dev", "gold.dim_customer", pa.table({"customer_id": ["A"]}), key="customer_id"
+    )
+    assert attempts["n"] == 2
+
+
+def test_tables_history_route_is_registered() -> None:
+    """The route table names the history route."""
+    assert ROUTES["tables.history"] == Route(
+        "POST", "/api/v1/environments/{env}/namespaces/{path}/tables/{name}/history"
     )
 
 

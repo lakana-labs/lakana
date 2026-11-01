@@ -4699,6 +4699,278 @@
         }
       }
     },
+    "/api/v1/environments/{env}/namespaces/{path}/tables/{name}/history": {
+      "post": {
+        "tags": [
+          "tables"
+        ],
+        "summary": "Keep the versions of a dimension's rows: open, close and leave alone, in one snapshot",
+        "description": "Sends the current state of every row as an Arrow IPC stream. Against the table's open versions, a new key opens a version, a key whose values changed closes its version and opens a new one, an unchanged key is left alone, and with `close_missing=true` a key the rows lack is closed. Nothing is deleted. A Python asset with `write=\"history\"` calls this; there is no CLI command. Takes the same `source`, `source_version` and `expected_snapshot_id` as the merge, and the same body limits. Needs `WRITE_TABLE` and `READ_TABLE` (and `CREATE_TABLE` to create the table with `expected_snapshot_id=none`); refused (422) while a row filter or column mask on the table applies to the caller. Answers 404 when the table or a source does not exist, 409 when `expected_snapshot_id` no longer matches or another writer committed first, 413/408/503 as the merge, and 422 for what the history write refuses (counts, never values), including more open versions than `LAKANA_RUN__MAX_HISTORY_OPEN_VERSIONS` allows.",
+        "operationId": "write_table_history_api_v1_environments__env__namespaces__path__tables__name__history_post",
+        "parameters": [
+          {
+            "name": "env",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Env"
+            },
+            "description": "Environment name."
+          },
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            },
+            "description": "Dot-joined namespace path."
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            },
+            "description": "Table name."
+          },
+          {
+            "name": "key",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "title": "Key"
+            },
+            "description": "The natural key's columns; repeat the parameter for a key of several columns."
+          },
+          {
+            "name": "valid_from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 1024
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Valid From"
+            },
+            "description": "The column each version's start is read from; without it, the time the run began (or the server's time for a call outside a run)."
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source"
+            },
+            "description": "Dotted names of the tables the rows came from."
+          },
+          {
+            "name": "source_version",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source Version"
+            },
+            "description": "``<version>:<dotted name>`` for each source that is an artifact."
+          },
+          {
+            "name": "expected_snapshot_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Expected Snapshot Id"
+            },
+            "description": "The table's current snapshot as the caller read it, or `none`, which also creates a missing table."
+          },
+          {
+            "name": "close_missing",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Close Missing"
+            },
+            "description": "Close the open version of each key the rows lack."
+          },
+          {
+            "name": "break_glass_reason",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 500
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Why the protection of a protected environment is broken, up to 500 characters; recorded in the audit log. Only a protected environment needs it.",
+              "title": "Break Glass Reason"
+            },
+            "description": "Why the protection of a protected environment is broken, up to 500 characters; recorded in the audit log. Only a protected environment needs it."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HistoryOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token is missing, wrong, expired or revoked.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "No part of the request body arrived within the read timeout.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The request body is larger than the server accepts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The server cannot do this right now; ask again after the time in `Retry-After`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/environments/{env}/namespaces/{path}/tables/{name}/load": {
       "post": {
         "tags": [
@@ -19720,6 +19992,47 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
+      },
+      "HistoryOut": {
+        "properties": {
+          "snapshot_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snapshot Id"
+          },
+          "versions_opened": {
+            "type": "integer",
+            "title": "Versions Opened"
+          },
+          "versions_closed": {
+            "type": "integer",
+            "title": "Versions Closed"
+          },
+          "closed_missing": {
+            "type": "integer",
+            "title": "Closed Missing"
+          },
+          "created": {
+            "type": "boolean",
+            "title": "Created"
+          }
+        },
+        "type": "object",
+        "required": [
+          "snapshot_id",
+          "versions_opened",
+          "versions_closed",
+          "closed_missing",
+          "created"
+        ],
+        "title": "HistoryOut",
+        "description": "What a history write answers: the snapshot and how many versions it opened and closed.\n\nParameters\n----------\nsnapshot_id\n    The committed snapshot; `None` when the rows matched the open versions already.\nversions_opened\n    New versions: a key seen for the first time, or a key with changed values.\nversions_closed\n    Ended versions: a key with changed values, or a key the rows lack (`close_missing`).\nclosed_missing\n    The part of `versions_closed` that ended because the key is gone from the rows.\ncreated\n    `True` when this write created the table (`expected_snapshot_id=none`)."
       },
       "InfoOut": {
         "properties": {
