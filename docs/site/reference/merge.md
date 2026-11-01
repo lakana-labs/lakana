@@ -3,7 +3,8 @@
 A merge sends rows with a key: a row whose key the table already has replaces that row, and any
 other row is added. Nothing is deleted. Use it to keep a table in step with a source that sends
 changed rows again, such as a customer list exported each night with its changes. To add rows
-without matching, use an append; to swap every row, use a replace.
+without matching, use an append; to swap every row, use a replace. To keep every version of a
+dimension's rows instead of the latest, see [Keeping the history of a dimension](history.md).
 
 This page is about merging rows you send. An asset that merges its own result on every run says
 `write: merge` with `key:` in its header; see

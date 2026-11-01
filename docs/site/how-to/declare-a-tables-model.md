@@ -64,6 +64,10 @@ each kind are in
 A project can require a kind per layer, such as `staging` in silver and `fact`, `dimension` or
 `wide` in gold: see [Keep layers apart](keep-layers-apart.md).
 
+A dimension whose rows change can keep every version with `write: history`; a fact then points at
+the version valid at its own time with `customer_id: {to: gold.dim_customer, at: ordered_at}`. See
+[Keeping the history of a dimension](../reference/history.md).
+
 ## Deploy, and see the generated checks
 
 <!-- source: docs/examples/see-a-tables-model/run.sh#deploy -->
