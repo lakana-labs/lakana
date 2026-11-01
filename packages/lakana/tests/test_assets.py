@@ -353,7 +353,7 @@ def test_a_key_is_accepted_with_every_write_mode() -> None:
 
 _EVOLVE_NEEDS_REPLACE = (
     'evolve_schema=True works with write="replace" (the default) only; remove evolve_schema, '
-    "or replace the table instead of appending or merging"
+    "or replace the table instead of appending, merging or keeping its history"
 )
 
 
@@ -745,3 +745,70 @@ def test_a_bad_measure_description_is_refused(description: str, message: str) ->
     measure = {"aggregation": "sum", "unit": "count", "description": description}
     with pytest.raises(ValueError, match=re.escape(message)):
         cast("Any", asset)(kind="fact", grain="g", key="none", measures={"m": measure})
+
+
+_DIM: dict[str, Any] = {
+    "kind": "dimension",
+    "grain": "One row per customer and version.",
+    "key": "customer_id",
+}
+
+
+def test_the_history_options_reach_the_spec() -> None:
+    spec = getattr(
+        lakana.asset(write="history", valid_from="changed_at", close_missing=True, **_DIM)(
+            lambda: None
+        ),
+        ASSET_ATTRIBUTE,
+    )
+    assert (spec.write, spec.valid_from, spec.close_missing) == ("history", "changed_at", True)
+    plain = getattr(lakana.asset()(lambda: None), ASSET_ATTRIBUTE)
+    assert (plain.valid_from, plain.close_missing) == (None, False)
+
+
+@pytest.mark.parametrize(
+    ("arguments", "message"),
+    [
+        (
+            {"write": "history", "key": "id"},
+            "`write: history` keeps the versions of a dimension's rows; declare `kind: "
+            "dimension`, with `grain:` and `key:`",
+        ),
+        (
+            {"write": "history", "watermark": "ts", **_DIM},
+            "`write: history` takes no `watermark:`; its SELECT returns the current state of "
+            "every row, and each run compares it with the open versions",
+        ),
+        ({"valid_from": "changed_at"}, "`valid_from:` works with `write: history` only"),
+        ({"close_missing": False}, "`close_missing:` works with `write: history` only"),
+        (
+            {"write": "history", "valid_from": "customer_id", **_DIM},
+            "`valid_from: customer_id` names a key column; name the column that says when the "
+            "row's values took effect, or leave `valid_from:` out to use the run's start time",
+        ),
+        ({"write": "history", "valid_from": 3, **_DIM}, "valid_from must be a string"),
+        (
+            {"write": "history", "close_missing": "yes", **_DIM},
+            "close_missing must be True or False",
+        ),
+        (
+            {"write": "history", "evolve_schema": True, **_DIM},
+            'evolve_schema=True works with write="replace" (the default) only; remove '
+            "evolve_schema, or replace the table instead of appending, merging or keeping its "
+            "history",
+        ),
+    ],
+)
+def test_a_wrong_history_model_is_refused_at_import(
+    arguments: dict[str, Any], message: str
+) -> None:
+    with pytest.raises(ValueError) as info:
+        lakana.asset(**arguments)
+    assert str(info.value) == message
+
+
+@pytest.mark.parametrize("column", ["", "changed​_at"])
+def test_an_unsafe_valid_from_is_refused_at_import(column: str) -> None:
+    with pytest.raises(ValueError) as info:
+        lakana.asset(write="history", valid_from=column, **_DIM)
+    assert str(info.value) == f"valid_from {lakana.assets._IDENTIFIER_MESSAGE}"

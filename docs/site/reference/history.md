@@ -62,9 +62,7 @@ Grace's move starts at the `changed_at` the CRM gave it.
 | `valid_from:` | The column that says when a row's values took effect. | Optional. Without it a change starts its new version at the run's start time. A key's first version starts at the earliest time either way ([When a version starts](#when-a-version-starts)). A `date` (midnight UTC), a `timestamp` (read as UTC) or a `timestamptz`; never a key column. The column is not stored: its value is the version's `valid_from`, so `columns:` may not describe it and `references:` may not name it. |
 | `close_missing:` | Close the open version of a key the `SELECT` no longer returns. | `true` or `false` (the default). The version is closed at the run's start time, never deleted. |
 
-Only SQL assets can write history so far: a Python asset with `write="history"` is refused at
-deploy (``write="history" is not available for Python assets yet; build the dimension as a SQL
-asset with `write: history` in its header``). The deploy's other rules for these keys are in
+A Python asset gives the same keys to `@asset(write="history", valid_from=…, close_missing=…)`. The deploy's other rules for these keys are in
 [Asset front-matter](asset-front-matter.md#rules).
 
 ## The columns Lakana adds

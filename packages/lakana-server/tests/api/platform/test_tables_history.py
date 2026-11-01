@@ -9,7 +9,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from lakana_core.config import RunConfig
+from lakana_core.catalog.writes import max_rows_message
+from lakana_core.config import QueryLimitsConfig, RunConfig
 from lakana_core.models import AuditEvent, AuditEventType
 from lakana_server.api.platform import tables as tables_module
 from lakana_server.app import create_app
@@ -143,6 +144,17 @@ def test_the_servers_open_versions_cap_applies(settings: Settings) -> None:
         "gold.dim_customer would start with 2 open versions, more than "
         "LAKANA_RUN__MAX_HISTORY_OPEN_VERSIONS (1) allows."
     )
+
+
+def test_the_servers_write_row_cap_applies(settings: Settings) -> None:
+    """`LAKANA_QUERY_LIMITS__MAX_WRITE_ROWS` refuses a history write over it, as for an append."""
+    capped = settings.model_copy(update={"query_limits": QueryLimitsConfig(max_write_rows=1)})
+    with TestClient(create_app(capped)) as client:
+        create_environment(client)
+        refused = _history(client, [("A", "north"), ("B", "north")], expected_snapshot_id="none")
+
+    assert refused.status_code == 422, refused.text
+    assert refused.json()["detail"] == max_rows_message(1)
 
 
 def test_a_history_write_gives_its_memory_back_whether_or_not_it_lands(

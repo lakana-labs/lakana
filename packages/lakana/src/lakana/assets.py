@@ -132,10 +132,16 @@ _KEY_NONE = "none"
 
 EVOLVE_NEEDS_REPLACE = (
     'evolve_schema=True works with write="replace" (the default) only; remove evolve_schema, '
-    "or replace the table instead of appending or merging"
+    "or replace the table instead of appending, merging or keeping its history"
 )
-"""Why `evolve_schema` is refused with an append or a merge; deploy says the same (a parity
-test pins both)."""
+"""Why `evolve_schema` is refused with an append, a merge or a history write; deploy says the
+same (a parity test pins both)."""
+HISTORY_NEEDS_DIMENSION = (
+    "`write: history` keeps the versions of a dimension's rows; declare `kind: dimension`, with "
+    "`grain:` and `key:`"
+)
+"""Why `write="history"` needs `kind="dimension"`; deploy says the same (a parity test pins
+both)."""
 
 _UNSAFE_CATEGORIES = ("Cc", "Cf", "Cs", "Zl", "Zp")
 _BIDI_CONTROLS = frozenset("\u061c\u200e\u200f\u202a\u202b\u202c\u202d\u202e") | frozenset(
@@ -226,7 +232,7 @@ class AssetSpec:
     connections
         Names of connections of the environment the asset reads from; checked at deploy.
     write
-        ``replace``, ``append`` or ``merge``: what a run does to the table.
+        ``replace``, ``append``, ``merge`` or ``history``: what a run does to the table.
     key
         The columns that identify a row (for ``merge`` too), or ``"none"`` for a fact or wide
         table whose rows no columns identify.
@@ -235,6 +241,11 @@ class AssetSpec:
         optionally ``merge``).
     evolve_schema
         Whether a ``replace`` lets the table take the schema the function returns.
+    valid_from
+        For ``history``: the column whose value is when a row's values took effect; `None` for
+        the run's start time.
+    close_missing
+        For ``history``: close the open version of a key the function no longer returns.
     kind
         ``fact``, ``dimension``, ``wide`` or ``staging``; `None` when not declared.
     grain
@@ -268,6 +279,8 @@ class AssetSpec:
     key: tuple[str, ...] | str = ()
     watermark: str | None = None
     evolve_schema: bool = False
+    valid_from: str | None = None
+    close_missing: bool = False
     kind: str | None = None
     grain: str | None = None
     references: dict[str, str | dict[str, str]] = field(default_factory=dict)
@@ -293,7 +306,11 @@ def _unsafe(text: str) -> bool:
 
 
 def _check_write(
-    write: object, key: object, watermark: object
+    write: object,
+    key: object,
+    watermark: object,
+    valid_from: object = None,
+    close_missing: object = None,
 ) -> tuple[str, tuple[str, ...] | str, str | None]:
     """Read the decorator's write model with the rules deploy applies.
 
@@ -306,6 +323,10 @@ def _check_write(
         `None` means none.
     watermark
         The watermark column, or `None`.
+    valid_from
+        The `valid_from` column, or `None`.
+    close_missing
+        `True`, `False`, or `None` when not given.
 
     Returns
     -------
@@ -319,7 +340,8 @@ def _check_write(
         `WRITE_CHOICES`, an empty key column, a key column listed twice, a key of more than 8
         columns, ``append``
         without a watermark, ``merge`` without a key or with ``key="none"``, and ``replace``
-        with a watermark.
+        with a watermark, a `valid_from` or `close_missing` without ``history``, ``history`` with
+        a watermark, and a `valid_from` that is a key column.
     """
     mode = "replace" if write is None else write
     if not isinstance(mode, str):
@@ -335,6 +357,12 @@ def _check_write(
         raise ValueError("key must be a list of strings or one string")
     if watermark is not None and not isinstance(watermark, str):
         raise ValueError("watermark must be a string")
+    if valid_from is not None and not isinstance(valid_from, str):
+        raise ValueError("valid_from must be a string")
+    if close_missing is not None and not isinstance(close_missing, bool):
+        raise ValueError("close_missing must be True or False")
+    if valid_from is not None and (not valid_from or _unsafe(valid_from)):
+        raise ValueError(f"valid_from {_IDENTIFIER_MESSAGE}")
     if any(_unsafe(column) for column in columns):
         raise ValueError(f"a key column {_IDENTIFIER_MESSAGE}")
     if any(not column for column in columns):
@@ -367,6 +395,21 @@ def _check_write(
         raise ValueError(
             "`write: replace` takes no `watermark:`; to add only new rows use `write: append`"
         )
+    if mode == "history" and watermark is not None:
+        raise ValueError(
+            "`write: history` takes no `watermark:`; its SELECT returns the current state of "
+            "every row, and each run compares it with the open versions"
+        )
+    if mode == "history" and valid_from is not None and valid_from in columns:
+        raise ValueError(
+            f"`valid_from: {valid_from}` names a key column; name the column that says when "
+            "the row's values took effect, or leave `valid_from:` out to use the run's start "
+            "time"
+        )
+    if mode != "history" and valid_from is not None:
+        raise ValueError("`valid_from:` works with `write: history` only")
+    if mode != "history" and close_missing is not None:
+        raise ValueError("`close_missing:` works with `write: history` only")
     return mode, _KEY_NONE if key_none else tuple(columns), watermark
 
 
@@ -1057,6 +1100,8 @@ def asset(
     key: Iterable[str] | str = (),
     watermark: str | None = None,
     evolve_schema: bool | None = False,
+    valid_from: str | None = None,
+    close_missing: bool | None = None,
     kind: str | None = None,
     grain: str | None = None,
     references: Mapping[str, str | Mapping[str, str]] | None = None,
@@ -1137,6 +1182,12 @@ def asset(
         type changes otherwise becomes a new column (its earlier values read as null), and a
         column the result no longer has is removed from the table. Only with
         ``write="replace"``; `None` means ``False``.
+    valid_from
+        For ``write="history"``: the column whose value is when a row's values took effect (a
+        date or a timestamp); without it a new version starts when the run began.
+    close_missing
+        For ``write="history"``: close the open version of a key the function no longer
+        returns. Never deletes.
     kind
         ``fact``, ``dimension``, ``wide`` or ``staging``. A fact and a wide table need
         `grain` and `key`; a dimension needs `grain` and a real `key`; a staging table needs
@@ -1172,7 +1223,9 @@ def asset(
         ``float`` or ``exact``, a `connections` that is not a list of valid,
         distinct names or holds more than 16, a `write`, `key` or `watermark` deploy
         would refuse (also any of them on an artifact asset), an `evolve_schema` that is
-        not a boolean, or is ``True`` on an artifact asset or with an append or a merge, and a
+        not a boolean, or is ``True`` on an artifact asset or with an append, a merge or a history
+        write, ``write="history"`` without ``kind="dimension"``, a `valid_from` or `close_missing`
+        that deploy would refuse, and a
         `kind`, `grain`, `references`, `checks` or `measures` deploy would refuse (also any of them
         on an artifact asset).
     """
@@ -1207,6 +1260,8 @@ def asset(
             ("key", key or None),
             ("watermark", watermark),
             ("evolve_schema", evolves or None),
+            ("valid_from", valid_from),
+            ("close_missing", close_missing),
             ("kind", kind),
             ("grain", grain),
             ("references", references),
@@ -1226,8 +1281,12 @@ def asset(
     elif materialize not in (None, "table"):
         raise ValueError(f"a Python asset supports only 'table', got {materialize!r}")
     declared = _check_connections(connections)
-    mode, key_columns, watermark_column = _check_write(write, key, watermark)
+    mode, key_columns, watermark_column = _check_write(
+        write, key, watermark, valid_from, close_missing
+    )
     model = _check_model(kind, grain, key_columns, references, checks)
+    if mode == "history" and model[0] != "dimension":
+        raise ValueError(HISTORY_NEEDS_DIMENSION)
     measured = _check_measures(measures, model[0], key_columns, model[3])
     checked_label = None if label is None else _check_label("label", label)
     checked_columns = _check_columns(columns)
@@ -1251,6 +1310,8 @@ def asset(
         key=key_columns,
         watermark=watermark_column,
         evolve_schema=evolves,
+        valid_from=valid_from,
+        close_missing=bool(close_missing),
         kind=model[0],
         grain=model[1],
         references=model[2],
