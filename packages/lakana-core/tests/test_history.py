@@ -549,6 +549,21 @@ def test_the_valid_from_column_must_be_returned_and_not_be_a_key_column() -> Non
     )
 
 
+def test_a_valid_from_column_in_another_case_is_named_as_the_result_spells_it() -> None:
+    data = pa.table(
+        {"customer_id": ["A"], "Changed_At": pa.array([T1], pa.timestamp("us", tz="UTC"))}
+    )
+    with pytest.raises(ValidationError) as info:
+        check_history_batch(
+            data, ["customer_id"], table=TABLE, valid_from="changed_at", close_missing=False
+        )
+    assert str(info.value) == (
+        "Column `changed_at` in `valid_from:` is not a column of `gold.dim_customer`'s SELECT, "
+        "which spells it `Changed_At`; write `valid_from: Changed_At`, or rename the column in "
+        "the SELECT to `changed_at`."
+    )
+
+
 def test_a_nested_column_is_refused_with_the_cast_to_write() -> None:
     data = pa.table({"customer_id": ["A"], "tags": pa.array([["x"]], pa.list_(pa.string()))})
     with pytest.raises(ValidationError) as info:

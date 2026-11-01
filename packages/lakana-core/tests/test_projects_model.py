@@ -367,3 +367,15 @@ def test_a_history_select_may_not_return_an_added_name_and_must_return_valid_fro
         project_model_issues([_history(("customer_id", "changed_at"), valid_from="changed_at")])
         == []
     )
+
+
+def test_a_valid_from_column_spelled_in_another_case_is_named_as_the_select_spells_it() -> None:
+    """The column check is exact (the run reads the result's own names), so say how to match it."""
+    issues = project_model_issues(
+        [_history(("customer_id", "Changed_At"), valid_from="changed_at")]
+    )
+    assert [i.message for i in issues] == [
+        "Column `changed_at` in `valid_from:` is not a column of `gold.dim_customer`'s SELECT, "
+        "which spells it `Changed_At`; write `valid_from: Changed_At`, or rename the column in "
+        "the SELECT to `changed_at`.",
+    ]

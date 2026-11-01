@@ -496,9 +496,14 @@ def project_model_issues(assets: Sequence[ParsedAsset]) -> list[ProjectIssue]:
             )
             valid_from = asset.metadata.valid_from
             if valid_from is not None and valid_from not in asset.columns:
+                spelled = next(
+                    (c for c in asset.columns if c.casefold() == valid_from.casefold()), None
+                )
                 issues.append(
                     ProjectIssue(
-                        asset.path, line, valid_from_column_message(valid_from, asset.table)
+                        asset.path,
+                        line,
+                        valid_from_column_message(valid_from, asset.table, spelled=spelled),
                     )
                 )
         for column in sorted(asset.metadata.references):

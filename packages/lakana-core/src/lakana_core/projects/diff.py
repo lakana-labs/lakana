@@ -8,6 +8,7 @@ from typing import Any
 from lakana_core.projects.manifest import (
     EntryModel,
     entry_decimals,
+    entry_history,
     entry_keep_versions,
     entry_model,
     entry_output,
@@ -30,9 +31,10 @@ def _materialization(entry: dict[str, Any]) -> tuple[object, ...]:
     read through the manifest readers, not with `get`: an entry deployed before manifest
     version 3 lacks the keys and reads as "table, keep all, float decimals", exactly like a
     version 3 table entry, and one from before `write` reads its write model from
-    `materialize`, so upgrading the platform alone is not a change. A changed write mode, or the
-    changed key of a merge, is a change of how the table is written; the key of any other write
-    only identifies a row, a model change (`_model`).
+    `materialize`, so upgrading the platform alone is not a change. A changed write mode, the
+    changed key of a merge or a history asset, or a history asset's `valid_from` or
+    `close_missing`, is a change of how the table is written; the key of any other write only
+    identifies a row, a model change (`_model`).
 
     Parameters
     ----------
@@ -45,12 +47,14 @@ def _materialization(entry: dict[str, Any]) -> tuple[object, ...]:
         The values to compare.
     """
     write, key, watermark = entry_write(entry)
+    keyed = write in ("merge", "history")
     return (
         *(entry.get(key) for key in _MATERIALIZATION_KEYS),
         entry_output(entry),
         entry_keep_versions(entry),
         entry_decimals(entry),
-        (write, key if write == "merge" else (), watermark),
+        (write, key if keyed else (), watermark),
+        entry_history(entry),
     )
 
 
@@ -67,12 +71,15 @@ def _model(entry: dict[str, Any]) -> tuple[object, ...]:
     tuple
         The model as `entry_model` reads it, without its key (`None` when it declares nothing
         else, as for a merge asset deployed before models), and the key unless the asset merges
-        on it (that is a materialization change).
+        on it or keeps its history by it (that is a materialization change).
     """
     model = entry_model(entry)
     declared = replace(model, key=()) if model is not None else None
     write, key, _ = entry_write(entry)
-    return (None if declared == _NO_MODEL else declared, key if write != "merge" else ())
+    return (
+        None if declared == _NO_MODEL else declared,
+        key if write not in ("merge", "history") else (),
+    )
 
 
 def _job_changes(before: dict[str, Any], after: dict[str, Any]) -> list[str]:

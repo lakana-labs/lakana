@@ -12,10 +12,12 @@ from lakana_core.projects.asset_model import ResolvedReference, deploy_hints
 from lakana_core.projects.checks import GeneratedFrom, ParsedCheck, read_manifest_checks
 from lakana_core.projects.dag import build_graph
 from lakana_core.projects.frontmatter import AssetMetadata
+from lakana_core.projects.history_columns import HistorySpec
 from lakana_core.projects.layers import MEDALLION_LAYERS
 from lakana_core.projects.manifest import (
     CHECKS_VERSION,
     CONNECTIONS_VERSION,
+    HISTORY_VERSION,
     JOBS_VERSION,
     MANIFEST_VERSION,
     MEASURES_VERSION,
@@ -32,6 +34,7 @@ from lakana_core.projects.manifest import (
     build_manifest,
     entry_connections,
     entry_decimals,
+    entry_history,
     entry_input_kinds,
     entry_inputs,
     entry_keep_versions,
@@ -540,7 +543,7 @@ def test_a_python_entry_records_decimals_and_the_manifest_version_is_unchanged(
     asset = dataclasses.replace(_python_asset(), decimals=decimals)
     manifest = build_manifest([asset], build_graph([asset]), ResolvedProjectConfig())
     assert manifest["version"] == VERSION_WITHOUT_CHECKS == 3
-    assert MANIFEST_VERSION == 11
+    assert MANIFEST_VERSION == 12
     assert manifest["assets"][0]["decimals"] == decimals
 
 
@@ -1138,7 +1141,8 @@ def test_texts_raise_the_version_only_when_used() -> None:
         translations={"gold.a": {"fr": {"label": "A"}}},
     )
     assert translated["assets"][0]["metadata"]["translations"] == {"fr": {"label": "A"}}
-    assert MANIFEST_VERSION == TEXTS_VERSION == 11
+    assert MANIFEST_VERSION == HISTORY_VERSION == 12
+    assert TEXTS_VERSION == 11
 
 
 def test_entry_translations_flattens_and_fails_safe() -> None:
@@ -1219,3 +1223,80 @@ def test_manifest_layers_reads_damaged_rules_as_none() -> None:
     ]
     for manifest in damaged:
         assert manifest_layers(manifest) is None, manifest
+
+
+def _dimension(**fields: object) -> ParsedAsset:
+    """Build a history dimension `gold.dim_customer`.
+
+    Parameters
+    ----------
+    **fields
+        More metadata.
+
+    Returns
+    -------
+    ParsedAsset
+        The asset.
+    """
+    metadata = AssetMetadata(
+        materialize="table",
+        kind="dimension",
+        grain="One row per customer and version.",
+        key=("customer_id",),
+        write="history",
+        columns={"region": "Where the customer lives."},
+        **fields,  # ty: ignore[invalid-argument-type]
+    )
+    return make_asset("gold.dim_customer", columns=("customer_id", "region"), metadata=metadata)
+
+
+def test_history_raises_the_version_to_12_and_records_how_it_writes() -> None:
+    asset = _dimension(valid_from="changed_at", close_missing=True)
+    manifest = build_manifest([asset], build_graph([asset]), ResolvedProjectConfig())
+    assert manifest["version"] == HISTORY_VERSION == 12
+    (entry,) = manifest["assets"]
+    assert (entry["write"], entry["write_mode"], entry["first_write_mode"]) == (
+        "history",
+        "history",
+        "create",
+    )
+    assert entry["history"] == {"valid_from": "changed_at", "close_missing": True}
+    assert entry_history(entry) == HistorySpec(("customer_id",), "changed_at", True)
+    assert entry["metadata"]["columns"] == {
+        "dim_customer_key": "Identifies this version: a hash of the key (`customer_id`) and "
+        "`valid_from`. A fact can store it to point at exactly this version.",
+        "valid_from": "When this version became valid (UTC).",
+        "valid_to": "When this version stopped being valid (UTC); empty while it is the current "
+        "version.",
+        "is_current": "Whether this is the current version of its key.",
+        "region": "Where the customer lives.",
+    }
+    assert isinstance(manifest["checks"], list)
+
+
+def test_a_project_without_history_keeps_its_version() -> None:
+    asset = make_asset("gold.a")
+    manifest = build_manifest([asset], build_graph([asset]), ResolvedProjectConfig())
+    assert manifest["version"] < HISTORY_VERSION
+    assert "history" not in manifest["assets"][0]
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        None,
+        {"write": "merge", "key": ["id"], "history": {"valid_from": None, "close_missing": False}},
+        {"write": "history", "key": ["id"]},
+        {"write": "history", "key": [], "history": {"valid_from": None, "close_missing": False}},
+        {"write": "history", "key": ["id"], "history": {"valid_from": 3, "close_missing": False}},
+        {"write": "history", "key": ["id"], "history": {"valid_from": None, "close_missing": 1}},
+    ],
+)
+def test_entry_history_reads_a_damaged_entry_as_not_history(entry: object) -> None:
+    assert entry_history(entry) is None
+
+
+def test_a_history_spec_round_trips_through_json() -> None:
+    spec = HistorySpec(("id", "country"), None, False)
+    assert HistorySpec.from_json(spec.to_json()) == spec
+    assert HistorySpec.from_json({"key": ["id"], "valid_from": None}) is None

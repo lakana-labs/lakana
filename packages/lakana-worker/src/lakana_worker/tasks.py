@@ -67,7 +67,7 @@ from lakana_core.models import (
 )
 from lakana_core.projects.asset_model import WRITE_CHOICES
 from lakana_core.projects.checks import read_manifest_checks, source_check_tables
-from lakana_core.projects.manifest import asset_kind, entry_write
+from lakana_core.projects.manifest import asset_kind, entry_history, entry_write
 from lakana_core.runs.check_message import message_for_log
 from lakana_core.runs.checks import (
     ASSET,
@@ -393,7 +393,8 @@ def checked_write(
     ------
     TaskFailure
         Permanent for a write mode this release does not know (never run as a replace,
-        which would drop rows) and for a merge without a key.
+        which would drop rows), for a merge without a key, and for a history write without a
+        readable key.
     """
     written, merge_key, watermark = entry_write(entry)
     if written not in WRITE_CHOICES:
@@ -407,6 +408,13 @@ def checked_write(
         raise TaskFailure(
             FailureKind.PERMANENT,
             f"the project version merges {asset} without a key; deploy it again with this release",
+            FailureCode.CODE_CHANGED,
+        )
+    if written == "history" and entry_history(entry) is None:
+        raise TaskFailure(
+            FailureKind.PERMANENT,
+            f"the project version keeps the history of {asset} without a readable key; deploy "
+            "it again with this release",
             FailureCode.CODE_CHANGED,
         )
     return written, merge_key, watermark
@@ -619,13 +627,14 @@ def _prepare(session: Session, engine: RunEngine, claimed: ClaimedTask) -> _Prep
             FailureCode.CODE_CHANGED,
         ) from None
     written, merge_key, watermark = checked_write(entry, claimed.asset)
-    if written == "merge" and mode not in (WriteMode.MERGE, WriteMode.CREATE):
-        # `write` and `write_mode` disagree: never run a merge asset as a replace or append.
+    if written in ("merge", "history") and mode not in (WriteMode(written), WriteMode.CREATE):
+        # `write` and `write_mode` disagree: never run a merge or history asset as a replace.
         raise TaskFailure(
             FailureKind.PERMANENT,
             f"the project version's write mode {mode_name!r} for {claimed.asset} is not valid",
             FailureCode.CODE_CHANGED,
         )
+    history = entry_history(entry) if written == "history" else None
     write = QueryRun(
         id=uuid.uuid4(),
         environment_id=env.id,
@@ -636,6 +645,7 @@ def _prepare(session: Session, engine: RunEngine, claimed: ClaimedTask) -> _Prep
         target_name=claimed.asset,
         incremental_key=watermark,
         merge_key=list(merge_key) if written == "merge" else None,
+        history=None if history is None else history.to_json(),
         evolve_schema=bool(entry.get("evolve_schema")),
         task_run_id=claimed.task_run_id,
         worker_id=engine.settings.worker_id,

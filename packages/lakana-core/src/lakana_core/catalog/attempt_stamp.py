@@ -11,6 +11,11 @@ The stamp is written by the catalog only: `stamp_snapshots` removes both propert
 snapshot a commit adds before it sets them, so a client of the Iceberg REST catalog cannot claim an
 attempt's write as its own.
 
+A SQL task's write run (the query-run form of `RunContext`, which only the worker builds, from
+`QueryRun.task_run_id`) marks its snapshots with the task run alone, without a claim: a history
+write reads that mark to refuse a second write of one run (`history.written_by_run`, #253), and a
+mark without a claim never proves a Python attempt's write (`written_by_attempt` wants both).
+
 A table created without rows has no snapshot to stamp. For it the evidence is the claim of its
 location (`created_by_task_run`): the create records the task run that claimed it, and only the
 current attempt of a task run can still commit (the write guard re-checks the claim under lock).
@@ -74,8 +79,10 @@ def stamp_snapshots(
     updates
         The commit's updates.
     context
-        The acting principal's run context. Only the claim form (a bound task token) stamps;
-        any other context, and none, only removes the reserved properties.
+        The acting principal's run context. The claim form (a bound task token) stamps the task
+        run and the claim; the query-run form (a SQL task's write run) stamps the task run
+        only; a context with both forms or neither, and none, only removes the reserved
+        properties.
 
     Returns
     -------
@@ -86,6 +93,8 @@ def stamp_snapshots(
     stamp: dict[str, str] = {}
     if context is not None and context.claim is not None and context.query_run_id is None:
         stamp = {TASK_RUN_PROPERTY: str(context.task_run_id), CLAIM_PROPERTY: str(context.claim)}
+    elif context is not None and context.query_run_id is not None and context.claim is None:
+        stamp = {TASK_RUN_PROPERTY: str(context.task_run_id)}
     stamped: list[TableUpdate] = []
     for update in updates:
         if isinstance(update, AddSnapshotUpdate):

@@ -24,6 +24,7 @@ from lakana_core.auth import (
     PrincipalRef,
 )
 from lakana_core.catalog.identity import resolve_table_id
+from lakana_core.config import QueryLimitsConfig
 from lakana_core.identifiers import TableRef
 from lakana_core.models import (
     Environment,
@@ -159,6 +160,7 @@ def _engine(
     drain: threading.Event | None = None,
     grace: float = 0.0,
     renew: float = 0.05,
+    limits: QueryLimitsConfig | None = None,
 ) -> RunEngine:
     """Build the run engine the poller would.
 
@@ -174,6 +176,8 @@ def _engine(
         Drain grace in seconds.
     renew
         Seconds between lease renewals.
+    limits
+        The worker's query limits; the defaults when `None`.
 
     Returns
     -------
@@ -183,7 +187,12 @@ def _engine(
     return RunEngine(
         session_factory=world.session,
         authz_factory=authz or (lambda _s: AllowAllAuthorization()),
-        settings=TaskSettings(worker_id="w1", renew_seconds=renew, drain_grace_seconds=grace),
+        settings=TaskSettings(
+            worker_id="w1",
+            renew_seconds=renew,
+            drain_grace_seconds=grace,
+            limits=limits or QueryLimitsConfig(),
+        ),
         drain=drain or threading.Event(),
         rand=lambda: 0.5,
     )

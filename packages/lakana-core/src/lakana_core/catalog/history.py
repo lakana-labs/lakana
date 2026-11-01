@@ -431,7 +431,10 @@ def check_history_batch(
         if valid_from in key:
             raise ValidationError(valid_from_key_message(valid_from))
         if valid_from not in data.column_names:
-            raise ValidationError(valid_from_column_message(valid_from, table))
+            spelled = next(
+                (n for n in data.column_names if n.casefold() == valid_from.casefold()), None
+            )
+            raise ValidationError(valid_from_column_message(valid_from, table, spelled=spelled))
     for field in data.schema:
         if pa.types.is_nested(field.type):
             raise ValidationError(
@@ -1393,7 +1396,8 @@ def _too_many_ends(cap: int, table: str, after: datetime) -> str:
 def written_by_run(metadata: TableMetadata, context: RunContext | None) -> bool:
     """Tell whether the table's current snapshot is a write of the acting principal's run.
 
-    The catalog stamps every snapshot a claim-form run context commits with its task run
+    The catalog stamps every snapshot a run context commits with its task run, in the claim form
+    (a Python task's bound token) and in the query-run form (a SQL task's write run)
     (`attempt_stamp.stamp_snapshots`); no client can set the stamp.
 
     Parameters

@@ -1140,7 +1140,9 @@ code in this area has to know.
   attempt's own write, #49: a snapshot on the current branch, newer than the attempt's start,
   whose summary carries `lakana.task-run-id` and `lakana.task-claim`; `CatalogService.commit_table`
   and `_write_new_table` set both from the claim-form `RunContext` only and remove them from every
-  other added snapshot, so no client, Iceberg REST included, can claim an attempt's write; a table
+  other added snapshot, so no client, Iceberg REST included, can claim an attempt's write (a SQL
+  task's write run, the query-run form, gets `lakana.task-run-id` alone, which never proves an
+  attempt: `written_by_attempt` wants both); a table
   created without rows is proven by its location's `holder_run_id`, and only the current claim of a
   task run can commit, `record_pending`), the child's output (redacted, control characters replaced, 1 MiB per
   attempt in all), uv's output (redacted of proxy and index credentials).
@@ -2520,8 +2522,11 @@ authentication or the worker set (`run_clock`); no request field can move it. A 
 table's history once: when the table's current snapshot carries the acting run context's task run
 as `lakana.task-run-id` (the attempt stamp, which only the catalog sets), a write that would change
 the table again is refused (`written_by_run`, `RUN_WROTE_MESSAGE`); one that changes nothing
-returns nothing. Without a claim-form run context there is no stamp and no such refusal (a SQL
-task's write run carries `query_run_id` and is not stamped either). A history write never removes
+returns nothing. A SQL task's write run (the query-run form, built only by the worker from
+`QueryRun.task_run_id`) is marked too: `stamp_snapshots` sets `lakana.task-run-id` alone, without
+`lakana.task-claim`, so a retried attempt of the same task run cannot open a second version, and
+the mark never passes as a Python attempt's proof. Without a run context there is no stamp and no
+such refusal. A history write never removes
 a row it did not plan to: its staged snapshot must add exactly `versions_opened` rows net, so a
 table whose open versions share a surrogate key (only a commit outside `CatalogService.history`
 can make one) is refused after staging, with every staged file deleted (`stage_history`).

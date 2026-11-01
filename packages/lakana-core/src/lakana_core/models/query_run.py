@@ -123,6 +123,10 @@ class QueryRun(Base, TimestampMixin):
     """The columns a merge matches rows on: set by the worker for a SQL asset with
     `write: merge` (its `MERGE` runs and the `CREATE` of its first run, which is checked the same
     way); `None` for every other run."""
+    history: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    """How a history asset's run writes (`HistorySpec.to_json`: key, valid_from, close_missing):
+    set by the worker for a SQL asset with `write: history` (its `HISTORY` runs and the `CREATE`
+    of its first run); `None` for every other run."""
     evolve_schema: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     watermark: Mapped[str | None] = mapped_column(String(255), nullable=True)
     """The type-tagged watermark an incremental append filtered on, e.g. ``long:42``."""

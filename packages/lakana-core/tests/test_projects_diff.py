@@ -476,3 +476,26 @@ def test_a_merge_asset_deployed_before_models_is_no_model_change() -> None:
     del stored["assets"][0]["model"]
     diff = diff_manifests(stored, _manifest(_written("merge", ("id",))), existing_unowned=set())
     assert diff == DeployDiff()
+
+
+def test_a_history_assets_key_valid_from_and_close_missing_are_materialization() -> None:
+    def history(key: tuple[str, ...], **fields: object) -> ParsedAsset:
+        metadata = AssetMetadata(
+            materialize="table",
+            write="history",
+            key=key,
+            **fields,  # ty: ignore[invalid-argument-type]
+        )
+        return make_asset("s.customers", metadata=metadata)
+
+    before = _manifest(history(("id",)))
+    for after in (
+        history(("id", "region")),
+        history(("id",), valid_from="changed_at"),
+        history(("id",), close_missing=True),
+    ):
+        diff = diff_manifests(before, _manifest(after), existing_unowned=set())
+        assert diff.materialization_changed == ("s.customers",)
+        assert diff.model_changed == ()
+    same = diff_manifests(before, _manifest(history(("id",))), existing_unowned=set())
+    assert same.materialization_changed == ()
