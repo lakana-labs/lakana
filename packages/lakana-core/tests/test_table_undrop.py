@@ -1190,7 +1190,12 @@ def test_undrop_restores_the_time_of_a_valid_at_reference(
     table_id = _orders_table(catalog, principal)
     model = _MODEL_ENTRY["model"]
     assert isinstance(model, dict)
-    reference = {**model["references"][0], "at": "ordered_at"}
+    reference = {
+        "column": "region",
+        "target": "gold.regions",
+        "target_column": "code",
+        "at": "ordered_at",
+    }
     write_model_entry(
         session,
         _fresh(session, Table, table_id),
