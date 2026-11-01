@@ -5,6 +5,7 @@ from __future__ import annotations
 import dataclasses
 import inspect
 import json
+import re
 import uuid
 from collections.abc import Sequence
 from datetime import UTC, datetime
@@ -13,6 +14,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 import pyarrow as pa
+import pyiceberg.io.pyarrow as pyiceberg_arrow
 import pytest
 from core_test_helpers import ActionAllowList, _config, python_task_run
 from pyiceberg.catalog.noop import NoopCatalog
@@ -35,8 +37,9 @@ from lakana_core.catalog.history import (
     check_history_table,
     count_open_versions,
     read_last_ends,
+    read_open_versions,
 )
-from lakana_core.catalog.merge import SQL_ADVICE
+from lakana_core.catalog.merge import SDK_ADVICE, SQL_ADVICE, MergeAdvice
 from lakana_core.catalog.service import CatalogService
 from lakana_core.config import RunConfig
 from lakana_core.errors import (
@@ -1079,6 +1082,86 @@ def test_a_table_at_or_under_a_raised_open_versions_cap_is_written(hist: Hist, c
     result = hist.run([("A", "south")], T2, max_open_versions=cap)
 
     assert (result.versions_opened, result.versions_closed) == (1, 1)
+
+
+def test_the_open_bytes_cap_defaults_to_the_settings_default() -> None:
+    default = inspect.signature(CatalogService.history).parameters["max_open_bytes"].default
+    assert default == RunConfig().max_history_open_bytes == 536_870_912
+
+
+@pytest.mark.parametrize(
+    ("advice", "memory"),
+    [
+        (SQL_ADVICE, "the worker's memory limit (LAKANA_WORKER__MEMORY_LIMIT) allows it"),
+        (SDK_ADVICE, "the memory the server has allows it"),
+    ],
+)
+def test_open_versions_past_the_byte_cap_are_refused_while_reading_and_nothing_is_written(
+    hist: Hist, advice: MergeAdvice, memory: str
+) -> None:
+    hist.run([("A", "north"), ("B", "north")], T1, first=True)
+    before = hist.versions()
+
+    with pytest.raises(ValidationError) as info:
+        hist.run([("A", "south")], T2, max_open_bytes=1, advice=advice)
+
+    found = re.fullmatch(
+        r"Reading the open versions of gold\.dim_customer passed (\d+) bytes of Arrow data, more "
+        r"than LAKANA_RUN__MAX_HISTORY_OPEN_BYTES \(1\) allows, so the read stopped and nothing "
+        rf"was written\. A history write holds every open version in the {advice.holder}'s "
+        r"memory\. Ask an operator to raise LAKANA_RUN__MAX_HISTORY_OPEN_BYTES if "
+        rf"{re.escape(memory)}, or narrow the dimension's columns: keep wide text such as "
+        r"descriptions in a table of its own and join it by the key\.",
+        str(info.value),
+    )
+    assert found is not None, str(info.value)
+    assert int(found.group(1)) > 1
+    assert hist.versions() == before
+
+
+def test_open_versions_under_the_byte_cap_are_written(hist: Hist) -> None:
+    hist.run([("A", "north"), ("B", "north")], T1, first=True)
+
+    result = hist.run([("A", "south")], T2, max_open_bytes=1024 * 1024)
+
+    assert (result.versions_opened, result.versions_closed) == (1, 1)
+
+
+def test_the_byte_cap_stops_the_read_before_the_rest_of_the_table_is_read(
+    hist: Hist, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """At most the cap plus one batch is read: the files are read one after another, lazily."""
+    wide = "x" * 4096
+    hist.run([("K0", wide)], T1, first=True)
+    for day in range(1, 8):  # one more data file of open versions per write
+        hist.run([(f"K{day}", wide)], datetime(2026, 2, day + 1, tzinfo=UTC))
+    metadata = hist.static().metadata
+    file_io = StorageResolver(hist.session).for_environment("dev").file_io
+    read: list[int] = []
+    original = pyiceberg_arrow._task_to_record_batches
+
+    def counting(*args: object, **kwargs: object) -> object:
+        for batch in original(*args, **kwargs):  # ty: ignore[invalid-argument-type]
+            read.append(batch.nbytes)
+            yield batch
+
+    monkeypatch.setattr(pyiceberg_arrow, "_task_to_record_batches", counting)
+    whole = read_open_versions(
+        metadata, file_io, max_rows=None, max_bytes=None, table=DIM, holder="server"
+    )
+    assert whole.num_rows == 8
+    assert len(read) == 8
+    cap = sum(read) // 3
+    biggest = max(read)
+    read.clear()
+
+    with pytest.raises(ValidationError, match="LAKANA_RUN__MAX_HISTORY_OPEN_BYTES"):
+        read_open_versions(
+            metadata, file_io, max_rows=None, max_bytes=cap, table=DIM, holder="server"
+        )
+
+    assert sum(read) <= cap + biggest
+    assert len(read) < 8
 
 
 def test_open_versions_are_counted_from_file_bounds_and_mixed_files_are_scanned(

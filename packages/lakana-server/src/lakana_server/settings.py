@@ -40,11 +40,15 @@ class AppendConfig(BaseModel):
         retryable and is run again.
     max_concurrent_history
         Most history writes (`write="history"` of a Python asset, over REST) one server process
-        runs at once (default 1), in addition to the `max_concurrent` slot each takes. Each holds
-        the table's open versions in server memory, about 2 GiB per million. A request past the
-        limit is refused at once with 503 and `Retry-After: 1`. The SDK's history write does not
-        retry it and raises `ServerError`; a run of a Python asset ends as retryable and the
-        platform runs it again.
+        runs at once (default 1), in addition to the `max_concurrent` slot each takes; a request
+        takes it once its authorization is checked, before its body is read. Each holds the
+        table's open versions in server memory, about 2 GiB per million, at most
+        `LAKANA_RUN__MAX_HISTORY_OPEN_BYTES` of Arrow data. A request past the limit is refused
+        at once with 503 and `Retry-After: 1`. The SDK's history write does not retry it and
+        raises `ServerError`; a run of a Python asset ends as retryable and runs again up to its
+        `retries:` (2 by default, 30 s and then 60 s apart; at most `LAKANA_RUN__MAX_RETRIES`),
+        and fails once they are used up. Raise this (with the server's memory) or the asset's
+        `retries:` when several Python history assets run at once.
     read_timeout_seconds
         How long the server waits for the body of a request, in seconds (default 300). For a table
         append, the whole body; for an artifact upload, the next piece of a file and the whole

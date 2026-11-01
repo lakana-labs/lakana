@@ -415,6 +415,9 @@ DEFAULT_MAINTENANCE_TIMEOUT = 1800.0
 DEFAULT_MAX_HISTORY_OPEN_VERSIONS = 1_000_000
 """Most open versions a history write takes on by default (`max_history_open_versions`)."""
 
+DEFAULT_MAX_HISTORY_OPEN_BYTES = 512 * 1024**2
+"""Most bytes of Arrow data a history write reads its open versions into by default (512 MiB)."""
+
 
 class RunConfig(BaseModel):
     """Operator settings of the run engine (`LAKANA_RUN__*`; Python assets too).
@@ -471,6 +474,15 @@ class RunConfig(BaseModel):
         before it creates the table), and before it writes when the open versions it would leave
         exceed it. Raise it together with `LAKANA_WORKER__MEMORY_LIMIT` (SQL asset) or the
         memory the server has (Python asset).
+    max_history_open_bytes
+        Most bytes of Arrow data a history write may read the open versions of its table into,
+        512 MiB by default (about 2 GiB of the process's memory at its peak). The open-versions
+        cap counts rows; this bounds their width too, since a version holds whatever columns the
+        dimension has: the worker's memory for a SQL asset, the server's for a Python asset. The
+        bytes are counted batch by batch while the open versions are read; as soon as they pass
+        it, the read stops and the run is refused, and nothing is written. Raise it if that
+        memory allows it, or narrow the dimension's columns (wide text such as descriptions in a
+        table of its own, joined by the key).
     index_url
         An extra package index for building the environment of a Python project, as a URL. It may
         carry a password, which is hidden in logs and error messages.
@@ -526,6 +538,7 @@ class RunConfig(BaseModel):
     sweep_interval: float = Field(default=3600.0, ge=0)
     maintenance_timeout: float = Field(default=DEFAULT_MAINTENANCE_TIMEOUT, gt=0)
     max_history_open_versions: int = Field(default=DEFAULT_MAX_HISTORY_OPEN_VERSIONS, gt=0)
+    max_history_open_bytes: int = Field(default=DEFAULT_MAX_HISTORY_OPEN_BYTES, gt=0)
     index_url: SecretStr | None = None
     https_proxy: SecretStr | None = None
     no_proxy: str | None = None

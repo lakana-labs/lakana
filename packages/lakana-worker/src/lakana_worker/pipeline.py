@@ -100,6 +100,7 @@ from lakana_core.catalog.writes import (
 )
 from lakana_core.config import (
     DEFAULT_MAINTENANCE_TIMEOUT,
+    DEFAULT_MAX_HISTORY_OPEN_BYTES,
     DEFAULT_MAX_HISTORY_OPEN_VERSIONS,
     QueryLimitsConfig,
 )
@@ -2004,17 +2005,23 @@ def install_maintenance_timeout(seconds: float) -> None:
 _MAX_HISTORY_OPEN_VERSIONS: int = DEFAULT_MAX_HISTORY_OPEN_VERSIONS
 """Most open versions a history write takes on; set once by `install_history_cap`."""
 
+_MAX_HISTORY_OPEN_BYTES: int = DEFAULT_MAX_HISTORY_OPEN_BYTES
+"""Most bytes a history write reads its open versions into; set once by `install_history_cap`."""
 
-def install_history_cap(count: int) -> None:
-    """Set how many open versions a history write may take on.
+
+def install_history_cap(count: int, *, open_bytes: int = DEFAULT_MAX_HISTORY_OPEN_BYTES) -> None:
+    """Set how many open versions a history write may take on, and how many bytes they may hold.
 
     Parameters
     ----------
     count
         `LAKANA_RUN__MAX_HISTORY_OPEN_VERSIONS`.
+    open_bytes
+        `LAKANA_RUN__MAX_HISTORY_OPEN_BYTES`.
     """
-    global _MAX_HISTORY_OPEN_VERSIONS
+    global _MAX_HISTORY_OPEN_VERSIONS, _MAX_HISTORY_OPEN_BYTES
     _MAX_HISTORY_OPEN_VERSIONS = count
+    _MAX_HISTORY_OPEN_BYTES = open_bytes
 
 
 def _run_maintenance(
@@ -2386,7 +2393,8 @@ def _history_result(
     first) writes with ``expected_snapshot_id="none"``, which creates the table after the same
     checks as every later run; a `HISTORY` run commits against `pin` when its rows depend on the
     table. A watermark never applies: the deploy refuses one. The table may take on at most
-    `LAKANA_RUN__MAX_HISTORY_OPEN_VERSIONS` open versions (`install_history_cap`). Whether or not
+    `LAKANA_RUN__MAX_HISTORY_OPEN_VERSIONS` open versions, read into at most
+    `LAKANA_RUN__MAX_HISTORY_OPEN_BYTES` of Arrow data (`install_history_cap`). Whether or not
     the write lands, the heap pages it freed go back to the system (`trim_heap`), beside the
     Arrow pool's, which `history` returns itself.
 
@@ -2441,6 +2449,7 @@ def _history_result(
             query_run_id=run.id,
             max_rows=max_rows,
             max_open_versions=_MAX_HISTORY_OPEN_VERSIONS,
+            max_open_bytes=_MAX_HISTORY_OPEN_BYTES,
             advice=SQL_ADVICE,
         )
     finally:

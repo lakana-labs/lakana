@@ -165,6 +165,7 @@ The messages give counts, never values. Nothing is written.
 | Two open versions of a key | ``2 keys of gold.dim_customer have more than one open version; there must be one per key, so nothing was written. Drop the table (`lakana table delete gold.dim_customer --env dev`) and let the next run create it again (its history starts again with that run).`` Lakana's own runs never leave two open versions; a writer outside Lakana did. Drop the table as the text says, and the next run creates it with one open version per key. |
 | Delete files from another Iceberg writer | ``gold.dim_customer has row-level delete files, which an Iceberg writer outside Lakana added; a history write cannot keep its versions right with them, so nothing was read or written. Compact the table with that writer so that no delete files remain, or drop it (`lakana table delete gold.dim_customer --env dev`) and let the next run create it again (its history starts again with that run).`` |
 | More open versions than the setting allows | ``gold.dim_customer has 1200000 open versions, more than LAKANA_RUN__MAX_HISTORY_OPEN_VERSIONS (1000000) allows. A history write holds every open version in the worker's memory, roughly 2 GiB per million open versions of 8 columns and more for wider rows, so nothing was read or written. Ask an operator to raise LAKANA_RUN__MAX_HISTORY_OPEN_VERSIONS together with the worker's memory limit (LAKANA_WORKER__MEMORY_LIMIT).`` A Python asset writes over the REST API, where the server holds the versions, and the text says "in the server's memory" and ends "together with the memory the server has". The same text starts ``The asset's result for gold.dim_customer has 1200000 rows, and each can open a version: more than …`` for a result with more rows than the setting, and ``gold.dim_customer would have 1000004 open versions after this write, more than …`` (ending "so nothing was written") for a write that would leave more open versions; see [Limits](#limits). |
+| Open versions wider than the setting allows | ``Reading the open versions of gold.dim_customer passed 536993812 bytes of Arrow data, more than LAKANA_RUN__MAX_HISTORY_OPEN_BYTES (536870912) allows, so the read stopped and nothing was written. …`` (the whole text and what to do: [Limits](#limits)) |
 | A null or repeated key | as for a merge, with the `QUALIFY` to write ([Merging rows](merge.md#errors)) |
 
 ## Python assets
@@ -197,7 +198,12 @@ repeats, with advice in Python terms (``key `customer_id` repeats in 4 rows of w
 returned; return one row per key, for example with
 `df.unique(subset=['customer_id'], keep='last')` ``). The project's lock must hold `lakana` of
 this release or later: an earlier `lakana` in the task refuses the task's description, and the
-task fails with ``task description: expected a version 2 or 3 document``.
+task fails with ``the task process exited with status 2 without a result: the harness refuses a
+task description it does not understand, so the worker and the lakana package in the task's
+environment disagree about it (the output above says which field). Check that the project's
+uv.lock pins the same lakana version as this worker, then deploy again. If the asset's own code
+exits with status 2, use another status``. The task's output above it shows the harness's own
+line, ``task description: expected a version 2 or 3 document``.
 
 ## REST route and SDK
 
@@ -316,9 +322,30 @@ time. The first run, which creates the table, records the event of a create.
   comparison, the open versions the write would leave must be within it too. A run over it
   writes nothing and names the setting. Raise it together with the memory of the process that
   holds the versions: the worker's memory limit, or the memory the server has.
-  On the REST path (a Python asset) the server holds the open versions, and
-  `LAKANA_APPEND__MAX_CONCURRENT_HISTORY` (1 by default) bounds how many such writes run at once;
-  one past it is refused with 503; a run of the asset fails as retryable and is run again.
+- The open-versions cap counts versions, not their width: a version holds every column of the
+  dimension, so a long description column can make a few thousand versions weigh gigabytes.
+  `LAKANA_RUN__MAX_HISTORY_OPEN_BYTES` (512 MiB of Arrow data by default, about 2 GiB of the
+  process's memory at its peak) bounds the bytes. The open versions are read one batch after
+  another and their bytes counted; as soon as they pass it, the read stops (one batch past the
+  cap, and what the Parquet reader read ahead in the same file) and the run is refused, writing
+  nothing: ``Reading the open versions of
+  gold.dim_customer passed 536993812 bytes of Arrow data, more than
+  LAKANA_RUN__MAX_HISTORY_OPEN_BYTES (536870912) allows, so the read stopped and nothing was
+  written. A history write holds every open version in the worker's memory. Ask an operator to
+  raise LAKANA_RUN__MAX_HISTORY_OPEN_BYTES if the worker's memory limit
+  (LAKANA_WORKER__MEMORY_LIMIT) allows it, or narrow the dimension's columns: keep wide text such
+  as descriptions in a table of its own and join it by the key.`` For a Python asset the text
+  names the server and ends "if the memory the server has allows it". The count cap protects
+  against many versions, the byte cap against wide ones; together they bound what one write
+  holds. Both apply to SQL assets (in the worker) and Python assets (in the server).
+- On the REST path (a Python asset) the server holds the open versions, and
+  `LAKANA_APPEND__MAX_CONCURRENT_HISTORY` (1 by default) bounds how many such writes run at once.
+  A request takes the slot once its authorization is checked, before its body is read; one past
+  it is refused with 503. A run of the asset then fails as retryable and runs again up to its
+  `retries:` (2 by default, 30 s and then 60 s apart, at most `LAKANA_RUN__MAX_RETRIES`; see
+  [Retries and timeouts](lakana-yaml.md#retries-and-timeouts)), and fails once they are used
+  up. When several Python history assets run at once, raise
+  `LAKANA_APPEND__MAX_CONCURRENT_HISTORY` (and the server's memory) or the asset's `retries:`.
 - Measured on one machine, with a dimension of 1,000,000 open versions of 8 columns, the worker's
   memory peaked at about 1,312 MiB (1.5 s) when 10,000 keys changed, 5,000 were new and 5,000 went
   missing, at 1,760 MiB (8.6 s) when half the keys changed and at 2,251 MiB (16.1 s) when all

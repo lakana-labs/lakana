@@ -29,6 +29,7 @@ import pyarrow as pa
 import pyarrow.compute as _compute
 from pyiceberg.expressions import And, EqualTo, GreaterThan, In, Or
 from pyiceberg.io import FileIO
+from pyiceberg.io.pyarrow import ArrowScan, _read_all_delete_files, schema_to_pyarrow
 from pyiceberg.manifest import DataFileContent, ManifestEntry
 from pyiceberg.schema import Schema
 from pyiceberg.table import DataScan
@@ -1030,6 +1031,47 @@ def too_many_open_versions_message(
     )
 
 
+MAX_OPEN_BYTES_SETTING = "LAKANA_RUN__MAX_HISTORY_OPEN_BYTES"
+"""The setting that caps the bytes a history write reads its open versions into (`RunConfig`)."""
+
+
+def too_many_open_bytes_message(
+    table: str, read: int, cap: int, *, holder: Literal["worker", "server"]
+) -> str:
+    """Refuse a history write whose open versions passed the byte cap while being read.
+
+    Parameters
+    ----------
+    table
+        The table's dotted name.
+    read
+        The bytes of Arrow data read so far; more than `cap`.
+    cap
+        `LAKANA_RUN__MAX_HISTORY_OPEN_BYTES`.
+    holder
+        The process that holds the versions: ``"worker"`` (a SQL asset's run) or ``"server"``
+        (a write over the REST API).
+
+    Returns
+    -------
+    str
+        The message, naming the bytes, the setting, the process and the two next steps.
+    """
+    setting = MAX_OPEN_BYTES_SETTING
+    memory = (
+        "the worker's memory limit (LAKANA_WORKER__MEMORY_LIMIT)"
+        if holder == "worker"
+        else "the memory the server has"
+    )
+    return (
+        f"Reading the open versions of {table} passed {read} bytes of Arrow data, more than "
+        f"{setting} ({cap}) allows, so the read stopped and nothing was written. A history write "
+        f"holds every open version in the {holder}'s memory. Ask an operator to raise {setting} "
+        f"if {memory} allows it, or narrow the dimension's columns: keep wide text such as "
+        "descriptions in a table of its own and join it by the key."
+    )
+
+
 def _live_entries(snapshot: Snapshot, file_io: FileIO) -> Iterator[ManifestEntry]:
     """List the live data and delete file entries of a snapshot's manifests.
 
@@ -1262,13 +1304,48 @@ def conform_batch(schema: Schema, data: pa.Table, *, table: str) -> pa.Table:
     return data.select(target.names).cast(target)
 
 
+def _stream_batches(scan: DataScan) -> Iterator[pa.RecordBatch]:
+    """Read a scan's batches lazily, one data file after another, in the scan's Arrow schema.
+
+    `DataScan.to_arrow_batch_reader` hands every planned file to pyiceberg's thread pool at once,
+    and each thread reads its whole file into a list: whatever its consumer keeps, the whole
+    scan is read into memory, and a cap counted while consuming bounds nothing. Here a file is
+    read only once the batches of the one before it are consumed, and each file batch by batch
+    (as pyarrow's scanner gives them), so a reader that stops has read at most one batch more,
+    and what the scanner read ahead within the same file.
+    It goes through pyiceberg's `ArrowScan` internals (pinned below 0.13; a test counts what is
+    read), which apply the row filter, the projection and any delete files as the public reader
+    does.
+
+    Parameters
+    ----------
+    scan
+        The scan.
+
+    Yields
+    ------
+    pa.RecordBatch
+        The scan's batches, cast to its projected Arrow schema.
+    """
+    projected = scan.projection()
+    target = schema_to_pyarrow(projected)
+    arrow = ArrowScan(scan.table_metadata, scan.io, projected, scan.row_filter, scan.case_sensitive)
+    for task in scan.plan_files():
+        deletes = _read_all_delete_files(scan.io, [task])
+        for batch in arrow._record_batches_from_scan_tasks_and_deletes([task], deletes):
+            yield batch.cast(target)
+
+
 def _read_capped(
     scan: DataScan,
     max_rows: int | None,
     message: Callable[[int], str],
     keep: Callable[[pa.Table], pa.Table] | None = None,
+    *,
+    max_bytes: int | None = None,
+    bytes_message: Callable[[int, int], str] | None = None,
 ) -> pa.Table:
-    """Read a scan batch by batch, refusing as soon as it passes a row limit.
+    """Read a scan batch by batch, refusing as soon as it passes a row or byte limit.
 
     Parameters
     ----------
@@ -1280,6 +1357,10 @@ def _read_capped(
         Builds the refusal from `max_rows`.
     keep
         Picks the rows of each batch that are kept and counted, or `None` for every row.
+    max_bytes
+        Most bytes of Arrow data (`nbytes`) to keep, or `None`.
+    bytes_message
+        Builds the refusal from the bytes kept and `max_bytes`; needed with `max_bytes`.
 
     Returns
     -------
@@ -1289,32 +1370,44 @@ def _read_capped(
     Raises
     ------
     ValidationError
-        For more rows kept than `max_rows`, with `message`'s text, before the rest is read.
+        For more rows kept than `max_rows`, with `message`'s text, or more bytes kept than
+        `max_bytes`, with `bytes_message`'s, before the rest is read.
     """
-    reader = scan.to_arrow_batch_reader()
-    empty = reader.schema.empty_table()
+    empty = schema_to_pyarrow(scan.projection()).empty_table()
     parts = [empty if keep is None else keep(empty)]  # gives the result its schema
     rows = 0
-    for batch in reader:
+    held = 0
+    for batch in _stream_batches(scan):
         part = pa.Table.from_batches([batch])
         if keep is not None:
             part = keep(part)
         rows += part.num_rows
         if max_rows is not None and rows > max_rows:
             raise ValidationError(message(max_rows))
+        held += part.nbytes
+        if max_bytes is not None and held > max_bytes and bytes_message is not None:
+            raise ValidationError(bytes_message(held, max_bytes))
         parts.append(part)
     return pa.concat_tables(parts)
 
 
 def read_open_versions(
-    metadata: TableMetadata, file_io: FileIO, *, max_rows: int | None
+    metadata: TableMetadata,
+    file_io: FileIO,
+    *,
+    max_rows: int | None,
+    max_bytes: int | None,
+    table: str,
+    holder: Literal["worker", "server"],
 ) -> pa.Table:
     """Read a history table's open versions, every column.
 
     One scan filtered on `is_current`: a data file whose rows are all closed has `false` as
-    both bounds of the column and is skipped, so a long history costs nothing here. Nothing is
-    checked here: `plan_history` refuses a key with two open versions, and `stage_history` a
-    surrogate key shared by two (the rows a write removes and adds must match its plan).
+    both bounds of the column and is skipped, so a long history costs nothing here. The bytes
+    read are counted batch by batch, and the read stops as soon as they pass `max_bytes`, so
+    at most that and one batch is held. Nothing else is checked here: `plan_history` refuses a
+    key with two open versions, and `stage_history` a surrogate key shared by two (the rows a
+    write removes and adds must match its plan).
 
     Parameters
     ----------
@@ -1324,6 +1417,13 @@ def read_open_versions(
         The environment's `FileIO`.
     max_rows
         Most open versions to read (`QueryLimitsConfig.max_write_rows`), or `None`.
+    max_bytes
+        Most bytes of Arrow data to read them into (`RunConfig.max_history_open_bytes`), or
+        `None`.
+    table
+        The table's dotted name, for the message.
+    holder
+        The process that holds the versions, for the message: ``"worker"`` or ``"server"``.
 
     Returns
     -------
@@ -1333,7 +1433,8 @@ def read_open_versions(
     Raises
     ------
     ValidationError
-        For more open versions than `max_rows` (`max_rows_message`, refused while reading).
+        For more open versions than `max_rows` (`max_rows_message`) or more bytes than
+        `max_bytes` (`too_many_open_bytes_message`), refused while reading.
     """
     schema = metadata.schema().as_arrow()
     if metadata.current_snapshot_id is None:
@@ -1341,7 +1442,15 @@ def read_open_versions(
     scan = DataScan(
         table_metadata=metadata, io=file_io, row_filter=EqualTo(term=IS_CURRENT, value=True)
     )
-    return _read_capped(scan, max_rows, max_rows_message).cast(schema)
+    return _read_capped(
+        scan,
+        max_rows,
+        max_rows_message,
+        max_bytes=max_bytes,
+        bytes_message=lambda read, cap: too_many_open_bytes_message(
+            table, read, cap, holder=holder
+        ),
+    ).cast(schema)
 
 
 IN_LIMIT = 10_000

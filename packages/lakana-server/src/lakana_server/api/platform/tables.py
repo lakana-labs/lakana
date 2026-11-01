@@ -878,8 +878,9 @@ async def _governed_arrow_write(
     history
         Whether this is a history write. It then also takes a slot of
         `app.state.history_concurrency_limiter` (`Settings.append.max_concurrent_history`,
-        `LAKANA_APPEND__MAX_CONCURRENT_HISTORY`), without waiting, before the shared slot; both
-        are released however the function exits.
+        `LAKANA_APPEND__MAX_CONCURRENT_HISTORY`), without waiting, after the precheck and before
+        the body is read, so a request the precheck refuses never holds it; both slots are
+        released however the function exits.
 
     Returns
     -------
@@ -902,23 +903,21 @@ async def _governed_arrow_write(
     if _media_type(request.headers.get("content-type")) != _ARROW_STREAM_MEDIA_TYPE:
         raise ValidationError(f"Content-Type must be {_ARROW_STREAM_MEDIA_TYPE!r}.")
 
-    history_limiter: AppendConcurrencyLimiter | None = (
-        request.app.state.history_concurrency_limiter if history else None
-    )
-    if history_limiter is not None and not history_limiter.try_acquire():
-        raise AppendConcurrencyLimitError(
-            "Too many concurrent history writes; retry shortly. The server holds a history "
-            "table's open versions in memory, so it runs few at once "
-            "(LAKANA_APPEND__MAX_CONCURRENT_HISTORY, default 1)."
-        )
     limiter: AppendConcurrencyLimiter = request.app.state.append_concurrency_limiter
     if not limiter.try_acquire():
-        if history_limiter is not None:
-            history_limiter.release()
         raise AppendConcurrencyLimitError("Too many concurrent appends; retry shortly.")
+    history_limiter: AppendConcurrencyLimiter | None = None
     try:
         await run_in_threadpool(precheck)
         await run_in_threadpool(session.rollback)
+        if history:
+            if not request.app.state.history_concurrency_limiter.try_acquire():
+                raise AppendConcurrencyLimitError(
+                    "Too many concurrent history writes; retry shortly. The server holds a "
+                    "history table's open versions in memory, so it runs few at once "
+                    "(LAKANA_APPEND__MAX_CONCURRENT_HISTORY, default 1)."
+                )
+            history_limiter = request.app.state.history_concurrency_limiter
 
         append_config = request.app.state.settings.append
         max_bytes = append_config.max_bytes
@@ -2348,7 +2347,8 @@ async def write_table_history(
     Notes
     -----
     The body controls are shared with `append_table_data` through `_governed_arrow_write`. The
-    write runs with the server's `max_write_rows` and `max_history_open_versions`, as a run's
+    write runs with the server's `max_write_rows`, `max_history_open_versions` and
+    `max_history_open_bytes`, as a run's
     does in the worker, and hands the memory it freed back afterwards (`trim_heap`), whether or
     not it lands; a request refused before its body is read never gets that far.
     """
@@ -2383,6 +2383,7 @@ async def write_table_history(
                 expected_snapshot_id=expected,
                 max_rows=settings.query_limits.max_write_rows,
                 max_open_versions=settings.run.max_history_open_versions,
+                max_open_bytes=settings.run.max_history_open_bytes,
             )
         finally:
             trim_heap()

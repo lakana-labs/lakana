@@ -147,6 +147,39 @@ def test_the_servers_open_versions_cap_applies(settings: Settings) -> None:
     )
 
 
+def test_the_servers_open_bytes_cap_bounds_what_wide_open_versions_hold(
+    settings: Settings,
+) -> None:
+    """`LAKANA_RUN__MAX_HISTORY_OPEN_BYTES` refuses once the open versions grow past it.
+
+    Every body is under `LAKANA_APPEND__MAX_BYTES` and the open-versions count stays tiny, yet
+    each write makes the server read every open version: the byte cap is what bounds that.
+    """
+    wide = "x" * 20 * 1024
+    capped = settings.model_copy(
+        update={
+            "run": RunConfig(max_history_open_bytes=500_000),
+            "append": AppendConfig(max_bytes=256 * 1024),
+        }
+    )
+    with TestClient(create_app(capped)) as client:
+        create_environment(client)
+        for n in range(3):  # reads 0, about 205 KB, then about 411 KB of open versions
+            rows: list[tuple[str, str]] = [(f"K{n * 10 + i:06d}", wide) for i in range(10)]
+            params: dict[str, str] = {"expected_snapshot_id": "none"} if n == 0 else {}
+            assert _history(client, rows, **params).status_code == 200
+        refused = _history(client, [(f"K{30 + i:06d}", wide) for i in range(10)])
+        table = client.get(f"{_TABLES}/dim_customer", headers=_HEADERS).json()
+
+    assert refused.status_code == 422, refused.text
+    detail = refused.json()["detail"]
+    assert detail.startswith("Reading the open versions of gold.dim_customer passed ")
+    assert "LAKANA_RUN__MAX_HISTORY_OPEN_BYTES (500000) allows" in detail
+    assert "in the server's memory" in detail
+    assert "the memory the server has allows it" in detail
+    assert table["row_count"] == 30
+
+
 def test_the_servers_write_row_cap_applies(settings: Settings) -> None:
     """`LAKANA_QUERY_LIMITS__MAX_WRITE_ROWS` refuses a history write over it, as for an append."""
     capped = settings.model_copy(update={"query_limits": QueryLimitsConfig(max_write_rows=1)})
@@ -206,6 +239,41 @@ def test_the_history_slot_defaults_to_one_and_reads_the_environment(
     assert loaded.append.max_concurrent_history == 3
     with pytest.raises(ValueError, match="greater than 0"):
         AppendConfig(max_concurrent_history=0)
+
+
+def test_a_request_the_precheck_refuses_never_takes_the_history_slot(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A 403 or 404 before the body is read leaves the slot to the writes that will use it."""
+    create_environment(client)
+    assert _history(client, [("A", "north")], expected_snapshot_id="none").status_code == 200
+    history = client.app.state.history_concurrency_limiter  # type: ignore[attr-defined]
+    taken: list[bool] = []
+    original = history.try_acquire
+
+    def counting() -> bool:
+        taken.append(True)
+        return original()
+
+    monkeypatch.setattr(history, "try_acquire", counting)
+    writer = _restricted(client, "writer", ["WRITE_TABLE"])
+    forbidden = client.post(
+        f"{_TABLES}/dim_customer/history",
+        headers=writer,
+        params={"key": "customer_id"},
+        content=b"never read",
+    )
+    missing = client.post(
+        f"{_TABLES}/dim_nobody/history",
+        headers=_HEADERS,
+        params={"key": "customer_id"},
+        content=b"never read",
+    )
+
+    assert (forbidden.status_code, missing.status_code) == (403, 404)
+    assert taken == []
+    assert _history(client, [("A", "south")]).status_code == 200
+    assert taken == [True]
 
 
 def test_a_history_write_past_the_history_slot_is_503_and_frees_the_shared_slot(

@@ -22,6 +22,7 @@ from lakana_core.auth import AllowAllAuthorization, PrincipalRef
 from lakana_core.catalog.service import CatalogService
 from lakana_core.config import (
     DEFAULT_MAINTENANCE_TIMEOUT,
+    DEFAULT_MAX_HISTORY_OPEN_BYTES,
     DEFAULT_MAX_HISTORY_OPEN_VERSIONS,
     DatabaseConfig,
     StorageConfig,
@@ -251,6 +252,7 @@ def _no_drain_leaks() -> Iterator[None]:
     executor_module._WORKER_STALE = None
     pipeline_module._MAINTENANCE_TIMEOUT = DEFAULT_MAINTENANCE_TIMEOUT
     pipeline_module._MAX_HISTORY_OPEN_VERSIONS = DEFAULT_MAX_HISTORY_OPEN_VERSIONS
+    pipeline_module._MAX_HISTORY_OPEN_BYTES = DEFAULT_MAX_HISTORY_OPEN_BYTES
     pipeline_module._clock = time.monotonic
 
 

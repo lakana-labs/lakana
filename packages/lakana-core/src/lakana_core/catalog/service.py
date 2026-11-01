@@ -237,7 +237,12 @@ from lakana_core.catalog.writes import (
     stage_snapshot,
     target_changed_message,
 )
-from lakana_core.config import DEFAULT_MAX_HISTORY_OPEN_VERSIONS, StorageConfig, ViewAuditConfig
+from lakana_core.config import (
+    DEFAULT_MAX_HISTORY_OPEN_BYTES,
+    DEFAULT_MAX_HISTORY_OPEN_VERSIONS,
+    StorageConfig,
+    ViewAuditConfig,
+)
 from lakana_core.db import db_now, rowcount
 from lakana_core.errors import (
     AlreadyExistsError,
@@ -6326,6 +6331,7 @@ class CatalogService:
         query_run_id: uuid.UUID | None = None,
         max_rows: int | None = None,
         max_open_versions: int = DEFAULT_MAX_HISTORY_OPEN_VERSIONS,
+        max_open_bytes: int = DEFAULT_MAX_HISTORY_OPEN_BYTES,
         advice: MergeAdvice = SDK_ADVICE,
     ) -> HistoryResult:
         """Keep the versions of a dimension's rows: open, close and leave alone, in one commit.
@@ -6374,8 +6380,12 @@ class CatalogService:
             the open versions counted from the manifests and the result's rows before any
             version is read, and the open versions the planned write would leave before it is
             staged.
+        max_open_bytes
+            Most bytes of Arrow data the open versions may be read into
+            (`RunConfig.max_history_open_bytes`), counted batch by batch while they are read.
         advice
-            How a repeated key is explained: `SDK_ADVICE` or `SQL_ADVICE`.
+            How a repeated key is explained (`SDK_ADVICE` or `SQL_ADVICE`), and which process
+            the open-versions and byte refusals name as the one that holds the versions.
 
         Returns
         -------
@@ -6396,7 +6406,8 @@ class CatalogService:
             this key, a batch without the table's columns, a refusal of `plan_history`, a change
             by a run whose own write is the table's current snapshot (`written_by_run`), a table
             that is not managed, a row filter or column mask that applies to `p`, more open
-            versions or result rows than `max_open_versions` (before any version is read), more
+            versions or result rows than `max_open_versions` (before any version is read), open
+            versions past `max_open_bytes` (while they are read, before anything is staged), more
             open versions after the planned write (before anything is staged), or first versions
             to replace or close after a run that started later wrote the table
             (`check_first_versions_order`).
@@ -6504,7 +6515,14 @@ class CatalogService:
             )
         plan = plan_history(
             rows,
-            read_open_versions(current, file_io, max_rows=max_rows),
+            read_open_versions(
+                current,
+                file_io,
+                max_rows=max_rows,
+                max_bytes=max_open_bytes,
+                table=ref.dotted(),
+                holder=advice.holder,
+            ),
             key=key,
             table=ref.dotted(),
             schema=schema.as_arrow(),

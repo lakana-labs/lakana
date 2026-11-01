@@ -557,7 +557,9 @@ def main() -> None:
     signal.signal(signal.SIGTERM, lambda signum, frame: drain.set())
     install_drain(drain, settings.run.drain_grace_seconds)
     install_maintenance_timeout(settings.run.maintenance_timeout)
-    install_history_cap(settings.run.max_history_open_versions)
+    install_history_cap(
+        settings.run.max_history_open_versions, open_bytes=settings.run.max_history_open_bytes
+    )
     install_query_text(settings.audit.query_text)
     runtime = _python_runtime(settings, python, drain)
     _clean_up_after_restart(runtime)

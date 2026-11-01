@@ -11,7 +11,7 @@ from task_run_helpers import World, _engine, _entry, _exists, _start, _task
 
 from lakana_core.auth import AllowAllAuthorization
 from lakana_core.catalog.history import RUN_WROTE_MESSAGE
-from lakana_core.config import QueryLimitsConfig
+from lakana_core.config import DEFAULT_MAX_HISTORY_OPEN_VERSIONS, QueryLimitsConfig
 from lakana_core.models import (
     Environment,
     QueryRun,
@@ -189,6 +189,26 @@ def test_the_configured_open_versions_cap_reaches_the_history_write(world: World
 
     assert _task(world, "gold.dim_events").status is TaskStatus.SUCCEEDED
     assert _ids(world, "gold.dim_events") == [1, 2, 3]
+
+
+def test_the_configured_open_bytes_cap_reaches_the_history_write(world: World) -> None:
+    """`LAKANA_RUN__MAX_HISTORY_OPEN_BYTES`, installed at start, caps what the run reads."""
+    _outside_table(world, "bronze.events", [1, 2, 3])
+    _keeping(world, retries=0)
+    _start(world)
+    _drain(world)
+    assert _task(world, "gold.dim_events").status is TaskStatus.SUCCEEDED
+    install_history_cap(DEFAULT_MAX_HISTORY_OPEN_VERSIONS, open_bytes=1)
+
+    _start(world)
+    _drain(world)
+
+    refused = _task(world, "gold.dim_events")
+    assert refused.status is TaskStatus.FAILED
+    assert refused.error_message is not None
+    assert refused.error_message.startswith("Reading the open versions of gold.dim_events passed")
+    assert "LAKANA_RUN__MAX_HISTORY_OPEN_BYTES (1) allows" in refused.error_message
+    assert "the worker's memory limit (LAKANA_WORKER__MEMORY_LIMIT)" in refused.error_message
 
 
 def _write_again(world: World, task_run_id: uuid.UUID) -> QueryRun:
