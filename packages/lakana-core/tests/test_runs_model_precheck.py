@@ -167,6 +167,24 @@ def deny_target() -> AuthorizationService:
         ({"id": "long"}, GeneratedFrom("key", ("id",)), None),
         ({"id": "long", "day": "date"}, GeneratedFrom("key", ("id", "day")), None),
         (
+            {
+                "id": "long",
+                "f_key": "string",
+                "valid_from": "timestamptz",
+                "valid_to": "timestamptz",
+                "is_current": "boolean",
+            },
+            GeneratedFrom("key", ("id",), history=True),
+            None,
+        ),
+        (
+            {"id": "long", "valid_from": "timestamptz"},
+            GeneratedFrom("key", ("id",), history=True),
+            "`gold.f` has no column `f_key`, which `write: history` adds, so it was not built by "
+            "its history asset. Drop it (`lakana table delete gold.f --env dev`) so that the "
+            "next run creates it, and deploy again.",
+        ),
+        (
             {"amount": "double"},
             GeneratedFrom("key", ("amount",)),
             "Key column `amount` is double, a floating-point type, so it cannot identify a row; "

@@ -30,6 +30,7 @@ from lakana_core.catalog.columns import stored_columns
 from lakana_core.errors import ValidationError
 from lakana_core.identifiers import TableRef
 from lakana_core.projects.checks import CheckSpec, GeneratedFrom
+from lakana_core.projects.history_columns import added_columns
 from lakana_core.projects.measures import NUMERIC_AGGREGATIONS, ORDERED_AGGREGATIONS
 
 FLOAT_TYPES = frozenset({"float", "double"})
@@ -64,6 +65,13 @@ KEY_FLOAT = (
     "in the asset, for example to DECIMAL, BIGINT or VARCHAR, and deploy again."
 )
 """A key column of a floating-point type."""
+
+HISTORY_COLUMN_MISSING = (
+    "`{table}` has no column `{column}`, which `write: history` adds, so it was not built by its "
+    "history asset. Drop it (`lakana table delete {table} --env {environment}`) so that the next "
+    "run creates it, and deploy again."
+)
+"""A history dimension's table without one of the columns its history write adds."""
 
 KEY_MISSING = (
     "Key column `{column}` is not a column of `{table}`; fix `key:` in {path} and deploy again."
@@ -214,13 +222,15 @@ def model_problem(
     if not own:
         return None
     if generated.family == "key":
-        return _key_problem(own, generated, spec)
+        return _key_problem(own, generated, spec, environment)
     if generated.family == "measures":
         return _measures_problem(own, generated, spec)
     return _reference_problem(session, authz, principal, environment, own, generated, spec)
 
 
-def _key_problem(own: dict[str, str], generated: GeneratedFrom, spec: CheckSpec) -> str | None:
+def _key_problem(
+    own: dict[str, str], generated: GeneratedFrom, spec: CheckSpec, environment: str
+) -> str | None:
     """Check a key's columns: each one there, none of a floating-point type.
 
     Parameters
@@ -231,11 +241,15 @@ def _key_problem(own: dict[str, str], generated: GeneratedFrom, spec: CheckSpec)
         The key the check comes from.
     spec
         The check.
+    environment
+        The run's environment, for the command in the text.
 
     Returns
     -------
     str or None
-        `KEY_MISSING` or `KEY_FLOAT` for the first key column with a problem, else `None`.
+        `KEY_MISSING` or `KEY_FLOAT` for the first key column with a problem, then
+        `HISTORY_COLUMN_MISSING` for a history key whose table lacks an added column, else
+        `None`.
     """
     for column in generated.columns:
         type_ = own.get(column)
@@ -244,6 +258,12 @@ def _key_problem(own: dict[str, str], generated: GeneratedFrom, spec: CheckSpec)
             return text + _case_hint(own, column)
         if type_ in FLOAT_TYPES:
             return KEY_FLOAT.format(column=column, type=type_)
+    if generated.history:
+        for column in added_columns(spec.table):
+            if column not in own:
+                return HISTORY_COLUMN_MISSING.format(
+                    table=spec.table, column=column, environment=environment
+                )
     return None
 
 

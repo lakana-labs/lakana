@@ -135,14 +135,15 @@ class DeployDiff:
     adopted
         New in this manifest; the table exists but no project version produces it.
     materialization_changed
-        Materialization, write mode, the key of a merge, watermark or evolve flag changed.
+        Materialization, write mode, the key of a merge or history asset, watermark or evolve flag
+        changed.
     sql_changed
         Normalized SQL changed.
     metadata_changed
         Description, owner, tags or column docs changed.
     model_changed
-        Kind, grain, references, the checks overrides, or the key of an asset that does not
-        merge, changed.
+        Kind, grain, references, the checks overrides, or the key of an asset that neither
+        merges nor keeps history, changed.
     jobs_added
         Names of jobs this manifest declares and the current one does not.
     jobs_removed

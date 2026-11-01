@@ -1468,6 +1468,8 @@ def test_a_well_formed_generated_entry_reads_back(generated: dict[str, object]) 
         {**_KEY_FROM, "target": "x.y", "target_column": "id"},
         {**_REF_FROM, "target": None},
         {**_REF_FROM, "target_column": 3},
+        {**_KEY_FROM, "history": "yes"},
+        {**_REF_FROM, "history": True},
     ],
     ids=[
         "a string",
@@ -1480,6 +1482,8 @@ def test_a_well_formed_generated_entry_reads_back(generated: dict[str, object]) 
         "key with a target",
         "reference without a target",
         "target column not a string",
+        "history not a boolean",
+        "history on a reference",
     ],
 )
 def test_a_damaged_generated_entry_is_unreadable_for_its_table(generated: object) -> None:
@@ -1487,6 +1491,13 @@ def test_a_damaged_generated_entry_is_unreadable_for_its_table(generated: object
     read = read_manifest_checks({"assets": [{"table": "a.b"}], "checks": [entry]})
     assert read.specs == ()
     assert read.unreadable_tables == {"a.b"}
+
+
+def test_a_history_key_entry_reads_back_as_history() -> None:
+    entry = _stored(generated={**_KEY_FROM, "history": True})
+    (spec,) = read_manifest_checks({"assets": [{"table": "a.b"}], "checks": [entry]}).specs
+    assert spec.generated is not None and spec.generated.history is True
+    assert spec.generated == dataclasses.replace(spec.generated, history=True)
 
 
 _MEASURES_FROM = {"family": "measures", "columns": ["a", "b"], "aggregations": ["sum", "max"]}

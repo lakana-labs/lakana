@@ -421,15 +421,18 @@ def _check_entry(check: ParsedCheck) -> dict[str, Any]:
         "references": list(check.references),
     }
     if check.generated is not None:
-        entry["generated"] = {
+        generated: dict[str, str | bool | list[str] | None] = {
             "family": check.generated.family,
             "columns": list(check.generated.columns),
             "target": check.generated.target,
             "target_column": check.generated.target_column,
         }
         if check.generated.family == "measures":
-            entry["generated"]["not_over"] = list(check.generated.not_over)
-            entry["generated"]["aggregations"] = list(check.generated.aggregations)
+            generated["not_over"] = list(check.generated.not_over)
+            generated["aggregations"] = list(check.generated.aggregations)
+        if check.generated.history:
+            generated["history"] = True
+        entry["generated"] = generated
     return entry
 
 

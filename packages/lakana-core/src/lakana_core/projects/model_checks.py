@@ -1,7 +1,8 @@
 """The checks an asset's header generates: ``key_*``, ``ref_<column>`` and ``measures``.
 
 ``key_unique`` and ``key_not_null`` come from a key, ``ref_<column>`` from each reference, and
-``measures`` from `measures:`.
+``measures`` from `measures:`; a history dimension's ``key_unique`` checks versions, and
+``surrogate_key_unique`` comes from `write: history`.
 
 A deploy turns each declared key and each resolved reference into an ordinary `ParsedCheck`, so the
 generated checks run, count, block and show exactly like hand-written ones. The SQL quotes every
@@ -16,11 +17,15 @@ from lakana_core.identifiers import shown
 from lakana_core.projects.asset_model import ParsedAsset, ResolvedReference, key_columns
 from lakana_core.projects.checks import GeneratedFrom, ParsedCheck
 from lakana_core.projects.discovery import _fold
+from lakana_core.projects.history_columns import IS_CURRENT, VALID_FROM, VALID_TO, surrogate_column
 from lakana_core.projects.issues import ProjectIssue
 from lakana_core.projects.measures import MEASURES_CHECK
 
 KEY_UNIQUE = "key_unique"
 """The check that returns the rows whose key appears more than once."""
+
+SURROGATE_KEY_UNIQUE = "surrogate_key_unique"
+"""The check that returns the versions of a history dimension whose surrogate key repeats."""
 
 KEY_NOT_NULL = "key_not_null"
 """The check that returns the rows with a null in any key column."""
@@ -192,6 +197,50 @@ def _generated(
     )
 
 
+def history_key_unique_sql(table: str, key: Sequence[str]) -> str:
+    """Select the versions that break "one version per key at any time".
+
+    A version is returned when the next version of its key starts before it ends (two open
+    versions, or an overlap), when it ends at or before it starts, or when `is_current`
+    disagrees with `valid_to`.
+
+    Parameters
+    ----------
+    table
+        The history table.
+    key
+        Its natural key's columns.
+
+    Returns
+    -------
+    str
+        One SELECT.
+    """
+    columns = ", ".join(_quote(c) for c in key)
+    start, end, current = _quote(VALID_FROM), _quote(VALID_TO), _quote(IS_CURRENT)
+    return (
+        f"SELECT * FROM {_table(table)} QUALIFY lead({start}) OVER (PARTITION BY {columns} "  # nosec B608 -- identifiers quoted
+        f"ORDER BY {start}) < coalesce({end}, 'infinity'::TIMESTAMPTZ) OR {end} <= {start} "
+        f"OR {current} IS DISTINCT FROM ({end} IS NULL)"
+    )
+
+
+def surrogate_key_unique_sql(table: str) -> str:
+    """Select the versions of a history table whose surrogate key appears more than once.
+
+    Parameters
+    ----------
+    table
+        The history table.
+
+    Returns
+    -------
+    str
+        One SELECT.
+    """
+    return key_unique_sql(table, [surrogate_column(table)])
+
+
 def generated_checks(
     assets: Sequence[ParsedAsset],
     references: Mapping[str, Sequence[ResolvedReference]],
@@ -213,7 +262,8 @@ def generated_checks(
     Returns
     -------
     list of ParsedCheck
-        ``key_not_null`` and ``key_unique`` for a declared key (none for ``key: none``),
+        ``key_not_null`` and ``key_unique`` for a declared key (none for ``key: none``; a history
+        dimension's ``key_unique`` checks versions, and it has ``surrogate_key_unique`` too),
         ``ref_<column>`` per resolved reference, and one ``measures`` for an asset that
         declares measures; sorted by name.
     """
@@ -221,15 +271,31 @@ def generated_checks(
     for asset in sorted(assets, key=lambda a: a.table):
         columns = key_columns(asset.metadata.key)
         if columns:
-            source = GeneratedFrom("key", columns)
-            for check, sql in (
-                (KEY_NOT_NULL, key_not_null_sql(asset.table, columns)),
-                (KEY_UNIQUE, key_unique_sql(asset.table, columns)),
-            ):
-                checks.append(
-                    _generated(
-                        asset, check, sql, source, "generated from `key:`", default_on_failure
+            history = asset.metadata.write == "history"
+            source = GeneratedFrom("key", columns, history=history)
+            keyed: list[tuple[str, str, str]] = [
+                (KEY_NOT_NULL, key_not_null_sql(asset.table, columns), "generated from `key:`"),
+                (
+                    (
+                        KEY_UNIQUE,
+                        history_key_unique_sql(asset.table, columns),
+                        "generated from `key:` (one version per key at any time)",
                     )
+                    if history
+                    else (KEY_UNIQUE, key_unique_sql(asset.table, columns), "generated from `key:`")
+                ),
+            ]
+            if history:
+                keyed.append(
+                    (
+                        SURROGATE_KEY_UNIQUE,
+                        surrogate_key_unique_sql(asset.table),
+                        "generated from `write: history` (one row per version key)",
+                    )
+                )
+            for check, sql, description in keyed:
+                checks.append(
+                    _generated(asset, check, sql, source, description, default_on_failure)
                 )
         for ref in references.get(asset.table, ()):
             checks.append(

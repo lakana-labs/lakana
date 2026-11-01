@@ -1250,6 +1250,24 @@ def _dimension(**fields: object) -> ParsedAsset:
     return make_asset("gold.dim_customer", columns=("customer_id", "region"), metadata=metadata)
 
 
+def test_a_history_key_check_reads_back_as_history() -> None:
+    asset = _dimension()
+    checks = generated_checks([asset], {}, default_on_failure="block")
+    manifest = build_manifest([asset], build_graph([asset]), ResolvedProjectConfig(), checks=checks)
+    entries = {c["check"]: c for c in manifest["checks"]}
+    assert entries["key_unique"]["generated"]["history"] is True
+    read = read_manifest_checks(manifest)
+    assert {s.generated for s in read.specs} == {
+        GeneratedFrom("key", ("customer_id",), history=True)
+    }
+    plain = make_asset("gold.a", metadata=AssetMetadata(materialize="table", key=("id",)))
+    plain_checks = generated_checks([plain], {}, default_on_failure="block")
+    stored = build_manifest(
+        [plain], build_graph([plain]), ResolvedProjectConfig(), checks=plain_checks
+    )
+    assert all("history" not in c["generated"] for c in stored["checks"])
+
+
 def test_history_raises_the_version_to_12_and_records_how_it_writes() -> None:
     asset = _dimension(valid_from="changed_at", close_missing=True)
     manifest = build_manifest([asset], build_graph([asset]), ResolvedProjectConfig())

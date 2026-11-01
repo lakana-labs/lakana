@@ -6,6 +6,7 @@ import duckdb
 
 from lakana_core.projects.checks import count_query
 from lakana_core.projects.model_checks import (
+    history_key_unique_sql,
     key_not_null_sql,
     key_unique_sql,
     measures_sql,
@@ -86,3 +87,64 @@ def test_measures_sql_returns_no_rows_and_quotes_the_table() -> None:
     con.execute('INSERT INTO "we""ird"."order" VALUES (1.50)')
     assert con.execute(measures_sql('we"ird.order')).fetchall() == []
     assert _rows(measures_sql("gold.f")) == []
+
+
+def _versions() -> duckdb.DuckDBPyConnection:
+    """Open DuckDB in memory, in UTC as a check runs, with a history dimension `gold.d`.
+
+    Returns
+    -------
+    duckdb.DuckDBPyConnection
+        The connection. `A` is fine; `B` has two open versions; `C` overlaps; `D` says
+        `is_current` without being open; `E` has a version of zero length; `F` repeats a
+        surrogate key.
+    """
+    con = duckdb.connect()
+    con.execute("SET TimeZone = 'UTC'")
+    con.execute("CREATE SCHEMA gold")
+    con.execute(
+        "CREATE TABLE gold.d (customer_id VARCHAR, d_key VARCHAR, valid_from TIMESTAMPTZ, "
+        "valid_to TIMESTAMPTZ, is_current BOOLEAN)"
+    )
+    con.execute(
+        "INSERT INTO gold.d VALUES "
+        "('A', 'a1', '2026-01-01', '2026-02-01', false), ('A', 'a2', '2026-02-01', NULL, true), "
+        "('B', 'b1', '2026-01-01', NULL, true), ('B', 'b2', '2026-01-15', NULL, true), "
+        "('C', 'c1', '2026-01-01', '2026-03-01', false), ('C', 'c2', '2026-02-01', NULL, true), "
+        "('D', 'd1', '2026-01-01', NULL, false), "
+        "('E', 'e1', '2026-03-01', '2026-03-01', false), "
+        "('F', 'f1', '2026-01-01', NULL, true), ('G', 'f1', '2026-01-01', NULL, true)"
+    )
+    return con
+
+
+def _keys(con: duckdb.DuckDBPyConnection, sql: str) -> list[tuple[str, str]]:
+    """Run a check and keep the key columns of what it returns (timestamps need pytz to fetch).
+
+    Parameters
+    ----------
+    con
+        The connection.
+    sql
+        The check.
+
+    Returns
+    -------
+    list of tuple
+        ``(customer_id, d_key)``, sorted.
+    """
+    return sorted(con.execute(f"SELECT customer_id, d_key FROM ({sql})").fetchall())  # nosec B608
+
+
+def test_the_history_key_check_finds_every_broken_version_and_nothing_else() -> None:
+    found = _keys(_versions(), history_key_unique_sql("gold.d", ["customer_id"]))
+    assert found == [("B", "b1"), ("C", "c1"), ("D", "d1"), ("E", "e1")]
+
+
+def test_the_surrogate_key_check_finds_a_repeated_version_key() -> None:
+    con = _versions()
+    sql = key_unique_sql("gold.d", ["d_key"])  # the shape `surrogate_key_unique_sql` writes
+    assert _keys(con, sql) == [("F", "f1"), ("G", "f1")]
+    assert con.execute(
+        count_query(history_key_unique_sql("gold.d", ["customer_id"]))
+    ).fetchone() == (4,)
