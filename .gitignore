@@ -20,7 +20,6 @@ node_modules/
 .vscode/
 .superpowers/
 docs/superpowers/
-graphify-out/
 .worktrees/
 site-build/
 
