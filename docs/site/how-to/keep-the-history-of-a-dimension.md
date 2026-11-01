@@ -72,7 +72,7 @@ lakana sql "SELECT f.order_id, d.region FROM gold.fact_orders AS f JOIN gold.dim
 Order 2 belongs to Grace's north version: it was placed before she moved south.
 
 An order placed exactly when the customer moved belongs to the new version. A `DATE` column such
-as `ordered_at` is compared as midnight; cast it in the join if your times are in another zone.
+as `ordered_at` is compared as midnight UTC; cast it in the join if your times are in another zone.
 
 The first version's `valid_from`, 0001-01-01, is outside the range of a nanosecond timestamp.
 Converting `valid_from` to `timestamp[ns]` raises `ArrowInvalid`, and pandas before version 2

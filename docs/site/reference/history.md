@@ -230,8 +230,9 @@ result = client.tables.history(
 print(result.versions_opened, result.versions_closed)
 ```
 
-A conflict is retried once without `expected_snapshot_id`, as for `merge`: the second try
-compares with the table as the other writer left it, so it cannot open a second version.
+A call that passes no `expected_snapshot_id` has a conflict (409) retried once, as for `merge`: the
+second try compares with the table as the other writer left it, so it cannot open a second
+version. A Python asset passes one, so its conflict ends the run, and the platform runs it again.
 
 ## Checks
 
