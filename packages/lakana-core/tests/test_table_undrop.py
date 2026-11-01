@@ -1183,6 +1183,35 @@ def test_undrop_restores_the_model_and_its_references(
     ]
 
 
+def test_undrop_restores_the_time_of_a_valid_at_reference(
+    session: Session, catalog: CatalogService, principal: PrincipalRef
+) -> None:
+    """The reference's `at:` column comes back, so a dropped `at_column` fails here."""
+    table_id = _orders_table(catalog, principal)
+    model = _MODEL_ENTRY["model"]
+    assert isinstance(model, dict)
+    reference = {**model["references"][0], "at": "ordered_at"}
+    write_model_entry(
+        session,
+        _fresh(session, Table, table_id),
+        {**_MODEL_ENTRY, "model": {**model, "references": [reference]}},
+    )
+    session.commit()
+    environment_id = _fresh(
+        session, Namespace, _fresh(session, Table, table_id).namespace_id
+    ).environment_id
+    before = read_table_model(session, _fresh(session, Table, table_id))
+    assert before is not None and before.references[0].at == "ordered_at"
+
+    catalog.drop_table(principal, _ref("gold.orders"))
+    catalog.undrop_table(principal, _ref("gold.orders"))
+
+    assert read_table_model(session, _fresh(session, Table, table_id)) == before
+    assert incoming_references(session, environment_id, "gold.regions") == [
+        (table_id, "region", "code", "ordered_at")
+    ]
+
+
 def _measured_entry() -> dict[str, object]:
     """Build `_MODEL_ENTRY` with one measure, `amount`.
 

@@ -1578,14 +1578,12 @@ def references(ctx: typer.Context, name: str, env: _ENV = None) -> None:
         _output.emit(state, found)
         return
     sections = (
-        (
-            "References",
-            found.outgoing,
-            ["column", "target", "target_column", "target_exists", "at"],
-        ),
-        ("Referenced by", found.incoming, ["table", "column", "target_column", "at"]),
+        ("References", found.outgoing, ["column", "target", "target_column", "target_exists"]),
+        ("Referenced by", found.incoming, ["table", "column", "target_column"]),
     )
     for title, listed, columns in sections:
+        if any(view.at for view in listed):
+            columns = [*columns, "at"]
         if listed:
             _output.emit(state, f"{title}:")
             _output.emit(state, list(listed), columns=columns)

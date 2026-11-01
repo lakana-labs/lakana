@@ -2223,6 +2223,12 @@ def test_table_references_prints_both_directions(tmp_path: Path) -> None:
     assert "cannot read" not in out
 
 
+def test_table_references_has_no_time_column_when_no_reference_has_one(tmp_path: Path) -> None:
+    result = _references(tmp_path, _REFERENCES)
+    assert result.exit_code == 0, result.stderr
+    assert "┃ at" not in result.stdout
+
+
 def test_table_references_shows_the_time_of_a_valid_at_reference(tmp_path: Path) -> None:
     timed = {**_MODEL["references"][0], "at": "ordered_at"}
     body = {**_REFERENCES, "outgoing": [{**timed, "table": "gold.dim_store"}], "incoming": [timed]}
