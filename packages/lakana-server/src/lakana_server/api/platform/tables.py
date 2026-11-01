@@ -2287,14 +2287,15 @@ async def write_table_history(
     versions, a new key opens a version, a key whose values changed closes its version and opens
     a new one, an unchanged key is left alone, and with `close_missing=true` a key the rows lack
     is closed. Nothing is deleted. A key's first version always starts at 0001-01-01 UTC, so
-    that every row of a fact finds it; `valid_from` and the run's start time date later versions.
-    A Python asset with `write="history"` calls this; there is no CLI command. Takes the same `source`, `source_version` and `expected_snapshot_id` as the
-    merge, and the same body limits. Needs `WRITE_TABLE` and `READ_TABLE` (and `CREATE_TABLE` to
-    create the table with `expected_snapshot_id=none`); refused (422) while a row filter or
-    column mask on the table applies to the caller. Answers 404 when the table or a source does
-    not exist, 409 when `expected_snapshot_id` no longer matches or another writer committed
-    first, 413/408/503 as the merge, and 422 for what the history write refuses (counts, never
-    values), including more open versions than `LAKANA_RUN__MAX_HISTORY_OPEN_VERSIONS` allows.
+    that every row of a fact finds it; `valid_from` and the run's start time date later
+    versions. A Python asset with `write="history"` calls this; there is no CLI command. Takes
+    the same `source`, `source_version` and `expected_snapshot_id` as the merge, and the same
+    body limits. Needs `WRITE_TABLE` and `READ_TABLE` (and `CREATE_TABLE` to create the table
+    with `expected_snapshot_id=none`); refused (422) while a row filter or column mask on the
+    table applies to the caller. Answers 404 when the table or a source does not exist, 409 when
+    `expected_snapshot_id` no longer matches or another writer committed first, 413/408/503 as
+    the merge, and 422 for what the history write refuses (counts, never values), including more
+    open versions than `LAKANA_RUN__MAX_HISTORY_OPEN_VERSIONS` allows.
 
     Parameters
     ----------
