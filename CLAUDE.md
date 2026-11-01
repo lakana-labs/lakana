@@ -88,6 +88,29 @@ reason about a codebase rather than copy from a spec.
 Security-relevant diffs earn a tier. Every path-traversal escape found in this repo so far was
 found by a reviewer reasoning adversarially about code that already looked correct.
 
+## Keeping tool output small
+
+Everything a tool prints stays in the agent's context and is re-read on every later turn. These
+rules hold for every session and every subagent.
+
+- **Small outputs, honest status.** Filter output, never the verdict: a command passed only if it
+  exited 0, so check that (`set -o pipefail`, or `cmd > ~/.cache/<task>/out.log 2>&1; echo $?`)
+  before trusting a clean tail, and read the failing lines when it did not. Keep every flag a gate
+  needs ("Local gates" in `docs/agent/testing.md`; run pytest in the capped scope shown there) and
+  filter only what it prints: `set -o pipefail; uv run ruff check . 2>&1 | tail -n 30`.
+  `git grep -n` on a narrow path, `-l` or `-c` first when you expect many hits; read code by line
+  range.
+- **Long output to a file.** Write it under `~/.cache/` or your scratchpad, never `/tmp` (a RAM
+  disk here) and never the repository; `grep` or `tail` it, delete it when done. Never let it
+  overflow into a saved tool result you then read whole.
+- **Fewer turns.** Batch independent commands into one call and independent reads into one turn.
+  Do not re-read a file you just edited.
+- **Exactness first.** Code you edit, or judge in a review, is read verbatim. These rules cut
+  noise, not evidence.
+
+Measured during #253 (not controlled; tasks and models differed): implementer tool output about
+54k → 38k tokens, task reviewers 46k → 28k, overflowed outputs read whole 78k → 8.5k.
+
 ## Design documents
 
 - `docs/site/explanation/scope.md` — current scope, principles and audiences (living)
@@ -125,9 +148,10 @@ credential scoping, not by blacklisting DuckDB functions.
 </important>
 
 <important if="you are looking for where something is defined or what calls it">
-`docs/agent/graphify.md`. `graphify explain <symbol>` is a cheap first hop for
-structural questions. It is a lead generator, never an authority: it cannot show
-that something is **absent**, so completeness checks still belong to `grep`.
+Use `git grep -n` on a narrow path (`-l` or `-c` first when you expect many hits) and read the
+call sites. We tried a code graph (graphify) during #253 and dropped it: it cannot show that
+something is **absent**, a graph built from main misses a branch's own symbols and still
+answers confidently, and agents' own greps returned less text than its answers.
 </important>
 
 <important if="you are adding or upgrading a dependency">
