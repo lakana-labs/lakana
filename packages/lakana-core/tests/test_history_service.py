@@ -575,9 +575,9 @@ def test_a_result_with_another_column_is_refused(hist: Hist) -> None:
 
     assert str(info.value) == (
         "The result does not match gold.dim_customer's columns (added segment (string)); a "
-        "history table keeps its columns. Make the SELECT return the columns and types "
-        "gold.dim_customer has; to add a column, build a new history asset (its history starts "
-        "with its first run)."
+        "history table keeps its columns. Make the SELECT (or the Python asset's result) return "
+        "the columns and types gold.dim_customer has; to add a column, build a new history asset "
+        "(its history starts with its first run)."
     )
 
 

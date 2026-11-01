@@ -3894,7 +3894,8 @@ def test_a_history_asset_that_changes_its_schema_is_told_it_keeps_history(
         "the asset's output no longer matches the schema of gold.scores. Server detail: The "
         "result does not match gold.scores's schema (dropped region). An asset that keeps "
         "history cannot change its table's schema: make the asset return the columns and types "
-        "gold.scores has, then run it again."
+        'gold.scores has, except the four columns `write="history"` adds (valid_from, '
+        "valid_to, is_current, scores_key), then run it again."
     )
 
 
@@ -3903,7 +3904,7 @@ def test_a_history_asset_that_changes_its_schema_is_told_it_keeps_history(
     [
         (
             "return obs.with_columns(pl.lit(True).alias('Is_Current'))",
-            "Column `Is_Current` of what the asset returned has a name `write: history` adds "
+            'Column `Is_Current` of what the asset returned has a name `write="history"` adds '
             "itself (valid_from, valid_to, is_current, scores_key); rename it, for example with "
             "`df.rename({'Is_Current': 'source_Is_Current'})`",
         ),
@@ -3926,6 +3927,44 @@ def test_a_history_result_the_server_would_refuse_is_refused_before_the_upload(
     assert (record["error_type"], record["retryable"]) == ("InvalidResult", False)
     assert record["message"] == message
     assert world.client.tables.calls == []
+
+
+def test_a_renamed_reserved_column_that_is_the_assets_valid_from_says_to_change_it_too(
+    world: _World,
+) -> None:
+    record = _failing(
+        world,
+        "return obs.with_columns(pl.lit(1).alias('valid_from'))",
+        **_v4(valid_from="valid_from"),
+    )
+    assert record["message"] == (
+        'Column `valid_from` of what the asset returned has a name `write="history"` adds '
+        "itself (valid_from, valid_to, is_current, scores_key); rename it, for example with "
+        "`df.rename({'valid_from': 'source_valid_from'})`, and set "
+        "`valid_from='source_valid_from'` in `@asset(...)` too"
+    )
+
+
+def test_an_empty_result_without_columns_and_close_missing_on_an_existing_table_is_refused(
+    world: _World,
+) -> None:
+    record = _failing(world, "return pl.DataFrame()", **_v4(close_missing=True))
+    assert (record["error_type"], record["retryable"]) == ("InvalidResult", False)
+    assert record["message"] == (
+        "the asset returned no columns, and `close_missing=True` would close every open version "
+        "of gold.scores; nothing was written. If the source really is empty, remove "
+        "`close_missing=True` from `@asset(...)` for this run"
+    )
+    assert world.client.tables.calls == []
+
+
+def test_a_busy_history_slot_ends_the_run_as_retryable(world: _World) -> None:
+    """The server refuses past `LAKANA_APPEND__MAX_CONCURRENT_HISTORY` with 503 (Q8)."""
+    _write_asset(world, "return obs")
+    world.client.tables.kept = ServerError("busy", status=503)
+    record = _failing(world, "return obs", **_v4())
+    assert (record["phase"], record["retryable"], record["conflict"]) == ("upload", True, False)
+    assert [call["method"] for call in world.client.tables.calls] == ["history"]
 
 
 def test_a_history_result_without_its_key_column_is_left_to_the_server(world: _World) -> None:

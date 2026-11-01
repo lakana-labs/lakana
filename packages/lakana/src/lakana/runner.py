@@ -139,6 +139,12 @@ _NOTHING_TO_CREATE = (
     "no data yet (check the pattern or the query); the first run must find data"
 )
 """Why a first append or merge without columns fails: a table needs its columns."""
+_NOTHING_TO_CLOSE = (
+    "the asset returned no columns, and `close_missing=True` would close every open version of "
+    "{table}; nothing was written. If the source really is empty, remove `close_missing=True` "
+    "from `@asset(...)` for this run"
+)
+"""Why a history asset with `close_missing` and no columns fails on a table that exists."""
 _READER = (
     "the asset returned a pyarrow RecordBatchReader; read it with `.read_all()` and return the "
     "table"
@@ -1541,7 +1547,9 @@ def _check_repeated_keys(table: pa.Table, key: tuple[str, ...]) -> None:
         )
 
 
-def _check_history_rows(table: pa.Table, key: tuple[str, ...], dotted: str) -> None:
+def _check_history_rows(
+    table: pa.Table, key: tuple[str, ...], dotted: str, valid_from: str | None = None
+) -> None:
     """Refuse a history write the server would refuse, with advice a Python asset can follow.
 
     Parameters
@@ -1552,6 +1560,9 @@ def _check_history_rows(table: pa.Table, key: tuple[str, ...], dotted: str) -> N
         The natural key's columns.
     dotted
         The asset's table, which names its surrogate key column.
+    valid_from
+        The asset's `valid_from` column, or `None`; when it is a reserved name, the advice says
+        to change it too.
 
     Raises
     ------
@@ -1563,10 +1574,16 @@ def _check_history_rows(table: pa.Table, key: tuple[str, ...], dotted: str) -> N
     reserved = {"valid_from", "valid_to", "is_current", surrogate.casefold()}
     for name in table.column_names:
         if name.casefold() in reserved:
+            also = (
+                f", and set `valid_from='source_{shown(name)}'` in `@asset(...)` too"
+                if name == valid_from
+                else ""
+            )
             raise InvalidResult(
-                f"Column `{shown(name)}` of what the asset returned has a name `write: history` "
-                f"adds itself (valid_from, valid_to, is_current, {surrogate}); rename it, for "
-                f"example with `df.rename({{{name!r}: 'source_{shown(name)}'}})`"
+                f"Column `{shown(name)}` of what the asset returned has a name "
+                f'`write="history"` adds itself (valid_from, valid_to, is_current, {surrogate}); '
+                f"rename it, for example with `df.rename({{{name!r}: 'source_{shown(name)}'}})`"
+                f"{also}"
             )
     for column in key:
         if column in table.column_names and table.column(column).null_count:
@@ -1897,10 +1914,17 @@ def _upload_message(exc: ValidationError, table: str, write: str) -> str:
         return str(exc)
     detail = str(exc).split(_SERVER_ADVICE, 1)[0].strip().rstrip(".")
     cause = f"the asset's output no longer matches the schema of {table}. Server detail: {detail}."
-    if write != "replace":
-        does = "keeps history" if write == "history" else f"{write}s"
+    if write == "history":
+        surrogate = f"{table.rsplit('.', 1)[-1]}_key"
         return (
-            f"{cause} An asset that {does} cannot change its table's schema: make the asset "
+            f"{cause} An asset that keeps history cannot change its table's schema: make the "
+            f"asset return the columns and types {table} has, except the four columns "
+            f'`write="history"` adds (valid_from, valid_to, is_current, {surrogate}), then run '
+            "it again."
+        )
+    if write != "replace":
+        return (
+            f"{cause} An asset that {write}s cannot change its table's schema: make the asset "
             f"return the columns and types {table} has, then run it again."
         )
     return (
@@ -1999,6 +2023,8 @@ def run_asset(description: TaskDescription, client: Client, root: Path) -> dict[
             # A history asset with `close_missing` sends an empty result: the server refuses it,
             # rather than close every version.
             return {"status": "succeeded", "snapshot_id": None, "rows": 0}
+        if arrow.num_columns == 0 and description.write == "history" and _table_exists(description):
+            raise InvalidResult(_NOTHING_TO_CLOSE.format(table=description.table))
         if arrow.num_columns == 0:
             raise InvalidResult(_NOTHING_TO_CREATE.format(table=description.table))
         if description.watermark_column is not None:
@@ -2006,7 +2032,7 @@ def run_asset(description: TaskDescription, client: Client, root: Path) -> dict[
         if description.write == "merge":
             _check_merge_rows(arrow, description.key)
         if description.write == "history":
-            _check_history_rows(arrow, description.key, description.table)
+            _check_history_rows(arrow, description.key, description.table, description.valid_from)
     with _Phase("upload"):
         return _upload(client, description, arrow)
 

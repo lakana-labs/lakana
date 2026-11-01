@@ -1672,9 +1672,9 @@ class PythonRuntime:
                     ),
                 )
             if after == before and nothing_new:
-                # Nothing new since the last run: an append or merge that writes nothing has
-                # done its work. A record can claim this without running the asset, which then
-                # left the table as it was, the outcome a run that found nothing has.
+                # Nothing new since the last run: an append, merge or history write that writes
+                # nothing has done its work. A record can claim this without running the asset,
+                # which then left the table as it was, the outcome a run that found nothing has.
                 return self._wrote_nothing(before, start, baseline, ended)
         stop = cancel_kind(session, keeper, claimed.run_id)
         if stop is not None:
@@ -1744,7 +1744,7 @@ class PythonRuntime:
         baseline: Baseline | None,
         ended: Callable[..., TaskOutcome],
     ) -> TaskOutcome:
-        """End an append or merge that found nothing new, as succeeded.
+        """End an append, merge or history write that found nothing new, as succeeded.
 
         What counts is the table as this attempt found it (`before`): a change somebody else
         made while it ran is not this task run's write.

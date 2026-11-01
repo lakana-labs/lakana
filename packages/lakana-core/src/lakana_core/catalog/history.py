@@ -1253,9 +1253,9 @@ def conform_batch(schema: Schema, data: pa.Table, *, table: str) -> pa.Table:
         changes += [f"removed {n}" for n in gone]
         raise ValidationError(
             f"The result does not match {table}'s columns ({', '.join(changes)}); a history "
-            f"table keeps its columns. Make the SELECT return the columns and types {table} "
-            "has; to add a column, build a new history asset (its history starts with its first "
-            "run)."
+            f"table keeps its columns. Make the SELECT (or the Python asset's result) return the "
+            f"columns and types {table} has; to add a column, build a new history asset (its "
+            "history starts with its first run)."
         )
     validate_arrow_schema(stored, data)
     target = stored.as_arrow()
