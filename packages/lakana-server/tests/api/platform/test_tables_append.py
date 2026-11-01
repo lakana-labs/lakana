@@ -1369,6 +1369,10 @@ def _open_stalled_append_connection(port: int, path: str) -> socket.socket:
     return sock
 
 
+# Setup is not what these tests measure; a slow CI runner must not fail them here.
+_SETUP_TIMEOUT = 30
+
+
 def _setup_dev_sales_table(base_url: str, tmp_path: Path) -> None:
     """Create the `dev` environment and a `gold.sales` table over real HTTP.
 
@@ -1386,14 +1390,14 @@ def _setup_dev_sales_table(base_url: str, tmp_path: Path) -> None:
             "name": "dev",
             "storage": {"scheme": "file", "root": f"file://{tmp_path}", "options": {}},
         },
-        timeout=5,
+        timeout=_SETUP_TIMEOUT,
     )
     assert created.status_code == 201, created.text
     created = requests.post(
         f"{base_url}/api/v1/environments/dev/namespaces/gold/tables",
         headers=AUTH_HEADER,
         json={"name": "sales", "schema": _ID_ONLY_SCHEMA},
-        timeout=5,
+        timeout=_SETUP_TIMEOUT,
     )
     assert created.status_code == 201, created.text
 
