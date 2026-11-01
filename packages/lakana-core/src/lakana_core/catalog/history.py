@@ -637,7 +637,7 @@ def _check_returning(
     starts: pa.Array,
     key: Sequence[str],
     valid_from: str | None,
-    last_ends: Callable[[pa.Table], pa.Table],
+    last_ends: Callable[[pa.Table, datetime], pa.Table],
     *,
     table: str,
     clock: datetime,
@@ -657,7 +657,11 @@ def _check_returning(
     valid_from
         The `valid_from:` column, or `None` when every start is the run clock; for the message.
     last_ends
-        Reads the key columns and `valid_to` of the closed versions of the keys it is given.
+        Reads the key columns and `valid_to` of the closed versions of the keys it is given (first
+        argument) whose `valid_to` is after the lower bound it is given (second argument; a later
+        or equal end cannot conflict, so the read may leave the others out). The bound is the
+        earliest start among the rows that open a key again: the run clock, or the smallest
+        declared `valid_from`.
     table
         The table's dotted name, for the message.
     clock
@@ -670,7 +674,8 @@ def _check_returning(
         the run clock as the start, that means a newer run closed the key.
     """
     wanted = data.select(list(key)).take(new_rows)
-    ends = last_ends(wanted)
+    earliest = pc.min(starts.take(new_rows)).as_py()
+    ends = last_ends(wanted, earliest)
     if ends.num_rows == 0:
         return
     latest = ends.group_by(list(key)).aggregate([(VALID_TO, "max")])
@@ -714,7 +719,7 @@ def plan_history(
     clock: datetime,
     valid_from: str | None,
     close_missing: bool,
-    last_ends: Callable[[pa.Table], pa.Table],
+    last_ends: Callable[[pa.Table, datetime], pa.Table],
 ) -> HistoryPlan:
     """Diff a batch against the open versions and build the rows to close and to open.
 
@@ -744,8 +749,9 @@ def plan_history(
     close_missing
         Whether keys the batch lacks are closed.
     last_ends
-        Reads the closed versions of keys that come back; called only for batch keys
-        without an open version.
+        Reads the closed versions of keys that come back, as `_check_returning` documents
+        (the keys, and the earliest start among them as a lower bound for `valid_to`); called
+        only for batch keys without an open version.
 
     Returns
     -------

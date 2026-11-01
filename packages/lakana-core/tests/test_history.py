@@ -106,13 +106,15 @@ def _open(rows: Sequence[Row], start: datetime = T0) -> pa.Table:
     )
 
 
-def _no_ends(wanted: pa.Table) -> pa.Table:
+def _no_ends(wanted: pa.Table, after: datetime) -> pa.Table:
     """Find no closed version for any key.
 
     Parameters
     ----------
     wanted
         The keys asked for.
+    after
+        The lower bound the diff passes; ignored.
 
     Returns
     -------
@@ -367,7 +369,7 @@ def test_an_older_run_cannot_replace_or_close_newer_versions() -> None:
 
 
 def test_a_returning_key_may_not_start_before_its_last_version_ended() -> None:
-    def ends(wanted: pa.Table) -> pa.Table:
+    def ends(wanted: pa.Table, after: datetime) -> pa.Table:
         assert wanted.column("customer_id").to_pylist() == ["D"]
         return pa.table({"customer_id": ["D", "D"], VALID_TO: pa.array([T0, T2], UTC_MICROS)})
 
@@ -387,7 +389,7 @@ def test_a_returning_key_may_not_start_before_its_last_version_ended() -> None:
 
 
 def test_a_returning_key_starting_at_its_last_end_opens() -> None:
-    def ends(wanted: pa.Table) -> pa.Table:
+    def ends(wanted: pa.Table, after: datetime) -> pa.Table:
         return pa.table({"customer_id": ["D"], VALID_TO: pa.array([T1], UTC_MICROS)})
 
     plan = _plan(
@@ -710,7 +712,7 @@ def test_a_timestamp_key_finer_than_microseconds_is_refused_with_the_cast() -> N
 
 
 def test_an_older_run_cannot_reopen_a_key_a_newer_run_closed() -> None:
-    def ends(wanted: pa.Table) -> pa.Table:
+    def ends(wanted: pa.Table, after: datetime) -> pa.Table:
         return pa.table({"customer_id": ["D"], VALID_TO: pa.array([T2], UTC_MICROS)})
 
     with pytest.raises(ValidationError) as info:
@@ -723,7 +725,7 @@ def test_an_older_run_cannot_reopen_a_key_a_newer_run_closed() -> None:
 
 
 def test_a_key_may_come_back_at_the_run_clock_when_its_last_version_ended_then() -> None:
-    def ends(wanted: pa.Table) -> pa.Table:
+    def ends(wanted: pa.Table, after: datetime) -> pa.Table:
         return pa.table({"customer_id": ["D"], VALID_TO: pa.array([T1], UTC_MICROS)})
 
     plan = _plan(_batch([("D", "north", 1.0)]), _open([]), clock=T1, last_ends=ends)
@@ -766,7 +768,7 @@ def test_the_diff_works_when_a_key_column_has_an_internal_looking_name() -> None
         schema=schema,
     )
 
-    def ends(wanted: pa.Table) -> pa.Table:
+    def ends(wanted: pa.Table, after: datetime) -> pa.Table:
         return pa.table(
             {n: pa.array([], pa.int64()) for n in names} | {VALID_TO: pa.array([], UTC_MICROS)}
         )
@@ -800,3 +802,74 @@ def test_two_open_versions_of_one_key_are_refused() -> None:
     thrice = pa.concat_tables([twice, _open([("B", "n", 1.0)]), _open([("B", "n", 1.0)])])
     with pytest.raises(ValidationError, match=r"2 keys of gold\.dim_customer have more than one"):
         _plan(_batch([("A", "south", 1.0)]), thrice)
+
+
+def test_the_last_ends_read_gets_the_earliest_start_of_the_opening_rows() -> None:
+    bounds: list[datetime] = []
+
+    def ends(wanted: pa.Table, after: datetime) -> pa.Table:
+        bounds.append(after)
+        return _no_ends(wanted, after)
+
+    _plan(_batch([("D", "n", 1.0)]), _open([]), clock=T2, last_ends=ends)
+    batch = _batch([("D", "n", 1.0), ("E", "n", 1.0), ("A", "south", 1.0)])
+    starts = pa.array([T1, T0, T2], UTC_MICROS)
+    _plan(
+        batch,
+        _open([("A", "north", 1.0)], start=T0),
+        clock=T2,
+        starts=starts,
+        valid_from="changed_at",
+        last_ends=ends,
+    )
+    assert bounds == [T2, T0]
+
+
+def test_a_conflict_is_still_found_when_the_callback_filters_on_the_bound() -> None:
+    def ends(wanted: pa.Table, after: datetime) -> pa.Table:
+        kept = [t for t in (T0, T1, T2) if t > after]
+        return pa.table({"customer_id": ["D"] * len(kept), VALID_TO: pa.array(kept, UTC_MICROS)})
+
+    with pytest.raises(ValidationError, match="a newer run already changed"):
+        _plan(_batch([("D", "n", 1.0)]), _open([]), clock=T1, last_ends=ends)
+    plan = _plan(_batch([("D", "n", 1.0)]), _open([]), clock=T2, last_ends=ends)
+    assert plan.versions_opened == 1
+
+
+def test_the_returning_check_works_when_a_key_column_is_named_like_its_end_column() -> None:
+    schema = pa.schema(
+        [
+            pa.field("__lakana_end", pa.string()),
+            pa.field("t_key", pa.string(), nullable=False),
+            pa.field(VALID_FROM, UTC_MICROS, nullable=False),
+            pa.field(VALID_TO, UTC_MICROS),
+            pa.field(IS_CURRENT, pa.bool_(), nullable=False),
+        ]
+    )
+    open_rows = pa.table(
+        {
+            "__lakana_end": pa.array([], pa.string()),
+            "t_key": pa.array([], pa.string()),
+            VALID_FROM: pa.array([], UTC_MICROS),
+            VALID_TO: pa.array([], UTC_MICROS),
+            IS_CURRENT: pa.array([], pa.bool_()),
+        },
+        schema=schema,
+    )
+
+    def ends(wanted: pa.Table, after: datetime) -> pa.Table:
+        return pa.table({"__lakana_end": ["D"], VALID_TO: pa.array([T2], UTC_MICROS)})
+
+    with pytest.raises(ValidationError, match=r"a newer run already changed gold\.t"):
+        plan_history(
+            pa.table({"__lakana_end": ["D"]}),
+            open_rows,
+            key=["__lakana_end"],
+            table="gold.t",
+            schema=schema,
+            starts=pa.array([T1], UTC_MICROS),
+            clock=T1,
+            valid_from=None,
+            close_missing=False,
+            last_ends=ends,
+        )
