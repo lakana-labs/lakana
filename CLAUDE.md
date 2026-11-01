@@ -94,10 +94,12 @@ Everything a tool prints stays in the agent's context and is re-read on every la
 rules hold for every session and every subagent.
 
 - **Small outputs, honest status.** Filter output, never the verdict: a command passed only if it
-  exited 0, so check that (`set -o pipefail`, or `cmd > out.log 2>&1; echo $?`) before trusting a
-  clean tail, and read the failing lines when it did not. Run the rule-5 gates with their full
-  flags (`pytest --cov --cov-report=json -q … 2>&1 | tail -n 30`); `git grep -n` on a narrow path,
-  `-l` or `-c` first when you expect many hits; read code by line range.
+  exited 0, so check that (`set -o pipefail`, or `cmd > ~/.cache/<task>/out.log 2>&1; echo $?`)
+  before trusting a clean tail, and read the failing lines when it did not. Keep every flag a gate
+  needs ("Local gates" in `docs/agent/testing.md`; run pytest in the capped scope shown there) and
+  filter only what it prints: `set -o pipefail; uv run ruff check . 2>&1 | tail -n 30`.
+  `git grep -n` on a narrow path, `-l` or `-c` first when you expect many hits; read code by line
+  range.
 - **Long output to a file.** Write it under `~/.cache/` or your scratchpad, never `/tmp` (a RAM
   disk here) and never the repository; `grep` or `tail` it, delete it when done. Never let it
   overflow into a saved tool result you then read whole.
