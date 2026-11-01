@@ -25,6 +25,7 @@ from lakana_core.projects.asset_model import (
     normalized_write,
 )
 from lakana_core.projects.dag import ProjectGraph
+from lakana_core.projects.history_columns import HistorySpec, added_column_descriptions
 from lakana_core.projects.layers import LayersConfig
 from lakana_core.projects.measures import MeasureEntry, measure_entries, read_measure_entries
 from lakana_core.projects.parse import ParsedAsset
@@ -39,7 +40,7 @@ if TYPE_CHECKING:
     from lakana_core.projects.checks import ParsedCheck
     from lakana_core.projects.frontmatter import AssetMetadata
 
-MANIFEST_VERSION = 11
+MANIFEST_VERSION = 12
 """Bumped when the manifest's shape changes. Version 2 adds `kind` per asset and
 `lock_sha256`; a version-1 manifest is read as all-SQL. Version 3 adds `output`,
 `keep_versions` and `input_kinds` per Python asset; versions 1 and 2 are read as all-table.
@@ -68,6 +69,9 @@ Version 10 is written only when an asset declares measures (`MEASURES_VERSION`);
 Version 11 is written only when the project declares `main_language`, a label or a translation
 (`TEXTS_VERSION`); such a manifest has a top-level `main_language` when declared, and its entries'
 `metadata` may carry `label`, `column_labels` and `translations`.
+Version 12 is written only when an asset uses `write: history` or a reference declares `at:`
+(`HISTORY_VERSION`); such an entry carries `history` (read with `entry_history`), and a reference
+in its `model` may carry `at`.
 The `decimals` key is optional and read with a default (`entry_decimals`), so it needed
 no bump: an entry without it means ``float``. The `package_indexes` key is optional in
 the same way: a manifest without it uses no registered package index. The `python` key is
@@ -110,7 +114,12 @@ TEXTS_VERSION = 11
 """The version of a manifest whose project declares `main_language`, a label or a translation; a
 worker of an earlier release refuses it instead of creating tables without their texts."""
 
-LISTS_CHECKS = (4, 5, 6, 7, 8, 9, 10, 11)
+HISTORY_VERSION = 12
+"""The version of a manifest in which an asset uses `write: history` or a reference declares
+`at:`; a worker of an earlier release refuses it instead of running a dimension as something
+else, or a reference check without its time."""
+
+LISTS_CHECKS = (4, 5, 6, 7, 8, 9, 10, 11, 12)
 """The versions whose manifest always carries a `checks` list (version 4 a non-empty one). A
 tuple, not a set: a stored version may be any JSON value, a list too, and must not raise."""
 
@@ -121,12 +130,14 @@ WRITE_MODES: dict[str, tuple[str, str]] = {
     "view": ("view", "view"),
     "incremental": ("append", "create"),
     "merge": ("merge", "create"),
+    "history": ("history", "create"),
 }
-"""Materialization (or ``merge``) → (write mode, write mode when the table does not exist yet).
+"""Materialization (or ``merge``, ``history``) → (write mode, write mode when the table does not
+exist yet).
 
 An incremental asset's first run creates its table with every row its SELECT returns;
-the runs after it append the rows past the watermark. A merge asset's first run creates its
-table too, with the same key checks as every later merge.
+the runs after it append the rows past the watermark. A merge or history asset's first run
+creates its table too, with the same key checks as every later run.
 """
 
 
@@ -178,6 +189,30 @@ def declares_model(metadata: AssetMetadata) -> bool:
     )
 
 
+def _columns(asset: ParsedAsset, write: str, key: Sequence[str]) -> dict[str, str]:
+    """Collect the column descriptions an entry records.
+
+    Parameters
+    ----------
+    asset
+        The parsed asset.
+    write
+        Its write mode.
+    key
+        Its key columns.
+
+    Returns
+    -------
+    dict
+        The header's descriptions; for a history asset first the fixed descriptions of the four
+        columns it adds (a header may not describe them).
+    """
+    own = asset.metadata.column_descriptions()
+    if write != "history":
+        return own
+    return {**added_column_descriptions(asset.table, key), **own}
+
+
 def _entry(
     asset: ParsedAsset,
     caps: RunCaps,
@@ -210,7 +245,9 @@ def _entry(
     materialize = asset.metadata.materialize or "table"
     if write == "append":
         materialize = "incremental"
-    write_mode, first_write_mode = WRITE_MODES["merge" if write == "merge" else materialize]
+    write_mode, first_write_mode = WRITE_MODES[
+        write if write in ("merge", "history") else materialize
+    ]
     entry: dict[str, Any] = {
         "table": asset.table,
         "path": asset.path,
@@ -228,7 +265,7 @@ def _entry(
             "description": asset.metadata.description,
             "owner": asset.metadata.owner,
             "tags": list(asset.metadata.tags),
-            "columns": asset.metadata.column_descriptions(),
+            "columns": _columns(asset, write, key),
         },
         "sql": asset.sql,
         "normalized_sql": asset.normalized_sql,
@@ -236,6 +273,11 @@ def _entry(
         "columns": list(asset.columns) if asset.columns is not None else None,
         "lineage": asset.lineage,
     }
+    if write == "history":
+        entry["history"] = {
+            "valid_from": asset.metadata.valid_from,
+            "close_missing": bool(asset.metadata.close_missing),
+        }
     if asset.metadata.label is not None:
         entry["metadata"]["label"] = asset.metadata.label
     labels = asset.metadata.column_labels()
@@ -261,7 +303,12 @@ def _entry(
             "grain": asset.metadata.grain,
             "key_none": asset.metadata.key == KEY_NONE,
             "references": [
-                {"column": r.column, "target": r.target, "target_column": r.target_column}
+                {
+                    "column": r.column,
+                    "target": r.target,
+                    "target_column": r.target_column,
+                    **({"at": r.at} if r.at is not None else {}),
+                }
                 for r in references
             ],
             "checks": dict(sorted(asset.metadata.checks.items())),
@@ -300,6 +347,7 @@ def _version(
     uses_model: bool = False,
     uses_measures: bool = False,
     uses_texts: bool = False,
+    uses_history: bool = False,
 ) -> int:
     """Pick the lowest manifest version that carries everything the project declares.
 
@@ -319,11 +367,14 @@ def _version(
         Whether an asset declares measures.
     uses_texts
         Whether the project declares `main_language`, a label or a translation.
+    uses_history
+        Whether an asset uses `write: history` or a reference declares `at:`.
 
     Returns
     -------
     int
-        `TEXTS_VERSION` when the project uses texts, else `MEASURES_VERSION` when an asset
+        `HISTORY_VERSION` when the project uses history, else `TEXTS_VERSION` when the project
+        uses texts, else `MEASURES_VERSION` when an asset
         declares measures, else `MODEL_VERSION` when an asset
         declares a model field, else `WRITES_VERSION` when an
         asset uses the new write spelling, else `CONNECTIONS_VERSION`
@@ -331,6 +382,8 @@ def _version(
         `JOBS_VERSION` with jobs, `CHECKS_VERSION` with checks, `VERSION_WITHOUT_CHECKS`
         otherwise.
     """
+    if uses_history:
+        return HISTORY_VERSION
     if uses_texts:
         return TEXTS_VERSION
     if uses_measures:
@@ -373,15 +426,20 @@ def _check_entry(check: ParsedCheck) -> dict[str, Any]:
         "references": list(check.references),
     }
     if check.generated is not None:
-        entry["generated"] = {
+        generated: dict[str, str | bool | list[str] | None] = {
             "family": check.generated.family,
             "columns": list(check.generated.columns),
             "target": check.generated.target,
             "target_column": check.generated.target_column,
         }
         if check.generated.family == "measures":
-            entry["generated"]["not_over"] = list(check.generated.not_over)
-            entry["generated"]["aggregations"] = list(check.generated.aggregations)
+            generated["not_over"] = list(check.generated.not_over)
+            generated["aggregations"] = list(check.generated.aggregations)
+        if check.generated.history:
+            generated["history"] = True
+        if check.generated.at is not None:
+            generated["at"] = check.generated.at
+        entry["generated"] = generated
     return entry
 
 
@@ -437,7 +495,8 @@ def build_manifest(
     translations
         Table → language → its texts (`translation_entries`), recorded as each entry's
         `metadata.translations`; `None` when the project has no translation files. With
-        `main_language`, a label or a translation the manifest is `TEXTS_VERSION`.
+        `main_language`, a label or a translation the manifest is `TEXTS_VERSION`, or
+        `HISTORY_VERSION` when an asset uses `write: history`.
     layers
         `lakana.yaml`'s `layers:`; recorded as `layers` (`LayersConfig.model_dump(mode="json")`)
         only when declared, so every other project keeps its manifest byte for byte. No version
@@ -465,6 +524,8 @@ def build_manifest(
         uses_model=any(declares_model(asset.metadata) for asset in assets),
         uses_measures=any(asset.metadata.measures for asset in assets),
         uses_texts=uses_texts,
+        uses_history=any(asset.metadata.write == "history" for asset in assets)
+        or any(r.at is not None for refs in resolved.values() for r in refs),
     )
     manifest: dict[str, Any] = {
         "version": version,
@@ -498,6 +559,7 @@ def build_manifest(
         MODEL_VERSION,
         MEASURES_VERSION,
         TEXTS_VERSION,
+        HISTORY_VERSION,
     )
     if checks or config.jobs or version in lists_empty:
         manifest["checks"] = [_check_entry(check) for check in sorted(checks, key=lambda c: c.name)]
@@ -845,6 +907,36 @@ def entry_write(entry: object) -> tuple[str, tuple[str, ...], str | None]:
     return write, key, watermark if isinstance(watermark, str) else None
 
 
+def entry_history(entry: object) -> HistorySpec | None:
+    """Read how a history asset's run writes, from a stored manifest entry.
+
+    Parameters
+    ----------
+    entry
+        One element of `manifest_json["assets"]`; untrusted.
+
+    Returns
+    -------
+    HistorySpec or None
+        The spec of an entry whose `write` is ``history`` with a key and a readable `history`
+        mapping; `None` otherwise, which a reader treats as "not a history entry" (the worker
+        refuses a history write without it).
+    """
+    if not isinstance(entry, Mapping):
+        return None
+    write, key, _ = entry_write(entry)
+    raw = entry.get("history")
+    if write != "history" or not isinstance(raw, Mapping):
+        return None
+    return HistorySpec.from_json(
+        {
+            "key": list(key),
+            "valid_from": raw.get("valid_from"),
+            "close_missing": raw.get("close_missing"),
+        }
+    )
+
+
 @dataclass(frozen=True)
 class EntryModel:
     """What a stored manifest entry says about the asset's model.
@@ -899,7 +991,12 @@ def entry_model(entry: object) -> EntryModel | None:
     kind, grain = raw.get("kind"), raw.get("grain")
     items = raw.get("references")
     references = tuple(
-        ResolvedReference(item["column"], item["target"], item["target_column"])
+        ResolvedReference(
+            item["column"],
+            item["target"],
+            item["target_column"],
+            item["at"] if isinstance(item.get("at"), str) else None,
+        )
         for item in (items if isinstance(items, list) else [])
         if isinstance(item, Mapping)
         and all(isinstance(item.get(k), str) for k in ("column", "target", "target_column"))

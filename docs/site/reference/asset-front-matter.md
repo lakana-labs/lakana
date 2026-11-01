@@ -12,7 +12,7 @@ label: Hourly weather
 description: Cleaned hourly weather observations, nulls dropped.
 owner: data-eng
 tags: [weather, hourly]
-write: append                 # replace | append | merge, see "Write modes" below
+write: append                 # replace | append | merge | history, see "Write modes" below
 watermark: ts                 # append needs it; merge may have it
 evolve_schema: false          # append only
 retries: 3                    # run policy, see lakana.yaml: "Retries and timeouts"
@@ -177,6 +177,16 @@ the worker's memory limit (`LAKANA_WORKER__MEMORY_LIMIT`). A merge compares the 
 filter or column mask on the table applies to that principal. The details, the counts and the
 audit event are in [Merging rows into a table](merge.md).
 
+### `history`
+
+Keeps every version of a dimension's rows: each run opens a version for a new or changed key and
+closes the one it replaces, and Lakana adds `valid_from`, `valid_to`, `is_current` and a
+surrogate key `<table>_key`. It needs `kind: dimension` with `grain:` and `key:`; `valid_from:`
+names the column a later version starts at, and `close_missing: true` closes the keys the
+`SELECT` no longer returns. A key's first version starts at the earliest time,
+0001-01-01T00:00:00Z, with or without `valid_from:`, so that every row that references the key
+finds a version. See [Keeping the history of a dimension](history.md).
+
 ### `replace`
 
 `replace` needs nothing more: leave `write:` out, or write `write: replace`.
@@ -187,13 +197,22 @@ Each of these fails the deploy with an issue at the block's line:
 
 | Issue | Cause |
 |---|---|
-| ``write: must be one of replace, append, merge; got 'upsert'`` | Another value. |
+| ``write: must be one of replace, append, merge, history; got 'upsert'`` | Another value. |
 | ``` `write: append` needs `watermark:` — the column whose largest value the next run starts after ``` | `append` without `watermark:`. |
 | ``` `write: merge` needs `key:` — the columns that identify a row ``` | `merge` without `key:`. |
 | ``` `write: replace` takes no `watermark:`; to add only new rows use `write: append` ``` | `replace` with `watermark:`. |
 | ``key column `id` is listed twice`` | A repeated key column. |
 | ``` `materialize: view` cannot take `write:` ``` | A view with `write:`. |
 | ``` `evolve_schema` works with `write: append` only ``` | `evolve_schema` on any other asset. |
+| ``` `write: history` keeps the versions of a dimension's rows; declare `kind: dimension`, with `grain:` and `key:` ``` | `history` on another kind. |
+| ``` `write: history` takes no `watermark:`; its SELECT returns the current state of every row, and each run compares it with the open versions ``` | `history` with `watermark:`. |
+| ``` `valid_from:` works with `write: history` only ``` (the same for `close_missing:`) | Either key on another write mode. |
+| ``` `valid_from: customer_id` names a key column; name the column that says when the row's values took effect, or leave `valid_from:` out to use the run's start time ``` | `valid_from:` on a key column. |
+| ``Column `changed_at` in `valid_from:` is not a column of `gold.dim_customer`'s SELECT; add it to the SELECT, or change `valid_from:`.`` | A `valid_from:` the `SELECT` does not return (when the `SELECT` spells it in another letter case, the message names that spelling). |
+| ``Column `is_current` of `gold.dim_customer`'s SELECT has a name `write: history` adds itself (valid_from, valid_to, is_current, dim_customer_key); rename it in the SELECT, for example `AS source_is_current`.`` | A `SELECT` column named like an added column, in any letter case. |
+| ``` `columns: is_current`: `write: history` adds this column and describes it itself; remove it from `columns:` ``` | A text for an added column. |
+| ``` `columns: changed_at`: `changed_at` is the `valid_from:` column, which `write: history` does not store (its value becomes each version's `valid_from`, which Lakana describes itself); remove it from `columns:` ``` | A text for the `valid_from:` column. |
+| ``` `references: changed_at`: `changed_at` is the `valid_from:` column, which `write: history` does not store (its value becomes each version's `valid_from`), so no check can read it; remove it from `references:` ``` | A reference on the `valid_from:` column. |
 | ``use one: `write: append` with `watermark:` replaces `materialize: incremental` `` | Both spellings in one block. |
 
 ### The older spelling
@@ -217,6 +236,8 @@ hint: silver.orders_log: `materialize: incremental` is now written `write: appen
 
 A project version that uses `write: append` or `merge` needs workers of this release or later: a
 worker of an earlier one refuses its manifest instead of running the asset as a replace.
+A project version that uses `write: history` or a reference with `at:` needs workers of this
+release or later in the same way (manifest version 12).
 
 ## Model fields: kind, grain, key and references
 
@@ -232,6 +253,7 @@ key: [date, store_id]                 # one column may be written as a plain str
 references:
   store_id: gold.dim_store            # short form: that table's single key column
   product_sku: gold.dim_product.sku   # long form: a column you name
+  customer_id: {to: gold.dim_customer, at: ordered_at}   # a table that keeps history: the row's time
 measures:                             # fact or wide only
   net_amount: {aggregation: sum, currency: EUR, label: Net revenue}
 checks:
@@ -244,9 +266,9 @@ checks:
 | `kind` | `fact`: events or measurements at a grain. `dimension`: the things facts refer to. `wide`: a denormalised table for consumption. `staging`: an intermediate step, not for consumers. | One of the four. Without `kind`, no rule of the table below applies. |
 | `grain` | One sentence saying what exactly one row stands for. It is for people. | One line, not empty, at most 300 characters. |
 | `key` | The columns that identify one row; usually the grain written as columns. It is also the key `write: merge` matches rows on: there is one key, not a second one for merging. | Distinct, non-empty columns of the `SELECT`, at most 8 (a merge key too), or `none` where the kind allows it (below). Allowed with every write mode. |
-| `references` | For each column, the table its values point at. A null in a reference column is allowed; a reference that is required is also in `key`. | The column is a column of the `SELECT`; the target is checked as "References" below says. |
+| `references` | For each column, the table its values point at. A null in a reference column is allowed; a reference that is required is also in `key`. For a target that keeps history, the mapping `{to: <target>, at: <column>}`, where `at:` names this table's column that says when the row happened. | The column is a column of the `SELECT`; the target is checked as "References" below says. |
 | `measures` | The measures of a fact or wide table: how each is aggregated and what its numbers are. | See [Measures](#measures). |
-| `checks` | How the checks generated from `key`, `references` and `measures` fail: `block`, `warn` or `keep`, with the rules of a check's `on_failure` (`keep` never on a view, an append or a merge). | Only `key`, `references` and `measures`, and only for a field the asset declares. A deploy turns `key` into the checks `key_unique` and `key_not_null`, each reference into `ref_<column>`, and `measures` into the check `measures`; they count toward the 50 checks of a table, a hand-written check of the same table may not use their names, and a referenced table the project builds is built first. See [Generated checks](checks.md#generated-checks). |
+| `checks` | How the checks generated from `key`, `references` and `measures` fail: `block`, `warn` or `keep`, with the rules of a check's `on_failure` (`keep` never on a view, an append, a merge or a history table). | Only `key`, `references` and `measures`, and only for a field the asset declares. A deploy turns `key` into the checks `key_unique` and `key_not_null` (and `surrogate_key_unique` for a history table), each reference into `ref_<column>`, and `measures` into the check `measures`; they count toward the 50 checks of a table, a hand-written check of the same table may not use their names, and a referenced table the project builds is built first. See [Generated checks](checks.md#generated-checks). |
 
 ### Rules for each kind
 
@@ -284,6 +306,26 @@ to:
 
 A `fact`, `dimension` or `wide` table may not reference a `staging` table: a model points at
 modelled tables.
+
+**A target that keeps history** (`write: history`) has several versions of each key. A reference
+to it says which one each row means with the row's time: `customer_id: {to: gold.dim_customer,
+at: ordered_at}`. The check `ref_customer_id` then proves that every row finds the version valid
+at its `ordered_at` ([Keeping the history of a dimension](history.md#references-to-a-dimension-that-keeps-history)).
+This holds for every kind that references such a table. `at:` names a column of the table that
+references, never of the target; a history dimension that references another writes `at:
+valid_from` (its own start, which it stores under that name), not the name of its `valid_from:`
+column. The deploy refuses:
+
+| Issue | Cause |
+|---|---|
+| ``` `gold.fact_orders` references `gold.dim_customer` (`customer_id`), which keeps the history of its rows (`write: history`); say which version each row means with the row's time: `customer_id: {to: gold.dim_customer, at: <column>}` ``` | A reference to a history table without `at:`. |
+| ``` `at:` in reference `store_id` is for a target that keeps history (`write: history`), and `gold.dim_store` does not; remove `at:` ``` | `at:` on any other target. |
+| ``Column `ordered_at` in `at:` of reference `customer_id` is not a column of `gold.fact_orders`'s SELECT; add it to the SELECT, or name another column.`` | An `at:` the `SELECT` does not return. |
+| ``Column `valid_from` in `at:` of reference `customer_id` is not a column of `gold.fact_orders`'s SELECT: `at:` names the column of `gold.fact_orders` that says when each of its rows happened, not the target's `valid_from`; name that column, and add it to the SELECT if it is missing.`` | `at: valid_from` on a table that has no such column. |
+| ``Column `changed_at` in `at:` of reference `region_id` is `gold.dim_store`'s `valid_from:` column, which `write: history` stores as `valid_from`; write `at: valid_from`.`` | A history dimension whose `at:` names its own `valid_from:` column. |
+| ``` `at:` of reference `customer_id` must not be empty; name the column that says when each row happened ``` | `at: ""`. |
+| ``reference `customer_id` is a mapping without `at:`; write the target as a plain string, or add `at:` `` | `{to: …}` alone. |
+| ``reference `customer_id` takes `to:` (the target) and `at:` (the row's time column), such as `{to: gold.dim_customer, at: ordered_at}` `` | A mapping with another key, or without `to:`. |
 
 A namespace may have several levels, so `a.b.c` can read two ways: as the table `a.b.c`, or as the
 column `c` of the table `a.b`. When only one of them is a table, that one is meant. When both are,
@@ -399,10 +441,10 @@ Each of these fails the deploy with an issue at the block's line:
 | ``` `gold.fact_orders` (a fact) references `staging.orders_clean`, a staging table; point it at a modelled table. ``` | A `fact`, `dimension` or `wide` table references a `staging` table. |
 | ``Reference `store_id: a.b.store_id`: `a.b.store_id` is a table, and so is `a.b`, which has a column `store_id`; rename one of them so that the reference names one thing.`` | A target that reads two ways (above). When the deploy does not know the columns of `a.b`, the message says ``which would read `store_id` as its column``. |
 | ``Reference `model_id: models.churn`: `models.churn` is an artifact, not a table, so no column can point at it; point the reference at a table.`` | The target is an artifact, of the project or of the environment. |
-| ``Reference `store_id: gold.dim_store` is too long to store: the column `…` has 1025 bytes, and each of the column, the target table and the target column may have at most 1024 bytes; shorten that name.`` | A reference column, its target table's dotted name or its target column is longer than 1024 bytes in UTF-8. Shorten the name the message points at. |
+| ``Reference `store_id: gold.dim_store` is too long to store: the column `…` has 1025 bytes, and each of the column, the target table, the target column and the `at:` column may have at most 1024 bytes; shorten that name.`` | A reference column, its target table's dotted name, its target column or its `at:` column is longer than 1024 bytes in UTF-8. Shorten the name the message points at. |
 | ``` cycle: gold.a -> gold.b -> gold.a (a reference in `references:` counts as a dependency: the target is built first); remove one of the references, or check it with a hand-written check under `checks/` ``` | Two assets of the project reference each other, directly or through others. A target the project builds is built before the table that references it, so such references cannot all hold; remove one of them. |
-| ``A check named `key_unique` is generated for `gold.fact_orders`; rename `checks/gold/fact_orders/key_unique.sql`.`` | A hand-written check of a table has the name of a check that table's header generates (`key_unique`, `key_not_null`, `ref_<column>`, `measures`). Rename the file. |
-| ``` `checks: key: keep` cannot be used on `gold.fact_orders`: it is written with `write: merge`, … Use `checks: key: block`: … ``` | `keep` for a generated check of a view, an append or a merge, as for a hand-written check's `on_failure`. |
+| ``A check named `key_unique` is generated for `gold.fact_orders`; rename `checks/gold/fact_orders/key_unique.sql`.`` | A hand-written check of a table has the name of a check that table's header generates (`key_unique`, `key_not_null`, `surrogate_key_unique`, `ref_<column>`, `measures`). Rename the file. |
+| ``` `checks: key: keep` cannot be used on `gold.fact_orders`: it is written with `write: merge`, … Use `checks: key: block`: … ``` | `keep` for a generated check of a view, an append, a merge or a history table, as for a hand-written check's `on_failure`. |
 | ``checks: takes only key, references and measures``, ``checks: key must be block, keep or warn`` | Another check family or failure mode. |
 | ``` `checks: key` sets how the key checks fail, but the asset declares no `key:`; declare `key:`, or remove `checks: key` ``` | A `checks` family for a field the asset does not declare (`references` likewise). |
 | ``measures: `net_amount` must be a mapping such as `{aggregation: sum, currency: EUR}``` | A measure written as a string or a list. |
@@ -451,7 +493,7 @@ release keeps its text as it was stored.
 A project version in which an asset declares a model field (`key:` alone counts, so every project
 with a `write: merge` asset) has manifest version 9, one in which an asset declares `measures:`
 version 10, and one that declares `main_language`, a label or a
-[translation](translations.md) version 11. Each needs workers of the release that introduced it or later: a worker of an earlier
+[translation](translations.md) version 11, and one that uses `write: history` or a reference with `at:` version 12. Each needs workers of the release that introduced it or later: a worker of an earlier
 one refuses its manifest. A deploy's changes list a table whose `kind`, `grain`, `references`,
 `checks`, or the `key` of an asset that does not merge, changed as `model_changed`; the key of a
 merge stays a change of how the table is written.

@@ -11,6 +11,11 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 
 from lakana_core.projects.asset_model import ParsedAsset, ResolvedReference, key_columns
+from lakana_core.projects.history_columns import (
+    added_columns,
+    reserved_name_message,
+    valid_from_column_message,
+)
 from lakana_core.projects.issues import ProjectIssue
 
 _MODELLED = {"fact": "a fact", "dimension": "a dimension", "wide": "a wide table"}
@@ -40,6 +45,8 @@ class TargetInfo:
         Its columns, or `None` when they are not known at deploy.
     artifact
         Whether it is an artifact: a versioned file with no rows, which nothing can point at.
+    history
+        Whether it keeps history (`write: history`): a reference to it must say `at:`.
     """
 
     kind: str | None
@@ -47,6 +54,7 @@ class TargetInfo:
     key_none: bool
     columns: tuple[str, ...] | None
     artifact: bool = False
+    history: bool = False
 
 
 class AmbiguousReference(Exception):
@@ -259,10 +267,11 @@ def _resolve_one(
     info = lookup(target)
     if info is None:
         return None, [_Told(missing_target_message(raw, environment))]
-    messages = _target_problems(asset, column, raw, target, target_column, info)
+    at = asset.metadata.reference_times().get(column)
+    messages = _target_problems(asset, column, raw, target, target_column, info, at)
     if messages:
         return None, [_Told(message, (target,)) for message in messages]
-    return ResolvedReference(column, target, target_column or info.key[0]), []
+    return ResolvedReference(column, target, target_column or info.key[0], at), []
 
 
 def _target_problems(
@@ -272,6 +281,7 @@ def _target_problems(
     target: str,
     target_column: str | None,
     info: TargetInfo,
+    at: str | None,
 ) -> list[str]:
     """Find what is wrong with a reference to a target the lookup described.
 
@@ -289,6 +299,8 @@ def _target_problems(
         The column the long form names, or `None` for the short form.
     info
         What the lookup knows of the target.
+    at
+        The reference's `at:` column, or `None`.
 
     Returns
     -------
@@ -309,6 +321,17 @@ def _target_problems(
         messages.append(
             f"`{asset.table}` ({_MODELLED[kind]}) references `{target}`, a staging table; "
             "point it at a modelled table."
+        )
+    if info.history and at is None:
+        messages.append(
+            f"`{asset.table}` references `{target}` (`{column}`), which keeps the history of its "
+            "rows (`write: history`); say which version each row means with the row's time: "
+            f"`{column}: {{to: {raw}, at: <column>}}`"
+        )
+    if not info.history and at is not None:
+        messages.append(
+            f"`at:` in reference `{column}` is for a target that keeps history (`write: "
+            f"history`), and `{target}` does not; remove `at:`"
         )
     where = f"Reference `{column}: {raw}`: `{target}`"
     if target_column is None:
@@ -333,17 +356,17 @@ def _target_problems(
         )
     if messages:
         return messages
-    too_long = _too_long(column, target, target_column or info.key[0])
+    too_long = _too_long(column, target, target_column or info.key[0], at)
     if too_long is not None:
         return [
             f"Reference `{column}: {raw}` is too long to store: {too_long}, and each of the "
-            f"column, the target table and the target column may have at most {MAX_REFERENCE_BYTES}"
-            " bytes; shorten that name."
+            "column, the target table, the target column and the `at:` column may have at most "
+            f"{MAX_REFERENCE_BYTES} bytes; shorten that name."
         ]
     return []
 
 
-def _too_long(column: str, target: str, target_column: str) -> str | None:
+def _too_long(column: str, target: str, target_column: str, at: str | None) -> str | None:
     """Name the first part of a reference that the catalog cannot store.
 
     Parameters
@@ -354,6 +377,8 @@ def _too_long(column: str, target: str, target_column: str) -> str | None:
         The target table's dotted name.
     target_column
         The target column.
+    at
+        The `at:` column, or `None` for a reference without one.
 
     Returns
     -------
@@ -364,6 +389,7 @@ def _too_long(column: str, target: str, target_column: str) -> str | None:
         ("the column", column),
         ("the target table", target),
         ("the target column", target_column),
+        ("the `at:` column", at or ""),
     ):
         size = len(value.encode("utf-8"))
         if size > MAX_REFERENCE_BYTES:
@@ -414,7 +440,7 @@ def resolve_references(
     for asset in sorted(assets, key=lambda a: a.path):
         line = asset.block_line or asset.body_line
         found: list[ResolvedReference] = []
-        for column, raw in sorted(asset.metadata.references.items()):
+        for column, raw in sorted(asset.metadata.reference_targets().items()):
             reference, problems = _resolve_one(asset, column, raw, lookup, test, environment)
             # A reader who may not read the target is shown what a missing target shows: one
             # line per reference, so the first problem's line becomes it and the others go.
@@ -450,6 +476,43 @@ def resolve_references(
     return resolved, issues
 
 
+def _at_column_message(asset: ParsedAsset, column: str, at: str) -> str:
+    """Say why a reference's `at:` column is not a column of the table the asset writes.
+
+    Parameters
+    ----------
+    asset
+        The referencing asset, with an explicit SELECT.
+    column
+        The referencing column.
+    at
+        Its `at:` column, which the stored table does not have.
+
+    Returns
+    -------
+    str
+        The message: for a history asset's own `valid_from:` column, that it is stored as
+        `valid_from`; for `valid_from` on an asset that does not keep history, that `at:` names
+        the asset's own time column, not the target's; otherwise that the SELECT lacks it.
+    """
+    where = f"Column `{at}` in `at:` of reference `{column}`"
+    if asset.metadata.write == "history" and at == asset.metadata.valid_from:
+        return (
+            f"{where} is `{asset.table}`'s `valid_from:` column, which `write: history` stores "
+            "as `valid_from`; write `at: valid_from`."
+        )
+    if at == "valid_from":
+        return (
+            f"{where} is not a column of `{asset.table}`'s SELECT: `at:` names the column of "
+            f"`{asset.table}` that says when each of its rows happened, not the target's "
+            "`valid_from`; name that column, and add it to the SELECT if it is missing."
+        )
+    return (
+        f"{where} is not a column of `{asset.table}`'s SELECT; add it to the SELECT, or name "
+        "another column."
+    )
+
+
 def project_model_issues(assets: Sequence[ParsedAsset]) -> list[ProjectIssue]:
     """Check that key and reference columns are columns of an explicit SELECT.
 
@@ -461,9 +524,12 @@ def project_model_issues(assets: Sequence[ParsedAsset]) -> list[ProjectIssue]:
     Returns
     -------
     list of ProjectIssue
-        One per key column, then per reference column, then per measure column and
+        One per key column, then per reference column, then per `at:` column that the SELECT
+        (with a history asset's added columns) does not return, then per measure column and
         `not_over` column, that the asset's explicit SELECT does not return, in path order;
-        nothing for a star or a Python asset, whose columns are checked at the run.
+        for a history asset, also one per SELECT column named like an added column and one for a
+        `valid_from:` column the SELECT does not return; nothing for a star or a Python asset,
+        whose columns are checked at the run.
     """
     issues: list[ProjectIssue] = []
     for asset in sorted(assets, key=lambda a: a.path):
@@ -480,6 +546,25 @@ def project_model_issues(assets: Sequence[ParsedAsset]) -> list[ProjectIssue]:
                         "add it to the SELECT, or change `key:`.",
                     )
                 )
+        if asset.metadata.write == "history":
+            reserved = {name.casefold() for name in added_columns(asset.table)}
+            issues.extend(
+                ProjectIssue(asset.path, line, reserved_name_message(column, asset.table))
+                for column in asset.columns
+                if column.casefold() in reserved
+            )
+            valid_from = asset.metadata.valid_from
+            if valid_from is not None and valid_from not in asset.columns:
+                spelled = next(
+                    (c for c in asset.columns if c.casefold() == valid_from.casefold()), None
+                )
+                issues.append(
+                    ProjectIssue(
+                        asset.path,
+                        line,
+                        valid_from_column_message(valid_from, asset.table, spelled=spelled),
+                    )
+                )
         for column in sorted(asset.metadata.references):
             if column not in asset.columns:
                 issues.append(
@@ -490,6 +575,13 @@ def project_model_issues(assets: Sequence[ParsedAsset]) -> list[ProjectIssue]:
                         "SELECT; add it to the SELECT, or remove the reference.",
                     )
                 )
+        available = set(asset.columns)
+        if asset.metadata.write == "history":
+            available |= set(added_columns(asset.table))
+            available.discard(asset.metadata.valid_from or "")
+        for column, at in sorted(asset.metadata.reference_times().items()):
+            if at not in available:
+                issues.append(ProjectIssue(asset.path, line, _at_column_message(asset, column, at)))
         for column, spec in sorted(asset.metadata.measures.items()):
             if column not in asset.columns:
                 issues.append(

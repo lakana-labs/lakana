@@ -143,11 +143,48 @@ def test_a_write_of_a_task_attempt_is_stamped_with_its_task_run_and_claim() -> N
 def test_a_stamp_a_caller_sent_is_never_kept() -> None:
     """Only the platform stamps: a summary that claims an attempt is stripped of the claim."""
     forged = AddSnapshotUpdate(snapshot=_snapshot(5, None, **_stamp(), keep="yes"))
-    for context in (None, RunContext(task_run_id=_TASK_RUN, query_run_id=uuid.uuid4())):
-        (stripped,) = stamp_snapshots([forged], context)
-        assert _summary(stripped) == {"operation": "append", "keep": "yes"}
+    (stripped,) = stamp_snapshots([forged], None)
+    assert _summary(stripped) == {"operation": "append", "keep": "yes"}
+    (marked,) = stamp_snapshots(
+        [forged], RunContext(task_run_id=_OTHER_RUN, query_run_id=_TASK_RUN)
+    )
+    assert _summary(marked) == {
+        "operation": "append",
+        "keep": "yes",
+        TASK_RUN_PROPERTY: str(_OTHER_RUN),
+    }
     (restamped,) = stamp_snapshots([forged], RunContext(task_run_id=_OTHER_RUN, claim=7))
     assert _summary(restamped) == {"operation": "append", "keep": "yes", **_stamp(_OTHER_RUN, 7)}
+
+
+def test_a_sql_tasks_write_run_marks_its_task_run_but_proves_no_attempt() -> None:
+    """The query-run form (a SQL task's write run) names its task run and no claim.
+
+    The mark is what `written_by_run` reads to refuse a second history write of one run; without
+    a claim it never passes for a Python attempt's write (`written_by_attempt`).
+    """
+    staged = AddSnapshotUpdate(snapshot=_snapshot(5, None, **{"added-records": "3"}))
+
+    (marked,) = stamp_snapshots(
+        [staged], RunContext(task_run_id=_TASK_RUN, query_run_id=uuid.uuid4())
+    )
+
+    assert _summary(marked) == {
+        "operation": "append",
+        "added-records": "3",
+        TASK_RUN_PROPERTY: str(_TASK_RUN),
+    }
+    assert isinstance(marked, AddSnapshotUpdate)
+    metadata = _table(marked.snapshot)
+    for claim in (0, 1, 2):
+        assert not written_by_attempt(metadata, since=None, task_run_id=_TASK_RUN, claim=claim)
+
+
+def test_a_context_with_both_forms_stamps_nothing() -> None:
+    forged = AddSnapshotUpdate(snapshot=_snapshot(5, None, **_stamp()))
+    both = RunContext(task_run_id=_TASK_RUN, query_run_id=uuid.uuid4(), claim=2)
+    (stripped,) = stamp_snapshots([forged], both)
+    assert _summary(stripped) == {"operation": "append"}
 
 
 def test_updates_without_a_snapshot_are_returned_as_they_are() -> None:

@@ -4829,3 +4829,96 @@ def test_0059_adds_the_check_claims_of_a_task_run(
             assert connection.execute(sa.text("SELECT count(*) FROM task_runs")).scalar_one() == 1
     finally:
         engine.dispose()
+
+
+_REVISION_0060 = "f2b6c8d0e4a5"
+
+
+@pytest.mark.usefixtures("_without_fsync")
+def test_0060_adds_how_a_history_run_writes_and_downgrades_it_to_a_merge(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Revision `0060`: `query_runs.history`, null on old rows; a downgrade calls the run a merge.
+
+    Parameters
+    ----------
+    tmp_path
+        Holds the throwaway SQLite file.
+    monkeypatch
+        Points `lakana_core.config.Settings` at that file.
+    """
+    db_path = tmp_path / "migrated.db"
+    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    config = Config(str(ALEMBIC_INI))
+    command.upgrade(config, _REVISION_0060)
+    engine = create_engine(f"sqlite:///{db_path}")
+    run_id = uuid.uuid4().hex
+    now = datetime.now(UTC).isoformat()
+    try:
+        found = {c["name"]: c for c in inspect(engine).get_columns("query_runs")}
+        assert found["history"]["nullable"] is True
+        with engine.begin() as connection:
+            connection.execute(sa.text("PRAGMA foreign_keys=OFF"))
+            connection.execute(
+                sa.text(
+                    "INSERT INTO query_runs (id, environment_id, sql_text, status,"
+                    " cancel_requested, write_mode, history, created_at, updated_at) VALUES"
+                    " (:id, :env, 'SELECT 1', 'SUCCEEDED', 0, 'HISTORY', :history, :now, :now)"
+                ),
+                {
+                    "id": run_id,
+                    "env": uuid.uuid4().hex,
+                    "history": json.dumps(
+                        {"key": ["id"], "valid_from": None, "close_missing": False}
+                    ),
+                    "now": now,
+                },
+            )
+    finally:
+        engine.dispose()
+
+    command.downgrade(config, _REVISION_0059)
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        assert "history" not in {c["name"] for c in inspect(engine).get_columns("query_runs")}
+        with engine.connect() as connection:
+            mode = connection.execute(sa.text("SELECT write_mode FROM query_runs")).scalar_one()
+        assert mode == "MERGE"
+    finally:
+        engine.dispose()
+
+
+_REVISION_0061 = "a3c7d9e1f5b6"
+
+
+@pytest.mark.usefixtures("_without_fsync")
+def test_0061_adds_the_time_column_of_a_reference(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Revision `0061`: `table_references.at_column`, nullable, gone again after a downgrade.
+
+    Parameters
+    ----------
+    tmp_path
+        Holds the throwaway SQLite file.
+    monkeypatch
+        Points `lakana_core.config.Settings` at that file.
+    """
+    db_path = tmp_path / "migrated.db"
+    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    config = Config(str(ALEMBIC_INI))
+    command.upgrade(config, _REVISION_0061)
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        found = {c["name"]: c for c in inspect(engine).get_columns("table_references")}
+        assert found["at_column"]["nullable"] is True
+    finally:
+        engine.dispose()
+    command.downgrade(config, _REVISION_0060)
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        assert "at_column" not in {
+            c["name"] for c in inspect(engine).get_columns("table_references")
+        }
+    finally:
+        engine.dispose()

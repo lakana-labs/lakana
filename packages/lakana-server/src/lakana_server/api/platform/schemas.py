@@ -1085,6 +1085,10 @@ class ModelReferenceOut(BaseModel):
     target_exists
         Whether a table of that name exists now. A reference whose target the caller may not
         read is never listed, so this says nothing about such a table.
+    at
+        The referencing table's time column (`at:`) when the target keeps history (`write:
+        history`): each row's value must have a version of the target valid at that time;
+        `None` otherwise.
     """
 
     id: str
@@ -1093,6 +1097,7 @@ class ModelReferenceOut(BaseModel):
     target: str
     target_column: str
     target_exists: bool
+    at: str | None = None
 
 
 class MeasureOut(BaseModel):

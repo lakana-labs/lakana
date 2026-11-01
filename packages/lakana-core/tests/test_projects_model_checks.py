@@ -15,12 +15,16 @@ from lakana_core.projects.model_checks import (
     KEY_NOT_NULL,
     KEY_UNIQUE,
     REF_PREFIX,
+    SURROGATE_KEY_UNIQUE,
     generated_checks,
     generated_name_issues,
+    history_key_unique_sql,
     key_not_null_sql,
     key_unique_sql,
     measures_sql,
     reference_sql,
+    surrogate_key_unique_sql,
+    valid_at_reference_sql,
 )
 from lakana_core.query_rewrite import check_blacklist, extract_table_refs
 
@@ -357,3 +361,115 @@ def test_checks_measures_sets_the_mode_and_a_hand_written_measures_check_is_refu
         "A check named `measures` is generated for `gold.fact_stock`; rename "
         "`checks/gold/fact_stock/measures.sql`."
     )
+
+
+def test_keep_is_refused_on_a_history_dimension() -> None:
+    dim = _fact(
+        kind="dimension",
+        write="history",
+        references={},
+        key=("store_id",),
+        checks={"key": "keep"},
+    )
+    generated = generated_checks([dim], {}, default_on_failure="block")
+    issues = check_issues(generated, [dim], build_graph([dim]))
+    assert issues[0].message == (
+        "`checks: key: keep` cannot be used on `gold.fact_sales`: it is written with `write: "
+        "history`, and building it again never removes a version, so the rows that failed would "
+        "stay. Use `checks: key: block`: it takes the failed run's versions out again."
+    )
+
+
+def _dimension(**fields: object) -> ParsedAsset:
+    """Build a history dimension `gold.dim_customer` keyed on `customer_id`.
+
+    Parameters
+    ----------
+    **fields
+        Overrides of the metadata.
+
+    Returns
+    -------
+    ParsedAsset
+        The asset.
+    """
+    values: dict[str, object] = {
+        "materialize": "table",
+        "kind": "dimension",
+        "grain": "One row per customer and version.",
+        "key": ("customer_id",),
+        "write": "history",
+        **fields,
+    }
+    meta = AssetMetadata(**values)  # ty: ignore[invalid-argument-type]
+    return make_asset(
+        "gold.dim_customer", ("silver.customers",), columns=("customer_id",), metadata=meta
+    )
+
+
+def test_a_history_dimension_generates_three_key_checks() -> None:
+    checks = generated_checks([_dimension(checks={"key": "warn"})], {}, default_on_failure="block")
+    assert [c.check for c in checks] == ["key_not_null", "key_unique", SURROGATE_KEY_UNIQUE]
+    assert SURROGATE_KEY_UNIQUE == "surrogate_key_unique"
+    assert {c.on_failure for c in checks} == {"warn"}
+    assert {c.generated for c in checks} == {GeneratedFrom("key", ("customer_id",), history=True)}
+    assert [c.description for c in checks] == [
+        "generated from `key:`",
+        "generated from `key:` (one version per key at any time)",
+        "generated from `write: history` (one row per version key)",
+    ]
+    assert checks[1].sql == history_key_unique_sql("gold.dim_customer", ["customer_id"])
+    assert checks[2].sql == (
+        'SELECT * FROM "gold"."dim_customer" QUALIFY count(*) OVER '
+        '(PARTITION BY "dim_customer_key") > 1'
+    )
+
+
+def test_the_history_key_sql_is_the_specs() -> None:
+    assert history_key_unique_sql("gold.dim_customer", ["customer_id"]) == (
+        'SELECT * FROM "gold"."dim_customer" QUALIFY lead("valid_from") OVER (PARTITION BY '
+        '"customer_id" ORDER BY "valid_from") < coalesce("valid_to", \'infinity\'::TIMESTAMPTZ) '
+        'OR "valid_to" <= "valid_from" OR "is_current" IS DISTINCT FROM ("valid_to" IS NULL)'
+    )
+    for sql in (
+        history_key_unique_sql("gold.dim_customer", ["id", "country"]),
+        surrogate_key_unique_sql("gold.dim_customer"),
+    ):
+        check_blacklist(sql, dialect="duckdb")
+        assert set(extract_table_refs(sql, dialect="duckdb")) == {"gold.dim_customer"}
+
+
+def test_a_hand_written_check_may_not_be_called_surrogate_key_unique() -> None:
+    generated = generated_checks([_dimension()], {}, default_on_failure="block")
+    issues = generated_name_issues([_hand(SURROGATE_KEY_UNIQUE, "gold.dim_customer")], generated)
+    assert [i.message for i in issues] == [
+        "A check named `surrogate_key_unique` is generated for `gold.dim_customer`; rename "
+        "`checks/gold/dim_customer/surrogate_key_unique.sql`."
+    ]
+
+
+def test_a_reference_with_at_generates_the_valid_at_check() -> None:
+    ref = ResolvedReference("customer_id", "gold.dim_customer", "customer_id", "ordered_at")
+    asset = _fact(references={"customer_id": {"to": "gold.dim_customer", "at": "ordered_at"}})
+    (check,) = [
+        c
+        for c in generated_checks([asset], {"gold.fact_sales": (ref,)}, default_on_failure="block")
+        if c.check.startswith("ref_")
+    ]
+    assert check.generated == GeneratedFrom(
+        "references", ("customer_id",), "gold.dim_customer", "customer_id", at="ordered_at"
+    )
+    assert check.sql == valid_at_reference_sql(
+        "gold.fact_sales", "customer_id", "gold.dim_customer", "customer_id", "ordered_at"
+    )
+    assert check.sql == (
+        'SELECT s.* FROM "gold"."fact_sales" AS s LEFT JOIN "gold"."dim_customer" AS t ON '
+        's."customer_id" = t."customer_id" AND t."valid_from" <= CAST(s."ordered_at" AS '
+        'TIMESTAMPTZ) AND (t."valid_to" IS NULL OR CAST(s."ordered_at" AS TIMESTAMPTZ) < '
+        't."valid_to") WHERE s."customer_id" IS NOT NULL AND t."customer_id" IS NULL'
+    )
+    check_blacklist(check.sql, dialect="duckdb")
+    assert set(extract_table_refs(check.sql, dialect="duckdb")) == {
+        "gold.fact_sales",
+        "gold.dim_customer",
+    }

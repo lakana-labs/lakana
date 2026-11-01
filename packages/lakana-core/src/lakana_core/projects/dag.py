@@ -55,7 +55,7 @@ def _upstream(asset: ParsedAsset, produced: Mapping[str, tuple[str, ...] | None]
     """
     targets = {
         target
-        for raw in asset.metadata.references.values()
+        for raw in asset.metadata.reference_targets().values()
         if (target := project_reference_target(raw, produced)) is not None
     }
     return {*asset.references, *targets} - {asset.table}

@@ -75,9 +75,11 @@ from lakana_core.projects.deploy_jobs import (
 )
 from lakana_core.projects.diff import DeployDiff, diff_manifests
 from lakana_core.projects.git_input import is_full_sha, validate_ref
+from lakana_core.projects.history_columns import history_table_columns
 from lakana_core.projects.issues import ProjectIssue, ProjectValidationError, error_for_reader
 from lakana_core.projects.lookups import deployment_row, environment_by_name, repository_by_name
 from lakana_core.projects.manifest import (
+    entry_history,
     entry_model,
     entry_output,
     entry_write,
@@ -2282,12 +2284,17 @@ class DeployService:
             if name in by_table:
                 asset = by_table[name]
                 meta = asset.metadata
+                history = meta.write == "history"
+                columns = asset.columns
+                if history and columns is not None:
+                    columns = history_table_columns(asset.table, columns, meta.valid_from)
                 return TargetInfo(
                     meta.kind,
                     key_columns(meta.key),
                     meta.key == KEY_NONE,
-                    asset.columns,
+                    columns,
                     artifact=asset.output == "artifact",
+                    history=history,
                 )
             # Another repository's table counts only once it exists and `p` may read it, so an
             # unreadable target never reaches the manifest or catalog metadata below.
@@ -2307,12 +2314,20 @@ class DeployService:
                 else None
             )
             model = entry_model(entry)
+            write, merge_key, _ = entry_write(entry)
+            history = write == "history"
+            if history and listed is not None:
+                # Before the first run there are no stored columns, only the SELECT's.
+                spec = entry_history(entry)
+                valid_from = spec.valid_from if spec is not None else None
+                listed = history_table_columns(name, listed, valid_from)
             if model is None:
                 # A manifest from before models: a merge's key still identifies a row.
-                write, merge_key, _ = entry_write(entry)
                 key = merge_key if write == "merge" else ()
-                return TargetInfo(None, key, False, columns or listed)
-            return TargetInfo(model.kind, model.key, model.key_none, columns or listed)
+                return TargetInfo(None, key, False, columns or listed, history=history)
+            return TargetInfo(
+                model.kind, model.key, model.key_none, columns or listed, history=history
+            )
 
         run_as = self._bound_run_as(env.id, repository_id)
 

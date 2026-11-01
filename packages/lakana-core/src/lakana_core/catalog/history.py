@@ -23,11 +23,11 @@ import uuid
 from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
 import pyarrow as pa
 import pyarrow.compute as _compute
-from pyiceberg.expressions import And, EqualTo, GreaterThan, In
+from pyiceberg.expressions import And, EqualTo, GreaterThan, In, Or
 from pyiceberg.io import FileIO
 from pyiceberg.manifest import DataFileContent, ManifestEntry
 from pyiceberg.schema import Schema
@@ -36,7 +36,7 @@ from pyiceberg.table.metadata import TableMetadata
 from pyiceberg.table.snapshots import Snapshot
 from pyiceberg.table.update import AddSnapshotUpdate, TableRequirement, TableUpdate
 from pyiceberg.types import BooleanType, StringType, TimestamptzType
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from lakana_core.auth import RunContext
@@ -79,11 +79,20 @@ HISTORY_KEY_PROPERTY = "lakana.history-key"
 UTC_MICROS = pa.timestamp("us", tz="UTC")
 """The Arrow type of `valid_from` and `valid_to`: Iceberg's `timestamptz`."""
 
+EARLIEST_START = datetime(1, 1, 1, tzinfo=UTC)
+"""Where a key's first version starts, with the run clock and with `valid_from:` (decision Q7).
+
+A key the table has never held gets a first version that reaches back to the earliest time, so
+every fact row finds a version once its key exists; only later versions (a change, or a key that
+comes back after it was closed) start at the run clock or the `valid_from:` value.
+"""
+
 KEY_TYPE_MESSAGE = (
     "key column `{column}` has type {type}; a history key must be a string, an integer, a "
-    "decimal, a date, a timestamp, a boolean or binary"
+    "decimal, a date, a timestamp, a boolean or binary. Cast it in the SELECT, for example "
+    "{cast}."
 )
-"""A natural key column the surrogate key cannot encode."""
+"""A natural key column the surrogate key cannot encode; `{cast}` is the cast to write."""
 
 UUID_KEY_MESSAGE = (
     "key column `{column}` is a uuid, which a history key cannot be; cast it in the SELECT, for "
@@ -286,7 +295,14 @@ def _payloads(column: pa.Array, name: str) -> tuple[bytes, list[bytes]]:
         return b"x", column.to_pylist()
     if pa.types.is_fixed_size_binary(kind):
         return b"x", column.to_pylist()
-    raise ValidationError(KEY_TYPE_MESSAGE.format(column=name, type=shown_type(kind)))
+    if pa.types.is_floating(kind):
+        cast = (
+            f"`CAST({name} AS DECIMAL(18, 2))` (with the scale its values need) or "
+            f"`CAST({name} AS VARCHAR)`"
+        )
+    else:
+        cast = f"`CAST({name} AS VARCHAR)`"
+    raise ValidationError(KEY_TYPE_MESSAGE.format(column=name, type=shown_type(kind), cast=cast))
 
 
 def surrogate_keys(data: pa.Table, key: Sequence[str], starts: pa.Array) -> pa.Array:
@@ -431,7 +447,10 @@ def check_history_batch(
         if valid_from in key:
             raise ValidationError(valid_from_key_message(valid_from))
         if valid_from not in data.column_names:
-            raise ValidationError(valid_from_column_message(valid_from, table))
+            spelled = next(
+                (n for n in data.column_names if n.casefold() == valid_from.casefold()), None
+            )
+            raise ValidationError(valid_from_column_message(valid_from, table, spelled=spelled))
     for field in data.schema:
         if pa.types.is_nested(field.type):
             raise ValidationError(
@@ -698,8 +717,8 @@ def _check_returning(
     *,
     table: str,
     clock: datetime,
-) -> None:
-    """Refuse a key that comes back with a start before its last version ended.
+) -> pa.Array:
+    """Find the keys that come back, and refuse one with a start before its last version ended.
 
     Parameters
     ----------
@@ -716,13 +735,20 @@ def _check_returning(
     last_ends
         Reads the key columns and `valid_to` of the closed versions of the keys it is given (first
         argument) whose `valid_to` is after the lower bound it is given (second argument; an end
-        at or before it cannot conflict, so the read may leave those out). The bound is the
-        earliest start among the rows that open a key again: the run clock, or the smallest
-        declared `valid_from`.
+        at or before it cannot conflict, so the read may leave those out), and of each such key's
+        closed first version (`valid_from` at `EARLIEST_START`), whatever its end: a key the table
+        held and closed always has one, so a key the read does not return was never held. The
+        bound is the earliest start among the rows without an open version: the run clock, or
+        the smallest declared `valid_from`.
     table
         The table's dotted name, for the message.
     clock
         The run clock, for the message.
+
+    Returns
+    -------
+    pa.Array
+        One boolean per row of `new_rows`: whether its key comes back (the table held it).
 
     Raises
     ------
@@ -734,7 +760,7 @@ def _check_returning(
     earliest = pc.min(starts.take(new_rows)).as_py()
     ends = last_ends(wanted, earliest)
     if ends.num_rows == 0:
-        return
+        return pa.repeat(pa.scalar(False), len(new_rows))
     latest = ends.group_by(list(key)).aggregate([(VALID_TO, "max")])
     row_name = _unused(_ROW, key)
     end_name = _unused(_END, [*key, row_name])
@@ -747,6 +773,9 @@ def _check_returning(
         ),
         keys=list(key),
         join_type="inner",
+    )
+    held = pc.is_in(
+        pa.array(range(len(new_rows)), pa.int64()), value_set=met.column(row_name).combine_chunks()
     )
     returning = starts.take(new_rows).take(met.column(row_name).combine_chunks())
     overlap = _count(pc.less(returning, met.column(end_name).combine_chunks()))
@@ -763,6 +792,7 @@ def _check_returning(
             f"valid_from column `{valid_from}` is before the end of the key's last version in "
             f"{overlap} {opens} a key again; versions of one key must not overlap."
         )
+    return held
 
 
 def plan_history(
@@ -784,7 +814,9 @@ def plan_history(
     A batch row whose key has no open version opens one; one whose values (every column but
     the key) differ from its open version closes it at the new start and opens a new version;
     one whose values are the same is dropped before its start is looked at. With
-    `close_missing`, an open version whose key the batch lacks is closed at `clock`.
+    `close_missing`, an open version whose key the batch lacks is closed at `clock`. A key the
+    table never held opens its first version at `EARLIEST_START`; its declared start is checked
+    all the same.
 
     Parameters
     ----------
@@ -889,11 +921,13 @@ def plan_history(
             f"({shown_clock(clock)}); a run that started earlier cannot replace or close {them}. "
             "Start a new run."
         )
+    held = pa.array([], pa.bool_())
     if len(new_rows):
-        _check_returning(
+        held = _check_returning(
             data, new_rows, starts, key, valid_from, last_ends, table=table, clock=clock
         )
-    opened_starts = starts.take(opening)
+    first = pa.concat_arrays([pc.invert(held), pa.repeat(pa.scalar(False), len(changed_rows))])
+    opened_starts = pc.if_else(first, pa.scalar(EARLIEST_START, UTC_MICROS), starts.take(opening))
     opened = first_versions(data.take(opening), key=key, table=table, starts=opened_starts)
     closing = pa.concat_arrays([changed_opens, missing])
     ends = pa.concat_arrays(
@@ -937,32 +971,48 @@ def recreate_hint(table: str, environment: str) -> str:
 MAX_OPEN_VERSIONS_SETTING = "LAKANA_RUN__MAX_HISTORY_OPEN_VERSIONS"
 """The setting that caps the open versions of a history write (`RunConfig`)."""
 
+OpenVersionsState = Literal["create", "open", "result", "after"]
+"""What `too_many_open_versions_message` counted."""
 
-def too_many_open_versions_message(table: str, count: int, cap: int, *, create: bool) -> str:
-    """Refuse a history write into a table with more open versions than the setting allows.
+
+def too_many_open_versions_message(
+    table: str, count: int, cap: int, *, state: OpenVersionsState
+) -> str:
+    """Refuse a history write that would hold more open versions than the setting allows.
 
     Parameters
     ----------
     table
         The table's dotted name.
     count
-        Its open versions; more than `cap`, so at least 2.
+        The open versions (or result rows) counted; more than `cap`, so at least 2.
     cap
         `LAKANA_RUN__MAX_HISTORY_OPEN_VERSIONS`.
-    create
-        Whether the write would create the table with `count` open versions.
+    state
+        What was counted: ``"create"`` the rows a first run would create the table with,
+        ``"open"`` the table's open versions, ``"result"`` the rows of a later run's result (each
+        can open a version), ``"after"`` the open versions the planned write would leave.
 
     Returns
     -------
     str
         The message, naming the count, the setting, the memory it stands for and the fix.
     """
-    has = "would start with" if create else "has"
+    setting = MAX_OPEN_VERSIONS_SETTING
+    head = {
+        "create": f"{table} would start with {count} open versions, more than",
+        "open": f"{table} has {count} open versions, more than",
+        "result": (
+            f"The asset's result for {table} has {count} rows, and each can open a version: "
+            "more than"
+        ),
+        "after": f"{table} would have {count} open versions after this write, more than",
+    }[state]
+    done = "written" if state == "after" else "read or written"
     return (
-        f"{table} {has} {count} open versions, more than {MAX_OPEN_VERSIONS_SETTING} ({cap}) "
-        "allows. A history write holds every open version in the worker's memory, roughly "
-        "2 GiB per million open versions of 8 columns and more for wider rows, so nothing was "
-        f"read or written. Ask an operator to raise {MAX_OPEN_VERSIONS_SETTING} together with "
+        f"{head} {setting} ({cap}) allows. A history write holds every open version in the "
+        "worker's memory, roughly 2 GiB per million open versions of 8 columns and more for "
+        f"wider rows, so nothing was {done}. Ask an operator to raise {setting} together with "
         "the worker's memory limit (LAKANA_WORKER__MEMORY_LIMIT)."
     )
 
@@ -1299,15 +1349,17 @@ def read_last_ends(
     table: str,
     max_rows: int | None,
 ) -> pa.Table:
-    """Read the key columns and `valid_to` of the closed versions of some keys that end late.
+    """Read the key columns and `valid_to` of some keys' closed first versions and late ends.
 
-    Only closed versions that end after `after` are read: an earlier or equal end cannot
-    overlap a version starting at or after `after`, so a long history of a returning key costs
-    no more than its recent versions (files whose `valid_to` bounds are all at or before it are
-    skipped). The files are planned with that filter alone first: when none is left, which is
-    the usual case under the run clock, nothing is read and no key filter is built. Otherwise
-    an `In` per key column narrows the scan for at most `IN_LIMIT` keys, and each batch is
-    joined with the exact keys before it counts against `max_rows`.
+    Two kinds of closed version are read: the first version of each key (`valid_from` at
+    `EARLIEST_START`, at most one per key), which tells a key that comes back from one the table
+    never held, and the versions that end after `after`. An earlier or equal end cannot overlap
+    a version starting at or after `after`, so a long history of a returning key costs no more
+    than its first and its recent versions (files whose `valid_from` and `valid_to` bounds
+    match neither are skipped). The files are planned with that filter alone first: when none
+    is left, as for a table that has closed nothing yet, nothing is read and no key filter is
+    built. Otherwise an `In` per key column narrows the scan for at most `IN_LIMIT` keys, and
+    each batch is joined with the exact keys before it counts against `max_rows`.
 
     Parameters
     ----------
@@ -1330,7 +1382,8 @@ def read_last_ends(
     Returns
     -------
     pa.Table
-        The closed versions of exactly the wanted keys that end after `after`.
+        The closed versions of exactly the wanted keys that are a first version or end after
+        `after`.
 
     Raises
     ------
@@ -1341,7 +1394,10 @@ def read_last_ends(
     target = metadata.schema().select(*columns).as_arrow()
     if metadata.current_snapshot_id is None or wanted.num_rows == 0:
         return target.empty_table()
-    late = And(EqualTo(term=IS_CURRENT, value=False), GreaterThan(term=VALID_TO, value=after))
+    late = And(
+        EqualTo(term=IS_CURRENT, value=False),
+        Or(EqualTo(term=VALID_FROM, value=EARLIEST_START), GreaterThan(term=VALID_TO, value=after)),
+    )
     planned = DataScan(table_metadata=metadata, io=file_io, row_filter=late).plan_files()
     if next(iter(planned), None) is None:
         return target.empty_table()
@@ -1380,10 +1436,10 @@ def _too_many_ends(cap: int, table: str, after: datetime) -> str:
         The refusal, its counts agreeing in number, naming the setting and the two ways out.
     """
     versions = "closed version" if cap == 1 else "closed versions"
-    end = "ends" if cap == 1 else "end"
     return (
         f"Together, the keys this run opens again have more than {cap} {versions} in {table} "
-        f"that {end} after {shown_clock(after)}. That is more rows than one write may read (the "
+        "to read (their first versions, and the versions that end after "
+        f"{shown_clock(after)}). That is more rows than one write may read (the "
         "max_write_rows setting, a total for all keys), so nothing was committed. Start the "
         "returning versions later (a later `valid_from`), or ask an operator to raise "
         "max_write_rows."
@@ -1393,7 +1449,8 @@ def _too_many_ends(cap: int, table: str, after: datetime) -> str:
 def written_by_run(metadata: TableMetadata, context: RunContext | None) -> bool:
     """Tell whether the table's current snapshot is a write of the acting principal's run.
 
-    The catalog stamps every snapshot a claim-form run context commits with its task run
+    The catalog stamps every snapshot a run context commits with its task run, in the claim form
+    (a Python task's bound token) and in the query-run form (a SQL task's write run)
     (`attempt_stamp.stamp_snapshots`); no client can set the stamp.
 
     Parameters
@@ -1413,6 +1470,85 @@ def written_by_run(metadata: TableMetadata, context: RunContext | None) -> bool:
     snapshot = metadata.snapshot_by_id(metadata.current_snapshot_id)
     summary = snapshot.summary if snapshot is not None else None
     return summary is not None and summary.get(TASK_RUN_PROPERTY) == str(context.task_run_id)
+
+
+def newest_run_start(session: Session, metadata: TableMetadata) -> datetime | None:
+    """Find the latest start among the runs whose tasks wrote the table's snapshots.
+
+    Parameters
+    ----------
+    session
+        Database session; only reads.
+    metadata
+        The table's current metadata: every snapshot it keeps is looked at, so a compaction on
+        top of a run's write does not hide the run.
+
+    Returns
+    -------
+    datetime or None
+        The latest `started_at` of the runs whose task runs stamped a snapshot
+        (`TASK_RUN_PROPERTY`, set by the catalog only); `None` when no stamped snapshot belongs
+        to a run with a start.
+    """
+    ids: set[uuid.UUID] = set()
+    for snapshot in metadata.snapshots:
+        stamp = snapshot.summary.get(TASK_RUN_PROPERTY) if snapshot.summary is not None else None
+        try:
+            ids.add(uuid.UUID(str(stamp)))
+        except ValueError:
+            continue
+    if not ids:
+        return None
+    started = session.execute(
+        select(func.max(Run.started_at))
+        .join(TaskRun, TaskRun.run_id == Run.id)
+        .where(TaskRun.id.in_(ids))
+    ).scalar_one_or_none()
+    return None if started is None else started.astimezone(UTC)
+
+
+def check_first_versions_order(
+    plan: HistoryPlan,
+    clock: datetime,
+    newest: Callable[[], datetime | None],
+    *,
+    table: str,
+) -> None:
+    """Refuse a run that would replace or close first versions a run that started later wrote.
+
+    A first version starts at `EARLIEST_START`, not at the clock of the run that opened it, so
+    the rule "a run cannot replace or close a version starting at or after its clock" does not
+    see it; this rule asks the runs that wrote the table instead.
+
+    Parameters
+    ----------
+    plan
+        The write's plan.
+    clock
+        The run clock.
+    newest
+        Reads the latest start among the runs that wrote the table (`newest_run_start`); called
+        only when the plan closes a first version.
+    table
+        The table's dotted name, for the message.
+
+    Raises
+    ------
+    ValidationError
+        If the plan closes a first version and a run that started after `clock` wrote the table.
+    """
+    firsts = _count(pc.equal(plan.closed.column(VALID_FROM), pa.scalar(EARLIEST_START, UTC_MICROS)))
+    if not firsts:
+        return
+    later = newest()
+    if later is None or later <= clock:
+        return
+    versions = "first version" if firsts == 1 else "first versions"
+    raise ValidationError(
+        f"A run that started after this one ({shown_clock(later)}) already wrote {table}, and "
+        f"this run ({shown_clock(clock)}) would replace or close {firsts} {versions} that it may "
+        "have opened with newer values, so nothing was written. Start a new run."
+    )
 
 
 @dataclass(frozen=True)

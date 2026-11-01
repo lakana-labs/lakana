@@ -543,6 +543,29 @@ def _outside_table(world: World, dotted: str, ids: list[int]) -> None:
         )
 
 
+def _append_ids(world: World, dotted: str, ids: list[int]) -> None:
+    """Append rows to a table the project does not build.
+
+    Parameters
+    ----------
+    world
+        The world.
+    dotted
+        Its dotted name.
+    ids
+        The `id` values to add.
+    """
+    data = pa.table({"id": pa.array(ids, pa.int64())})
+    with world.session() as session:
+        CatalogService(session, StorageResolver(session), AllowAllAuthorization()).write_batches(
+            world.admin,
+            TableRef.from_dotted("dev", dotted),
+            mode=WriteMode.APPEND,
+            schema=data.schema,
+            batches=data.to_batches(),
+        )
+
+
 def _source_checked(world: World, check_sql: str) -> None:
     """Deploy `silver.orders` reading `bronze.events` (ids 1, 1, 2), and a check of that table.
 

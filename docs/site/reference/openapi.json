@@ -20434,6 +20434,17 @@
           "target_exists": {
             "type": "boolean",
             "title": "Target Exists"
+          },
+          "at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "At"
           }
         },
         "type": "object",
@@ -20446,7 +20457,7 @@
           "target_exists"
         ],
         "title": "ModelReferenceOut",
-        "description": "One reference a table's header declares, as `ModelReferenceView` holds it.\n\nParameters\n----------\nid\n    ``<ns.table>/ref_<column>``: the name of the reference's generated check.\ntable\n    The dotted name of the table that declares it.\ncolumn\n    The referencing column.\ntarget\n    The dotted name of the table it points at, as the header names it.\ntarget_column\n    The column of the target it must match.\ntarget_exists\n    Whether a table of that name exists now. A reference whose target the caller may not\n    read is never listed, so this says nothing about such a table."
+        "description": "One reference a table's header declares, as `ModelReferenceView` holds it.\n\nParameters\n----------\nid\n    ``<ns.table>/ref_<column>``: the name of the reference's generated check.\ntable\n    The dotted name of the table that declares it.\ncolumn\n    The referencing column.\ntarget\n    The dotted name of the table it points at, as the header names it.\ntarget_column\n    The column of the target it must match.\ntarget_exists\n    Whether a table of that name exists now. A reference whose target the caller may not\n    read is never listed, so this says nothing about such a table.\nat\n    The referencing table's time column (`at:`) when the target keeps history (`write:\n    history`): each row's value must have a version of the target valid at that time;\n    `None` otherwise."
       },
       "NamespaceCreate": {
         "properties": {

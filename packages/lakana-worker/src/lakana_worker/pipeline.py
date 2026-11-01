@@ -98,7 +98,11 @@ from lakana_core.catalog.writes import (
     max_rows_message,
     target_changed_message,
 )
-from lakana_core.config import DEFAULT_MAINTENANCE_TIMEOUT, QueryLimitsConfig
+from lakana_core.config import (
+    DEFAULT_MAINTENANCE_TIMEOUT,
+    DEFAULT_MAX_HISTORY_OPEN_VERSIONS,
+    QueryLimitsConfig,
+)
 from lakana_core.db import rowcount
 from lakana_core.errors import (
     CheckedSnapshotGoneError,
@@ -136,6 +140,7 @@ from lakana_core.policy.expressions import columns_of
 from lakana_core.policy.read_errors import policy_read_failure
 from lakana_core.policy.renames import policy_column_renamed_message, renamed_policy_column
 from lakana_core.policy.resolver import PolicyResolver
+from lakana_core.projects.history_columns import HistorySpec
 from lakana_core.query_rewrite import (
     ExpandedQuery,
     ReadField,
@@ -190,7 +195,7 @@ from lakana_worker.executor import (
     execute_query,
     stream_query,
 )
-from lakana_worker.memory import MACHINE_MEMORY_ADVICE
+from lakana_worker.memory import MACHINE_MEMORY_ADVICE, trim_heap
 from lakana_worker.query_protocol import STORE_CERTIFICATE_UNVERIFIED
 
 if TYPE_CHECKING:
@@ -1995,6 +2000,22 @@ def install_maintenance_timeout(seconds: float) -> None:
     _MAINTENANCE_TIMEOUT = seconds
 
 
+_MAX_HISTORY_OPEN_VERSIONS: int = DEFAULT_MAX_HISTORY_OPEN_VERSIONS
+"""Most open versions a history write takes on; set once by `install_history_cap`."""
+
+
+def install_history_cap(count: int) -> None:
+    """Set how many open versions a history write may take on.
+
+    Parameters
+    ----------
+    count
+        `LAKANA_RUN__MAX_HISTORY_OPEN_VERSIONS`.
+    """
+    global _MAX_HISTORY_OPEN_VERSIONS
+    _MAX_HISTORY_OPEN_VERSIONS = count
+
+
 def _run_maintenance(
     session: Session,
     run: QueryRun,
@@ -2165,7 +2186,19 @@ def _run_write(
                 arrow_to_iceberg_schema(schema), run.incremental_key, table_name=ref.dotted()
             )
         try:
-            if run.merge_key is not None:
+            if run.history is not None:
+                result = _history_result(
+                    catalog,
+                    principal,
+                    ref,
+                    run,
+                    schema,
+                    batches,
+                    sources=dotted_refs,
+                    max_rows=limits.max_write_rows,
+                    pin=pin,
+                )
+            elif run.merge_key is not None:
                 result = _merge_result(
                     catalog,
                     principal,
@@ -2194,13 +2227,21 @@ def _run_write(
                 )
         except PermissionDenied as exc:
             first_run = run.write_mode is WriteMode.CREATE and (
-                run.incremental_key is not None or run.merge_key is not None
+                run.incremental_key is not None
+                or run.merge_key is not None
+                or run.history is not None
             )
             # The guard refuses with the same error for other reasons (a superseded attempt);
             # advice about a right would be false there.
             if not first_run or Action.CREATE_TABLE.value not in str(exc):
                 raise
-            kind = "a merge" if run.merge_key is not None else "an incremental"
+            kind = (
+                "a history"
+                if run.history is not None
+                else "a merge"
+                if run.merge_key is not None
+                else "an incremental"
+            )
             raise PermissionDenied(
                 f"{str(exc).rstrip('.')}. The first run of {kind} asset creates "
                 f"{ref.dotted()}, which "
@@ -2213,6 +2254,36 @@ def _run_write(
     run.watermark = encoded
     run.schema_diff = None if result.schema_diff.is_empty() else result.schema_diff.to_json()
     return result.rows
+
+
+def _collect(batches: Iterable[pa.RecordBatch], max_rows: int) -> list[pa.RecordBatch]:
+    """Collect a result into memory, refusing more rows than the write may take.
+
+    Parameters
+    ----------
+    batches
+        The result's rows; consumed once.
+    max_rows
+        `QueryLimitsConfig.max_write_rows`.
+
+    Returns
+    -------
+    list of pa.RecordBatch
+        Every batch.
+
+    Raises
+    ------
+    ValidationError
+        When the result has more than `max_rows` rows.
+    """
+    collected: list[pa.RecordBatch] = []
+    rows = 0
+    for batch in batches:
+        rows += batch.num_rows
+        if rows > max_rows:
+            raise ValidationError(max_rows_message(max_rows))
+        collected.append(batch)
+    return collected
 
 
 def _merge_result(
@@ -2270,13 +2341,7 @@ def _merge_result(
     LakanaError
         If `merge` named no table, which it always does.
     """
-    collected: list[pa.RecordBatch] = []
-    rows = 0
-    for batch in batches:
-        rows += batch.num_rows
-        if rows > max_rows:
-            raise ValidationError(max_rows_message(max_rows))
-        collected.append(batch)
+    collected = _collect(batches, max_rows)
     creates = run.write_mode is WriteMode.CREATE
     merged = catalog.merge(
         principal,
@@ -2297,6 +2362,95 @@ def _merge_result(
         rows=merged.rows_inserted + merged.rows_updated,
         files=0,
         snapshot_id=merged.snapshot_id,
+        schema_diff=SchemaDiff(),
+    )
+
+
+def _history_result(
+    catalog: CatalogService,
+    principal: PrincipalRef,
+    ref: TableRef,
+    run: QueryRun,
+    schema: pa.Schema,
+    batches: Iterable[pa.RecordBatch],
+    *,
+    sources: Sequence[str],
+    max_rows: int,
+    pin: SnapshotPin | None,
+) -> WriteResult:
+    """Keep the versions of a SQL asset's rows in its table (`CatalogService.history`).
+
+    The rows are collected into one Arrow table, at most `max_rows` of them, because a history
+    write compares the whole current state with the open versions. A `CREATE` run (the asset's
+    first) writes with ``expected_snapshot_id="none"``, which creates the table after the same
+    checks as every later run; a `HISTORY` run commits against `pin` when its rows depend on the
+    table. A watermark never applies: the deploy refuses one. The table may take on at most
+    `LAKANA_RUN__MAX_HISTORY_OPEN_VERSIONS` open versions (`install_history_cap`). Whether or not
+    the write lands, the heap pages it freed go back to the system (`trim_heap`), beside the
+    Arrow pool's, which `history` returns itself.
+
+    Parameters
+    ----------
+    catalog
+        The catalog.
+    principal
+        The run's principal.
+    ref
+        The target.
+    run
+        The write run; `history` is set.
+    schema
+        The result's schema.
+    batches
+        The result's rows; consumed once.
+    sources
+        Dotted names of what the SELECT read, one lineage edge each.
+    max_rows
+        `QueryLimitsConfig.max_write_rows`.
+    pin
+        The snapshot the rows were computed from, or `None`.
+
+    Returns
+    -------
+    WriteResult
+        The table, the versions opened and closed together, and the snapshot.
+
+    Raises
+    ------
+    ValidationError
+        When the result has more than `max_rows` rows, and anything `history` refuses.
+    LakanaError
+        If the run's history cannot be read, or `history` named no table; neither happens.
+    """
+    spec = HistorySpec.from_json(run.history)
+    if spec is None:  # pragma: no cover - `_prepare` writes it, `checked_write` read it first
+        raise LakanaError("A history run has no readable history.")
+    creates = run.write_mode is WriteMode.CREATE
+    try:
+        kept = catalog.history(
+            principal,
+            ref,
+            pa.Table.from_batches(_collect(batches, max_rows), schema=schema),
+            key=spec.key,
+            valid_from=spec.valid_from,
+            close_missing=spec.close_missing,
+            sources=sources,
+            expected_snapshot_id="none" if creates else None,
+            pin=None if creates else pin,
+            query_run_id=run.id,
+            max_rows=max_rows,
+            max_open_versions=_MAX_HISTORY_OPEN_VERSIONS,
+            advice=SQL_ADVICE,
+        )
+    finally:
+        trim_heap()
+    if kept.table_id is None:  # pragma: no cover - `history` always names the table
+        raise LakanaError("A history write returned no table.")
+    return WriteResult(
+        table_id=kept.table_id,
+        rows=kept.versions_opened + kept.versions_closed,
+        files=0,
+        snapshot_id=kept.snapshot_id,
         schema_diff=SchemaDiff(),
     )
 

@@ -76,6 +76,11 @@ _KEEP_REFUSED: dict[str, str] = {
         "building it again never deletes a row, so the rows that failed would stay. Use "
         "{fix}: it takes the failed merge out again."
     ),
+    "history": (
+        "{setting} cannot be used on `{table}`: it is written with `write: history`, and "
+        "building it again never removes a version, so the rows that failed would stay. Use "
+        "{fix}: it takes the failed run's versions out again."
+    ),
     "view": (
         "{setting} cannot be used on `{table}`: it is a view and holds no data to keep. "
         "Use {fix}: for a view it stops what reads it in that run."
@@ -88,7 +93,8 @@ _KEEP_REFUSED: dict[str, str] = {
 for a generated one; ``{fix}`` is the same setting with ``block``.
 
 A kept table is cleared by building it again and passing its checks. An incremental build
-(``write: append``) only adds rows and a merge never deletes one, so the rows that failed would
+(``write: append``) only adds rows, a merge never deletes one and a history write never
+removes a version, so the rows that failed would
 still be there; a view holds no data. An asset of
 ``materialize: table`` (SQL or Python) is replaced by a build, and a table the project only
 reads gets no note at all, so neither is listed.
@@ -108,15 +114,17 @@ def _built_as(asset: ParsedAsset) -> str | None:
     Returns
     -------
     str or None
-        ``view``, ``incremental`` (``write: append`` in either spelling), ``merge``, or the
-        asset's ``materialize`` otherwise.
+        ``view``, ``incremental`` (``write: append`` in either spelling), ``merge``, ``history``,
+        or the asset's ``materialize`` otherwise.
     """
     if asset.metadata.materialize == "view":
         return "view"
     write = normalized_write(asset.metadata)[0]
     if write == "append":
         return "incremental"
-    return "merge" if write == "merge" else asset.metadata.materialize
+    if write in ("merge", "history"):
+        return write
+    return asset.metadata.materialize
 
 
 @dataclass(frozen=True)
@@ -139,6 +147,13 @@ class GeneratedFrom:
     aggregations
         For ``measures``, each column's aggregation, in the order of `columns`; empty
         otherwise.
+    history
+        For ``key``, whether the key is a history dimension's natural key: its checks are
+        about versions, and the pre-check requires the columns `write: history` adds;
+        `False` otherwise.
+    at
+        For ``references``, the referencing table's time column of a valid-at check; `None`
+        otherwise.
     """
 
     family: str
@@ -147,6 +162,8 @@ class GeneratedFrom:
     target_column: str | None = None
     not_over: tuple[str, ...] = ()
     aggregations: tuple[str, ...] = ()
+    history: bool = False
+    at: str | None = None
 
 
 @dataclass(frozen=True)
@@ -673,8 +690,8 @@ def check_issues(
     list of ProjectIssue
         A check of a table the project neither builds nor reads, a check of an artifact, a
         check with ``on_failure: keep`` (or a header's ``checks: <family>: keep``) of an
-        incremental, merge or view asset (`_KEEP_REFUSED`), and a table with too many checks,
-        generated checks counted.
+        incremental, merge, history or view asset (`_KEEP_REFUSED`), and a table with too many
+        checks, generated checks counted.
     """
     limits = limits or DeployLimits()
     built = {asset.table for asset in assets}
@@ -966,7 +983,9 @@ def _generated_from(raw: object) -> GeneratedFrom | None:
         ``target`` and ``target_column`` are both strings for ``references`` and both absent
         or null for ``key``; for ``measures``, both target fields absent or null, ``not_over``
         absent or a list of strings, and ``aggregations`` a list of `AGGREGATIONS` as long as
-        ``columns``. ``not_over`` or ``aggregations`` on another family is refused.
+        ``columns``. ``not_over`` or ``aggregations`` on another family is refused. ``history``
+        is absent or a boolean, and true only for ``key``; ``at`` is absent or a non-empty
+        string, and only for ``references``.
     """
     if not isinstance(raw, Mapping):
         return None
@@ -977,6 +996,11 @@ def _generated_from(raw: object) -> GeneratedFrom | None:
     if not all(isinstance(column, str) for column in columns):
         return None
     not_over, aggregations = raw.get("not_over"), raw.get("aggregations")
+    history, at = raw.get("history"), raw.get("at")
+    if history is not None and (not isinstance(history, bool) or family != "key"):
+        return None
+    if at is not None and (not isinstance(at, str) or not at or family != "references"):
+        return None
     if family == "measures":
         if target is not None or target_column is not None:
             return None
@@ -995,10 +1019,10 @@ def _generated_from(raw: object) -> GeneratedFrom | None:
     if family == "references":
         if not isinstance(target, str) or not isinstance(target_column, str):
             return None
-        return GeneratedFrom("references", tuple(columns), target, target_column)
+        return GeneratedFrom("references", tuple(columns), target, target_column, at=at)
     if target is not None or target_column is not None:
         return None
-    return GeneratedFrom("key", tuple(columns))
+    return GeneratedFrom("key", tuple(columns), history=history is True)
 
 
 def manifest_checks(manifest: object) -> tuple[CheckSpec, ...]:

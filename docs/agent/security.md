@@ -349,6 +349,7 @@ Audited in the same transaction (`TABLE_DESCRIBED`, `COLUMN_DESCRIBED`; `detail`
 | `TableOut.model.measures` | `READ_TABLE` on the table | `model_metadata.model_view`. A measure names only columns of its own table (`table_measures` rows, written only by a deploy, a rollback, a run's table creation, and restored by an undrop), so a reader of the table sees every measure, with no hidden count; a column mask hides values, not names, so a measure on a masked column is shown. The `measures` check reads only its own table and its pre-check texts name only that table's column and type. Pins: `test_model_view_shows_every_measure_with_its_id`, `test_a_measures_check_result_shows_while_the_header_declares_measures`, `test_a_reader_sees_every_measure_even_on_a_masked_column`. |
 | `?model_kind=` on the listing | as the listing | The filter runs on the described tables the caller may read; `require_model_kind` refuses anything outside `MODEL_KINDS` with one text. |
 | `GET .../tables/{name}/references` | `READ_TABLE` on the table, checked first (403 before the lookup) | `CatalogService.table_references`, `model_metadata.references_view`. Outgoing as above (`hidden_outgoing`). Incoming rows are found by the table's current dotted name (`ix_table_references_environment_target`) and kept only when the caller may read the **source** table; the rest are counted in `hidden_incoming`, never named. |
+| A reference's `at:` (#253) | as the references above | The deploy's `at:` rules (a history target without `at:`, `at:` on a target that does not keep history) are target problems: they carry `targets=(target,)` and the missing-target text as `withheld`, and the lookup describes only targets the deployer may read, so whether a table keeps history is never told to someone who may not read it. The valid-at pre-check's texts name only the checked table's own column and type; a target without `valid_from`/`valid_to` gets `REFERENCE_UNCHECKABLE`, which names nothing of it. `ModelReferenceView.at` is a column of the **source** table, shown only with a reference the reader may see (incoming rows too: `incoming_references` returns the `at` of each). |
 
 **Generated reference checks everywhere else.** `runs/hidden_checks.ReferenceCheckFilter`
 withholds a generated `ref_<column>` result (its outcome, `failing_rows` and `error`) from a reader
@@ -1140,7 +1141,9 @@ code in this area has to know.
   attempt's own write, #49: a snapshot on the current branch, newer than the attempt's start,
   whose summary carries `lakana.task-run-id` and `lakana.task-claim`; `CatalogService.commit_table`
   and `_write_new_table` set both from the claim-form `RunContext` only and remove them from every
-  other added snapshot, so no client, Iceberg REST included, can claim an attempt's write; a table
+  other added snapshot, so no client, Iceberg REST included, can claim an attempt's write (a SQL
+  task's write run, the query-run form, gets `lakana.task-run-id` alone, which never proves an
+  attempt: `written_by_attempt` wants both); a table
   created without rows is proven by its location's `holder_run_id`, and only the current claim of a
   task run can commit, `record_pending`), the child's output (redacted, control characters replaced, 1 MiB per
   attempt in all), uv's output (redacted of proxy and index credentials).
@@ -2520,8 +2523,11 @@ authentication or the worker set (`run_clock`); no request field can move it. A 
 table's history once: when the table's current snapshot carries the acting run context's task run
 as `lakana.task-run-id` (the attempt stamp, which only the catalog sets), a write that would change
 the table again is refused (`written_by_run`, `RUN_WROTE_MESSAGE`); one that changes nothing
-returns nothing. Without a claim-form run context there is no stamp and no such refusal (a SQL
-task's write run carries `query_run_id` and is not stamped either). A history write never removes
+returns nothing. A SQL task's write run (the query-run form, built only by the worker from
+`QueryRun.task_run_id`) is marked too: `stamp_snapshots` sets `lakana.task-run-id` alone, without
+`lakana.task-claim`, so a retried attempt of the same task run cannot open a second version, and
+the mark never passes as a Python attempt's proof. Without a run context there is no stamp and no
+such refusal. A history write never removes
 a row it did not plan to: its staged snapshot must add exactly `versions_opened` rows net, so a
 table whose open versions share a surrogate key (only a commit outside `CatalogService.history`
 can make one) is refused after staging, with every staged file deleted (`stage_history`).

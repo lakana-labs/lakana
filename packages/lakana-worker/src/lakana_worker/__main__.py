@@ -61,7 +61,7 @@ from lakana_worker.launcher.settings import check_ingestion_roots
 from lakana_worker.launcher_client import LauncherClient, LauncherUnavailable, claim_owner
 from lakana_worker.memory import resolve_limit, start_watchdog
 from lakana_worker.notify import DeliveryLoop, NotifySettings
-from lakana_worker.pipeline import install_maintenance_timeout
+from lakana_worker.pipeline import install_history_cap, install_maintenance_timeout
 from lakana_worker.poller import WorkerPool, poll_forever
 from lakana_worker.processes import UnsafeDirectory, prepare_private_directory
 from lakana_worker.python_support import PythonSupport, detect, worker_cache_dir
@@ -557,6 +557,7 @@ def main() -> None:
     signal.signal(signal.SIGTERM, lambda signum, frame: drain.set())
     install_drain(drain, settings.run.drain_grace_seconds)
     install_maintenance_timeout(settings.run.maintenance_timeout)
+    install_history_cap(settings.run.max_history_open_versions)
     install_query_text(settings.audit.query_text)
     runtime = _python_runtime(settings, python, drain)
     _clean_up_after_restart(runtime)

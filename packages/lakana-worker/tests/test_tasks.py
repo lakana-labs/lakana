@@ -21,6 +21,7 @@ from check_run_helpers import (
     _DUPLICATE_IDS,
     _UNPUBLISHED,
     _after,
+    _append_ids,
     _check,
     _checked,
     _drain,
@@ -1626,12 +1627,12 @@ def test_a_sql_task_of_a_manifest_of_a_version_up_to_the_current_one_still_runs(
 
 @pytest.mark.parametrize(
     ("declared", "status"),
-    [(10, TaskStatus.SUCCEEDED), (11, TaskStatus.SUCCEEDED), (12, TaskStatus.FAILED)],
+    [(11, TaskStatus.SUCCEEDED), (12, TaskStatus.SUCCEEDED), (13, TaskStatus.FAILED)],
 )
-def test_a_manifest_of_version_11_is_accepted_and_12_is_refused(
+def test_a_manifest_of_version_12_is_accepted_and_13_is_refused(
     world: World, declared: int, status: TaskStatus
 ) -> None:
-    """Version 11 is the one a project that uses texts gets; 12 is a future one's."""
+    """Version 12 is the one a project that uses history gets; 13 is a future one's."""
     _start(world)
     with world.session() as session:
         version = session.get(JobVersion, world.version_id)
@@ -1745,29 +1746,6 @@ def test_the_evidence_decides_the_attempt_even_if_the_run_could_not_be_closed(
     assert (task.status, task.attempt) == (TaskStatus.SUCCEEDED, 1)
     (attempt,) = _attempts(world, claimed.task_run_id)
     assert attempt.outcome is AttemptOutcome.SUCCEEDED
-
-
-def _append_ids(world: World, dotted: str, ids: list[int]) -> None:
-    """Append rows to a table the project does not build.
-
-    Parameters
-    ----------
-    world
-        The world.
-    dotted
-        Its dotted name.
-    ids
-        The `id` values to add.
-    """
-    data = pa.table({"id": pa.array(ids, pa.int64())})
-    with world.session() as session:
-        CatalogService(session, StorageResolver(session), AllowAllAuthorization()).write_batches(
-            world.admin,
-            TableRef.from_dotted("dev", dotted),
-            mode=WriteMode.APPEND,
-            schema=data.schema,
-            batches=data.to_batches(),
-        )
 
 
 def _incremental(

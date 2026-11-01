@@ -167,6 +167,24 @@ def deny_target() -> AuthorizationService:
         ({"id": "long"}, GeneratedFrom("key", ("id",)), None),
         ({"id": "long", "day": "date"}, GeneratedFrom("key", ("id", "day")), None),
         (
+            {
+                "id": "long",
+                "f_key": "string",
+                "valid_from": "timestamptz",
+                "valid_to": "timestamptz",
+                "is_current": "boolean",
+            },
+            GeneratedFrom("key", ("id",), history=True),
+            None,
+        ),
+        (
+            {"id": "long", "valid_from": "timestamptz"},
+            GeneratedFrom("key", ("id",), history=True),
+            "`gold.f` has no column `f_key`, which `write: history` adds, so it was not built by "
+            "its history asset. Drop it (`lakana table delete gold.f --env dev`) so that the "
+            "next run creates it, and deploy again.",
+        ),
+        (
             {"amount": "double"},
             GeneratedFrom("key", ("amount",)),
             "Key column `amount` is double, a floating-point type, so it cannot identify a row; "
@@ -224,6 +242,25 @@ def deny_target() -> AuthorizationService:
         (
             {"store_id": "long"},
             GeneratedFrom("references", ("store_id",), "gold.d", "shop_id"),
+            "The reference `store_id` at `assets/gold/f.sql:1` cannot be checked: its target is "
+            "missing, not readable by the run's principal, or no longer has the key column; fix "
+            "the reference or the grant and deploy again.",
+        ),
+        (
+            {"store_id": "long", "ordered_at": "string"},
+            GeneratedFrom("references", ("store_id",), "gold.d", "store_id", at="ordered_at"),
+            "The `at:` column `ordered_at` of gold.f has type string; a reference to a table "
+            "that keeps history compares a date or a timestamp; cast it in the SELECT.",
+        ),
+        (
+            {"store_id": "long"},
+            GeneratedFrom("references", ("store_id",), "gold.d", "store_id", at="ordered_at"),
+            "The `at:` column `ordered_at` of reference `store_id` is not a column of `gold.f`; "
+            "fix `references:` in assets/gold/f.sql:1 and deploy again.",
+        ),
+        (
+            {"store_id": "long", "ordered_at": "date"},
+            GeneratedFrom("references", ("store_id",), "gold.d", "store_id", at="ordered_at"),
             "The reference `store_id` at `assets/gold/f.sql:1` cannot be checked: its target is "
             "missing, not readable by the run's principal, or no longer has the key column; fix "
             "the reference or the grant and deploy again.",
@@ -499,3 +536,19 @@ def test_an_unknown_type_fails_closed_and_is_named(
     on_sum = GeneratedFrom("measures", ("n",), aggregations=("sum",))
     text = model_problem(session, authz, principal, "dev", _spec(on_sum))
     assert text is not None and text.startswith("Measure `n` is uint128, not a number")
+
+
+def test_a_valid_at_reference_to_a_history_target_passes_the_precheck(
+    session: Session, env_with_tables: _Tables
+) -> None:
+    env_with_tables(
+        own={"store_id": "long", "ordered_at": "timestamptz"},
+        target={"store_id": "long", "valid_from": "timestamptz", "valid_to": "timestamptz"},
+    )
+    generated = GeneratedFrom("references", ("store_id",), "gold.d", "store_id", at="ordered_at")
+    assert (
+        model_problem(
+            session, AllowAllAuthorization(), env_with_tables.principal, "dev", _spec(generated)
+        )
+        is None
+    )

@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from lakana_core.auth import RunContext
 from lakana_core.catalog.history import (
+    EARLIEST_START,
     IS_CURRENT,
     UTC_MICROS,
     VALID_FROM,
@@ -244,7 +245,15 @@ def test_every_key_type_has_its_tag_and_widening_an_integer_keeps_the_key() -> N
         (
             pa.array([1.5]),
             "key column `k` has type double; a history key must be a string, an "
-            "integer, a decimal, a date, a timestamp, a boolean or binary",
+            "integer, a decimal, a date, a timestamp, a boolean or binary. Cast it in the "
+            "SELECT, for example `CAST(k AS DECIMAL(18, 2))` (with the scale its values need) "
+            "or `CAST(k AS VARCHAR)`.",
+        ),
+        (
+            pa.array([datetime(2026, 1, 1).time()], pa.time64("us")),
+            "key column `k` has type time; a history key must be a string, an "
+            "integer, a decimal, a date, a timestamp, a boolean or binary. Cast it in the "
+            "SELECT, for example `CAST(k AS VARCHAR)`.",
         ),
         (
             pa.ExtensionArray.from_storage(
@@ -305,7 +314,7 @@ def test_a_run_opens_closes_and_leaves_alone() -> None:
         _open([("A", "north", 1.0), ("B", "north", 2.0), ("C", "north", 3.0)]),
     )
     assert plan.opened.column("customer_id").to_pylist() == ["D", "A"]
-    assert plan.opened.column(VALID_FROM).to_pylist() == [T1, T1]
+    assert plan.opened.column(VALID_FROM).to_pylist() == [EARLIEST_START, T1]
     assert plan.opened.column(VALID_TO).to_pylist() == [None, None]
     assert plan.opened.column(IS_CURRENT).to_pylist() == [True, True]
     assert plan.closed.column("customer_id").to_pylist() == ["A"]
@@ -549,6 +558,21 @@ def test_the_valid_from_column_must_be_returned_and_not_be_a_key_column() -> Non
     )
 
 
+def test_a_valid_from_column_in_another_case_is_named_as_the_result_spells_it() -> None:
+    data = pa.table(
+        {"customer_id": ["A"], "Changed_At": pa.array([T1], pa.timestamp("us", tz="UTC"))}
+    )
+    with pytest.raises(ValidationError) as info:
+        check_history_batch(
+            data, ["customer_id"], table=TABLE, valid_from="changed_at", close_missing=False
+        )
+    assert str(info.value) == (
+        "Column `changed_at` in `valid_from:` is not a column of `gold.dim_customer`'s SELECT, "
+        "which spells it `Changed_At`; write `valid_from: Changed_At`, or rename the column in "
+        "the SELECT to `changed_at`."
+    )
+
+
 def test_a_nested_column_is_refused_with_the_cast_to_write() -> None:
     data = pa.table({"customer_id": ["A"], "tags": pa.array([["x"]], pa.list_(pa.string()))})
     with pytest.raises(ValidationError) as info:
@@ -658,6 +682,7 @@ def test_a_returning_key_with_no_closed_version_opens() -> None:
         valid_from="changed_at",
     )
     assert plan.opened.column("customer_id").to_pylist() == ["D"]
+    assert plan.opened.column(VALID_FROM).to_pylist() == [EARLIEST_START]
 
 
 def _payload(column: pa.Array) -> tuple[bytes, list[bytes]]:
@@ -755,6 +780,7 @@ def test_a_key_may_come_back_at_the_run_clock_when_its_last_version_ended_then()
 
     plan = _plan(_batch([("D", "north", 1.0)]), _open([]), clock=T1, last_ends=ends)
     assert plan.opened.column("customer_id").to_pylist() == ["D"]
+    assert plan.opened.column(VALID_FROM).to_pylist() == [T1]
 
 
 def test_an_open_version_starting_at_the_clock_is_not_replaced_by_the_same_clock() -> None:
@@ -899,4 +925,50 @@ def test_the_returning_check_works_when_a_key_column_is_named_like_its_end_colum
             close_missing=False,
             last_ends=ends,
             environment="dev",
+        )
+
+
+def test_the_earliest_start_is_the_first_microsecond_of_year_one_in_utc() -> None:
+    assert datetime(1, 1, 1, tzinfo=UTC) == EARLIEST_START
+    assert pa.array([EARLIEST_START], UTC_MICROS).to_pylist() == [EARLIEST_START]
+
+
+@pytest.mark.parametrize("valid_from", [None, "changed_at"])
+def test_a_key_the_table_never_held_starts_at_the_earliest_time(valid_from: str | None) -> None:
+    # D and E are new; F comes back after its version ended at T0 (the read returns it).
+    def ends(wanted: pa.Table, after: datetime) -> pa.Table:
+        return pa.table({"customer_id": ["F"], VALID_TO: pa.array([T0], UTC_MICROS)})
+
+    plan = _plan(
+        _batch([("D", "n", 1.0), ("F", "n", 1.0), ("A", "south", 1.0), ("E", "n", 1.0)]),
+        _open([("A", "north", 1.0)], start=EARLIEST_START),
+        clock=T1,
+        starts=pa.array([T1, T1, T1, T1], UTC_MICROS),
+        valid_from=valid_from,
+        last_ends=ends,
+    )
+
+    opened = dict(
+        zip(
+            plan.opened.column("customer_id").to_pylist(),
+            plan.opened.column(VALID_FROM).to_pylist(),
+            strict=True,
+        )
+    )
+    assert opened == {"D": EARLIEST_START, "E": EARLIEST_START, "F": T1, "A": T1}
+    assert plan.closed.column(VALID_TO).to_pylist() == [T1]
+    expected = surrogate_keys(
+        _batch([("D", "n", 1.0)]), ["customer_id"], pa.array([EARLIEST_START], UTC_MICROS)
+    )
+    assert plan.opened.column("dim_customer_key").to_pylist()[0] == expected[0].as_py()
+
+
+def test_a_first_versions_declared_start_is_still_checked() -> None:
+    with pytest.raises(ValidationError, match="a version cannot start in the future"):
+        _plan(
+            _batch([("D", "n", 1.0)]),
+            _open([]),
+            clock=T1,
+            starts=pa.array([T2], UTC_MICROS),
+            valid_from="changed_at",
         )

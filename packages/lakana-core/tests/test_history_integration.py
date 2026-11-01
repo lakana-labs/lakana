@@ -329,7 +329,8 @@ def test_a_key_of_any_type_comes_back_through_the_real_scan(stack: Stack, case: 
             loaded.metadata, file_io, wanted, T2, key=key, table=ref.dotted(), max_rows=None
         )
     assert late.to_pylist() == [{**dict(zip(key, case.first, strict=True)), "valid_to": T2}]
-    assert at_end.num_rows == 0  # `valid_to > after`: an end equal to the start is not read
+    # The key's first version is read whatever its end: it tells a returning key from a new one.
+    assert at_end.to_pylist() == late.to_pylist()
 
     with pytest.raises(ValidationError, match="before the end of the key's last version"):
         run([case.first, case.second], [BETWEEN, T1], T3)

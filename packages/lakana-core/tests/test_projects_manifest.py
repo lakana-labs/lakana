@@ -12,10 +12,12 @@ from lakana_core.projects.asset_model import ResolvedReference, deploy_hints
 from lakana_core.projects.checks import GeneratedFrom, ParsedCheck, read_manifest_checks
 from lakana_core.projects.dag import build_graph
 from lakana_core.projects.frontmatter import AssetMetadata
+from lakana_core.projects.history_columns import HistorySpec
 from lakana_core.projects.layers import MEDALLION_LAYERS
 from lakana_core.projects.manifest import (
     CHECKS_VERSION,
     CONNECTIONS_VERSION,
+    HISTORY_VERSION,
     JOBS_VERSION,
     MANIFEST_VERSION,
     MEASURES_VERSION,
@@ -32,6 +34,7 @@ from lakana_core.projects.manifest import (
     build_manifest,
     entry_connections,
     entry_decimals,
+    entry_history,
     entry_input_kinds,
     entry_inputs,
     entry_keep_versions,
@@ -540,7 +543,7 @@ def test_a_python_entry_records_decimals_and_the_manifest_version_is_unchanged(
     asset = dataclasses.replace(_python_asset(), decimals=decimals)
     manifest = build_manifest([asset], build_graph([asset]), ResolvedProjectConfig())
     assert manifest["version"] == VERSION_WITHOUT_CHECKS == 3
-    assert MANIFEST_VERSION == 11
+    assert MANIFEST_VERSION == 12
     assert manifest["assets"][0]["decimals"] == decimals
 
 
@@ -1138,7 +1141,8 @@ def test_texts_raise_the_version_only_when_used() -> None:
         translations={"gold.a": {"fr": {"label": "A"}}},
     )
     assert translated["assets"][0]["metadata"]["translations"] == {"fr": {"label": "A"}}
-    assert MANIFEST_VERSION == TEXTS_VERSION == 11
+    assert MANIFEST_VERSION == HISTORY_VERSION == 12
+    assert TEXTS_VERSION == 11
 
 
 def test_entry_translations_flattens_and_fails_safe() -> None:
@@ -1194,7 +1198,7 @@ def test_the_declared_layer_rules_are_recorded_only_when_declared() -> None:
         },
         "gold": {
             "reads": ["silver", "gold"],
-            "write": ["replace", "append", "merge", "view"],
+            "write": ["replace", "append", "merge", "history", "view"],
             "kinds": ["fact", "dimension", "wide"],
         },
     }
@@ -1219,3 +1223,162 @@ def test_manifest_layers_reads_damaged_rules_as_none() -> None:
     ]
     for manifest in damaged:
         assert manifest_layers(manifest) is None, manifest
+
+
+def _dimension(**fields: object) -> ParsedAsset:
+    """Build a history dimension `gold.dim_customer`.
+
+    Parameters
+    ----------
+    **fields
+        More metadata.
+
+    Returns
+    -------
+    ParsedAsset
+        The asset.
+    """
+    metadata = AssetMetadata(
+        materialize="table",
+        kind="dimension",
+        grain="One row per customer and version.",
+        key=("customer_id",),
+        write="history",
+        columns={"region": "Where the customer lives."},
+        **fields,  # ty: ignore[invalid-argument-type]
+    )
+    return make_asset("gold.dim_customer", columns=("customer_id", "region"), metadata=metadata)
+
+
+def test_a_history_key_check_reads_back_as_history() -> None:
+    asset = _dimension()
+    checks = generated_checks([asset], {}, default_on_failure="block")
+    manifest = build_manifest([asset], build_graph([asset]), ResolvedProjectConfig(), checks=checks)
+    entries = {c["check"]: c for c in manifest["checks"]}
+    assert entries["key_unique"]["generated"]["history"] is True
+    read = read_manifest_checks(manifest)
+    assert {s.generated for s in read.specs} == {
+        GeneratedFrom("key", ("customer_id",), history=True)
+    }
+    plain = make_asset("gold.a", metadata=AssetMetadata(materialize="table", key=("id",)))
+    plain_checks = generated_checks([plain], {}, default_on_failure="block")
+    stored = build_manifest(
+        [plain], build_graph([plain]), ResolvedProjectConfig(), checks=plain_checks
+    )
+    assert all("history" not in c["generated"] for c in stored["checks"])
+
+
+def test_history_raises_the_version_to_12_and_records_how_it_writes() -> None:
+    asset = _dimension(valid_from="changed_at", close_missing=True)
+    manifest = build_manifest([asset], build_graph([asset]), ResolvedProjectConfig())
+    assert manifest["version"] == HISTORY_VERSION == 12
+    (entry,) = manifest["assets"]
+    assert (entry["write"], entry["write_mode"], entry["first_write_mode"]) == (
+        "history",
+        "history",
+        "create",
+    )
+    assert entry["history"] == {"valid_from": "changed_at", "close_missing": True}
+    assert entry_history(entry) == HistorySpec(("customer_id",), "changed_at", True)
+    assert entry["metadata"]["columns"] == {
+        "dim_customer_key": "Identifies this version: a hash of the key (`customer_id`) and "
+        "`valid_from`. A fact can store it to point at exactly this version.",
+        "valid_from": (
+            "When this version became valid (UTC); a key's first version starts at the earliest "
+            "time, 0001-01-01T00:00:00Z, so that every row that references the key finds it."
+        ),
+        "valid_to": "When this version stopped being valid (UTC); empty while it is the current "
+        "version.",
+        "is_current": "Whether this is the current version of its key.",
+        "region": "Where the customer lives.",
+    }
+    assert isinstance(manifest["checks"], list)
+
+
+def test_a_project_without_history_keeps_its_version() -> None:
+    asset = make_asset("gold.a")
+    manifest = build_manifest([asset], build_graph([asset]), ResolvedProjectConfig())
+    assert manifest["version"] < HISTORY_VERSION
+    assert "history" not in manifest["assets"][0]
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        None,
+        {"write": "merge", "key": ["id"], "history": {"valid_from": None, "close_missing": False}},
+        {"write": "history", "key": ["id"]},
+        {"write": "history", "key": [], "history": {"valid_from": None, "close_missing": False}},
+        {"write": "history", "key": ["id"], "history": {"valid_from": 3, "close_missing": False}},
+        {"write": "history", "key": ["id"], "history": {"valid_from": None, "close_missing": 1}},
+    ],
+)
+def test_entry_history_reads_a_damaged_entry_as_not_history(entry: object) -> None:
+    assert entry_history(entry) is None
+
+
+def test_a_history_spec_round_trips_through_json() -> None:
+    spec = HistorySpec(("id", "country"), None, False)
+    assert HistorySpec.from_json(spec.to_json()) == spec
+    assert HistorySpec.from_json({"key": ["id"], "valid_from": None}) is None
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        None,
+        ["id"],
+        {"key": "id", "valid_from": None, "close_missing": False},
+        {"key": ["id", 3], "valid_from": None, "close_missing": False},
+        {"key": ["id", ""], "valid_from": None, "close_missing": False},
+        {"key": ["id"], "valid_from": 3, "close_missing": False},
+        {"key": ["id"], "valid_from": None, "close_missing": "no"},
+    ],
+)
+def test_a_stored_history_spec_that_no_deploy_wrote_reads_as_none(raw: object) -> None:
+    assert HistorySpec.from_json(raw) is None
+
+
+def test_a_reference_with_at_raises_the_version_and_reads_back() -> None:
+    meta = AssetMetadata(
+        materialize="table",
+        kind="fact",
+        grain="One row per order.",
+        key=("id",),
+        references={"customer_id": {"to": "gold.dim_customer", "at": "ordered_at"}},
+    )
+    asset = make_asset(
+        "gold.fact_orders", columns=("id", "customer_id", "ordered_at"), metadata=meta
+    )
+    ref = ResolvedReference("customer_id", "gold.dim_customer", "customer_id", "ordered_at")
+    checks = generated_checks([asset], {"gold.fact_orders": (ref,)}, default_on_failure="block")
+    manifest = build_manifest(
+        [asset],
+        build_graph([asset]),
+        ResolvedProjectConfig(),
+        checks=checks,
+        references={"gold.fact_orders": (ref,)},
+    )
+    assert manifest["version"] == HISTORY_VERSION
+    (entry,) = manifest["assets"]
+    assert entry["model"]["references"] == [
+        {
+            "column": "customer_id",
+            "target": "gold.dim_customer",
+            "target_column": "customer_id",
+            "at": "ordered_at",
+        }
+    ]
+    model = entry_model(entry)
+    assert model is not None and model.references == (ref,)
+    ref_check = next(c for c in manifest["checks"] if c["check"] == "ref_customer_id")
+    assert ref_check["generated"]["at"] == "ordered_at"
+    assert {s.generated.at for s in read_manifest_checks(manifest).specs if s.generated} >= {
+        "ordered_at"
+    }
+
+
+def test_a_reference_without_at_keeps_its_entry_shape() -> None:
+    manifest = build_manifest([_modelled()], build_graph([_modelled()]), ResolvedProjectConfig())
+    assert all("at" not in r for r in manifest["assets"][0]["model"]["references"])
+    assert manifest["version"] == MODEL_VERSION

@@ -4816,3 +4816,131 @@ def test_an_error_stored_without_withheld_lines_is_shown_whole() -> None:
     # A line that is not the one stored is withheld all the same (fail closed).
     changed = [{"index": 0, "line": "other", "withheld": "c", "targets": ["x.y"]}]
     assert error_for_reader("a\nb", changed, lambda _t: False) == "c\nb"
+
+
+def _history_dim(table: str) -> ParsedAsset:
+    """Build a history dimension keyed on `customer_id` whose versions start at `changed_at`.
+
+    Parameters
+    ----------
+    table
+        Its dotted name.
+
+    Returns
+    -------
+    ParsedAsset
+        The asset.
+    """
+    return make_asset(
+        table,
+        ("bronze.events",),
+        columns=("customer_id", "region", "changed_at"),
+        metadata=AssetMetadata(
+            materialize="table",
+            kind="dimension",
+            grain="One row per customer and version.",
+            key=("customer_id",),
+            write="history",
+            valid_from="changed_at",
+        ),
+    )
+
+
+def _orders_on(references: dict[str, object]) -> ParsedAsset:
+    """Build a fact with an `ordered_at` column and the given references.
+
+    Parameters
+    ----------
+    references
+        Column to target or `{to, at}`.
+
+    Returns
+    -------
+    ParsedAsset
+        The asset.
+    """
+    return make_asset(
+        "gold.f",
+        ("bronze.events",),
+        columns=("id", "customer_id", "customer_key", "changed_at", "ordered_at"),
+        metadata=AssetMetadata(
+            materialize="table",
+            references=references,
+        ),
+    )
+
+
+def test_a_project_history_target_has_its_added_columns_and_not_its_valid_from_column(
+    session: Session, env: None, principal: PrincipalRef
+) -> None:
+    repo = _repo(session)
+    fact = _orders_on(
+        {
+            "customer_id": {"to": "dim.customer", "at": "ordered_at"},
+            "customer_key": {"to": "dim.customer.customer_key", "at": "ordered_at"},
+            "changed_at": {"to": "dim.customer.changed_at", "at": "ordered_at"},
+        }
+    )
+    resolved, issues = DeployService(session, AllowAllAuthorization()).resolve_model_references(
+        principal, "dev", repo.id, [_history_dim("dim.customer"), fact]
+    )
+    assert resolved["gold.f"] == (
+        ResolvedReference("customer_id", "dim.customer", "customer_id", "ordered_at"),
+        ResolvedReference("customer_key", "dim.customer", "customer_key", "ordered_at"),
+    )
+    assert [i.message for i in issues] == [
+        "Reference `changed_at: dim.customer.changed_at`: `dim.customer` has no column "
+        "`changed_at`; name one of its columns, or use the short form to point at its key."
+    ]
+
+
+def test_another_repositorys_history_target_before_its_first_run_has_its_stored_columns(
+    session: Session, env: None, principal: PrincipalRef
+) -> None:
+    """Without stored columns, the manifest's SELECT columns are read as the run will store them."""
+    other = _repo(session, "other")
+    _deployed(session, principal, other, "a" * 40, _history_dim("dim.customer"))
+    ensure_table(session, "dev", "dim", "customer")
+    repo = _repo(session)
+    fact = _orders_on(
+        {
+            "customer_key": {"to": "dim.customer.customer_key", "at": "ordered_at"},
+            "changed_at": {"to": "dim.customer.changed_at", "at": "ordered_at"},
+        }
+    )
+    resolved, issues = DeployService(session, AllowAllAuthorization()).resolve_model_references(
+        principal, "dev", repo.id, [fact]
+    )
+    assert resolved["gold.f"] == (
+        ResolvedReference("customer_key", "dim.customer", "customer_key", "ordered_at"),
+    )
+    assert [i.message for i in issues] == [
+        "Reference `changed_at: dim.customer.changed_at`: `dim.customer` has no column "
+        "`changed_at`; name one of its columns, or use the short form to point at its key."
+    ]
+
+
+def test_another_repositorys_history_target_needs_at(
+    session: Session, env: None, principal: PrincipalRef
+) -> None:
+    other = _repo(session, "other")
+    _deployed(session, principal, other, "a" * 40, _history_dim("dim.customer"))
+    ensure_table(session, "dev", "dim", "customer")
+    repo = _repo(session)
+    fact = _orders_on(
+        {
+            "customer_id": "dim.customer",
+            "customer_key": {"to": "dim.customer", "at": "ordered_at"},
+        }
+    )
+    resolved, issues = DeployService(session, AllowAllAuthorization()).resolve_model_references(
+        principal, "dev", repo.id, [fact]
+    )
+    assert resolved["gold.f"] == (
+        ResolvedReference("customer_key", "dim.customer", "customer_id", "ordered_at"),
+    )
+    assert [i.message for i in issues] == [
+        "`gold.f` references `dim.customer` (`customer_id`), which keeps the history of its "
+        "rows (`write: history`); say which version each row means with the row's time: "
+        "`customer_id: {to: dim.customer, at: <column>}`"
+    ]

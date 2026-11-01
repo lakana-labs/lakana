@@ -26,7 +26,7 @@ _SILVER = (
     "    kinds: [staging]\n"
 )
 _GOLD = (
-    "  gold:\n    reads: [silver, gold]\n    write: [replace, append, merge, view]\n"
+    "  gold:\n    reads: [silver, gold]\n    write: [replace, append, merge, history, view]\n"
     "    kinds: [fact, dimension, wide]\n"
 )
 MEDALLION_YAML = "layers:\n" + _BRONZE + _SILVER + _GOLD
@@ -38,14 +38,14 @@ _EMPTY = (
     "remove `layers:` to deploy without layer rules. The medallion default: `layers: {bronze: "
     "{reads: [], write: [append, merge], kinds: none}, silver: {reads: [bronze, silver], write: "
     "[replace, append, merge, view], kinds: [staging]}, gold: {reads: [silver, gold], write: "
-    "[replace, append, merge, view], kinds: [fact, dimension, wide]}}`"
+    "[replace, append, merge, history, view], kinds: [fact, dimension, wide]}}`"
 )
 _NOT_A_LAYER = (
     "is not a layer; list bronze, silver or gold. Tables outside them are sources, which only "
     "bronze reads"
 )
 _NOT_A_WRITE = (
-    "is not a write mode a layer takes; list replace, append, merge or view "
+    "is not a write mode a layer takes; list replace, append, merge, history or view "
     "(`materialize: incremental` counts as append)"
 )
 _KINDS_SHAPE = "must be `none` or a list of kinds, such as `[fact, dimension, wide]`"
@@ -101,7 +101,7 @@ def test_the_medallion_default_parses_to_the_constant() -> None:
 
 def test_the_three_names_exist_once_in_core() -> None:
     assert LAYERS == ("bronze", "silver", "gold")
-    assert LAYER_WRITES == ("replace", "append", "merge", "view")
+    assert LAYER_WRITES == ("replace", "append", "merge", "history", "view")
     assert frozenset(LAYERS) == catalog_service._MEDALLION_TOP_LEVEL_NAMESPACES
     assert loads.LOAD_LAYER == "bronze"
 
@@ -110,8 +110,8 @@ def test_the_default_on_one_line_is_valid_yaml_of_the_same_rules() -> None:
     assert MEDALLION_LAYERS_FLOW == (
         "layers: {bronze: {reads: [], write: [append, merge], kinds: none}, "
         "silver: {reads: [bronze, silver], write: [replace, append, merge, view], "
-        "kinds: [staging]}, gold: {reads: [silver, gold], write: [replace, append, merge, view], "
-        "kinds: [fact, dimension, wide]}}"
+        "kinds: [staging]}, gold: {reads: [silver, gold], write: "
+        "[replace, append, merge, history, view], kinds: [fact, dimension, wide]}}"
     )
     assert parse_project_config(MEDALLION_LAYERS_FLOW + "\n").layers == MEDALLION_LAYERS
 
@@ -223,9 +223,9 @@ def test_an_unknown_layer_and_an_unknown_rule_are_refused() -> None:
         ),
         (
             "    write: [append, merge]\n",
-            "    write: [append, history]\n",
+            "    write: [append, upsert]\n",
             4,
-            f"layers.bronze.write: `history` {_NOT_A_WRITE}",
+            f"layers.bronze.write: `upsert` {_NOT_A_WRITE}",
         ),
         (
             "    write: [append, merge]\n",
@@ -356,3 +356,9 @@ def test_the_model_refuses_what_lakana_yaml_refuses() -> None:
         )
     with pytest.raises(pydantic.ValidationError, match="Extra inputs"):
         LayersConfig.model_validate({**stored, "platinum": stored["gold"]})
+
+
+def test_the_medallion_default_lets_gold_keep_history() -> None:
+    assert MEDALLION_LAYERS.gold.write == ("replace", "append", "merge", "history", "view")
+    assert MEDALLION_LAYERS.silver.write == ("replace", "append", "merge", "view")
+    assert "history" in LAYER_WRITES

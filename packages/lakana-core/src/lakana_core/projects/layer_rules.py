@@ -237,7 +237,7 @@ def _reads(asset: ParsedAsset) -> list[_Read]:
             if table not in files:
                 claimed.add(table)
                 reads.append(_Read(table, (table,), asset.body_line))
-    for _, target in sorted(asset.metadata.references.items()):
+    for _, target in sorted(asset.metadata.reference_targets().items()):
         tables = _reference_tables(target)
         if claimed.isdisjoint(tables):
             claimed.update(tables)

@@ -268,8 +268,8 @@ def test_a_reference_too_long_to_store_is_refused_with_what_to_shorten() -> None
         assert resolved == {}
         assert [i.message for i in issues] == [
             f"Reference `{column}: {raw}` is too long to store: {part}, and each of the column, "
-            "the target table and the target column may have at most 1024 bytes; shorten that "
-            "name."
+            "the target table, the target column and the `at:` column may have at most 1024 "
+            "bytes; shorten that name."
         ]
     ok, issues = resolve_references(
         [_fact({"c" * 1024: "gold.dim_store"})], _lookup(targets), environment="dev"
@@ -323,3 +323,226 @@ def test_two_references_to_one_hidden_target_read_like_two_missing_targets() -> 
     _, missing = resolve_references([fact], _lookup({}), environment="dev")
     shown = error_for_reader(whole, withheld_lines(issues), lambda _t: False)
     assert shown.encode() == "\n".join(issue.render() for issue in missing).encode()
+
+
+def _history(columns: tuple[str, ...] | None, **fields: object) -> ParsedAsset:
+    """Build a history dimension with the given SELECT columns.
+
+    Parameters
+    ----------
+    columns
+        Its output columns, or `None` for a star.
+    **fields
+        More metadata.
+
+    Returns
+    -------
+    ParsedAsset
+        The asset.
+    """
+    meta = AssetMetadata(
+        materialize="table",
+        kind="dimension",
+        grain="One row per customer and version.",
+        key=("customer_id",),
+        write="history",
+        **fields,  # ty: ignore[invalid-argument-type]
+    )
+    return make_asset("gold.dim_customer", ("silver.customers",), columns=columns, metadata=meta)
+
+
+def test_a_history_select_may_not_return_an_added_name_and_must_return_valid_from() -> None:
+    issues = project_model_issues(
+        [_history(("customer_id", "VALID_TO", "region"), valid_from="changed_at")]
+    )
+    assert [i.message for i in issues] == [
+        "Column `VALID_TO` of `gold.dim_customer`'s SELECT has a name `write: history` adds "
+        "itself (valid_from, valid_to, is_current, dim_customer_key); rename it in the SELECT, "
+        "for example `AS source_VALID_TO`.",
+        "Column `changed_at` in `valid_from:` is not a column of `gold.dim_customer`'s SELECT; "
+        "add it to the SELECT, or change `valid_from:`.",
+    ]
+    assert project_model_issues([_history(None, valid_from="changed_at")]) == []
+    assert (
+        project_model_issues([_history(("customer_id", "changed_at"), valid_from="changed_at")])
+        == []
+    )
+
+
+def test_a_valid_from_column_spelled_in_another_case_is_named_as_the_select_spells_it() -> None:
+    """The column check is exact (the run reads the result's own names), so say how to match it."""
+    issues = project_model_issues(
+        [_history(("customer_id", "Changed_At"), valid_from="changed_at")]
+    )
+    assert [i.message for i in issues] == [
+        "Column `changed_at` in `valid_from:` is not a column of `gold.dim_customer`'s SELECT, "
+        "which spells it `Changed_At`; write `valid_from: Changed_At`, or rename the column in "
+        "the SELECT to `changed_at`.",
+    ]
+
+
+_HISTORY_DIM = TargetInfo(
+    kind="dimension",
+    key=("customer_id",),
+    key_none=False,
+    columns=("customer_id", "region", "dim_customer_key", "valid_from", "valid_to", "is_current"),
+    history=True,
+)
+
+
+def _orders(references: dict[str, object], columns: tuple[str, ...] | None) -> ParsedAsset:
+    """Build `gold.fact_orders` with references, possibly with `at:`.
+
+    Parameters
+    ----------
+    references
+        Column to target or `{to, at}`.
+    columns
+        Its output columns, or `None` for a star.
+
+    Returns
+    -------
+    ParsedAsset
+        The asset.
+    """
+    meta = AssetMetadata(
+        materialize="table",
+        kind="fact",
+        grain="One row per order.",
+        key=("id",),
+        references=references,
+    )
+    return make_asset("gold.fact_orders", ("gold.dim_customer",), columns=columns, metadata=meta)
+
+
+def test_a_reference_to_a_history_target_resolves_with_its_time() -> None:
+    resolved, issues = resolve_references(
+        [
+            _orders(
+                {
+                    "customer_id": {"to": "gold.dim_customer", "at": "ordered_at"},
+                    "customer_version": {
+                        "to": "gold.dim_customer.dim_customer_key",
+                        "at": "ordered_at",
+                    },
+                },
+                ("id", "customer_id", "customer_version", "ordered_at"),
+            )
+        ],
+        _lookup({"gold.dim_customer": _HISTORY_DIM}),
+        environment="dev",
+    )
+    assert issues == []
+    assert resolved["gold.fact_orders"] == (
+        ResolvedReference("customer_id", "gold.dim_customer", "customer_id", "ordered_at"),
+        ResolvedReference(
+            "customer_version", "gold.dim_customer", "dim_customer_key", "ordered_at"
+        ),
+    )
+
+
+def test_a_reference_to_a_history_target_needs_at_and_at_needs_a_history_target() -> None:
+    _, issues = resolve_references(
+        [
+            _orders(
+                {
+                    "customer_id": "gold.dim_customer",
+                    "store_id": {"to": "gold.dim_store", "at": "ordered_at"},
+                },
+                ("id", "customer_id", "store_id", "ordered_at"),
+            )
+        ],
+        _lookup({"gold.dim_customer": _HISTORY_DIM, "gold.dim_store": _DIM}),
+        environment="dev",
+    )
+    assert [(i.message, i.targets) for i in issues] == [
+        (
+            "`gold.fact_orders` references `gold.dim_customer` (`customer_id`), which keeps the "
+            "history of its rows (`write: history`); say which version each row means with the "
+            "row's time: `customer_id: {to: gold.dim_customer, at: <column>}`",
+            ("gold.dim_customer",),
+        ),
+        (
+            "`at:` in reference `store_id` is for a target that keeps history (`write: "
+            "history`), and `gold.dim_store` does not; remove `at:`",
+            ("gold.dim_store",),
+        ),
+    ]
+    assert all(i.withheld for i in issues)
+
+
+def test_the_at_column_must_be_a_column_of_the_select() -> None:
+    asset = _orders(
+        {"customer_id": {"to": "gold.dim_customer", "at": "ordered_at"}}, ("id", "customer_id")
+    )
+    assert [i.message for i in project_model_issues([asset])] == [
+        "Column `ordered_at` in `at:` of reference `customer_id` is not a column of "
+        "`gold.fact_orders`'s SELECT; add it to the SELECT, or name another column."
+    ]
+
+
+def test_a_history_dimension_may_reference_another_at_its_own_valid_from() -> None:
+    meta = AssetMetadata(
+        materialize="table",
+        kind="dimension",
+        grain="One row per store and version.",
+        key=("store_id",),
+        write="history",
+        references={"region_id": {"to": "gold.dim_region", "at": "valid_from"}},
+    )
+    asset = make_asset("gold.dim_store", columns=("store_id", "region_id"), metadata=meta)
+    assert project_model_issues([asset]) == []
+
+
+def test_an_at_column_too_long_to_store_is_refused_with_what_to_shorten() -> None:
+    """`at:` is stored in 1,024 bytes too, beside the reference."""
+    long_at = "t" * 1025
+    resolved, issues = resolve_references(
+        [_orders({"customer_id": {"to": "gold.dim_customer", "at": long_at}}, None)],
+        _lookup({"gold.dim_customer": _HISTORY_DIM}),
+        environment="dev",
+    )
+    assert resolved == {}
+    assert [(i.message, i.targets) for i in issues] == [
+        (
+            "Reference `customer_id: gold.dim_customer` is too long to store: the `at:` column "
+            f"`{long_at}` has 1025 bytes, and each of the column, the target table, the target "
+            "column and the `at:` column may have at most 1024 bytes; shorten that name.",
+            ("gold.dim_customer",),
+        )
+    ]
+
+
+def test_an_at_naming_the_own_valid_from_column_says_to_write_valid_from() -> None:
+    """A history dimension stores its `valid_from:` column as `valid_from`, never by its name."""
+    meta = AssetMetadata(
+        materialize="table",
+        kind="dimension",
+        grain="One row per store and version.",
+        key=("store_id",),
+        write="history",
+        valid_from="changed_at",
+        references={"region_id": {"to": "gold.dim_region", "at": "changed_at"}},
+    )
+    asset = make_asset(
+        "gold.dim_store", columns=("store_id", "region_id", "changed_at"), metadata=meta
+    )
+    assert [i.message for i in project_model_issues([asset])] == [
+        "Column `changed_at` in `at:` of reference `region_id` is `gold.dim_store`'s "
+        "`valid_from:` column, which `write: history` stores as `valid_from`; write "
+        "`at: valid_from`."
+    ]
+
+
+def test_an_at_naming_valid_from_of_a_table_without_it_says_what_at_names() -> None:
+    """`at:` names the referencing table's own time column, not the target's `valid_from`."""
+    asset = _orders(
+        {"customer_id": {"to": "gold.dim_customer", "at": "valid_from"}},
+        ("id", "customer_id", "ordered_at"),
+    )
+    assert [i.message for i in project_model_issues([asset])] == [
+        "Column `valid_from` in `at:` of reference `customer_id` is not a column of "
+        "`gold.fact_orders`'s SELECT: `at:` names the column of `gold.fact_orders` that says "
+        "when each of its rows happened, not the target's `valid_from`; name that column, and "
+        "add it to the SELECT if it is missing."
+    ]

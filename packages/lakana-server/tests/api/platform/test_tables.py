@@ -763,6 +763,7 @@ def test_a_table_carries_its_model_and_a_plain_table_none(client: TestClient) ->
                 "target": "gold.dim_store",
                 "target_column": "id",
                 "target_exists": True,
+                "at": None,
             }
         ],
         "hidden_references": 0,
@@ -806,6 +807,7 @@ def test_the_references_route_lists_both_directions(client: TestClient) -> None:
                 "target": "gold.dim_store",
                 "target_column": "id",
                 "target_exists": True,
+                "at": None,
             }
         ],
         "hidden_incoming": 0,

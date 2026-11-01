@@ -167,3 +167,121 @@ def test_require_model_kind_names_the_kinds_and_the_value() -> None:
 def test_require_model_kind_escapes_what_it_repeats() -> None:
     with pytest.raises(ValidationError, match=r"got '\\n'"):
         require_model_kind("\n")
+
+
+_DIM = {"kind": "dimension", "grain": "One row per customer and version.", "key": ("customer_id",)}
+
+
+@pytest.mark.parametrize(
+    ("fields", "expected"),
+    [
+        ({**_DIM, "write": "history"}, []),
+        ({**_DIM, "write": "history", "valid_from": "changed_at"}, []),
+        (
+            {"write": "history", "key": ("customer_id",)},
+            [
+                "`write: history` keeps the versions of a dimension's rows; declare "
+                "`kind: dimension`, with `grain:` and `key:`"
+            ],
+        ),
+        (
+            {**_DIM, "write": "history", "kind": "fact"},
+            [
+                "`write: history` keeps the versions of a dimension's rows; declare "
+                "`kind: dimension`, with `grain:` and `key:`"
+            ],
+        ),
+        (
+            {**_DIM, "write": "history", "columns": {"Is_Current": "Mine."}},
+            [
+                "`columns: Is_Current`: `write: history` adds this column and describes it "
+                "itself; remove it from `columns:`"
+            ],
+        ),
+        (
+            {
+                **_DIM,
+                "write": "history",
+                "valid_from": "changed_at",
+                "columns": {"changed_at": "When the CRM changed the row."},
+                "references": {"changed_at": "gold.dim_calendar"},
+            },
+            [
+                "`columns: changed_at`: `changed_at` is the `valid_from:` column, which "
+                "`write: history` does not store (its value becomes each version's `valid_from`, "
+                "which Lakana describes itself); remove it from `columns:`",
+                "`references: changed_at`: `changed_at` is the `valid_from:` column, which "
+                "`write: history` does not store (its value becomes each version's "
+                "`valid_from`), so no check can read it; remove it from `references:`",
+            ],
+        ),
+    ],
+)
+def test_history_is_for_dimensions_and_describes_its_own_columns(
+    fields: dict[str, object], expected: list[str]
+) -> None:
+    metadata = AssetMetadata(**fields)  # ty: ignore[invalid-argument-type]
+    assert model_issues(metadata, table="gold.dim_customer") == expected
+
+
+@pytest.mark.parametrize(
+    ("fields", "expected"),
+    [
+        ({"write": "history", "valid_from": "changed_at", "close_missing": True}, []),
+        (
+            {"write": "history", "watermark": "changed_at"},
+            [
+                "`write: history` takes no `watermark:`; its SELECT returns the current state of "
+                "every row, and each run compares it with the open versions"
+            ],
+        ),
+        (
+            {"write": "merge", "valid_from": "changed_at"},
+            ["`valid_from:` works with `write: history` only"],
+        ),
+        ({"close_missing": False}, ["`close_missing:` works with `write: history` only"]),
+        (
+            {"write": "history", "valid_from": "customer_id"},
+            [
+                "`valid_from: customer_id` names a key column; name the column that says when "
+                "the row's values took effect, or leave `valid_from:` out to use the run's start "
+                "time"
+            ],
+        ),
+        (
+            {"write": "history", "evolve_schema": True},
+            ["`evolve_schema` works with `write: append` only"],
+        ),
+        (
+            {"write": "history", "materialize": "view"},
+            ["`materialize: view` cannot take `write:`"],
+        ),
+        (
+            {"write": "history", "materialize": "incremental", "incremental_key": "t"},
+            ["use one: `write: append` with `watermark:` replaces `materialize: incremental`"],
+        ),
+    ],
+)
+def test_the_write_rules_of_history(fields: dict[str, object], expected: list[str]) -> None:
+    metadata = AssetMetadata(key=("customer_id",), **fields)  # ty: ignore[invalid-argument-type]
+    assert (
+        write_rule_issues(
+            metadata.write,
+            metadata.key,
+            metadata.watermark,
+            materialize=metadata.materialize,
+            evolve_schema=metadata.evolve_schema,
+            valid_from=metadata.valid_from,
+            close_missing=metadata.close_missing,
+        )
+        == expected
+    )
+
+
+def test_a_block_passes_valid_from_and_close_missing_to_the_rules() -> None:
+    metadata = AssetMetadata(materialize="table", valid_from="changed_at", close_missing=True)
+    messages = [i.message for i in consistency_issues(metadata, path="a.sql", line=1)]
+    assert messages == [
+        "`valid_from:` works with `write: history` only",
+        "`close_missing:` works with `write: history` only",
+    ]

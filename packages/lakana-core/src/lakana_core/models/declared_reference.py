@@ -33,6 +33,9 @@ class DeclaredReference(Base):
         The dotted name of the table it points at, in the same environment.
     target_column : str
         The column of the target it must match.
+    at_column : str or None
+        The referencing table's time column (`at:`) for a target that keeps history; `None`
+        otherwise.
     """
 
     __tablename__ = "table_references"
@@ -49,6 +52,7 @@ class DeclaredReference(Base):
     source_column: Mapped[str] = mapped_column(String(1024))
     target_name: Mapped[str] = mapped_column(String(1024))
     target_column: Mapped[str] = mapped_column(String(1024))
+    at_column: Mapped[str | None] = mapped_column(String(1024), nullable=True)
 
     table: Mapped[Table] = relationship()
     """The source table. Declared so that the unit of work inserts a table before its references

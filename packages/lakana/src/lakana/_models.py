@@ -388,6 +388,9 @@ class ModelReference:
     target_exists
         `True` while a table by the target's name exists. References to tables you may not
         read are counted on the model, never listed.
+    at
+        Which column of the table says when each row happened, for a target that keeps history;
+        `None` otherwise.
     """
 
     id: str
@@ -396,6 +399,7 @@ class ModelReference:
     target: str
     target_column: str
     target_exists: bool
+    at: str | None = None
 
 
 @dataclass(frozen=True)
