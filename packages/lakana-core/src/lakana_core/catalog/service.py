@@ -6420,6 +6420,12 @@ class CatalogService:
         rows = data.drop_columns([valid_from]) if valid_from is not None else data
         del data  # `rows` is the batch from here on; a cast copy must not sit next to it
         if self._existing_table(ref) is None and expected_snapshot_id == "none":
+            if rows.num_rows > max_open_versions:
+                raise ValidationError(
+                    too_many_open_versions_message(
+                        ref.dotted(), rows.num_rows, max_open_versions, create=True
+                    )
+                )
             check_starts(starts, clock, valid_from)
             first = first_versions(rows, key=key, table=ref.dotted(), starts=starts)
             try:
@@ -6464,7 +6470,9 @@ class CatalogService:
         )
         if open_count > max_open_versions:
             raise ValidationError(
-                too_many_open_versions_message(ref.dotted(), open_count, max_open_versions)
+                too_many_open_versions_message(
+                    ref.dotted(), open_count, max_open_versions, create=False
+                )
             )
         plan = plan_history(
             rows,

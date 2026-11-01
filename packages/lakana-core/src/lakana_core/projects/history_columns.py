@@ -49,7 +49,7 @@ def added_columns(table: str) -> tuple[str, str, str, str]:
     return (surrogate_column(table), VALID_FROM, VALID_TO, IS_CURRENT)
 
 
-def reserved_name_message(column: str, table: str) -> str:
+def reserved_name_message(column: str, table: str, *, valid_from: str | None = None) -> str:
     """Refuse a result column whose name a history write adds itself.
 
     Parameters
@@ -58,6 +58,8 @@ def reserved_name_message(column: str, table: str) -> str:
         The column, as the result spells it.
     table
         The table's dotted name.
+    valid_from
+        The `valid_from:` column; when it is `column`, the message says to rename it there too.
 
     Returns
     -------
@@ -65,9 +67,14 @@ def reserved_name_message(column: str, table: str) -> str:
         The message, naming the four names and a rename to write.
     """
     listed = ", ".join((VALID_FROM, VALID_TO, IS_CURRENT, surrogate_column(table)))
+    also = (
+        f", and name the new column in `valid_from:` too (`valid_from: source_{column}`)"
+        if valid_from == column
+        else ""
+    )
     return (
         f"Column `{column}` of `{table}`'s SELECT has a name `write: history` adds itself "
-        f"({listed}); rename it in the SELECT, for example `AS source_{column}`."
+        f"({listed}); rename it in the SELECT, for example `AS source_{column}`{also}."
     )
 
 

@@ -463,10 +463,11 @@ class RunConfig(BaseModel):
         steps and between files, stops at the first safe point, and fails the run with the
         timeout cause; running maintenance again continues where it stopped.
     max_history_open_versions
-        Most open versions a table built with `write: history` may have for a run to write it. A
-        history write holds every open version in the worker's memory, roughly 1.5 GiB per
-        million at 8 columns and more for wider rows; a run on a larger table is refused before
-        it reads them. Raise it together with `LAKANA_WORKER__MEMORY_LIMIT`.
+        Most open versions a table built with `write: history` may have for a run to write it,
+        its first run included. A history write holds every open version in the worker's memory,
+        roughly 2 GiB per million at 8 columns and more for wider rows; a run over it is refused
+        before it reads them, a first run before it creates the table. Raise it together with
+        `LAKANA_WORKER__MEMORY_LIMIT`.
     index_url
         An extra package index for building the environment of a Python project, as a URL. It may
         carry a password, which is hidden in logs and error messages.

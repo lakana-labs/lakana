@@ -513,6 +513,22 @@ def test_a_column_with_a_name_history_adds_is_refused_in_any_case(name: str) -> 
     )
 
 
+def test_a_valid_from_column_named_valid_from_is_refused_with_both_renames() -> None:
+    data = pa.table(
+        {"customer_id": ["A"], "valid_from": pa.array([T1], pa.timestamp("us", tz="UTC"))}
+    )
+    with pytest.raises(ValidationError) as info:
+        check_history_batch(
+            data, ["customer_id"], table=TABLE, valid_from="valid_from", close_missing=False
+        )
+    assert str(info.value) == (
+        "Column `valid_from` of `gold.dim_customer`'s SELECT has a name `write: history` adds "
+        "itself (valid_from, valid_to, is_current, dim_customer_key); rename it in the SELECT, "
+        "for example `AS source_valid_from`, and name the new column in `valid_from:` too "
+        "(`valid_from: source_valid_from`)."
+    )
+
+
 def test_the_valid_from_column_must_be_returned_and_not_be_a_key_column() -> None:
     data = pa.table({"customer_id": ["A"], "region": ["n"]})
     with pytest.raises(ValidationError) as info:

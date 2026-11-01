@@ -426,7 +426,7 @@ def check_history_batch(
     reserved = {name.casefold() for name in added_columns(table)}
     for name in data.column_names:
         if name.casefold() in reserved:
-            raise ValidationError(reserved_name_message(name, table))
+            raise ValidationError(reserved_name_message(name, table, valid_from=valid_from))
     if valid_from is not None:
         if valid_from in key:
             raise ValidationError(valid_from_key_message(valid_from))
@@ -938,7 +938,7 @@ MAX_OPEN_VERSIONS_SETTING = "LAKANA_RUN__MAX_HISTORY_OPEN_VERSIONS"
 """The setting that caps the open versions of a history write (`RunConfig`)."""
 
 
-def too_many_open_versions_message(table: str, count: int, cap: int) -> str:
+def too_many_open_versions_message(table: str, count: int, cap: int, *, create: bool) -> str:
     """Refuse a history write into a table with more open versions than the setting allows.
 
     Parameters
@@ -949,16 +949,19 @@ def too_many_open_versions_message(table: str, count: int, cap: int) -> str:
         Its open versions; more than `cap`, so at least 2.
     cap
         `LAKANA_RUN__MAX_HISTORY_OPEN_VERSIONS`.
+    create
+        Whether the write would create the table with `count` open versions.
 
     Returns
     -------
     str
         The message, naming the count, the setting, the memory it stands for and the fix.
     """
+    has = "would start with" if create else "has"
     return (
-        f"{table} has {count} open versions, more than {MAX_OPEN_VERSIONS_SETTING} ({cap}) "
+        f"{table} {has} {count} open versions, more than {MAX_OPEN_VERSIONS_SETTING} ({cap}) "
         "allows. A history write holds every open version in the worker's memory, roughly "
-        "1.5 GiB per million open versions of 8 columns and more for wider rows, so nothing was "
+        "2 GiB per million open versions of 8 columns and more for wider rows, so nothing was "
         f"read or written. Ask an operator to raise {MAX_OPEN_VERSIONS_SETTING} together with "
         "the worker's memory limit (LAKANA_WORKER__MEMORY_LIMIT)."
     )

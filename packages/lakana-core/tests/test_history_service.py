@@ -1009,10 +1009,30 @@ def test_a_table_over_the_open_versions_cap_is_refused_before_anything_is_read(
     assert str(info.value) == (
         "gold.dim_customer has 3 open versions, more than LAKANA_RUN__MAX_HISTORY_OPEN_VERSIONS "
         "(2) allows. A history write holds every open version in the worker's memory, roughly "
-        "1.5 GiB per million open versions of 8 columns and more for wider rows, so nothing was "
+        "2 GiB per million open versions of 8 columns and more for wider rows, so nothing was "
         "read or written. Ask an operator to raise LAKANA_RUN__MAX_HISTORY_OPEN_VERSIONS "
         "together with the worker's memory limit (LAKANA_WORKER__MEMORY_LIMIT)."
     )
+
+
+def test_a_first_run_over_the_open_versions_cap_creates_nothing(hist: Hist) -> None:
+    with (
+        mock.patch.object(service_module, "first_versions", side_effect=AssertionError),
+        pytest.raises(ValidationError) as info,
+    ):
+        hist.run(
+            [("A", "north"), ("B", "north"), ("C", "north")], T1, first=True, max_open_versions=2
+        )
+
+    assert str(info.value) == (
+        "gold.dim_customer would start with 3 open versions, more than "
+        "LAKANA_RUN__MAX_HISTORY_OPEN_VERSIONS (2) allows. A history write holds every open "
+        "version in the worker's memory, roughly 2 GiB per million open versions of 8 columns "
+        "and more for wider rows, so nothing was read or written. Ask an operator to raise "
+        "LAKANA_RUN__MAX_HISTORY_OPEN_VERSIONS together with the worker's memory limit "
+        "(LAKANA_WORKER__MEMORY_LIMIT)."
+    )
+    assert not hist.service.table_exists(hist.admin, hist.ref())
 
 
 @pytest.mark.parametrize("cap", [3, 4])
@@ -1030,7 +1050,9 @@ def test_open_versions_are_counted_from_file_bounds_and_mixed_files_are_scanned(
     hist.run([("A", "north"), ("B", "north"), ("C", "north")], T1, first=True)
     hist.run([("A", "south"), ("B", "north"), ("C", "north")], T2)  # a closed file and two open
     file_io = StorageResolver(hist.session).for_environment("dev").file_io
-    pure = count_open_versions(hist.static().metadata, file_io, table=DIM, environment="dev")
+    with mock.patch.object(history_module, "DataScan", wraps=history_module.DataScan) as none:
+        pure = count_open_versions(hist.static().metadata, file_io, table=DIM, environment="dev")
+    assert none.call_count == 0  # the manifests alone
     rows = hist.static().scan().to_arrow()
     mixed = rows.filter(
         pa.array([c == "A" for c in rows["customer_id"].to_pylist()])
