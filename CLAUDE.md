@@ -91,19 +91,23 @@ found by a reviewer reasoning adversarially about code that already looked corre
 ## Keeping tool output small
 
 Everything a tool prints stays in the agent's context and is re-read on every later turn. These
-rules hold for every session and every subagent; say so in the dispatch.
+rules hold for every session and every subagent.
 
-- **Small outputs.** `pytest -q … | tail -n 30`; gates print only their summary lines;
-  `git grep -n` on a narrow path, `-l` or `-c` first when you expect many hits; code read by line
-  range. A long output goes to a file outside the repository, then `grep` or `tail` it; never let
-  it overflow into a saved tool result you then read whole.
+- **Small outputs, honest status.** Filter output, never the verdict: a command passed only if it
+  exited 0, so check that (`set -o pipefail`, or `cmd > out.log 2>&1; echo $?`) before trusting a
+  clean tail, and read the failing lines when it did not. Run the rule-5 gates with their full
+  flags (`pytest --cov --cov-report=json -q … 2>&1 | tail -n 30`); `git grep -n` on a narrow path,
+  `-l` or `-c` first when you expect many hits; read code by line range.
+- **Long output to a file.** Write it under `~/.cache/` or your scratchpad, never `/tmp` (a RAM
+  disk here) and never the repository; `grep` or `tail` it, delete it when done. Never let it
+  overflow into a saved tool result you then read whole.
 - **Fewer turns.** Batch independent commands into one call and independent reads into one turn.
   Do not re-read a file you just edited.
 - **Exactness first.** Code you edit, or judge in a review, is read verbatim. These rules cut
   noise, not evidence.
 
-During #253 they cut an agent's tool output by about a third, and the overflowed outputs it read
-whole by nine tenths.
+Measured during #253 (not controlled; tasks and models differed): implementer tool output about
+54k → 38k tokens, task reviewers 46k → 28k, overflowed outputs read whole 78k → 8.5k.
 
 ## Design documents
 
