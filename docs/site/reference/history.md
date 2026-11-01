@@ -244,7 +244,7 @@ time. The first run, which creates the table, records the event of a create.
   writes nothing and names the setting. Raise it together with the worker's memory limit.
   On the REST path (a Python asset) the server holds the open versions, and
   `LAKANA_APPEND__MAX_CONCURRENT_HISTORY` (1 by default) bounds how many such writes run at once;
-  one past it is refused with 503 and retried.
+  one past it is refused with 503; a run of the asset fails as retryable and is run again.
 - Measured on one machine, with a dimension of 1,000,000 open versions of 8 columns, the worker's
   memory peaked at about 1,312 MiB (1.5 s) when 10,000 keys changed, 5,000 were new and 5,000 went
   missing, at 1,760 MiB (8.6 s) when half the keys changed and at 2,251 MiB (16.1 s) when all

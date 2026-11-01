@@ -230,7 +230,7 @@ accepted for M5c2b.
   it ends, and it ends only at its upload's expiry or when it sends no byte for the read timeout
   (300 s), so a client that sends one byte per read timeout keeps the slot for the upload's
   lifetime (one hour by default), and can open another upload to keep it. Downloads have a minimum
-  rate (64 KiB/s); uploads have none. A table append then gets 503 and the SDK asks again. #12
+  rate (64 KiB/s); uploads have none. A table append then gets 503; the SDK does not retry it, and a run whose write was refused is run again. #12
   (per-principal append slots, a minimum upload rate) is the follow-up.
 - **A slow writer can hold a manifest slot.** A request that opens an upload holds one of the two
   manifest decode slots of a process while its body arrives, for at most the read timeout; a

@@ -34,13 +34,17 @@ class AppendConfig(BaseModel):
         with 413 before the rest of the body is read, and nothing is written.
     max_concurrent
         Most appends and artifact uploads one server process receives at once (default 4). A
-        request past the limit is refused at once with 503 and a hint to retry; the SDK asks
-        again.
+        request past the limit is refused at once with 503 and `Retry-After: 1`. The SDK asks again
+        for an artifact upload (a few tries). A table write (the SDK's `append`, `merge`
+        or `history`) is not retried: it raises `ServerError`, and a run of a Python asset ends as
+        retryable and is run again.
     max_concurrent_history
         Most history writes (`write="history"` of a Python asset, over REST) one server process
         runs at once (default 1), in addition to the `max_concurrent` slot each takes. Each holds
         the table's open versions in server memory, about 2 GiB per million. A request past the
-        limit is refused at once with 503 and a hint to retry; the SDK asks again.
+        limit is refused at once with 503 and `Retry-After: 1`. The SDK's history write does not
+        retry it and raises `ServerError`; a run of a Python asset ends as retryable and the
+        platform runs it again.
     read_timeout_seconds
         How long the server waits for the body of a request, in seconds (default 300). For a table
         append, the whole body; for an artifact upload, the next piece of a file and the whole

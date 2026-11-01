@@ -230,7 +230,7 @@ def test_a_history_write_past_the_history_slot_is_503_and_frees_the_shared_slot(
 
 
 def test_a_failed_history_write_frees_both_slots(client: TestClient) -> None:
-    """A refused batch (422) and a write that raises both give the history slot back."""
+    """A write that fails (a refused batch, 422) gives the history and shared slots back."""
     create_environment(client)
     history = client.app.state.history_concurrency_limiter  # type: ignore[attr-defined]
     appends = client.app.state.append_concurrency_limiter  # type: ignore[attr-defined]
