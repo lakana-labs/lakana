@@ -52,6 +52,29 @@ def added_columns(table: str) -> tuple[str, str, str, str]:
     return (surrogate_column(table), VALID_FROM, VALID_TO, IS_CURRENT)
 
 
+def history_table_columns(
+    table: str, columns: Sequence[str], valid_from: str | None
+) -> tuple[str, ...]:
+    """Name the columns a history asset's table has, from the columns of its SELECT.
+
+    Parameters
+    ----------
+    table
+        The table's dotted name.
+    columns
+        The SELECT's columns.
+    valid_from
+        The `valid_from:` column, which the write stores as `VALID_FROM` and not by its name;
+        `None` when the versions start at the run's start time.
+
+    Returns
+    -------
+    tuple of str
+        The SELECT's columns without `valid_from`, then the four `added_columns`.
+    """
+    return (*(c for c in columns if c != valid_from), *added_columns(table))
+
+
 def reserved_name_message(column: str, table: str, *, valid_from: str | None = None) -> str:
     """Refuse a result column whose name a history write adds itself.
 

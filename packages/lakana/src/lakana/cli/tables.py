@@ -554,7 +554,7 @@ def _hidden_outgoing(count: int) -> str:
 
 
 def _reference_line(ref: ModelReference) -> str:
-    """Write one reference as ``column → target.column (exists)``.
+    """Write one reference as ``column → target.column (exists)``, with its time if it has one.
 
     Parameters
     ----------
@@ -567,7 +567,8 @@ def _reference_line(ref: ModelReference) -> str:
         The line, indented, with control characters escaped.
     """
     exists = "exists" if ref.target_exists else "missing"
-    return _output.inline(f"  {ref.column} → {ref.target}.{ref.target_column} ({exists})")
+    valid = f", valid at {ref.at}" if ref.at else ""
+    return _output.inline(f"  {ref.column} → {ref.target}.{ref.target_column} ({exists}{valid})")
 
 
 _ADDITIVITY_SHOWN = {"additive": "additive", "semi": "semi-additive", "non": "non-additive"}
@@ -1577,8 +1578,12 @@ def references(ctx: typer.Context, name: str, env: _ENV = None) -> None:
         _output.emit(state, found)
         return
     sections = (
-        ("References", found.outgoing, ["column", "target", "target_column", "target_exists"]),
-        ("Referenced by", found.incoming, ["table", "column", "target_column"]),
+        (
+            "References",
+            found.outgoing,
+            ["column", "target", "target_column", "target_exists", "at"],
+        ),
+        ("Referenced by", found.incoming, ["table", "column", "target_column", "at"]),
     )
     for title, listed, columns in sections:
         if listed:

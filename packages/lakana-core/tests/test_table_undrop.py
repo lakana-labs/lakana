@@ -1179,7 +1179,7 @@ def test_undrop_restores_the_model_and_its_references(
 
     assert read_table_model(session, _fresh(session, Table, table_id)) == before
     assert incoming_references(session, environment_id, "gold.regions") == [
-        (table_id, "region", "code")
+        (table_id, "region", "code", None)
     ]
 
 

@@ -23,6 +23,7 @@ from lakana_core.catalog.model_metadata import (
     measure_id,
     model_view,
     read_table_model,
+    references_view,
     write_model_entry,
 )
 from lakana_core.catalog.service import CatalogService
@@ -135,7 +136,7 @@ def test_a_deploy_writes_the_model_and_the_references(
     session.flush()
     assert read_table_model(session, row) == _EXPECTED
     assert incoming_references(session, _env_id(session), "gold.dim_store") == [
-        (row.id, "store_id", "store_id")
+        (row.id, "store_id", "store_id", None)
     ]
 
 
@@ -193,7 +194,7 @@ def test_a_table_created_by_its_first_run_gets_its_model(
     row = session.scalars(select(Table)).one()
     assert read_table_model(session, row) == _EXPECTED
     assert incoming_references(session, env_id, "gold.dim_store") == [
-        (row.id, "store_id", "store_id")
+        (row.id, "store_id", "store_id", None)
     ]
 
 
@@ -250,7 +251,35 @@ def test_a_reference_the_header_drops_loses_its_row_and_a_new_one_gets_one(
     ]
     sync_project_descriptions(session, env_id, manifest)
     session.flush()
-    assert incoming_references(session, env_id, "gold.dim_day") == [(row.id, "date", "day")]
+    assert incoming_references(session, env_id, "gold.dim_day") == [(row.id, "date", "day", None)]
+
+
+def test_a_reference_with_at_stores_and_reads_its_time(
+    session: Session, catalog: CatalogService, principal: PrincipalRef
+) -> None:
+    catalog.create_table(principal, _FACT, schema=_SCHEMA)
+    row = session.scalars(select(Table)).one()
+    timed = ResolvedReference("store_id", "gold.dim_store", "store_id", "date")
+    manifest = _manifest()
+    manifest["assets"][0]["model"]["references"][0]["at"] = "date"
+    sync_project_descriptions(session, _env_id(session), manifest)
+    session.flush()
+    model = read_table_model(session, row)
+    assert model is not None and model.references == (timed,)
+    environment_id = _env_id(session)
+    assert incoming_references(session, environment_id, "gold.dim_store") == [
+        (row.id, "store_id", "store_id", "date")
+    ]
+    assert [r.at for r in references_view(session, row, _FACT, lambda _: True).outgoing] == ["date"]
+    dim = TableRef("dev", _GOLD, "dim_store")
+    catalog.create_table(principal, dim, schema=_SCHEMA)
+    dim_row = session.scalars(select(Table).where(Table.name == "dim_store")).one()
+    incoming = references_view(session, dim_row, dim, lambda _: True).incoming
+    assert [r.at for r in incoming] == ["date"]
+    sync_project_descriptions(session, _env_id(session), _manifest())
+    session.flush()
+    model = read_table_model(session, row)
+    assert model is not None and model.references == (_REF,)
 
 
 def test_an_asset_without_a_model_clears_what_an_earlier_deploy_wrote(
@@ -380,7 +409,7 @@ def test_a_new_table_with_a_model_gets_it_on_creation(
     session.commit()
     assert read_table_model(session, row) == _EXPECTED
     assert incoming_references(session, _env_id(session), "gold.dim_store") == [
-        (row.id, "store_id", "store_id")
+        (row.id, "store_id", "store_id", None)
     ]
 
 
@@ -397,7 +426,7 @@ def test_a_source_dropped_while_references_are_read_is_counted_not_an_error(
     row = session.scalars(select(Table)).one()
     gone = uuid.uuid4()
     monkeypatch.setattr(
-        model_metadata, "incoming_references", lambda *a: [(gone, "store_id", "store_id")]
+        model_metadata, "incoming_references", lambda *a: [(gone, "store_id", "store_id", None)]
     )
     found = model_metadata.references_view(session, row, _FACT, lambda _: True)
     assert (found.incoming, found.hidden_incoming) == ((), 1)

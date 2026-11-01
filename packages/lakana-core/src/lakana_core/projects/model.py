@@ -356,17 +356,17 @@ def _target_problems(
         )
     if messages:
         return messages
-    too_long = _too_long(column, target, target_column or info.key[0])
+    too_long = _too_long(column, target, target_column or info.key[0], at)
     if too_long is not None:
         return [
             f"Reference `{column}: {raw}` is too long to store: {too_long}, and each of the "
-            f"column, the target table and the target column may have at most {MAX_REFERENCE_BYTES}"
-            " bytes; shorten that name."
+            "column, the target table, the target column and the `at:` column may have at most "
+            f"{MAX_REFERENCE_BYTES} bytes; shorten that name."
         ]
     return []
 
 
-def _too_long(column: str, target: str, target_column: str) -> str | None:
+def _too_long(column: str, target: str, target_column: str, at: str | None) -> str | None:
     """Name the first part of a reference that the catalog cannot store.
 
     Parameters
@@ -377,6 +377,8 @@ def _too_long(column: str, target: str, target_column: str) -> str | None:
         The target table's dotted name.
     target_column
         The target column.
+    at
+        The `at:` column, or `None` for a reference without one.
 
     Returns
     -------
@@ -387,6 +389,7 @@ def _too_long(column: str, target: str, target_column: str) -> str | None:
         ("the column", column),
         ("the target table", target),
         ("the target column", target_column),
+        ("the `at:` column", at or ""),
     ):
         size = len(value.encode("utf-8"))
         if size > MAX_REFERENCE_BYTES:
@@ -473,6 +476,43 @@ def resolve_references(
     return resolved, issues
 
 
+def _at_column_message(asset: ParsedAsset, column: str, at: str) -> str:
+    """Say why a reference's `at:` column is not a column of the table the asset writes.
+
+    Parameters
+    ----------
+    asset
+        The referencing asset, with an explicit SELECT.
+    column
+        The referencing column.
+    at
+        Its `at:` column, which the stored table does not have.
+
+    Returns
+    -------
+    str
+        The message: for a history asset's own `valid_from:` column, that it is stored as
+        `valid_from`; for `valid_from` on an asset that does not keep history, that `at:` names
+        the asset's own time column, not the target's; otherwise that the SELECT lacks it.
+    """
+    where = f"Column `{at}` in `at:` of reference `{column}`"
+    if asset.metadata.write == "history" and at == asset.metadata.valid_from:
+        return (
+            f"{where} is `{asset.table}`'s `valid_from:` column, which `write: history` stores "
+            "as `valid_from`; write `at: valid_from`."
+        )
+    if at == "valid_from":
+        return (
+            f"{where} is not a column of `{asset.table}`'s SELECT: `at:` names the column of "
+            f"`{asset.table}` that says when each of its rows happened, not the target's "
+            "`valid_from`; name that column, and add it to the SELECT if it is missing."
+        )
+    return (
+        f"{where} is not a column of `{asset.table}`'s SELECT; add it to the SELECT, or name "
+        "another column."
+    )
+
+
 def project_model_issues(assets: Sequence[ParsedAsset]) -> list[ProjectIssue]:
     """Check that key and reference columns are columns of an explicit SELECT.
 
@@ -541,14 +581,7 @@ def project_model_issues(assets: Sequence[ParsedAsset]) -> list[ProjectIssue]:
             available.discard(asset.metadata.valid_from or "")
         for column, at in sorted(asset.metadata.reference_times().items()):
             if at not in available:
-                issues.append(
-                    ProjectIssue(
-                        asset.path,
-                        line,
-                        f"Column `{at}` in `at:` of reference `{column}` is not a column of "
-                        f"`{asset.table}`'s SELECT; add it to the SELECT, or name another column.",
-                    )
-                )
+                issues.append(ProjectIssue(asset.path, line, _at_column_message(asset, column, at)))
         for column, spec in sorted(asset.metadata.measures.items()):
             if column not in asset.columns:
                 issues.append(

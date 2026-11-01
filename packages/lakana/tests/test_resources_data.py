@@ -53,7 +53,12 @@ from lakana.resources.environments import Environments
 from lakana.resources.namespaces import Namespaces
 from lakana.resources.queries import Queries, QueryRun, waiting_for_from_json
 from lakana.resources.runs import failure_from_json, run_from_json
-from lakana.resources.tables import Tables, _model_from_json, _split_namespace_table
+from lakana.resources.tables import (
+    Tables,
+    _model_from_json,
+    _model_reference_from_json,
+    _split_namespace_table,
+)
 
 _CONFIG = ResolvedConfig(url="http://api.example", token="lakana_pat_abc_supersecret")
 
@@ -2949,6 +2954,13 @@ _EXPECTED_REFERENCE = ModelReference(
     target_column="store_id",
     target_exists=True,
 )
+
+
+def test_a_reference_reads_its_time_and_an_older_server_without_it() -> None:
+    assert _model_reference_from_json({**_MODEL_REFERENCE, "at": "ordered_at"}).at == "ordered_at"
+    assert _model_reference_from_json(_MODEL_REFERENCE).at is None
+
+
 _MODEL_TABLE = {
     "name": "fact_sales",
     "namespace": "gold",

@@ -616,6 +616,11 @@ def test_a_reference_may_name_the_rows_time() -> None:
             "time column), such as `{to: gold.dim_customer, at: ordered_at}`",
         ),
         (
+            '{to: gold.dim_customer, at: ""}',
+            "references: `at:` of reference `customer_id` must not be empty; name the column "
+            "that says when each row happened",
+        ),
+        (
             '{to: gold.dim_customer, at: "o\\u2028d"}',
             "references: `at:` of reference `customer_id` must not contain a control, format or "
             "surrogate character or a line separator",
@@ -626,6 +631,32 @@ def test_a_reference_mapping_is_checked_where_it_is_read(value: str, message: st
     with pytest.raises(ProjectValidationError) as info:
         parse_front_matter(
             f"/* lakana\nreferences:\n  customer_id: {value}\n*/\nSELECT 1", path=_PATH
+        )
+    assert [issue.message for issue in info.value.issues] == [message]
+
+
+@pytest.mark.parametrize(
+    ("column", "message"),
+    [
+        ('""', "references: a reference column must not be empty"),
+        (
+            '"c\\u2028d"',
+            "references: a reference column must not contain a control, format or surrogate "
+            "character or a line separator",
+        ),
+        (
+            "1",
+            "references: reference `?` is a mapping without `at:`; write the target as a plain "
+            "string, or add `at:`",
+        ),
+    ],
+)
+def test_a_bad_reference_column_is_named_before_its_mapping(column: str, message: str) -> None:
+    """The SDK checks the column first; the deploy says the same."""
+    with pytest.raises(ProjectValidationError) as info:
+        parse_front_matter(
+            f"/* lakana\nreferences:\n  {column}: {{to: gold.dim_customer}}\n*/\nSELECT 1",
+            path=_PATH,
         )
     assert [issue.message for issue in info.value.issues] == [message]
 

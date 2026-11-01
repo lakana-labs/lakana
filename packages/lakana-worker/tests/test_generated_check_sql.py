@@ -191,3 +191,23 @@ def test_the_valid_at_reference_reads_half_open_intervals_dates_and_nulls() -> N
     sql = valid_at_reference_sql("gold.f", "customer_id", "gold.d", "customer_id", "ordered_at")
     failing = sorted(con.execute(f"SELECT order_id FROM ({sql})").fetchall())  # nosec B608
     assert failing == [(3,), (4,), (6,)]
+
+
+def test_the_valid_at_reference_excludes_the_end_of_a_version_before_a_gap() -> None:
+    """`valid_to` is exclusive: a row dated on it, while the key has no next version yet, fails."""
+    con = _versions()
+    con.execute(
+        "INSERT INTO gold.d VALUES "
+        "('H', 'h1', '2026-01-01', '2026-01-15', false), ('H', 'h2', '2026-02-01', NULL, true)"
+    )
+    con.execute("CREATE TABLE gold.f (order_id INT, customer_id VARCHAR, ordered_at DATE)")
+    con.execute(
+        "INSERT INTO gold.f VALUES "
+        "(1, 'H', '2026-01-14'), "  # inside the first version
+        "(2, 'H', '2026-01-15'), "  # exactly the first version's end, inside the gap: fails
+        "(3, 'H', '2026-01-20'), "  # inside the gap: fails
+        "(4, 'H', '2026-02-01')"  # the second version's start
+    )
+    sql = valid_at_reference_sql("gold.f", "customer_id", "gold.d", "customer_id", "ordered_at")
+    failing = sorted(con.execute(f"SELECT order_id FROM ({sql})").fetchall())  # nosec B608
+    assert failing == [(2,), (3,)]

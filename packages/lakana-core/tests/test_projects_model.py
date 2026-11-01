@@ -268,8 +268,8 @@ def test_a_reference_too_long_to_store_is_refused_with_what_to_shorten() -> None
         assert resolved == {}
         assert [i.message for i in issues] == [
             f"Reference `{column}: {raw}` is too long to store: {part}, and each of the column, "
-            "the target table and the target column may have at most 1024 bytes; shorten that "
-            "name."
+            "the target table, the target column and the `at:` column may have at most 1024 "
+            "bytes; shorten that name."
         ]
     ok, issues = resolve_references(
         [_fact({"c" * 1024: "gold.dim_store"})], _lookup(targets), environment="dev"
@@ -492,3 +492,57 @@ def test_a_history_dimension_may_reference_another_at_its_own_valid_from() -> No
     )
     asset = make_asset("gold.dim_store", columns=("store_id", "region_id"), metadata=meta)
     assert project_model_issues([asset]) == []
+
+
+def test_an_at_column_too_long_to_store_is_refused_with_what_to_shorten() -> None:
+    """`at:` is stored in 1,024 bytes too, beside the reference."""
+    long_at = "t" * 1025
+    resolved, issues = resolve_references(
+        [_orders({"customer_id": {"to": "gold.dim_customer", "at": long_at}}, None)],
+        _lookup({"gold.dim_customer": _HISTORY_DIM}),
+        environment="dev",
+    )
+    assert resolved == {}
+    assert [(i.message, i.targets) for i in issues] == [
+        (
+            "Reference `customer_id: gold.dim_customer` is too long to store: the `at:` column "
+            f"`{long_at}` has 1025 bytes, and each of the column, the target table, the target "
+            "column and the `at:` column may have at most 1024 bytes; shorten that name.",
+            ("gold.dim_customer",),
+        )
+    ]
+
+
+def test_an_at_naming_the_own_valid_from_column_says_to_write_valid_from() -> None:
+    """A history dimension stores its `valid_from:` column as `valid_from`, never by its name."""
+    meta = AssetMetadata(
+        materialize="table",
+        kind="dimension",
+        grain="One row per store and version.",
+        key=("store_id",),
+        write="history",
+        valid_from="changed_at",
+        references={"region_id": {"to": "gold.dim_region", "at": "changed_at"}},
+    )
+    asset = make_asset(
+        "gold.dim_store", columns=("store_id", "region_id", "changed_at"), metadata=meta
+    )
+    assert [i.message for i in project_model_issues([asset])] == [
+        "Column `changed_at` in `at:` of reference `region_id` is `gold.dim_store`'s "
+        "`valid_from:` column, which `write: history` stores as `valid_from`; write "
+        "`at: valid_from`."
+    ]
+
+
+def test_an_at_naming_valid_from_of_a_table_without_it_says_what_at_names() -> None:
+    """`at:` names the referencing table's own time column, not the target's `valid_from`."""
+    asset = _orders(
+        {"customer_id": {"to": "gold.dim_customer", "at": "valid_from"}},
+        ("id", "customer_id", "ordered_at"),
+    )
+    assert [i.message for i in project_model_issues([asset])] == [
+        "Column `valid_from` in `at:` of reference `customer_id` is not a column of "
+        "`gold.fact_orders`'s SELECT: `at:` names the column of `gold.fact_orders` that says "
+        "when each of its rows happened, not the target's `valid_from`; name that column, and "
+        "add it to the SELECT if it is missing."
+    ]

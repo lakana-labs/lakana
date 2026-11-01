@@ -171,7 +171,11 @@ def _sync_references(
         if ref is None:
             session.delete(found)
         else:
-            found.target_name, found.target_column = ref.target, ref.target_column
+            found.target_name, found.target_column, found.at_column = (
+                ref.target,
+                ref.target_column,
+                ref.at,
+            )
     return [
         DeclaredReference(
             id=uuid.uuid4(),
@@ -179,6 +183,7 @@ def _sync_references(
             source_column=ref.column,
             target_name=ref.target,
             target_column=ref.target_column,
+            at_column=ref.at,
         )
         for column, ref in wanted.items()
         if column not in existing
@@ -340,7 +345,7 @@ def read_table_model(session: Session, row: Table) -> TableModel | None:
         measure).
     """
     references = tuple(
-        ResolvedReference(r.source_column, r.target_name, r.target_column)
+        ResolvedReference(r.source_column, r.target_name, r.target_column, r.at_column)
         for r in session.scalars(
             select(DeclaredReference)
             .where(DeclaredReference.source_table_id == row.id)
@@ -385,7 +390,7 @@ def read_table_model(session: Session, row: Table) -> TableModel | None:
 
 def incoming_references(
     session: Session, environment_id: uuid.UUID, dotted: str
-) -> list[tuple[uuid.UUID, str, str]]:
+) -> list[tuple[uuid.UUID, str, str, str | None]]:
     """List the references that point at a table, by its dotted name.
 
     The result is not filtered: a caller that shows it keeps only the source tables the reader
@@ -402,15 +407,16 @@ def incoming_references(
 
     Returns
     -------
-    list of tuple of (uuid.UUID, str, str)
-        ``(source table id, source column, target column)``, ordered by source table id and
-        column.
+    list of tuple of (uuid.UUID, str, str, str or None)
+        ``(source table id, source column, target column, at column)``, ordered by source table
+        id and column; the at column is `None` for a reference without `at:`.
     """
     rows = session.execute(
         select(
             DeclaredReference.source_table_id,
             DeclaredReference.source_column,
             DeclaredReference.target_column,
+            DeclaredReference.at_column,
         )
         .where(
             DeclaredReference.environment_id == environment_id,
@@ -418,7 +424,7 @@ def incoming_references(
         )
         .order_by(DeclaredReference.source_table_id, DeclaredReference.source_column)
     )
-    return [(table_id, column, target_column) for table_id, column, target_column in rows]
+    return [(table_id, column, target_column, at) for table_id, column, target_column, at in rows]
 
 
 @dataclass(frozen=True)
@@ -441,6 +447,8 @@ class ModelReferenceView:
     target_exists
         Whether a table of that name exists now. Only a reader who may read the target is shown
         the reference at all, so this never says anything about a table the reader may not read.
+    at
+        The referencing table's time column when the target keeps history; `None` otherwise.
     """
 
     id: str
@@ -449,6 +457,7 @@ class ModelReferenceView:
     target: str
     target_column: str
     target_exists: bool
+    at: str | None = None
 
 
 @dataclass(frozen=True)
@@ -658,6 +667,7 @@ def _outgoing(
                 target=ref.target,
                 target_column=ref.target_column,
                 target_exists=exists,
+                at=ref.at,
             )
         )
     return tuple(sorted(shown, key=lambda r: r.id)), hidden
@@ -784,12 +794,12 @@ def references_view(
         for table_id, path, name in session.execute(
             select(Table.id, Namespace.path, Table.name)
             .join(Namespace, Namespace.id == Table.namespace_id)
-            .where(Table.id.in_({source_id for source_id, _, _ in found}))
+            .where(Table.id.in_({source_id for source_id, _, _, _ in found}))
         )
     }
     incoming: list[ModelReferenceView] = []
     hidden_incoming = 0
-    for source_id, column, target_column in found:
+    for source_id, column, target_column, at in found:
         # A source dropped between the two reads has no name any more: count it, as hidden.
         source = sources.get(source_id)
         if source is None or not may_read(source):
@@ -803,6 +813,7 @@ def references_view(
                 target=table.dotted(),
                 target_column=target_column,
                 target_exists=True,
+                at=at,
             )
         )
     return TableReferences(

@@ -75,10 +75,11 @@ from lakana_core.projects.deploy_jobs import (
 )
 from lakana_core.projects.diff import DeployDiff, diff_manifests
 from lakana_core.projects.git_input import is_full_sha, validate_ref
-from lakana_core.projects.history_columns import added_columns
+from lakana_core.projects.history_columns import history_table_columns
 from lakana_core.projects.issues import ProjectIssue, ProjectValidationError, error_for_reader
 from lakana_core.projects.lookups import deployment_row, environment_by_name, repository_by_name
 from lakana_core.projects.manifest import (
+    entry_history,
     entry_model,
     entry_output,
     entry_write,
@@ -2286,8 +2287,7 @@ class DeployService:
                 history = meta.write == "history"
                 columns = asset.columns
                 if history and columns is not None:
-                    kept = tuple(c for c in columns if c != meta.valid_from)
-                    columns = (*kept, *added_columns(asset.table))
+                    columns = history_table_columns(asset.table, columns, meta.valid_from)
                 return TargetInfo(
                     meta.kind,
                     key_columns(meta.key),
@@ -2316,6 +2316,11 @@ class DeployService:
             model = entry_model(entry)
             write, merge_key, _ = entry_write(entry)
             history = write == "history"
+            if history and listed is not None:
+                # Before the first run there are no stored columns, only the SELECT's.
+                spec = entry_history(entry)
+                valid_from = spec.valid_from if spec is not None else None
+                listed = history_table_columns(name, listed, valid_from)
             if model is None:
                 # A manifest from before models: a merge's key still identifies a row.
                 key = merge_key if write == "merge" else ()

@@ -4894,6 +4894,32 @@ def test_a_project_history_target_has_its_added_columns_and_not_its_valid_from_c
     ]
 
 
+def test_another_repositorys_history_target_before_its_first_run_has_its_stored_columns(
+    session: Session, env: None, principal: PrincipalRef
+) -> None:
+    """Without stored columns, the manifest's SELECT columns are read as the run will store them."""
+    other = _repo(session, "other")
+    _deployed(session, principal, other, "a" * 40, _history_dim("dim.customer"))
+    ensure_table(session, "dev", "dim", "customer")
+    repo = _repo(session)
+    fact = _orders_on(
+        {
+            "customer_key": {"to": "dim.customer.customer_key", "at": "ordered_at"},
+            "changed_at": {"to": "dim.customer.changed_at", "at": "ordered_at"},
+        }
+    )
+    resolved, issues = DeployService(session, AllowAllAuthorization()).resolve_model_references(
+        principal, "dev", repo.id, [fact]
+    )
+    assert resolved["gold.f"] == (
+        ResolvedReference("customer_key", "dim.customer", "customer_key", "ordered_at"),
+    )
+    assert [i.message for i in issues] == [
+        "Reference `changed_at: dim.customer.changed_at`: `dim.customer` has no column "
+        "`changed_at`; name one of its columns, or use the short form to point at its key."
+    ]
+
+
 def test_another_repositorys_history_target_needs_at(
     session: Session, env: None, principal: PrincipalRef
 ) -> None:

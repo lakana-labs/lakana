@@ -544,6 +544,11 @@ def test_a_reference_may_be_a_mapping_with_its_time() -> None:
             "column), such as `{to: gold.dim_customer, at: ordered_at}`",
         ),
         (
+            {"to": "gold.dim_customer", "at": ""},
+            "`at:` of reference `customer_id` must not be empty; name the column that says when "
+            "each row happened",
+        ),
+        (
             {"to": "gold.dim_customer", "at": "o\u2028d"},
             "`at:` of reference `customer_id` must not contain a control, format or surrogate "
             "character or a line separator",
@@ -555,6 +560,23 @@ def test_a_reference_mapping_is_refused_with_the_deploys_text(
 ) -> None:
     with pytest.raises(ValueError) as info:
         lakana.asset(references={"customer_id": value})
+    assert str(info.value) == message
+
+
+@pytest.mark.parametrize(
+    ("column", "message"),
+    [
+        ("", "a reference column must not be empty"),
+        (
+            "c\u2028d",
+            "a reference column must not contain a control, format or surrogate character or a "
+            "line separator",
+        ),
+    ],
+)
+def test_a_bad_reference_column_is_named_before_its_mapping(column: str, message: str) -> None:
+    with pytest.raises(ValueError) as info:
+        lakana.asset(references={column: {"to": "gold.dim_customer"}})
     assert str(info.value) == message
 
 

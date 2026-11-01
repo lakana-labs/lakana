@@ -2004,6 +2004,11 @@ def test_table_get_shows_the_model_block(tmp_path: Path) -> None:
     assert "key_unique (generated)" in out
 
 
+def test_table_get_shows_the_time_of_a_valid_at_reference(tmp_path: Path) -> None:
+    out = _get_fact(tmp_path, {**_MODEL, "references": [{**_MODEL["references"][0], "at": "date"}]})
+    assert "store_id → gold.dim_store.store_id (exists, valid at date)" in out
+
+
 def test_table_get_lists_the_measures_and_their_check(tmp_path: Path) -> None:
     measure = {"not_over": [], "unit": None, "currency": None, "label": None, "description": None}
     out = _get_fact(
@@ -2216,6 +2221,14 @@ def test_table_references_prints_both_directions(tmp_path: Path) -> None:
     assert "gold.fact_sales" in out
     assert "store_id" in out
     assert "cannot read" not in out
+
+
+def test_table_references_shows_the_time_of_a_valid_at_reference(tmp_path: Path) -> None:
+    timed = {**_MODEL["references"][0], "at": "ordered_at"}
+    body = {**_REFERENCES, "outgoing": [{**timed, "table": "gold.dim_store"}], "incoming": [timed]}
+    result = _references(tmp_path, body)
+    assert result.exit_code == 0, result.stderr
+    assert result.stdout.count("ordered_at") == 2
 
 
 def test_table_references_counts_what_it_hides(tmp_path: Path) -> None:

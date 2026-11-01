@@ -541,7 +541,12 @@ def _reference_target(column: str, given: Mapping[str, object]) -> str:
             f"reference `{column}` takes `to:` (the target) and `at:` (the row's time "
             "column), such as `{to: gold.dim_customer, at: ordered_at}`"
         )
-    if not at or _unsafe(at):
+    if not at:
+        raise ValueError(
+            f"`at:` of reference `{column}` must not be empty; name the column that says when "
+            "each row happened"
+        )
+    if _unsafe(at):
         raise ValueError(f"`at:` of reference `{column}` {_IDENTIFIER_MESSAGE}")
     return to
 

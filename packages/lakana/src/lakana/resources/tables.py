@@ -192,6 +192,7 @@ def _model_reference_from_json(data: dict[str, Any]) -> ModelReference:
         target=data["target"],
         target_column=data["target_column"],
         target_exists=data["target_exists"],
+        at=data.get("at"),
     )
 
 

@@ -4886,3 +4886,39 @@ def test_0060_adds_how_a_history_run_writes_and_downgrades_it_to_a_merge(
         assert mode == "MERGE"
     finally:
         engine.dispose()
+
+
+_REVISION_0061 = "a3c7d9e1f5b6"
+
+
+@pytest.mark.usefixtures("_without_fsync")
+def test_0061_adds_the_time_column_of_a_reference(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Revision `0061`: `table_references.at_column`, nullable, gone again after a downgrade.
+
+    Parameters
+    ----------
+    tmp_path
+        Holds the throwaway SQLite file.
+    monkeypatch
+        Points `lakana_core.config.Settings` at that file.
+    """
+    db_path = tmp_path / "migrated.db"
+    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    config = Config(str(ALEMBIC_INI))
+    command.upgrade(config, _REVISION_0061)
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        found = {c["name"]: c for c in inspect(engine).get_columns("table_references")}
+        assert found["at_column"]["nullable"] is True
+    finally:
+        engine.dispose()
+    command.downgrade(config, _REVISION_0060)
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        assert "at_column" not in {
+            c["name"] for c in inspect(engine).get_columns("table_references")
+        }
+    finally:
+        engine.dispose()

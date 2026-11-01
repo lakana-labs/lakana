@@ -177,6 +177,25 @@ _REFERENCE_SHAPE = (
 )
 
 
+def _check_reference_column(column: str) -> None:
+    """Refuse an empty or unsafe reference column, before any message shows it.
+
+    Parameters
+    ----------
+    column
+        The referencing column.
+
+    Raises
+    ------
+    ValueError
+        If it is empty or has an unsafe character.
+    """
+    if not column:
+        raise ValueError("a reference column must not be empty")
+    if unsafe_identifier(column):
+        raise ValueError(f"a reference column {IDENTIFIER_MESSAGE}")
+
+
 class AssetMetadata(SafeTextModel):
     """What one asset's front-matter may say.
 
@@ -406,6 +425,9 @@ class AssetMetadata(SafeTextModel):
     def _reference_mappings_have_their_keys(cls, value: object) -> object:
         """Refuse a reference mapping without `at:`, with another key, or without `to:`.
 
+        The column of a mapping is checked first, as the SDK does, so an empty or unsafe one is
+        named as such.
+
         Parameters
         ----------
         value
@@ -419,13 +441,16 @@ class AssetMetadata(SafeTextModel):
         Raises
         ------
         ValueError
-            For the first mapping that is not exactly `to:` and `at:`, both strings.
+            For the first mapping whose column is empty or unsafe, or that is not exactly `to:`
+            and `at:`, both strings.
         """
         if not isinstance(value, Mapping):
             return value
         for column, given in value.items():
             if not isinstance(given, Mapping):
                 continue
+            if isinstance(column, str):
+                _check_reference_column(column)
             named = shown(column) if isinstance(column, str) else "?"
             if set(given) == {"to"}:
                 raise ValueError(
@@ -461,11 +486,13 @@ class AssetMetadata(SafeTextModel):
         """
         for column, given in value.items():
             target = given.to if isinstance(given, ReferenceSpec) else given
-            if not column:
-                raise ValueError("a reference column must not be empty")
-            if unsafe_identifier(column):
-                raise ValueError(f"a reference column {IDENTIFIER_MESSAGE}")
-            if isinstance(given, ReferenceSpec) and (not given.at or unsafe_identifier(given.at)):
+            _check_reference_column(column)
+            if isinstance(given, ReferenceSpec) and not given.at:
+                raise ValueError(
+                    f"`at:` of reference `{column}` must not be empty; name the column that says "
+                    "when each row happened"
+                )
+            if isinstance(given, ReferenceSpec) and unsafe_identifier(given.at):
                 raise ValueError(f"`at:` of reference `{column}` {IDENTIFIER_MESSAGE}")
             if unsafe_identifier(target):
                 # Before any message shows the target: it could forge a line of the issues.
