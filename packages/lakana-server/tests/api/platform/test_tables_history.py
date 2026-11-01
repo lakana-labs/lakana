@@ -174,7 +174,7 @@ def test_the_servers_open_bytes_cap_bounds_what_wide_open_versions_hold(
     assert refused.status_code == 422, refused.text
     detail = refused.json()["detail"]
     assert detail.startswith("Reading the open versions of gold.dim_customer passed ")
-    assert "LAKANA_RUN__MAX_HISTORY_OPEN_BYTES (500000) allows" in detail
+    assert "LAKANA_RUN__MAX_HISTORY_OPEN_BYTES (500000 bytes, 0.5 MiB) allows" in detail
     assert "in the server's memory" in detail
     assert "the memory the server has allows it" in detail
     assert table["row_count"] == 30

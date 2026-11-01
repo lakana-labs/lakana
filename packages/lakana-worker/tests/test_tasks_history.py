@@ -207,7 +207,7 @@ def test_the_configured_open_bytes_cap_reaches_the_history_write(world: World) -
     assert refused.status is TaskStatus.FAILED
     assert refused.error_message is not None
     assert refused.error_message.startswith("Reading the open versions of gold.dim_events passed")
-    assert "LAKANA_RUN__MAX_HISTORY_OPEN_BYTES (1) allows" in refused.error_message
+    assert "LAKANA_RUN__MAX_HISTORY_OPEN_BYTES (1 bytes, 0.0 MiB) allows" in refused.error_message
     assert "the worker's memory limit (LAKANA_WORKER__MEMORY_LIMIT)" in refused.error_message
 
 

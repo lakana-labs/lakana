@@ -30,6 +30,9 @@ dependencies = [
     "alembic>=1.13",
     "pydantic>=2.7",
     "pydantic-settings>=2.16.0",
+    # Before raising this bound, check `_stream_batches` in lakana_core/catalog/history.py: it
+    # calls pyiceberg's private `ArrowScan._record_batches_from_scan_tasks_and_deletes` and
+    # `_read_all_delete_files` to read history tables lazily.
     "pyiceberg>=0.12,<0.13",
     "fsspec>=2026.9.0",
     # pyiceberg's PyArrowFileIO needs pyarrow, but pyarrow only arrives

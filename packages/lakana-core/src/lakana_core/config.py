@@ -476,13 +476,15 @@ class RunConfig(BaseModel):
         memory the server has (Python asset).
     max_history_open_bytes
         Most bytes of Arrow data a history write may read the open versions of its table into,
-        512 MiB by default (about 2 GiB of the process's memory at its peak). The open-versions
-        cap counts rows; this bounds their width too, since a version holds whatever columns the
-        dimension has: the worker's memory for a SQL asset, the server's for a Python asset. The
-        bytes are counted batch by batch while the open versions are read; as soon as they pass
-        it, the read stops and the run is refused, and nothing is written. Raise it if that
-        memory allows it, or narrow the dimension's columns (wide text such as descriptions in a
-        table of its own, joined by the key).
+        512 MiB by default. The open-versions cap counts rows; this bounds their width too, since
+        a version holds whatever columns the dimension has: the worker's memory for a SQL asset,
+        the server's for a Python asset. The bytes are counted file by file while the open
+        versions are read; as soon as they pass it, the read stops and the run is refused, and
+        nothing is written, so at most this plus one data file is held (a file holds one write's
+        new versions: one request body over REST, `LAKANA_APPEND__MAX_BYTES`, or one SQL run's).
+        It also bounds the latest ends of the keys that return. Raise it if that memory allows
+        it, or narrow the dimension's columns (wide text such as descriptions in a table of its
+        own, joined by the key).
     index_url
         An extra package index for building the environment of a Python project, as a URL. It may
         carry a password, which is hidden in logs and error messages.

@@ -6382,7 +6382,8 @@ class CatalogService:
             staged.
         max_open_bytes
             Most bytes of Arrow data the open versions may be read into
-            (`RunConfig.max_history_open_bytes`), counted batch by batch while they are read.
+            (`RunConfig.max_history_open_bytes`), counted batch by batch while they are read;
+            also a backstop for the latest ends of returning keys (`read_last_ends`).
         advice
             How a repeated key is explained (`SDK_ADVICE` or `SQL_ADVICE`), and which process
             the open-versions and byte refusals name as the one that holds the versions.
@@ -6531,7 +6532,15 @@ class CatalogService:
             valid_from=valid_from,
             close_missing=close_missing,
             last_ends=lambda wanted, after: read_last_ends(
-                current, file_io, wanted, after, key=key, table=ref.dotted(), max_rows=max_rows
+                current,
+                file_io,
+                wanted,
+                after,
+                key=key,
+                table=ref.dotted(),
+                max_rows=max_rows,
+                max_bytes=max_open_bytes,
+                holder=advice.holder,
             ),
             environment=ref.environment,
         )

@@ -950,7 +950,7 @@ def test_the_closed_versions_a_returning_key_reads_are_capped(hist: Hist) -> Non
     with pytest.raises(ValidationError) as none:
         read_last_ends(metadata, file_io, wanted, T1, key=["customer_id"], table=DIM, max_rows=0)
 
-    assert sorted(ends.column("valid_to").to_pylist()) == [T2, t4]
+    assert ends.to_pylist() == [{"customer_id": "A", "valid_to": t4}]  # A's latest end
     assert str(one.value) == (
         "Together, the keys this run opens again have more than 1 closed version in "
         "gold.dim_customer to read (their first versions, and the versions that end after "
@@ -964,6 +964,110 @@ def test_the_closed_versions_a_returning_key_reads_are_capped(hist: Hist) -> Non
         "gold.dim_customer to read (their first versions, and the versions that end after "
         "2026-02-01T00:00:00Z). That is more rows"
     )
+
+
+def _dated(
+    hist: Hist, keys: Sequence[str], region: str, start: datetime, **options: object
+) -> HistoryResult:
+    """Write `keys` with a declared `valid_from` (`changed_at`) at a late run clock.
+
+    Parameters
+    ----------
+    hist
+        The helpers.
+    keys
+        The batch's keys.
+    region
+        Every row's region.
+    start
+        Every row's `changed_at`.
+    **options
+        More keywords for `CatalogService.history`.
+
+    Returns
+    -------
+    HistoryResult
+        What it committed.
+    """
+    data = pa.table(
+        {
+            "customer_id": pa.array(keys, pa.string()),
+            "region": pa.array([region] * len(keys), pa.string()),
+            "changed_at": pa.array([start] * len(keys), pa.timestamp("us", tz="UTC")),
+        }
+    )
+    clock = datetime(2030, 1, 1, tzinfo=UTC)
+    with mock.patch.object(service_module, "run_clock", return_value=clock):
+        return hist.service.history(
+            hist.admin,
+            hist.ref(),
+            data,
+            key=["customer_id"],
+            valid_from="changed_at",
+            **options,  # ty: ignore[invalid-argument-type]
+        )
+
+
+def test_the_ends_of_returning_keys_are_held_one_per_key_whatever_the_history(
+    hist: Hist, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An old `valid_from` reads every closed version of the keys; only each key's end is kept."""
+    keys = [f"{i:02d}" + "k" * 4096 for i in range(8)]  # 8 wide keys, about 32 KiB a batch
+    _dated(hist, keys, "r0", datetime(2026, 1, 1, tzinfo=UTC), expected_snapshot_id="none")
+    for n in range(1, 5):
+        _dated(hist, keys, f"r{n}", datetime(2026, 1, 1 + n, tzinfo=UTC))
+    _dated(hist, ["Z"], "z", datetime(2027, 1, 1, tzinfo=UTC), close_missing=True)
+    rows: list[int] = []
+    original = pyiceberg_arrow._task_to_record_batches
+
+    def counting(*args: object, **kwargs: object) -> object:
+        for batch in original(*args, **kwargs):  # ty: ignore[invalid-argument-type]
+            rows.append(batch.num_rows)
+            yield batch
+
+    ends: list[pa.Table] = []
+    read = service_module.read_last_ends
+
+    def spy(*args: object, **kwargs: object) -> pa.Table:
+        ends.append(read(*args, **kwargs))  # ty: ignore[invalid-argument-type]
+        return ends[-1]
+
+    monkeypatch.setattr(pyiceberg_arrow, "_task_to_record_batches", counting)
+    monkeypatch.setattr(service_module, "read_last_ends", spy)
+    cap = 3 * sum(len(k) for k in keys)  # below the 5 closed versions of every key
+
+    with pytest.raises(ValidationError, match="before the end of the key's last version"):
+        _dated(hist, keys, "back", datetime(2000, 1, 1, tzinfo=UTC), max_open_bytes=cap)
+
+    assert sum(rows) >= 5 * len(keys)  # every closed version was read ...
+    assert ends[0].num_rows == len(keys)  # ... and one end per key held
+    assert ends[0].nbytes <= cap
+
+
+def test_the_ends_of_returning_keys_have_the_byte_cap_as_a_backstop(hist: Hist) -> None:
+    hist.run([("A", "north"), ("B", "north")], T1, first=True)
+    hist.run([("C", "north")], T2, close_missing=True)  # A and B closed at T2
+    metadata = hist.static().metadata
+    file_io = StorageResolver(hist.session).for_environment("dev").file_io
+    wanted = pa.table({"customer_id": ["A", "B"]})
+
+    with pytest.raises(ValidationError) as info:
+        read_last_ends(
+            metadata,
+            file_io,
+            wanted,
+            T1,
+            key=["customer_id"],
+            table=DIM,
+            max_rows=None,
+            max_bytes=1,
+            holder="server",
+        )
+
+    assert str(info.value).startswith(
+        "Reading the closed versions of the keys that return to gold.dim_customer passed "
+    )
+    assert "LAKANA_RUN__MAX_HISTORY_OPEN_BYTES (1 bytes, 0.0 MiB) allows" in str(info.value)
 
 
 def test_no_key_filter_is_built_when_the_table_has_no_closed_version(hist: Hist) -> None:
@@ -1106,8 +1210,9 @@ def test_open_versions_past_the_byte_cap_are_refused_while_reading_and_nothing_i
         hist.run([("A", "south")], T2, max_open_bytes=1, advice=advice)
 
     found = re.fullmatch(
-        r"Reading the open versions of gold\.dim_customer passed (\d+) bytes of Arrow data, more "
-        r"than LAKANA_RUN__MAX_HISTORY_OPEN_BYTES \(1\) allows, so the read stopped and nothing "
+        r"Reading the open versions of gold\.dim_customer passed (\d+) bytes \(\d+\.\d MiB\) of "
+        r"Arrow data, more than LAKANA_RUN__MAX_HISTORY_OPEN_BYTES \(1 bytes, 0\.0 MiB\) allows, "
+        r"so the read stopped and nothing "
         rf"was written\. A history write holds every open version in the {advice.holder}'s "
         r"memory\. Ask an operator to raise LAKANA_RUN__MAX_HISTORY_OPEN_BYTES if "
         rf"{re.escape(memory)}, or narrow the dimension's columns: keep wide text such as "

@@ -1035,22 +1035,62 @@ MAX_OPEN_BYTES_SETTING = "LAKANA_RUN__MAX_HISTORY_OPEN_BYTES"
 """The setting that caps the bytes a history write reads its open versions into (`RunConfig`)."""
 
 
+@dataclass(frozen=True)
+class ByteCap:
+    """A cap on the bytes of Arrow data a read may hold, with its refusal.
+
+    Parameters
+    ----------
+    cap
+        Most bytes (`RunConfig.max_history_open_bytes`).
+    message
+        Builds the refusal from the bytes held and `cap`.
+    """
+
+    cap: int
+    message: Callable[[int, int], str]
+
+
+def _mib(count: int) -> str:
+    """Show a byte count with its MiB figure.
+
+    Parameters
+    ----------
+    count
+        The bytes.
+
+    Returns
+    -------
+    str
+        For example ``536993812 bytes (512.1 MiB)``.
+    """
+    return f"{count} bytes ({count / 1024**2:.1f} MiB)"
+
+
 def too_many_open_bytes_message(
-    table: str, read: int, cap: int, *, holder: Literal["worker", "server"]
+    table: str,
+    read: int,
+    cap: int,
+    *,
+    holder: Literal["worker", "server"],
+    what: Literal["open", "ends"] = "open",
 ) -> str:
-    """Refuse a history write whose open versions passed the byte cap while being read.
+    """Refuse a history write whose versions passed the byte cap while being read.
 
     Parameters
     ----------
     table
         The table's dotted name.
     read
-        The bytes of Arrow data read so far; more than `cap`.
+        The bytes of Arrow data held so far; more than `cap`.
     cap
         `LAKANA_RUN__MAX_HISTORY_OPEN_BYTES`.
     holder
         The process that holds the versions: ``"worker"`` (a SQL asset's run) or ``"server"``
         (a write over the REST API).
+    what
+        What was read: ``"open"`` the open versions, ``"ends"`` the latest end of each key that
+        returns (`read_last_ends`).
 
     Returns
     -------
@@ -1063,9 +1103,14 @@ def too_many_open_bytes_message(
         if holder == "worker"
         else "the memory the server has"
     )
+    reading = {
+        "open": f"the open versions of {table}",
+        "ends": f"the closed versions of the keys that return to {table}",
+    }[what]
+    shown_cap = _mib(cap).replace(" (", ", ").rstrip(")")
     return (
-        f"Reading the open versions of {table} passed {read} bytes of Arrow data, more than "
-        f"{setting} ({cap}) allows, so the read stopped and nothing was written. A history write "
+        f"Reading {reading} passed {_mib(read)} of Arrow data, more than {setting} "
+        f"({shown_cap}) allows, so the read stopped and nothing was written. A history write "
         f"holds every open version in the {holder}'s memory. Ask an operator to raise {setting} "
         f"if {memory} allows it, or narrow the dimension's columns: keep wide text such as "
         "descriptions in a table of its own and join it by the key."
@@ -1342,8 +1387,8 @@ def _read_capped(
     message: Callable[[int], str],
     keep: Callable[[pa.Table], pa.Table] | None = None,
     *,
-    max_bytes: int | None = None,
-    bytes_message: Callable[[int, int], str] | None = None,
+    byte_cap: ByteCap | None = None,
+    fold: Callable[[pa.Table], pa.Table] | None = None,
 ) -> pa.Table:
     """Read a scan batch by batch, refusing as soon as it passes a row or byte limit.
 
@@ -1352,31 +1397,33 @@ def _read_capped(
     scan
         The scan.
     max_rows
-        Most rows to keep, or `None`.
+        Most rows to keep, or `None`; counted before `fold`.
     message
         Builds the refusal from `max_rows`.
     keep
         Picks the rows of each batch that are kept and counted, or `None` for every row.
-    max_bytes
-        Most bytes of Arrow data (`nbytes`) to keep, or `None`.
-    bytes_message
-        Builds the refusal from the bytes kept and `max_bytes`; needed with `max_bytes`.
+    byte_cap
+        Most bytes of Arrow data (`nbytes`) to hold, with its refusal, or `None`.
+    fold
+        Reduces what is held, applied after each batch to the rows held so far and the batch's
+        (so that only its result is held), or `None` to hold every row kept.
 
     Returns
     -------
     pa.Table
-        The rows kept.
+        The rows kept (folded, with `fold`).
 
     Raises
     ------
     ValidationError
-        For more rows kept than `max_rows`, with `message`'s text, or more bytes kept than
-        `max_bytes`, with `bytes_message`'s, before the rest is read.
+        For more rows kept than `max_rows`, with `message`'s text, or more bytes held than
+        `byte_cap` allows, with its message, before the rest is read.
     """
     empty = schema_to_pyarrow(scan.projection()).empty_table()
-    parts = [empty if keep is None else keep(empty)]  # gives the result its schema
+    held = empty if keep is None else keep(empty)  # gives the result its schema
+    parts = [held]
     rows = 0
-    held = 0
+    size = 0
     for batch in _stream_batches(scan):
         part = pa.Table.from_batches([batch])
         if keep is not None:
@@ -1384,10 +1431,14 @@ def _read_capped(
         rows += part.num_rows
         if max_rows is not None and rows > max_rows:
             raise ValidationError(message(max_rows))
-        held += part.nbytes
-        if max_bytes is not None and held > max_bytes and bytes_message is not None:
-            raise ValidationError(bytes_message(held, max_bytes))
-        parts.append(part)
+        if fold is None:
+            parts.append(part)
+            size += part.nbytes
+        else:
+            parts = [fold(pa.concat_tables([*parts, part]))]
+            size = parts[0].nbytes
+        if byte_cap is not None and size > byte_cap.cap:
+            raise ValidationError(byte_cap.message(size, byte_cap.cap))
     return pa.concat_tables(parts)
 
 
@@ -1442,15 +1493,13 @@ def read_open_versions(
     scan = DataScan(
         table_metadata=metadata, io=file_io, row_filter=EqualTo(term=IS_CURRENT, value=True)
     )
-    return _read_capped(
-        scan,
-        max_rows,
-        max_rows_message,
-        max_bytes=max_bytes,
-        bytes_message=lambda read, cap: too_many_open_bytes_message(
-            table, read, cap, holder=holder
-        ),
-    ).cast(schema)
+    byte_cap = None
+    if max_bytes is not None:
+        byte_cap = ByteCap(
+            max_bytes,
+            lambda read, cap: too_many_open_bytes_message(table, read, cap, holder=holder),
+        )
+    return _read_capped(scan, max_rows, max_rows_message, byte_cap=byte_cap).cast(schema)
 
 
 IN_LIMIT = 10_000
@@ -1470,8 +1519,10 @@ def read_last_ends(
     key: Sequence[str],
     table: str,
     max_rows: int | None,
+    max_bytes: int | None = None,
+    holder: Literal["worker", "server"] = "worker",
 ) -> pa.Table:
-    """Read the key columns and `valid_to` of some keys' closed first versions and late ends.
+    """Read the latest end of some keys among their closed first versions and late ends.
 
     Two kinds of closed version are read: the first version of each key (`valid_from` at
     `EARLIEST_START`, at most one per key), which tells a key that comes back from one the table
@@ -1481,7 +1532,11 @@ def read_last_ends(
     match neither are skipped). The files are planned with that filter alone first: when none
     is left, as for a table that has closed nothing yet, nothing is read and no key filter is
     built. Otherwise an `In` per key column narrows the scan for at most `IN_LIMIT` keys, and
-    each batch is joined with the exact keys before it counts against `max_rows`.
+    each batch is joined with the exact keys before it counts against `max_rows`. Only each
+    key's latest `valid_to` is kept: every batch is folded into one row per key as it is read,
+    so what is held is bounded by the wanted keys, not by how many versions they have (an old
+    `valid_from` matches every closed version). A key the read returns was held by the table
+    (its closed first version is always read), one it does not return never was.
 
     Parameters
     ----------
@@ -1500,17 +1555,23 @@ def read_last_ends(
         The table's dotted name, for the message.
     max_rows
         Most closed versions to read (`QueryLimitsConfig.max_write_rows`), or `None`.
+    max_bytes
+        Most bytes of Arrow data to hold (`RunConfig.max_history_open_bytes`), or `None`; a
+        backstop, since one row per wanted key is held.
+    holder
+        The process that holds them, for the message: ``"worker"`` or ``"server"``.
 
     Returns
     -------
     pa.Table
-        The closed versions of exactly the wanted keys that are a first version or end after
-        `after`.
+        The key columns and the latest `valid_to`, one row per wanted key whose closed
+        versions include a first version or one that ends after `after`.
 
     Raises
     ------
     ValidationError
-        For more such closed versions than `max_rows` in total, refused while reading.
+        For more such closed versions than `max_rows` in total, or more bytes held than
+        `max_bytes`, refused while reading.
     """
     columns = (*key, VALID_TO)
     target = metadata.schema().select(*columns).as_arrow()
@@ -1532,12 +1593,44 @@ def read_last_ends(
     scan = DataScan(
         table_metadata=metadata, io=file_io, row_filter=row_filter, selected_fields=columns
     )
+    byte_cap = None
+    if max_bytes is not None:
+        byte_cap = ByteCap(
+            max_bytes,
+            lambda read, cap: too_many_open_bytes_message(
+                table, read, cap, holder=holder, what="ends"
+            ),
+        )
     return _read_capped(
         scan,
         max_rows,
         lambda cap: _too_many_ends(cap, table, after),
         keep=lambda part: part.cast(target).join(keys, keys=list(key), join_type="left semi"),
+        byte_cap=byte_cap,
+        fold=lambda held: _latest_ends(held, key, target),
     )
+
+
+def _latest_ends(ends: pa.Table, key: Sequence[str], target: pa.Schema) -> pa.Table:
+    """Keep each key's latest `valid_to`.
+
+    Parameters
+    ----------
+    ends
+        Key columns and `valid_to`, any number of rows per key.
+    key
+        The natural key's columns.
+    target
+        The result's schema: the key columns, then `valid_to`.
+
+    Returns
+    -------
+    pa.Table
+        One row per key, with its largest `valid_to`.
+    """
+    latest = ends.group_by(list(key)).aggregate([(VALID_TO, "max")])
+    columns = {column: latest.column(column) for column in key}
+    return pa.table({**columns, VALID_TO: latest.column(f"{VALID_TO}_max")}).cast(target)
 
 
 def _too_many_ends(cap: int, table: str, after: datetime) -> str:
