@@ -193,6 +193,43 @@ def history_columns_issue(column: str) -> str:
     )
 
 
+def _unstored_valid_from_issues(metadata: AssetMetadata) -> list[str]:
+    """Refuse a `columns:` text or a `references:` entry for a history asset's `valid_from:` column.
+
+    The column is not stored: its value becomes each version's `valid_from`, so a text would
+    describe a column the table does not have, and a reference check could never read it.
+
+    Parameters
+    ----------
+    metadata
+        The merged metadata of an asset with `write: history`.
+
+    Returns
+    -------
+    list of str
+        One message per field that names the column; empty without `valid_from:`.
+    """
+    column = metadata.valid_from
+    if column is None:
+        return []
+    what = (
+        f"`{column}` is the `valid_from:` column, which `write: history` does not store (its "
+        "value becomes each version's `valid_from`"
+    )
+    issues: list[str] = []
+    if column in metadata.columns:
+        issues.append(
+            f"`columns: {column}`: {what}, which Lakana describes itself); remove it from "
+            "`columns:`"
+        )
+    if column in metadata.references:
+        issues.append(
+            f"`references: {column}`: {what}), so no check can read it; remove it from "
+            "`references:`"
+        )
+    return issues
+
+
 def model_issues(metadata: AssetMetadata, *, table: str) -> list[str]:
     """Check an asset's model fields against the rules of its kind.
 
@@ -208,7 +245,8 @@ def model_issues(metadata: AssetMetadata, *, table: str) -> list[str]:
     list of str
         The spec's fixed texts for a missing grain or key, a dimension's `key: none`, a
         `key: none` without a kind that allows it, `write: history` on another kind than a
-        dimension, a `columns:` text for a column history adds, a `checks:` family the asset has
+        dimension, a `columns:` text for a column history adds, a `columns:` text or a
+        `references:` entry for its unstored `valid_from:` column, a `checks:` family the asset has
         nothing for, and `measure_issues`' texts; empty when the fields agree.
     """
     kind, key = metadata.kind, metadata.key
@@ -238,6 +276,7 @@ def model_issues(metadata: AssetMetadata, *, table: str) -> list[str]:
             for name in sorted(metadata.columns)
             if name.casefold() in reserved
         )
+        issues.extend(_unstored_valid_from_issues(metadata))
     issues.extend(measure_issues(kind, key, metadata.measures, table=table))
     return issues
 

@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
-import duckdb
+from datetime import UTC, datetime
 
+import duckdb
+import pyarrow as pa
+
+from lakana_core.catalog.history import EARLIEST_START, UTC_MICROS, first_versions, plan_history
 from lakana_core.projects.checks import count_query
 from lakana_core.projects.model_checks import (
     history_key_unique_sql,
@@ -211,3 +215,57 @@ def test_the_valid_at_reference_excludes_the_end_of_a_version_before_a_gap() -> 
     sql = valid_at_reference_sql("gold.f", "customer_id", "gold.d", "customer_id", "ordered_at")
     failing = sorted(con.execute(f"SELECT order_id FROM ({sql})").fetchall())  # nosec B608
     assert failing == [(2,), (3,)]
+
+
+def test_every_order_finds_the_first_version_of_a_customer_new_in_this_run() -> None:
+    """A first version reaches back to the earliest time, so an order placed before the run fits.
+
+    The CRM creates C-1 at 09:00, C-1 orders at 09:05 and on 2026-11-01; the 10:00 run is the
+    first that sees C-1. A later run changes C-1 at 12:00 and an order at 12:30 finds the new
+    version.
+    """
+    first = first_versions(
+        pa.table({"customer_id": ["C-1"], "region": ["north"]}),
+        key=["customer_id"],
+        table="gold.dim_customer",
+        starts=pa.array([EARLIEST_START], UTC_MICROS),
+    )
+    noon = datetime(2026, 11, 2, 12, tzinfo=UTC)
+    plan = plan_history(
+        pa.table({"customer_id": ["C-1"], "region": ["south"]}),
+        first,
+        key=["customer_id"],
+        table="gold.dim_customer",
+        schema=first.schema,
+        starts=pa.array([noon], UTC_MICROS),
+        clock=noon,
+        valid_from=None,
+        close_missing=False,
+        last_ends=lambda wanted, after: first.slice(0, 0).select(["customer_id", "valid_to"]),
+        environment="dev",
+    )
+    versions = pa.concat_tables([plan.closed, plan.opened])
+    con = duckdb.connect()
+    con.execute("SET TimeZone = 'UTC'")
+    con.execute("CREATE SCHEMA gold")
+    con.register("versions", versions)
+    con.execute("CREATE TABLE gold.dim_customer AS SELECT * FROM versions")
+    con.execute(
+        "CREATE TABLE gold.f (order_id VARCHAR, customer_id VARCHAR, ordered_at TIMESTAMPTZ)"
+    )
+    con.execute(
+        "INSERT INTO gold.f VALUES ('O-1', 'C-1', '2026-11-01 09:05:00+00'), "
+        "('O-2', 'C-1', DATE '2026-11-01'), ('O-3', 'C-1', '2026-11-02 12:30:00+00'), "
+        "('O-4', 'C-2', '2026-11-01 09:05:00+00')"
+    )
+    sql = valid_at_reference_sql(
+        "gold.f", "customer_id", "gold.dim_customer", "customer_id", "ordered_at"
+    )
+    failing = con.execute(f"SELECT order_id FROM ({sql})").fetchall()  # nosec B608
+    placed = con.execute(
+        "SELECT f.order_id, d.region FROM gold.f AS f JOIN gold.dim_customer AS d "
+        "ON f.customer_id = d.customer_id AND d.valid_from <= f.ordered_at "
+        "AND (d.valid_to IS NULL OR f.ordered_at < d.valid_to) ORDER BY f.order_id"
+    ).fetchall()
+    assert failing == [("O-4",)]
+    assert placed == [("O-1", "north"), ("O-2", "north"), ("O-3", "south")]

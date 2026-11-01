@@ -104,15 +104,19 @@ from lakana_core.catalog.health import (
     snapshot_stats,
 )
 from lakana_core.catalog.history import (
+    EARLIEST_START,
     HISTORY_KEY_PROPERTY,
     RUN_WROTE_MESSAGE,
+    UTC_MICROS,
     HistoryResult,
+    check_first_versions_order,
     check_history_batch,
     check_history_table,
     check_starts,
     conform_batch,
     count_open_versions,
     first_versions,
+    newest_run_start,
     plan_history,
     read_last_ends,
     read_open_versions,
@@ -6366,8 +6370,10 @@ class CatalogService:
             Most rows of the batch and most open versions (`QueryLimitsConfig.max_write_rows`),
             or `None`.
         max_open_versions
-            Most open versions the table may have (`RunConfig.max_history_open_versions`),
-            counted from the manifests before any is read.
+            Most open versions the table may have (`RunConfig.max_history_open_versions`):
+            the open versions counted from the manifests and the result's rows before any
+            version is read, and the open versions the planned write would leave before it is
+            staged.
         advice
             How a repeated key is explained: `SDK_ADVICE` or `SQL_ADVICE`.
 
@@ -6389,8 +6395,11 @@ class CatalogService:
             versions of returning keys than `max_rows`, a table that is not a history table of
             this key, a batch without the table's columns, a refusal of `plan_history`, a change
             by a run whose own write is the table's current snapshot (`written_by_run`), a table
-            that is not managed, a row filter or column mask that applies to `p`, or more open
-            versions than `max_open_versions`.
+            that is not managed, a row filter or column mask that applies to `p`, more open
+            versions or result rows than `max_open_versions` (before any version is read), more
+            open versions after the planned write (before anything is staged), or first versions
+            to replace or close after a run that started later wrote the table
+            (`check_first_versions_order`).
         UnsupportedTableError
             For a table with row-level delete files (`count_open_versions`).
         ConflictError
@@ -6423,11 +6432,12 @@ class CatalogService:
             if rows.num_rows > max_open_versions:
                 raise ValidationError(
                     too_many_open_versions_message(
-                        ref.dotted(), rows.num_rows, max_open_versions, create=True
+                        ref.dotted(), rows.num_rows, max_open_versions, state="create"
                     )
                 )
             check_starts(starts, clock, valid_from)
-            first = first_versions(rows, key=key, table=ref.dotted(), starts=starts)
+            earliest = pa.repeat(pa.scalar(EARLIEST_START, UTC_MICROS), rows.num_rows)
+            first = first_versions(rows, key=key, table=ref.dotted(), starts=earliest)
             try:
                 created = self._write_new_table(
                     p,
@@ -6471,7 +6481,13 @@ class CatalogService:
         if open_count > max_open_versions:
             raise ValidationError(
                 too_many_open_versions_message(
-                    ref.dotted(), open_count, max_open_versions, create=False
+                    ref.dotted(), open_count, max_open_versions, state="open"
+                )
+            )
+        if rows.num_rows > max_open_versions:
+            raise ValidationError(
+                too_many_open_versions_message(
+                    ref.dotted(), rows.num_rows, max_open_versions, state="result"
                 )
             )
         plan = plan_history(
@@ -6493,6 +6509,19 @@ class CatalogService:
             return HistoryResult(None, 0, 0, 0, table_id=row.id)
         if written_by_run(current, p.run_context):
             raise ValidationError(RUN_WROTE_MESSAGE.format(table=ref.dotted()))
+        remaining = open_count + plan.versions_opened - plan.versions_closed
+        if remaining > max_open_versions:
+            raise ValidationError(
+                too_many_open_versions_message(
+                    ref.dotted(), remaining, max_open_versions, state="after"
+                )
+            )
+        check_first_versions_order(
+            plan,
+            clock,
+            lambda: newest_run_start(self._session, current),
+            table=ref.dotted(),
+        )
         staged = stage_history(
             current,
             loaded.metadata_location,

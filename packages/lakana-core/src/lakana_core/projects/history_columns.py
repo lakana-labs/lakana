@@ -235,7 +235,10 @@ def added_column_descriptions(table: str, key: Sequence[str]) -> dict[str, str]:
             f"Identifies this version: a hash of the key ({named}) and `valid_from`. A fact can "
             "store it to point at exactly this version."
         ),
-        VALID_FROM: "When this version became valid (UTC).",
+        VALID_FROM: (
+            "When this version became valid (UTC); a key's first version starts at the earliest "
+            "time, 0001-01-01T00:00:00Z, so that every row that references the key finds it."
+        ),
         VALID_TO: (
             "When this version stopped being valid (UTC); empty while it is the current version."
         ),

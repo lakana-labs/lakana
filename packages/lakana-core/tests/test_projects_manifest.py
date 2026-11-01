@@ -1283,7 +1283,10 @@ def test_history_raises_the_version_to_12_and_records_how_it_writes() -> None:
     assert entry["metadata"]["columns"] == {
         "dim_customer_key": "Identifies this version: a hash of the key (`customer_id`) and "
         "`valid_from`. A fact can store it to point at exactly this version.",
-        "valid_from": "When this version became valid (UTC).",
+        "valid_from": (
+            "When this version became valid (UTC); a key's first version starts at the earliest "
+            "time, 0001-01-01T00:00:00Z, so that every row that references the key finds it."
+        ),
         "valid_to": "When this version stopped being valid (UTC); empty while it is the current "
         "version.",
         "is_current": "Whether this is the current version of its key.",

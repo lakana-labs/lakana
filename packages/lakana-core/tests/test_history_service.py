@@ -29,6 +29,7 @@ from lakana_core.auth import Action, AllowAllAuthorization, PrincipalRef, RunCon
 from lakana_core.catalog import history as history_module
 from lakana_core.catalog import service as service_module
 from lakana_core.catalog.history import (
+    EARLIEST_START,
     HISTORY_KEY_PROPERTY,
     HistoryResult,
     check_history_table,
@@ -45,7 +46,7 @@ from lakana_core.errors import (
     ValidationError,
 )
 from lakana_core.identifiers import NamespacePath, TableRef
-from lakana_core.models import AuditEvent, AuditEventType, LineageEdge
+from lakana_core.models import AuditEvent, AuditEventType, LineageEdge, Run, TaskRun
 from lakana_core.policy.column_masks import ColumnMaskService
 from lakana_core.policy.row_filters import RowFilterService
 from lakana_core.runs.lockdown import PROTECTED_MESSAGE
@@ -264,7 +265,10 @@ def test_the_first_run_creates_the_table_with_every_row_open(hist: Hist) -> None
     ]
     assert [f.required for f in metadata.schema().fields][2:] == [True, True, False, True]
     assert json.loads(metadata.properties[HISTORY_KEY_PROPERTY]) == ["customer_id"]
-    assert hist.versions() == [("A", "north", T1, None, True), ("B", "north", T1, None, True)]
+    assert hist.versions() == [
+        ("A", "north", EARLIEST_START, None, True),
+        ("B", "north", EARLIEST_START, None, True),
+    ]
     assert [e.detail["mode"] for e in hist.events(AuditEventType.TABLE_WRITE)] == ["create"]
 
 
@@ -279,11 +283,11 @@ def test_a_later_run_opens_closes_and_leaves_alone_in_one_snapshot(hist: Hist) -
     assert commit.call_count == 1
     assert commit.call_args.kwargs["own_data_files"] is True
     assert hist.versions() == [
-        ("A", "north", T1, T2, False),
+        ("A", "north", EARLIEST_START, T2, False),
         ("A", "south", T2, None, True),
-        ("B", "north", T1, None, True),
-        ("C", "north", T1, T2, False),
-        ("D", "west", T2, None, True),
+        ("B", "north", EARLIEST_START, None, True),
+        ("C", "north", EARLIEST_START, T2, False),
+        ("D", "west", EARLIEST_START, None, True),
     ]
     after = hist.static().metadata
     assert {s.snapshot_id for s in after.snapshots} == {
@@ -352,25 +356,37 @@ def test_a_key_that_comes_back_opens_a_new_version(hist: Hist) -> None:
     result = hist.run([("A", "north"), ("B", "north")], T3, close_missing=True)
 
     assert (result.versions_opened, result.versions_closed) == (1, 0)
-    assert hist.versions()[:2] == [("A", "north", T1, T2, False), ("A", "north", T3, None, True)]
+    assert hist.versions()[:2] == [
+        ("A", "north", EARLIEST_START, T2, False),
+        ("A", "north", T3, None, True),
+    ]
 
 
-def test_a_declared_valid_from_starts_the_version_and_is_not_stored(hist: Hist) -> None:
-    data = hist.batch([("A", "north")]).append_column(
-        "changed_at", pa.array([datetime(2026, 1, 15, tzinfo=UTC)], pa.timestamp("us", tz="UTC"))
-    )
+def test_a_declared_valid_from_starts_a_later_version_and_is_not_stored(hist: Hist) -> None:
+    changed_at = datetime(2026, 2, 15, tzinfo=UTC)
     with mock.patch.object(service_module, "run_clock", return_value=T1):
         hist.service.history(
             hist.admin,
             hist.ref(),
-            data,
+            _with_start([("A", "north")], datetime(2026, 1, 15, tzinfo=UTC)),
             key=["customer_id"],
             valid_from="changed_at",
             expected_snapshot_id="none",
         )
+    with mock.patch.object(service_module, "run_clock", return_value=T2):
+        hist.service.history(
+            hist.admin,
+            hist.ref(),
+            _with_start([("A", "south")], changed_at),
+            key=["customer_id"],
+            valid_from="changed_at",
+        )
 
     assert "changed_at" not in hist.static().metadata.schema().column_names
-    assert hist.versions() == [("A", "north", datetime(2026, 1, 15, tzinfo=UTC), None, True)]
+    assert hist.versions() == [
+        ("A", "north", EARLIEST_START, changed_at, False),
+        ("A", "south", changed_at, None, True),
+    ]
 
 
 def test_a_returning_key_closed_later_than_its_new_start_is_refused(hist: Hist) -> None:
@@ -463,7 +479,7 @@ def test_a_lost_race_conflicts_and_the_retry_diffs_against_the_new_state(hist: H
     retried = hist.run([("A", "south"), ("B", "north")], T3)
     assert (retried.versions_opened, retried.versions_closed) == (1, 1)
     assert sorted((v[2], v[1], v[3], v[4]) for v in hist.versions() if v[0] == "A") == [
-        (T1, "north", T2, False),
+        (EARLIEST_START, "north", T2, False),
         (T2, "east", T3, False),
         (T3, "south", None, True),
     ]
@@ -716,7 +732,7 @@ def test_an_empty_first_run_creates_the_table_and_the_next_opens_its_rows(hist: 
 
     assert (created.created, created.snapshot_id, created.versions_opened) == (True, None, 0)
     assert (result.versions_opened, result.versions_closed) == (1, 0)
-    assert hist.versions() == [("A", "north", T2, None, True)]
+    assert hist.versions() == [("A", "north", EARLIEST_START, None, True)]
 
 
 @pytest.mark.parametrize("stored", ["", "not json", '{"customer_id": 1}', "[]", "[1]"])
@@ -934,20 +950,21 @@ def test_the_closed_versions_a_returning_key_reads_are_capped(hist: Hist) -> Non
     assert sorted(ends.column("valid_to").to_pylist()) == [T2, t4]
     assert str(one.value) == (
         "Together, the keys this run opens again have more than 1 closed version in "
-        "gold.dim_customer that ends after 2026-02-01T00:00:00Z. That is more rows than one "
+        "gold.dim_customer to read (their first versions, and the versions that end after "
+        "2026-02-01T00:00:00Z). That is more rows than one "
         "write may read (the max_write_rows setting, a total for all keys), so nothing was "
         "committed. Start the returning versions later (a later `valid_from`), or ask an "
         "operator to raise max_write_rows."
     )
     assert str(none.value).startswith(
         "Together, the keys this run opens again have more than 0 closed versions in "
-        "gold.dim_customer that end after 2026-02-01T00:00:00Z. That is more rows"
+        "gold.dim_customer to read (their first versions, and the versions that end after "
+        "2026-02-01T00:00:00Z). That is more rows"
     )
 
 
-def test_no_key_filter_is_built_when_no_closed_version_ends_late(hist: Hist) -> None:
+def test_no_key_filter_is_built_when_the_table_has_no_closed_version(hist: Hist) -> None:
     hist.run([("A", "north")], T1, first=True)
-    hist.run([("A", "south")], T2)  # A's first version is closed at T2
     metadata = hist.static().metadata
     file_io = StorageResolver(hist.session).for_environment("dev").file_io
     wanted = pa.table({"customer_id": ["A", "B"]})
@@ -1091,3 +1108,139 @@ def test_a_table_with_row_level_delete_files_is_refused_with_its_cause(hist: His
         "(`lakana table delete gold.dim_customer --env dev`) and let the next run create it "
         "again (its history starts again with that run)."
     )
+
+
+def test_a_returning_keys_first_version_is_read_whatever_its_end(hist: Hist) -> None:
+    hist.run([("A", "north"), ("B", "north")], T1, first=True)
+    hist.run([("B", "north")], T2, close_missing=True)  # A's first version ends at T2
+    metadata = hist.static().metadata
+    file_io = StorageResolver(hist.session).for_environment("dev").file_io
+    wanted = pa.table({"customer_id": ["A", "C"]})
+
+    ends = read_last_ends(metadata, file_io, wanted, T3, key=["customer_id"], table=DIM, max_rows=5)
+
+    assert ends.to_pylist() == [{"customer_id": "A", "valid_to": T2}]
+
+
+def test_a_new_key_starts_at_the_earliest_time_and_a_returning_one_at_the_clock(
+    hist: Hist,
+) -> None:
+    hist.run([("A", "north")], T1, first=True)
+    hist.run([], T2, close_missing=False)
+    hist.run([("B", "north")], T2, close_missing=True)  # A closed at T2, B new
+
+    hist.run([("A", "north"), ("B", "south")], T3)
+
+    assert hist.versions() == [
+        ("A", "north", EARLIEST_START, T2, False),
+        ("A", "north", T3, None, True),
+        ("B", "north", EARLIEST_START, T3, False),
+        ("B", "south", T3, None, True),
+    ]
+
+
+def _started(hist: Hist, started: datetime) -> PrincipalRef:
+    """Act as a running task whose run started at a given time (the run clock it reads).
+
+    Parameters
+    ----------
+    hist
+        The helpers.
+    started
+        The run's `started_at`.
+
+    Returns
+    -------
+    PrincipalRef
+        The admin with that task run's run context.
+    """
+    principal = _task(hist)
+    assert principal.run_context is not None
+    task = hist.session.get_one(TaskRun, principal.run_context.task_run_id)
+    hist.session.get_one(Run, task.run_id).started_at = started
+    hist.session.commit()
+    return principal
+
+
+def test_an_older_run_may_not_replace_a_first_version_after_a_newer_run_wrote(
+    hist: Hist,
+) -> None:
+    newer, older = _started(hist, T2), _started(hist, T1)
+    hist.service.history(
+        newer,
+        hist.ref(),
+        hist.batch([("A", "north")]),
+        key=["customer_id"],
+        expected_snapshot_id="none",
+    )
+    before = hist.versions()
+
+    with pytest.raises(ValidationError) as changed:
+        hist.service.history(older, hist.ref(), hist.batch([("A", "south")]), key=["customer_id"])
+    with pytest.raises(ValidationError) as missing:
+        hist.service.history(
+            older,
+            hist.ref(),
+            hist.batch([("B", "north")]),
+            key=["customer_id"],
+            close_missing=True,
+        )
+
+    assert str(changed.value) == (
+        "A run that started after this one (2026-03-01T00:00:00Z) already wrote "
+        "gold.dim_customer, and this run (2026-02-01T00:00:00Z) would replace or close 1 first "
+        "version that it may have opened with newer values, so nothing was written. Start a new "
+        "run."
+    )
+    assert str(missing.value).startswith("A run that started after this one (2026-03-01")
+    assert hist.versions() == before
+    added = hist.service.history(
+        older, hist.ref(), hist.batch([("B", "north")]), key=["customer_id"]
+    )
+    assert added.versions_opened == 1
+
+
+def test_a_result_over_the_open_versions_cap_is_refused_before_anything_is_read(
+    hist: Hist,
+) -> None:
+    hist.run([("A", "north")], T1, first=True)
+    four_new = [("A", "north"), ("B", "north"), ("C", "north"), ("D", "north"), ("E", "north")]
+
+    with (
+        mock.patch.object(service_module, "read_open_versions", side_effect=AssertionError),
+        pytest.raises(ValidationError) as info,
+    ):
+        hist.run(four_new, T2, max_open_versions=2)
+
+    assert str(info.value) == (
+        "The asset's result for gold.dim_customer has 5 rows, and each can open a version: "
+        "more than LAKANA_RUN__MAX_HISTORY_OPEN_VERSIONS (2) allows. A history write holds every "
+        "open version in the worker's memory, roughly 2 GiB per million open versions of 8 "
+        "columns and more for wider rows, so nothing was read or written. Ask an operator to "
+        "raise LAKANA_RUN__MAX_HISTORY_OPEN_VERSIONS together with the worker's memory limit "
+        "(LAKANA_WORKER__MEMORY_LIMIT)."
+    )
+    assert hist.run([("A", "south")], T3, max_open_versions=2).versions_opened == 1
+
+
+def test_a_write_that_would_leave_too_many_open_versions_stages_nothing(hist: Hist) -> None:
+    hist.run([("A", "north"), ("B", "north")], T1, first=True)
+    parquet = hist.files(".parquet")
+
+    with (
+        mock.patch.object(service_module, "stage_history", side_effect=AssertionError),
+        pytest.raises(ValidationError) as info,
+    ):
+        hist.run([("C", "north"), ("D", "north")], T2, max_open_versions=3)
+
+    assert str(info.value) == (
+        "gold.dim_customer would have 4 open versions after this write, more than "
+        "LAKANA_RUN__MAX_HISTORY_OPEN_VERSIONS (3) allows. A history write holds every open "
+        "version in the worker's memory, roughly 2 GiB per million open versions of 8 columns "
+        "and more for wider rows, so nothing was written. Ask an operator to raise "
+        "LAKANA_RUN__MAX_HISTORY_OPEN_VERSIONS together with the worker's memory limit "
+        "(LAKANA_WORKER__MEMORY_LIMIT)."
+    )
+    assert hist.files(".parquet") == parquet
+    replaced = hist.run([("C", "north")], T2, max_open_versions=2, close_missing=True)
+    assert (replaced.versions_opened, replaced.versions_closed) == (1, 2)

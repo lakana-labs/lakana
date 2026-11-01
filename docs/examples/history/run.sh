@@ -44,10 +44,10 @@ python3 -c '
 import json, sys
 rows = [(r["customer_id"], r["region"], str(r["valid_from"]), r["is_current"], r["closed"]) for r in json.loads(sys.argv[1])]
 assert rows == [
-    ("C-001", "north", "2026-01-01", False, True),
-    ("C-002", "north", "2026-01-01", False, True),
+    ("C-001", "north", "0001-01-01", False, True),
+    ("C-002", "north", "0001-01-01", False, True),
     ("C-002", "south", "2026-02-01", True, False),
-    ("C-003", "west", "2026-02-01", True, False),
+    ("C-003", "west", "0001-01-01", True, False),
 ], rows
 ' "$out"
 
@@ -74,9 +74,10 @@ tr -s '\n ' ' ' <<<"$out" | grep -Fq 'which keeps the history of its rows (`writ
 git checkout -q HEAD~1 -- assets/gold/fact_orders.sql
 git commit -q -am "The reference says its time again"
 
-# An order dated before its customer's first version fails the reference check, which blocks.
+# A key's first version reaches back to the earliest time: an order dated before the run that
+# first saw its customer still finds that version, so the reference check passes.
 cp "$EXAMPLE_DIR/changes/orders.sql" assets/silver/orders.sql
-git commit -q -am "An order from before the customer existed"
+git commit -q -am "An order from before the first run"
 lakana deploy --env dev >/dev/null
-lakana run --env dev >/dev/null || true
-test "$(check_outcome)" = "failed"
+lakana run --env dev >/dev/null
+test "$(check_outcome)" = "passed"

@@ -176,6 +176,7 @@ _DIM = {"kind": "dimension", "grain": "One row per customer and version.", "key"
     ("fields", "expected"),
     [
         ({**_DIM, "write": "history"}, []),
+        ({**_DIM, "write": "history", "valid_from": "changed_at"}, []),
         (
             {"write": "history", "key": ("customer_id",)},
             [
@@ -195,6 +196,23 @@ _DIM = {"kind": "dimension", "grain": "One row per customer and version.", "key"
             [
                 "`columns: Is_Current`: `write: history` adds this column and describes it "
                 "itself; remove it from `columns:`"
+            ],
+        ),
+        (
+            {
+                **_DIM,
+                "write": "history",
+                "valid_from": "changed_at",
+                "columns": {"changed_at": "When the CRM changed the row."},
+                "references": {"changed_at": "gold.dim_calendar"},
+            },
+            [
+                "`columns: changed_at`: `changed_at` is the `valid_from:` column, which "
+                "`write: history` does not store (its value becomes each version's `valid_from`, "
+                "which Lakana describes itself); remove it from `columns:`",
+                "`references: changed_at`: `changed_at` is the `valid_from:` column, which "
+                "`write: history` does not store (its value becomes each version's "
+                "`valid_from`), so no check can read it; remove it from `references:`",
             ],
         ),
     ],

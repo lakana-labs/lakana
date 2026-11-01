@@ -182,8 +182,10 @@ audit event are in [Merging rows into a table](merge.md).
 Keeps every version of a dimension's rows: each run opens a version for a new or changed key and
 closes the one it replaces, and Lakana adds `valid_from`, `valid_to`, `is_current` and a
 surrogate key `<table>_key`. It needs `kind: dimension` with `grain:` and `key:`; `valid_from:`
-names the column a version starts at, and `close_missing: true` closes the keys the `SELECT` no
-longer returns. See [Keeping the history of a dimension](history.md).
+names the column a later version starts at, and `close_missing: true` closes the keys the
+`SELECT` no longer returns. A key's first version starts at the earliest time,
+0001-01-01T00:00:00Z, with or without `valid_from:`, so that every row that references the key
+finds a version. See [Keeping the history of a dimension](history.md).
 
 ### `replace`
 
@@ -209,6 +211,8 @@ Each of these fails the deploy with an issue at the block's line:
 | ``Column `changed_at` in `valid_from:` is not a column of `gold.dim_customer`'s SELECT; add it to the SELECT, or change `valid_from:`.`` | A `valid_from:` the `SELECT` does not return (when the `SELECT` spells it in another letter case, the message names that spelling). |
 | ``Column `is_current` of `gold.dim_customer`'s SELECT has a name `write: history` adds itself (valid_from, valid_to, is_current, dim_customer_key); rename it in the SELECT, for example `AS source_is_current`.`` | A `SELECT` column named like an added column, in any letter case. |
 | ``` `columns: is_current`: `write: history` adds this column and describes it itself; remove it from `columns:` ``` | A text for an added column. |
+| ``` `columns: changed_at`: `changed_at` is the `valid_from:` column, which `write: history` does not store (its value becomes each version's `valid_from`, which Lakana describes itself); remove it from `columns:` ``` | A text for the `valid_from:` column. |
+| ``` `references: changed_at`: `changed_at` is the `valid_from:` column, which `write: history` does not store (its value becomes each version's `valid_from`), so no check can read it; remove it from `references:` ``` | A reference on the `valid_from:` column. |
 | ``use one: `write: append` with `watermark:` replaces `materialize: incremental` `` | Both spellings in one block. |
 
 ### The older spelling

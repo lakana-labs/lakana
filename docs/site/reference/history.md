@@ -11,7 +11,8 @@ happened.
 The asset's `SELECT` returns the **current state** of every row, as for a replace. Each run
 compares it with the table's open versions and, in one snapshot:
 
-- opens a version for a key the table has not seen;
+- opens the first version of a key the table has not seen, which reaches back to the earliest
+  time ([When a version starts](#when-a-version-starts));
 - closes the open version of a key whose values changed and opens a new one;
 - leaves a key whose values are the same alone;
 - with `close_missing: true`, closes the open version of a key the `SELECT` no longer returns.
@@ -41,20 +42,24 @@ The second run leaves:
 ┏━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━┓
 ┃ customer_id ┃ name   ┃ region ┃ valid_from ┃ is_current ┃ closed ┃
 ┡━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━┩
-│ C-001       │ Ada    │ north  │ 2026-01-01 │ False      │ True   │
-│ C-002       │ Grace  │ north  │ 2026-01-01 │ False      │ True   │
+│ C-001       │ Ada    │ north  │ 0001-01-01 │ False      │ True   │
+│ C-002       │ Grace  │ north  │ 0001-01-01 │ False      │ True   │
 │ C-002       │ Grace  │ south  │ 2026-02-01 │ True       │ False  │
-│ C-003       │ Edsger │ west   │ 2026-02-01 │ True       │ False  │
+│ C-003       │ Edsger │ west   │ 0001-01-01 │ True       │ False  │
 └─────────────┴────────┴────────┴────────────┴────────────┴────────┘
 4 rows
 ```
+
+Each key's first version, Edsger's too, starts at 0001-01-01: a first version reaches back to the
+earliest time, so that every order finds its customer ([When a version starts](#when-a-version-starts)).
+Grace's move starts at the `changed_at` the CRM gave it.
 
 ## The header
 
 | Key | Meaning | Rules |
 |---|---|---|
 | `write: history` | Keep every version. | Needs `kind: dimension`, with `grain:` and a `key:` (not `none`). The key is the natural key, at most 8 columns. No `watermark:`: the `SELECT` returns every row every time. No `evolve_schema`. |
-| `valid_from:` | The column that says when a row's values took effect. | Optional. Without it a new version starts at the run's start time. A `date` (midnight UTC), a `timestamp` (read as UTC) or a `timestamptz`; never a key column. The column is not stored: its value is the version's `valid_from`. |
+| `valid_from:` | The column that says when a row's values took effect. | Optional. Without it a change starts its new version at the run's start time. A key's first version starts at the earliest time either way ([When a version starts](#when-a-version-starts)). A `date` (midnight UTC), a `timestamp` (read as UTC) or a `timestamptz`; never a key column. The column is not stored: its value is the version's `valid_from`, so `columns:` may not describe it and `references:` may not name it. |
 | `close_missing:` | Close the open version of a key the `SELECT` no longer returns. | `true` or `false` (the default). The version is closed at the run's start time, never deleted. |
 
 Only SQL assets can write history so far: a Python asset with `write="history"` is refused at
@@ -69,7 +74,7 @@ The table has the `SELECT`'s columns (without the `valid_from:` column), then:
 | Column | Type | Description, as `lakana table get` shows it |
 |---|---|---|
 | `<table>_key` | `string`, required | Identifies this version: a hash of the key (`customer_id`) and `valid_from`. A fact can store it to point at exactly this version. |
-| `valid_from` | `timestamptz`, required | When this version became valid (UTC). |
+| `valid_from` | `timestamptz`, required | When this version became valid (UTC); a key's first version starts at the earliest time, 0001-01-01T00:00:00Z, so that every row that references the key finds it. |
 | `valid_to` | `timestamptz` | When this version stopped being valid (UTC); empty while it is the current version. |
 | `is_current` | `boolean`, required | Whether this is the current version of its key. |
 
@@ -94,9 +99,12 @@ names, in any letter case, and `columns:` may not describe them.
 3. The key is the first 16 bytes of the input's SHA-256, as 32 lowercase hex characters.
 
 For example, `customer_id = 'C-001'` with `valid_from` 2026-10-31T00:00:00Z
-(1793404800000000 µs) gives `7e18e0a16407926388ca6000694864ce`. A key column of another type
-(`float`, `double`, `time`, a nested type) is refused when the run starts, and so is a uuid
-(cast it with `CAST(id AS VARCHAR)`) and a timestamp key finer than a microsecond (cast it with
+(1793404800000000 µs) gives `7e18e0a16407926388ca6000694864ce`, and its first version, with
+`valid_from` 0001-01-01T00:00:00Z (-62135596800000000 µs), gives
+`fe8185b5f5c48867dc8170a32ef03416`. A key column of another type (`float`, `double`, `time`, a
+nested type) is refused when the run starts, with the cast to write (a `double` becomes
+`CAST(price AS DECIMAL(18, 2))` or text), and so is a uuid (cast it with
+`CAST(id AS VARCHAR)`) and a timestamp key finer than a microsecond (cast it with
 `CAST(ts AS TIMESTAMP)`).
 
 ## How a change is found
@@ -109,17 +117,26 @@ timestamps opens nothing.
 
 ## When a version starts
 
-The run's start time is the time the run began, the same for every table and every retry of
-one run. A new version starts there, unless `valid_from:` names a column. Then, for each new
-version:
+**A key's first version** (a key the table has never held, in no version open or closed)
+starts at the earliest time, 0001-01-01T00:00:00Z, with or without `valid_from:`. It reaches
+back so that every row of a fact finds a version once the key exists, also an order placed
+before the run that first saw its customer, and every row of a first load. The cost: the
+`valid_from` of a first version is not when the key appeared. The run that added it is in
+the table's snapshots and in the run history.
 
-- the value may not be NULL, nor later than the run's start time, nor finer than a microsecond;
+**Every later version** (a change, or a key that comes back after it was closed) starts at the
+run's start time: the time the run began, the same for every table and every retry of one run.
+With `valid_from:` it starts at that column's value instead. Then, for each new version:
+
+- the value may not be NULL, nor later than the run's start time, nor finer than a microsecond
+  (checked for a first version's row too, although its version starts at the earliest time);
 - it must be later than the `valid_from` of the version it closes;
 - a key that comes back after being closed may not start before its last version ended.
 
 The last rule holds without `valid_from:` too, with the run's start time: a run that started
-before another run closed the key cannot reopen it. A run that would break one of these writes
-nothing (below).
+before another run closed the key cannot reopen it. A run that started before another run that
+already wrote the table cannot replace or close a first version either, since that run may have
+opened it with newer values. A run that would break one of these writes nothing (below).
 
 ## What a run can refuse
 
@@ -129,14 +146,14 @@ The messages give counts, never values. Nothing is written.
 |---|---|
 | An empty result with `close_missing: true` | ``The asset's result is empty, and `close_missing: true` would close every open version of gold.dim_customer; nothing was written. If the source really is empty, remove `close_missing:` for this run.`` |
 | A column named like an added one (a `SELECT *` is checked when it runs) | ``Column `is_current` of `gold.dim_customer`'s SELECT has a name `write: history` adds itself (valid_from, valid_to, is_current, dim_customer_key); rename it in the SELECT, for example `AS source_is_current`.`` |
-| A key column of another type | ``key column `price` has type double; a history key must be a string, an integer, a decimal, a date, a timestamp, a boolean or binary`` |
+| A key column of another type | ``key column `price` has type double; a history key must be a string, an integer, a decimal, a date, a timestamp, a boolean or binary. Cast it in the SELECT, for example `CAST(price AS DECIMAL(18, 2))` (with the scale its values need) or `CAST(price AS VARCHAR)`.`` For a type other than a `float` or `double`, the example is `CAST(… AS VARCHAR)` alone. |
 | A nested column | ``Column `tags` has type list<string>; a history write compares every column and cannot compare this type. Turn it into a string in the SELECT, for example with `to_json(tags)`.`` |
 | A `valid_from:` column of another type | ``valid_from column `changed_at` has type string; it must be a date or a timestamp`` |
 | A `valid_from:` finer than a microsecond | ``valid_from column `changed_at` has timestamps finer than microseconds, which a version cannot start at; cast it in the SELECT, for example `CAST(changed_at AS TIMESTAMP)`.`` |
 | A NULL `valid_from` | ``valid_from column `changed_at` is null in 4 rows; every version needs a start`` |
 | A `valid_from` in the future | ``valid_from column `changed_at` is later than the run's start time (2026-10-31T06:00:00Z) in 2 rows; a version cannot start in the future.`` |
 | A changed row that does not start later | ``valid_from column `changed_at` is at or before the open version's valid_from in 3 rows whose values changed; a new version must start after the one it closes. Fix the times in the source, or leave `valid_from:` out to use the run's start time.`` |
-| An older run that commits after a newer one | ``2 open versions of gold.dim_customer start at or after this run's start time (2026-10-31T06:00:00Z); a run that started earlier cannot replace or close them. Start a new run.`` |
+| An older run that commits after a newer one | ``2 open versions of gold.dim_customer start at or after this run's start time (2026-10-31T06:00:00Z); a run that started earlier cannot replace or close them. Start a new run.`` For first versions, which start at the earliest time: ``A run that started after this one (2026-10-31T07:00:00Z) already wrote gold.dim_customer, and this run (2026-10-31T06:00:00Z) would replace or close 2 first versions that it may have opened with newer values, so nothing was written. Start a new run.`` |
 | A returning key that starts too early | ``valid_from column `changed_at` is before the end of the key's last version in 1 row that opens a key again; versions of one key must not overlap.`` Without `valid_from:`: ``1 row that opens a key again would start at this run's start time (2026-10-31T06:00:00Z), before the end of the key's last version; a newer run already changed gold.dim_customer. Start a new run.`` |
 | A second write of one run | ``This run already wrote this table's history (the current snapshot of gold.dim_customer is its write), and a run opens at most one version per key. Start a new run to record the newer values.`` |
 | A table its first history run did not create | ``gold.dim_customer exists without the columns `write: history` adds; a history table is created by its first history run. Drop it (`lakana table delete gold.dim_customer --env dev`) so that the next run creates it with every row as an open version, or build the history into a new asset.`` |
@@ -144,7 +161,7 @@ The messages give counts, never values. Nothing is written.
 | Columns added or removed | ``The result does not match gold.dim_customer's columns (added segment (string)); a history table keeps its columns. Make the SELECT return the columns and types gold.dim_customer has; to add a column, build a new history asset (its history starts with its first run).`` |
 | Two open versions of a key | ``2 keys of gold.dim_customer have more than one open version; there must be one per key, so nothing was written. Drop the table (`lakana table delete gold.dim_customer --env dev`) and let the next run create it again (its history starts again with that run).`` Lakana's own runs never leave two open versions; a writer outside Lakana did. Drop the table as the text says, and the next run creates it with one open version per key. |
 | Delete files from another Iceberg writer | ``gold.dim_customer has row-level delete files, which an Iceberg writer outside Lakana added; a history write cannot keep its versions right with them, so nothing was read or written. Compact the table with that writer so that no delete files remain, or drop it (`lakana table delete gold.dim_customer --env dev`) and let the next run create it again (its history starts again with that run).`` |
-| More open versions than the setting allows | ``gold.dim_customer has 1200000 open versions, more than LAKANA_RUN__MAX_HISTORY_OPEN_VERSIONS (1000000) allows. …`` (see [Limits](#limits)) |
+| More open versions than the setting allows | ``gold.dim_customer has 1200000 open versions, more than LAKANA_RUN__MAX_HISTORY_OPEN_VERSIONS (1000000) allows. A history write holds every open version in the worker's memory, roughly 2 GiB per million open versions of 8 columns and more for wider rows, so nothing was read or written. Ask an operator to raise LAKANA_RUN__MAX_HISTORY_OPEN_VERSIONS together with the worker's memory limit (LAKANA_WORKER__MEMORY_LIMIT).`` The same text starts ``The asset's result for gold.dim_customer has 1200000 rows, and each can open a version: more than …`` for a result with more rows than the setting, and ``gold.dim_customer would have 1000004 open versions after this write, more than …`` (ending "so nothing was written") for a write that would leave more open versions; see [Limits](#limits). |
 | A null or repeated key | as for a merge, with the `QUALIFY` to write ([Merging rows](merge.md#errors)) |
 
 ## Checks
@@ -180,7 +197,12 @@ check `ref_customer_id` then returns each order whose customer has no version va
 `ordered_at`. `to:` takes what the plain form takes: `gold.dim_customer` for the key, or
 `gold.dim_customer.dim_customer_key` for an order that stores the version's key. A history
 dimension that references another uses its own start: `at: valid_from`, not the name of its
-`valid_from:` column, which it does not store. A deploy refuses a reference to a history
+`valid_from:` column, which it does not store.
+
+Because a key's first version reaches back to the earliest time, an order dated before the run
+that first saw its customer still finds that version, and so does every order of a first load.
+What fails is an order whose customer the dimension does not have yet: run the dimension first
+(a project that builds both does), or fix the key. A deploy refuses a reference to a history
 dimension without `at:`:
 
 <!-- source: docs/examples/history/run.sh#refused -->
@@ -217,9 +239,11 @@ time. The first run, which creates the table, records the event of a create.
   compares them, so a large dimension counts against the worker's memory limit
   (`LAKANA_WORKER__MEMORY_LIMIT`). The result may have at most
   `LAKANA_QUERY_LIMITS__MAX_WRITE_ROWS` rows. The open versions may number at most
-  `LAKANA_RUN__MAX_HISTORY_OPEN_VERSIONS` (1,000,000 by default); the first run is checked
-  against it too, before it creates the table. A run over it writes nothing and names the
-  setting. Raise it together with the worker's memory limit.
+  `LAKANA_RUN__MAX_HISTORY_OPEN_VERSIONS` (1,000,000 by default). Before a run reads any
+  version, both the table's open versions and the rows of its result must be within it (each
+  row can open a version; the first run is checked before it creates the table). After the
+  comparison, the open versions the write would leave must be within it too. A run over it
+  writes nothing and names the setting. Raise it together with the worker's memory limit.
 - Measured on one machine, with a dimension of 1,000,000 open versions of 8 columns, the worker's
   memory peaked at about 1,312 MiB (1.5 s) when 10,000 keys changed, 5,000 were new and 5,000 went
   missing, at 1,760 MiB (8.6 s) when half the keys changed and at 2,251 MiB (16.1 s) when all
