@@ -88,6 +88,23 @@ reason about a codebase rather than copy from a spec.
 Security-relevant diffs earn a tier. Every path-traversal escape found in this repo so far was
 found by a reviewer reasoning adversarially about code that already looked correct.
 
+## Keeping tool output small
+
+Everything a tool prints stays in the agent's context and is re-read on every later turn. These
+rules hold for every session and every subagent; say so in the dispatch.
+
+- **Small outputs.** `pytest -q … | tail -n 30`; gates print only their summary lines;
+  `git grep -n` on a narrow path, `-l` or `-c` first when you expect many hits; code read by line
+  range. A long output goes to a file outside the repository, then `grep` or `tail` it; never let
+  it overflow into a saved tool result you then read whole.
+- **Fewer turns.** Batch independent commands into one call and independent reads into one turn.
+  Do not re-read a file you just edited.
+- **Exactness first.** Code you edit, or judge in a review, is read verbatim. These rules cut
+  noise, not evidence.
+
+During #253 they cut an agent's tool output by about a third, and the overflowed outputs it read
+whole by nine tenths.
+
 ## Design documents
 
 - `docs/site/explanation/scope.md` — current scope, principles and audiences (living)
