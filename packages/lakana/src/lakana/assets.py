@@ -240,7 +240,8 @@ class AssetSpec:
     grain
         One line saying what one row is; `None` when not declared.
     references
-        Column of this table → the table it refers to (``ns.table`` or ``ns.table.column``).
+        Column of this table → the table it refers to (``ns.table`` or ``ns.table.column``), or
+        ``{"to": …, "at": …}`` for a table that keeps history.
     checks
         Generated-check family (``key``, ``references``, ``measures``) → what a failure does
         (``block``, ``keep`` or ``warn``).
@@ -269,7 +270,7 @@ class AssetSpec:
     evolve_schema: bool = False
     kind: str | None = None
     grain: str | None = None
-    references: dict[str, str] = field(default_factory=dict)
+    references: dict[str, str | dict[str, str]] = field(default_factory=dict)
     checks: dict[str, str] = field(default_factory=dict)
     measures: dict[str, dict[str, object]] = field(default_factory=dict)
     label: str | None = None
@@ -412,7 +413,7 @@ def _unsafe_free_text(text: str) -> bool:
 
 def _check_model(
     kind: object, grain: object, key: tuple[str, ...] | str, references: object, checks: object
-) -> tuple[str | None, str | None, dict[str, str], dict[str, str]]:
+) -> tuple[str | None, str | None, dict[str, str | dict[str, str]], dict[str, str]]:
     """Read the decorator's model fields with the rules deploy applies.
 
     Parameters
@@ -424,7 +425,7 @@ def _check_model(
     key
         `_check_write`'s key: its columns, ``"none"`` or empty.
     references
-        Column → target table; `None` for none.
+        Column → target table, or ``{"to": …, "at": …}``; `None` for none.
     checks
         Check family → failure mode; `None` for none.
 
@@ -437,7 +438,8 @@ def _check_model(
     ------
     ValueError
         For a value of the wrong type, a `kind` that is not in `MODEL_KINDS`, a `grain` that
-        is empty, long, several lines or unsafe, a reference column or target deploy refuses,
+        is empty, long, several lines or unsafe, a reference column, target, mapping or `at`
+        column deploy refuses,
         a `checks` family or mode that does not exist, a fact, dimension or wide table
         without what its kind needs, ``key="none"`` where the kind does not allow it, and a
         `checks` family for which the asset declares nothing.
@@ -446,12 +448,18 @@ def _check_model(
         raise ValueError("kind must be a string")
     if grain is not None and not isinstance(grain, str):
         raise ValueError("grain must be a string")
-    for name, mapping in (("references", references), ("checks", checks)):
-        if mapping is not None and (
-            not isinstance(mapping, Mapping)
-            or not all(isinstance(k, str) and isinstance(v, str) for k, v in mapping.items())
-        ):
-            raise ValueError(f"{name} must be a dict of strings")
+    if checks is not None and (
+        not isinstance(checks, Mapping)
+        or not all(isinstance(k, str) and isinstance(v, str) for k, v in checks.items())
+    ):
+        raise ValueError("checks must be a dict of strings")
+    if references is not None and (
+        not isinstance(references, Mapping)
+        or not all(
+            isinstance(k, str) and isinstance(v, (str, Mapping)) for k, v in references.items()
+        )
+    ):
+        raise ValueError('references must be a dict of strings, or of {"to": ..., "at": ...} dicts')
     if kind is not None and kind not in MODEL_KINDS:
         shown = ascii(kind)[1:-1][:200]
         raise ValueError(f"kind must be one of {', '.join(MODEL_KINDS)}; got '{shown}'")
@@ -469,11 +477,15 @@ def _check_model(
                 "or tab, a bidirectional control or a line separator"
             )
     refs = dict(references) if isinstance(references, Mapping) else {}
-    for column, target in refs.items():
+    for column, given in refs.items():
         if not column:
             raise ValueError("a reference column must not be empty")
         if _unsafe(column):
             raise ValueError(f"a reference column {_IDENTIFIER_MESSAGE}")
+        target = given
+        if isinstance(given, Mapping):
+            target = _reference_target(column, given)
+            refs[column] = dict(given)
         if _unsafe(target):
             raise ValueError(f"reference `{column}` names a target that {_IDENTIFIER_MESSAGE}")
         if not _component_ok(f"ref_{column}"):
@@ -497,11 +509,48 @@ def _check_model(
     return kind, text, refs, modes
 
 
+def _reference_target(column: str, given: Mapping[str, object]) -> str:
+    """Read a reference's ``{"to": …, "at": …}`` mapping as deploy reads it.
+
+    Parameters
+    ----------
+    column
+        The referencing column, already found safe.
+    given
+        The mapping.
+
+    Returns
+    -------
+    str
+        Its target, ``to``.
+
+    Raises
+    ------
+    ValueError
+        For a mapping without ``at``, one that is not exactly ``to`` and ``at`` as strings, or
+        an ``at`` column that is empty or unsafe.
+    """
+    if set(given) == {"to"}:
+        raise ValueError(
+            f"reference `{column}` is a mapping without `at:`; write the target as a "
+            "plain string, or add `at:`"
+        )
+    to, at = given.get("to"), given.get("at")
+    if set(given) != {"to", "at"} or not isinstance(to, str) or not isinstance(at, str):
+        raise ValueError(
+            f"reference `{column}` takes `to:` (the target) and `at:` (the row's time "
+            "column), such as `{to: gold.dim_customer, at: ordered_at}`"
+        )
+    if not at or _unsafe(at):
+        raise ValueError(f"`at:` of reference `{column}` {_IDENTIFIER_MESSAGE}")
+    return to
+
+
 def _check_kind_rules(
     kind: str | None,
     grain: str | None,
     key: tuple[str, ...] | str,
-    references: dict[str, str],
+    references: dict[str, str | dict[str, str]],
     checks: dict[str, str],
 ) -> None:
     """Apply the rules of each kind to fields that are valid on their own.
@@ -515,7 +564,7 @@ def _check_kind_rules(
     key
         The key's columns, ``"none"`` or empty.
     references
-        Column → target table.
+        Column → target table or ``{"to": …, "at": …}``; only its emptiness is read.
     checks
         Check family → failure mode.
 
@@ -1005,7 +1054,7 @@ def asset(
     evolve_schema: bool | None = False,
     kind: str | None = None,
     grain: str | None = None,
-    references: Mapping[str, str] | None = None,
+    references: Mapping[str, str | Mapping[str, str]] | None = None,
     checks: Mapping[str, str] | None = None,
     measures: Mapping[str, Mapping[str, object]] | None = None,
 ) -> Callable[[F], F]:
@@ -1091,7 +1140,8 @@ def asset(
         One line, at most 300 characters, saying what one row is.
     references
         Column of this table → the table it refers to, as ``ns.table`` (that table's single
-        key column) or ``ns.table.column``.
+        key column) or ``ns.table.column``; for a table that keeps history (``write="history"``),
+        ``{"to": <target>, "at": <the row's time column>}``.
     checks
         Generated-check family (``key``, ``references``, ``measures``) → ``block``, ``keep`` or
         ``warn``: what a failure does.

@@ -1334,3 +1334,48 @@ def test_a_history_spec_round_trips_through_json() -> None:
 )
 def test_a_stored_history_spec_that_no_deploy_wrote_reads_as_none(raw: object) -> None:
     assert HistorySpec.from_json(raw) is None
+
+
+def test_a_reference_with_at_raises_the_version_and_reads_back() -> None:
+    meta = AssetMetadata(
+        materialize="table",
+        kind="fact",
+        grain="One row per order.",
+        key=("id",),
+        references={"customer_id": {"to": "gold.dim_customer", "at": "ordered_at"}},
+    )
+    asset = make_asset(
+        "gold.fact_orders", columns=("id", "customer_id", "ordered_at"), metadata=meta
+    )
+    ref = ResolvedReference("customer_id", "gold.dim_customer", "customer_id", "ordered_at")
+    checks = generated_checks([asset], {"gold.fact_orders": (ref,)}, default_on_failure="block")
+    manifest = build_manifest(
+        [asset],
+        build_graph([asset]),
+        ResolvedProjectConfig(),
+        checks=checks,
+        references={"gold.fact_orders": (ref,)},
+    )
+    assert manifest["version"] == HISTORY_VERSION
+    (entry,) = manifest["assets"]
+    assert entry["model"]["references"] == [
+        {
+            "column": "customer_id",
+            "target": "gold.dim_customer",
+            "target_column": "customer_id",
+            "at": "ordered_at",
+        }
+    ]
+    model = entry_model(entry)
+    assert model is not None and model.references == (ref,)
+    ref_check = next(c for c in manifest["checks"] if c["check"] == "ref_customer_id")
+    assert ref_check["generated"]["at"] == "ordered_at"
+    assert {s.generated.at for s in read_manifest_checks(manifest).specs if s.generated} >= {
+        "ordered_at"
+    }
+
+
+def test_a_reference_without_at_keeps_its_entry_shape() -> None:
+    manifest = build_manifest([_modelled()], build_graph([_modelled()]), ResolvedProjectConfig())
+    assert all("at" not in r for r in manifest["assets"][0]["model"]["references"])
+    assert manifest["version"] == MODEL_VERSION

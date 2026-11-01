@@ -582,3 +582,58 @@ def test_valid_from_and_close_missing_are_checked_where_they_are_read(
     with pytest.raises(ProjectValidationError) as info:
         parse_front_matter(f"/* lakana\n{block}*/\nSELECT 1", path=_PATH)
     assert [issue.message for issue in info.value.issues] == [message]
+
+
+def test_a_reference_may_name_the_rows_time() -> None:
+    front = parse_front_matter(
+        "/* lakana\nreferences:\n  customer_id: {to: gold.dim_customer, at: ordered_at}\n"
+        "  store_id: gold.dim_store\n*/\nSELECT 1",
+        path=_PATH,
+    )
+    assert front.metadata.reference_targets() == {
+        "customer_id": "gold.dim_customer",
+        "store_id": "gold.dim_store",
+    }
+    assert front.metadata.reference_times() == {"customer_id": "ordered_at"}
+
+
+@pytest.mark.parametrize(
+    ("value", "message"),
+    [
+        (
+            "{to: gold.dim_customer}",
+            "references: reference `customer_id` is a mapping without `at:`; write the target as "
+            "a plain string, or add `at:`",
+        ),
+        (
+            "{to: gold.dim_customer, at: ordered_at, as_of: x}",
+            "references: reference `customer_id` takes `to:` (the target) and `at:` (the row's "
+            "time column), such as `{to: gold.dim_customer, at: ordered_at}`",
+        ),
+        (
+            "{at: ordered_at}",
+            "references: reference `customer_id` takes `to:` (the target) and `at:` (the row's "
+            "time column), such as `{to: gold.dim_customer, at: ordered_at}`",
+        ),
+        (
+            '{to: gold.dim_customer, at: "o\\u2028d"}',
+            "references: `at:` of reference `customer_id` must not contain a control, format or "
+            "surrogate character or a line separator",
+        ),
+    ],
+)
+def test_a_reference_mapping_is_checked_where_it_is_read(value: str, message: str) -> None:
+    with pytest.raises(ProjectValidationError) as info:
+        parse_front_matter(
+            f"/* lakana\nreferences:\n  customer_id: {value}\n*/\nSELECT 1", path=_PATH
+        )
+    assert [issue.message for issue in info.value.issues] == [message]
+
+
+def test_a_reference_list_is_refused_as_before_the_mapping_form() -> None:
+    with pytest.raises(ProjectValidationError) as info:
+        parse_front_matter("/* lakana\nreferences: [customer_id]\n*/\nSELECT 1", path=_PATH)
+    assert [issue.message for issue in info.value.issues] == [
+        "references: must be a mapping of keys to values (`key: value`), not a list or a single "
+        "value"
+    ]

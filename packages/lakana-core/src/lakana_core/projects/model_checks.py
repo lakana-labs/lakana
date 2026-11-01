@@ -132,6 +132,44 @@ def reference_sql(table: str, column: str, target: str, target_column: str) -> s
     return f"{source}{join} WHERE s.{own} IS NOT NULL AND t.{other} IS NULL"
 
 
+def valid_at_reference_sql(
+    table: str, column: str, target: str, target_column: str, at: str
+) -> str:
+    """Select the rows whose key has no version of the target valid at the row's time.
+
+    The target keeps history: a version is valid at a time `t` when ``valid_from <= t`` and
+    ``valid_to`` is NULL or later than `t` (half-open). A row with a key and a NULL time fails;
+    a date reads as midnight and a timestamp as UTC, because a check runs with `TimeZone` UTC.
+
+    Parameters
+    ----------
+    table
+        The checked table.
+    column
+        Its referencing column.
+    target
+        The referenced history table.
+    target_column
+        The referenced column: the natural key, or the surrogate key.
+    at
+        The checked table's time column.
+
+    Returns
+    -------
+    str
+        One SELECT: a ``LEFT JOIN … WHERE target IS NULL``.
+    """
+    own, other = _quote(column), _quote(target_column)
+    start, end = _quote(VALID_FROM), _quote(VALID_TO)
+    moment = f"CAST(s.{_quote(at)} AS TIMESTAMPTZ)"
+    source = f"SELECT s.* FROM {_table(table)} AS s"  # nosec B608 -- identifiers quoted
+    join = (
+        f" LEFT JOIN {_table(target)} AS t ON s.{own} = t.{other} AND t.{start} <= {moment}"
+        f" AND (t.{end} IS NULL OR {moment} < t.{end})"
+    )
+    return f"{source}{join} WHERE s.{own} IS NOT NULL AND t.{other} IS NULL"
+
+
 def measures_sql(table: str) -> str:
     """Select no rows of a table: the `measures` check exists for its pre-check.
 
@@ -298,12 +336,21 @@ def generated_checks(
                     _generated(asset, check, sql, source, description, default_on_failure)
                 )
         for ref in references.get(asset.table, ()):
+            sql = (
+                reference_sql(asset.table, ref.column, ref.target, ref.target_column)
+                if ref.at is None
+                else valid_at_reference_sql(
+                    asset.table, ref.column, ref.target, ref.target_column, ref.at
+                )
+            )
             checks.append(
                 _generated(
                     asset,
                     f"{REF_PREFIX}{ref.column}",
-                    reference_sql(asset.table, ref.column, ref.target, ref.target_column),
-                    GeneratedFrom("references", (ref.column,), ref.target, ref.target_column),
+                    sql,
+                    GeneratedFrom(
+                        "references", (ref.column,), ref.target, ref.target_column, at=ref.at
+                    ),
                     f"generated from `references: {ref.column}`",
                     default_on_failure,
                 )

@@ -303,7 +303,12 @@ def _entry(
             "grain": asset.metadata.grain,
             "key_none": asset.metadata.key == KEY_NONE,
             "references": [
-                {"column": r.column, "target": r.target, "target_column": r.target_column}
+                {
+                    "column": r.column,
+                    "target": r.target,
+                    "target_column": r.target_column,
+                    **({"at": r.at} if r.at is not None else {}),
+                }
                 for r in references
             ],
             "checks": dict(sorted(asset.metadata.checks.items())),
@@ -432,6 +437,8 @@ def _check_entry(check: ParsedCheck) -> dict[str, Any]:
             generated["aggregations"] = list(check.generated.aggregations)
         if check.generated.history:
             generated["history"] = True
+        if check.generated.at is not None:
+            generated["at"] = check.generated.at
         entry["generated"] = generated
     return entry
 
@@ -517,7 +524,8 @@ def build_manifest(
         uses_model=any(declares_model(asset.metadata) for asset in assets),
         uses_measures=any(asset.metadata.measures for asset in assets),
         uses_texts=uses_texts,
-        uses_history=any(asset.metadata.write == "history" for asset in assets),
+        uses_history=any(asset.metadata.write == "history" for asset in assets)
+        or any(r.at is not None for refs in resolved.values() for r in refs),
     )
     manifest: dict[str, Any] = {
         "version": version,
@@ -983,7 +991,12 @@ def entry_model(entry: object) -> EntryModel | None:
     kind, grain = raw.get("kind"), raw.get("grain")
     items = raw.get("references")
     references = tuple(
-        ResolvedReference(item["column"], item["target"], item["target_column"])
+        ResolvedReference(
+            item["column"],
+            item["target"],
+            item["target_column"],
+            item["at"] if isinstance(item.get("at"), str) else None,
+        )
         for item in (items if isinstance(items, list) else [])
         if isinstance(item, Mapping)
         and all(isinstance(item.get(k), str) for k in ("column", "target", "target_column"))

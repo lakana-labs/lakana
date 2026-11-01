@@ -379,3 +379,116 @@ def test_a_valid_from_column_spelled_in_another_case_is_named_as_the_select_spel
         "which spells it `Changed_At`; write `valid_from: Changed_At`, or rename the column in "
         "the SELECT to `changed_at`.",
     ]
+
+
+_HISTORY_DIM = TargetInfo(
+    kind="dimension",
+    key=("customer_id",),
+    key_none=False,
+    columns=("customer_id", "region", "dim_customer_key", "valid_from", "valid_to", "is_current"),
+    history=True,
+)
+
+
+def _orders(references: dict[str, object], columns: tuple[str, ...] | None) -> ParsedAsset:
+    """Build `gold.fact_orders` with references, possibly with `at:`.
+
+    Parameters
+    ----------
+    references
+        Column to target or `{to, at}`.
+    columns
+        Its output columns, or `None` for a star.
+
+    Returns
+    -------
+    ParsedAsset
+        The asset.
+    """
+    meta = AssetMetadata(
+        materialize="table",
+        kind="fact",
+        grain="One row per order.",
+        key=("id",),
+        references=references,
+    )
+    return make_asset("gold.fact_orders", ("gold.dim_customer",), columns=columns, metadata=meta)
+
+
+def test_a_reference_to_a_history_target_resolves_with_its_time() -> None:
+    resolved, issues = resolve_references(
+        [
+            _orders(
+                {
+                    "customer_id": {"to": "gold.dim_customer", "at": "ordered_at"},
+                    "customer_version": {
+                        "to": "gold.dim_customer.dim_customer_key",
+                        "at": "ordered_at",
+                    },
+                },
+                ("id", "customer_id", "customer_version", "ordered_at"),
+            )
+        ],
+        _lookup({"gold.dim_customer": _HISTORY_DIM}),
+        environment="dev",
+    )
+    assert issues == []
+    assert resolved["gold.fact_orders"] == (
+        ResolvedReference("customer_id", "gold.dim_customer", "customer_id", "ordered_at"),
+        ResolvedReference(
+            "customer_version", "gold.dim_customer", "dim_customer_key", "ordered_at"
+        ),
+    )
+
+
+def test_a_reference_to_a_history_target_needs_at_and_at_needs_a_history_target() -> None:
+    _, issues = resolve_references(
+        [
+            _orders(
+                {
+                    "customer_id": "gold.dim_customer",
+                    "store_id": {"to": "gold.dim_store", "at": "ordered_at"},
+                },
+                ("id", "customer_id", "store_id", "ordered_at"),
+            )
+        ],
+        _lookup({"gold.dim_customer": _HISTORY_DIM, "gold.dim_store": _DIM}),
+        environment="dev",
+    )
+    assert [(i.message, i.targets) for i in issues] == [
+        (
+            "`gold.fact_orders` references `gold.dim_customer` (`customer_id`), which keeps the "
+            "history of its rows (`write: history`); say which version each row means with the "
+            "row's time: `customer_id: {to: gold.dim_customer, at: <column>}`",
+            ("gold.dim_customer",),
+        ),
+        (
+            "`at:` in reference `store_id` is for a target that keeps history (`write: "
+            "history`), and `gold.dim_store` does not; remove `at:`",
+            ("gold.dim_store",),
+        ),
+    ]
+    assert all(i.withheld for i in issues)
+
+
+def test_the_at_column_must_be_a_column_of_the_select() -> None:
+    asset = _orders(
+        {"customer_id": {"to": "gold.dim_customer", "at": "ordered_at"}}, ("id", "customer_id")
+    )
+    assert [i.message for i in project_model_issues([asset])] == [
+        "Column `ordered_at` in `at:` of reference `customer_id` is not a column of "
+        "`gold.fact_orders`'s SELECT; add it to the SELECT, or name another column."
+    ]
+
+
+def test_a_history_dimension_may_reference_another_at_its_own_valid_from() -> None:
+    meta = AssetMetadata(
+        materialize="table",
+        kind="dimension",
+        grain="One row per store and version.",
+        key=("store_id",),
+        write="history",
+        references={"region_id": {"to": "gold.dim_region", "at": "valid_from"}},
+    )
+    asset = make_asset("gold.dim_store", columns=("store_id", "region_id"), metadata=meta)
+    assert project_model_issues([asset]) == []

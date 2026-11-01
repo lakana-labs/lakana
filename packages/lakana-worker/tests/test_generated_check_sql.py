@@ -11,6 +11,7 @@ from lakana_core.projects.model_checks import (
     key_unique_sql,
     measures_sql,
     reference_sql,
+    valid_at_reference_sql,
 )
 
 
@@ -148,3 +149,45 @@ def test_the_surrogate_key_check_finds_a_repeated_version_key() -> None:
     assert con.execute(
         count_query(history_key_unique_sql("gold.d", ["customer_id"]))
     ).fetchone() == (4,)
+
+
+def test_the_history_key_check_accepts_a_gap_between_versions() -> None:
+    """A key may be absent for a while: a version that ends before the next starts is legal."""
+    con = _versions()
+    con.execute(
+        "INSERT INTO gold.d VALUES "
+        "('H', 'h1', '2026-01-01', '2026-01-15', false), ('H', 'h2', '2026-02-01', NULL, true)"
+    )
+    found = _keys(con, history_key_unique_sql("gold.d", ["customer_id"]))
+    assert [row for row in found if row[0] == "H"] == []
+
+
+def test_the_history_key_check_fails_two_versions_that_start_together() -> None:
+    """Two versions of one key with the same `valid_from` overlap; exactly one row is returned.
+
+    Which of the two depends on the order of the tie, so the test pins the count only.
+    """
+    con = _versions()
+    con.execute(
+        "INSERT INTO gold.d VALUES "
+        "('I', 'i1', '2026-01-01', '2026-02-01', false), ('I', 'i2', '2026-01-01', NULL, true)"
+    )
+    found = _keys(con, history_key_unique_sql("gold.d", ["customer_id"]))
+    assert len([row for row in found if row[0] == "I"]) == 1
+
+
+def test_the_valid_at_reference_reads_half_open_intervals_dates_and_nulls() -> None:
+    con = _versions()
+    con.execute("CREATE TABLE gold.f (order_id INT, customer_id VARCHAR, ordered_at DATE)")
+    con.execute(
+        "INSERT INTO gold.f VALUES "
+        "(1, 'A', '2026-01-10'), "  # inside A's first version
+        "(2, 'A', '2026-02-01'), "  # the instant A moved: the new version, not a gap
+        "(3, 'A', '2025-12-31'), "  # before A's first version: fails
+        "(4, 'A', NULL), "  # a key without a time cannot be placed: fails
+        "(5, NULL, '2026-01-01'), "  # no key: not checked
+        "(6, 'Z', '2026-01-01')"  # no such key: fails
+    )
+    sql = valid_at_reference_sql("gold.f", "customer_id", "gold.d", "customer_id", "ordered_at")
+    failing = sorted(con.execute(f"SELECT order_id FROM ({sql})").fetchall())  # nosec B608
+    assert failing == [(3,), (4,), (6,)]

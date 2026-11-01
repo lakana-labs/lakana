@@ -1284,3 +1284,13 @@ def test_a_python_asset_cannot_keep_history_yet() -> None:
         'write="history" is not available for Python assets yet; build the dimension as a SQL '
         "asset with `write: history` in its header"
     ]
+
+
+def test_a_python_reference_may_name_the_rows_time() -> None:
+    source = _GOOD.replace(
+        "@asset(",
+        '@asset(references={"station_id": {"to": "gold.dim_station", "at": "observed_at"}}, ',
+        1,
+    )
+    metadata = _parsed(source).metadata
+    assert metadata.reference_times() == {"station_id": "observed_at"}

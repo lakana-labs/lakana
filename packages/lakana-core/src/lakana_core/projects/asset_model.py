@@ -147,11 +147,15 @@ class ResolvedReference:
     target_column
         The column of the target it must match: the named one (long form), or the target's
         single key column (short form).
+    at
+        The referencing table's time column (`at:`) for a target that keeps history; `None`
+        otherwise.
     """
 
     column: str
     target: str
     target_column: str
+    at: str | None = None
 
 
 def key_columns(key: Sequence[str] | str) -> tuple[str, ...]:

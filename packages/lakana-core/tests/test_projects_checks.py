@@ -1470,6 +1470,8 @@ def test_a_well_formed_generated_entry_reads_back(generated: dict[str, object]) 
         {**_REF_FROM, "target_column": 3},
         {**_KEY_FROM, "history": "yes"},
         {**_REF_FROM, "history": True},
+        {**_REF_FROM, "at": 3},
+        {**_KEY_FROM, "at": "t"},
     ],
     ids=[
         "a string",
@@ -1484,6 +1486,8 @@ def test_a_well_formed_generated_entry_reads_back(generated: dict[str, object]) 
         "target column not a string",
         "history not a boolean",
         "history on a reference",
+        "at not a string",
+        "at on a key",
     ],
 )
 def test_a_damaged_generated_entry_is_unreadable_for_its_table(generated: object) -> None:
@@ -1498,6 +1502,12 @@ def test_a_history_key_entry_reads_back_as_history() -> None:
     (spec,) = read_manifest_checks({"assets": [{"table": "a.b"}], "checks": [entry]}).specs
     assert spec.generated is not None and spec.generated.history is True
     assert spec.generated == dataclasses.replace(spec.generated, history=True)
+
+
+def test_a_reference_entry_with_at_reads_back() -> None:
+    entry = _stored(generated={**_REF_FROM, "at": "ordered_at"})
+    (spec,) = read_manifest_checks({"assets": [{"table": "a.b"}], "checks": [entry]}).specs
+    assert spec.generated is not None and spec.generated.at == "ordered_at"
 
 
 _MEASURES_FROM = {"family": "measures", "columns": ["a", "b"], "aggregations": ["sum", "max"]}

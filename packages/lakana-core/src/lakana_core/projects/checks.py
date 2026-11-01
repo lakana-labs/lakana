@@ -151,6 +151,9 @@ class GeneratedFrom:
         For ``key``, whether the key is a history dimension's natural key: its checks are
         about versions, and the pre-check requires the columns `write: history` adds;
         `False` otherwise.
+    at
+        For ``references``, the referencing table's time column of a valid-at check; `None`
+        otherwise.
     """
 
     family: str
@@ -160,6 +163,7 @@ class GeneratedFrom:
     not_over: tuple[str, ...] = ()
     aggregations: tuple[str, ...] = ()
     history: bool = False
+    at: str | None = None
 
 
 @dataclass(frozen=True)
@@ -980,7 +984,8 @@ def _generated_from(raw: object) -> GeneratedFrom | None:
         or null for ``key``; for ``measures``, both target fields absent or null, ``not_over``
         absent or a list of strings, and ``aggregations`` a list of `AGGREGATIONS` as long as
         ``columns``. ``not_over`` or ``aggregations`` on another family is refused. ``history``
-        is absent or a boolean, and true only for ``key``.
+        is absent or a boolean, and true only for ``key``; ``at`` is absent or a non-empty
+        string, and only for ``references``.
     """
     if not isinstance(raw, Mapping):
         return None
@@ -991,8 +996,10 @@ def _generated_from(raw: object) -> GeneratedFrom | None:
     if not all(isinstance(column, str) for column in columns):
         return None
     not_over, aggregations = raw.get("not_over"), raw.get("aggregations")
-    history = raw.get("history")
+    history, at = raw.get("history"), raw.get("at")
     if history is not None and (not isinstance(history, bool) or family != "key"):
+        return None
+    if at is not None and (not isinstance(at, str) or not at or family != "references"):
         return None
     if family == "measures":
         if target is not None or target_column is not None:
@@ -1012,7 +1019,7 @@ def _generated_from(raw: object) -> GeneratedFrom | None:
     if family == "references":
         if not isinstance(target, str) or not isinstance(target_column, str):
             return None
-        return GeneratedFrom("references", tuple(columns), target, target_column)
+        return GeneratedFrom("references", tuple(columns), target, target_column, at=at)
     if target is not None or target_column is not None:
         return None
     return GeneratedFrom("key", tuple(columns), history=history is True)

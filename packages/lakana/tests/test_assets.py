@@ -434,8 +434,14 @@ UNSAFE_GRAIN = (
         ({"grain": "a\x07b"}, UNSAFE_GRAIN),
         ({"grain": "a\u202eb"}, UNSAFE_GRAIN),
         ({"grain": "x" * 301}, "grain must be at most 300 characters"),
-        ({"references": ["x"]}, "references must be a dict of strings"),
-        ({"references": {"a": 1}}, "references must be a dict of strings"),
+        (
+            {"references": ["x"]},
+            'references must be a dict of strings, or of {"to": ..., "at": ...} dicts',
+        ),
+        (
+            {"references": {"a": 1}},
+            'references must be a dict of strings, or of {"to": ..., "at": ...} dicts',
+        ),
         ({"checks": {"key": 1}}, "checks must be a dict of strings"),
         ({"checks": {"rows": "warn"}}, "checks takes only key, references and measures"),
         ({"checks": {"key": "loud"}}, "checks: key must be block, keep or warn"),
@@ -516,6 +522,40 @@ def test_a_wrong_model_is_refused(arguments: dict[str, Any], message: str) -> No
     with pytest.raises(ValueError) as caught:
         lakana.asset(**arguments)
     assert str(caught.value) == message
+
+
+def test_a_reference_may_be_a_mapping_with_its_time() -> None:
+    mapping = {"customer_id": {"to": "gold.dim_customer", "at": "ordered_at"}}
+    spec = getattr(lakana.asset(references=mapping)(lambda: None), ASSET_ATTRIBUTE)
+    assert spec.references == mapping
+
+
+@pytest.mark.parametrize(
+    ("value", "message"),
+    [
+        (
+            {"to": "gold.dim_customer"},
+            "reference `customer_id` is a mapping without `at:`; write the target as a plain "
+            "string, or add `at:`",
+        ),
+        (
+            {"to": "gold.dim_customer", "at": "ordered_at", "as_of": "x"},
+            "reference `customer_id` takes `to:` (the target) and `at:` (the row's time "
+            "column), such as `{to: gold.dim_customer, at: ordered_at}`",
+        ),
+        (
+            {"to": "gold.dim_customer", "at": "o\u2028d"},
+            "`at:` of reference `customer_id` must not contain a control, format or surrogate "
+            "character or a line separator",
+        ),
+    ],
+)
+def test_a_reference_mapping_is_refused_with_the_deploys_text(
+    value: dict[str, str], message: str
+) -> None:
+    with pytest.raises(ValueError) as info:
+        lakana.asset(references={"customer_id": value})
+    assert str(info.value) == message
 
 
 def test_a_grain_may_hold_a_tab_and_is_stripped() -> None:

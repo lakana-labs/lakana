@@ -87,14 +87,15 @@ _SHAPES: dict[str, tuple[type | tuple[type, ...], str]] = {
     "key": ((list, str), "a list of strings or one string"),
     "kind": (str, "a string"),
     "grain": (str, "a string"),
-    "references": (dict, "a dict of strings"),
+    "references": (dict, 'a dict of strings, or of {"to": ..., "at": ...} dicts'),
     "measures": (dict, "a dict of dicts"),
     "checks": (dict, "a dict of strings"),
     "watermark": (str, "a string"),
     "evolve_schema": (bool, "True or False"),
 }
-_TWO_LEVEL = frozenset({"measures", "columns"})
-"""Arguments whose values may be dicts of literal dicts, read with `_measures_literal`."""
+_TWO_LEVEL = frozenset({"measures", "columns", "references"})
+"""Arguments whose values may be dicts of literal dicts (a measure, a column's texts, a
+reference's `{to, at}`), read with `_measures_literal`."""
 _DEFAULTS: dict[str, tuple[object, ...]] = {
     "write": ("replace",),
     "key": ([],),
@@ -377,7 +378,7 @@ def _measure_literal(node: ast.expr) -> object:
 
 
 def _measures_literal(node: ast.expr) -> object:
-    """Evaluate `measures=` or `columns=`: a dict of names to literals or `_measure_literal` dicts.
+    """Evaluate `measures=`, `columns=` or `references=`: names to literals or literal dicts.
 
     Parameters
     ----------

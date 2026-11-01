@@ -24,6 +24,7 @@ from lakana_core.projects.model_checks import (
     measures_sql,
     reference_sql,
     surrogate_key_unique_sql,
+    valid_at_reference_sql,
 )
 from lakana_core.query_rewrite import check_blacklist, extract_table_refs
 
@@ -445,3 +446,30 @@ def test_a_hand_written_check_may_not_be_called_surrogate_key_unique() -> None:
         "A check named `surrogate_key_unique` is generated for `gold.dim_customer`; rename "
         "`checks/gold/dim_customer/surrogate_key_unique.sql`."
     ]
+
+
+def test_a_reference_with_at_generates_the_valid_at_check() -> None:
+    ref = ResolvedReference("customer_id", "gold.dim_customer", "customer_id", "ordered_at")
+    asset = _fact(references={"customer_id": {"to": "gold.dim_customer", "at": "ordered_at"}})
+    (check,) = [
+        c
+        for c in generated_checks([asset], {"gold.fact_sales": (ref,)}, default_on_failure="block")
+        if c.check.startswith("ref_")
+    ]
+    assert check.generated == GeneratedFrom(
+        "references", ("customer_id",), "gold.dim_customer", "customer_id", at="ordered_at"
+    )
+    assert check.sql == valid_at_reference_sql(
+        "gold.fact_sales", "customer_id", "gold.dim_customer", "customer_id", "ordered_at"
+    )
+    assert check.sql == (
+        'SELECT s.* FROM "gold"."fact_sales" AS s LEFT JOIN "gold"."dim_customer" AS t ON '
+        's."customer_id" = t."customer_id" AND t."valid_from" <= CAST(s."ordered_at" AS '
+        'TIMESTAMPTZ) AND (t."valid_to" IS NULL OR CAST(s."ordered_at" AS TIMESTAMPTZ) < '
+        't."valid_to") WHERE s."customer_id" IS NOT NULL AND t."customer_id" IS NULL'
+    )
+    check_blacklist(check.sql, dialect="duckdb")
+    assert set(extract_table_refs(check.sql, dialect="duckdb")) == {
+        "gold.fact_sales",
+        "gold.dim_customer",
+    }

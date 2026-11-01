@@ -156,6 +156,27 @@ class ColumnTexts(StrictModel):
         return self
 
 
+class ReferenceSpec(StrictModel):
+    """A reference to a table that keeps history: its target and the row's time.
+
+    Parameters
+    ----------
+    to
+        The target, as the string form takes it (``ns.table`` or ``ns.table.column``).
+    at
+        The column of the referencing table that says when the row happened.
+    """
+
+    to: str
+    at: str
+
+
+_REFERENCE_SHAPE = (
+    "reference `{column}` takes `to:` (the target) and `at:` (the row's time column), such as "
+    "`{{to: gold.dim_customer, at: ordered_at}}`"
+)
+
+
 class AssetMetadata(SafeTextModel):
     """What one asset's front-matter may say.
 
@@ -186,7 +207,8 @@ class AssetMetadata(SafeTextModel):
         The columns that identify a row (needed for ``write: merge``), or ``none`` to say that
         no columns identify one.
     references
-        Column → the table (``ns.table``, or ``ns.table.column``) its values must exist in.
+        Column → the table (``ns.table``, or ``ns.table.column``) its values must exist in, or
+        `{to:, at:}` for a table that keeps history.
     measures
         Column → its measure (aggregation, additivity, unit or currency, label, description).
     checks
@@ -221,7 +243,7 @@ class AssetMetadata(SafeTextModel):
     kind: Literal["fact", "dimension", "wide", "staging"] | None = None
     grain: str | None = None
     key: tuple[str, ...] | Literal["none"] = ()
-    references: dict[str, str] = Field(default_factory=dict)
+    references: dict[str, str | ReferenceSpec] = Field(default_factory=dict)
     measures: dict[str, MeasureSpec] = Field(default_factory=dict)
     checks: dict[str, str] = Field(default_factory=dict)
     watermark: str | None = None
@@ -379,9 +401,46 @@ class AssetMetadata(SafeTextModel):
             empty="must not be empty: say in one sentence what one row is",
         )
 
+    @field_validator("references", mode="before")
+    @classmethod
+    def _reference_mappings_have_their_keys(cls, value: object) -> object:
+        """Refuse a reference mapping without `at:`, with another key, or without `to:`.
+
+        Parameters
+        ----------
+        value
+            The field's raw value.
+
+        Returns
+        -------
+        object
+            `value`, for the type check that follows.
+
+        Raises
+        ------
+        ValueError
+            For the first mapping that is not exactly `to:` and `at:`, both strings.
+        """
+        if not isinstance(value, Mapping):
+            return value
+        for column, given in value.items():
+            if not isinstance(given, Mapping):
+                continue
+            named = shown(column) if isinstance(column, str) else "?"
+            if set(given) == {"to"}:
+                raise ValueError(
+                    f"reference `{named}` is a mapping without `at:`; write the target as a "
+                    "plain string, or add `at:`"
+                )
+            if set(given) != {"to", "at"} or not all(isinstance(v, str) for v in given.values()):
+                raise ValueError(_REFERENCE_SHAPE.format(column=named))
+        return value
+
     @field_validator("references")
     @classmethod
-    def _references_are_tables(cls, value: dict[str, str]) -> dict[str, str]:
+    def _references_are_tables(
+        cls, value: dict[str, str | ReferenceSpec]
+    ) -> dict[str, str | ReferenceSpec]:
         """Refuse a reference column or target that cannot be used.
 
         Parameters
@@ -397,14 +456,17 @@ class AssetMetadata(SafeTextModel):
         Raises
         ------
         ValueError
-            If a column has an unsafe character or cannot name its check, or a target is not
-            a table name.
+            If a column has an unsafe character or cannot name its check, a target is not
+            a table name, or an `at:` column has an unsafe character.
         """
-        for column, target in value.items():
+        for column, given in value.items():
+            target = given.to if isinstance(given, ReferenceSpec) else given
             if not column:
                 raise ValueError("a reference column must not be empty")
             if unsafe_identifier(column):
                 raise ValueError(f"a reference column {IDENTIFIER_MESSAGE}")
+            if isinstance(given, ReferenceSpec) and (not given.at or unsafe_identifier(given.at)):
+                raise ValueError(f"`at:` of reference `{column}` {IDENTIFIER_MESSAGE}")
             if unsafe_identifier(target):
                 # Before any message shows the target: it could forge a line of the issues.
                 raise ValueError(f"reference `{column}` names a target that {IDENTIFIER_MESSAGE}")
@@ -675,6 +737,33 @@ class AssetMetadata(SafeTextModel):
             Column → label, for the columns that have one.
         """
         return {n: t.label for n, t in self.columns.items() if t.label is not None}
+
+    def reference_targets(self) -> dict[str, str]:
+        """List each reference's target, whichever form declares it.
+
+        Returns
+        -------
+        dict
+            Column → target as written (``ns.table`` or ``ns.table.column``).
+        """
+        return {
+            column: given.to if isinstance(given, ReferenceSpec) else given
+            for column, given in self.references.items()
+        }
+
+    def reference_times(self) -> dict[str, str]:
+        """List the time column of each reference that declares one.
+
+        Returns
+        -------
+        dict
+            Column → its `at:` column.
+        """
+        return {
+            column: given.at
+            for column, given in self.references.items()
+            if isinstance(given, ReferenceSpec)
+        }
 
 
 @dataclass(frozen=True)
