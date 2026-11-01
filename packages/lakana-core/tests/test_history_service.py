@@ -1021,7 +1021,7 @@ def test_a_table_over_the_open_versions_cap_is_refused_before_anything_is_read(
         mock.patch.object(service_module, "read_open_versions", side_effect=AssertionError),
         pytest.raises(ValidationError) as info,
     ):
-        hist.run([("A", "south")], T2, max_open_versions=2)
+        hist.run([("A", "south")], T2, max_open_versions=2, advice=SQL_ADVICE)
 
     assert str(info.value) == (
         "gold.dim_customer has 3 open versions, more than LAKANA_RUN__MAX_HISTORY_OPEN_VERSIONS "
@@ -1032,13 +1032,33 @@ def test_a_table_over_the_open_versions_cap_is_refused_before_anything_is_read(
     )
 
 
+def test_the_cap_names_the_server_when_the_server_holds_the_versions(hist: Hist) -> None:
+    """A Python asset writes over REST: the server, not the worker, holds the versions."""
+    hist.run([("A", "north"), ("B", "north"), ("C", "north")], T1, first=True)
+
+    with pytest.raises(ValidationError) as info:
+        hist.run([("A", "south")], T2, max_open_versions=2)
+
+    assert str(info.value) == (
+        "gold.dim_customer has 3 open versions, more than LAKANA_RUN__MAX_HISTORY_OPEN_VERSIONS "
+        "(2) allows. A history write holds every open version in the server's memory, roughly "
+        "2 GiB per million open versions of 8 columns and more for wider rows, so nothing was "
+        "read or written. Ask an operator to raise LAKANA_RUN__MAX_HISTORY_OPEN_VERSIONS "
+        "together with the memory the server has."
+    )
+
+
 def test_a_first_run_over_the_open_versions_cap_creates_nothing(hist: Hist) -> None:
     with (
         mock.patch.object(service_module, "first_versions", side_effect=AssertionError),
         pytest.raises(ValidationError) as info,
     ):
         hist.run(
-            [("A", "north"), ("B", "north"), ("C", "north")], T1, first=True, max_open_versions=2
+            [("A", "north"), ("B", "north"), ("C", "north")],
+            T1,
+            first=True,
+            max_open_versions=2,
+            advice=SQL_ADVICE,
         )
 
     assert str(info.value) == (
@@ -1210,7 +1230,7 @@ def test_a_result_over_the_open_versions_cap_is_refused_before_anything_is_read(
         mock.patch.object(service_module, "read_open_versions", side_effect=AssertionError),
         pytest.raises(ValidationError) as info,
     ):
-        hist.run(four_new, T2, max_open_versions=2)
+        hist.run(four_new, T2, max_open_versions=2, advice=SQL_ADVICE)
 
     assert str(info.value) == (
         "The asset's result for gold.dim_customer has 5 rows, and each can open a version: "
@@ -1231,7 +1251,7 @@ def test_a_write_that_would_leave_too_many_open_versions_stages_nothing(hist: Hi
         mock.patch.object(service_module, "stage_history", side_effect=AssertionError),
         pytest.raises(ValidationError) as info,
     ):
-        hist.run([("C", "north"), ("D", "north")], T2, max_open_versions=3)
+        hist.run([("C", "north"), ("D", "north")], T2, max_open_versions=3, advice=SQL_ADVICE)
 
     assert str(info.value) == (
         "gold.dim_customer would have 4 open versions after this write, more than "

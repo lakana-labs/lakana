@@ -6432,7 +6432,11 @@ class CatalogService:
             if rows.num_rows > max_open_versions:
                 raise ValidationError(
                     too_many_open_versions_message(
-                        ref.dotted(), rows.num_rows, max_open_versions, state="create"
+                        ref.dotted(),
+                        rows.num_rows,
+                        max_open_versions,
+                        state="create",
+                        holder=advice.holder,
                     )
                 )
             check_starts(starts, clock, valid_from)
@@ -6481,13 +6485,21 @@ class CatalogService:
         if open_count > max_open_versions:
             raise ValidationError(
                 too_many_open_versions_message(
-                    ref.dotted(), open_count, max_open_versions, state="open"
+                    ref.dotted(),
+                    open_count,
+                    max_open_versions,
+                    state="open",
+                    holder=advice.holder,
                 )
             )
         if rows.num_rows > max_open_versions:
             raise ValidationError(
                 too_many_open_versions_message(
-                    ref.dotted(), rows.num_rows, max_open_versions, state="result"
+                    ref.dotted(),
+                    rows.num_rows,
+                    max_open_versions,
+                    state="result",
+                    holder=advice.holder,
                 )
             )
         plan = plan_history(
@@ -6513,7 +6525,11 @@ class CatalogService:
         if remaining > max_open_versions:
             raise ValidationError(
                 too_many_open_versions_message(
-                    ref.dotted(), remaining, max_open_versions, state="after"
+                    ref.dotted(),
+                    remaining,
+                    max_open_versions,
+                    state="after",
+                    holder=advice.holder,
                 )
             )
         check_first_versions_order(

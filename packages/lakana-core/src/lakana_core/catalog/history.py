@@ -976,7 +976,12 @@ OpenVersionsState = Literal["create", "open", "result", "after"]
 
 
 def too_many_open_versions_message(
-    table: str, count: int, cap: int, *, state: OpenVersionsState
+    table: str,
+    count: int,
+    cap: int,
+    *,
+    state: OpenVersionsState,
+    holder: Literal["worker", "server"] = "worker",
 ) -> str:
     """Refuse a history write that would hold more open versions than the setting allows.
 
@@ -992,6 +997,9 @@ def too_many_open_versions_message(
         What was counted: ``"create"`` the rows a first run would create the table with,
         ``"open"`` the table's open versions, ``"result"`` the rows of a later run's result (each
         can open a version), ``"after"`` the open versions the planned write would leave.
+    holder
+        The process that holds the versions: ``"worker"`` (a SQL asset's run) or ``"server"``
+        (a write over the REST API).
 
     Returns
     -------
@@ -1009,11 +1017,16 @@ def too_many_open_versions_message(
         "after": f"{table} would have {count} open versions after this write, more than",
     }[state]
     done = "written" if state == "after" else "read or written"
+    memory = (
+        "the worker's memory limit (LAKANA_WORKER__MEMORY_LIMIT)"
+        if holder == "worker"
+        else "the memory the server has"
+    )
     return (
         f"{head} {setting} ({cap}) allows. A history write holds every open version in the "
-        "worker's memory, roughly 2 GiB per million open versions of 8 columns and more for "
+        f"{holder}'s memory, roughly 2 GiB per million open versions of 8 columns and more for "
         f"wider rows, so nothing was {done}. Ask an operator to raise {setting} together with "
-        "the worker's memory limit (LAKANA_WORKER__MEMORY_LIMIT)."
+        f"{memory}."
     )
 
 

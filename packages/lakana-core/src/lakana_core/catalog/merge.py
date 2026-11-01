@@ -17,6 +17,7 @@ import logging
 import uuid
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass
+from typing import Literal
 
 import pyarrow as pa
 from pyiceberg.catalog.noop import NoopCatalog
@@ -58,10 +59,14 @@ class MergeAdvice:
     too_many
         A key of several columns with more rows than `COMPOSITE_KEY_MAX_ROWS`; formatted with
         ``cap`` and ``rows``, both with thousands separators.
+    holder
+        The process whose memory a history write fills: ``"worker"`` for a SQL asset (the worker
+        runs it), ``"server"`` for a caller of the REST API (the server holds the versions).
     """
 
     repeats: str
     too_many: str
+    holder: Literal["worker", "server"]
 
 
 SDK_ADVICE = MergeAdvice(
@@ -74,6 +79,7 @@ SDK_ADVICE = MergeAdvice(
         "has {rows}. Merge on one key column (a column that holds the whole key), or send batches "
         "of at most {cap} rows."
     ),
+    holder="server",
 )
 """For a caller of the SDK, the CLI or the REST API: it builds and sends the batches."""
 SQL_ADVICE = MergeAdvice(
@@ -88,6 +94,7 @@ SQL_ADVICE = MergeAdvice(
         "the asset a `watermark:` so that each run merges only the rows changed since the last "
         "one; a first run reads every row, so load the history in parts of at most {cap} rows."
     ),
+    holder="worker",
 )
 """For a SQL asset: its SELECT is the batch, one per run."""
 
