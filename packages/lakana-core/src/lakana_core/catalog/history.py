@@ -658,8 +658,8 @@ def _check_returning(
         The `valid_from:` column, or `None` when every start is the run clock; for the message.
     last_ends
         Reads the key columns and `valid_to` of the closed versions of the keys it is given (first
-        argument) whose `valid_to` is after the lower bound it is given (second argument; a later
-        or equal end cannot conflict, so the read may leave the others out). The bound is the
+        argument) whose `valid_to` is after the lower bound it is given (second argument; an end
+        at or before it cannot conflict, so the read may leave those out). The bound is the
         earliest start among the rows that open a key again: the run clock, or the smallest
         declared `valid_from`.
     table
