@@ -103,6 +103,25 @@ from lakana_core.catalog.health import (
     readers,
     snapshot_stats,
 )
+from lakana_core.catalog.history import (
+    HISTORY_KEY_PROPERTY,
+    RUN_WROTE_MESSAGE,
+    HistoryResult,
+    check_history_batch,
+    check_history_table,
+    check_starts,
+    conform_batch,
+    count_open_versions,
+    first_versions,
+    plan_history,
+    read_last_ends,
+    read_open_versions,
+    run_clock,
+    stage_history,
+    too_many_open_versions_message,
+    version_starts,
+    written_by_run,
+)
 from lakana_core.catalog.identity import artifact_refusal, resolve_table_id
 from lakana_core.catalog.json_schema import ColumnSpec, from_iceberg_schema
 from lakana_core.catalog.loads import require_bronze
@@ -210,10 +229,11 @@ from lakana_core.catalog.writes import (
     check_sources,
     cleanup_location,
     expected_snapshot_value,
+    max_rows_message,
     stage_snapshot,
     target_changed_message,
 )
-from lakana_core.config import StorageConfig, ViewAuditConfig
+from lakana_core.config import DEFAULT_MAX_HISTORY_OPEN_VERSIONS, StorageConfig, ViewAuditConfig
 from lakana_core.db import db_now, rowcount
 from lakana_core.errors import (
     AlreadyExistsError,
@@ -941,6 +961,24 @@ def _storage_errors_as_lakana(active: bool) -> Generator[None]:
         if not active:
             raise
         raise _RollbackReason(_STORAGE_FAILED.format(error=type(exc).__name__)) from exc
+
+
+@contextlib.contextmanager
+def _arrow_memory_returned() -> Generator[None]:
+    """Hand the Arrow pool's freed pages back to the system once a write is over.
+
+    pyarrow's default pool keeps the pages a large write freed; in a worker process, which
+    its memory watchdog cannot end on its own, they would count against every later query.
+
+    Yields
+    ------
+    None
+        While the write runs; the pages are returned whether or not it succeeds.
+    """
+    try:
+        yield
+    finally:
+        pa.default_memory_pool().release_unused()
 
 
 def failed_snapshot_tag(run_id: uuid.UUID) -> str:
@@ -5507,12 +5545,106 @@ class CatalogService:
             If the table is not a managed table, or a row filter or column mask on it applies
             to `p`.
         """
-        row = self._check_can_write_or_create(
+        self._check_can_compare(
             p,
             ref,
             expected_snapshot_id,
             artifact_operation="merging rows",
             unmanaged="Merges are only supported on managed (Iceberg) tables.",
+            hidden=(
+                f"Merges into {ref.dotted()} are refused while a row filter or column mask "
+                "applies to you on it: a merge compares your rows with rows you can't see."
+            ),
+        )
+
+    def check_can_history(
+        self,
+        p: PrincipalRef,
+        ref: TableRef,
+        *,
+        expected_snapshot_id: ExpectedSnapshot | None = None,
+    ) -> None:
+        """Cheaply verify a history write would be authorized, before any data is read.
+
+        The rules of `check_can_merge`, for the same reasons: `WRITE_TABLE`, then `READ_TABLE`
+        (a bound task token on its own asset checked without its narrowing), `CREATE_TABLE` as
+        well when the write would create the table, and refused while a row filter or column mask
+        on the table applies to `p`: a history write reads every open version, and its counts
+        tell what it found.
+
+        Parameters
+        ----------
+        p
+            The acting principal.
+        ref
+            The table.
+        expected_snapshot_id
+            The caller's precondition, if any.
+
+        Raises
+        ------
+        PermissionDenied
+            Without `WRITE_TABLE` or `READ_TABLE`, or without `CREATE_TABLE` for a create.
+        NotFoundError
+            For a missing table without a precondition.
+        ConflictError
+            For a missing table where a snapshot id was expected.
+        ValidationError
+            For a table that is not managed, or a row filter or column mask on the table that
+            applies to `p`.
+        """
+        self._check_can_compare(
+            p,
+            ref,
+            expected_snapshot_id,
+            artifact_operation="writing history",
+            unmanaged="History writes are only supported on managed (Iceberg) tables.",
+            hidden=(
+                f"History writes into {ref.dotted()} are refused while a row filter or column "
+                "mask applies to you on it: a history write compares your rows with rows you "
+                "can't see."
+            ),
+        )
+
+    def _check_can_compare(
+        self,
+        p: PrincipalRef,
+        ref: TableRef,
+        expected_snapshot_id: ExpectedSnapshot | None,
+        *,
+        artifact_operation: str,
+        unmanaged: str,
+        hidden: str,
+    ) -> None:
+        """Run the pre-check of a write that compares its rows with the table's.
+
+        Parameters
+        ----------
+        p
+            The acting principal.
+        ref
+            The table.
+        expected_snapshot_id
+            The caller's precondition, if any.
+        artifact_operation
+            What was attempted, for `artifact_refusal`.
+        unmanaged
+            The refusal for a table that is neither managed nor an artifact.
+        hidden
+            The first sentence of the refusal while a row filter or column mask applies to `p`.
+
+        Raises
+        ------
+        ValidationError
+            While a row filter or column mask on the table applies to `p`; the rest as
+            `_check_can_write_or_create` raises it.
+        """
+        row = self._check_can_write_or_create(
+            p,
+            ref,
+            expected_snapshot_id,
+            artifact_operation=artifact_operation,
+            unmanaged=unmanaged,
             read_as=replace(p, task_scope=None) if _bound_to_own_asset(p, ref) else p,
         )
         if row is None:
@@ -5520,10 +5652,8 @@ class CatalogService:
         policy = PolicyResolver(self._session).resolve(p, ref, table_id=row.id)
         if policy.row_filters or policy.column_masks:
             raise ValidationError(
-                f"Merges into {ref.dotted()} are refused while a row filter or column mask "
-                "applies to you on it: a merge compares your rows with rows you can't see. Ask "
-                "someone the table is not filtered or masked for to run it, or ask an owner to "
-                "lift the filter or mask for you."
+                f"{hidden} Ask someone the table is not filtered or masked for to run it, or ask "
+                "an owner to lift the filter or mask for you."
             )
 
     def _check_can_write_or_create(
@@ -6002,6 +6132,7 @@ class CatalogService:
             pin=pin,
         )
 
+    @_arrow_memory_returned()
     def merge(
         self,
         p: PrincipalRef,
@@ -6122,12 +6253,320 @@ class CatalogService:
                 table_id=created.table_id,
             )
 
-        securable = Securable.table_scope(ref.environment, ref.namespace, ref.name)
         ns, row = self._find_table(ref)
-        environment_id, table_id = ns.environment_id, row.id
-        unpublished = row.unpublished_run_id is not None
         loaded = self._to_loaded_table(ref, row)
         current = loaded.metadata
+        pins = self._write_pins(ref, row.id, current, expected_snapshot_id, pin)
+        schema = current.schema()
+        check_merge_batch(
+            data,
+            key,
+            table_columns=[column.name for column in schema.fields],
+            table_name=ref.dotted(),
+            advice=advice,
+        )
+        validate_arrow_schema(schema, data)
+        nothing = MergeResult(snapshot_id=None, rows_inserted=0, rows_updated=0, table_id=row.id)
+        if data.num_rows == 0:
+            return nothing
+        resolved = self._storage.for_environment(ref.environment)
+        staged = stage_upsert(
+            current, loaded.metadata_location, resolved.file_io, data, key, table_name=ref.dotted()
+        )
+        counts = staged.counts
+        snapshot_id = self._commit_one_snapshot(
+            p,
+            ref,
+            mode=WriteMode.MERGE,
+            table_id=row.id,
+            environment_id=ns.environment_id,
+            current=current,
+            unpublished=row.unpublished_run_id is not None,
+            resolved=resolved,
+            requirements=[*pins, *staged.requirements],
+            updates=staged.updates,
+            discarded=staged.discarded,
+            rows=counts.rows_inserted + counts.rows_updated,
+            lineage=lineage,
+            query_run_id=query_run_id,
+            watermark=watermark,
+            detail={
+                "rows_inserted": counts.rows_inserted,
+                "rows_updated": counts.rows_updated,
+                "key": key,
+            },
+        )
+        if snapshot_id is None:
+            return nothing
+        return MergeResult(
+            snapshot_id=snapshot_id,
+            rows_inserted=counts.rows_inserted,
+            rows_updated=counts.rows_updated,
+            table_id=row.id,
+        )
+
+    @_arrow_memory_returned()
+    def history(
+        self,
+        p: PrincipalRef,
+        ref: TableRef,
+        data: pa.Table,
+        *,
+        key: Sequence[str],
+        valid_from: str | None = None,
+        close_missing: bool = False,
+        sources: Sequence[str] = (),
+        source_versions: Mapping[str, int] | None = None,
+        expected_snapshot_id: ExpectedSnapshot | None = None,
+        pin: SnapshotPin | None = None,
+        query_run_id: uuid.UUID | None = None,
+        max_rows: int | None = None,
+        max_open_versions: int = DEFAULT_MAX_HISTORY_OPEN_VERSIONS,
+        advice: MergeAdvice = SDK_ADVICE,
+    ) -> HistoryResult:
+        """Keep the versions of a dimension's rows: open, close and leave alone, in one commit.
+
+        The batch is the current state of every row. It is checked first
+        (`check_history_batch`: the added names, the `valid_from` column, the key; counts, never
+        values). A missing table with `expected_snapshot_id="none"` is created with every row
+        as an open version and the property `lakana.history-key` (the audit event is the
+        create's). Otherwise the table must be a history table of this key, the batch must have
+        its columns, and `plan_history` diffs it against the open versions; the closed and
+        opened rows are staged as one snapshot (`stage_history`) and committed through
+        `commit_table` with the `TABLE_WRITE` event (`mode: history`) and one lineage edge per
+        source in the same transaction. Nothing is deleted. The run clock is the start of the
+        run `p`'s run context belongs to (`run_clock`); no caller sends one.
+
+        Parameters
+        ----------
+        p
+            The acting principal.
+        ref
+            The table.
+        data
+            The rows: the current state of every row, with the `valid_from` column if named.
+        key
+            The natural key's columns.
+        valid_from
+            The column each version's start is read from; `None` for the run clock.
+        close_missing
+            Close the open version of each key `data` lacks, at the run clock.
+        sources
+            Dotted names of the tables `data` came from; each must exist and be READ-able.
+        source_versions
+            The version of each source that is an artifact, by dotted name.
+        expected_snapshot_id
+            The table's current snapshot as the caller read it, or ``none``, which also creates
+            a missing table.
+        pin
+            The table and snapshot a worker's run computed its rows from, or `None`.
+        query_run_id
+            The run writing, for the audit event and the lineage edges.
+        max_rows
+            Most rows of the batch and most open versions (`QueryLimitsConfig.max_write_rows`),
+            or `None`.
+        max_open_versions
+            Most open versions the table may have (`RunConfig.max_history_open_versions`),
+            counted from the manifests before any is read.
+        advice
+            How a repeated key is explained: `SDK_ADVICE` or `SQL_ADVICE`.
+
+        Returns
+        -------
+        HistoryResult
+            The snapshot and the counts. `snapshot_id` is `None`, and nothing is committed or
+            audited, when nothing changed.
+
+        Raises
+        ------
+        PermissionDenied
+            If `p` may not write or read the table or read a source, or lacks `CREATE_TABLE`
+            where the write would create the table.
+        NotFoundError
+            If the table or a source does not exist.
+        ValidationError
+            For a batch `check_history_batch` refuses, more rows, open versions or closed
+            versions of returning keys than `max_rows`, a table that is not a history table of
+            this key, a batch without the table's columns, a refusal of `plan_history`, a change
+            by a run whose own write is the table's current snapshot (`written_by_run`), a table
+            that is not managed, a row filter or column mask that applies to `p`, or more open
+            versions than `max_open_versions`.
+        UnsupportedTableError
+            For a table with row-level delete files (`count_open_versions`).
+        ConflictError
+            If another writer committed first, or `expected_snapshot_id` or `pin` no longer
+            matches.
+        """
+        self._commit_sent = False
+        self.check_can_history(p, ref, expected_snapshot_id=expected_snapshot_id)
+        self._guard.check(p, ref.environment, WriteOperation.HISTORY, table_target(ref))
+        lineage = self.resolve_lineage_sources(
+            p, ref.environment, sources, versions=source_versions
+        )
+        data = strip_field_metadata(data)
+        key = list(key)
+        if max_rows is not None and data.num_rows > max_rows:
+            raise ValidationError(max_rows_message(max_rows))
+        check_history_batch(
+            data,
+            key,
+            table=ref.dotted(),
+            valid_from=valid_from,
+            close_missing=close_missing,
+            advice=advice,
+        )
+        clock = run_clock(self._session, p.run_context)
+        starts = version_starts(data, valid_from, clock)
+        rows = data.drop_columns([valid_from]) if valid_from is not None else data
+        del data  # `rows` is the batch from here on; a cast copy must not sit next to it
+        if self._existing_table(ref) is None and expected_snapshot_id == "none":
+            if rows.num_rows > max_open_versions:
+                raise ValidationError(
+                    too_many_open_versions_message(
+                        ref.dotted(), rows.num_rows, max_open_versions, create=True
+                    )
+                )
+            check_starts(starts, clock, valid_from)
+            first = first_versions(rows, key=key, table=ref.dotted(), starts=starts)
+            try:
+                created = self._write_new_table(
+                    p,
+                    ref,
+                    schema=first.schema,
+                    batches=first.to_batches(),
+                    max_rows=max_rows,
+                    sources=lineage,
+                    query_run_id=query_run_id,
+                    properties={HISTORY_KEY_PROPERTY: json.dumps(key)},
+                )
+            except AlreadyExistsError as exc:
+                raise ConflictError(target_changed_message(ref.dotted())) from exc
+            return HistoryResult(
+                snapshot_id=created.snapshot_id,
+                versions_opened=created.rows,
+                versions_closed=0,
+                closed_missing=0,
+                created=True,
+                table_id=created.table_id,
+            )
+
+        ns, row = self._find_table(ref)
+        loaded = self._to_loaded_table(ref, row)
+        current = loaded.metadata
+        schema = current.schema()
+        check_history_table(
+            schema,
+            current.properties,
+            key=key,
+            table=ref.dotted(),
+            environment=ref.environment,
+        )
+        rows = conform_batch(schema, rows, table=ref.dotted())
+        pins = self._write_pins(ref, row.id, current, expected_snapshot_id, pin)
+        resolved = self._storage.for_environment(ref.environment)
+        file_io = resolved.file_io
+        open_count = count_open_versions(
+            current, file_io, table=ref.dotted(), environment=ref.environment
+        )
+        if open_count > max_open_versions:
+            raise ValidationError(
+                too_many_open_versions_message(
+                    ref.dotted(), open_count, max_open_versions, create=False
+                )
+            )
+        plan = plan_history(
+            rows,
+            read_open_versions(current, file_io, max_rows=max_rows),
+            key=key,
+            table=ref.dotted(),
+            schema=schema.as_arrow(),
+            starts=starts,
+            clock=clock,
+            valid_from=valid_from,
+            close_missing=close_missing,
+            last_ends=lambda wanted, after: read_last_ends(
+                current, file_io, wanted, after, key=key, table=ref.dotted(), max_rows=max_rows
+            ),
+            environment=ref.environment,
+        )
+        if not plan.changed:
+            return HistoryResult(None, 0, 0, 0, table_id=row.id)
+        if written_by_run(current, p.run_context):
+            raise ValidationError(RUN_WROTE_MESSAGE.format(table=ref.dotted()))
+        staged = stage_history(
+            current,
+            loaded.metadata_location,
+            file_io,
+            plan,
+            table=ref.dotted(),
+            environment=ref.environment,
+        )
+        snapshot_id = self._commit_one_snapshot(
+            p,
+            ref,
+            mode=WriteMode.HISTORY,
+            table_id=row.id,
+            environment_id=ns.environment_id,
+            current=current,
+            unpublished=row.unpublished_run_id is not None,
+            resolved=resolved,
+            requirements=[*pins, *staged.requirements],
+            updates=staged.updates,
+            discarded=staged.discarded,
+            rows=plan.versions_opened + plan.versions_closed,
+            lineage=lineage,
+            query_run_id=query_run_id,
+            watermark=None,
+            detail={
+                "versions_opened": plan.versions_opened,
+                "versions_closed": plan.versions_closed,
+                "closed_missing": plan.closed_missing,
+                "key": key,
+                "valid_from": valid_from or "run",
+                "run_started_at": clock.isoformat(),
+            },
+        )
+        return HistoryResult(
+            snapshot_id=snapshot_id,
+            versions_opened=plan.versions_opened,
+            versions_closed=plan.versions_closed,
+            closed_missing=plan.closed_missing,
+            table_id=row.id,
+        )
+
+    def _write_pins(
+        self,
+        ref: TableRef,
+        table_id: uuid.UUID,
+        current: TableMetadata,
+        expected_snapshot_id: ExpectedSnapshot | None,
+        pin: SnapshotPin | None,
+    ) -> list[TableRequirement]:
+        """Build the requirements of a write that commits against the table it read.
+
+        Parameters
+        ----------
+        ref
+            The table, for the message.
+        table_id
+            Its id.
+        current
+            Its current metadata.
+        expected_snapshot_id
+            The caller's precondition, if any.
+        pin
+            The table and snapshot the rows were computed from, if any.
+
+        Returns
+        -------
+        list of TableRequirement
+            The table's identity and schema, and each precondition as a snapshot requirement.
+
+        Raises
+        ------
+        ConflictError
+            If `expected_snapshot_id` or `pin` no longer matches.
+        """
         pins: list[TableRequirement] = [
             AssertTableUUID(uuid=table_id),
             AssertCurrentSchemaId(current_schema_id=current.current_schema_id),
@@ -6141,43 +6580,102 @@ class CatalogService:
             if pin != SnapshotPin(table_id, current.current_snapshot_id):
                 raise ConflictError(target_changed_message(ref.dotted()))
             pins.append(AssertRefSnapshotId(ref="main", snapshot_id=pin.snapshot_id))
-        schema = current.schema()
-        check_merge_batch(
-            data,
-            key,
-            table_columns=[column.name for column in schema.fields],
-            table_name=ref.dotted(),
-            advice=advice,
-        )
-        validate_arrow_schema(schema, data)
-        if data.num_rows == 0:
-            return MergeResult(snapshot_id=None, rows_inserted=0, rows_updated=0, table_id=table_id)
+        return pins
 
-        resolved = self._storage.for_environment(ref.environment)
-        staged = stage_upsert(
-            current, loaded.metadata_location, resolved.file_io, data, key, table_name=ref.dotted()
-        )
-        added = [u.snapshot for u in staged.updates if isinstance(u, AddSnapshotUpdate)]
+    def _commit_one_snapshot(
+        self,
+        p: PrincipalRef,
+        ref: TableRef,
+        *,
+        mode: WriteMode,
+        table_id: uuid.UUID,
+        environment_id: uuid.UUID,
+        current: TableMetadata,
+        unpublished: bool,
+        resolved: ResolvedStorage,
+        requirements: Sequence[TableRequirement],
+        updates: Sequence[TableUpdate],
+        discarded: Sequence[str],
+        rows: int,
+        lineage: Sequence[LineageSource],
+        query_run_id: uuid.UUID | None,
+        watermark: str | None,
+        detail: Mapping[str, object],
+    ) -> int | None:
+        """Commit a staged single-snapshot write (a merge or a history write) with its evidence.
+
+        The `TABLE_WRITE` event, the lineage edges and the guard's numbers are added in the
+        transaction of `commit_table`, which stamps the snapshot with the writing task attempt.
+        A failure known not to have landed deletes every file the write staged and raises a lost
+        race as `target_changed_message`; the files of folded snapshots are deleted either way.
+
+        Parameters
+        ----------
+        p
+            The acting principal.
+        ref
+            The table.
+        mode
+            `WriteMode.MERGE` or `WriteMode.HISTORY`, for the event.
+        table_id
+            The table's id.
+        environment_id
+            Its environment's id.
+        current
+            The metadata the write was staged on.
+        unpublished
+            Whether the table is not published yet.
+        resolved
+            The environment's storage.
+        requirements
+            The pins and the staging's own requirements.
+        updates
+            The staged updates.
+        discarded
+            Files of folded snapshots.
+        rows
+            The rows the event reports.
+        lineage
+            The sources, one edge each.
+        query_run_id
+            The run writing, if any.
+        watermark
+            The encoded watermark, if any.
+        detail
+            The event's own fields.
+
+        Returns
+        -------
+        int or None
+            The committed snapshot's id; `None` when `updates` adds no snapshot (nothing
+            committed or audited).
+
+        Raises
+        ------
+        ConflictError
+            If another writer committed first, or a pin no longer holds.
+        """
+        added = [u.snapshot for u in updates if isinstance(u, AddSnapshotUpdate)]
         if not added:
-            return MergeResult(snapshot_id=None, rows_inserted=0, rows_updated=0, table_id=table_id)
+            return None
         snapshot = added[0]
         # Listed before the try, as in `append`: a failure reading them back aborts directly.
         written_paths = new_data_file_paths(snapshot, resolved.file_io)
         cleanup_paths = [
             *written_paths,
             *new_manifest_paths(snapshot, resolved.file_io),
-            *staged.discarded,
+            *discarded,
         ]
-        counts = staged.counts
+        securable = Securable.table_scope(ref.environment, ref.namespace, ref.name)
         try:
             self._record_write(
                 p,
                 securable,
                 ref,
-                WriteMode.MERGE,
+                mode,
                 WriteResult(
                     table_id=table_id,
-                    rows=counts.rows_inserted + counts.rows_updated,
+                    rows=rows,
                     files=len(written_paths),
                     snapshot_id=snapshot.snapshot_id,
                     schema_diff=SchemaDiff(),
@@ -6188,18 +6686,10 @@ class CatalogService:
                 environment_id,
                 snapshot_before=current.current_snapshot_id,
                 publishes=unpublished,
-                detail={
-                    "rows_inserted": counts.rows_inserted,
-                    "rows_updated": counts.rows_updated,
-                    "key": key,
-                },
+                detail=detail,
             )
             self.commit_table(
-                p,
-                ref,
-                requirements=[*pins, *staged.requirements],
-                updates=staged.updates,
-                own_data_files=True,
+                p, ref, requirements=requirements, updates=updates, own_data_files=True
             )
         except Exception as exc:
             landed = self._settle_failed_write(
@@ -6215,13 +6705,8 @@ class CatalogService:
                 if isinstance(exc, ConflictError):
                     raise ConflictError(target_changed_message(ref.dotted())) from exc
                 raise
-        cleanup_written_paths(resolved, staged.discarded)
-        return MergeResult(
-            snapshot_id=snapshot.snapshot_id,
-            rows_inserted=counts.rows_inserted,
-            rows_updated=counts.rows_updated,
-            table_id=table_id,
-        )
+        cleanup_written_paths(resolved, discarded)
+        return snapshot.snapshot_id
 
     def resolve_lineage_sources(
         self,
@@ -7244,6 +7729,7 @@ class CatalogService:
         max_rows: int | None,
         sources: Sequence[LineageSource],
         query_run_id: uuid.UUID | None,
+        properties: Mapping[str, str] | None = None,
     ) -> WriteResult:
         """Create a table from a result and publish it with its first snapshot, atomically.
 
@@ -7272,6 +7758,8 @@ class CatalogService:
             The tables the rows came from.
         query_run_id
             The run writing, if any.
+        properties
+            Table properties to create the table with (a history table's key), or `None`.
 
         Returns
         -------
@@ -7297,7 +7785,7 @@ class CatalogService:
             schema=arrow_to_iceberg_schema(schema),
             partition_spec=None,
             sort_order=None,
-            properties=None,
+            properties=properties,
             location=None,
             holder_run_id=claim_holder(p, query_run_id),
         )

@@ -2510,6 +2510,30 @@ refusal still runs against the principal the task acts for, so a task of a filte
 principal cannot merge (`test_a_task_of_a_filtered_principal_may_not_merge_into_its_own_asset`,
 core and server).
 
+A **history write** (`CatalogService.history`, #253) has the same pre-check through
+`check_can_history`, which shares `_check_can_compare` with `check_can_merge`: `WRITE_TABLE`, then
+`READ_TABLE` (the bound-token own-asset exception included), `CREATE_TABLE` for a create, and the
+row filter and column mask refusal, because it reads every open version and its counts tell what
+it found. The guard sees it as `WriteOperation.HISTORY`, a materialising operation of its own (so
+a break-glass event names it), never as `MERGE`. The run clock comes from the run context that
+authentication or the worker set (`run_clock`); no request field can move it. A run writes a
+table's history once: when the table's current snapshot carries the acting run context's task run
+as `lakana.task-run-id` (the attempt stamp, which only the catalog sets), a write that would change
+the table again is refused (`written_by_run`, `RUN_WROTE_MESSAGE`); one that changes nothing
+returns nothing. Without a claim-form run context there is no stamp and no such refusal (a SQL
+task's write run carries `query_run_id` and is not stamped either). A history write never removes
+a row it did not plan to: its staged snapshot must add exactly `versions_opened` rows net, so a
+table whose open versions share a surrogate key (only a commit outside `CatalogService.history`
+can make one) is refused after staging, with every staged file deleted (`stage_history`).
+
+**Limit: `lakana.history-key` is an ordinary table property.** An Iceberg REST commit with
+`WRITE_TABLE` can set or remove it (`SetPropertiesUpdate`, `RemovePropertiesUpdate`):
+`validate_table_properties` refuses only the location and class-path properties, and no
+`lakana.*` table property is reserved on that path. It is no escalation (the same writer may
+rewrite the rows), but "a history table keeps its key" holds only against writes through
+`CatalogService.history`; a removed property makes the next history run refuse the table with
+`not_history_message`.
+
 **An Iceberg REST commit never removes snapshots** (`_NO_SNAPSHOT_REMOVAL`, 403 for every caller).
 `commit_table` refuses `remove-snapshots`, and `remove-snapshot-ref` for a ref named
 `lakana-check-failed-*` (`_is_maintenance_update` is the one definition of what that is), unless

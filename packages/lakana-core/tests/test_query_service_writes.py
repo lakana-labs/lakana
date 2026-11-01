@@ -375,3 +375,19 @@ def test_a_query_cannot_merge_and_is_told_what_does(
             WriteTarget(table="gold.daily", mode=WriteMode.MERGE),
         )
     assert str(caught.value) == _MERGE_REFUSAL
+
+
+def test_a_query_cannot_write_history_and_is_told_what_does(
+    session: Session, principal: PrincipalRef, seeded: CatalogService
+) -> None:
+    with pytest.raises(ValidationError) as caught:
+        QueryService(session, AllowAllAuthorization()).submit_write(
+            principal,
+            "dev",
+            "SELECT 1 AS id",
+            WriteTarget(table="gold.daily", mode=WriteMode.HISTORY),
+        )
+    assert str(caught.value) == (
+        "history is written by assets (`write: history`); a query writes with create, replace or "
+        "append"
+    )

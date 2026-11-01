@@ -201,6 +201,7 @@ def check_merge_batch(
     table_columns: Collection[str],
     table_name: str,
     advice: MergeAdvice = SDK_ADVICE,
+    composite_cap: bool = True,
 ) -> None:
     """Refuse a batch a merge cannot apply, naming counts and never values.
 
@@ -216,13 +217,17 @@ def check_merge_batch(
         The target's dotted name, for the message.
     advice
         How the caller is told to fix a repeated key or too many rows.
+    composite_cap
+        Refuse a key of several columns with more than `COMPOSITE_KEY_MAX_ROWS` rows. A history
+        write passes `False`: it joins such a key in pyarrow, with no term per row.
 
     Raises
     ------
     ValidationError
         For an empty key, a column named twice in it, a key column missing from the table or
         the data, a key column of a nested type, a key of several columns with more than
-        `COMPOSITE_KEY_MAX_ROWS` rows, a null key, or a key that repeats within the batch.
+        `COMPOSITE_KEY_MAX_ROWS` rows (unless `composite_cap` is off), a null key, or a key that
+        repeats within the batch.
     """
     if not key:
         raise ValidationError("A merge needs at least one key column.")
@@ -242,7 +247,7 @@ def check_merge_batch(
                 f"key column `{column}` has type {kind}; a key column must hold single values "
                 "(a number, a string, a date or a timestamp)"
             )
-    if len(key) > 1 and data.num_rows > COMPOSITE_KEY_MAX_ROWS:
+    if composite_cap and len(key) > 1 and data.num_rows > COMPOSITE_KEY_MAX_ROWS:
         raise ValidationError(
             advice.too_many.format(cap=f"{COMPOSITE_KEY_MAX_ROWS:,}", rows=f"{data.num_rows:,}")
         )
@@ -450,8 +455,23 @@ def _delete_staged(tx: Transaction, file_io: FileIO) -> None:
     file_io
         The environment's `FileIO`.
     """
+    _delete_snapshot_files(tx._updates, file_io)
+
+
+def _delete_snapshot_files(updates: Sequence[TableUpdate], file_io: FileIO) -> None:
+    """Best-effort delete the files the staged snapshots among some updates wrote.
+
+    As `_delete_staged`, for updates of more than one transaction (a write and its fold).
+
+    Parameters
+    ----------
+    updates
+        The updates; only the `AddSnapshotUpdate`s are looked at.
+    file_io
+        The environment's `FileIO`.
+    """
     paths: list[str] = []
-    for update in tx._updates:
+    for update in updates:
         if not isinstance(update, AddSnapshotUpdate):
             continue
         # Every snapshot is listed before any file is deleted: a later snapshot reads the
@@ -475,6 +495,50 @@ def _delete_staged(tx: Transaction, file_io: FileIO) -> None:
                 "Failed to delete a file while cleaning up a failed merge: %s",
                 type(exc).__name__,
             )
+
+
+def fold_snapshots(
+    tx: Transaction, metadata: TableMetadata, metadata_location: str, file_io: FileIO
+) -> tuple[Sequence[TableRequirement], Sequence[TableUpdate], list[str]]:
+    """Fold the snapshots pyiceberg staged on a transaction into one on the target's current one.
+
+    A merge's upsert and a history write's overwrite and append each stage up to three
+    snapshots, each moving `main`. When there is more than one, the data files of the last are
+    compared with the target's: one overwrite on the target's current snapshot deletes the files
+    that went and adds the ones that came.
+
+    Parameters
+    ----------
+    tx
+        A transaction on the target's `StaticTable`, with the staged snapshots.
+    metadata
+        The target's current metadata.
+    metadata_location
+        Its location.
+    file_io
+        The environment's `FileIO`.
+
+    Returns
+    -------
+    tuple
+        The requirements and updates to commit (the transaction's own when it staged at most one
+        snapshot), and the files of the folded snapshots no committed snapshot names.
+    """
+    staged: list[Snapshot] = [u.snapshot for u in tx._updates if isinstance(u, AddSnapshotUpdate)]
+    if len(staged) <= 1:
+        return tx._requirements, tx._updates, []
+    before, after = _live_files(metadata, file_io), _live_files(tx.table_metadata, file_io)
+    folded = _static(metadata, metadata_location, file_io).transaction()
+    with folded.update_snapshot().overwrite() as overwrite:
+        for path in before.keys() - after.keys():
+            overwrite.delete_data_file(before[path])
+        for path in after.keys() - before.keys():
+            overwrite.append_data_file(after[path])
+    discarded: list[str] = []
+    for snapshot in staged:
+        discarded.extend(new_manifest_paths(snapshot, file_io))
+        discarded.extend(p for p in new_data_file_paths(snapshot, file_io) if p not in after)
+    return folded._requirements, folded._updates, discarded
 
 
 def _upsert_folded(
@@ -509,24 +573,7 @@ def _upsert_folded(
     """
     result = tx.upsert(data, join_cols=list(key))
     counts = MergeCounts(rows_inserted=result.rows_inserted, rows_updated=result.rows_updated)
-    staged: list[Snapshot] = [u.snapshot for u in tx._updates if isinstance(u, AddSnapshotUpdate)]
-    if len(staged) <= 1:
-        return StagedMerge(requirements=tx._requirements, updates=tx._updates, counts=counts)
-
-    before, after = _live_files(metadata, file_io), _live_files(tx.table_metadata, file_io)
-    folded = _static(metadata, metadata_location, file_io).transaction()
-    with folded.update_snapshot().overwrite() as overwrite:
-        for path in before.keys() - after.keys():
-            overwrite.delete_data_file(before[path])
-        for path in after.keys() - before.keys():
-            overwrite.append_data_file(after[path])
-    discarded: list[str] = []
-    for snapshot in staged:
-        discarded.extend(new_manifest_paths(snapshot, file_io))
-        discarded.extend(p for p in new_data_file_paths(snapshot, file_io) if p not in after)
+    requirements, updates, discarded = fold_snapshots(tx, metadata, metadata_location, file_io)
     return StagedMerge(
-        requirements=folded._requirements,
-        updates=folded._updates,
-        counts=counts,
-        discarded=discarded,
+        requirements=requirements, updates=updates, counts=counts, discarded=discarded
     )

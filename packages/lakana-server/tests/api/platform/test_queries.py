@@ -1070,6 +1070,7 @@ _NO_RESULT_CLAUSE = {
     WriteMode.REPLACE: "wrote to a table",
     WriteMode.APPEND: "wrote to a table",
     WriteMode.MERGE: "wrote to a table",
+    WriteMode.HISTORY: "wrote to a table",
     WriteMode.VIEW: "created a view",
     WriteMode.MAINTAIN: "was a maintenance run",
 }

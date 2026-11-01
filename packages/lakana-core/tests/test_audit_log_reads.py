@@ -790,5 +790,5 @@ def test_each_group_of_shown_fields_is_in_alphabetical_order() -> None:
     assert breaks == [
         ("waits_for_run_id", "already_deleted"),
         ("why", "after"),
-        ("versions", "approved_options"),
+        ("versions_opened", "approved_options"),
     ]

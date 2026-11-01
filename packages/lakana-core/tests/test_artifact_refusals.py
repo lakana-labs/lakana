@@ -222,6 +222,16 @@ def test_a_rename_that_fails_for_another_integrity_reason_is_a_conflict_with_a_n
             artifact_refusal("gold.churn", "merging rows"),
         ),
         (
+            lambda c, p: c.check_can_history(p, _REF),
+            ValidationError,
+            artifact_refusal("gold.churn", "writing history"),
+        ),
+        (
+            lambda c, p: c.history(p, _REF, _ROWS, key=["id"], expected_snapshot_id="none"),
+            ValidationError,
+            artifact_refusal("gold.churn", "writing history"),
+        ),
+        (
             lambda c, p: c.read_watermark(p, _REF, "id"),
             ValidationError,
             artifact_refusal("gold.churn", "an incremental key"),
@@ -509,6 +519,10 @@ def _denied_calls() -> dict[str, Callable[[_Context], object]]:
         "merge": lambda x: x.catalog.merge(
             x.principal, x.ref, _ROWS, key=["id"], expected_snapshot_id="none"
         ),
+        "check_can_history": lambda x: x.catalog.check_can_history(x.principal, x.ref),
+        "history": lambda x: x.catalog.history(
+            x.principal, x.ref, _ROWS, key=["id"], expected_snapshot_id="none"
+        ),
         "read_watermark": lambda x: x.catalog.read_watermark(x.principal, x.ref, "id"),
         "maintain": lambda x: x.catalog.maintain(x.principal, x.ref),
         "drop_table": lambda x: x.catalog.drop_table(x.principal, x.ref),
@@ -752,6 +766,8 @@ _ARTIFACT_HANDLING = {
         "check_can_merge": "refuses",
         "check_can_load": "refuses",
         "merge": "refuses",
+        "check_can_history": "refuses",
+        "history": "refuses",
         "read_watermark": "refuses",
         "maintain": "refuses",
         "drop_table": "refuses",
