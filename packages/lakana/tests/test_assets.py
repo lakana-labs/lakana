@@ -807,8 +807,16 @@ def test_a_wrong_history_model_is_refused_at_import(
     assert str(info.value) == message
 
 
-@pytest.mark.parametrize("column", ["", "changed​_at"])
-def test_an_unsafe_valid_from_is_refused_at_import(column: str) -> None:
+def test_an_unsafe_valid_from_is_refused_at_import() -> None:
     with pytest.raises(ValueError) as info:
-        lakana.asset(write="history", valid_from=column, **_DIM)
+        lakana.asset(write="history", valid_from="changed​_at", **_DIM)
     assert str(info.value) == f"valid_from {lakana.assets._IDENTIFIER_MESSAGE}"
+
+
+def test_an_empty_valid_from_is_refused_at_import_as_empty() -> None:
+    with pytest.raises(ValueError) as info:
+        lakana.asset(write="history", valid_from="", **_DIM)
+    assert str(info.value) == (
+        "valid_from must not be empty; name the column that says when the row's values took "
+        "effect, or leave `valid_from:` out to use the run's start time"
+    )

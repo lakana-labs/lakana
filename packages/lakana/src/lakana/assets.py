@@ -317,7 +317,7 @@ def _check_write(
     Parameters
     ----------
     write
-        ``replace``, ``append`` or ``merge``; `None` means ``replace``.
+        ``replace``, ``append``, ``merge`` or ``history``; `None` means ``replace``.
     key
         The key: a list or tuple of strings, one string (a key of one column), or ``"none"``;
         `None` means none.
@@ -361,7 +361,12 @@ def _check_write(
         raise ValueError("valid_from must be a string")
     if close_missing is not None and not isinstance(close_missing, bool):
         raise ValueError("close_missing must be True or False")
-    if valid_from is not None and (not valid_from or _unsafe(valid_from)):
+    if valid_from == "":
+        raise ValueError(
+            "valid_from must not be empty; name the column that says when the row's values "
+            "took effect, or leave `valid_from:` out to use the run's start time"
+        )
+    if valid_from is not None and _unsafe(valid_from):
         raise ValueError(f"valid_from {_IDENTIFIER_MESSAGE}")
     if any(_unsafe(column) for column in columns):
         raise ValueError(f"a key column {_IDENTIFIER_MESSAGE}")

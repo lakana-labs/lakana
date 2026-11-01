@@ -776,6 +776,7 @@ async def _governed_arrow_write(
     ref: TableRef,
     write: Callable[[pa.Table], _T],
     precheck: Callable[[], None],
+    history: bool = False,
 ) -> _T:
     """Read, bound and decode an Arrow IPC body, then hand it to a catalog write.
 
@@ -874,6 +875,11 @@ async def _governed_arrow_write(
     precheck
         The catalog's cheap authorization and existence check, run in the
         threadpool before the body is read.
+    history
+        Whether this is a history write. It then also takes a slot of
+        `app.state.history_concurrency_limiter` (`Settings.append.max_concurrent_history`,
+        `LAKANA_APPEND__MAX_CONCURRENT_HISTORY`), without waiting, before the shared slot; both
+        are released however the function exits.
 
     Returns
     -------
@@ -896,8 +902,19 @@ async def _governed_arrow_write(
     if _media_type(request.headers.get("content-type")) != _ARROW_STREAM_MEDIA_TYPE:
         raise ValidationError(f"Content-Type must be {_ARROW_STREAM_MEDIA_TYPE!r}.")
 
+    history_limiter: AppendConcurrencyLimiter | None = (
+        request.app.state.history_concurrency_limiter if history else None
+    )
+    if history_limiter is not None and not history_limiter.try_acquire():
+        raise AppendConcurrencyLimitError(
+            "Too many concurrent history writes; retry shortly. The server holds a history "
+            "table's open versions in memory, so it runs few at once "
+            "(LAKANA_APPEND__MAX_CONCURRENT_HISTORY, default 1)."
+        )
     limiter: AppendConcurrencyLimiter = request.app.state.append_concurrency_limiter
     if not limiter.try_acquire():
+        if history_limiter is not None:
+            history_limiter.release()
         raise AppendConcurrencyLimitError("Too many concurrent appends; retry shortly.")
     try:
         await run_in_threadpool(precheck)
@@ -935,6 +952,8 @@ async def _governed_arrow_write(
         return await run_in_threadpool(write, data)
     finally:
         limiter.release()
+        if history_limiter is not None:
+            history_limiter.release()
 
 
 @router.post("", response_model=TableOut, status_code=201, responses=errors(403, 404, 409))
@@ -2373,6 +2392,7 @@ async def write_table_history(
         ref,
         write,
         precheck=lambda: catalog.check_can_history(principal, ref, expected_snapshot_id=expected),
+        history=True,
     )
     return HistoryOut(
         snapshot_id=result.snapshot_id,

@@ -573,6 +573,11 @@ def test_a_control_character_in_a_header_names_the_file_and_line() -> None:
             "valid_from: valid_from must not contain a control, format or surrogate character "
             "or a line separator",
         ),
+        (
+            'write: history\nvalid_from: ""\n',
+            "valid_from: valid_from must not be empty; name the column that says when the row's "
+            "values took effect, or leave `valid_from:` out to use the run's start time",
+        ),
         ('write: history\nclose_missing: "true"\n', "close_missing: must be true or false"),
     ],
 )

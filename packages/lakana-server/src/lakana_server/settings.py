@@ -36,6 +36,11 @@ class AppendConfig(BaseModel):
         Most appends and artifact uploads one server process receives at once (default 4). A
         request past the limit is refused at once with 503 and a hint to retry; the SDK asks
         again.
+    max_concurrent_history
+        Most history writes (`write="history"` of a Python asset, over REST) one server process
+        runs at once (default 1), in addition to the `max_concurrent` slot each takes. Each holds
+        the table's open versions in server memory, about 2 GiB per million. A request past the
+        limit is refused at once with 503 and a hint to retry; the SDK asks again.
     read_timeout_seconds
         How long the server waits for the body of a request, in seconds (default 300). For a table
         append, the whole body; for an artifact upload, the next piece of a file and the whole
@@ -49,6 +54,7 @@ class AppendConfig(BaseModel):
 
     max_bytes: int = Field(default=268_435_456, gt=0)
     max_concurrent: int = Field(default=4, gt=0)
+    max_concurrent_history: int = Field(default=1, gt=0)
     read_timeout_seconds: float = Field(default=300, gt=0)
     max_arrays: int = Field(default=100_000, gt=0)
 
