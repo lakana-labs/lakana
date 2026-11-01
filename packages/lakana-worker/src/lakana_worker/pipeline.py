@@ -118,6 +118,7 @@ from lakana_core.errors import (
     UnsupportedTableError,
     ValidationError,
 )
+from lakana_core.heap import trim_heap
 from lakana_core.identifiers import NamespacePath, TableRef, shown
 from lakana_core.identity.task_tokens import resolve_task_token_scope
 from lakana_core.lineage import extract_lineage
@@ -195,7 +196,7 @@ from lakana_worker.executor import (
     execute_query,
     stream_query,
 )
-from lakana_worker.memory import MACHINE_MEMORY_ADVICE, trim_heap
+from lakana_worker.memory import MACHINE_MEMORY_ADVICE
 from lakana_worker.query_protocol import STORE_CERTIFICATE_UNVERIFIED
 
 if TYPE_CHECKING:
