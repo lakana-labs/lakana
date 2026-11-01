@@ -39,6 +39,7 @@ from sqlalchemy.orm import Session
 
 from lakana_core.auth import RunContext
 from lakana_core.catalog.append import validate_arrow_schema
+from lakana_core.catalog.attempt_stamp import TASK_RUN_PROPERTY
 from lakana_core.catalog.merge import (
     SDK_ADVICE,
     MergeAdvice,
@@ -78,9 +79,21 @@ UTC_MICROS = pa.timestamp("us", tz="UTC")
 
 KEY_TYPE_MESSAGE = (
     "key column `{column}` has type {type}; a history key must be a string, an integer, a "
-    "decimal, a date, a timestamp, a boolean, binary or a uuid"
+    "decimal, a date, a timestamp, a boolean or binary"
 )
 """A natural key column the surrogate key cannot encode."""
+
+UUID_KEY_MESSAGE = (
+    "key column `{column}` is a uuid, which a history key cannot be; cast it in the SELECT, for "
+    "example `CAST({column} AS VARCHAR)`."
+)
+"""A uuid key column: pyarrow can neither group nor filter on it (the spec's tag `u` is unused)."""
+
+RUN_WROTE_MESSAGE = (
+    "This run already wrote this table's history (the current snapshot of {table} is its write), "
+    "and a run opens at most one version per key. Start a new run to record the newer values."
+)
+"""A second history write of one run that would change the table again (decision 15)."""
 
 _KEY_PREFIX = b"lakana-history-key-v1\x00"
 """The bytes every surrogate key's input starts with; `v1` names the encoding."""
@@ -381,8 +394,8 @@ def check_history_batch(
     ValidationError
         For an empty batch with `close_missing`; a column named like an added column (in any
         case); a `valid_from` column that is missing or a key column; a column a table cannot
-        store; a key column that is missing, nested, null, repeated or of a type the surrogate
-        key cannot encode; or a nested column.
+        store; a key column that is missing, nested, null, repeated, a uuid or of a type the
+        surrogate key cannot encode; or a nested column.
     """
     if close_missing and data.num_rows == 0:
         raise ValidationError(
@@ -408,6 +421,9 @@ def check_history_batch(
             )
     stored = data.drop_columns([valid_from]) if valid_from is not None else data
     arrow_to_iceberg_schema(stored.schema)
+    for column in key:
+        if column in data.column_names and data.schema.field(column).type == pa.uuid():
+            raise ValidationError(UUID_KEY_MESSAGE.format(column=column))
     check_merge_batch(
         data,
         key,
@@ -1007,6 +1023,39 @@ def conform_batch(schema: Schema, data: pa.Table, *, table: str) -> pa.Table:
     return data.select(target.names).cast(target)
 
 
+def _read_capped(scan: DataScan, max_rows: int | None, message: Callable[[int], str]) -> pa.Table:
+    """Read a scan batch by batch, refusing as soon as it passes a row limit.
+
+    Parameters
+    ----------
+    scan
+        The scan.
+    max_rows
+        Most rows to read, or `None`.
+    message
+        Builds the refusal from `max_rows`.
+
+    Returns
+    -------
+    pa.Table
+        The rows.
+
+    Raises
+    ------
+    ValidationError
+        For more rows than `max_rows`, with `message`'s text, before the rest is read.
+    """
+    reader = scan.to_arrow_batch_reader()
+    batches: list[pa.RecordBatch] = []
+    rows = 0
+    for batch in reader:
+        rows += batch.num_rows
+        if max_rows is not None and rows > max_rows:
+            raise ValidationError(message(max_rows))
+        batches.append(batch)
+    return pa.Table.from_batches(batches, schema=reader.schema)
+
+
 def read_open_versions(
     metadata: TableMetadata,
     file_io: FileIO,
@@ -1047,17 +1096,10 @@ def read_open_versions(
     schema = metadata.schema().as_arrow()
     if metadata.current_snapshot_id is None:
         return schema.empty_table()
-    reader = DataScan(
+    scan = DataScan(
         table_metadata=metadata, io=file_io, row_filter=EqualTo(term=IS_CURRENT, value=True)
-    ).to_arrow_batch_reader()
-    batches: list[pa.RecordBatch] = []
-    rows = 0
-    for batch in reader:
-        rows += batch.num_rows
-        if max_rows is not None and rows > max_rows:
-            raise ValidationError(max_rows_message(max_rows))
-        batches.append(batch)
-    found = pa.Table.from_batches(batches, schema=reader.schema).cast(schema)
+    )
+    found = _read_capped(scan, max_rows, max_rows_message).cast(schema)
     repeated = max(_repeated_rows(found, key), _repeated_rows(found, [surrogate_column(table)]))
     if repeated:
         raise ValidationError(
@@ -1075,6 +1117,8 @@ def read_last_ends(
     after: datetime,
     *,
     key: Sequence[str],
+    table: str,
+    max_rows: int | None,
 ) -> pa.Table:
     """Read the key columns and `valid_to` of the closed versions of some keys that end late.
 
@@ -1096,6 +1140,10 @@ def read_last_ends(
         bound): the run clock, or the smallest declared `valid_from`.
     key
         The natural key's columns.
+    table
+        The table's dotted name, for the message.
+    max_rows
+        Most closed versions to read (`QueryLimitsConfig.max_write_rows`), or `None`.
 
     Returns
     -------
@@ -1103,6 +1151,11 @@ def read_last_ends(
         The closed versions ending after `after` whose every key column is among the wanted
         values: a superset of the exact keys for a key of several columns, which
         `plan_history` joins exactly.
+
+    Raises
+    ------
+    ValidationError
+        For more such closed versions than `max_rows`, refused while reading.
     """
     columns = (*key, VALID_TO)
     if metadata.current_snapshot_id is None or wanted.num_rows == 0:
@@ -1112,12 +1165,47 @@ def read_last_ends(
         for column in key
     ]
     closed = And(EqualTo(term=IS_CURRENT, value=False), GreaterThan(term=VALID_TO, value=after))
-    return DataScan(
+    scan = DataScan(
         table_metadata=metadata,
         io=file_io,
         row_filter=functools.reduce(And, terms, closed),
         selected_fields=columns,
-    ).to_arrow()
+    )
+    return _read_capped(
+        scan,
+        max_rows,
+        lambda cap: (
+            f"The keys this run opens again have more than {cap} closed versions in {table} "
+            f"that end after {shown_clock(after)}, more than one write reads (max_write_rows); "
+            "nothing was committed. Start the returning versions later (a later `valid_from`), "
+            "or ask an operator to raise max_write_rows."
+        ),
+    )
+
+
+def written_by_run(metadata: TableMetadata, context: RunContext | None) -> bool:
+    """Tell whether the table's current snapshot is a write of the acting principal's run.
+
+    The catalog stamps every snapshot a claim-form run context commits with its task run
+    (`attempt_stamp.stamp_snapshots`); no client can set the stamp.
+
+    Parameters
+    ----------
+    metadata
+        The table's current metadata.
+    context
+        The acting principal's run context, or `None` (no stamp to find).
+
+    Returns
+    -------
+    bool
+        Whether the current snapshot carries `context`'s task run as `lakana.task-run-id`.
+    """
+    if context is None or metadata.current_snapshot_id is None:
+        return False
+    snapshot = metadata.snapshot_by_id(metadata.current_snapshot_id)
+    summary = snapshot.summary if snapshot is not None else None
+    return summary is not None and summary.get(TASK_RUN_PROPERTY) == str(context.task_run_id)
 
 
 @dataclass(frozen=True)

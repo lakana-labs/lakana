@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import uuid
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
@@ -11,7 +12,7 @@ from unittest import mock
 
 import pyarrow as pa
 import pytest
-from core_test_helpers import ActionAllowList, _config
+from core_test_helpers import ActionAllowList, _config, python_task_run
 from pyiceberg.catalog.noop import NoopCatalog
 from pyiceberg.expressions import EqualTo
 from pyiceberg.schema import Schema
@@ -21,10 +22,15 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from test_merge import _bound_task
 
-from lakana_core.auth import Action, AllowAllAuthorization, PrincipalRef
+from lakana_core.auth import Action, AllowAllAuthorization, PrincipalRef, RunContext
 from lakana_core.catalog import history as history_module
 from lakana_core.catalog import service as service_module
-from lakana_core.catalog.history import HISTORY_KEY_PROPERTY, HistoryResult, check_history_table
+from lakana_core.catalog.history import (
+    HISTORY_KEY_PROPERTY,
+    HistoryResult,
+    check_history_table,
+    read_last_ends,
+)
 from lakana_core.catalog.merge import SQL_ADVICE
 from lakana_core.catalog.service import CatalogService
 from lakana_core.errors import ConflictError, PermissionDenied, ValidationError
@@ -32,6 +38,7 @@ from lakana_core.identifiers import NamespacePath, TableRef
 from lakana_core.models import AuditEvent, AuditEventType, LineageEdge
 from lakana_core.policy.column_masks import ColumnMaskService
 from lakana_core.policy.row_filters import RowFilterService
+from lakana_core.runs.lockdown import PROTECTED_MESSAGE
 from lakana_core.storage.resolver import StorageResolver
 
 T1 = datetime(2026, 2, 1, tzinfo=UTC)
@@ -696,3 +703,193 @@ def test_a_failure_while_staging_deletes_what_was_staged(hist: Hist) -> None:
 
     assert hist.files(".parquet") == parquet
     assert hist.files(".avro") == avro
+
+
+def test_a_history_write_into_a_protected_environment_needs_break_glass(hist: Hist) -> None:
+    hist.run([("A", "north")], T1, first=True)
+    hist.service.set_environment_protection(hist.admin, "dev", True)
+
+    with (
+        mock.patch.object(service_module, "read_open_versions", side_effect=AssertionError),
+        pytest.raises(PermissionDenied) as info,
+    ):
+        hist.run([("A", "south")], T2)
+
+    assert str(info.value) == PROTECTED_MESSAGE.format(environment="dev")
+    (denied,) = hist.events(AuditEventType.PROTECTED_WRITE_DENIED)
+    assert denied.detail["operation"] == "history"
+    glass = dataclasses.replace(hist.admin, break_glass_reason="incident 9: fix a customer row")
+    with mock.patch.object(service_module, "run_clock", return_value=T2):
+        result = hist.service.history(
+            glass, hist.ref(), hist.batch([("A", "south")]), key=["customer_id"]
+        )
+    assert (result.versions_opened, result.versions_closed) == (1, 1)
+    (glass_event,) = hist.events(AuditEventType.BREAK_GLASS_WRITE)
+    assert glass_event.detail["operation"] == "history"
+
+
+def test_a_uuid_key_is_refused_with_the_cast_to_use(hist: Hist) -> None:
+    ids = pa.array([uuid.UUID(int=1).bytes], pa.binary(16))
+    data = pa.table(
+        {"id": pa.ExtensionArray.from_storage(pa.uuid(), ids), "region": pa.array(["north"])}
+    )
+
+    with pytest.raises(ValidationError) as info:
+        hist.service.history(hist.admin, hist.ref(), data, key=["id"], expected_snapshot_id="none")
+
+    assert str(info.value) == (
+        "key column `id` is a uuid, which a history key cannot be; cast it in the SELECT, for "
+        "example `CAST(id AS VARCHAR)`."
+    )
+
+
+def test_a_task_writes_history_into_its_own_asset_without_reading_it(hist: Hist) -> None:
+    own = hist.ref("bronze.customers")
+    with mock.patch.object(service_module, "run_clock", return_value=T1):
+        hist.service.history(
+            hist.admin,
+            own,
+            hist.batch([("A", "north")]),
+            key=["customer_id"],
+            expected_snapshot_id="none",
+        )
+    governed, task = _bound_task(hist)  # ty: ignore[invalid-argument-type]
+
+    with mock.patch.object(service_module, "run_clock", return_value=T2):
+        result = governed.history(
+            task, own, hist.batch([("A", "south"), ("B", "west")]), key=["customer_id"]
+        )
+
+    assert (result.versions_opened, result.versions_closed) == (2, 1)
+    with pytest.raises(PermissionDenied, match="may read only its declared inputs"):
+        governed.load_table(task, own)
+
+
+def _task(hist: Hist) -> PrincipalRef:
+    """Act as the running claim-form task of `gold.dim_customer` (a Python task's table asset).
+
+    Parameters
+    ----------
+    hist
+        The helpers.
+
+    Returns
+    -------
+    PrincipalRef
+        The admin with that task run's run context; its writes carry the run's stamp.
+    """
+    task = python_task_run(
+        hist.session, hist.admin.id, asset=DIM, inputs={"rows": "silver.customers"}, extra={}
+    )
+    return dataclasses.replace(hist.admin, run_context=RunContext(task_run_id=task.id, claim=1))
+
+
+def _with_start(rows: Sequence[Row], start: datetime) -> pa.Table:
+    """Add a `changed_at` column, one start for every row.
+
+    Parameters
+    ----------
+    rows
+        The batch.
+    start
+        The start.
+
+    Returns
+    -------
+    pa.Table
+        The batch with `changed_at`.
+    """
+    return Hist.batch(rows).append_column(
+        "changed_at", pa.array([start] * len(rows), pa.timestamp("us", tz="UTC"))
+    )
+
+
+def test_a_run_that_already_wrote_the_history_may_not_write_it_again(hist: Hist) -> None:
+    with mock.patch.object(service_module, "run_clock", return_value=T1):
+        hist.service.history(
+            _task(hist),
+            hist.ref(),
+            _with_start([("A", "north")], T1),
+            key=["customer_id"],
+            valid_from="changed_at",
+            expected_snapshot_id="none",
+        )
+    task = _task(hist)
+    with mock.patch.object(service_module, "run_clock", return_value=T3):
+        hist.service.history(
+            task,
+            hist.ref(),
+            _with_start([("A", "south")], T2),
+            key=["customer_id"],
+            valid_from="changed_at",
+        )
+        before = hist.versions()
+
+        unchanged = hist.service.history(
+            task,
+            hist.ref(),
+            _with_start([("A", "south")], T2),
+            key=["customer_id"],
+            valid_from="changed_at",
+        )
+        with pytest.raises(ValidationError) as info:
+            hist.service.history(
+                task,
+                hist.ref(),
+                _with_start([("A", "east")], T3),
+                key=["customer_id"],
+                valid_from="changed_at",
+            )
+
+    assert unchanged.snapshot_id is None
+    assert str(info.value) == (
+        "This run already wrote this table's history (the current snapshot of gold.dim_customer "
+        "is its write), and a run opens at most one version per key. Start a new run to record "
+        "the newer values."
+    )
+    assert hist.versions() == before
+
+
+def test_another_run_writes_after_a_run_that_wrote_the_history(hist: Hist) -> None:
+    with mock.patch.object(service_module, "run_clock", return_value=T2):
+        hist.service.history(
+            _task(hist),
+            hist.ref(),
+            _with_start([("A", "north")], T1),
+            key=["customer_id"],
+            valid_from="changed_at",
+            expected_snapshot_id="none",
+        )
+    with mock.patch.object(service_module, "run_clock", return_value=T3):
+        result = hist.service.history(
+            _task(hist),
+            hist.ref(),
+            _with_start([("A", "south")], T2),
+            key=["customer_id"],
+            valid_from="changed_at",
+        )
+
+    assert (result.versions_opened, result.versions_closed) == (1, 1)
+
+
+def test_the_closed_versions_a_returning_key_reads_are_capped(hist: Hist) -> None:
+    t4 = datetime(2026, 5, 1, tzinfo=UTC)
+    hist.run([("A", "north"), ("B", "north")], T1, first=True)
+    hist.run([("B", "north")], T2, close_missing=True)
+    hist.run([("A", "north"), ("B", "north")], T3, close_missing=True)
+    hist.run([("B", "north")], t4, close_missing=True)
+    metadata = hist.static().metadata
+    file_io = StorageResolver(hist.session).for_environment("dev").file_io
+    wanted = pa.table({"customer_id": ["A"]})
+
+    ends = read_last_ends(metadata, file_io, wanted, T1, key=["customer_id"], table=DIM, max_rows=2)
+    with pytest.raises(ValidationError) as info:
+        read_last_ends(metadata, file_io, wanted, T1, key=["customer_id"], table=DIM, max_rows=1)
+
+    assert sorted(ends.column("valid_to").to_pylist()) == [T2, t4]
+    assert str(info.value) == (
+        "The keys this run opens again have more than 1 closed versions in gold.dim_customer "
+        "that end after 2026-02-01T00:00:00Z, more than one write reads (max_write_rows); "
+        "nothing was committed. Start the returning versions later (a later `valid_from`), or "
+        "ask an operator to raise max_write_rows."
+    )

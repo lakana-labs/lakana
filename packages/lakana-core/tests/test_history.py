@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import decimal
+import re
 import uuid
 from collections.abc import Sequence
 from datetime import UTC, date, datetime
@@ -242,13 +243,20 @@ def test_every_key_type_has_its_tag_and_widening_an_integer_keeps_the_key() -> N
         (
             pa.array([1.5]),
             "key column `k` has type double; a history key must be a string, an "
-            "integer, a decimal, a date, a timestamp, a boolean, binary or a uuid",
+            "integer, a decimal, a date, a timestamp, a boolean or binary",
+        ),
+        (
+            pa.ExtensionArray.from_storage(
+                pa.uuid(), pa.array([uuid.UUID(int=1).bytes], pa.binary(16))
+            ),
+            "key column `k` is a uuid, which a history key cannot be; cast it in the SELECT, "
+            "for example `CAST(k AS VARCHAR)`.",
         ),
         (pa.array([1.5], pa.float32()), "key column `k` has type float;"),
     ],
 )
 def test_a_key_of_another_type_is_refused(column: pa.Array, message: str) -> None:
-    with pytest.raises(ValidationError, match=message.replace("(", r"\(")):
+    with pytest.raises(ValidationError, match=re.escape(message)):
         check_history_batch(
             pa.table({"k": column, "v": ["a"]}),
             ["k"],

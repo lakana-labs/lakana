@@ -105,6 +105,7 @@ from lakana_core.catalog.health import (
 )
 from lakana_core.catalog.history import (
     HISTORY_KEY_PROPERTY,
+    RUN_WROTE_MESSAGE,
     HistoryResult,
     check_history_batch,
     check_history_table,
@@ -117,6 +118,7 @@ from lakana_core.catalog.history import (
     run_clock,
     stage_history,
     version_starts,
+    written_by_run,
 )
 from lakana_core.catalog.identity import artifact_refusal, resolve_table_id
 from lakana_core.catalog.json_schema import ColumnSpec, from_iceberg_schema
@@ -6357,10 +6359,11 @@ class CatalogService:
         NotFoundError
             If the table or a source does not exist.
         ValidationError
-            For a batch `check_history_batch` refuses, more rows or open versions than
-            `max_rows`, a table that is not a history table of this key, a batch without the
-            table's columns, a refusal of `plan_history`, a table that is not managed, or a row
-            filter or column mask that applies to `p`.
+            For a batch `check_history_batch` refuses, more rows, open versions or closed
+            versions of returning keys than `max_rows`, a table that is not a history table of
+            this key, a batch without the table's columns, a refusal of `plan_history`, a change
+            by a run whose own write is the table's current snapshot (`written_by_run`), a table
+            that is not managed, or a row filter or column mask that applies to `p`.
         ConflictError
             If another writer committed first, or `expected_snapshot_id` or `pin` no longer
             matches.
@@ -6437,12 +6440,13 @@ class CatalogService:
             valid_from=valid_from,
             close_missing=close_missing,
             last_ends=lambda wanted, after: read_last_ends(
-                current, file_io, wanted, after, key=key
+                current, file_io, wanted, after, key=key, table=ref.dotted(), max_rows=max_rows
             ),
         )
-        nothing = HistoryResult(None, 0, 0, 0, table_id=row.id)
         if not plan.changed:
-            return nothing
+            return HistoryResult(None, 0, 0, 0, table_id=row.id)
+        if written_by_run(current, p.run_context):
+            raise ValidationError(RUN_WROTE_MESSAGE.format(table=ref.dotted()))
         staged = stage_history(current, loaded.metadata_location, file_io, plan, table=ref.dotted())
         snapshot_id = self._commit_one_snapshot(
             p,
