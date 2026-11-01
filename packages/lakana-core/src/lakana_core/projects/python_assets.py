@@ -25,6 +25,7 @@ from lakana_core.projects.asset_model import (
     KEY_NONE,
     MAX_CONNECTIONS,
     MAX_KEEP_VERSIONS,
+    PYTHON_HISTORY_LATER,
     WATERMARK_MESSAGE,
     WRITE_CHOICES,
     ParsedAsset,
@@ -689,6 +690,10 @@ def _write_model(
         )
     if values.get("evolve_schema") is True and (write or "replace") != "replace":
         messages.append(EVOLVE_NEEDS_REPLACE)
+    if write == "history":
+        # Not a `messages` entry: the key and the rest are valid, so the metadata keeps them and
+        # no second, misleading "needs key" follows.
+        issues.append(ProjectIssue(path, line, PYTHON_HISTORY_LATER))
     issues.extend(ProjectIssue(path, line, message) for message in messages)
     if messages:
         return None, (), None  # the issues stand; nothing unsafe reaches the metadata

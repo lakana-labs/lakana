@@ -376,7 +376,7 @@ def test_a_wrong_write_model_in_a_block_is_reported(block: str, message: str) ->
 @pytest.mark.parametrize(
     ("block", "message"),
     [
-        ("write: upsert\n", "write: must be one of replace, append, merge; got 'upsert'"),
+        ("write: upsert\n", "write: must be one of replace, append, merge, history; got 'upsert'"),
         (
             'write: merge\nkey: ["i\\u200bd"]\n',
             "key: a key column must not contain a control, format or surrogate character or a "
@@ -563,3 +563,22 @@ def test_a_control_character_in_a_header_names_the_file_and_line() -> None:
         "assets/gold/t.sql:2: assets/gold/t.sql front-matter is not valid YAML: it holds the "
         "character U+000C, which YAML does not allow; remove it"
     ]
+
+
+@pytest.mark.parametrize(
+    ("block", "message"),
+    [
+        (
+            'write: history\nvalid_from: "c\\u2028t"\n',
+            "valid_from: valid_from must not contain a control, format or surrogate character "
+            "or a line separator",
+        ),
+        ('write: history\nclose_missing: "true"\n', "close_missing: must be true or false"),
+    ],
+)
+def test_valid_from_and_close_missing_are_checked_where_they_are_read(
+    block: str, message: str
+) -> None:
+    with pytest.raises(ProjectValidationError) as info:
+        parse_front_matter(f"/* lakana\n{block}*/\nSELECT 1", path=_PATH)
+    assert [issue.message for issue in info.value.issues] == [message]

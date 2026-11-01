@@ -405,7 +405,7 @@ MEDALLION_LAYERS = LayersConfig(
     ),
     gold=LayerRules(
         reads=("silver", "gold"),
-        write=("replace", "append", "merge", "view"),
+        write=("replace", "append", "merge", "history", "view"),
         kinds=("fact", "dimension", "wide"),
     ),
 )

@@ -176,8 +176,8 @@ class AssetMetadata(SafeTextModel):
     evolve_schema
         Let an incremental append evolve the table's schema.
     write
-        ``replace``, ``append`` or ``merge``; `None` when the asset does not say (it then
-        replaces, or appends for ``materialize: incremental``).
+        ``replace``, ``append``, ``merge`` or ``history``; `None` when the asset does not say (it
+        then replaces, or appends for ``materialize: incremental``).
     kind
         ``fact``, ``dimension``, ``wide`` or ``staging``; `None` when the asset does not say.
     grain
@@ -195,6 +195,11 @@ class AssetMetadata(SafeTextModel):
     watermark
         The column whose largest value the next run starts after, for ``write: append`` (and
         optionally ``merge``).
+    valid_from
+        For ``write: history``: the column whose value is when a row's values took effect; `None`
+        for the run's start time.
+    close_missing
+        For ``write: history``: close the open version of a key the SELECT no longer returns.
     columns
         Column name → its texts; a plain string is its description.
     retries
@@ -212,7 +217,7 @@ class AssetMetadata(SafeTextModel):
     materialize: Materialize | None = None
     incremental_key: str | None = None
     evolve_schema: StrictBool | None = None
-    write: Literal["replace", "append", "merge"] | None = None
+    write: Literal["replace", "append", "merge", "history"] | None = None
     kind: Literal["fact", "dimension", "wide", "staging"] | None = None
     grain: str | None = None
     key: tuple[str, ...] | Literal["none"] = ()
@@ -220,6 +225,8 @@ class AssetMetadata(SafeTextModel):
     measures: dict[str, MeasureSpec] = Field(default_factory=dict)
     checks: dict[str, str] = Field(default_factory=dict)
     watermark: str | None = None
+    valid_from: str | None = None
+    close_missing: StrictBool | None = None
     columns: dict[str, ColumnTexts] = Field(default_factory=dict)
     retries: int | None = Field(default=None, ge=0, le=MAX_RETRIES, strict=True)
     retry_delay: Duration | None = None
@@ -548,6 +555,30 @@ class AssetMetadata(SafeTextModel):
         """
         if value is not None and unsafe_identifier(value):
             raise ValueError(WATERMARK_MESSAGE)
+        return value
+
+    @field_validator("valid_from")
+    @classmethod
+    def _valid_from_is_safe(cls, value: str | None) -> str | None:
+        """Refuse a `valid_from` column with an unsafe character.
+
+        Parameters
+        ----------
+        value
+            The field's value.
+
+        Returns
+        -------
+        str or None
+            `value`.
+
+        Raises
+        ------
+        ValueError
+            If it has an unsafe character.
+        """
+        if value is not None and unsafe_identifier(value):
+            raise ValueError(f"valid_from {IDENTIFIER_MESSAGE}")
         return value
 
     @field_validator("label")
@@ -924,6 +955,8 @@ def consistency_issues(
             metadata.watermark,
             materialize=metadata.materialize,
             evolve_schema=metadata.evolve_schema,
+            valid_from=metadata.valid_from,
+            close_missing=metadata.close_missing,
         ),
         *key_issues(metadata.key),
     ]

@@ -1194,7 +1194,7 @@ def test_the_declared_layer_rules_are_recorded_only_when_declared() -> None:
         },
         "gold": {
             "reads": ["silver", "gold"],
-            "write": ["replace", "append", "merge", "view"],
+            "write": ["replace", "append", "merge", "history", "view"],
             "kinds": ["fact", "dimension", "wide"],
         },
     }

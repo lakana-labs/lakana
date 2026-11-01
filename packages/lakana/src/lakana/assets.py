@@ -35,8 +35,9 @@ CONNECTION_NAME = re.compile(r"\A[a-z][a-z0-9-]{0,62}\Z")
 MAX_CONNECTIONS = 16
 """The most connections one asset declares; deploy refuses more (a parity test pins both)."""
 
-WRITE_CHOICES = ("replace", "append", "merge")
-"""The values of `write`; deploy accepts the same three (a parity test pins both)."""
+WRITE_CHOICES = ("replace", "append", "merge", "history")
+"""The values of `write`; deploy accepts the same four (a parity test pins both). A Python asset is
+refused `history` at deploy until its harness writes it."""
 
 MODEL_KINDS = ("fact", "dimension", "wide", "staging")
 """The values of `kind`; the same as `lakana_core.projects.asset_model.MODEL_KINDS` (a parity

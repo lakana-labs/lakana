@@ -323,3 +323,47 @@ def test_two_references_to_one_hidden_target_read_like_two_missing_targets() -> 
     _, missing = resolve_references([fact], _lookup({}), environment="dev")
     shown = error_for_reader(whole, withheld_lines(issues), lambda _t: False)
     assert shown.encode() == "\n".join(issue.render() for issue in missing).encode()
+
+
+def _history(columns: tuple[str, ...] | None, **fields: object) -> ParsedAsset:
+    """Build a history dimension with the given SELECT columns.
+
+    Parameters
+    ----------
+    columns
+        Its output columns, or `None` for a star.
+    **fields
+        More metadata.
+
+    Returns
+    -------
+    ParsedAsset
+        The asset.
+    """
+    meta = AssetMetadata(
+        materialize="table",
+        kind="dimension",
+        grain="One row per customer and version.",
+        key=("customer_id",),
+        write="history",
+        **fields,  # ty: ignore[invalid-argument-type]
+    )
+    return make_asset("gold.dim_customer", ("silver.customers",), columns=columns, metadata=meta)
+
+
+def test_a_history_select_may_not_return_an_added_name_and_must_return_valid_from() -> None:
+    issues = project_model_issues(
+        [_history(("customer_id", "VALID_TO", "region"), valid_from="changed_at")]
+    )
+    assert [i.message for i in issues] == [
+        "Column `VALID_TO` of `gold.dim_customer`'s SELECT has a name `write: history` adds "
+        "itself (valid_from, valid_to, is_current, dim_customer_key); rename it in the SELECT, "
+        "for example `AS source_VALID_TO`.",
+        "Column `changed_at` in `valid_from:` is not a column of `gold.dim_customer`'s SELECT; "
+        "add it to the SELECT, or change `valid_from:`.",
+    ]
+    assert project_model_issues([_history(None, valid_from="changed_at")]) == []
+    assert (
+        project_model_issues([_history(("customer_id", "changed_at"), valid_from="changed_at")])
+        == []
+    )

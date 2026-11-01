@@ -357,3 +357,20 @@ def test_checks_measures_sets_the_mode_and_a_hand_written_measures_check_is_refu
         "A check named `measures` is generated for `gold.fact_stock`; rename "
         "`checks/gold/fact_stock/measures.sql`."
     )
+
+
+def test_keep_is_refused_on_a_history_dimension() -> None:
+    dim = _fact(
+        kind="dimension",
+        write="history",
+        references={},
+        key=("store_id",),
+        checks={"key": "keep"},
+    )
+    generated = generated_checks([dim], {}, default_on_failure="block")
+    issues = check_issues(generated, [dim], build_graph([dim]))
+    assert issues[0].message == (
+        "`checks: key: keep` cannot be used on `gold.fact_sales`: it is written with `write: "
+        "history`, and building it again never removes a version, so the rows that failed would "
+        "stay. Use `checks: key: block`: it takes the failed run's versions out again."
+    )

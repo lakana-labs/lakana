@@ -427,7 +427,7 @@ def test_the_connection_rules_are_the_same_in_core_and_the_sdk() -> None:
 
 
 def test_the_write_choices_and_defaults_are_the_same_in_core_and_the_sdk() -> None:
-    assert sdk_assets.WRITE_CHOICES == WRITE_CHOICES == ("replace", "append", "merge")
+    assert sdk_assets.WRITE_CHOICES == WRITE_CHOICES == ("replace", "append", "merge", "history")
     fields = sdk_assets.AssetSpec.__dataclass_fields__
     assert (fields["write"].default, fields["key"].default, fields["watermark"].default) == (
         "replace",

@@ -1019,7 +1019,7 @@ def test_a_key_is_accepted_with_every_write_mode(arguments: str) -> None:
 @pytest.mark.parametrize(
     ("argument", "message"),
     [
-        ('write="upsert"', "write must be one of replace, append, merge; got 'upsert'"),
+        ('write="upsert"', "write must be one of replace, append, merge, history; got 'upsert'"),
         ('write="append"', _APPEND_NEEDS_WATERMARK),
         ('write="merge"', "`write: merge` needs `key:` — the columns that identify a row"),
         ('write="merge", key=[]', "`write: merge` needs `key:` — the columns that identify a row"),
@@ -1272,4 +1272,15 @@ def test_a_label_on_an_artifact_asset_is_refused() -> None:
     )
     assert "argument 'label' does not apply to an artifact asset; remove it" in [
         issue.message for issue in issues
+    ]
+
+
+def test_a_python_asset_cannot_keep_history_yet() -> None:
+    source = _GOOD.replace(
+        "@asset(", '@asset(write="history", kind="dimension", grain="g", key=["id"], ', 1
+    )
+    messages = [issue.message for issue in _issues(source)]
+    assert messages == [
+        'write="history" is not available for Python assets yet; build the dimension as a SQL '
+        "asset with `write: history` in its header"
     ]

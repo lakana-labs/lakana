@@ -312,7 +312,7 @@ def test_the_write_model_defaults_to_replace_and_is_stored() -> None:
 @pytest.mark.parametrize(
     ("arguments", "message"),
     [
-        ({"write": "upsert"}, "write must be one of replace, append, merge; got 'upsert'"),
+        ({"write": "upsert"}, "write must be one of replace, append, merge, history; got 'upsert'"),
         (
             {"write": "append"},
             "`write: append` needs `watermark:` — the column whose largest value the next run "

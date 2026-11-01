@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 from lakana_core.errors import ValidationError
 from lakana_core.identifiers import shown
+from lakana_core.projects.history_columns import added_columns, valid_from_key_message
 from lakana_core.projects.measures import measure_issues
 from lakana_core.projects.project_config import IDENTIFIER_MESSAGE, unsafe_identifier
 from lakana_core.projects.vocabulary import MODEL_KINDS, WRITE_CHOICES
@@ -92,6 +93,21 @@ MERGE_KEY_NONE = (
     "`write: merge` needs key columns; `key: none` says that no columns identify a row, so "
     "there is nothing to merge on"
 )
+HISTORY_NEEDS_DIMENSION = (
+    "`write: history` keeps the versions of a dimension's rows; declare `kind: dimension`, with "
+    "`grain:` and `key:`"
+)
+HISTORY_TAKES_NO_WATERMARK = (
+    "`write: history` takes no `watermark:`; its SELECT returns the current state of every row, "
+    "and each run compares it with the open versions"
+)
+VALID_FROM_NEEDS_HISTORY = "`valid_from:` works with `write: history` only"
+CLOSE_MISSING_NEEDS_HISTORY = "`close_missing:` works with `write: history` only"
+PYTHON_HISTORY_LATER = (
+    'write="history" is not available for Python assets yet; build the dimension as a SQL asset '
+    "with `write: history` in its header"
+)
+"""Refused at the decorator until the harness uploads a history write (#253's third PR)."""
 KEY_NONE_NEEDS_KIND = (
     "`key: none` is for a fact or a wide table whose rows no columns identify; declare "
     "`kind: fact` or `kind: wide`, or remove `key: none`"
@@ -154,6 +170,25 @@ def key_columns(key: Sequence[str] | str) -> tuple[str, ...]:
     return () if isinstance(key, str) else tuple(key)
 
 
+def history_columns_issue(column: str) -> str:
+    """Refuse a header text for a column `write: history` adds and describes itself.
+
+    Parameters
+    ----------
+    column
+        The column, as `columns:` spells it.
+
+    Returns
+    -------
+    str
+        The message.
+    """
+    return (
+        f"`columns: {column}`: `write: history` adds this column and describes it itself; remove "
+        "it from `columns:`"
+    )
+
+
 def model_issues(metadata: AssetMetadata, *, table: str) -> list[str]:
     """Check an asset's model fields against the rules of its kind.
 
@@ -168,8 +203,9 @@ def model_issues(metadata: AssetMetadata, *, table: str) -> list[str]:
     -------
     list of str
         The spec's fixed texts for a missing grain or key, a dimension's `key: none`, a
-        `key: none` without a kind that allows it, a `checks:` family the asset has nothing
-        for, and `measure_issues`' texts; empty when the fields agree.
+        `key: none` without a kind that allows it, `write: history` on another kind than a
+        dimension, a `columns:` text for a column history adds, a `checks:` family the asset has
+        nothing for, and `measure_issues`' texts; empty when the fields agree.
     """
     kind, key = metadata.kind, metadata.key
     issues: list[str] = []
@@ -189,6 +225,15 @@ def model_issues(metadata: AssetMetadata, *, table: str) -> list[str]:
         )
     if "measures" in metadata.checks and not metadata.measures:
         issues.append(_FAMILY_UNUSED.format(family="measures", what="measure", field="measures"))
+    if metadata.write == "history":
+        if kind != "dimension":
+            issues.append(HISTORY_NEEDS_DIMENSION)
+        reserved = {name.casefold() for name in added_columns(table)}
+        issues.extend(
+            history_columns_issue(name)
+            for name in sorted(metadata.columns)
+            if name.casefold() in reserved
+        )
     issues.extend(measure_issues(kind, key, metadata.measures, table=table))
     return issues
 
@@ -250,6 +295,8 @@ def write_rule_issues(
     *,
     materialize: str | None,
     evolve_schema: bool | None,
+    valid_from: str | None = None,
+    close_missing: bool | None = None,
 ) -> list[str]:
     """Check an asset's write model against itself, for a SQL block and a decorator alike.
 
@@ -259,7 +306,7 @@ def write_rule_issues(
     Parameters
     ----------
     write
-        ``replace``, ``append``, ``merge``, or `None` when the asset does not say.
+        ``replace``, ``append``, ``merge``, ``history``, or `None` when the asset does not say.
     key
         The key columns, `KEY_NONE`, or empty when not given.
     watermark
@@ -268,6 +315,10 @@ def write_rule_issues(
         The asset's merged `materialize`.
     evolve_schema
         The asset's `evolve_schema`, or `None` when not given.
+    valid_from
+        The asset's `valid_from`, or `None` when not given.
+    close_missing
+        The asset's `close_missing`, or `None` when not given.
 
     Returns
     -------
@@ -276,12 +327,23 @@ def write_rule_issues(
     """
     key_none = key == KEY_NONE
     columns = key_columns(key)
-    if materialize == "view":
-        issues = [VIEW_TAKES_NO_WRITE] if write is not None else []
-        return [*issues, EVOLVE_NEEDS_APPEND] if evolve_schema is not None else issues
-    if materialize == "incremental":
-        return [USE_ONE_SPELLING] if write is not None or watermark is not None else []
+    history_only: list[str] = []
+    if write != "history":
+        if valid_from is not None:
+            history_only.append(VALID_FROM_NEEDS_HISTORY)
+        if close_missing is not None:
+            history_only.append(CLOSE_MISSING_NEEDS_HISTORY)
     issues: list[str] = []
+    if materialize == "view":
+        if write is not None:
+            issues.append(VIEW_TAKES_NO_WRITE)
+        if evolve_schema is not None:
+            issues.append(EVOLVE_NEEDS_APPEND)
+        return [*issues, *history_only]
+    if materialize == "incremental":
+        if write is not None or watermark is not None:
+            issues.append(USE_ONE_SPELLING)
+        return [*issues, *history_only]
     mode = write or "replace"
     if mode == "append" and watermark is None:
         issues.append(APPEND_NEEDS_WATERMARK)
@@ -291,9 +353,13 @@ def write_rule_issues(
         issues.append(MERGE_NEEDS_KEY)
     if mode == "replace" and watermark is not None:
         issues.append(REPLACE_TAKES_NO_WATERMARK)
+    if mode == "history" and watermark is not None:
+        issues.append(HISTORY_TAKES_NO_WATERMARK)
+    if mode == "history" and valid_from is not None and valid_from in columns:
+        issues.append(valid_from_key_message(valid_from))
     if evolve_schema is not None and mode != "append":
         issues.append(EVOLVE_NEEDS_APPEND)
-    return issues
+    return [*issues, *history_only]
 
 
 def normalized_write(

@@ -109,14 +109,14 @@ layers:
     kinds: [staging]
   gold:
     reads: [silver, gold]
-    write: [replace, append, merge, view]
+    write: [replace, append, merge, history, view]
     kinds: [fact, dimension, wide]
 ```
 
 | Rule | Lists | Meaning |
 |---|---|---|
 | `reads` | layers: `bronze`, `silver`, `gold` | The layers an asset of this layer may read: its SQL, its Python inputs and its `references:` targets. A layer reads itself only when it lists itself. A table outside the three layers (a raw-zone table, a catalog artifact) or a connection is a **source**, and only bronze reads sources. `reads: []` means "sources only" for bronze and "nothing" for silver and gold. |
-| `write` | `replace`, `append`, `merge`, `view` | The ways its assets may store their result. `materialize: view` counts as `view`, `materialize: incremental` as `append`; an asset that says nothing is `replace`. `write: []` means the project builds no asset in this layer, not even an artifact. |
+| `write` | `replace`, `append`, `merge`, `history`, `view` | The ways its assets may store their result. `materialize: view` counts as `view`, `materialize: incremental` as `append`; an asset that says nothing is `replace`. `write: []` means the project builds no asset in this layer, not even an artifact. |
 | `kinds` | `none`, or `fact`, `dimension`, `wide`, `staging` | `none`: no asset of the layer declares `kind:`. A list: every asset declares one of them. There is no `any`. |
 
 - Once `layers:` is there, all three layers and all three rules are required: a rule you did not
@@ -132,7 +132,7 @@ What a deploy says when the section is wrong (the line is the nearest key):
 
 | Mistake | Message |
 |---|---|
-| `layers:` with no value, or `{}` | ``layers: is empty; declare bronze, silver and gold, each with reads, write and kinds, or remove `layers:` to deploy without layer rules. The medallion default: `layers: {bronze: {reads: [], write: [append, merge], kinds: none}, silver: {reads: [bronze, silver], write: [replace, append, merge, view], kinds: [staging]}, gold: {reads: [silver, gold], write: [replace, append, merge, view], kinds: [fact, dimension, wide]}}` `` |
+| `layers:` with no value, or `{}` | ``layers: is empty; declare bronze, silver and gold, each with reads, write and kinds, or remove `layers:` to deploy without layer rules. The medallion default: `layers: {bronze: {reads: [], write: [append, merge], kinds: none}, silver: {reads: [bronze, silver], write: [replace, append, merge, view], kinds: [staging]}, gold: {reads: [silver, gold], write: [replace, append, merge, history, view], kinds: [fact, dimension, wide]}}` `` |
 | `layers:` is not a mapping | ``layers: must map bronze, silver and gold to their rules, such as `bronze: {reads: [], write: [append, merge], kinds: none}` `` |
 | A layer missing | ``layers: needs silver; once lakana.yaml has `layers:`, it declares bronze, silver and gold, each with reads, write and kinds. The medallion default for silver: `silver: {reads: [bronze, silver], write: [replace, append, merge, view], kinds: [staging]}` `` |
 | A rule missing | ``layers.silver: needs `kinds:`; every layer declares reads, write and kinds. The medallion default: `kinds: [staging]` `` |
@@ -141,7 +141,7 @@ What a deploy says when the section is wrong (the line is the nearest key):
 | A rule Lakana does not have | ``layers.silver: `reads_from` is not a rule; a layer declares reads, write and kinds`` |
 | `reads` names no layer | ``layers.gold.reads: `raw` is not a layer; list bronze, silver or gold. Tables outside them are sources, which only bronze reads`` |
 | A value listed twice | ``layers.gold.reads: lists `silver` twice`` |
-| `write` names no write mode | ``layers.bronze.write: `incremental` is not a write mode a layer takes; list replace, append, merge or view (`materialize: incremental` counts as append)`` |
+| `write` names no write mode | ``layers.bronze.write: `incremental` is not a write mode a layer takes; list replace, append, merge, history or view (`materialize: incremental` counts as append)`` |
 | `kinds` names no kind | ``layers.gold.kinds: `star` is not a kind; list fact, dimension, wide or staging, or write `none` `` |
 | `kinds: any` | ``layers.gold.kinds: there is no `any`; list the kinds this layer's assets may declare, or write `none` if they declare none`` |
 | `kinds: []` | ``layers.gold.kinds: an empty list would allow no asset; list the kinds this layer's assets may declare, or write `none` if they declare none`` |

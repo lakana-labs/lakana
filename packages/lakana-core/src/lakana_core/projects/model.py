@@ -11,6 +11,11 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 
 from lakana_core.projects.asset_model import ParsedAsset, ResolvedReference, key_columns
+from lakana_core.projects.history_columns import (
+    added_columns,
+    reserved_name_message,
+    valid_from_column_message,
+)
 from lakana_core.projects.issues import ProjectIssue
 
 _MODELLED = {"fact": "a fact", "dimension": "a dimension", "wide": "a wide table"}
@@ -463,7 +468,9 @@ def project_model_issues(assets: Sequence[ParsedAsset]) -> list[ProjectIssue]:
     list of ProjectIssue
         One per key column, then per reference column, then per measure column and
         `not_over` column, that the asset's explicit SELECT does not return, in path order;
-        nothing for a star or a Python asset, whose columns are checked at the run.
+        for a history asset, also one per SELECT column named like an added column and one for a
+        `valid_from:` column the SELECT does not return; nothing for a star or a Python asset,
+        whose columns are checked at the run.
     """
     issues: list[ProjectIssue] = []
     for asset in sorted(assets, key=lambda a: a.path):
@@ -478,6 +485,20 @@ def project_model_issues(assets: Sequence[ParsedAsset]) -> list[ProjectIssue]:
                         line,
                         f"Key column `{column}` is not a column of `{asset.table}`'s SELECT; "
                         "add it to the SELECT, or change `key:`.",
+                    )
+                )
+        if asset.metadata.write == "history":
+            reserved = {name.casefold() for name in added_columns(asset.table)}
+            issues.extend(
+                ProjectIssue(asset.path, line, reserved_name_message(column, asset.table))
+                for column in asset.columns
+                if column.casefold() in reserved
+            )
+            valid_from = asset.metadata.valid_from
+            if valid_from is not None and valid_from not in asset.columns:
+                issues.append(
+                    ProjectIssue(
+                        asset.path, line, valid_from_column_message(valid_from, asset.table)
                     )
                 )
         for column in sorted(asset.metadata.references):
