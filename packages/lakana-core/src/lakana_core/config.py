@@ -412,6 +412,9 @@ def _checked_server_url(value: str) -> str:
 DEFAULT_MAINTENANCE_TIMEOUT = 1800.0
 """Seconds a maintenance run may take before it stops at a safe point (30 minutes)."""
 
+DEFAULT_MAX_HISTORY_OPEN_VERSIONS = 1_000_000
+"""Most open versions a history write takes on by default (`max_history_open_versions`)."""
+
 
 class RunConfig(BaseModel):
     """Operator settings of the run engine (`LAKANA_RUN__*`; Python assets too).
@@ -459,6 +462,11 @@ class RunConfig(BaseModel):
         Seconds one `lakana table maintain` run may take. The worker checks the time between
         steps and between files, stops at the first safe point, and fails the run with the
         timeout cause; running maintenance again continues where it stopped.
+    max_history_open_versions
+        Most open versions a table built with `write: history` may have for a run to write it. A
+        history write holds every open version in the worker's memory, roughly 1.5 GiB per
+        million at 8 columns and more for wider rows; a run on a larger table is refused before
+        it reads them. Raise it together with `LAKANA_WORKER__MEMORY_LIMIT`.
     index_url
         An extra package index for building the environment of a Python project, as a URL. It may
         carry a password, which is hidden in logs and error messages.
@@ -513,6 +521,7 @@ class RunConfig(BaseModel):
     kill_grace: float = Field(default=10.0, ge=0)
     sweep_interval: float = Field(default=3600.0, ge=0)
     maintenance_timeout: float = Field(default=DEFAULT_MAINTENANCE_TIMEOUT, gt=0)
+    max_history_open_versions: int = Field(default=DEFAULT_MAX_HISTORY_OPEN_VERSIONS, gt=0)
     index_url: SecretStr | None = None
     https_proxy: SecretStr | None = None
     no_proxy: str | None = None

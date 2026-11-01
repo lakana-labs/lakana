@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import dataclasses
+import inspect
 import json
 import uuid
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 import pyarrow as pa
@@ -15,6 +17,7 @@ import pytest
 from core_test_helpers import ActionAllowList, _config, python_task_run
 from pyiceberg.catalog.noop import NoopCatalog
 from pyiceberg.expressions import EqualTo
+from pyiceberg.manifest import DataFileContent
 from pyiceberg.schema import Schema
 from pyiceberg.table import DataScan, StaticTable
 from pyiceberg.types import BooleanType, NestedField, StringType, TimestamptzType
@@ -29,11 +32,18 @@ from lakana_core.catalog.history import (
     HISTORY_KEY_PROPERTY,
     HistoryResult,
     check_history_table,
+    count_open_versions,
     read_last_ends,
 )
 from lakana_core.catalog.merge import SQL_ADVICE
 from lakana_core.catalog.service import CatalogService
-from lakana_core.errors import ConflictError, PermissionDenied, ValidationError
+from lakana_core.config import RunConfig
+from lakana_core.errors import (
+    ConflictError,
+    PermissionDenied,
+    UnsupportedTableError,
+    ValidationError,
+)
 from lakana_core.identifiers import NamespacePath, TableRef
 from lakana_core.models import AuditEvent, AuditEventType, LineageEdge
 from lakana_core.policy.column_masks import ColumnMaskService
@@ -565,8 +575,8 @@ def test_two_open_versions_of_a_key_are_refused(hist: Hist) -> None:
 
     assert str(info.value) == (
         "1 key of gold.dim_customer has more than one open version; there must be one per key, "
-        "so nothing was written. Close all but the newest version of each such key, then run "
-        "again."
+        "so nothing was written. Drop the table (`lakana table delete gold.dim_customer --env "
+        "dev`) and let the next run create it again (its history starts again with that run)."
     )
 
 
@@ -584,8 +594,9 @@ def test_open_versions_sharing_a_surrogate_key_are_refused_after_staging(hist: H
     assert str(info.value) == (
         "This write would change the number of rows in gold.dim_customer by 0, but it opens 1 "
         "version: an open version shares its surrogate key (`dim_customer_key`) with another, "
-        "so closing one would remove both. Nothing was written. Drop the table and let the next "
-        "run create it again."
+        "so closing one would remove both. Nothing was written. Drop the table (`lakana table "
+        "delete gold.dim_customer --env dev`) and let the next run create it again (its history "
+        "starts again with that run)."
     )
     assert hist.service.load_table(hist.admin, hist.ref()).metadata_location == location
     assert (hist.files(".parquet"), hist.files(".avro")) == (parquet, avro)
@@ -977,3 +988,84 @@ def test_only_the_exact_returning_keys_count_against_the_cap(hist: Hist, in_limi
         )
 
     assert sorted((r["id"], r["country"]) for r in ends.to_pylist()) == [(1, "DE"), (2, "FR")]
+
+
+def test_the_open_versions_cap_defaults_to_the_settings_default() -> None:
+    default = inspect.signature(CatalogService.history).parameters["max_open_versions"].default
+    assert default == RunConfig().max_history_open_versions == 1_000_000
+
+
+def test_a_table_over_the_open_versions_cap_is_refused_before_anything_is_read(
+    hist: Hist,
+) -> None:
+    hist.run([("A", "north"), ("B", "north"), ("C", "north")], T1, first=True)
+
+    with (
+        mock.patch.object(service_module, "read_open_versions", side_effect=AssertionError),
+        pytest.raises(ValidationError) as info,
+    ):
+        hist.run([("A", "south")], T2, max_open_versions=2)
+
+    assert str(info.value) == (
+        "gold.dim_customer has 3 open versions, more than LAKANA_RUN__MAX_HISTORY_OPEN_VERSIONS "
+        "(2) allows. A history write holds every open version in the worker's memory, roughly "
+        "1.5 GiB per million open versions of 8 columns and more for wider rows, so nothing was "
+        "read or written. Ask an operator to raise LAKANA_RUN__MAX_HISTORY_OPEN_VERSIONS "
+        "together with the worker's memory limit (LAKANA_WORKER__MEMORY_LIMIT)."
+    )
+
+
+@pytest.mark.parametrize("cap", [3, 4])
+def test_a_table_at_or_under_a_raised_open_versions_cap_is_written(hist: Hist, cap: int) -> None:
+    hist.run([("A", "north"), ("B", "north"), ("C", "north")], T1, first=True)
+
+    result = hist.run([("A", "south")], T2, max_open_versions=cap)
+
+    assert (result.versions_opened, result.versions_closed) == (1, 1)
+
+
+def test_open_versions_are_counted_from_file_bounds_and_mixed_files_are_scanned(
+    hist: Hist,
+) -> None:
+    hist.run([("A", "north"), ("B", "north"), ("C", "north")], T1, first=True)
+    hist.run([("A", "south"), ("B", "north"), ("C", "north")], T2)  # a closed file and two open
+    file_io = StorageResolver(hist.session).for_environment("dev").file_io
+    pure = count_open_versions(hist.static().metadata, file_io, table=DIM, environment="dev")
+    rows = hist.static().scan().to_arrow()
+    mixed = rows.filter(
+        pa.array([c == "A" for c in rows["customer_id"].to_pylist()])
+    )  # A's closed and open rows
+    mixed = mixed.set_column(0, "customer_id", pa.array(["X", "Y"], rows.schema.field(0).type))
+    hist.service.append(hist.admin, hist.ref(), mixed)
+
+    with mock.patch.object(history_module, "DataScan", wraps=history_module.DataScan) as scans:
+        counted = count_open_versions(hist.static().metadata, file_io, table=DIM, environment="dev")
+
+    assert (pure, counted) == (3, 4)
+    assert scans.call_count == 1
+
+
+def test_a_table_with_row_level_delete_files_is_refused_with_its_cause(hist: Hist) -> None:
+    hist.run([("A", "north")], T1, first=True)
+    real = history_module._live_entries
+
+    def with_a_delete_file(snapshot: object, file_io: object) -> list[object]:
+        deletes = SimpleNamespace(
+            data_file=SimpleNamespace(content=DataFileContent.POSITION_DELETES)
+        )
+        return [*real(snapshot, file_io), deletes]  # ty: ignore[invalid-argument-type]
+
+    with (
+        mock.patch.object(history_module, "_live_entries", side_effect=with_a_delete_file),
+        mock.patch.object(service_module, "read_open_versions", side_effect=AssertionError),
+        pytest.raises(UnsupportedTableError) as info,
+    ):
+        hist.run([("A", "south")], T2)
+
+    assert str(info.value) == (
+        "gold.dim_customer has row-level delete files, which an Iceberg writer outside Lakana "
+        "added; a history write cannot keep its versions right with them, so nothing was read or "
+        "written. Compact the table with that writer so that no delete files remain, or drop it "
+        "(`lakana table delete gold.dim_customer --env dev`) and let the next run create it "
+        "again (its history starts again with that run)."
+    )

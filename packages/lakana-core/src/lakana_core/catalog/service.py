@@ -111,12 +111,14 @@ from lakana_core.catalog.history import (
     check_history_table,
     check_starts,
     conform_batch,
+    count_open_versions,
     first_versions,
     plan_history,
     read_last_ends,
     read_open_versions,
     run_clock,
     stage_history,
+    too_many_open_versions_message,
     version_starts,
     written_by_run,
 )
@@ -231,7 +233,7 @@ from lakana_core.catalog.writes import (
     stage_snapshot,
     target_changed_message,
 )
-from lakana_core.config import StorageConfig, ViewAuditConfig
+from lakana_core.config import DEFAULT_MAX_HISTORY_OPEN_VERSIONS, StorageConfig, ViewAuditConfig
 from lakana_core.db import db_now, rowcount
 from lakana_core.errors import (
     AlreadyExistsError,
@@ -6319,6 +6321,7 @@ class CatalogService:
         pin: SnapshotPin | None = None,
         query_run_id: uuid.UUID | None = None,
         max_rows: int | None = None,
+        max_open_versions: int = DEFAULT_MAX_HISTORY_OPEN_VERSIONS,
         advice: MergeAdvice = SDK_ADVICE,
     ) -> HistoryResult:
         """Keep the versions of a dimension's rows: open, close and leave alone, in one commit.
@@ -6362,6 +6365,9 @@ class CatalogService:
         max_rows
             Most rows of the batch and most open versions (`QueryLimitsConfig.max_write_rows`),
             or `None`.
+        max_open_versions
+            Most open versions the table may have (`RunConfig.max_history_open_versions`),
+            counted from the manifests before any is read.
         advice
             How a repeated key is explained: `SDK_ADVICE` or `SQL_ADVICE`.
 
@@ -6383,7 +6389,10 @@ class CatalogService:
             versions of returning keys than `max_rows`, a table that is not a history table of
             this key, a batch without the table's columns, a refusal of `plan_history`, a change
             by a run whose own write is the table's current snapshot (`written_by_run`), a table
-            that is not managed, or a row filter or column mask that applies to `p`.
+            that is not managed, a row filter or column mask that applies to `p`, or more open
+            versions than `max_open_versions`.
+        UnsupportedTableError
+            For a table with row-level delete files (`count_open_versions`).
         ConflictError
             If another writer committed first, or `expected_snapshot_id` or `pin` no longer
             matches.
@@ -6450,6 +6459,13 @@ class CatalogService:
         pins = self._write_pins(ref, row.id, current, expected_snapshot_id, pin)
         resolved = self._storage.for_environment(ref.environment)
         file_io = resolved.file_io
+        open_count = count_open_versions(
+            current, file_io, table=ref.dotted(), environment=ref.environment
+        )
+        if open_count > max_open_versions:
+            raise ValidationError(
+                too_many_open_versions_message(ref.dotted(), open_count, max_open_versions)
+            )
         plan = plan_history(
             rows,
             read_open_versions(current, file_io, max_rows=max_rows),
@@ -6463,12 +6479,20 @@ class CatalogService:
             last_ends=lambda wanted, after: read_last_ends(
                 current, file_io, wanted, after, key=key, table=ref.dotted(), max_rows=max_rows
             ),
+            environment=ref.environment,
         )
         if not plan.changed:
             return HistoryResult(None, 0, 0, 0, table_id=row.id)
         if written_by_run(current, p.run_context):
             raise ValidationError(RUN_WROTE_MESSAGE.format(table=ref.dotted()))
-        staged = stage_history(current, loaded.metadata_location, file_io, plan, table=ref.dotted())
+        staged = stage_history(
+            current,
+            loaded.metadata_location,
+            file_io,
+            plan,
+            table=ref.dotted(),
+            environment=ref.environment,
+        )
         snapshot_id = self._commit_one_snapshot(
             p,
             ref,

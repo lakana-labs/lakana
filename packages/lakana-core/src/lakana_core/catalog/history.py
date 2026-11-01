@@ -20,7 +20,7 @@ import functools
 import hashlib
 import json
 import uuid
-from collections.abc import Callable, Collection, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -29,9 +29,11 @@ import pyarrow as pa
 import pyarrow.compute as _compute
 from pyiceberg.expressions import And, EqualTo, GreaterThan, In
 from pyiceberg.io import FileIO
+from pyiceberg.manifest import DataFileContent, ManifestEntry
 from pyiceberg.schema import Schema
 from pyiceberg.table import DataScan
 from pyiceberg.table.metadata import TableMetadata
+from pyiceberg.table.snapshots import Snapshot
 from pyiceberg.table.update import AddSnapshotUpdate, TableRequirement, TableUpdate
 from pyiceberg.types import BooleanType, StringType, TimestamptzType
 from sqlalchemy import select
@@ -52,7 +54,7 @@ from lakana_core.catalog.merge import (
 )
 from lakana_core.catalog.schema_compat import arrow_to_iceberg_schema, arrow_to_iceberg_type
 from lakana_core.catalog.writes import max_rows_message
-from lakana_core.errors import ValidationError
+from lakana_core.errors import UnsupportedTableError, ValidationError
 from lakana_core.models import Run, TaskRun
 from lakana_core.projects.history_columns import (
     IS_CURRENT,
@@ -775,6 +777,7 @@ def plan_history(
     valid_from: str | None,
     close_missing: bool,
     last_ends: Callable[[pa.Table, datetime], pa.Table],
+    environment: str,
 ) -> HistoryPlan:
     """Diff a batch against the open versions and build the rows to close and to open.
 
@@ -807,6 +810,8 @@ def plan_history(
         Reads the closed versions of keys that come back, as `_check_returning` documents
         (the keys, and the earliest start among them as a lower bound for `valid_to`); called
         only for batch keys without an open version.
+    environment
+        The table's environment, for the command in a message.
 
     Returns
     -------
@@ -833,8 +838,7 @@ def plan_history(
         have = "has" if twice == 1 else "have"
         raise ValidationError(
             f"{twice} {keys} {table} {have} more than one open version; there must be one per "
-            "key, so nothing was written. Close all but the newest version of each such key, "
-            "then run again."
+            f"key, so nothing was written. {recreate_hint(table, environment)}"
         )
     joined = _numbered(data, key, row_name).join(
         numbered_open,
@@ -907,6 +911,147 @@ def plan_history(
         opened=opened.select(schema.names).cast(schema),
         closed_missing=len(missing),
     )
+
+
+def recreate_hint(table: str, environment: str) -> str:
+    """Tell how to start a history table again: drop it, and the next run creates it.
+
+    Parameters
+    ----------
+    table
+        The table's dotted name.
+    environment
+        Its environment.
+
+    Returns
+    -------
+    str
+        The next step, with the command and what it costs.
+    """
+    return (
+        f"Drop the table (`lakana table delete {table} --env {environment}`) and let the next "
+        "run create it again (its history starts again with that run)."
+    )
+
+
+MAX_OPEN_VERSIONS_SETTING = "LAKANA_RUN__MAX_HISTORY_OPEN_VERSIONS"
+"""The setting that caps the open versions of a history write (`RunConfig`)."""
+
+
+def too_many_open_versions_message(table: str, count: int, cap: int) -> str:
+    """Refuse a history write into a table with more open versions than the setting allows.
+
+    Parameters
+    ----------
+    table
+        The table's dotted name.
+    count
+        Its open versions; more than `cap`, so at least 2.
+    cap
+        `LAKANA_RUN__MAX_HISTORY_OPEN_VERSIONS`.
+
+    Returns
+    -------
+    str
+        The message, naming the count, the setting, the memory it stands for and the fix.
+    """
+    return (
+        f"{table} has {count} open versions, more than {MAX_OPEN_VERSIONS_SETTING} ({cap}) "
+        "allows. A history write holds every open version in the worker's memory, roughly "
+        "1.5 GiB per million open versions of 8 columns and more for wider rows, so nothing was "
+        f"read or written. Ask an operator to raise {MAX_OPEN_VERSIONS_SETTING} together with "
+        "the worker's memory limit (LAKANA_WORKER__MEMORY_LIMIT)."
+    )
+
+
+def _live_entries(snapshot: Snapshot, file_io: FileIO) -> Iterator[ManifestEntry]:
+    """List the live data and delete file entries of a snapshot's manifests.
+
+    Parameters
+    ----------
+    snapshot
+        The snapshot.
+    file_io
+        The environment's `FileIO`.
+
+    Yields
+    ------
+    ManifestEntry
+        Each live entry; only manifests are read, never a data file.
+    """
+    for manifest in snapshot.manifests(file_io):
+        yield from manifest.fetch_manifest_entry(file_io, discard_deleted=True)
+
+
+_TRUE = b"\x01"
+"""A boolean bound of true, as Iceberg stores it: one byte."""
+
+_FALSE = b"\x00"
+"""A boolean bound of false."""
+
+
+def count_open_versions(
+    metadata: TableMetadata, file_io: FileIO, *, table: str, environment: str
+) -> int:
+    """Count a history table's open versions without reading them.
+
+    The manifests carry each data file's row count and the bounds of `is_current`: a file whose
+    lower bound is true holds only open versions, one whose upper bound is false only closed
+    ones. A history write never mixes them in one file, so the count usually comes from the
+    manifests alone. Only when some file mixes them, or has no bounds (a file another writer
+    added), the `is_current` column alone is scanned and its true values counted.
+
+    Parameters
+    ----------
+    metadata
+        The table's current metadata.
+    file_io
+        The environment's `FileIO`.
+    table
+        The table's dotted name, for the message.
+    environment
+        Its environment, for the command in the message.
+
+    Returns
+    -------
+    int
+        The open versions.
+
+    Raises
+    ------
+    UnsupportedTableError
+        If the current snapshot has a live row-level delete file (an Iceberg writer outside
+        Lakana): its rows' versions cannot be kept right.
+    """
+    snapshot = metadata.current_snapshot()
+    if snapshot is None:
+        return 0
+    field_id = metadata.schema().find_field(IS_CURRENT).field_id
+    count, mixed = 0, False
+    for entry in _live_entries(snapshot, file_io):
+        data_file = entry.data_file
+        if data_file.content != DataFileContent.DATA:
+            raise UnsupportedTableError(
+                f"{table} has row-level delete files, which an Iceberg writer outside Lakana "
+                "added; a history write cannot keep its versions right with them, so nothing was "
+                "read or written. Compact the table with that writer so that no delete files "
+                "remain, or drop it (`lakana table delete "
+                f"{table} --env {environment}`) and let the next run create it again (its "
+                "history starts again with that run)."
+            )
+        if (data_file.lower_bounds or {}).get(field_id) == _TRUE:
+            count += data_file.record_count
+        elif (data_file.upper_bounds or {}).get(field_id) != _FALSE:
+            mixed = True
+    if not mixed:
+        return count
+    scan = DataScan(
+        table_metadata=metadata,
+        io=file_io,
+        row_filter=EqualTo(term=IS_CURRENT, value=True),
+        selected_fields=(IS_CURRENT,),
+    )
+    return sum(batch.num_rows for batch in scan.to_arrow_batch_reader())
 
 
 def not_history_message(table: str, environment: str) -> str:
@@ -1294,6 +1439,7 @@ def stage_history(
     plan: HistoryPlan,
     *,
     table: str,
+    environment: str,
 ) -> StagedHistory:
     """Stage a history write as one snapshot, without a catalog behind it.
 
@@ -1317,6 +1463,8 @@ def stage_history(
         What the write changes; `plan.changed` is true.
     table
         The table's dotted name.
+    environment
+        Its environment, for the command in a message.
 
     Returns
     -------
@@ -1353,7 +1501,7 @@ def stage_history(
             f"This write would change the number of rows in {table} by {net}, but it opens "
             f"{plan.versions_opened} {versions}: an open version shares its surrogate key "
             f"(`{surrogate}`) with another, so closing one would remove both. Nothing was "
-            "written. Drop the table and let the next run create it again."
+            f"written. {recreate_hint(table, environment)}"
         )
     return StagedHistory(requirements=requirements, updates=updates, discarded=discarded)
 

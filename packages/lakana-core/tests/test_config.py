@@ -318,6 +318,17 @@ def test_run_config_default_and_env(monkeypatch: pytest.MonkeyPatch) -> None:
         RunConfig(max_retries=-1)
 
 
+def test_the_history_open_versions_cap_defaults_to_a_million_and_may_be_raised(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LAKANA_DATABASE__URL", "sqlite://")
+    assert Settings().run.max_history_open_versions == 1_000_000
+    monkeypatch.setenv("LAKANA_RUN__MAX_HISTORY_OPEN_VERSIONS", "3000000")
+    assert Settings().run.max_history_open_versions == 3_000_000
+    with pytest.raises(pydantic.ValidationError):
+        RunConfig(max_history_open_versions=0)
+
+
 def test_run_config_scheduling_defaults() -> None:
     """Interval 1 s, lease 60 s, renewal 20 s, drain grace 20 s; non-positive values refused."""
     config = RunConfig()

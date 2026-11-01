@@ -170,6 +170,7 @@ def _plan(
         valid_from=valid_from,
         close_missing=close_missing,
         last_ends=last_ends,  # ty: ignore[invalid-argument-type]
+        environment="dev",
     )
 
 
@@ -792,6 +793,7 @@ def test_the_diff_works_when_a_key_column_has_an_internal_looking_name() -> None
         valid_from=None,
         close_missing=True,
         last_ends=ends,
+        environment="dev",
     )
     assert plan.opened.column("v").to_pylist() == ["new"]
     assert plan.closed.column("v").to_pylist() == ["old"]
@@ -804,8 +806,8 @@ def test_two_open_versions_of_one_key_are_refused() -> None:
         _plan(_batch([("A", "south", 1.0)]), twice)
     assert str(info.value) == (
         "1 key of gold.dim_customer has more than one open version; there must be one per key, "
-        "so nothing was written. Close all but the newest version of each such key, then run "
-        "again."
+        "so nothing was written. Drop the table (`lakana table delete gold.dim_customer --env "
+        "dev`) and let the next run create it again (its history starts again with that run)."
     )
     thrice = pa.concat_tables([twice, _open([("B", "n", 1.0)]), _open([("B", "n", 1.0)])])
     with pytest.raises(ValidationError, match=r"2 keys of gold\.dim_customer have more than one"):
@@ -880,4 +882,5 @@ def test_the_returning_check_works_when_a_key_column_is_named_like_its_end_colum
             valid_from=None,
             close_missing=False,
             last_ends=ends,
+            environment="dev",
         )
