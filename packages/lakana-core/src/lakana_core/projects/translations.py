@@ -626,6 +626,10 @@ def _glossary_section(
     return found
 
 
+NO_GLOSSARY = Glossary(terms={})
+"""The glossary of a repository without a `glossary/` folder: no terms to translate."""
+
+
 def glossary_texts(glossary: Glossary | None) -> list[str]:
     """List the keys of every main-language text a glossary gives to translate.
 
@@ -903,7 +907,7 @@ def translation_issues(
     config: ProjectConfig,
     assets: Sequence[ParsedAsset],
     translations: Sequence[Translations],
-    glossary: Glossary | None = None,
+    glossary: Glossary | None = NO_GLOSSARY,
 ) -> list[ProjectIssue]:
     """Check the translation files against `lakana.yaml` and the project's assets.
 
@@ -916,7 +920,10 @@ def translation_issues(
     translations
         The parsed files.
     glossary
-        The parsed glossary; its terms are what a `glossary:` section may translate.
+        The parsed glossary; its terms are what a `glossary:` section may translate. Pass
+        `NO_GLOSSARY` (the default) for a repository without a `glossary/` folder, where every
+        `glossary:` translation is refused, and `None` only when the glossary failed to parse:
+        its own issues are reported, so the terms are not also reported as unknown.
 
     Returns
     -------

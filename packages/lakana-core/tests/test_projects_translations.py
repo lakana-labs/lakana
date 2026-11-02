@@ -27,6 +27,7 @@ from lakana_core.projects.project_config import (
     parse_project_config,
 )
 from lakana_core.projects.translations import (
+    NO_GLOSSARY,
     DiscoveredTranslation,
     TableTranslation,
     coverage_hints,
@@ -945,6 +946,17 @@ def test_an_unparsed_glossary_does_not_make_every_translated_term_unknown() -> N
     parsed, _ = _translation("glossary:\n  net_revenue:\n    name: X\n")
     config = parse_project_config("main_language: en\n", limits=_LIMITS)
     assert translation_issues(config, [], parsed, None) == []
+
+
+def test_without_a_glossary_folder_every_translated_term_is_unknown() -> None:
+    parsed, _ = _translation("glossary:\n  net_revenue:\n    name: X\n")
+    config = parse_project_config("main_language: en\n", limits=_LIMITS)
+    expected = [
+        "translations/fr.yaml:2: `net_revenue` is not a term this repository's glossary/ "
+        "defines; fix the id, or remove the entry"
+    ]
+    assert [i.render() for i in translation_issues(config, [], parsed)] == expected
+    assert [i.render() for i in translation_issues(config, [], parsed, NO_GLOSSARY)] == expected
 
 
 def test_coverage_and_strict_mode_count_term_names_and_definitions() -> None:
