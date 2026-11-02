@@ -355,3 +355,39 @@ def test_manifest_glossary_drops_a_term_over_any_limit_of_the_files(
     manifest = {"glossary": {"ok": {**good, "synonyms": ["s" * 100]}, **over}}
     assert list(manifest_glossary(manifest)) == ["ok"]
     assert caplog.text.count("dropped") == len(over)
+
+
+_REFERENCE = Path(__file__).resolve().parents[3] / "docs" / "site" / "reference" / "glossary.md"
+
+
+def test_the_reference_quotes_every_deploy_message() -> None:
+    from lakana_core.projects.glossary import (
+        artifact_columns_message,
+        missing_column_message,
+        missing_link_message,
+        missing_related_message,
+        owned_elsewhere_message,
+    )
+
+    text = " ".join(_REFERENCE.read_text(encoding="utf-8").split())
+    for message in (
+        missing_column_message(
+            "net_revenue", "gold.fact_sales", "net_amout", ("date", "store_id", "net_amount")
+        ),
+        missing_link_message("net_revenue", "gold.fact_sale", "dev", "gold.fact_sales"),
+        artifact_columns_message("net_revenue", "gold.churn_model"),
+        missing_related_message("net_revenue", "gros_revenue", "dev", "gross_revenue"),
+        owned_elsewhere_message("net_revenue", "finance", "dev"),
+    ):
+        assert message in text, message
+
+
+def test_a_missing_column_lists_at_most_twenty_columns() -> None:
+    from lakana_core.projects.glossary import missing_column_message
+
+    columns = tuple(f"c{i}" for i in range(25))
+    assert missing_column_message("t", "a.b", "x", columns) == (
+        "t links a.b column x, which a.b does not have (columns: "
+        + ", ".join(columns[:20])
+        + " … and 5 more); fix the column name or remove the link."
+    )

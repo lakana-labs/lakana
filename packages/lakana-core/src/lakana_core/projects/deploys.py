@@ -9,6 +9,7 @@ observed, so the loser of a race gets `ConflictError` and nothing moves.
 from __future__ import annotations
 
 import dataclasses
+import difflib
 import re
 import uuid
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -26,7 +27,12 @@ from lakana_core.audit.service import AuditService
 from lakana_core.auth import Action, AuthorizationService, CiScope, PrincipalRef, Securable
 from lakana_core.catalog.columns import stored_columns
 from lakana_core.catalog.descriptions import sync_project_descriptions
-from lakana_core.catalog.glossary import delete_glossary, glossary_clashes, write_glossary
+from lakana_core.catalog.glossary import (
+    delete_glossary,
+    glossary_clashes,
+    terms_elsewhere,
+    write_glossary,
+)
 from lakana_core.catalog.identity import resolve_table_id
 from lakana_core.catalog.model_metadata import clear_removed_models
 from lakana_core.ci_oidc.exchange import ci_scope_for_run
@@ -76,7 +82,15 @@ from lakana_core.projects.deploy_jobs import (
 )
 from lakana_core.projects.diff import DeployDiff, diff_manifests
 from lakana_core.projects.git_input import is_full_sha, validate_ref
-from lakana_core.projects.glossary import manifest_glossary, owned_elsewhere_message
+from lakana_core.projects.glossary import (
+    Glossary,
+    artifact_columns_message,
+    manifest_glossary,
+    missing_column_message,
+    missing_link_message,
+    missing_related_message,
+    owned_elsewhere_message,
+)
 from lakana_core.projects.history_columns import history_table_columns
 from lakana_core.projects.issues import ProjectIssue, ProjectValidationError, error_for_reader
 from lakana_core.projects.lookups import deployment_row, environment_by_name, repository_by_name
@@ -2265,6 +2279,81 @@ class DeployService:
         """
         check_ci_commit(self._authz, dataclasses.replace(p, ci_scope=scope), scope, kind, sha)
 
+    def _target_info(
+        self,
+        p: PrincipalRef,
+        environment: str,
+        name: str,
+        by_table: Mapping[str, ParsedAsset],
+        elsewhere: Mapping[str, Mapping[str, Any]],
+    ) -> TargetInfo | None:
+        """Find what a deploy knows about a table that a reference or a glossary link names.
+
+        Parameters
+        ----------
+        p
+            The deploying principal.
+        environment
+            Environment name.
+        name
+            Dotted name.
+        by_table
+            The project's assets by table.
+        elsewhere
+            Other repositories' manifest entries by table (`_elsewhere_entries`).
+
+        Returns
+        -------
+        TargetInfo or None
+            The info of a project asset, or of an existing table `p` may read, an artifact
+            marked as one; `None` for anything else.
+        """
+        if name in by_table:
+            asset = by_table[name]
+            meta = asset.metadata
+            history = meta.write == "history"
+            columns = asset.columns
+            if history and columns is not None:
+                columns = history_table_columns(asset.table, columns, meta.valid_from)
+            return TargetInfo(
+                meta.kind,
+                key_columns(meta.key),
+                meta.key == KEY_NONE,
+                columns,
+                artifact=asset.output == "artifact",
+                history=history,
+            )
+        # Another repository's table counts only once it exists and `p` may read it, so an
+        # unreadable target never reaches the manifest or catalog metadata below.
+        table_type = self._readable_type(p, environment, name)
+        if table_type is None:
+            return None
+        if table_type is TableType.ARTIFACT:
+            return TargetInfo(None, (), False, None, artifact=True)
+        columns = self._catalog_columns(environment, name)
+        entry = elsewhere.get(name)
+        if entry is None:
+            return TargetInfo(None, (), False, columns)
+        stored = entry.get("columns")
+        listed = (
+            tuple(stored)
+            if isinstance(stored, list) and all(isinstance(c, str) for c in stored)
+            else None
+        )
+        model = entry_model(entry)
+        write, merge_key, _ = entry_write(entry)
+        history = write == "history"
+        if history and listed is not None:
+            # Before the first run there are no stored columns, only the SELECT's.
+            spec = entry_history(entry)
+            valid_from = spec.valid_from if spec is not None else None
+            listed = history_table_columns(name, listed, valid_from)
+        if model is None:
+            # A manifest from before models: a merge's key still identifies a row.
+            key = merge_key if write == "merge" else ()
+            return TargetInfo(None, key, False, columns or listed, history=history)
+        return TargetInfo(model.kind, model.key, model.key_none, columns or listed, history=history)
+
     def resolve_model_references(
         self,
         p: PrincipalRef,
@@ -2307,11 +2396,10 @@ class DeployService:
         elsewhere = self._elsewhere_entries(env.id, repository_id)
         by_table = {asset.table: asset for asset in assets}
 
+        # `resolve_references` reads a name as a table exactly when this returns info, so the
+        # reading of a target and what is shown of it pass the same test.
         def lookup(name: str) -> TargetInfo | None:
-            """Find what is known about a target.
-
-            `resolve_references` reads a name as a table exactly when this returns info, so the
-            reading of a target and what is shown of it pass the same test.
+            """Find what is known about a target (`_target_info`).
 
             Parameters
             ----------
@@ -2321,56 +2409,9 @@ class DeployService:
             Returns
             -------
             TargetInfo or None
-                The info of a project asset, or of an existing table `p` may read, an artifact
-                marked as one; `None` for anything else.
+                The info, or `None` for a name that is not a table here.
             """
-            if name in by_table:
-                asset = by_table[name]
-                meta = asset.metadata
-                history = meta.write == "history"
-                columns = asset.columns
-                if history and columns is not None:
-                    columns = history_table_columns(asset.table, columns, meta.valid_from)
-                return TargetInfo(
-                    meta.kind,
-                    key_columns(meta.key),
-                    meta.key == KEY_NONE,
-                    columns,
-                    artifact=asset.output == "artifact",
-                    history=history,
-                )
-            # Another repository's table counts only once it exists and `p` may read it, so an
-            # unreadable target never reaches the manifest or catalog metadata below.
-            table_type = self._readable_type(p, environment, name)
-            if table_type is None:
-                return None
-            if table_type is TableType.ARTIFACT:
-                return TargetInfo(None, (), False, None, artifact=True)
-            columns = self._catalog_columns(environment, name)
-            entry = elsewhere.get(name)
-            if entry is None:
-                return TargetInfo(None, (), False, columns)
-            stored = entry.get("columns")
-            listed = (
-                tuple(stored)
-                if isinstance(stored, list) and all(isinstance(c, str) for c in stored)
-                else None
-            )
-            model = entry_model(entry)
-            write, merge_key, _ = entry_write(entry)
-            history = write == "history"
-            if history and listed is not None:
-                # Before the first run there are no stored columns, only the SELECT's.
-                spec = entry_history(entry)
-                valid_from = spec.valid_from if spec is not None else None
-                listed = history_table_columns(name, listed, valid_from)
-            if model is None:
-                # A manifest from before models: a merge's key still identifies a row.
-                key = merge_key if write == "merge" else ()
-                return TargetInfo(None, key, False, columns or listed, history=history)
-            return TargetInfo(
-                model.kind, model.key, model.key_none, columns or listed, history=history
-            )
+            return self._target_info(p, environment, name, by_table, elsewhere)
 
         run_as = self._bound_run_as(env.id, repository_id)
 
@@ -2510,6 +2551,105 @@ class DeployService:
         own = {asset.table for asset in assets if asset.output == "artifact"}
         for asset in ordered:
             issues.extend(self._kind_issues(p, environment, asset, artifacts, own))
+        return issues
+
+    def validate_glossary(
+        self,
+        p: PrincipalRef,
+        environment: str,
+        repository_id: uuid.UUID,
+        glossary: Glossary | None,
+        assets: Sequence[ParsedAsset],
+    ) -> list[ProjectIssue]:
+        """Check the glossary's links, related ids and ownership against the environment.
+
+        A linked table is one the project builds, or an existing table `p` may read
+        (`_target_info`, as for references), so a missing and an unreadable table get the same
+        text. A table the repository's current version builds and the new project does not
+        counts as missing: the deploy makes it an orphan. A link's columns are checked against
+        the table's known columns (`TargetInfo.columns`); unknown columns are not checked. A
+        message about a table outside the project tells something of it, so it carries the
+        table (`ProjectIssue.targets`) and the missing-table text (`withheld`).
+
+        Parameters
+        ----------
+        p
+            The deploying principal.
+        environment
+            Environment name.
+        repository_id
+            The repository being deployed.
+        glossary
+            The parsed glossary; `None` (no `glossary/` folder) checks nothing.
+        assets
+            The parsed assets.
+
+        Returns
+        -------
+        list of ProjectIssue
+            Per term in id order: an id another repository owns, each link problem, each related
+            id no repository defines.
+        """
+        if glossary is None or not glossary.terms:
+            return []
+        env = self._environment(environment)
+        by_table = {asset.table: asset for asset in assets}
+        current = self.current_job_version(env.id, repository_id)
+        orphaned = (
+            set(manifest_assets(current.manifest_json)) - by_table.keys()
+            if current is not None
+            else set()
+        )
+        elsewhere = self._elsewhere_entries(env.id, repository_id)
+        others = terms_elsewhere(self._session, env.id, repository_id)
+        known, ids = sorted(by_table), sorted({*glossary.terms, *others})
+        found: dict[str, TargetInfo | None] = {}
+        issues: list[ProjectIssue] = []
+        for key, term in glossary.terms.items():
+            if key in others:
+                message = owned_elsewhere_message(key, others[key], environment)
+                issues.append(ProjectIssue(term.path, glossary.line(key), message))
+            for table, columns in term.links.items():
+                if table not in found:
+                    found[table] = (
+                        None
+                        if table in orphaned
+                        else self._target_info(p, environment, table, by_table, elsewhere)
+                    )
+                info, line = found[table], glossary.line(key, "links", table)
+                if info is None:
+                    close = difflib.get_close_matches(table, known, n=1, cutoff=0.8)
+                    message = missing_link_message(key, table, environment, next(iter(close), None))
+                    issues.append(ProjectIssue(term.path, line, message))
+                    continue
+                outside = table not in by_table
+                targets = (table,) if outside else ()
+                withheld = missing_link_message(key, table, environment, None) if outside else None
+                if info.artifact and columns:
+                    message = artifact_columns_message(key, table)
+                    issues.append(ProjectIssue(term.path, line, message, targets, withheld))
+                    continue
+                for index, column in enumerate(columns):
+                    if info.columns is not None and column not in info.columns:
+                        issues.append(
+                            ProjectIssue(
+                                term.path,
+                                glossary.line(key, "links", table, index),
+                                missing_column_message(key, table, column, info.columns),
+                                targets,
+                                withheld,
+                            )
+                        )
+            for index, related in enumerate(term.related):
+                if related in glossary.terms or related in glossary.invalid or related in others:
+                    continue
+                close = difflib.get_close_matches(related, ids, n=1, cutoff=0.8)
+                message = missing_related_message(
+                    key, related, environment, next(iter(close), None)
+                )
+                issues.append(
+                    ProjectIssue(term.path, glossary.line(key, "related", index), message)
+                )
         return issues
 
     def validate_checks_against_environment(

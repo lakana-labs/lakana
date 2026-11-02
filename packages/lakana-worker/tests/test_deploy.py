@@ -32,7 +32,7 @@ from lakana_core.catalog.service import CatalogService
 from lakana_core.config import StorageConfig
 from lakana_core.connections.kinds import ConnectionKind
 from lakana_core.connections.service import ConnectionService
-from lakana_core.errors import ConflictError, NotFoundError, PermissionDenied
+from lakana_core.errors import AlreadyExistsError, ConflictError, NotFoundError, PermissionDenied
 from lakana_core.grants.authorization import GrantAuthorization
 from lakana_core.grants.service import GrantService
 from lakana_core.identifiers import NamespacePath, TableRef
@@ -43,6 +43,7 @@ from lakana_core.models import (
     DeployStatus,
     Environment,
     EnvironmentDeployment,
+    GlossaryTerm,
     JobVersion,
     PackageIndex,
     Principal,
@@ -56,6 +57,7 @@ from lakana_core.models import (
 )
 from lakana_core.models.table import Table, TableType
 from lakana_core.projects.deploys import CONFLICT_MESSAGE, DeployService
+from lakana_core.projects.glossary import DiscoveredGlossaryFile, parse_glossary
 from lakana_core.projects.issues import ProjectIssue, ProjectValidationError
 from lakana_core.projects.layers import MEDALLION_LAYERS, MEDALLION_LAYERS_FLOW
 from lakana_core.projects.limits import DeployLimits
@@ -3307,6 +3309,282 @@ def test_translations_without_a_main_language_refuse_the_deploy(
         "lakana.yaml: a project with translations must say which language its asset headers are "
         "written in; add `main_language:` with that language, such as `main_language: en`, to "
         "lakana.yaml"
+    )
+
+
+_GLOSSARY_SQL = (
+    "/* lakana\ndescription: Clean events.\n*/\nSELECT id, id AS amount FROM bronze.events\n"
+)
+_TERM = (
+    "net_revenue:\n  name: Net revenue\n  definition: Revenue after returns.\n"
+    "  owner: finance\n  synonyms: [revenue]\n  links:\n    silver.clean: [amount]\n"
+    "    bronze.events: []\n"
+)
+_FR_TERM = "glossary:\n  net_revenue:\n    name: Chiffre d'affaires net\n"
+_UNKNOWN_TERM = "is not a term this repository's glossary/ defines"
+
+
+def _build_table(session: Session, principal: PrincipalRef, dotted: str) -> None:
+    """Create a table as a run would, with one `id` column.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    principal
+        The admin.
+    dotted
+        ``namespace.name``.
+    """
+    namespace, name = dotted.split(".")
+    catalog = CatalogService(session, StorageResolver(session), AllowAllAuthorization())
+    path = NamespacePath.from_parts([namespace])
+    try:
+        catalog.create_namespace(principal, "dev", path)
+    except AlreadyExistsError:
+        session.rollback()  # the environment created it
+    catalog.create_table(
+        principal,
+        TableRef("dev", path, name),
+        schema=Schema(NestedField(1, "id", LongType(), required=True)),
+    )
+
+
+def test_a_project_with_a_glossary_deploys_manifest_13_and_writes_its_terms(
+    session: Session, principal: PrincipalRef, world: World
+) -> None:
+    commit(
+        world.repo_path, {"assets/silver/clean.sql": _GLOSSARY_SQL, "glossary/sales.yaml": _TERM}
+    )
+    run = _submit_and_run(session, principal, world)
+    assert (run.status, run.error_message) == (DeployStatus.SUCCEEDED, None)
+    version = session.get(JobVersion, run.job_version_id)
+    assert version is not None
+    assert version.manifest_json["version"] == 13
+    assert version.manifest_json["glossary"]["net_revenue"]["links"] == {
+        "bronze.events": [],
+        "silver.clean": ["amount"],
+    }
+    assert [t.term_key for t in session.scalars(select(GlossaryTerm))] == ["net_revenue"]
+
+
+def test_an_empty_glossary_folder_deploys_manifest_13_and_refuses_unknown_translated_terms(
+    session: Session, principal: PrincipalRef, world: World
+) -> None:
+    commit(world.repo_path, {"glossary/README.md": "Terms go here.\n"})
+    run = _submit_and_run(session, principal, world)
+    assert (run.status, run.error_message) == (DeployStatus.SUCCEEDED, None)
+    version = session.get(JobVersion, run.job_version_id)
+    assert version is not None
+    assert (version.manifest_json["version"], version.manifest_json["glossary"]) == (13, {})
+    commit(
+        world.repo_path,
+        {
+            "lakana.yaml": "repo: analytics\nmain_language: en\n",
+            "translations/fr.yaml": _FR_TERM,
+        },
+    )
+    run = _submit_and_run(session, principal, world)
+    assert run.status is DeployStatus.FAILED
+    assert _UNKNOWN_TERM in (run.error_message or "")
+
+
+def test_without_a_glossary_folder_a_translated_term_is_refused_and_the_manifest_has_none(
+    session: Session, principal: PrincipalRef, world: World
+) -> None:
+    run = _submit_and_run(session, principal, world)
+    version = session.get(JobVersion, run.job_version_id)
+    assert version is not None
+    assert "glossary" not in version.manifest_json
+    assert version.manifest_json["version"] < 13
+    commit(
+        world.repo_path,
+        {
+            "lakana.yaml": "repo: analytics\nmain_language: en\n",
+            "translations/fr.yaml": _FR_TERM,
+        },
+    )
+    run = _submit_and_run(session, principal, world)
+    assert run.status is DeployStatus.FAILED
+    assert _UNKNOWN_TERM in (run.error_message or "")
+
+
+def test_a_glossary_that_fails_to_parse_is_not_reported_again_by_its_translations(
+    session: Session, principal: PrincipalRef, world: World
+) -> None:
+    commit(
+        world.repo_path,
+        {
+            "lakana.yaml": "repo: analytics\nmain_language: en\n",
+            "glossary/sales.yaml": "net_revenue: [\n",
+            "translations/fr.yaml": _FR_TERM,
+        },
+    )
+    run = _submit_and_run(session, principal, world)
+    assert run.status is DeployStatus.FAILED
+    assert (run.error_message or "").startswith("glossary/sales.yaml")
+    assert _UNKNOWN_TERM not in (run.error_message or "")
+
+
+def test_a_misspelt_link_column_refuses_the_deploy_and_writes_nothing(
+    session: Session, principal: PrincipalRef, world: World
+) -> None:
+    commit(
+        world.repo_path,
+        {
+            "assets/silver/clean.sql": _GLOSSARY_SQL,
+            "glossary/sales.yaml": _TERM.replace("[amount]", "[amout]"),
+        },
+    )
+    run = _submit_and_run(session, principal, world)
+    assert run.status is DeployStatus.FAILED
+    assert run.error_message == (
+        "glossary/sales.yaml:7: net_revenue links silver.clean column amout, which silver.clean "
+        "does not have (columns: id, amount); fix the column name or remove the link."
+    )
+    assert session.scalars(select(GlossaryTerm)).all() == []
+
+
+def test_a_link_to_a_missing_table_and_an_unknown_related_id_are_refused(
+    session: Session, principal: PrincipalRef, world: World
+) -> None:
+    term = _TERM.replace("bronze.events: []", "silver.clen: []") + "  related: [gros_revenue]\n"
+    commit(world.repo_path, {"assets/silver/clean.sql": _GLOSSARY_SQL, "glossary/sales.yaml": term})
+    run = _submit_and_run(session, principal, world)
+    assert run.error_message == "\n".join(
+        [
+            "glossary/sales.yaml:8: net_revenue links silver.clen, which does not exist in "
+            "environment dev, or you may not read it; fix the table name (did you mean "
+            "silver.clean?), build the table first, or ask for READ_TABLE on it.",
+            "glossary/sales.yaml:9: net_revenue names gros_revenue under related:, which is not a "
+            "term of this repository or of another repository deployed to dev; fix the id, or "
+            "remove it from related:.",
+        ]
+    )
+
+
+def test_removing_a_linked_column_refuses_the_next_deploy(
+    session: Session, principal: PrincipalRef, world: World
+) -> None:
+    commit(
+        world.repo_path, {"assets/silver/clean.sql": _GLOSSARY_SQL, "glossary/sales.yaml": _TERM}
+    )
+    assert _submit_and_run(session, principal, world).status is DeployStatus.SUCCEEDED
+    commit(
+        world.repo_path,
+        {
+            "assets/silver/clean.sql": (
+                "/* lakana\ndescription: C.\n*/\nSELECT id FROM bronze.events\n"
+            )
+        },
+    )
+    run = _submit_and_run(session, principal, world)
+    assert run.status is DeployStatus.FAILED
+    assert (
+        "net_revenue links silver.clean column amount, which silver.clean does not have "
+        "(columns: id)"
+    ) in (run.error_message or "")
+
+
+def test_a_linked_table_the_project_no_longer_builds_counts_as_missing(
+    session: Session, principal: PrincipalRef, world: World
+) -> None:
+    """The table still exists until it is dropped, but the deploy makes it an orphan."""
+    term = _TERM.replace("[amount]", "[]")
+    commit(world.repo_path, {"assets/silver/clean.sql": _GLOSSARY_SQL, "glossary/sales.yaml": term})
+    assert _submit_and_run(session, principal, world).status is DeployStatus.SUCCEEDED
+    _build_table(session, principal, "silver.clean")
+    (world.repo_path / "assets" / "silver" / "clean.sql").unlink()
+    commit(world.repo_path, {"assets/silver/other.sql": "SELECT id FROM bronze.events\n"})
+    run = _submit_and_run(session, principal, world)
+    assert run.status is DeployStatus.FAILED
+    assert run.error_message == (
+        "glossary/sales.yaml:7: net_revenue links silver.clean, which does not exist in "
+        "environment dev, or you may not read it; fix the table name, build the table first, or "
+        "ask for READ_TABLE on it."
+    )
+
+
+def test_a_link_another_repository_broke_refuses_this_repositorys_next_deploy(
+    session: Session, principal: PrincipalRef, world: World
+) -> None:
+    other = world.repo_path.parent / "finance"
+    make_repo(other, {"assets/gold/x.sql": "SELECT 1 AS id\n"})
+    RepositoryService(
+        session, AllowAllAuthorization(), repo_roots=world.settings.repo_roots
+    ).create(principal, name="finance", kind=RepositoryKind.LOCAL, url=str(other))
+    assert (
+        _submit_and_run(session, principal, world, repository="finance").status
+        is DeployStatus.SUCCEEDED
+    )
+    _build_table(session, principal, "gold.x")
+    term = _TERM.replace("bronze.events: []", "gold.x: [id]")
+    commit(world.repo_path, {"assets/silver/clean.sql": _GLOSSARY_SQL, "glossary/sales.yaml": term})
+    assert _submit_and_run(session, principal, world).status is DeployStatus.SUCCEEDED
+    service = DeployService(session, AllowAllAuthorization())
+    service.undeploy(principal, "dev", "finance")
+    CatalogService(session, StorageResolver(session), AllowAllAuthorization()).drop_table(
+        principal, TableRef("dev", NamespacePath.from_parts(["gold"]), "x")
+    )
+    run = _submit_and_run(session, principal, world)
+    assert run.status is DeployStatus.FAILED
+    assert run.error_message == (
+        "glossary/sales.yaml:8: net_revenue links gold.x, which does not exist in environment "
+        "dev, or you may not read it; fix the table name, build the table first, or ask for "
+        "READ_TABLE on it."
+    )
+    assert [t.term_key for t in session.scalars(select(GlossaryTerm))] == ["net_revenue"]
+
+
+def test_a_term_another_repository_owns_refuses_the_deploy(
+    session: Session, principal: PrincipalRef, world: World
+) -> None:
+    other = world.repo_path.parent / "finance"
+    make_repo(
+        other,
+        {"assets/fin/x.sql": "SELECT 1 AS id\n", "glossary/f.yaml": _TERM.split("  links:")[0]},
+    )
+    RepositoryService(
+        session, AllowAllAuthorization(), repo_roots=world.settings.repo_roots
+    ).create(principal, name="finance", kind=RepositoryKind.LOCAL, url=str(other))
+    assert (
+        _submit_and_run(session, principal, world, repository="finance").status
+        is DeployStatus.SUCCEEDED
+    )
+    commit(
+        world.repo_path, {"assets/silver/clean.sql": _GLOSSARY_SQL, "glossary/sales.yaml": _TERM}
+    )
+    run = _submit_and_run(session, principal, world)
+    assert run.error_message == (
+        "glossary/sales.yaml:1: net_revenue is a term of repository finance in dev, and a term id "
+        "belongs to the repository that deployed it first; rename the term here, or remove it "
+        "from finance first."
+    )
+
+
+def test_a_column_of_another_repositorys_table_is_checked_and_withheld(
+    session: Session, principal: PrincipalRef, world: World
+) -> None:
+    """`bronze.events` exists outside the project: its columns are the catalog's."""
+    service = DeployService(session, AllowAllAuthorization())
+    glossary, _ = parse_glossary(
+        (
+            DiscoveredGlossaryFile(
+                "glossary/a.yaml",
+                "t:\n  name: T\n  definition: D\n  owner: o\n  links:\n    bronze.events: [idd]\n",
+            ),
+        )
+    )
+    repo_id = session.scalars(select(Repository.id).where(Repository.name == "analytics")).one()
+    (issue,) = service.validate_glossary(principal, "dev", repo_id, glossary, [])
+    assert issue.message == (
+        "t links bronze.events column idd, which bronze.events does not have (columns: id); fix "
+        "the column name or remove the link."
+    )
+    assert issue.targets == ("bronze.events",)
+    assert issue.withheld == (
+        "t links bronze.events, which does not exist in environment dev, or you may not read it; "
+        "fix the table name, build the table first, or ask for READ_TABLE on it."
     )
 
 

@@ -1090,3 +1090,110 @@ def owned_elsewhere_message(key: str, owner: str, environment: str) -> str:
         f"repository that deployed it first; rename the term here, or remove it from {owner} "
         "first."
     )
+
+
+_MAX_LISTED_COLUMNS = 20
+"""The most columns a missing-column refusal lists."""
+
+
+def missing_column_message(key: str, table: str, column: str, columns: Sequence[str]) -> str:
+    """Word the refusal of a linked column the table does not have.
+
+    Parameters
+    ----------
+    key
+        The term id.
+    table
+        The linked table.
+    column
+        The column as written.
+    columns
+        The table's columns, in order.
+
+    Returns
+    -------
+    str
+        The text; it lists at most `_MAX_LISTED_COLUMNS` columns and counts the rest.
+    """
+    listed = ", ".join(columns[:_MAX_LISTED_COLUMNS])
+    rest = len(columns) - _MAX_LISTED_COLUMNS
+    if rest > 0:
+        listed += f" … and {rest} more"
+    return (
+        f"{key} links {table} column {column}, which {table} does not have (columns: {listed}); "
+        "fix the column name or remove the link."
+    )
+
+
+def missing_link_message(key: str, table: str, environment: str, close: str | None) -> str:
+    """Word the refusal of a linked table that is missing or that the deployer may not read.
+
+    Parameters
+    ----------
+    key
+        The term id.
+    table
+        The table as written.
+    environment
+        The environment's name.
+    close
+        A table of the project with a close name, or `None`.
+
+    Returns
+    -------
+    str
+        The text; the same for a missing table and an unreadable one.
+    """
+    hint = f" (did you mean {close}?)" if close else ""
+    return (
+        f"{key} links {table}, which does not exist in environment {environment}, or you may not "
+        f"read it; fix the table name{hint}, build the table first, or ask for READ_TABLE on it."
+    )
+
+
+def artifact_columns_message(key: str, table: str) -> str:
+    """Word the refusal of column links to an artifact.
+
+    Parameters
+    ----------
+    key
+        The term id.
+    table
+        The artifact.
+
+    Returns
+    -------
+    str
+        The text.
+    """
+    return (
+        f"{key} links columns of {table}, an artifact, which has no columns; link the artifact "
+        f"itself with `{table}: []`, or remove the link."
+    )
+
+
+def missing_related_message(key: str, related: str, environment: str, close: str | None) -> str:
+    """Word the refusal of a related id no repository in the environment defines.
+
+    Parameters
+    ----------
+    key
+        The term id.
+    related
+        The id as written.
+    environment
+        The environment's name.
+    close
+        A known id with a close spelling, or `None`.
+
+    Returns
+    -------
+    str
+        The text.
+    """
+    hint = f" (did you mean {close}?)" if close else ""
+    return (
+        f"{key} names {related} under related:, which is not a term of this repository or of "
+        f"another repository deployed to {environment}; fix the id{hint}, or remove it from "
+        "related:."
+    )

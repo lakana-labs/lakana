@@ -237,7 +237,8 @@ hint: silver.orders_log: `materialize: incremental` is now written `write: appen
 A project version that uses `write: append` or `merge` needs workers of this release or later: a
 worker of an earlier one refuses its manifest instead of running the asset as a replace.
 A project version that uses `write: history` or a reference with `at:` needs workers of this
-release or later in the same way (manifest version 12).
+release or later in the same way (manifest version 12, or 13 when the project also has a
+[`glossary/`](glossary.md) folder).
 
 ## Model fields: kind, grain, key and references
 
@@ -493,7 +494,8 @@ release keeps its text as it was stored.
 A project version in which an asset declares a model field (`key:` alone counts, so every project
 with a `write: merge` asset) has manifest version 9, one in which an asset declares `measures:`
 version 10, and one that declares `main_language`, a label or a
-[translation](translations.md) version 11, and one that uses `write: history` or a reference with `at:` version 12. Each needs workers of the release that introduced it or later: a worker of an earlier
+[translation](translations.md) version 11, one that uses `write: history` or a reference with `at:` version 12, and one with a
+[`glossary/`](glossary.md) folder version 13. Each needs workers of the release that introduced it or later: a worker of an earlier
 one refuses its manifest. A deploy's changes list a table whose `kind`, `grain`, `references`,
 `checks`, or the `key` of an asset that does not merge, changed as `model_changed`; the key of a
 merge stays a change of how the table is written.
