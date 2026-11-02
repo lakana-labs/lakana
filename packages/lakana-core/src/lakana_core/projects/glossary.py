@@ -9,12 +9,13 @@ applies the form rules. The deploy checks links, related ids and ownership again
 from __future__ import annotations
 
 import difflib
+import logging
 import os
 import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
 import pydantic
 from pydantic import (
@@ -28,6 +29,7 @@ from pydantic import (
 
 from lakana_core.errors import ValidationError
 from lakana_core.identifiers import TableRef
+from lakana_core.languages import canonical_language
 from lakana_core.projects.discovery import (
     GLOSSARY_DIR,
     _decode,
@@ -52,6 +54,11 @@ from lakana_core.projects.yaml_loader import (
     load_yaml_with_lines,
     shown_key,
 )
+
+if TYPE_CHECKING:
+    from lakana_core.projects.translations import Translations
+
+logger = logging.getLogger(__name__)
 
 MAX_GLOSSARY_FILES = 50
 """The most YAML files `glossary/` may hold."""
@@ -812,3 +819,220 @@ def parse_glossary(
         ]
     ordered = dict(sorted(terms.items()))
     return Glossary(ordered, lines_of, frozenset(invalid)), issues
+
+
+def glossary_entries(
+    glossary: Glossary, translations: Sequence[Translations]
+) -> dict[str, dict[str, Any]]:
+    """Build the manifest form of every term.
+
+    Parameters
+    ----------
+    glossary
+        The parsed, validated glossary.
+    translations
+        The parsed translation files; their `glossary` sections give `translations`.
+
+    Returns
+    -------
+    dict
+        Id → ``{name, definition, owner, synonyms, links, related, translations}``, empty
+        lists and maps left out, tables and languages sorted.
+    """
+    result: dict[str, dict[str, Any]] = {}
+    for key, term in glossary.terms.items():
+        form: dict[str, Any] = {
+            "name": term.name,
+            "definition": term.definition,
+            "owner": term.owner,
+        }
+        if term.synonyms:
+            form["synonyms"] = list(term.synonyms)
+        if term.links:
+            form["links"] = {table: list(term.links[table]) for table in sorted(term.links)}
+        if term.related:
+            form["related"] = list(term.related)
+        texts = {
+            t.language: t.glossary[key].model_dump(
+                exclude_none=True, exclude_defaults=True, mode="json"
+            )
+            for t in sorted(translations, key=lambda t: t.language)
+            if key in t.glossary
+        }
+        if texts:
+            form["translations"] = texts
+        result[key] = form
+    return result
+
+
+@dataclass(frozen=True)
+class TermTextsEntry:
+    """One term's texts in one language, as the manifest stores them.
+
+    Parameters
+    ----------
+    name
+        The translated name, or `None`.
+    definition
+        The translated definition, or `None`.
+    synonyms
+        The additional synonyms.
+    """
+
+    name: str | None
+    definition: str | None
+    synonyms: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class GlossaryEntry:
+    """One term of a stored manifest, checked enough to be written.
+
+    Parameters
+    ----------
+    key
+        Its id.
+    name
+        Its main-language name.
+    definition
+        Its main-language definition.
+    owner
+        Its owner.
+    synonyms
+        Its main-language synonyms.
+    links
+        ``(table, column)`` pairs in order; `None` as column links the table.
+    related
+        Ids of related terms.
+    translations
+        Language → its texts.
+    """
+
+    key: str
+    name: str
+    definition: str
+    owner: str
+    synonyms: tuple[str, ...]
+    links: tuple[tuple[str, str | None], ...]
+    related: tuple[str, ...]
+    translations: dict[str, TermTextsEntry]
+
+
+_MAX_STORED_NAME = 1024
+"""The widest table or column name the link rows store."""
+
+
+def _texts(value: object) -> tuple[str, ...] | None:
+    """Read a list of non-empty strings.
+
+    Parameters
+    ----------
+    value
+        The stored value.
+
+    Returns
+    -------
+    tuple of str or None
+        The strings, or `None` when the value is not such a list.
+    """
+    if not isinstance(value, list) or not all(isinstance(v, str) and v for v in value):
+        return None
+    return tuple(value)
+
+
+def _entry(key: object, form: object) -> GlossaryEntry | None:
+    """Read one stored term, or nothing when any part of it cannot be stored.
+
+    Parameters
+    ----------
+    key
+        The stored id.
+    form
+        The stored term.
+
+    Returns
+    -------
+    GlossaryEntry or None
+        The term, or `None` for a damaged one.
+    """
+    if (
+        not isinstance(key, str)
+        or term_id_problem(key) is not None
+        or not isinstance(form, Mapping)
+    ):
+        return None
+    name, definition, owner = form.get("name"), form.get("definition"), form.get("owner")
+    if not (isinstance(name, str) and isinstance(definition, str) and isinstance(owner, str)):
+        return None
+    if not (name and definition and owner):
+        return None
+    synonyms = _texts(form.get("synonyms", []))
+    related = _texts(form.get("related", []))
+    links_form = form.get("links", {})
+    if synonyms is None or related is None or not isinstance(links_form, Mapping):
+        return None
+    if any(term_id_problem(r) is not None for r in related):
+        return None
+    links: list[tuple[str, str | None]] = []
+    for table, columns in links_form.items():
+        listed = _texts(columns)
+        if (
+            not isinstance(table, str)
+            or not table
+            or len(table) > _MAX_STORED_NAME
+            or listed is None
+        ):
+            return None
+        if any(len(c) > _MAX_STORED_NAME for c in listed):
+            return None
+        links += [(table, c) for c in listed] if listed else [(table, None)]
+    texts: dict[str, TermTextsEntry] = {}
+    translations = form.get("translations", {})
+    if not isinstance(translations, Mapping):
+        return None
+    for language, given in translations.items():
+        if not isinstance(language, str) or canonical_language(language) != language:
+            return None
+        if not isinstance(given, Mapping):
+            return None
+        t_name, t_definition = given.get("name"), given.get("definition")
+        t_synonyms = _texts(given.get("synonyms", []))
+        if t_synonyms is None:
+            return None
+        if not all(v is None or (isinstance(v, str) and v) for v in (t_name, t_definition)):
+            return None
+        texts[language] = TermTextsEntry(t_name, t_definition, t_synonyms)
+    return GlossaryEntry(key, name, definition, owner, synonyms, tuple(links), related, texts)
+
+
+def manifest_glossary(manifest: object) -> dict[str, GlossaryEntry]:
+    """Read a stored manifest's glossary, leaving out every term that cannot be stored.
+
+    A manifest is written by a deploy that checked it, but a database row can be edited by
+    hand; a damaged term is dropped with a warning, the others are kept.
+
+    Parameters
+    ----------
+    manifest
+        The stored manifest.
+
+    Returns
+    -------
+    dict
+        Id → term, sorted by id; empty for a manifest without a glossary.
+    """
+    if not isinstance(manifest, Mapping):
+        return {}
+    stored = manifest.get("glossary")
+    if not isinstance(stored, Mapping):
+        return {}
+    found: dict[str, GlossaryEntry] = {}
+    for key, form in stored.items():
+        entry = _entry(key, form)
+        if entry is None:
+            logger.warning(
+                "glossary term %r of a stored manifest dropped: it cannot be stored", str(key)[:80]
+            )
+            continue
+        found[entry.key] = entry
+    return dict(sorted(found.items()))

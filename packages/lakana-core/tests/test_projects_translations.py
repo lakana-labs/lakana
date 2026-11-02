@@ -939,10 +939,12 @@ def test_a_translation_of_a_term_the_repository_does_not_define_is_refused() -> 
         "translations/fr.yaml:2: `net_revenu` is not a term this repository's glossary/ "
         "defines; did you mean `net_revenue`? Fix the id, or remove the entry"
     ]
-    assert [i.render() for i in translation_issues(config, [], parsed, None)] == [
-        "translations/fr.yaml:2: `net_revenu` is not a term this repository's glossary/ "
-        "defines; fix the id, or remove the entry"
-    ]
+
+
+def test_an_unparsed_glossary_does_not_make_every_translated_term_unknown() -> None:
+    parsed, _ = _translation("glossary:\n  net_revenue:\n    name: X\n")
+    config = parse_project_config("main_language: en\n", limits=_LIMITS)
+    assert translation_issues(config, [], parsed, None) == []
 
 
 def test_coverage_and_strict_mode_count_term_names_and_definitions() -> None:

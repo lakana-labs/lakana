@@ -1627,12 +1627,12 @@ def test_a_sql_task_of_a_manifest_of_a_version_up_to_the_current_one_still_runs(
 
 @pytest.mark.parametrize(
     ("declared", "status"),
-    [(11, TaskStatus.SUCCEEDED), (12, TaskStatus.SUCCEEDED), (13, TaskStatus.FAILED)],
+    [(12, TaskStatus.SUCCEEDED), (13, TaskStatus.SUCCEEDED), (14, TaskStatus.FAILED)],
 )
-def test_a_manifest_of_version_12_is_accepted_and_13_is_refused(
+def test_a_manifest_of_version_13_is_accepted_and_14_is_refused(
     world: World, declared: int, status: TaskStatus
 ) -> None:
-    """Version 12 is the one a project that uses history gets; 13 is a future one's."""
+    """Version 13 is the one a project with a glossary gets; 14 is a future one's."""
     _start(world)
     with world.session() as session:
         version = session.get(JobVersion, world.version_id)

@@ -937,6 +937,8 @@ def translation_issues(
     )
     terms = glossary.terms if glossary is not None else {}
     refused_terms = glossary.invalid if glossary is not None else frozenset()
+    # without a parsed glossary its own issues say what is wrong; do not list every term too
+    check_terms = glossary is not None
     files = {t.language: t for t in translations}
     known = sorted(by_table)
     for t in translations:
@@ -972,7 +974,7 @@ def translation_issues(
                 for issue in _entry_issues(t, table, entry, asset):
                     problems.add(issue)
         for key in t.glossary:
-            if key not in terms and key not in refused_terms:
+            if check_terms and key not in terms and key not in refused_terms:
                 line = t.lines.line(["glossary", key])
                 problems.add(ProjectIssue(t.path, line, _unknown_term(key, sorted(terms))))
         issues += problems.done()

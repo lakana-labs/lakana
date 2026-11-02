@@ -17,8 +17,10 @@ from lakana_core.projects.layers import MEDALLION_LAYERS
 from lakana_core.projects.manifest import (
     CHECKS_VERSION,
     CONNECTIONS_VERSION,
+    GLOSSARY_VERSION,
     HISTORY_VERSION,
     JOBS_VERSION,
+    LISTS_CHECKS,
     MANIFEST_VERSION,
     MEASURES_VERSION,
     MODEL_VERSION,
@@ -543,7 +545,7 @@ def test_a_python_entry_records_decimals_and_the_manifest_version_is_unchanged(
     asset = dataclasses.replace(_python_asset(), decimals=decimals)
     manifest = build_manifest([asset], build_graph([asset]), ResolvedProjectConfig())
     assert manifest["version"] == VERSION_WITHOUT_CHECKS == 3
-    assert MANIFEST_VERSION == 12
+    assert MANIFEST_VERSION == 13
     assert manifest["assets"][0]["decimals"] == decimals
 
 
@@ -1141,7 +1143,8 @@ def test_texts_raise_the_version_only_when_used() -> None:
         translations={"gold.a": {"fr": {"label": "A"}}},
     )
     assert translated["assets"][0]["metadata"]["translations"] == {"fr": {"label": "A"}}
-    assert MANIFEST_VERSION == HISTORY_VERSION == 12
+    assert MANIFEST_VERSION == GLOSSARY_VERSION == 13
+    assert HISTORY_VERSION == 12
     assert TEXTS_VERSION == 11
 
 
@@ -1382,3 +1385,21 @@ def test_a_reference_without_at_keeps_its_entry_shape() -> None:
     manifest = build_manifest([_modelled()], build_graph([_modelled()]), ResolvedProjectConfig())
     assert all("at" not in r for r in manifest["assets"][0]["model"]["references"])
     assert manifest["version"] == MODEL_VERSION
+
+
+def test_a_glossary_raises_the_version_to_13_and_only_then() -> None:
+    asset = make_asset("gold.a")
+    plain = build_manifest([asset], build_graph([asset]), ResolvedProjectConfig())
+    with_terms = build_manifest(
+        [asset],
+        build_graph([asset]),
+        ResolvedProjectConfig(),
+        glossary={"a": {"name": "A", "definition": "B", "owner": "c"}},
+    )
+    empty = build_manifest([asset], build_graph([asset]), ResolvedProjectConfig(), glossary={})
+    assert plain["version"] < GLOSSARY_VERSION and "glossary" not in plain
+    assert with_terms["version"] == GLOSSARY_VERSION == 13
+    assert with_terms["glossary"] == {"a": {"name": "A", "definition": "B", "owner": "c"}}
+    assert isinstance(with_terms["checks"], list)
+    assert empty["version"] == 13 and empty["glossary"] == {}
+    assert 13 in LISTS_CHECKS

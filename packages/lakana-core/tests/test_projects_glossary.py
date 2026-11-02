@@ -10,9 +10,15 @@ from lakana_core.projects.glossary import (
     MAX_GLOSSARY_FILES,
     DiscoveredGlossaryFile,
     Glossary,
+    GlossaryEntry,
+    TermTextsEntry,
     discover_glossary,
+    glossary_entries,
+    manifest_glossary,
     parse_glossary,
 )
+from lakana_core.projects.limits import DeployLimits
+from lakana_core.projects.translations import DiscoveredTranslation, parse_translations
 
 _SALES = """\
 net_revenue:
@@ -264,3 +270,57 @@ def test_a_blank_column_is_refused_with_the_identifier_rule() -> None:
     _, issues = _parse(("glossary/a.yaml", text))
     assert len(issues) == 1 and "a column of `gold.t`" in issues[0]
     assert issues[0].endswith("and must not be empty")
+
+
+def test_glossary_entries_is_the_manifest_form_and_reads_back() -> None:
+    glossary, _ = parse_glossary((DiscoveredGlossaryFile("glossary/sales.yaml", _SALES),))
+    assert glossary is not None
+    translations, _ = parse_translations(
+        (
+            DiscoveredTranslation(
+                "translations/fr.yaml", "fr", "glossary:\n  net_revenue:\n    name: CA net\n"
+            ),
+        ),
+        limits=DeployLimits(),
+    )
+    entries = glossary_entries(glossary, translations)
+    assert entries["gross_revenue"] == {
+        "name": "Gross revenue",
+        "definition": "Revenue before returns and discounts.",
+        "owner": "finance",
+    }
+    assert entries["net_revenue"]["links"] == {
+        "gold.dim_store": [],
+        "gold.fact_sales": ["net_amount"],
+    }
+    assert entries["net_revenue"]["translations"] == {"fr": {"name": "CA net"}}
+    read = manifest_glossary({"version": 13, "glossary": entries})
+    assert read["net_revenue"] == GlossaryEntry(
+        "net_revenue",
+        "Net revenue",
+        "Revenue after returns and discounts, before tax.",
+        "finance",
+        ("revenue", "sales", "turnover"),
+        (("gold.dim_store", None), ("gold.fact_sales", "net_amount")),
+        ("gross_revenue",),
+        {"fr": TermTextsEntry("CA net", None, ())},
+    )
+
+
+def test_manifest_glossary_drops_what_it_cannot_store(caplog: pytest.LogCaptureFixture) -> None:
+    good = {"name": "A", "definition": "B", "owner": "c"}
+    manifest = {
+        "glossary": {
+            "ok": good,
+            "x" * 200: good,
+            "long_table": {**good, "links": {"a." + "t" * 2000: []}},
+            "bad_language": {**good, "translations": {"xx_YY!": {"name": "A"}}},
+            "bad_synonyms": {**good, "synonyms": "revenue"},
+            "bad_columns": {**good, "links": {"gold.a": [1, 2]}},
+            "no_name": {"definition": "B", "owner": "c"},
+        }
+    }
+    assert list(manifest_glossary(manifest)) == ["ok"]
+    assert manifest_glossary({"version": 12}) == {}
+    assert manifest_glossary(["not", "a", "manifest"]) == {}
+    assert "dropped" in caplog.text
