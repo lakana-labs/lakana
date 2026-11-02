@@ -754,3 +754,20 @@ def test_a_link_under_translations_is_refused_once_in_a_python_project(tmp_path:
     assert [m for m in _messages(caught.value) if "symlink" in m] == [
         "translations/fr.yaml: symlinks are not allowed under translations/"
     ]
+
+
+def test_discover_returns_the_glossary_files(tmp_path: Path) -> None:
+    _write(tmp_path, "assets/gold/a.sql")
+    assert discover(tmp_path).glossary is None
+    (tmp_path / "glossary").mkdir()
+    (tmp_path / "glossary" / "a.yaml").write_text("x:\n  name: X\n")
+    assert [f.path for f in discover(tmp_path).glossary or ()] == ["glossary/a.yaml"]
+
+
+def test_a_symlink_under_glossary_is_reported_once_in_a_python_project(tmp_path: Path) -> None:
+    _write(tmp_path, "assets/gold/a.py", "x = 1\n")
+    _write(tmp_path, "glossary/sales.yaml", "x:\n  name: X\n")
+    (tmp_path / "glossary" / "link.yaml").symlink_to("sales.yaml")
+    with pytest.raises(ProjectValidationError) as info:
+        discover(tmp_path)
+    assert _messages(info.value) == ["glossary/link.yaml: symlinks are not allowed under glossary/"]

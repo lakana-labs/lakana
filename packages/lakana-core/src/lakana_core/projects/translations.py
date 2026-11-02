@@ -26,9 +26,8 @@ from lakana_core.projects.discovery import (
     CONFIG_FILE,
     TRANSLATIONS_DIR,
     _decode,
-    _display,
-    _is_unsafe,
     _read,
+    folder_entry_refused,
 )
 from lakana_core.projects.issues import ProjectIssue
 from lakana_core.projects.limits import DeployLimits
@@ -179,18 +178,7 @@ def discover_translations(
         if files > MAX_LANGUAGES:
             continue
         relative = f"{TRANSLATIONS_DIR}/{entry.name}"
-        if _is_unsafe(relative):
-            issues.append(
-                ProjectIssue(
-                    _display(relative), None, "the path has a non-UTF-8 or control character"
-                )
-            )
-            continue
-        if entry.is_symlink():
-            issues.append(ProjectIssue(relative, None, _LINK))
-            continue
-        if entry.is_dir(follow_symlinks=False):
-            issues.append(ProjectIssue(relative, None, _NO_FOLDERS))
+        if folder_entry_refused(entry, relative, _LINK, _NO_FOLDERS, issues):
             continue
         stem, dot, suffix = entry.name.rpartition(".")
         if dot and suffix != "yaml" and suffix.lower() in ("yaml", "yml"):
