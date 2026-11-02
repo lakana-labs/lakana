@@ -29,6 +29,7 @@ from lakana_core.projects.discovery import (
     _read,
     folder_entry_refused,
 )
+from lakana_core.projects.glossary import Glossary, TermTexts
 from lakana_core.projects.issues import ProjectIssue
 from lakana_core.projects.limits import DeployLimits
 from lakana_core.projects.project_config import (
@@ -378,7 +379,10 @@ class Translations:
     lines
         The line of every key, from the one parse of the file.
     invalid
-        Tables whose entry was refused; strict mode does not report their texts as missing too.
+        Tables, and ``glossary.<id>`` for terms, whose entry was refused; strict mode does not
+        report their texts as missing too.
+    glossary
+        Term id → its texts in this language, from the `glossary:` section.
     """
 
     path: str
@@ -387,6 +391,7 @@ class Translations:
     tables: dict[str, TableTranslation]
     lines: KeyLines = field(default_factory=KeyLines)
     invalid: frozenset[str] = frozenset()
+    glossary: dict[str, TermTexts] = field(default_factory=dict)
 
 
 class _FileIssues:
@@ -510,6 +515,7 @@ def parse_translations(
             )
             continue
         tables: dict[str, TableTranslation] = {}
+        glossary_found: dict[str, TermTexts] = {}
         invalid: set[str] = set()
         problems = _FileIssues(item.path)
         for index, (table, value) in enumerate(raw.items()):
@@ -524,6 +530,9 @@ def parse_translations(
                         "name, such as `gold.fact_sales`",
                     )
                 )
+                continue
+            if table == "glossary":
+                glossary_found = _glossary_section(item.path, value, lines, problems, invalid)
                 continue
             if value is not None and not isinstance(value, Mapping):
                 invalid.add(table)
@@ -546,9 +555,137 @@ def parse_translations(
                     problems.add(issue)
         issues += problems.done()
         parsed.append(
-            Translations(item.path, item.language, item.text, tables, lines, frozenset(invalid))
+            Translations(
+                item.path,
+                item.language,
+                item.text,
+                tables,
+                lines,
+                frozenset(invalid),
+                glossary_found,
+            )
         )
     return parsed, issues
+
+
+def _glossary_section(
+    path: str, value: object, lines: KeyLines, problems: _FileIssues, invalid: set[str]
+) -> dict[str, TermTexts]:
+    """Validate a translation file's `glossary:` section.
+
+    Parameters
+    ----------
+    path
+        The file.
+    value
+        The section as YAML read it.
+    lines
+        The file's key lines.
+    problems
+        Receives every issue.
+    invalid
+        Receives ``glossary.<id>`` for each refused entry.
+
+    Returns
+    -------
+    dict
+        Term id → its valid texts.
+    """
+    if not isinstance(value, Mapping):
+        problems.add(
+            ProjectIssue(
+                path,
+                lines.line(["glossary"]),
+                "`glossary` must be a mapping of term ids to their texts, such as "
+                "`glossary: {net_revenue: {name: …, definition: …}}`",
+            )
+        )
+        return {}
+    found: dict[str, TermTexts] = {}
+    for key, texts in value.items():
+        if not isinstance(key, str) or not isinstance(texts, Mapping):
+            if isinstance(key, str):
+                invalid.add(f"glossary.{key}")
+            problems.add(
+                ProjectIssue(
+                    path,
+                    lines.line(["glossary", key]),
+                    f"`glossary.{shown_key(key)}` must be a mapping such as "
+                    "`{name: …, definition: …, synonyms: […]}`",
+                )
+            )
+            continue
+        try:
+            found[key] = TermTexts.model_validate(texts)
+        except pydantic.ValidationError as exc:
+            invalid.add(f"glossary.{key}")
+            for issue in pydantic_issues(
+                exc, path=path, line=None, prefix=("glossary", key), lines=lines
+            ):
+                problems.add(issue)
+    return found
+
+
+def glossary_texts(glossary: Glossary | None) -> list[str]:
+    """List the keys of every main-language text a glossary gives to translate.
+
+    Parameters
+    ----------
+    glossary
+        The parsed glossary, or `None`.
+
+    Returns
+    -------
+    list of str
+        ``glossary.<id>.name`` and ``glossary.<id>.definition`` per valid term.
+    """
+    if glossary is None:
+        return []
+    return [f"glossary.{key}.{f}" for key in glossary.terms for f in ("name", "definition")]
+
+
+def _translated_term_texts(entries: Mapping[str, TermTexts]) -> set[str]:
+    """List the keys of every glossary text a file translates.
+
+    Parameters
+    ----------
+    entries
+        Term id → its translated texts.
+
+    Returns
+    -------
+    set of str
+        ``glossary.<id>.name`` and ``.definition`` for each one given.
+    """
+    return {
+        f"glossary.{key}.{f}"
+        for key, texts in entries.items()
+        for f in ("name", "definition")
+        if getattr(texts, f)
+    }
+
+
+def _unknown_term(key: str, known: Sequence[str]) -> str:
+    """Word the refusal of a translated term the repository does not define.
+
+    Parameters
+    ----------
+    key
+        The id as written.
+    known
+        The repository's term ids.
+
+    Returns
+    -------
+    str
+        The text.
+    """
+    close = difflib.get_close_matches(key, known, n=1, cutoff=0.8)
+    hint = f"; did you mean `{close[0]}`? Fix" if close else "; fix"
+    return (
+        f"`{shown_key(key)}` is not a term this repository's glossary/ defines{hint} the id, "
+        "or remove the entry"
+    )
 
 
 def _has(text: str | None) -> bool:
@@ -763,7 +900,10 @@ def _missing_issue(t: Translations, missing: list[str]) -> ProjectIssue:
 
 
 def translation_issues(
-    config: ProjectConfig, assets: Sequence[ParsedAsset], translations: Sequence[Translations]
+    config: ProjectConfig,
+    assets: Sequence[ParsedAsset],
+    translations: Sequence[Translations],
+    glossary: Glossary | None = None,
 ) -> list[ProjectIssue]:
     """Check the translation files against `lakana.yaml` and the project's assets.
 
@@ -775,6 +915,8 @@ def translation_issues(
         The parsed assets.
     translations
         The parsed files.
+    glossary
+        The parsed glossary; its terms are what a `glossary:` section may translate.
 
     Returns
     -------
@@ -790,7 +932,11 @@ def translation_issues(
     if main is None and translations and not require:
         issues.append(ProjectIssue(CONFIG_FILE, None, NEEDS_MAIN_LANGUAGE))
     by_table = {asset.table: asset for asset in assets}
-    every = sorted({key for asset in assets for key in header_texts(asset)})
+    every = sorted(
+        {key for asset in assets for key in header_texts(asset)} | set(glossary_texts(glossary))
+    )
+    terms = glossary.terms if glossary is not None else {}
+    refused_terms = glossary.invalid if glossary is not None else frozenset()
     files = {t.language: t for t in translations}
     known = sorted(by_table)
     for t in translations:
@@ -825,6 +971,10 @@ def translation_issues(
             else:
                 for issue in _entry_issues(t, table, entry, asset):
                     problems.add(issue)
+        for key in t.glossary:
+            if key not in terms and key not in refused_terms:
+                line = t.lines.line(["glossary", key])
+                problems.add(ProjectIssue(t.path, line, _unknown_term(key, sorted(terms))))
         issues += problems.done()
     for language in require:
         if language == main:
@@ -842,6 +992,7 @@ def translation_issues(
             )
             continue
         done = {key for table, entry in t.tables.items() for key in translated_texts(table, entry)}
+        done |= _translated_term_texts(t.glossary)
         refused = tuple(f"{table}." for table in t.invalid)  # reported already, not twice
         missing = [key for key in every if key not in done and not key.startswith(refused)]
         if missing:
@@ -850,7 +1001,10 @@ def translation_issues(
 
 
 def coverage_hints(
-    config: ProjectConfig, assets: Sequence[ParsedAsset], translations: Sequence[Translations]
+    config: ProjectConfig,
+    assets: Sequence[ParsedAsset],
+    translations: Sequence[Translations],
+    glossary: Glossary | None = None,
 ) -> tuple[str, ...]:
     """Say, per file, how many header texts it translates; the deploy prints these as hints.
 
@@ -862,16 +1016,19 @@ def coverage_hints(
         The parsed assets.
     translations
         The parsed, validated files.
+    glossary
+        The parsed glossary, whose names and definitions count as texts too.
 
     Returns
     -------
     tuple of str
         One hint per file, by language.
     """
-    every = {key for asset in assets for key in header_texts(asset)}
+    every = {key for asset in assets for key in header_texts(asset)} | set(glossary_texts(glossary))
     hints: list[str] = []
     for t in sorted(translations, key=lambda t: t.language):
-        done = {k for table, e in t.tables.items() for k in translated_texts(table, e)} & every
+        done = {k for table, e in t.tables.items() for k in translated_texts(table, e)}
+        done = (done | _translated_term_texts(t.glossary)) & every
         hint = f"{t.path}: {len(done)} of {len(every)} texts translated"
         rest = len(every) - len(done)
         if rest:

@@ -17,7 +17,14 @@ from pathlib import Path
 from typing import Annotated, Any
 
 import pydantic
-from pydantic import AfterValidator, BeforeValidator, Field, ValidationInfo, field_validator
+from pydantic import (
+    AfterValidator,
+    BeforeValidator,
+    Field,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
 
 from lakana_core.errors import ValidationError
 from lakana_core.identifiers import TableRef
@@ -32,6 +39,7 @@ from lakana_core.projects.project_config import (
     IDENTIFIER_MESSAGE,
     MAX_DESCRIPTION_CHARS,
     SafeTextModel,
+    StrictModel,
     checked_label,
     checked_text,
     pydantic_issues,
@@ -278,6 +286,32 @@ def synonym_problem(synonyms: Sequence[str], name: str | None) -> str | None:
     return None
 
 
+def _check_synonyms(value: tuple[str, ...], name: str | None) -> tuple[str, ...]:
+    """Raise the first synonym rule `value` breaks.
+
+    Parameters
+    ----------
+    value
+        The synonyms.
+    name
+        The term's name in the same language, or `None`.
+
+    Returns
+    -------
+    tuple of str
+        `value`.
+
+    Raises
+    ------
+    ValueError
+        For the first rule broken.
+    """
+    problem = synonym_problem(value, name)
+    if problem is not None:
+        raise ValueError(problem)
+    return value
+
+
 def _is_table_name(table: object) -> bool:
     """Say whether a `links:` key is a dotted table name.
 
@@ -426,16 +460,8 @@ class TermSpec(SafeTextModel):
         -------
         tuple of str
             `value`.
-
-        Raises
-        ------
-        ValueError
-            For the first rule broken.
         """
-        problem = synonym_problem(value, info.data.get("name"))
-        if problem is not None:
-            raise ValueError(problem)
-        return value
+        return _check_synonyms(value, info.data.get("name"))
 
     @field_validator("related")
     @classmethod
@@ -468,6 +494,61 @@ class TermSpec(SafeTextModel):
             if value.count(key) > 1:
                 raise ValueError(f"names `{key}` twice; remove one")
         return value
+
+
+class TermTexts(StrictModel):
+    """One term's texts in one language other than the main one.
+
+    Parameters
+    ----------
+    name
+        The translated name.
+    definition
+        The translated definition.
+    synonyms
+        Synonyms in that language, besides the main language's.
+    """
+
+    name: OneLine | None = None
+    definition: Definition | None = None
+    synonyms: tuple[OneLine, ...] = ()
+
+    @field_validator("synonyms")
+    @classmethod
+    def _synonyms(cls, value: tuple[str, ...], info: ValidationInfo) -> tuple[str, ...]:
+        """Apply `synonym_problem` against the translated name.
+
+        Parameters
+        ----------
+        value
+            The synonyms.
+        info
+            Holds the validated name.
+
+        Returns
+        -------
+        tuple of str
+            `value`.
+        """
+        return _check_synonyms(value, info.data.get("name"))
+
+    @model_validator(mode="after")
+    def _not_empty(self) -> TermTexts:
+        """Refuse an entry with no text.
+
+        Returns
+        -------
+        TermTexts
+            `self`.
+
+        Raises
+        ------
+        ValueError
+            For an entry with no name, definition or synonym.
+        """
+        if self.name is None and self.definition is None and not self.synonyms:
+            raise ValueError("needs `name:`, `definition:` or `synonyms:`")
+        return self
 
 
 @dataclass(frozen=True)
