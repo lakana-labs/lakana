@@ -323,6 +323,11 @@ def _links_shape(value: object) -> object:
             "must be a mapping of tables to their columns, such as "
             "`{gold.fact_sales: [net_amount], gold.dim_store: []}`"
         )
+    if len(value) > MAX_LINKED_TABLES:
+        raise ValueError(
+            f"links {len(value)} tables, and a term links at most {MAX_LINKED_TABLES}; link the "
+            "tables people should use for the term"
+        )
     columns = 0
     for table, listed in value.items():
         if not _is_table_name(table):
@@ -335,24 +340,21 @@ def _links_shape(value: object) -> object:
                 f"`{table}` must be a list of its columns, such as `[net_amount]`; write `[]` "
                 "to link the table itself"
             )
+        columns += len(listed)
+        if columns > MAX_LINKED_COLUMNS:
+            raise ValueError(
+                f"links {columns} columns, and a term links at most {MAX_LINKED_COLUMNS}; link "
+                "the columns people should use for the term"
+            )
+        seen: set[str] = set()
         for column in listed:
             if not column.strip() or unsafe_identifier(column):
                 raise ValueError(
                     f"a column of `{table}` {IDENTIFIER_MESSAGE} and must not be empty"
                 )
-            if listed.count(column) > 1:
+            if column in seen:
                 raise ValueError(f"lists column `{column}` of `{table}` twice; remove one")
-        columns += len(listed)
-    if len(value) > MAX_LINKED_TABLES:
-        raise ValueError(
-            f"links {len(value)} tables, and a term links at most {MAX_LINKED_TABLES}; link the "
-            "tables people should use for the term"
-        )
-    if columns > MAX_LINKED_COLUMNS:
-        raise ValueError(
-            f"links {columns} columns, and a term links at most {MAX_LINKED_COLUMNS}; link the "
-            "columns people should use for the term"
-        )
+            seen.add(column)
     return value
 
 

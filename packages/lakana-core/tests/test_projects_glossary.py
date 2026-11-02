@@ -247,3 +247,20 @@ def test_a_file_that_is_not_a_mapping_and_yaml_aliases_are_refused() -> None:
         "`net_revenue: {name: Net revenue, definition: …, owner: finance}`"
     ]
     assert len(aliased) == 1 and "alias" in aliased[0]
+
+
+def test_a_term_over_the_column_cap_is_refused_before_its_columns_are_walked() -> None:
+    columns = ", ".join(f"c{n}" for n in range(40_000))
+    text = f"a:\n  name: A\n  definition: B\n  owner: c\n  links: {{gold.t: [{columns}]}}\n"
+    _, issues = _parse(("glossary/a.yaml", text))
+    assert [i.split(": ", 1)[1] for i in issues] == [
+        "a.links: links 40000 columns, and a term links at most 200; link the columns people "
+        "should use for the term"
+    ]
+
+
+def test_a_blank_column_is_refused_with_the_identifier_rule() -> None:
+    text = "a:\n  name: A\n  definition: B\n  owner: c\n  links: {gold.t: ['  ']}\n"
+    _, issues = _parse(("glossary/a.yaml", text))
+    assert len(issues) == 1 and "a column of `gold.t`" in issues[0]
+    assert issues[0].endswith("and must not be empty")
