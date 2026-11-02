@@ -26,6 +26,7 @@ from lakana_core.audit.service import AuditService
 from lakana_core.auth import Action, AuthorizationService, CiScope, PrincipalRef, Securable
 from lakana_core.catalog.columns import stored_columns
 from lakana_core.catalog.descriptions import sync_project_descriptions
+from lakana_core.catalog.glossary import delete_glossary, glossary_clashes, write_glossary
 from lakana_core.catalog.identity import resolve_table_id
 from lakana_core.catalog.model_metadata import clear_removed_models
 from lakana_core.ci_oidc.exchange import ci_scope_for_run
@@ -75,6 +76,7 @@ from lakana_core.projects.deploy_jobs import (
 )
 from lakana_core.projects.diff import DeployDiff, diff_manifests
 from lakana_core.projects.git_input import is_full_sha, validate_ref
+from lakana_core.projects.glossary import manifest_glossary, owned_elsewhere_message
 from lakana_core.projects.history_columns import history_table_columns
 from lakana_core.projects.issues import ProjectIssue, ProjectValidationError, error_for_reader
 from lakana_core.projects.lookups import deployment_row, environment_by_name, repository_by_name
@@ -1019,6 +1021,46 @@ class DeployService:
             self._session.rollback()
             raise ProjectValidationError(issues)
 
+    def _require_own_terms(
+        self,
+        environment_id: uuid.UUID,
+        repository_id: uuid.UUID,
+        manifest: object,
+        environment_name: str,
+    ) -> None:
+        """Refuse a manifest that defines a term another repository owns.
+
+        Run while `_claim_tables` holds the ownership lock, so two repositories cannot both take
+        a new term id; validation checked the same long before.
+
+        Parameters
+        ----------
+        environment_id
+            The environment.
+        repository_id
+            The repository whose version becomes current.
+        manifest
+            That version's manifest.
+        environment_name
+            For the message.
+
+        Raises
+        ------
+        ProjectValidationError
+            Naming each clash; the transaction is rolled back first.
+        """
+        clashes = glossary_clashes(
+            self._session, environment_id, repository_id, manifest_glossary(manifest)
+        )
+        if clashes:
+            self._session.rollback()
+            raise ProjectValidationError(
+                [
+                    ProjectIssue("glossary", None, owned_elsewhere_message(k, o, environment_name))
+                    for k, o in clashes
+                ]
+            )
+
     def _ownership_clashes(
         self,
         environment_id: uuid.UUID,
@@ -1792,10 +1834,10 @@ class DeployService:
         """Remove a repository's deployment pointer and run principal binding.
 
         Data and project versions stay: the repository's tables become orphans and
-        its project versions remain as history. The pointer row is deleted first and
-        the active-run check runs after it in the same transaction, so a run
-        start racing this call either commits first (and this call is refused)
-        or finds the pointer gone (`lock_deployment`).
+        its project versions remain as history; the repository's glossary terms go. The
+        pointer row is deleted first and the active-run check runs after it in the same
+        transaction, so a run start racing this call either commits first (and this call is
+        refused) or finds the pointer gone (`lock_deployment`).
 
         Parameters
         ----------
@@ -1871,6 +1913,7 @@ class DeployService:
             .where(JobSchedule.environment_id == env.id, JobSchedule.repository_id == repo.id)
             .execution_options(synchronize_session=False)
         )
+        delete_glossary(self._session, env.id, repo.id)
         AuditService(self._session).record(
             p.id,
             AuditEventType.UNDEPLOYED,
@@ -3261,8 +3304,9 @@ class DeployService:
             repositories cannot both claim a new table); nothing is written.
         ProjectValidationError
             If an asset declares a connection the environment no longer has (read
-            ``FOR SHARE``, so a concurrent delete is ordered before or after); nothing is
-            written.
+            ``FOR SHARE``, so a concurrent delete is ordered before or after), or the glossary
+            defines a term another repository's current deployment owns (checked under the
+            ownership lock); nothing is written.
         NotFoundError
             If the repository or environment was deleted meanwhile.
         """
@@ -3274,6 +3318,7 @@ class DeployService:
         assert sha is not None  # nosec B101 -- set by the worker before recording
         self._claim_tables(environment_id, repository_id, manifest_tables(manifest), names[0])
         self._require_connections(environment_id, names[0], manifest)
+        self._require_own_terms(environment_id, repository_id, manifest, names[0])
         version = self._existing_job_version(environment_id, repository_id, sha)
         if version is None:
             version = JobVersion(
@@ -3300,6 +3345,7 @@ class DeployService:
                     environment_id, repository_id, manifest_tables(manifest), names[0]
                 )
                 self._require_connections(environment_id, names[0], manifest)
+                self._require_own_terms(environment_id, repository_id, manifest, names[0])
                 version = self._existing_job_version(environment_id, repository_id, sha)
                 if version is None:
                     raise NotFoundError(_GONE_MESSAGE) from None
@@ -3329,6 +3375,7 @@ class DeployService:
             previous.manifest_json if previous is not None else None,
             manifest,
         )
+        write_glossary(self._session, environment_id, repository_id, manifest)
         run.job_version_id = version.id
         run.diff_json = diff.to_json()
         run.checks_json = dict(checks) if checks else None
@@ -3391,6 +3438,9 @@ class DeployService:
     ) -> JobVersion:
         """Move the pointer back to the run's target, without fetching anything.
 
+        The target's glossary terms replace the repository's current ones, in the same
+        transaction.
+
         Parameters
         ----------
         p
@@ -3411,7 +3461,8 @@ class DeployService:
             If the run is not a rollback, the target is gone or belongs to
             another environment or repository, or the target's tables are now
             produced by another repository; a `ProjectValidationError` if the target
-            declares a connection the environment no longer has.
+            declares a connection the environment no longer has, or defines a glossary term
+            another repository's current deployment owns (checked under the ownership lock).
         ConflictError
             If the run is no longer `running` under `worker_id` (`DEPLOY_ENDED_MESSAGE`),
             another deploy moved the pointer first, or a `to_previous`
@@ -3447,6 +3498,7 @@ class DeployService:
             environment_id, repository_id, manifest_tables(target.manifest_json), names[0]
         )
         self._require_connections(environment_id, names[0], target.manifest_json)
+        self._require_own_terms(environment_id, repository_id, target.manifest_json, names[0])
         current = self.current_job_version(environment_id, repository_id)
         diff = diff_manifests(
             current.manifest_json if current is not None else None,
@@ -3472,6 +3524,7 @@ class DeployService:
             current.manifest_json if current is not None else None,
             target.manifest_json,
         )
+        write_glossary(self._session, environment_id, repository_id, target.manifest_json)
         run.resolved_sha = target.commit_sha
         run.job_version_id = target.id
         run.diff_json = diff.to_json()

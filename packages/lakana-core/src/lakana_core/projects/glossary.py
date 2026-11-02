@@ -1002,7 +1002,37 @@ def _entry(key: object, form: object) -> GlossaryEntry | None:
         if not all(v is None or (isinstance(v, str) and v) for v in (t_name, t_definition)):
             return None
         texts[language] = TermTextsEntry(t_name, t_definition, t_synonyms)
+    if not _keeps_the_file_rules(form, translations):
+        return None
     return GlossaryEntry(key, name, definition, owner, synonyms, tuple(links), related, texts)
+
+
+def _keeps_the_file_rules(form: Mapping[str, object], translations: Mapping[str, object]) -> bool:
+    """Say whether a stored term still keeps every rule of a glossary file.
+
+    A deploy stored it after those rules, so only a hand-edited row breaks them. They bound
+    every count and length that becomes a row (`lakana_core.catalog.glossary`) and refuse the
+    characters PostgreSQL does not store, such as NUL.
+
+    Parameters
+    ----------
+    form
+        The stored term.
+    translations
+        Its stored `translations`, language → texts.
+
+    Returns
+    -------
+    bool
+        Whether `TermSpec` and, per language, `TermTexts` accept it.
+    """
+    try:
+        TermSpec.model_validate({k: form[k] for k in TERM_FIELDS if k in form})
+        for given in translations.values():
+            TermTexts.model_validate(given)
+    except (ValueError, TypeError):
+        return False
+    return True
 
 
 def manifest_glossary(manifest: object) -> dict[str, GlossaryEntry]:
@@ -1036,3 +1066,27 @@ def manifest_glossary(manifest: object) -> dict[str, GlossaryEntry]:
             continue
         found[entry.key] = entry
     return dict(sorted(found.items()))
+
+
+def owned_elsewhere_message(key: str, owner: str, environment: str) -> str:
+    """Word the refusal of a term id another repository owns.
+
+    Parameters
+    ----------
+    key
+        The term id.
+    owner
+        The owning repository.
+    environment
+        The environment's name.
+
+    Returns
+    -------
+    str
+        The text.
+    """
+    return (
+        f"{key} is a term of repository {owner} in {environment}, and a term id belongs to the "
+        f"repository that deployed it first; rename the term here, or remove it from {owner} "
+        "first."
+    )

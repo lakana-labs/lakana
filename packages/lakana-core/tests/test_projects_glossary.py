@@ -324,3 +324,34 @@ def test_manifest_glossary_drops_what_it_cannot_store(caplog: pytest.LogCaptureF
     assert manifest_glossary({"version": 12}) == {}
     assert manifest_glossary(["not", "a", "manifest"]) == {}
     assert "dropped" in caplog.text
+
+
+def test_manifest_glossary_drops_a_term_over_any_limit_of_the_files(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    good = {"name": "A", "definition": "B", "owner": "c"}
+    over = {
+        "long_name": {**good, "name": "n" * 101},
+        "nul_name": {**good, "name": "A\x00"},
+        "long_definition": {**good, "definition": "d" * 4001},
+        "nul_owner": {**good, "owner": "c\x00"},
+        "many_synonyms": {**good, "synonyms": [f"s{n}" for n in range(21)]},
+        "long_synonym": {**good, "synonyms": ["s" * 101]},
+        "many_related": {**good, "related": [f"r{n}" for n in range(21)]},
+        "many_tables": {**good, "links": {f"gold.t{n}": [] for n in range(51)}},
+        "many_columns": {**good, "links": {"gold.t": [f"c{n}" for n in range(201)]}},
+        "nul_column": {**good, "links": {"gold.t": ["c\x00"]}},
+        "nul_table": {**good, "links": {"gold.t\x00": []}},
+        "long_translated_name": {**good, "translations": {"fr": {"name": "n" * 101}}},
+        "long_translated_definition": {
+            **good,
+            "translations": {"fr": {"definition": "d" * 4001}},
+        },
+        "many_translated_synonyms": {
+            **good,
+            "translations": {"fr": {"synonyms": [f"s{n}" for n in range(21)]}},
+        },
+    }
+    manifest = {"glossary": {"ok": {**good, "synonyms": ["s" * 100]}, **over}}
+    assert list(manifest_glossary(manifest)) == ["ok"]
+    assert caplog.text.count("dropped") == len(over)

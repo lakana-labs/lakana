@@ -27,6 +27,12 @@ from lakana_core.models.secret import Secret, SecretUseKind
 from lakana_core.models.audit_event import AuditEvent, AuditEventType
 from lakana_core.models.lineage_edge import LineageEdge
 from lakana_core.models.repository import Repository, RepositoryKind
+from lakana_core.models.glossary_term import (
+    GlossaryTerm,
+    GlossaryTermLink,
+    GlossaryTermRelated,
+    GlossaryTermText,
+)
 from lakana_core.models.package_index import PackageIndex
 from lakana_core.models.connection import (
     Connection,
@@ -87,6 +93,10 @@ __all__ = [
     "DeployStatus",
     "Environment",
     "EnvironmentDeployment",
+    "GlossaryTerm",
+    "GlossaryTermLink",
+    "GlossaryTermRelated",
+    "GlossaryTermText",
     "Grant",
     "Group",
     "GroupMembership",

@@ -2919,3 +2919,21 @@ def test_0060_on_postgres() -> None:
             )
         assert modes == {kept: "MERGE", replaced: "REPLACE"}
         engine.dispose()
+
+
+def test_0062_on_postgres() -> None:
+    """0062 creates the glossary tables with their unique key; a downgrade drops them."""
+    revision_0061 = "a3c7d9e1f5b6"
+    revision_0062 = "b4d8e0f2a6c7"
+    with PostgresContainer("postgres:16", driver="pg8000") as pg:
+        url = pg.get_connection_url()
+        migrate.upgrade(url, revision_0061)
+        migrate.upgrade(url, revision_0062)
+        engine = sqlalchemy.create_engine(url)
+        assert _alembic_version(engine) == revision_0062
+        uniques = sqlalchemy.inspect(engine).get_unique_constraints("glossary_terms")
+        assert [u["column_names"] for u in uniques] == [["environment_id", "term_key"]]
+        migrate.downgrade(url, revision_0061)
+        assert _alembic_version(engine) == revision_0061
+        assert "glossary_terms" not in sqlalchemy.inspect(engine).get_table_names()
+        engine.dispose()
