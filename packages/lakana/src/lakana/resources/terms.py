@@ -8,7 +8,7 @@ from typing import Any
 from lakana._http import HttpTransport, every_page, query_params
 from lakana._models import RelatedTerm, Term, TermLink, TermPage, known_fields
 from lakana._routes import ROUTES
-from lakana.errors import InvalidResponse
+from lakana.errors import InvalidResponse, NotFound
 from lakana.resources.artifacts import _ODD_ANSWER, _object
 
 
@@ -74,6 +74,30 @@ def _page_from_json(data: dict[str, Any]) -> TermPage:
     return TermPage(items=[_term_from_json(item) for item in items], next_cursor=cursor)
 
 
+def _no_routes(error: NotFound) -> NotFound:
+    """Tell a server without the glossary routes from a missing term.
+
+    Parameters
+    ----------
+    error
+        A 404 from a terms route.
+
+    Returns
+    -------
+    NotFound
+        An error that says to upgrade the server when the 404 is the framework's bare
+        `Not Found` (the route does not exist), else `error` itself.
+    """
+    if error.detail != "Not Found":
+        return error
+    return NotFound(
+        "This server has no glossary routes. Upgrade the server to a release with the "
+        "business glossary (lakana-labs/lakana#375), or use an SDK that matches the server.",
+        status=error.status,
+        error_type=error.error_type,
+    )
+
+
 class Terms:
     """The `terms` resource of the platform API: the glossary of an environment.
 
@@ -118,14 +142,23 @@ class Terms:
         -------
         TermPage
             The terms, and the cursor of the next page (`None` on the last).
+
+        Raises
+        ------
+        lakana.errors.NotFound
+            If the environment does not exist, or the server has no glossary routes.
         """
-        response = self._transport.request(
-            ROUTES["terms.list"],
-            path_params={"env": environment},
-            params=query_params(
-                owner=owner, repository=repository, lang=lang, limit=limit, cursor=cursor
-            ),
-        )
+        try:
+            response = self._transport.request(
+                ROUTES["terms.list"],
+                path_params={"env": environment},
+                params=query_params(
+                    owner=owner, repository=repository, lang=lang, limit=limit, cursor=cursor
+                ),
+            )
+        except NotFound as error:
+            translated = _no_routes(error)
+            raise translated from None
         return _page_from_json(_object(response, "the terms"))
 
     def iter(
@@ -190,9 +223,13 @@ class Terms:
         lakana.errors.NotFound
             If the environment or the term does not exist.
         """
-        response = self._transport.request(
-            ROUTES["terms.get"],
-            path_params={"env": environment, "key": key},
-            params=query_params(lang=lang),
-        )
+        try:
+            response = self._transport.request(
+                ROUTES["terms.get"],
+                path_params={"env": environment, "key": key},
+                params=query_params(lang=lang),
+            )
+        except NotFound as error:
+            translated = _no_routes(error)
+            raise translated from None
         return _term_from_json(_object(response, "a term"))

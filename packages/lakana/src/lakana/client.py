@@ -111,8 +111,8 @@ class Client:
         self.secrets = Secrets(self._transport)
         self.connections = Connections(self._transport)
         self.task_connections = TaskConnections(self._transport)
-        self.terms = Terms(self._transport)
         """For the helpers of `lakana.ingest` inside a task: the fetch of a declared connection."""
+        self.terms = Terms(self._transport)
         self.repositories = Repositories(self._transport)
         self.package_indexes = PackageIndexes(self._transport)
         self.ci_trust_rules = CiTrustRules(self._transport)

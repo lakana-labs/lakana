@@ -5592,7 +5592,7 @@
           "glossary"
         ],
         "summary": "List the environment's glossary terms, sorted by key",
-        "description": "Each term shows its texts in your language (`lang`, else your profile's language, else `Accept-Language`, else the instance's main language); a text without a translation shows in the main language. Needs `READ_ENVIRONMENT`. A link appears only when you may read its table, or when its table does not exist (`missing: true`). Answers 404 when the environment does not exist and 422 for a `lang` that is not a language tag or a cursor this list did not issue.",
+        "description": "Each term shows its texts in your language (`lang`, else your profile's language, else `Accept-Language`, else the instance's main language); a text without a translation shows in the main language. Without `READ_ENVIRONMENT` the page is empty, as for an environment that does not exist. A link appears only when you may read its table, or when its table does not exist (`missing: true`). Answers 404 when the environment does not exist and you may read environments, and 422 for a `lang` that is not a language tag or a cursor this list did not issue.",
         "operationId": "list_terms_api_v1_environments__env__terms_get",
         "parameters": [
           {
@@ -5769,7 +5769,7 @@
           "glossary"
         ],
         "summary": "Show one glossary term",
-        "description": "The texts come in your language (`lang`, else your profile's language, else `Accept-Language`, else the instance's main language); a text without a translation shows in the main language. Needs `READ_ENVIRONMENT`. A link appears only when you may read its table, or when its table does not exist (`missing: true`). Answers 404 when the environment or the term does not exist and 422 for a `lang` that is not a language tag.",
+        "description": "The texts come in your language (`lang`, else your profile's language, else `Accept-Language`, else the instance's main language); a text without a translation shows in the main language. Without `READ_ENVIRONMENT` the answer is the 404 of a missing term. A link appears only when you may read its table, or when its table does not exist (`missing: true`). Answers 404 when the environment or the term does not exist and 422 for a `lang` that is not a language tag.",
         "operationId": "get_term_api_v1_environments__env__terms__key__get",
         "parameters": [
           {

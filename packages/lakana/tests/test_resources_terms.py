@@ -10,7 +10,7 @@ import pytest
 from lakana._config import ResolvedConfig
 from lakana._http import HttpTransport
 from lakana._models import RelatedTerm, TermLink
-from lakana.errors import InvalidResponse
+from lakana.errors import InvalidResponse, NotFound
 from lakana.resources.terms import Terms
 
 _CONFIG = ResolvedConfig(url="http://api.example", token="lakana_pat_abc_supersecret")
@@ -104,3 +104,36 @@ def test_a_term_without_its_fields_is_invalid() -> None:
 def test_a_cursor_that_is_not_text_is_invalid() -> None:
     with pytest.raises(InvalidResponse, match="the terms"):
         _terms({"items": [], "next_cursor": 5}, []).list("dev")
+
+
+def _server_without_terms() -> Terms:
+    """Build the resource over a server that answers 404 `Not Found` to every route.
+
+    Returns
+    -------
+    Terms
+        The resource.
+    """
+    client = httpx.Client(
+        transport=httpx.MockTransport(lambda r: httpx.Response(404, json={"detail": "Not Found"})),
+        base_url=_CONFIG.url,
+    )
+    return Terms(HttpTransport(_CONFIG, http_client=client))
+
+
+def test_a_server_without_the_glossary_routes_says_to_upgrade() -> None:
+    terms = _server_without_terms()
+    for call in (lambda: terms.list("dev"), lambda: terms.get("dev", "x")):
+        with pytest.raises(NotFound, match=r"no glossary routes.*Upgrade the server"):
+            call()
+
+
+def test_a_missing_term_keeps_the_servers_own_message() -> None:
+    client = httpx.Client(
+        transport=httpx.MockTransport(
+            lambda r: httpx.Response(404, json={"detail": "Term `x` does not exist."})
+        ),
+        base_url=_CONFIG.url,
+    )
+    with pytest.raises(NotFound, match="Term `x` does not exist"):
+        Terms(HttpTransport(_CONFIG, http_client=client)).get("dev", "x")

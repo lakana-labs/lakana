@@ -106,6 +106,28 @@ def _person(client: TestClient, name: str, *, table: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {issued.json()['token']}"}
 
 
+def _outsider(client: TestClient, name: str) -> dict[str, str]:
+    """Create a user without any grant and return its headers.
+
+    Parameters
+    ----------
+    client
+        The test client.
+    name
+        The principal's name.
+
+    Returns
+    -------
+    dict
+        The `Authorization` header.
+    """
+    client.post("/api/v1/principals", headers=AUTH_HEADER, json={"name": name, "type": "USER"})
+    issued = client.post(
+        f"/api/v1/principals/{name}/tokens", headers=AUTH_HEADER, json={"name": name}
+    )
+    return {"Authorization": f"Bearer {issued.json()['token']}"}
+
+
 def _setup(client: TestClient) -> None:
     """Create `dev`, `silver.orders`, `silver.payroll`, the repository `shop` and its glossary.
 
@@ -173,3 +195,46 @@ def test_a_reader_of_one_table_sees_its_links_and_not_the_others(client: TestCli
     bob = _person(client, "bob", table="payroll")
     links = client.get(f"{_TERMS}/net_revenue", headers=bob).json()["links"]
     assert [link["table"] for link in links] == ["silver.gone", "silver.payroll"]
+
+
+def test_a_caller_who_may_not_read_the_environment_cannot_tell_it_exists(
+    client: TestClient,
+) -> None:
+    _setup(client)
+    carol = _outsider(client, "carol")
+    base = "/api/v1/environments"
+    for env in ("dev", "nowhere"):
+        page = client.get(f"{base}/{env}/terms", headers=carol)
+        assert (page.status_code, page.json()) == (200, {"items": [], "next_cursor": None})
+    answers = {
+        env: client.get(f"{base}/{env}/terms/net_revenue", headers=carol)
+        for env in (
+            "dev",
+            "nowhere",
+        )
+    }
+    assert {r.status_code for r in answers.values()} == {404}
+    assert answers["dev"].text.replace("dev", "X") == answers["nowhere"].text.replace(
+        "nowhere", "X"
+    )
+
+
+def test_a_missing_environment_is_404_for_a_caller_who_may_read_environments(
+    client: TestClient,
+) -> None:
+    _setup(client)
+    assert client.get("/api/v1/environments/nowhere/terms", headers=AUTH_HEADER).status_code == 404
+
+
+def test_the_owner_and_repository_filters_narrow_the_list(client: TestClient) -> None:
+    _setup(client)
+
+    def keys(**params: str) -> list[str]:
+        page = client.get(_TERMS, headers=AUTH_HEADER, params=params)
+        assert page.status_code == 200, page.text
+        return [t["key"] for t in page.json()["items"]]
+
+    assert keys(owner="finance") == ["gross_revenue", "net_revenue"]
+    assert keys(owner="hr") == []
+    assert keys(repository="shop") == ["gross_revenue", "net_revenue"]
+    assert keys(repository="other") == []

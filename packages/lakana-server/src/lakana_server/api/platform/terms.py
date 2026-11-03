@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Query, Request
 
 from lakana_core.auth import PrincipalRef
 from lakana_core.catalog.glossary_read import GlossaryService, TermView
+from lakana_core.errors import NotFoundError, PermissionDenied
 from lakana_server.api.platform.languages import LANG_DESCRIPTION, reader_languages
 from lakana_server.api.platform.schemas import (
     RelatedTermOut,
@@ -23,6 +24,13 @@ router = APIRouter(
     tags=["glossary"],
     responses=errors(401),
 )
+
+
+_NO_TERM = (
+    "Term `{key}` does not exist in environment `{env}`. List the terms with: "
+    "lakana term list --env {env}"
+)
+"""The answer for a term the caller cannot be told about; the text of a missing term."""
 
 
 def _out(view: TermView) -> TermOut:
@@ -70,9 +78,11 @@ def list_terms(
 
     Each term shows its texts in your language (`lang`, else your profile's language, else
     `Accept-Language`, else the instance's main language); a text without a translation shows in
-    the main language. Needs `READ_ENVIRONMENT`. A link appears only when you may read its table,
-    or when its table does not exist (`missing: true`). Answers 404 when the environment does not
-    exist and 422 for a `lang` that is not a language tag or a cursor this list did not issue.
+    the main language. Without `READ_ENVIRONMENT` the page is empty, as for an environment that
+    does not exist. A link appears only when you may read its table, or when its table does not
+    exist (`missing: true`). Answers 404 when the environment does not exist and you may read
+    environments, and 422 for a `lang` that is not a language tag or a cursor this list did
+    not issue.
 
     Parameters
     ----------
@@ -102,15 +112,18 @@ def list_terms(
     TermPage
         The terms and the next cursor.
     """
-    page = service.list(
-        principal,
-        env,
-        owner=owner,
-        repository=repository,
-        languages=reader_languages(request, lang, principal, main_language),
-        limit=limit,
-        cursor=cursor,
-    )
+    try:
+        page = service.list(
+            principal,
+            env,
+            owner=owner,
+            repository=repository,
+            languages=reader_languages(request, lang, principal, main_language),
+            limit=limit,
+            cursor=cursor,
+        )
+    except PermissionDenied:
+        return TermPage(items=[], next_cursor=None)
     return TermPage(items=[_out(v) for v in page.items], next_cursor=page.next_cursor)
 
 
@@ -128,9 +141,10 @@ def get_term(
 
     The texts come in your language (`lang`, else your profile's language, else
     `Accept-Language`, else the instance's main language); a text without a translation shows in
-    the main language. Needs `READ_ENVIRONMENT`. A link appears only when you may read its table,
-    or when its table does not exist (`missing: true`). Answers 404 when the environment or the
-    term does not exist and 422 for a `lang` that is not a language tag.
+    the main language. Without `READ_ENVIRONMENT` the answer is the 404 of a missing term. A link
+    appears only when you may read its table, or when its table does not exist (`missing: true`).
+    Answers 404 when the environment or the term does not exist and 422 for a `lang` that
+    is not a language tag.
 
     Parameters
     ----------
@@ -153,6 +167,14 @@ def get_term(
     -------
     TermOut
         The term.
+
+    Raises
+    ------
+    NotFoundError
+        If the caller may not read the environment: the answer of a missing term.
     """
     languages = reader_languages(request, lang, principal, main_language)
-    return _out(service.get(principal, env, key, languages=languages))
+    try:
+        return _out(service.get(principal, env, key, languages=languages))
+    except PermissionDenied:
+        raise NotFoundError(_NO_TERM.format(key=key, env=env)) from None
