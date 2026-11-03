@@ -37,7 +37,7 @@ net_revenue:
 | `definition` | yes | What the term means: 1 to 4,000 characters; newlines and tabs are allowed. |
 | `synonyms` | no | Other words for the term: a list of at most 20, each one line of 1 to 100 characters with no tab. No two may be equal once case is ignored, and none may equal the name. |
 | `owner` | yes | The team or person who answers for the term, with the rules of an asset header's `owner:`. |
-| `links` | no | Table → the list of its columns the term is about. The table is a dotted name as the project builds it; `[]` links the table itself. At most 50 tables and 200 columns per term, no column twice for one table. A column with a declared [measure](asset-front-matter.md) is a measure link: there is no separate syntax for measures. |
+| `links` | no | Table → the list of its columns the term is about. The table is a dotted name as the project builds it; `[]` links the table itself. A table or column name has at most 1,024 characters, no spaces around it, and no control, format or bidirectional character or line separator. At most 50 tables and 200 columns per term, no column twice for one table. A column with a declared [measure](asset-front-matter.md) is a measure link: there is no separate syntax for measures. |
 | `related` | no | Ids of related terms, of this repository or of another repository deployed to the same environment: at most 20, not the term itself, none twice. |
 
 ## Rules and limits
@@ -48,7 +48,11 @@ net_revenue:
 - At most 50 YAML files under `glossary/`, each at most 1 MiB, and at most 2,000 terms per
   repository.
 - A glossary file ends in `.yaml`: a `.yml` file is refused (rename it). Folders and symlinks
-  under `glossary/` are refused, and so is a file named `glossary` at the repository root.
+  under `glossary/` are refused, and so is a file named `glossary` at the repository root. A
+  root folder named `glossary` in another case, such as `Glossary`, is refused too: rename it to
+  `glossary`.
+- Synonyms are compared after Unicode normalisation (NFC) and ignoring case, so `café` typed in
+  two ways counts as the same word.
 - The files are read with the YAML rules of every project file: no anchors, aliases, merge keys or
   duplicate keys. A term id defined in two files is refused.
 
@@ -100,6 +104,10 @@ Links are checked again at every deploy. When this project stops building a link
 its deploy is refused until the link is fixed. When another repository drops a table or column one
 of your terms links to, your terms stay as they are, and your next deploy is refused until you fix
 or remove the link. Another repository is never blocked by a term it does not own.
+
+A rollback checks term ownership too. When another repository has since deployed a term id of the
+version you roll back to, the rollback is refused with the same message, except that its next step
+reads `roll back to or deploy a version without net_revenue, or remove it from finance first.`
 
 ## Stable ids
 

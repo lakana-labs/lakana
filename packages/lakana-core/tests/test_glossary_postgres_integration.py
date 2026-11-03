@@ -65,6 +65,11 @@ _REFUSED = (
     "glossary: net_revenue is a term of repository finance in dev, and a term id belongs to the "
     "repository that deployed it first; rename the term here, or remove it from finance first."
 )
+_REFUSED_ROLLBACK = (
+    "glossary: net_revenue is a term of repository finance in dev, and a term id belongs to the "
+    "repository that deployed it first; roll back to or deploy a version without net_revenue, or "
+    "remove it from finance first."
+)
 
 
 @pytest.fixture(scope="module")
@@ -416,7 +421,7 @@ def test_a_rollback_to_a_term_another_repository_now_owns_is_refused(
     run = _rollback_run(world, session, world.shop, "a")
     with pytest.raises(ProjectValidationError) as caught:
         world.service.execute_rollback(world.admin, run, worker_id="w1")
-    assert str(caught.value) == _REFUSED
+    assert str(caught.value) == _REFUSED_ROLLBACK
     assert _owners(session) == [("net_revenue", "finance")]
     shown = world.service.current_job_version(world.env, world.shop.id)
     assert shown is not None

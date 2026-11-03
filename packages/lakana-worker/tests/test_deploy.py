@@ -58,7 +58,7 @@ from lakana_core.models import (
 from lakana_core.models.table import Table, TableType
 from lakana_core.projects.deploys import CONFLICT_MESSAGE, DeployService
 from lakana_core.projects.glossary import DiscoveredGlossaryFile, parse_glossary
-from lakana_core.projects.issues import ProjectIssue, ProjectValidationError
+from lakana_core.projects.issues import ProjectIssue, ProjectValidationError, error_for_reader
 from lakana_core.projects.layers import MEDALLION_LAYERS, MEDALLION_LAYERS_FLOW
 from lakana_core.projects.limits import DeployLimits
 from lakana_core.projects.manifest import manifest_assets
@@ -3577,6 +3577,115 @@ def test_a_link_to_a_table_the_deployer_may_not_read_reads_as_missing(
         "environment dev, or you may not read it; fix the table name, build the table first, or "
         "ask for READ_TABLE on it."
     )
+
+
+_HEAD = "  name: T\n  definition: D\n  owner: o\n  links:\n"
+
+
+def _shown_to_others(run: DeployRun) -> str:
+    """Show a run's error to a reader who may read no table.
+
+    Parameters
+    ----------
+    run
+        The finished run.
+
+    Returns
+    -------
+    str
+        The error as that reader sees it.
+    """
+    return error_for_reader(run.error_message or "", run.error_withheld_json, lambda _: False)
+
+
+def _missing(key: str, table: str, hint: str = "") -> str:
+    """Word the refusal of a missing linked table, as `missing_link_message` does.
+
+    Parameters
+    ----------
+    key
+        The term id.
+    table
+        The table.
+    hint
+        The `(did you mean …?)` part with its leading space, or empty.
+
+    Returns
+    -------
+    str
+        The text.
+    """
+    return (
+        f"{key} links {table}, which does not exist in environment dev, or you may not read it; "
+        f"fix the table name{hint}, build the table first, or ask for READ_TABLE on it."
+    )
+
+
+@pytest.mark.parametrize("listed", ["[idd, idx]", "\n      - idd\n      - idx"])
+def test_wrong_columns_of_an_unreadable_table_read_exactly_like_a_missing_table(
+    session: Session, principal: PrincipalRef, world: World, listed: str
+) -> None:
+    """One line per term and table, at the table's line, and no count of the wrong columns."""
+    text = (
+        "t:\n" + _HEAD + f"    bronze.events: {listed}\n"
+        "u:\n" + _HEAD + f"    bronze.nothere: {listed}\n"
+    )
+    commit(world.repo_path, {"assets/silver/clean.sql": _GLOSSARY_SQL, "glossary/a.yaml": text})
+    run = _submit_and_run(session, principal, world)
+    assert run.status is DeployStatus.FAILED
+    u_line = 12 if listed.startswith("[") else 14
+    assert _shown_to_others(run) == "\n".join(
+        [
+            f"glossary/a.yaml:6: {_missing('t', 'bronze.events')}",
+            f"glossary/a.yaml:{u_line}: {_missing('u', 'bronze.nothere')}",
+        ]
+    )
+
+
+def test_an_unreadable_table_gets_the_close_name_hint_a_missing_table_gets(
+    session: Session, principal: PrincipalRef, world: World
+) -> None:
+    text = "t:\n" + _HEAD + "    bronze.events: [idd]\nu:\n" + _HEAD + "    bronze.eventx: [idd]\n"
+    commit(
+        world.repo_path, {"assets/bronze/event.sql": "SELECT 1 AS id\n", "glossary/a.yaml": text}
+    )
+    run = _submit_and_run(session, principal, world)
+    hint = " (did you mean bronze.event?)"
+    assert _shown_to_others(run) == "\n".join(
+        [
+            f"glossary/a.yaml:6: {_missing('t', 'bronze.events', hint)}",
+            f"glossary/a.yaml:12: {_missing('u', 'bronze.eventx', hint)}",
+        ]
+    )
+
+
+def test_the_glossary_checks_stop_at_the_deploy_deadline(
+    session: Session, principal: PrincipalRef, world: World
+) -> None:
+    class Late(Exception):
+        """The deadline passed."""
+
+    calls: list[None] = []
+
+    def check_time() -> None:
+        """Pass once, then raise.
+
+        Raises
+        ------
+        Late
+            From the second call on.
+        """
+        calls.append(None)
+        if len(calls) > 1:
+            raise Late
+
+    text = "".join(f"t{n}:\n" + _HEAD + "    bronze.nothere: []\n" for n in range(3))
+    glossary, _ = parse_glossary((DiscoveredGlossaryFile("glossary/a.yaml", text),))
+    repo_id = session.scalars(select(Repository.id).where(Repository.name == "analytics")).one()
+    service = DeployService(session, AllowAllAuthorization())
+    with pytest.raises(Late):
+        service.validate_glossary(principal, "dev", repo_id, glossary, [], check_time=check_time)
+    assert len(calls) == 2
 
 
 def test_a_column_of_another_repositorys_table_is_checked_and_withheld(

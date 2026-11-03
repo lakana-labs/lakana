@@ -12,10 +12,11 @@ import difflib
 import logging
 import os
 import re
+import unicodedata
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any, cast
 
 import pydantic
 from pydantic import (
@@ -127,6 +128,35 @@ class DiscoveredGlossaryFile:
     text: str
 
 
+def _other_case_folders(root: Path) -> list[ProjectIssue]:
+    """Refuse a root folder whose name is `glossary` in another case, such as `Glossary`.
+
+    Parameters
+    ----------
+    root
+        The extracted checkout, which has no `glossary`.
+
+    Returns
+    -------
+    list of ProjectIssue
+        One per such folder: it would otherwise be ignored without a word.
+    """
+    try:
+        entries = sorted(os.scandir(root), key=lambda entry: entry.name)
+    except OSError:
+        return []
+    return [
+        ProjectIssue(
+            entry.name,
+            None,
+            f"the glossary folder is spelled `{GLOSSARY_DIR}`, in lowercase; rename "
+            f"{entry.name} to {GLOSSARY_DIR}, or give it another name if it holds no glossary",
+        )
+        for entry in entries
+        if entry.name.casefold() == GLOSSARY_DIR and entry.is_dir(follow_symlinks=False)
+    ]
+
+
 def discover_glossary(
     root: Path,
 ) -> tuple[tuple[DiscoveredGlossaryFile, ...] | None, list[ProjectIssue]]:
@@ -149,7 +179,7 @@ def discover_glossary(
     if folder.is_symlink():
         return None, [ProjectIssue(GLOSSARY_DIR, None, _LINK)]
     if not os.path.lexists(folder):
-        return None, []
+        return None, _other_case_folders(root)
     if not folder.is_dir():
         return None, [ProjectIssue(GLOSSARY_DIR, None, _NOT_A_FOLDER)]
     try:
@@ -259,6 +289,22 @@ def term_id_problem(key: object) -> str | None:
     return f"is not a term id; {TERM_ID_RULE}"
 
 
+def folded_text(text: str) -> str:
+    """Fold a name or synonym for comparison: Unicode NFC first, then case.
+
+    Parameters
+    ----------
+    text
+        The text.
+
+    Returns
+    -------
+    str
+        The folded form; two spellings that read the same fold alike.
+    """
+    return unicodedata.normalize("NFC", text).casefold()
+
+
 def synonym_problem(synonyms: Sequence[str], name: str | None) -> str | None:
     """Apply the synonym rules of one language.
 
@@ -281,11 +327,11 @@ def synonym_problem(synonyms: Sequence[str], name: str | None) -> str | None:
         )
     seen: set[str] = set()
     for synonym in synonyms:
-        folded = synonym.casefold()
+        folded = folded_text(synonym)
         if folded in seen:
             return f"lists `{synonym}` twice (case does not count); remove one"
         seen.add(folded)
-        if name is not None and folded == name.casefold():
+        if name is not None and folded == folded_text(name):
             return (
                 f"`{synonym}` is the term's name; a synonym is another word for it, so remove it "
                 "here"
@@ -341,6 +387,32 @@ def _is_table_name(table: object) -> bool:
     return True
 
 
+def _table_key_problem(table: object) -> str | None:
+    """Say why a `links:` key is not a table name a message may repeat.
+
+    Parameters
+    ----------
+    table
+        The key as YAML read it.
+
+    Returns
+    -------
+    str or None
+        `None` for a good key; ``""`` for one that is not a dotted name, or the rule it breaks,
+        led by a colon: a control, format or bidirectional character or a line separator (which
+        could forge a line of the deploy error), spaces around it, or more than
+        `_MAX_STORED_NAME` characters.
+    """
+    if not _is_table_name(table):
+        return ""
+    name = cast("str", table)
+    if unsafe_identifier(name) or name != name.strip():
+        return f": a table name {IDENTIFIER_MESSAGE} and has no spaces around it"
+    if len(name) > _MAX_STORED_NAME:
+        return f": it has {len(name)} characters, and a table name has at most {_MAX_STORED_NAME}"
+    return None
+
+
 def _links_shape(value: object) -> object:
     """Refuse a `links:` value that is not table → list of column names, before pydantic does.
 
@@ -371,10 +443,11 @@ def _links_shape(value: object) -> object:
         )
     columns = 0
     for table, listed in value.items():
-        if not _is_table_name(table):
+        problem = _table_key_problem(table)
+        if problem is not None:
             raise ValueError(
-                f"`{shown_key(table)}` is not a table name; write the table's dotted name, as "
-                "the project builds it, such as `gold.fact_sales`"
+                f"`{shown_key(table)}` is not a table name{problem}; write the table's dotted "
+                "name, as the project builds it, such as `gold.fact_sales`"
             )
         if not isinstance(listed, list) or not all(isinstance(c, str) for c in listed):
             raise ValueError(
@@ -392,6 +465,11 @@ def _links_shape(value: object) -> object:
             if not column.strip() or unsafe_identifier(column):
                 raise ValueError(
                     f"a column of `{table}` {IDENTIFIER_MESSAGE} and must not be empty"
+                )
+            if len(column) > _MAX_STORED_NAME:
+                raise ValueError(
+                    f"a column of `{table}` has {len(column)} characters, and a column name has "
+                    f"at most {_MAX_STORED_NAME}; fix the column name"
                 )
             if column in seen:
                 raise ValueError(f"lists column `{column}` of `{table}` twice; remove one")
@@ -1068,7 +1146,9 @@ def manifest_glossary(manifest: object) -> dict[str, GlossaryEntry]:
     return dict(sorted(found.items()))
 
 
-def owned_elsewhere_message(key: str, owner: str, environment: str) -> str:
+def owned_elsewhere_message(
+    key: str, owner: str, environment: str, *, rollback: bool = False
+) -> str:
     """Word the refusal of a term id another repository owns.
 
     Parameters
@@ -1079,16 +1159,18 @@ def owned_elsewhere_message(key: str, owner: str, environment: str) -> str:
         The owning repository.
     environment
         The environment's name.
+    rollback
+        Whether a rollback is refused: it cannot rename the term, so it is told another step.
 
     Returns
     -------
     str
         The text.
     """
+    here = f"roll back to or deploy a version without {key}" if rollback else "rename the term here"
     return (
         f"{key} is a term of repository {owner} in {environment}, and a term id belongs to the "
-        f"repository that deployed it first; rename the term here, or remove it from {owner} "
-        "first."
+        f"repository that deployed it first; {here}, or remove it from {owner} first."
     )
 
 

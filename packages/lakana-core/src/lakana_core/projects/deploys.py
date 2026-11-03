@@ -163,6 +163,10 @@ class DeclaredConnections:
     names: tuple[str, ...]
 
 
+def _no_check() -> None:
+    """Check nothing: the default deadline check of `DeployService.validate_glossary`."""
+
+
 def connection_issues(
     session: Session,
     environment_id: uuid.UUID,
@@ -1041,6 +1045,8 @@ class DeployService:
         repository_id: uuid.UUID,
         manifest: object,
         environment_name: str,
+        *,
+        rollback: bool = False,
     ) -> None:
         """Refuse a manifest that defines a term another repository owns.
 
@@ -1057,6 +1063,8 @@ class DeployService:
             That version's manifest.
         environment_name
             For the message.
+        rollback
+            Whether a rollback asks: its message gives a step a rollback can follow.
 
         Raises
         ------
@@ -1070,7 +1078,11 @@ class DeployService:
             self._session.rollback()
             raise ProjectValidationError(
                 [
-                    ProjectIssue("glossary", None, owned_elsewhere_message(k, o, environment_name))
+                    ProjectIssue(
+                        "glossary",
+                        None,
+                        owned_elsewhere_message(k, o, environment_name, rollback=rollback),
+                    )
                     for k, o in clashes
                 ]
             )
@@ -2560,6 +2572,8 @@ class DeployService:
         repository_id: uuid.UUID,
         glossary: Glossary | None,
         assets: Sequence[ParsedAsset],
+        *,
+        check_time: Callable[[], None] = _no_check,
     ) -> list[ProjectIssue]:
         """Check the glossary's links, related ids and ownership against the environment.
 
@@ -2569,7 +2583,9 @@ class DeployService:
         counts as missing: the deploy makes it an orphan. A link's columns are checked against
         the table's known columns (`TargetInfo.columns`); unknown columns are not checked. A
         message about a table outside the project tells something of it, so it carries the
-        table (`ProjectIssue.targets`) and the missing-table text (`withheld`).
+        table (`ProjectIssue.targets`) and stands at the table's line; the first such message per
+        term and table is withheld as the missing-table text, hint included, and the later ones
+        as nothing, so a reader who may not read the table cannot tell it from a missing one.
 
         Parameters
         ----------
@@ -2583,6 +2599,8 @@ class DeployService:
             The parsed glossary; `None` (no `glossary/` folder) checks nothing.
         assets
             The parsed assets.
+        check_time
+            Called before each term; raises when the deploy is past its deadline.
 
         Returns
         -------
@@ -2606,6 +2624,7 @@ class DeployService:
         found: dict[str, TargetInfo | None] = {}
         issues: list[ProjectIssue] = []
         for key, term in glossary.terms.items():
+            check_time()
             if key in others:
                 message = owned_elsewhere_message(key, others[key], environment)
                 issues.append(ProjectIssue(term.path, glossary.line(key), message))
@@ -2617,29 +2636,34 @@ class DeployService:
                         else self._target_info(p, environment, table, by_table, elsewhere)
                     )
                 info, line = found[table], glossary.line(key, "links", table)
-                if info is None:
-                    close = difflib.get_close_matches(table, known, n=1, cutoff=0.8)
-                    message = missing_link_message(key, table, environment, next(iter(close), None))
-                    issues.append(ProjectIssue(term.path, line, message))
-                    continue
                 outside = table not in by_table
-                targets = (table,) if outside else ()
-                withheld = missing_link_message(key, table, environment, None) if outside else None
-                if info.artifact and columns:
-                    message = artifact_columns_message(key, table)
-                    issues.append(ProjectIssue(term.path, line, message, targets, withheld))
+                missing = ""
+                if info is None or outside:
+                    close = difflib.get_close_matches(table, known, n=1, cutoff=0.8)
+                    missing = missing_link_message(key, table, environment, next(iter(close), None))
+                if info is None:
+                    issues.append(ProjectIssue(term.path, line, missing))
                     continue
-                for index, column in enumerate(columns):
-                    if info.columns is not None and column not in info.columns:
-                        issues.append(
-                            ProjectIssue(
-                                term.path,
-                                glossary.line(key, "links", table, index),
-                                missing_column_message(key, table, column, info.columns),
-                                targets,
-                                withheld,
-                            )
+                problems: list[tuple[int | None, str]] = []
+                if info.artifact and columns:
+                    problems.append((line, artifact_columns_message(key, table)))
+                elif info.columns is not None:
+                    problems += [
+                        (
+                            glossary.line(key, "links", table, index),
+                            missing_column_message(key, table, column, info.columns),
                         )
+                        for index, column in enumerate(columns)
+                        if column not in info.columns
+                    ]
+                for index, (at, message) in enumerate(problems):
+                    if outside:
+                        # Read exactly as a missing table: one line, at the table's own line, with
+                        # its hint; the later lines are left out (`error_for_reader`).
+                        withheld = missing if index == 0 else ""
+                        issues.append(ProjectIssue(term.path, line, message, (table,), withheld))
+                    else:
+                        issues.append(ProjectIssue(term.path, at, message))
             for index, related in enumerate(term.related):
                 if related in glossary.terms or related in glossary.invalid or related in others:
                     continue
@@ -3638,7 +3662,9 @@ class DeployService:
             environment_id, repository_id, manifest_tables(target.manifest_json), names[0]
         )
         self._require_connections(environment_id, names[0], target.manifest_json)
-        self._require_own_terms(environment_id, repository_id, target.manifest_json, names[0])
+        self._require_own_terms(
+            environment_id, repository_id, target.manifest_json, names[0], rollback=True
+        )
         current = self.current_job_version(environment_id, repository_id)
         diff = diff_manifests(
             current.manifest_json if current is not None else None,

@@ -885,7 +885,7 @@ def _deploy(
             + reference_issues
             + layer_issues(project.layers, assets)
             + service.validate_glossary(
-                principal, environment_name, repository_id, glossary, assets
+                principal, environment_name, repository_id, glossary, assets, check_time=check_time
             )
         )
         if issues:

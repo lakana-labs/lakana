@@ -391,3 +391,82 @@ def test_a_missing_column_lists_at_most_twenty_columns() -> None:
         + ", ".join(columns[:20])
         + " … and 5 more); fix the column name or remove the link."
     )
+
+
+def _links_issues(links: str) -> list[str]:
+    """Parse one term whose `links:` is `links` and return its issues without file and line.
+
+    Parameters
+    ----------
+    links
+        The `links:` value, as YAML.
+
+    Returns
+    -------
+    list of str
+        The issues' messages.
+    """
+    text = f"a:\n  name: A\n  definition: B\n  owner: c\n  links: {links}\n"
+    _, issues = _parse(("glossary/a.yaml", text))
+    return [i.split(": ", 1)[1] for i in issues]
+
+
+def test_a_link_table_key_with_a_control_or_bidi_character_cannot_forge_a_line() -> None:
+    for key in ('"gold.x\\nlakana.yaml:1: forged"', '"gold.x\\u202e"', '" gold.x"'):
+        (issue,) = _links_issues("{" + key + ": []}")
+        assert "\n" not in issue and "\u202e" not in issue
+        assert issue.startswith("a.links: `"), issue
+        assert "is not a table name" in issue, issue
+
+
+def test_a_link_table_or_column_name_over_1024_characters_is_refused() -> None:
+    column = "c" * 1025
+    assert _links_issues(f"{{gold.a: [{column}]}}") == [
+        "a.links: a column of `gold.a` has 1025 characters, and a column name has at most 1024; "
+        "fix the column name"
+    ]
+    # YAML allows a key this long only in the explicit form `? key`
+    (issue,) = _links_issues("\n    ? gold." + "t" * 1020 + "\n    : []")
+    assert issue.startswith("a.links: `gold.ttt") and issue.endswith(
+        "is not a table name: it has 1025 characters, and a table name has at most 1024; write "
+        "the table's dotted name, as the project builds it, such as `gold.fact_sales`"
+    ), issue
+
+
+def test_synonyms_equal_after_unicode_normalisation_are_refused() -> None:
+    nfc, nfd = "caf\u00e9", "cafe\u0301"
+    base = "a:\n  name: Net revenue\n  definition: B\n  owner: c\n"
+    _, twice = _parse(("glossary/a.yaml", base + f"  synonyms: [{nfc}, {nfd}]\n"))
+    named = _parse(
+        (
+            "glossary/a.yaml",
+            f"a:\n  name: {nfc}\n  definition: B\n  owner: c\n  synonyms: [{nfd}]\n",
+        )
+    )[1]
+    assert twice == [
+        f"glossary/a.yaml:5: a.synonyms: lists `{nfd}` twice (case does not count); remove one"
+    ]
+    assert named == [
+        f"glossary/a.yaml:5: a.synonyms: `{nfd}` is the term's name; a synonym is another word "
+        "for it, so remove it here"
+    ]
+
+
+def test_a_root_folder_named_glossary_in_another_case_is_refused(tmp_path: Path) -> None:
+    (tmp_path / "Glossary").mkdir()
+    (tmp_path / "Glossary" / "sales.yaml").write_text(_SALES)
+    assert [i.render() for i in discover_glossary(tmp_path)[1]] == [
+        "Glossary: the glossary folder is spelled `glossary`, in lowercase; rename Glossary to "
+        "glossary, or give it another name if it holds no glossary"
+    ]
+    assert discover_glossary(tmp_path)[0] is None
+
+
+def test_a_rollback_is_told_a_next_step_it_can_follow() -> None:
+    from lakana_core.projects.glossary import owned_elsewhere_message
+
+    assert owned_elsewhere_message("net_revenue", "finance", "dev", rollback=True) == (
+        "net_revenue is a term of repository finance in dev, and a term id belongs to the "
+        "repository that deployed it first; roll back to or deploy a version without "
+        "net_revenue, or remove it from finance first."
+    )
