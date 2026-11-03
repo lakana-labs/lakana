@@ -1935,6 +1935,39 @@ List the registered workers and what each is doing (admin).
 
 A worker is alive while its heartbeat is recent and lost after that; a lost worker's row stays for an hour, and the query or deploy it held is ended by the scheduler. The column takes is the work the worker takes: all, interactive (ad-hoc queries) or pipeline (deploys, pipeline tasks and table maintenance). The column caches is the disk its caches take, as it last measured them (hourly).
 
+## `lakana term`
+
+Usage: `lakana term [OPTIONS] COMMAND [ARGS]...`
+
+Read the glossary: business terms and the tables and columns they point to.
+
+### `lakana term list`
+
+Usage: `lakana term list [OPTIONS]`
+
+List the glossary's terms, sorted by key, with their names in your language.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `--owner` | text | none | Only terms with exactly this owner. |
+| `--repository` | text | none | Only terms this repository defines. |
+| `--lang` | text | none | Show the texts in this language, such as de or fr-CH. |
+| `--env` | text | none | Environment (default: the profile's). |
+
+### `lakana term get`
+
+Usage: `lakana term get [OPTIONS] {key}`
+
+Show term KEY: its definition, synonyms, owner, links and related terms.
+
+A link shows only when you may read its table; one whose table does not exist shows as missing.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `KEY` | text | required |  |
+| `--lang` | text | none | Show the texts in this language, such as de or fr-CH. |
+| `--env` | text | none | Environment (default: the profile's). |
+
 ## `lakana job`
 
 Usage: `lakana job [OPTIONS] COMMAND [ARGS]...`

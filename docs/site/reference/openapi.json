@@ -5586,6 +5586,303 @@
         }
       }
     },
+    "/api/v1/environments/{env}/terms": {
+      "get": {
+        "tags": [
+          "glossary"
+        ],
+        "summary": "List the environment's glossary terms, sorted by key",
+        "description": "Each term shows its texts in your language (`lang`, else your profile's language, else `Accept-Language`, else the instance's main language); a text without a translation shows in the main language. Needs `READ_ENVIRONMENT`. A link appears only when you may read its table, or when its table does not exist (`missing: true`). Answers 404 when the environment does not exist and 422 for a `lang` that is not a language tag or a cursor this list did not issue.",
+        "operationId": "list_terms_api_v1_environments__env__terms_get",
+        "parameters": [
+          {
+            "name": "env",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Env"
+            },
+            "description": "Environment name."
+          },
+          {
+            "name": "owner",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only terms with exactly this owner.",
+              "title": "Owner"
+            },
+            "description": "Only terms with exactly this owner."
+          },
+          {
+            "name": "repository",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only terms this repository defines.",
+              "title": "Repository"
+            },
+            "description": "Only terms this repository defines."
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The language of the texts, such as de or fr-CH; without it, your profile's language, then Accept-Language, then the instance's main language.",
+              "title": "Lang"
+            },
+            "description": "The language of the texts, such as de or fr-CH; without it, your profile's language, then Accept-Language, then the instance's main language."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            },
+            "description": "Most terms returned (1 to 200)."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 512
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            },
+            "description": "The `next_cursor` of the previous page."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TermPage"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token is missing, wrong, expired or revoked.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/environments/{env}/terms/{key}": {
+      "get": {
+        "tags": [
+          "glossary"
+        ],
+        "summary": "Show one glossary term",
+        "description": "The texts come in your language (`lang`, else your profile's language, else `Accept-Language`, else the instance's main language); a text without a translation shows in the main language. Needs `READ_ENVIRONMENT`. A link appears only when you may read its table, or when its table does not exist (`missing: true`). Answers 404 when the environment or the term does not exist and 422 for a `lang` that is not a language tag.",
+        "operationId": "get_term_api_v1_environments__env__terms__key__get",
+        "parameters": [
+          {
+            "name": "env",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Env"
+            },
+            "description": "Environment name."
+          },
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Key"
+            },
+            "description": "The term's id in the glossary."
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The language of the texts, such as de or fr-CH; without it, your profile's language, then Accept-Language, then the instance's main language.",
+              "title": "Lang"
+            },
+            "description": "The language of the texts, such as de or fr-CH; without it, your profile's language, then Accept-Language, then the instance's main language."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TermOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token is missing, wrong, expired or revoked.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/environments/{env}/namespaces/{path}/artifacts/{name}/uploads": {
       "post": {
         "tags": [
@@ -21784,6 +22081,37 @@
         "title": "ReaderOut",
         "description": "A principal's use of a table over the window.\n\nParameters\n----------\nprincipal\n    The principal's name.\nread_count\n    How many of its succeeded queries named the table.\nlast_read_at\n    When the last of them completed."
       },
+      "RelatedTermOut": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "missing": {
+            "type": "boolean",
+            "title": "Missing"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "name",
+          "missing"
+        ],
+        "title": "RelatedTermOut",
+        "description": "A term another term names as related.\n\nParameters\n----------\nkey\n    The related term's id.\nname\n    Its name in the reader's language; `null` when no such term exists.\nmissing\n    `true` when no term of that id exists in the environment."
+      },
       "ReplaceOut": {
         "properties": {
           "rows": {
@@ -24196,6 +24524,152 @@
         ],
         "title": "TaskTokenScopeOut",
         "description": "The scope a task-token caller is narrowed to.\n\nParameters\n----------\nenvironment\n    The one environment the token may touch.\nasset_scope\n    The declared asset patterns."
+      },
+      "TermLinkOut": {
+        "properties": {
+          "table": {
+            "type": "string",
+            "title": "Table"
+          },
+          "column": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Column"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "table",
+              "column",
+              "measure"
+            ],
+            "title": "Kind"
+          },
+          "missing": {
+            "type": "boolean",
+            "title": "Missing"
+          }
+        },
+        "type": "object",
+        "required": [
+          "table",
+          "column",
+          "kind",
+          "missing"
+        ],
+        "title": "TermLinkOut",
+        "description": "One table, column or measure a glossary term points to.\n\nParameters\n----------\ntable\n    The dotted table name, such as `silver.orders`.\ncolumn\n    The column or measure name; `null` for a link to the whole table.\nkind\n    `table`, `column` or `measure`.\nmissing\n    `true` when the table does not exist in the environment (yet)."
+      },
+      "TermOut": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "definition": {
+            "type": "string",
+            "title": "Definition"
+          },
+          "synonyms": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Synonyms"
+          },
+          "owner": {
+            "type": "string",
+            "title": "Owner"
+          },
+          "repository": {
+            "type": "string",
+            "title": "Repository"
+          },
+          "language": {
+            "type": "string",
+            "title": "Language"
+          },
+          "links": {
+            "items": {
+              "$ref": "#/components/schemas/TermLinkOut"
+            },
+            "type": "array",
+            "title": "Links"
+          },
+          "related": {
+            "items": {
+              "$ref": "#/components/schemas/RelatedTermOut"
+            },
+            "type": "array",
+            "title": "Related"
+          },
+          "related_by": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Related By"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "id",
+          "name",
+          "definition",
+          "synonyms",
+          "owner",
+          "repository",
+          "language",
+          "links",
+          "related",
+          "related_by"
+        ],
+        "title": "TermOut",
+        "description": "A business glossary term, with its texts in the reader's language.\n\nA link appears only when the caller holds `READ_TABLE` on its table, except a link to a\ntable that does not exist, which shows as `missing`.\n\nParameters\n----------\nkey\n    The term's id in the glossary.\nid\n    The term's UUID, stable across deploys.\nname\n    The term's name in `language`.\ndefinition\n    What the term means, in `language`.\nsynonyms\n    Other names for the term.\nowner\n    Who answers for the definition.\nrepository\n    The repository whose glossary defines the term.\nlanguage\n    The language of `name` and `definition`.\nlinks\n    What the term points to that the caller may read.\nrelated\n    The terms this term names as related.\nrelated_by\n    The ids of the terms that name this term as related."
+      },
+      "TermPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TermOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "TermPage",
+        "description": "One page of an environment's glossary terms, sorted by key.\n\nParameters\n----------\nitems\n    The terms of this page.\nnext_cursor\n    Pass back as `?cursor=` to fetch the next page; `null` on the last page."
       },
       "TokenIssueIn": {
         "properties": {

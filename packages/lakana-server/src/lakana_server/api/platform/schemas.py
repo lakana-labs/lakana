@@ -2583,6 +2583,120 @@ class ConnectionPage(BaseModel):
     next_cursor: str | None
 
 
+class TermLinkOut(BaseModel):
+    """One table, column or measure a glossary term points to.
+
+    Parameters
+    ----------
+    table
+        The dotted table name, such as `silver.orders`.
+    column
+        The column or measure name; `null` for a link to the whole table.
+    kind
+        `table`, `column` or `measure`.
+    missing
+        `true` when the table does not exist in the environment (yet).
+    """
+
+    table: str
+    column: str | None
+    kind: Literal["table", "column", "measure"]
+    missing: bool
+
+
+class RelatedTermOut(BaseModel):
+    """A term another term names as related.
+
+    Parameters
+    ----------
+    key
+        The related term's id.
+    name
+        Its name in the reader's language; `null` when no such term exists.
+    missing
+        `true` when no term of that id exists in the environment.
+    """
+
+    key: str
+    name: str | None
+    missing: bool
+
+
+class TermOut(BaseModel):
+    """A business glossary term, with its texts in the reader's language.
+
+    A link appears only when the caller holds `READ_TABLE` on its table, except a link to a
+    table that does not exist, which shows as `missing`.
+
+    Parameters
+    ----------
+    key
+        The term's id in the glossary.
+    id
+        The term's UUID, stable across deploys.
+    name
+        The term's name in `language`.
+    definition
+        What the term means, in `language`.
+    synonyms
+        Other names for the term.
+    owner
+        Who answers for the definition.
+    repository
+        The repository whose glossary defines the term.
+    language
+        The language of `name` and `definition`.
+    links
+        What the term points to that the caller may read.
+    related
+        The terms this term names as related.
+    related_by
+        The ids of the terms that name this term as related.
+    """
+
+    key: str
+    id: str
+    name: str
+    definition: str
+    synonyms: list[str]
+    owner: str
+    repository: str
+    language: str
+    links: list[TermLinkOut]
+    related: list[RelatedTermOut]
+    related_by: list[str]
+
+
+class TermPage(BaseModel):
+    """One page of an environment's glossary terms, sorted by key.
+
+    Parameters
+    ----------
+    items
+        The terms of this page.
+    next_cursor
+        Pass back as `?cursor=` to fetch the next page; `null` on the last page.
+    """
+
+    items: list[TermOut]
+    next_cursor: str | None
+
+
+class TermRefOut(BaseModel):
+    """A short reference to a term, as a table or column shows it.
+
+    Parameters
+    ----------
+    key
+        The term's id.
+    name
+        The term's name in the reader's language.
+    """
+
+    key: str
+    name: str
+
+
 class ConnectionTestOut(BaseModel):
     """Response body for a connection test.
 

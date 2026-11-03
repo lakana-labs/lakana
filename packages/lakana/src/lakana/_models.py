@@ -1925,6 +1925,122 @@ class ConnectionPage:
 
 
 @dataclass(frozen=True)
+class TermLink:
+    """One table, column or measure a glossary term points to.
+
+    Parameters
+    ----------
+    table
+        The dotted table name.
+    column
+        The column or measure; `None` for a link to the whole table.
+    kind
+        ``table``, ``column`` or ``measure``.
+    missing
+        Whether the table does not exist in the environment.
+    """
+
+    table: str
+    column: str | None
+    kind: str
+    missing: bool
+
+
+@dataclass(frozen=True)
+class RelatedTerm:
+    """A term another term names as related.
+
+    Parameters
+    ----------
+    key
+        The related term's id.
+    name
+        Its name in the reader's language; `None` when no such term exists.
+    missing
+        Whether no term of that id exists.
+    """
+
+    key: str
+    name: str | None
+    missing: bool
+
+
+@dataclass(frozen=True)
+class Term:
+    """A business glossary term, with its texts in the reader's language.
+
+    Parameters
+    ----------
+    key
+        The term's id in the glossary.
+    id
+        The term's UUID, stable across deploys.
+    name
+        The name in `language`.
+    definition
+        What the term means, in `language`.
+    synonyms
+        Other names for the term.
+    owner
+        Who answers for the definition.
+    repository
+        The repository whose glossary defines it.
+    language
+        The language of `name` and `definition`.
+    links
+        What the term points to that the caller may read.
+    related
+        The terms this term names as related.
+    related_by
+        The ids of the terms that name this term as related.
+    """
+
+    key: str
+    id: str
+    name: str
+    definition: str
+    synonyms: tuple[str, ...]
+    owner: str
+    repository: str
+    language: str
+    links: tuple[TermLink, ...]
+    related: tuple[RelatedTerm, ...]
+    related_by: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class TermPage:
+    """One page of an environment's glossary terms, sorted by key.
+
+    Parameters
+    ----------
+    items
+        The terms of this page.
+    next_cursor
+        Pass back as `cursor=` to fetch the next page; `None` on the last page.
+    """
+
+    items: list[Term]
+    next_cursor: str | None
+
+
+@dataclass(frozen=True)
+class TermRef:
+    """A short reference to a term.
+
+    Parameters
+    ----------
+    key
+        The term's id.
+    name
+        The term's name in the reader's language.
+    """
+
+    key: str
+    name: str
+
+
+@dataclass(frozen=True)
 class DeployAccepted:
     """A queued deploy run.
 

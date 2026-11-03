@@ -14,6 +14,7 @@ from lakana_core.artifacts.service import ArtifactService
 from lakana_core.audit.authorization import AuditingAuthorization
 from lakana_core.audit.service import AuditService
 from lakana_core.auth import AuthorizationService, PrincipalRef
+from lakana_core.catalog.glossary_read import GlossaryService
 from lakana_core.catalog.lineage_graph import LineageService
 from lakana_core.catalog.query_service import QueryService
 from lakana_core.catalog.search import CatalogSearch
@@ -559,6 +560,30 @@ def get_catalog_search(
         A search using real authorization.
     """
     return CatalogSearch(session, authz, main_language=main_language)
+
+
+def get_glossary_service(
+    session: Session = Depends(get_session),
+    authz: AuthorizationService = Depends(get_grant_authorization),
+    main_language: str = Depends(get_main_language),
+) -> GlossaryService:
+    """Build a GlossaryService for the current request.
+
+    Parameters
+    ----------
+    session
+        The current request's database session.
+    authz
+        The real, grant-backed authorization service.
+    main_language
+        `LAKANA_MAIN_LANGUAGE`, for a term whose project declares none.
+
+    Returns
+    -------
+    GlossaryService
+        The glossary reader.
+    """
+    return GlossaryService(session, authz, main_language=main_language)
 
 
 def get_artifact_service(
