@@ -575,7 +575,7 @@ class TermSpec(SafeTextModel):
             )
         for key in value:
             if term_id_problem(key) is not None:
-                raise ValueError(f"`{key}` is not a term id; {TERM_ID_RULE}")
+                raise ValueError(f"`{shown_key(key)}` is not a term id; {TERM_ID_RULE}")
             if value.count(key) > 1:
                 raise ValueError(f"names `{key}` twice; remove one")
         return value

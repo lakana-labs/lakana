@@ -514,6 +514,49 @@ would leave the second half of a withheld read visible
   reader learns which group the hidden read is in: under the medallion default, a withheld line on
   a gold asset means a bronze table or a source.
 
+### The glossary's deploy checks (#375)
+
+`DeployService.validate_glossary` resolves each linked table through `_target_info`, the lookup
+references use: a table the project builds, or an existing table the deployer may read
+(`_readable_type`). A missing table and an unreadable one get the same text,
+`missing_link_message`, and its `(did you mean …?)` hint comes from the project's own tables
+only. A table the repository's current version builds that the new project no longer builds counts
+as missing too. So the deployer learns nothing from a link that a reference would not tell it.
+
+A failed deploy's error reaches every reader of the environment, so an unreadable linked table must
+read exactly like a missing one there too. A missing table makes **one** line per term and table,
+so a table outside the project gets the same: every column or artifact issue about it carries
+`targets=(table,)` and stands at the table's own line. The first such issue per term and table is
+withheld as the missing-table text with the same hint, and the later ones as `""`, so
+`error_for_reader` drops them. Without this, the number of lines a reader is shown would tell it
+the table exists and how many of the listed columns are wrong. Pins:
+`test_wrong_columns_of_an_unreadable_table_read_exactly_like_a_missing_table` (flow and block
+lists), `test_an_unreadable_table_gets_the_close_name_hint_a_missing_table_gets`,
+`test_a_link_to_a_table_the_deployer_may_not_read_reads_as_missing` (real grants),
+`test_a_column_of_another_repositorys_table_is_checked_and_withheld`.
+
+Refused texts are escaped or refused before any message repeats them. Without this, a line feed,
+a bidirectional control or a line separator from a glossary file would forge a line of the stored
+error, and `error_for_reader`, which swaps lines by position, would show part of a withheld line.
+Term ids, related ids, `translations/<lang>.yaml` `glossary:` keys and unknown fields go through
+`shown_key`. A `links:` table key, or a column name, with an `unsafe_identifier` character, spaces
+around it or more than 1,024 characters is refused. Names and synonyms pass `checked_label`
+(one line, no tab) before the synonym rules quote them. Pins:
+`test_a_refused_related_id_cannot_forge_a_line`, `test_a_refused_synonym_cannot_forge_a_line`,
+`test_a_link_table_key_with_a_control_or_bidi_character_cannot_forge_a_line`,
+`test_a_link_table_or_column_name_over_1024_characters_is_refused`.
+
+A term id another repository owns is refused naming that repository (`owned_elsewhere_message`). A
+term id and its repository are not secret within an environment: every `READ_ENVIRONMENT`
+reader is shown a term with its repository. Residuals:
+
+- Count (#442): a stored deploy error keeps the first 50 issues and ends with "…and N more
+  issues". N counts the lines withheld as `""`, so past 50 issues a reader who may not read the
+  table is shown fewer lines and a different N for an existing table than for a missing one. The
+  reference path behaves the same. The fix is to apply the cap per reader, after withholding.
+- Columns that the deploy cannot see (`SELECT *`, a Python asset) are not checked, for project
+  tables as well as for others, so no message tells anything of them.
+
 ## Table health: who sees the readers
 
 | Action | Needs | Notes |

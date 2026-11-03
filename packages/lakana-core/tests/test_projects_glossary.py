@@ -470,3 +470,36 @@ def test_a_rollback_is_told_a_next_step_it_can_follow() -> None:
         "repository that deployed it first; roll back to or deploy a version without "
         "net_revenue, or remove it from finance first."
     )
+
+
+def test_a_refused_related_id_cannot_forge_a_line() -> None:
+    text = 'a:\n  name: A\n  definition: B\n  owner: c\n  related: ["b\\nlakana.yaml:1: forged"]\n'
+    _, issues = _parse(("glossary/a.yaml", text))
+    assert issues == [
+        "glossary/a.yaml:5: a.related: `b\\nlakana.yaml:1: forged` is not a term id; a term id is "
+        "lowercase letters, digits and underscores, starts with a letter and has at most 63 "
+        "characters, such as `net_revenue`"
+    ]
+
+
+@pytest.mark.parametrize(
+    "value",
+    ['["s\\nlakana.yaml:1: forged"]', '["s\\u202e"]', '["s", "s\\u2028x"]'],
+)
+def test_a_refused_synonym_cannot_forge_a_line(value: str) -> None:
+    for text in (
+        f"a:\n  name: A\n  definition: B\n  owner: c\n  synonyms: {value}\n",
+        "a:\n  name: A\n  definition: B\n  owner: c\n",
+    ):
+        _, issues = _parse(("glossary/a.yaml", text))
+        assert all("\n" not in i and "\u202e" not in i and "\u2028" not in i for i in issues)
+    _, problems = parse_translations(
+        [
+            DiscoveredTranslation(
+                "translations/fr.yaml", "fr", f"glossary:\n  a:\n    synonyms: {value}\n"
+            )
+        ],
+        limits=DeployLimits(),
+    )
+    rendered = [p.render() for p in problems]
+    assert rendered and all("\n" not in r and "\u202e" not in r for r in rendered), rendered
