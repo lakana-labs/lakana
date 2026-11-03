@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -17,6 +18,7 @@ from lakana_core.projects.glossary import (
     manifest_glossary,
     parse_glossary,
 )
+from lakana_core.projects.issues import ProjectIssue
 from lakana_core.projects.limits import DeployLimits
 from lakana_core.projects.translations import DiscoveredTranslation, parse_translations
 
@@ -511,3 +513,98 @@ def test_a_refused_synonym_cannot_forge_a_line(value: str) -> None:
     )
     rendered = [p.render() for p in problems]
     assert rendered and all("\n" not in r and "\u202e" not in r for r in rendered), rendered
+
+
+def test_an_unreadable_root_a_linked_glossary_and_an_unreadable_folder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import os
+
+    assert discover_glossary(tmp_path / "gone") == (None, [])
+    (tmp_path / "elsewhere").mkdir()
+    (tmp_path / "glossary").symlink_to(tmp_path / "elsewhere")
+    assert [i.render() for i in discover_glossary(tmp_path)[1]] == [
+        "glossary: symlinks are not allowed under glossary/"
+    ]
+    (tmp_path / "glossary").unlink()
+    (tmp_path / "glossary").mkdir()
+    real = os.scandir
+
+    def scandir(path: Path) -> Iterator[os.DirEntry[str]]:
+        """Refuse to list `glossary/`, as a folder without read permission would.
+
+        Parameters
+        ----------
+        path
+            The folder.
+
+        Returns
+        -------
+        Iterator
+            The real listing of any other folder.
+
+        Raises
+        ------
+        PermissionError
+            For `glossary/`.
+        """
+        if Path(path).name == "glossary":
+            raise PermissionError(13, "Permission denied")
+        return real(path)
+
+    monkeypatch.setattr(os, "scandir", scandir)
+    assert discover_glossary(tmp_path) == (
+        None,
+        [ProjectIssue("glossary", None, "cannot be read: Permission denied")],
+    )
+
+
+def test_a_file_over_the_key_cap_and_a_term_that_is_not_a_mapping_are_refused() -> None:
+    from lakana_core.projects.glossary import MAX_GLOSSARY_ENTRIES
+
+    big = "a:\n  synonyms: [" + ", ".join("s" for _ in range(MAX_GLOSSARY_ENTRIES)) + "]\n"
+    _, too_many = _parse(("glossary/big.yaml", big))
+    glossary, scalar = _parse(("glossary/a.yaml", "net_revenue: 5\n"))
+    assert len(too_many) == 1 and "has more than 50000 keys and list items" in too_many[0]
+    assert scalar == [
+        "glossary/a.yaml:1: `net_revenue` must be a mapping of its fields, such as "
+        "`net_revenue: {name: …, definition: …, owner: …}`"
+    ]
+    assert "net_revenue" in glossary.invalid
+
+
+def test_a_glossary_translation_that_is_not_a_mapping_is_refused() -> None:
+    _, problems = parse_translations(
+        (
+            DiscoveredTranslation(
+                "translations/fr.yaml", "fr", "glossary:\n  net_revenue: 5\n  1: {name: x}\n"
+            ),
+        ),
+        limits=DeployLimits(),
+    )
+    assert [p.render() for p in problems] == [
+        "translations/fr.yaml:2: `glossary.net_revenue` must be a mapping such as "
+        "`{name: …, definition: …, synonyms: […]}`",
+        "translations/fr.yaml:3: `glossary.1` must be a mapping such as "
+        "`{name: …, definition: …, synonyms: […]}`",
+    ]
+
+
+_STORED = {"name": "N", "definition": "D", "owner": "o"}
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        {"name": ""},
+        {"related": ["B"]},
+        {"links": {"gold.a": ["c" * 1025]}},
+        {"translations": "fr"},
+        {"translations": {"fr": "x"}},
+        {"translations": {"fr": {"synonyms": "x"}}},
+        {"translations": {"fr": {"name": ""}}},
+    ],
+)
+def test_a_damaged_stored_term_is_dropped(damage: dict[str, object]) -> None:
+    assert manifest_glossary({"glossary": {"a": _STORED}}) != {}
+    assert manifest_glossary({"glossary": {"a": {**_STORED, **damage}}}) == {}

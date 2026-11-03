@@ -3688,6 +3688,43 @@ def test_the_glossary_checks_stop_at_the_deploy_deadline(
     assert len(calls) == 2
 
 
+def test_unseen_columns_shared_tables_and_known_related_ids_pass(
+    session: Session, principal: PrincipalRef, world: World
+) -> None:
+    """A `SELECT *` table's columns are not checked; two terms may link one table."""
+    text = (
+        "t:\n" + _HEAD + "    silver.star: [anything]\n    silver.clean: [amount]\n"
+        "  related: [u]\n"
+        "u:\n" + _HEAD + "    silver.clean: [id]\n"
+    )
+    commit(
+        world.repo_path,
+        {
+            "assets/silver/clean.sql": _GLOSSARY_SQL,
+            "assets/silver/star.sql": "SELECT * FROM bronze.events\n",
+            "glossary/a.yaml": text,
+        },
+    )
+    run = _submit_and_run(session, principal, world)
+    assert (run.status, run.error_message) == (DeployStatus.SUCCEEDED, None)
+
+
+def test_columns_of_an_artifact_outside_the_project_are_refused_and_withheld(
+    session: Session, principal: PrincipalRef, world: World
+) -> None:
+    _row(session, "bronze", "churn", TableType.ARTIFACT)
+    text = "t:\n" + _HEAD + "    bronze.churn: [score]\n"
+    glossary, _ = parse_glossary((DiscoveredGlossaryFile("glossary/a.yaml", text),))
+    repo_id = session.scalars(select(Repository.id).where(Repository.name == "analytics")).one()
+    service = DeployService(session, AllowAllAuthorization())
+    (issue,) = service.validate_glossary(principal, "dev", repo_id, glossary, [])
+    assert issue.render() == (
+        "glossary/a.yaml:6: t links columns of bronze.churn, an artifact, which has no columns; "
+        "link the artifact itself with `bronze.churn: []`, or remove the link."
+    )
+    assert (issue.targets, issue.withheld) == (("bronze.churn",), _missing("t", "bronze.churn"))
+
+
 def test_a_column_of_another_repositorys_table_is_checked_and_withheld(
     session: Session, principal: PrincipalRef, world: World
 ) -> None:
