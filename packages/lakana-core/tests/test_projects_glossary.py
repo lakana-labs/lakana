@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -499,10 +500,13 @@ def test_a_refused_related_id_cannot_forge_a_line() -> None:
 def test_a_refused_synonym_cannot_forge_a_line(value: str) -> None:
     for text in (
         f"a:\n  name: A\n  definition: B\n  owner: c\n  synonyms: {value}\n",
-        "a:\n  name: A\n  definition: B\n  owner: c\n",
+        "a:\n  name: A\n  definition: B\n  owner: c\n  synonyms:\n"
+        + "".join(f"    - {json.dumps(synonym)}\n" for synonym in json.loads(value)),
     ):
         _, issues = _parse(("glossary/a.yaml", text))
-        assert all("\n" not in i and "\u202e" not in i and "\u2028" not in i for i in issues)
+        assert issues and all(
+            "\n" not in i and "\u202e" not in i and "\u2028" not in i for i in issues
+        ), issues
     _, problems = parse_translations(
         [
             DiscoveredTranslation(
