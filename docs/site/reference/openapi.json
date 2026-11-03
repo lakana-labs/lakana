@@ -18780,6 +18780,14 @@
               }
             ],
             "title": "Description Language"
+          },
+          "terms": {
+            "items": {
+              "$ref": "#/components/schemas/TermRefOut"
+            },
+            "type": "array",
+            "title": "Terms",
+            "default": []
           }
         },
         "type": "object",
@@ -18789,7 +18797,7 @@
           "nullable"
         ],
         "title": "ColumnOut",
-        "description": "One column of a table's schema, in the JSON column form.\n\nParameters\n----------\nname\n    Column name.\ntype\n    The Iceberg type in the JSON form (`\"long\"`, `\"decimal(10,2)\"`, ...),\n    or the Iceberg string for a nested type.\nnullable\n    Whether the column accepts nulls.\ndescription\n    The column's description: the edit when it has one, else the project's text; `None`\n    when there is none.\ndescription_source\n    ``edited`` or ``project``; `None` when there is no description.\nlabel\n    The column's short name for people, in the reader's language where it has one, else\n    the main language's; `None` when there is none.\nlabel_source\n    ``edited`` or ``project``; `None` when there is no label.\nlabel_language\n    The language of `label`; `None` exactly when `label` is.\ndescription_language\n    The language of `description`; `None` exactly when `description` is."
+        "description": "One column of a table's schema, in the JSON column form.\n\nParameters\n----------\nname\n    Column name.\ntype\n    The Iceberg type in the JSON form (`\"long\"`, `\"decimal(10,2)\"`, ...),\n    or the Iceberg string for a nested type.\nnullable\n    Whether the column accepts nulls.\ndescription\n    The column's description: the edit when it has one, else the project's text; `None`\n    when there is none.\ndescription_source\n    ``edited`` or ``project``; `None` when there is no description.\nlabel\n    The column's short name for people, in the reader's language where it has one, else\n    the main language's; `None` when there is none.\nlabel_source\n    ``edited`` or ``project``; `None` when there is no label.\nlabel_language\n    The language of `label`; `None` exactly when `label` is.\ndescription_language\n    The language of `description`; `None` exactly when `description` is.\nterms\n    The glossary terms that link the column, in the reader's language; empty without\n    ``READ_ENVIRONMENT``."
       },
       "ConnectionCreate": {
         "properties": {
@@ -23836,6 +23844,14 @@
             },
             "type": "array",
             "title": "Translations"
+          },
+          "terms": {
+            "items": {
+              "$ref": "#/components/schemas/TermRefOut"
+            },
+            "type": "array",
+            "title": "Terms",
+            "default": []
           }
         },
         "type": "object",
@@ -23847,7 +23863,7 @@
           "schema"
         ],
         "title": "TableOut",
-        "description": "Response body for a table, external table or view, read-only.\n\nParameters\n----------\nname\n    Table name.\nnamespace\n    Dot-joined namespace path the table lives in.\nuuid\n    The table's id (the Iceberg ``table-uuid`` for a managed table).\nkind\n    ``TABLE``, ``EXTERNAL``, ``VIEW`` or ``ARTIFACT``.\nmetadata_location\n    Absolute URI of the current metadata file; `None` for an external\n    table or a view.\ncolumns\n    The columns, serialized as `schema`.\nsql\n    A view's SELECT. `None` if the caller may not read every reference\n    .\nreferences\n    A view's references. Empty if the caller may not read every\n    reference.\nhidden_references\n    The number of the view's references the caller may not read, and\n    so are withheld from `sql` and `references`.\nsnapshot_id\n    The current snapshot of a managed table; `None`\n    without one, and for a view or an external table.\nstate\n    ``not_published`` for a table whose first build did not finish, or failed a blocking\n    check, and that no later run has published; ``published`` for everything else.\nstate_message\n    Why it is not published, naming the check and the run; `None` otherwise.\ndescription\n    The table's description: the edit when it has one, else the project's text; `None`\n    when there is none.\ndescription_source\n    ``edited`` or ``project``; `None` when there is no description.\nlast_write_at\n    When the current snapshot was committed; `None` without one, and for a view, an\n    external table and an artifact.\nrow_count\n    The rows of the current snapshot, from its summary; `None` when missing.\nsize_bytes\n    The size of its data files, from its summary; `None` when missing.\nfile_count\n    Its data files, from its summary; `None` when missing.\nexpires_at\n    When a managed table's retention makes it expire; `None` when it never does.\nexpires_soon\n    Whether that is within the server's warning window\n    (``LAKANA_TABLES__EXPIRY_WARNING_DAYS``, 7 days by default); always `false` when that\n    is 0.\nmodel\n    The model the asset header declares (kind, grain, key, references, measures and the\n    checks they generate); `None` for a table whose header declares none.\nlabel\n    The table's short name for people, chosen like `description`; `None` for none.\nlabel_source\n    Where `label` came from (``edited`` or ``project``); `None` without a label.\nlabel_language\n    Which language `label` is in; `None` exactly when there is no label.\ndescription_language\n    Which language `description` is in; `None` exactly when there is no description.\nlanguage\n    The language the texts were chosen for: `lang`, else your profile's, else the first of\n    Accept-Language, else the instance's main language.\nmain_language\n    The table's main language: its project's `main_language`, else the instance's; a text\n    with no translation is shown in it.\ntranslations\n    Per language that has texts for the table, how many of its main-language texts it has."
+        "description": "Response body for a table, external table or view, read-only.\n\nParameters\n----------\nname\n    Table name.\nnamespace\n    Dot-joined namespace path the table lives in.\nuuid\n    The table's id (the Iceberg ``table-uuid`` for a managed table).\nkind\n    ``TABLE``, ``EXTERNAL``, ``VIEW`` or ``ARTIFACT``.\nmetadata_location\n    Absolute URI of the current metadata file; `None` for an external\n    table or a view.\ncolumns\n    The columns, serialized as `schema`.\nsql\n    A view's SELECT. `None` if the caller may not read every reference\n    .\nreferences\n    A view's references. Empty if the caller may not read every\n    reference.\nhidden_references\n    The number of the view's references the caller may not read, and\n    so are withheld from `sql` and `references`.\nsnapshot_id\n    The current snapshot of a managed table; `None`\n    without one, and for a view or an external table.\nstate\n    ``not_published`` for a table whose first build did not finish, or failed a blocking\n    check, and that no later run has published; ``published`` for everything else.\nstate_message\n    Why it is not published, naming the check and the run; `None` otherwise.\ndescription\n    The table's description: the edit when it has one, else the project's text; `None`\n    when there is none.\ndescription_source\n    ``edited`` or ``project``; `None` when there is no description.\nlast_write_at\n    When the current snapshot was committed; `None` without one, and for a view, an\n    external table and an artifact.\nrow_count\n    The rows of the current snapshot, from its summary; `None` when missing.\nsize_bytes\n    The size of its data files, from its summary; `None` when missing.\nfile_count\n    Its data files, from its summary; `None` when missing.\nexpires_at\n    When a managed table's retention makes it expire; `None` when it never does.\nexpires_soon\n    Whether that is within the server's warning window\n    (``LAKANA_TABLES__EXPIRY_WARNING_DAYS``, 7 days by default); always `false` when that\n    is 0.\nmodel\n    The model the asset header declares (kind, grain, key, references, measures and the\n    checks they generate); `None` for a table whose header declares none.\nlabel\n    The table's short name for people, chosen like `description`; `None` for none.\nlabel_source\n    Where `label` came from (``edited`` or ``project``); `None` without a label.\nlabel_language\n    Which language `label` is in; `None` exactly when there is no label.\ndescription_language\n    Which language `description` is in; `None` exactly when there is no description.\nlanguage\n    The language the texts were chosen for: `lang`, else your profile's, else the first of\n    Accept-Language, else the instance's main language.\nmain_language\n    The table's main language: its project's `main_language`, else the instance's; a text\n    with no translation is shown in it.\ntranslations\n    Per language that has texts for the table, how many of its main-language texts it has.\nterms\n    The glossary terms that link the table itself, in the reader's language; empty without\n    ``READ_ENVIRONMENT`` on the environment."
       },
       "TableReferenceOut": {
         "properties": {
@@ -24670,6 +24686,25 @@
         ],
         "title": "TermPage",
         "description": "One page of an environment's glossary terms, sorted by key.\n\nParameters\n----------\nitems\n    The terms of this page.\nnext_cursor\n    Pass back as `?cursor=` to fetch the next page; `null` on the last page."
+      },
+      "TermRefOut": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "name"
+        ],
+        "title": "TermRefOut",
+        "description": "A short reference to a term, as a table or column shows it.\n\nParameters\n----------\nkey\n    The term's id.\nname\n    The term's name in the reader's language."
       },
       "TokenIssueIn": {
         "properties": {

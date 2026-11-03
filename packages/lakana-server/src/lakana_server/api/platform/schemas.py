@@ -836,6 +836,21 @@ class ReplaceOut(BaseModel):
     schema_diff: dict[str, list[dict[str, str]]] | None = None
 
 
+class TermRefOut(BaseModel):
+    """A short reference to a term, as a table or column shows it.
+
+    Parameters
+    ----------
+    key
+        The term's id.
+    name
+        The term's name in the reader's language.
+    """
+
+    key: str
+    name: str
+
+
 class ColumnOut(BaseModel):
     """One column of a table's schema, in the JSON column form.
 
@@ -862,6 +877,9 @@ class ColumnOut(BaseModel):
         The language of `label`; `None` exactly when `label` is.
     description_language
         The language of `description`; `None` exactly when `description` is.
+    terms
+        The glossary terms that link the column, in the reader's language; empty without
+        ``READ_ENVIRONMENT``.
     """
 
     name: str
@@ -873,6 +891,7 @@ class ColumnOut(BaseModel):
     label_source: Literal["project", "edited"] | None = None
     label_language: str | None = None
     description_language: str | None = None
+    terms: list[TermRefOut] = []
 
 
 class TranslationCoverageOut(BaseModel):
@@ -982,6 +1001,9 @@ class TableOut(BaseModel):
         with no translation is shown in it.
     translations
         Per language that has texts for the table, how many of its main-language texts it has.
+    terms
+        The glossary terms that link the table itself, in the reader's language; empty without
+        ``READ_ENVIRONMENT`` on the environment.
     """
 
     name: str
@@ -1012,6 +1034,7 @@ class TableOut(BaseModel):
     language: str = "en"
     main_language: str = "en"
     translations: list[TranslationCoverageOut] = Field(default_factory=list)
+    terms: list[TermRefOut] = []
 
 
 class LastMaintenanceOut(BaseModel):
@@ -2680,21 +2703,6 @@ class TermPage(BaseModel):
 
     items: list[TermOut]
     next_cursor: str | None
-
-
-class TermRefOut(BaseModel):
-    """A short reference to a term, as a table or column shows it.
-
-    Parameters
-    ----------
-    key
-        The term's id.
-    name
-        The term's name in the reader's language.
-    """
-
-    key: str
-    name: str
 
 
 class ConnectionTestOut(BaseModel):

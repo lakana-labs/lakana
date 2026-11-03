@@ -234,6 +234,9 @@ class Column:
     description_language
         The language of `description`; `None` exactly when `description` is, and from a server
         older than translations.
+    terms
+        The glossary terms that link the column; ``()`` from a server older than the glossary,
+        and without ``READ_ENVIRONMENT``.
     """
 
     name: str
@@ -245,6 +248,7 @@ class Column:
     label_source: str | None = None
     label_language: str | None = None
     description_language: str | None = None
+    terms: tuple[TermRef, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -594,6 +598,9 @@ class Table:
     translations
         Per language that has texts for the table, how many of its main-language texts it has;
         empty without translations, and from a server older than them.
+    terms
+        The glossary terms that link the table itself; ``()`` from a server older than the
+        glossary, and without ``READ_ENVIRONMENT``.
     """
 
     name: str
@@ -624,6 +631,7 @@ class Table:
     language: str = "en"
     main_language: str = "en"
     translations: tuple[TranslationCoverage, ...] = ()
+    terms: tuple[TermRef, ...] = ()
 
 
 @dataclass(frozen=True)

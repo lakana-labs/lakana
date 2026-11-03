@@ -96,6 +96,7 @@ from lakana_core.catalog.environment_deletion import (
 )
 from lakana_core.catalog.external_location import check_claim_free, parse_external_location
 from lakana_core.catalog.field_ids import check_added_files_have_field_ids
+from lakana_core.catalog.glossary_read import TableTerms, TermRef, table_terms
 from lakana_core.catalog.health import (
     TableHealth,
     last_maintenance,
@@ -711,6 +712,11 @@ class TableDescription:
         The table's main language: its own `text_language`, else the instance's.
     translations
         Per language with texts, how many of the table's main-language texts it has.
+    terms
+        The glossary terms that link the table itself, in the reader's language; empty
+        without ``READ_ENVIRONMENT``.
+    column_terms
+        Column name → the terms that link it.
     """
 
     ref: TableRef
@@ -744,6 +750,8 @@ class TableDescription:
     language: str = DEFAULT_MAIN_LANGUAGE
     main_language: str = DEFAULT_MAIN_LANGUAGE
     translations: tuple[LanguageCoverage, ...] = ()
+    terms: tuple[TermRef, ...] = ()
+    column_terms: Mapping[str, tuple[TermRef, ...]] = dataclass_field(default_factory=dict)
 
 
 _NO_UNPUBLISHING = (
@@ -3382,11 +3390,14 @@ class CatalogService:
         included only if `p` holds READ_TABLE on every reference right
         now; otherwise both are empty and `hidden_references` reports how
         many were withheld.
+
+        The glossary terms need ``READ_ENVIRONMENT`` besides the table's
+        ``READ_TABLE``; without it they are left out.
         """
         self._authz.authorize(
             p, Action.READ_TABLE, Securable.table_scope(ref.environment, ref.namespace, ref.name)
         )
-        _, row = self._find_table(ref)
+        namespace, row = self._find_table(ref)
         described = self._describe_row(p, ref, row)
         chooser = TextChooser(
             row.text_language or self._main_language,
@@ -3427,8 +3438,18 @@ class CatalogService:
             expires_soon = (
                 self._expiry_warning_days > 0 and expires_at is not None and expires_at <= warning
             )
+        terms = TableTerms()
+        if self._authz.permits(
+            p, Action.READ_ENVIRONMENT, Securable.environment_scope(ref.environment)
+        ):
+            dotted = ".".join((*ref.namespace.parts, ref.name))
+            terms = table_terms(
+                self._session, namespace.environment_id, dotted, languages, self._main_language
+            )
         return replace(
             described,
+            terms=terms.table,
+            column_terms=dict(terms.columns),
             description=None if description is None else description.text,
             description_source=None if description is None else description.source,
             description_language=None if description is None else description.language,

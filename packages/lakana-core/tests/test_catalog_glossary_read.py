@@ -33,6 +33,7 @@ from lakana_core.models import (
     Table,
 )
 from lakana_core.pagination import encode_cursor
+from lakana_core.storage.resolver import StorageResolver
 
 _GOLD = NamespacePath.from_parts(["gold"])
 
@@ -382,6 +383,18 @@ def test_table_terms_lists_the_table_and_column_terms_in_the_reader_language(
         TermRef("net_revenue", "Net revenue"),
     )
     assert table_terms(world.session, env_id, "gold.nothing", (), "en").columns == {}
+
+
+def test_describe_table_carries_the_terms_only_with_read_environment(world: World) -> None:
+    ref = TableRef("dev", _GOLD, "fact_sales")
+    catalog = CatalogService(
+        world.session, StorageResolver(world.session), GrantAuthorization(world.session)
+    )
+    described = catalog.describe_table(world.bob, ref, languages=("fr",))
+    assert described.terms == ()
+    assert described.column_terms["net_amount"] == (TermRef("net_revenue", "CA net"),)
+    assert catalog.describe_table(world.carol, ref).column_terms == {}
+    assert catalog.describe_table(world.carol, ref).terms == ()
 
 
 def test_synonyms_come_from_every_reader_language_also_one_without_a_translated_name(
