@@ -461,6 +461,14 @@ def test_a_root_folder_named_glossary_in_another_case_is_refused(tmp_path: Path)
     ]
     assert discover_glossary(tmp_path)[0] is None
 
+    if (tmp_path / "glossary").exists():
+        return  # a case-insensitive filesystem cannot hold `glossary` beside `Glossary`
+    (tmp_path / "glossary").mkdir()
+    (tmp_path / "glossary" / "sales.yaml").write_text(_SALES)
+    found, issues = discover_glossary(tmp_path)
+    assert [f.path for f in found or ()] == ["glossary/sales.yaml"]
+    assert [i.path for i in issues] == ["Glossary"]
+
 
 def test_a_rollback_is_told_a_next_step_it_can_follow() -> None:
     from lakana_core.projects.glossary import owned_elsewhere_message

@@ -128,24 +128,30 @@ class DiscoveredGlossaryFile:
     text: str
 
 
-def _other_case_folders(root: Path) -> list[ProjectIssue]:
-    """Refuse a root folder whose name is `glossary` in another case, such as `Glossary`.
+def _root_glossary(root: Path) -> tuple[bool, list[ProjectIssue]]:
+    """Find `glossary` among the root's entries by their exact names.
+
+    Deciding by the listed names, not by opening ``root / "glossary"``, gives the same answer on
+    a case-insensitive filesystem (macOS), where that path would open `Glossary/` too.
 
     Parameters
     ----------
     root
-        The extracted checkout, which has no `glossary`.
+        The extracted checkout.
 
     Returns
     -------
-    list of ProjectIssue
-        One per such folder: it would otherwise be ignored without a word.
+    tuple
+        Whether an entry is named exactly `glossary`, and one refusal per root folder whose name
+        is `glossary` in another case, such as `Glossary`: it would otherwise be ignored without
+        a word.
     """
     try:
         entries = sorted(os.scandir(root), key=lambda entry: entry.name)
     except OSError:
-        return []
-    return [
+        return False, []
+    exact = any(entry.name == GLOSSARY_DIR for entry in entries)
+    return exact, [
         ProjectIssue(
             entry.name,
             None,
@@ -153,7 +159,9 @@ def _other_case_folders(root: Path) -> list[ProjectIssue]:
             f"{entry.name} to {GLOSSARY_DIR}, or give it another name if it holds no glossary",
         )
         for entry in entries
-        if entry.name.casefold() == GLOSSARY_DIR and entry.is_dir(follow_symlinks=False)
+        if entry.name != GLOSSARY_DIR
+        and entry.name.casefold() == GLOSSARY_DIR
+        and entry.is_dir(follow_symlinks=False)
     ]
 
 
@@ -175,19 +183,23 @@ def discover_glossary(
         other-case suffix, oversized or non-UTF-8 files, and more than `MAX_GLOSSARY_FILES`
         YAML files (those past it are not read). Files of other kinds are ignored.
     """
+    exact, other_case = _root_glossary(root)
+    if not exact:
+        return None, other_case
     folder = root / GLOSSARY_DIR
     if folder.is_symlink():
-        return None, [ProjectIssue(GLOSSARY_DIR, None, _LINK)]
-    if not os.path.lexists(folder):
-        return None, _other_case_folders(root)
+        return None, [*other_case, ProjectIssue(GLOSSARY_DIR, None, _LINK)]
     if not folder.is_dir():
-        return None, [ProjectIssue(GLOSSARY_DIR, None, _NOT_A_FOLDER)]
+        return None, [*other_case, ProjectIssue(GLOSSARY_DIR, None, _NOT_A_FOLDER)]
     try:
         entries = sorted(os.scandir(folder), key=lambda entry: entry.name)
     except OSError as exc:
-        return None, [ProjectIssue(GLOSSARY_DIR, None, f"cannot be read: {exc.strerror}")]
+        return None, [
+            *other_case,
+            ProjectIssue(GLOSSARY_DIR, None, f"cannot be read: {exc.strerror}"),
+        ]
     found: list[DiscoveredGlossaryFile] = []
-    issues: list[ProjectIssue] = []
+    issues: list[ProjectIssue] = [*other_case]
     files = 0
     for entry in entries:
         relative = f"{GLOSSARY_DIR}/{entry.name}"
