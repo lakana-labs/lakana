@@ -56,6 +56,7 @@ from lakana_core.projects.dag import build_graph, validate_project
 from lakana_core.projects.deploys import DeclaredConnections, DeployService, connection_issues
 from lakana_core.projects.diff import diff_manifests
 from lakana_core.projects.discovery import discover
+from lakana_core.projects.glossary import glossary_entries, parse_glossary
 from lakana_core.projects.issues import ProjectIssue, ProjectValidationError, withheld_lines
 from lakana_core.projects.jobs import job_issues
 from lakana_core.projects.layer_rules import layer_hints, layer_issues
@@ -77,6 +78,7 @@ from lakana_core.projects.parse import ParsedAsset, parse_assets
 from lakana_core.projects.project_config import normalize_source, parse_project_config
 from lakana_core.projects.run_policy import RunCaps, run_policy_issues
 from lakana_core.projects.translations import (
+    NO_GLOSSARY,
     coverage_hints,
     parse_translations,
     translation_entries,
@@ -818,7 +820,7 @@ def _deploy(
         )
 
         def check_time() -> None:
-            """Stop between translation files once the deploy is past its deadline.
+            """Stop between translation and glossary files once the deploy is past its deadline.
 
             Raises
             ------
@@ -831,6 +833,10 @@ def _deploy(
         translations, translation_problems = parse_translations(
             checkout.translations, limits=limits, check_time=check_time
         )
+        glossary, glossary_problems = parse_glossary(checkout.glossary, check_time=check_time)
+        # what translations may name: no folder refuses every term; a glossary that failed
+        # to parse has said what is wrong, so its terms are not reported again as unknown
+        translatable = NO_GLOSSARY if glossary is None else None if glossary_problems else glossary
         graph = build_graph(assets)
         resolved, reference_issues = service.resolve_model_references(
             principal, environment_name, repository_id, assets
@@ -874,9 +880,13 @@ def _deploy(
             )
             + project_model_issues(assets)
             + translation_problems
-            + translation_issues(project, assets, translations)
+            + glossary_problems
+            + translation_issues(project, assets, translations, translatable)
             + reference_issues
             + layer_issues(project.layers, assets)
+            + service.validate_glossary(
+                principal, environment_name, repository_id, glossary, assets, check_time=check_time
+            )
         )
         if issues:
             raise ProjectValidationError(issues)
@@ -894,6 +904,7 @@ def _deploy(
             references=resolved,
             main_language=project.main_language,
             translations=translation_entries(translations),
+            glossary=glossary_entries(glossary, translations) if glossary is not None else None,
             layers=project.layers,
             artifacts=service.artifact_inputs(
                 principal, environment_name, graph, repository_id=repository_id
@@ -909,7 +920,7 @@ def _deploy(
                 ),
             ),
             hints=deploy_hints(assets)
-            + coverage_hints(project, assets, translations)
+            + coverage_hints(project, assets, translations, glossary)
             + layer_hints(project.layers, assets),
         )
         if kind is DeployKind.DRY_RUN:

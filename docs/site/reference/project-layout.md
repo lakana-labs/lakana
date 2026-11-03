@@ -1,6 +1,6 @@
 # Project layout
 
-What a deploy reads from a repository: the files under `assets/`, `checks/` and `translations/`, and the names
+What a deploy reads from a repository: the files under `assets/`, `checks/`, `translations/` and `glossary/`, and the names
 they give to tables. For the steps that create and deploy a project, see
 [Projects and deploys](../how-to/projects.md).
 
@@ -39,3 +39,10 @@ tables, columns and measures, keyed by table: `translations/fr.yaml`, `translati
 The folder holds nothing else, at most 50 files of at most 1 MiB each. A project with translation
 files declares `main_language:` in `lakana.yaml`. The format and every rule are in
 [Translations](translations.md).
+
+## The `glossary/` directory
+
+`glossary/<area>.yaml` holds business terms: their names, definitions, synonyms and owners, and
+links to the tables and columns they are about. Every YAML file directly under `glossary/` is read,
+at most 50; other files, such as a `README.md`, are ignored. The format, the deploy checks and
+every rule are in [Glossary](glossary.md).

@@ -29,6 +29,7 @@ from lakana_core.projects.project_config import normalize_source, unsafe_identif
 
 if TYPE_CHECKING:
     from lakana_core.projects.checks import DiscoveredCheck
+    from lakana_core.projects.glossary import DiscoveredGlossaryFile
     from lakana_core.projects.translations import DiscoveredTranslation
 
 ASSETS_DIR = "assets"
@@ -36,6 +37,8 @@ CHECKS_DIR = "checks"
 CONFIG_FILE = "lakana.yaml"
 TRANSLATIONS_DIR = "translations"
 """The folder at the repository root that holds one translation file per language."""
+GLOSSARY_DIR = "glossary"
+"""The folder at the repository root that holds the glossary's YAML files."""
 _SUFFIXES = {".sql": "sql", ".py": "python"}
 _INIT_MESSAGE = (
     "every .py file under assets/ is an asset; put helper code outside assets/ "
@@ -86,6 +89,8 @@ class Checkout:
         The checks under `checks/`, sorted by path.
     translations
         The translation files under `translations/`, sorted by path.
+    glossary
+        The glossary files; `None` when the repository has no `glossary`.
     """
 
     config_text: str | None
@@ -94,6 +99,7 @@ class Checkout:
     lock: bytes | None = None
     checks: tuple[DiscoveredCheck, ...] = ()
     translations: tuple[DiscoveredTranslation, ...] = ()
+    glossary: tuple[DiscoveredGlossaryFile, ...] | None = None
 
 
 def _read(path: Path, relative: str, max_bytes: int, issues: list[ProjectIssue]) -> bytes | None:
@@ -296,13 +302,54 @@ def _read_root_file(
     return _read(path, name, max_bytes, issues)
 
 
+def folder_entry_refused(
+    entry: os.DirEntry[str],
+    relative: str,
+    link_message: str,
+    folder_message: str,
+    issues: list[ProjectIssue],
+) -> bool:
+    """Refuse an entry of a flat folder that is unsafe, a link or a folder.
+
+    Parameters
+    ----------
+    entry
+        The directory entry.
+    relative
+        Its repository-relative path.
+    link_message
+        The issue text for a symlink.
+    folder_message
+        The issue text for a folder.
+    issues
+        Receives the issue.
+
+    Returns
+    -------
+    bool
+        Whether the entry was refused, so the caller skips it.
+    """
+    if _is_unsafe(relative):
+        issues.append(
+            ProjectIssue(_display(relative), None, "the path has a non-UTF-8 or control character")
+        )
+    elif entry.is_symlink():
+        issues.append(ProjectIssue(relative, None, link_message))
+    elif entry.is_dir(follow_symlinks=False):
+        issues.append(ProjectIssue(relative, None, folder_message))
+    else:
+        return False
+    return True
+
+
 def _links_outside_assets(root: Path) -> list[ProjectIssue]:
     """List every symlink of the checkout that is not under `assets/`.
 
     A Python task unpacks the whole repository and refuses links; a project
     with a Python asset is therefore refused at deploy for any of them.
     Links under `assets/` are reported by the asset walk, links under `checks/` by the check
-    walk, links under `translations/` by the translation listing, and a linked
+    walk, links under `translations/` by the translation listing, links under `glossary/` by the
+    glossary listing, and a linked
     `pyproject.toml`, `uv.lock` or `uv.toml` by its own check. A directory that cannot be
     listed is an issue too, so no link hides behind it.
 
@@ -341,7 +388,8 @@ def _links_outside_assets(root: Path) -> list[ProjectIssue]:
                 TRANSLATIONS_DIR + "/"
             )
             reported = relative in (PYPROJECT_FILE, LOCK_FILE, UV_TOML_FILE)
-            walked = under_assets or under_checks or under_translations
+            under_glossary = relative == GLOSSARY_DIR or relative.startswith(GLOSSARY_DIR + "/")
+            walked = under_assets or under_checks or under_translations or under_glossary
             if path.is_symlink() and not walked and not reported:
                 found.append(relative)
     links = [ProjectIssue(_display(relative), None, _LINK_MESSAGE) for relative in sorted(found)]
@@ -372,11 +420,12 @@ def discover(root: Path, *, limits: DeployLimits | None = None) -> Checkout:
         with Python assets, bad or dotted components, oversized or non-UTF-8
         files, too many assets, or no assets at all; and every problem
         `discover_checks` finds under `checks/` and `discover_translations` under
-        `translations/`.
+        `translations/` and `discover_glossary` under `glossary/`.
     """
     # Imported here: discovery -> checks -> dag -> parse -> discovery is a cycle (checks needs
     # the readers below, and parse needs `DiscoveredAsset`).
     from lakana_core.projects.checks import discover_checks
+    from lakana_core.projects.glossary import discover_glossary
     from lakana_core.projects.translations import discover_translations
 
     limits = limits or DeployLimits()
@@ -491,6 +540,8 @@ def discover(root: Path, *, limits: DeployLimits | None = None) -> Checkout:
     issues.extend(check_problems)
     found_translations, translation_problems = discover_translations(root, limits=limits)
     issues.extend(translation_problems)
+    found_glossary, glossary_problems = discover_glossary(root)
+    issues.extend(glossary_problems)
     if not found and not issues:
         issues.append(ProjectIssue(ASSETS_DIR, None, "no assets found under assets/"))
     if issues:
@@ -502,4 +553,5 @@ def discover(root: Path, *, limits: DeployLimits | None = None) -> Checkout:
         lock=lock,
         checks=tuple(checks),
         translations=tuple(found_translations),
+        glossary=found_glossary,
     )

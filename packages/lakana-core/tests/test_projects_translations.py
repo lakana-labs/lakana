@@ -16,6 +16,7 @@ from lakana_core.projects import yaml_loader
 from lakana_core.projects.asset_model import ParsedAsset
 from lakana_core.projects.discovery import _read
 from lakana_core.projects.frontmatter import AssetMetadata
+from lakana_core.projects.glossary import DiscoveredGlossaryFile, Glossary, parse_glossary
 from lakana_core.projects.issues import ProjectIssue
 from lakana_core.projects.limits import DeployLimits
 from lakana_core.projects.project_config import (
@@ -26,6 +27,7 @@ from lakana_core.projects.project_config import (
     parse_project_config,
 )
 from lakana_core.projects.translations import (
+    NO_GLOSSARY,
     DiscoveredTranslation,
     TableTranslation,
     coverage_hints,
@@ -855,3 +857,127 @@ def test_a_nested_key_that_is_not_a_string_points_at_its_own_line() -> None:
         "translations/fr.yaml:4: gold.fact_sales.columns.1: must be a text; in YAML, quote a "
         "value that reads as a number, a date, `yes` or `null`"
     ]
+
+
+_GLOSSARY = (
+    "net_revenue:\n  name: Net revenue\n  definition: Revenue after returns.\n  owner: finance\n"
+)
+
+
+def _glossary() -> Glossary:
+    """Parse the one-term glossary.
+
+    Returns
+    -------
+    Glossary
+        The glossary.
+    """
+    glossary, issues = parse_glossary((DiscoveredGlossaryFile("glossary/a.yaml", _GLOSSARY),))
+    assert issues == [] and glossary is not None
+    return glossary
+
+
+def _translation(text: str) -> tuple[list[translations_module.Translations], list[str]]:
+    """Parse `translations/fr.yaml` with `text`.
+
+    Parameters
+    ----------
+    text
+        The file.
+
+    Returns
+    -------
+    tuple
+        The parsed files and the rendered parse issues.
+    """
+    parsed, issues = parse_translations(
+        (DiscoveredTranslation("translations/fr.yaml", "fr", text),), limits=_LIMITS
+    )
+    return parsed, [i.render() for i in issues]
+
+
+def test_a_glossary_section_translates_a_term() -> None:
+    parsed, issues = _translation(
+        "glossary:\n  net_revenue:\n    name: Chiffre d'affaires net\n    synonyms: [ventes, CA]\n"
+    )
+    assert issues == []
+    texts = parsed[0].glossary["net_revenue"]
+    assert (texts.name, texts.definition, texts.synonyms) == (
+        "Chiffre d'affaires net",
+        None,
+        ("ventes", "CA"),
+    )
+    assert parsed[0].tables == {}
+
+
+def test_a_translated_synonym_equal_to_the_translated_name_is_refused() -> None:
+    _, issues = _translation(
+        "glossary:\n  net_revenue:\n    name: Ventes\n    synonyms: [ventes]\n"
+    )
+    assert issues == [
+        "translations/fr.yaml:4: glossary.net_revenue.synonyms: `ventes` is the term's name; a "
+        "synonym is another word for it, so remove it here"
+    ]
+
+
+def test_a_glossary_section_of_the_wrong_shape_is_refused() -> None:
+    _, listed = _translation("glossary: [a]\n")
+    _, empty = _translation("glossary:\n  net_revenue: {}\n")
+    assert listed == [
+        "translations/fr.yaml:1: `glossary` must be a mapping of term ids to their texts, such "
+        "as `glossary: {net_revenue: {name: …, definition: …}}`"
+    ]
+    assert empty == [
+        "translations/fr.yaml:2: glossary.net_revenue: needs `name:`, `definition:` or `synonyms:`"
+    ]
+
+
+def test_a_translation_of_a_term_the_repository_does_not_define_is_refused() -> None:
+    parsed, _ = _translation("glossary:\n  net_revenu:\n    name: X\n")
+    config = parse_project_config("main_language: en\n", limits=_LIMITS)
+    issues = translation_issues(config, [], parsed, _glossary())
+    assert [i.render() for i in issues] == [
+        "translations/fr.yaml:2: `net_revenu` is not a term this repository's glossary/ "
+        "defines; did you mean `net_revenue`? Fix the id, or remove the entry"
+    ]
+
+
+def test_an_unparsed_glossary_does_not_make_every_translated_term_unknown() -> None:
+    parsed, _ = _translation("glossary:\n  net_revenue:\n    name: X\n")
+    config = parse_project_config("main_language: en\n", limits=_LIMITS)
+    assert translation_issues(config, [], parsed, None) == []
+
+
+def test_without_a_glossary_folder_every_translated_term_is_unknown() -> None:
+    parsed, _ = _translation("glossary:\n  net_revenue:\n    name: X\n")
+    config = parse_project_config("main_language: en\n", limits=_LIMITS)
+    expected = [
+        "translations/fr.yaml:2: `net_revenue` is not a term this repository's glossary/ "
+        "defines; fix the id, or remove the entry"
+    ]
+    assert [i.render() for i in translation_issues(config, [], parsed)] == expected
+    assert [i.render() for i in translation_issues(config, [], parsed, NO_GLOSSARY)] == expected
+
+
+def test_coverage_and_strict_mode_count_term_names_and_definitions() -> None:
+    parsed, _ = _translation("glossary:\n  net_revenue:\n    name: CA net\n")
+    config = parse_project_config(
+        "main_language: en\ntranslations:\n  require: [fr]\n", limits=_LIMITS
+    )
+    assert coverage_hints(config, [], parsed, _glossary()) == (
+        "translations/fr.yaml: 1 of 2 texts translated; the other 1 show in `en`",
+    )
+    assert [i.render() for i in translation_issues(config, [], parsed, _glossary())] == [
+        "translations/fr.yaml: translations.require in lakana.yaml needs a `fr` text for every "
+        "header text, and 1 is missing: glossary.net_revenue.definition. Add them to "
+        "translations/fr.yaml, or remove `fr` from translations.require."
+    ]
+
+
+def test_strict_mode_does_not_report_a_refused_glossary_entry_again_as_missing() -> None:
+    parsed, issues = _translation("glossary:\n  net_revenue: {}\n")
+    assert len(issues) == 1
+    config = parse_project_config(
+        "main_language: en\ntranslations:\n  require: [fr]\n", limits=_LIMITS
+    )
+    assert translation_issues(config, [], parsed, _glossary()) == []

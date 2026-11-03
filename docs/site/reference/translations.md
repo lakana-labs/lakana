@@ -60,7 +60,9 @@ gold.fact_sales:
 - No text may be empty or contain a control character other than a newline or tab, a
   bidirectional control or a line separator.
 - An artifact has no catalog texts, so it has no translations.
-- Top-level keys without a dot are reserved for later sections of the same files.
+- The top-level key `glossary:` translates the repository's glossary terms
+  ([Glossary](glossary.md#translations)); other top-level keys without a dot are reserved for
+  later sections of the same files.
 - The file is read with the YAML rules of every project file: no anchors, aliases, merge keys or
   duplicate keys.
 
@@ -88,6 +90,8 @@ A deploy then names the missing texts, as the file nests them, at most 20 of the
 ``translations/fr.yaml: translations.require in lakana.yaml needs a `fr` text for every header text, and 3 are missing: gold.dim_store.description, gold.fact_sales.columns.store_id.description, gold.fact_sales.label. Add them to translations/fr.yaml, or remove `fr` from translations.require.``
 
 Strict mode reads the project's files only: a text typed into the catalog does not count for it.
+A [glossary](glossary.md) term's name and definition count as texts too, as
+`glossary.<id>.name` and `glossary.<id>.definition`.
 
 ## Limits
 
@@ -179,4 +183,6 @@ The file is read with the rules of every project file. Each message starts with 
 
 A project version that declares `main_language`, a label or a translation has manifest version
 11. It needs workers of the release that introduced it or later: a worker of an earlier release
-refuses its manifest. Every other project keeps its manifest version.
+refuses its manifest. Every other project keeps its manifest version. A project that also uses
+`write: history` has version 12, and one with a `glossary/` folder version 13
+([Glossary](glossary.md#workers-and-manifest-13)).

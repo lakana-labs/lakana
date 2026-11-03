@@ -40,7 +40,7 @@ if TYPE_CHECKING:
     from lakana_core.projects.checks import ParsedCheck
     from lakana_core.projects.frontmatter import AssetMetadata
 
-MANIFEST_VERSION = 12
+MANIFEST_VERSION = 13
 """Bumped when the manifest's shape changes. Version 2 adds `kind` per asset and
 `lock_sha256`; a version-1 manifest is read as all-SQL. Version 3 adds `output`,
 `keep_versions` and `input_kinds` per Python asset; versions 1 and 2 are read as all-table.
@@ -76,7 +76,11 @@ The `decimals` key is optional and read with a default (`entry_decimals`), so it
 no bump: an entry without it means ``float``. The `package_indexes` key is optional in
 the same way: a manifest without it uses no registered package index. The `python` key is
 optional too: a manifest without it runs on the worker's Python, and a worker of an earlier
-release ignores it and does the same."""
+release ignores it and does the same.
+Version 13 is written only when the project has a `glossary/` folder (`GLOSSARY_VERSION`); such
+a manifest has a top-level `glossary` (read with `lakana_core.projects.glossary.manifest_glossary`)
+and a `checks` list.
+"""
 
 VERSION_WITHOUT_CHECKS = 3
 """The version of a manifest that has no `checks` list: a project without `checks/` is unchanged."""
@@ -119,7 +123,11 @@ HISTORY_VERSION = 12
 `at:`; a worker of an earlier release refuses it instead of running a dimension as something
 else, or a reference check without its time."""
 
-LISTS_CHECKS = (4, 5, 6, 7, 8, 9, 10, 11, 12)
+GLOSSARY_VERSION = 13
+"""The version of a manifest whose project has a `glossary/` folder; a worker of an earlier
+release refuses it, so only a project with a glossary needs the workers upgraded first."""
+
+LISTS_CHECKS = (4, 5, 6, 7, 8, 9, 10, 11, 12, 13)
 """The versions whose manifest always carries a `checks` list (version 4 a non-empty one). A
 tuple, not a set: a stored version may be any JSON value, a list too, and must not raise."""
 
@@ -348,6 +356,7 @@ def _version(
     uses_measures: bool = False,
     uses_texts: bool = False,
     uses_history: bool = False,
+    uses_glossary: bool = False,
 ) -> int:
     """Pick the lowest manifest version that carries everything the project declares.
 
@@ -369,10 +378,13 @@ def _version(
         Whether the project declares `main_language`, a label or a translation.
     uses_history
         Whether an asset uses `write: history` or a reference declares `at:`.
+    uses_glossary
+        Whether the project has a `glossary/` folder.
 
     Returns
     -------
     int
+        `GLOSSARY_VERSION` when the project has a glossary, else
         `HISTORY_VERSION` when the project uses history, else `TEXTS_VERSION` when the project
         uses texts, else `MEASURES_VERSION` when an asset
         declares measures, else `MODEL_VERSION` when an asset
@@ -382,6 +394,8 @@ def _version(
         `JOBS_VERSION` with jobs, `CHECKS_VERSION` with checks, `VERSION_WITHOUT_CHECKS`
         otherwise.
     """
+    if uses_glossary:
+        return GLOSSARY_VERSION
     if uses_history:
         return HISTORY_VERSION
     if uses_texts:
@@ -458,6 +472,7 @@ def build_manifest(
     main_language: str | None = None,
     translations: Mapping[str, Mapping[str, Any]] | None = None,
     layers: LayersConfig | None = None,
+    glossary: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Build the manifest stored on a project version.
 
@@ -501,6 +516,10 @@ def build_manifest(
         `lakana.yaml`'s `layers:`; recorded as `layers` (`LayersConfig.model_dump(mode="json")`)
         only when declared, so every other project keeps its manifest byte for byte. No version
         bump: the rules are enforced while a deploy is validated, never when a run executes.
+    glossary
+        Term id → its manifest form (`glossary_entries`); `None` when the project has no
+        `glossary/`. Recorded as `glossary` and makes the manifest `GLOSSARY_VERSION`, even
+        when empty.
 
     Returns
     -------
@@ -526,6 +545,7 @@ def build_manifest(
         uses_texts=uses_texts,
         uses_history=any(asset.metadata.write == "history" for asset in assets)
         or any(r.at is not None for refs in resolved.values() for r in refs),
+        uses_glossary=glossary is not None,
     )
     manifest: dict[str, Any] = {
         "version": version,
@@ -553,6 +573,8 @@ def build_manifest(
         manifest["main_language"] = main_language
     if layers is not None:
         manifest["layers"] = layers.model_dump(mode="json")
+    if glossary is not None:
+        manifest["glossary"] = {k: dict(v) for k, v in sorted(glossary.items())}
     lists_empty = (
         CONNECTIONS_VERSION,
         WRITES_VERSION,
@@ -560,6 +582,7 @@ def build_manifest(
         MEASURES_VERSION,
         TEXTS_VERSION,
         HISTORY_VERSION,
+        GLOSSARY_VERSION,
     )
     if checks or config.jobs or version in lists_empty:
         manifest["checks"] = [_check_entry(check) for check in sorted(checks, key=lambda c: c.name)]

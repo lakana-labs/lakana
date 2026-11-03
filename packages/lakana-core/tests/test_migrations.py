@@ -4922,3 +4922,55 @@ def test_0061_adds_the_time_column_of_a_reference(
         }
     finally:
         engine.dispose()
+
+
+_REVISION_0062 = "b4d8e0f2a6c7"
+
+
+@pytest.mark.usefixtures("_without_fsync")
+def test_0062_adds_the_glossary_tables_and_downgrades_cleanly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Revision `0062`: four empty glossary tables, the link index; the downgrade drops them.
+
+    Parameters
+    ----------
+    tmp_path
+        Holds the throwaway SQLite file.
+    monkeypatch
+        Points `lakana_core.config.Settings` at that file.
+    """
+    db_path = tmp_path / "migrated.db"
+    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    config = Config(str(ALEMBIC_INI))
+    command.upgrade(config, _REVISION_0062)
+    engine = create_engine(f"sqlite:///{db_path}")
+    tables = (
+        "glossary_terms",
+        "glossary_term_texts",
+        "glossary_term_links",
+        "glossary_term_related",
+    )
+    try:
+        inspector = inspect(engine)
+        assert set(tables) <= set(inspector.get_table_names())
+        assert {c["name"] for c in inspector.get_columns("glossary_term_links")} == {
+            "term_id",
+            "position",
+            "table_name",
+            "column_name",
+        }
+        assert "ix_glossary_term_links_table_name" in {
+            i["name"] for i in inspector.get_indexes("glossary_term_links")
+        }
+        assert [f["referred_table"] for f in inspector.get_foreign_keys("glossary_term_links")] == [
+            "glossary_terms"
+        ]
+    finally:
+        engine.dispose()
+    command.downgrade(config, _REVISION_0061)
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        assert not set(tables) & set(inspect(engine).get_table_names())
+    finally:
+        engine.dispose()
