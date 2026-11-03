@@ -3,9 +3,11 @@
 A term shows to anyone who may read its environment. Its links are resolved by name when read:
 a link to a table that exists shows only to a reader who may read that table, and is left out
 otherwise (never refused), also when its column is gone; a link to a table that does not exist
-shows as missing to everyone who sees the term. Texts are shown in the first of the reader's
-languages that has a translated name or definition, each text without a translation in the
-term's main language.
+shows as missing to everyone who sees the term. The name and definition are shown in the first
+of the reader's languages that has a translated name or definition, each text without a
+translation in the term's main language. Synonyms are additional words, not a translation: the
+main-language synonyms show always, followed by those of every reader language before the main
+language, a word that folds like one already shown left out.
 """
 
 from __future__ import annotations
@@ -36,6 +38,7 @@ from lakana_core.models import (
     TableColumn,
 )
 from lakana_core.pagination import Page, by_key
+from lakana_core.projects.glossary import folded_text
 from lakana_core.projects.lookups import environment_by_name
 
 _TERM_LIST = "terms"
@@ -101,7 +104,9 @@ class TermView:
     definition
         The definition, in `language` when translated, else in the main language.
     synonyms
-        The main-language synonyms, then those of `language`.
+        The main-language synonyms, then those of each reader language before the main language
+        (also one without a translated name or definition), in the reader's order; a word that
+        folds (NFC, then case) like an earlier one is left out.
     owner
         Who answers for the term.
     repository
@@ -192,7 +197,9 @@ def _shown(
     """Choose a term's texts for a reader.
 
     The shown language is the first of the reader's lookup chain, before the main language, that
-    has a translated name or definition; each text it lacks is shown in the main language.
+    has a translated name or definition; each text it lacks is shown in the main language. The
+    synonyms are the main language's, then those of every language of the chain before the main
+    language, whatever the shown language; a word folding like an earlier one shows once.
 
     Parameters
     ----------
@@ -214,21 +221,20 @@ def _shown(
     by: dict[tuple[str, str], list[str]] = {}
     for row in sorted(texts, key=lambda r: r.position):
         by.setdefault((row.language, row.field), []).append(row.text)
-    chosen = main
-    for language in lookup_chain(languages):
-        if language == main:
-            break
-        if (language, "name") in by or (language, "definition") in by:
-            chosen = language
-            break
-    synonyms = by.get((MAIN_TEXT_LANGUAGE, "synonym"), [])
-    if chosen != main:
-        synonyms = synonyms + by.get((chosen, "synonym"), [])
+    chain = lookup_chain(languages)
+    before_main = chain[: chain.index(main)] if main in chain else chain
+    chosen = next(
+        (lang for lang in before_main if (lang, "name") in by or (lang, "definition") in by), main
+    )
+    synonyms: dict[str, str] = {}
+    for language in (MAIN_TEXT_LANGUAGE, *before_main):
+        for word in by.get((language, "synonym"), []):
+            synonyms.setdefault(folded_text(word), word)
     return _Shown(
         chosen,
         by.get((chosen, "name"), [term.name])[0],
         by.get((chosen, "definition"), [term.definition])[0],
-        tuple(synonyms),
+        tuple(synonyms.values()),
     )
 
 

@@ -221,7 +221,9 @@ def world(
     return World(session, principal, env_id)
 
 
-def _deploy_hr(world: World, key: str, links: dict[str, list[str]]) -> None:
+def _deploy_hr(
+    world: World, key: str, links: dict[str, list[str]], translations: dict[str, Any] | None = None
+) -> None:
     """Deploy a second repository, `hr`, with one term.
 
     Parameters
@@ -232,11 +234,14 @@ def _deploy_hr(world: World, key: str, links: dict[str, list[str]]) -> None:
         The term id; its name, definition and owner are fixed.
     links
         The term's links in manifest form.
+    translations
+        The term's translations in manifest form, if any.
     """
     hr = Repository(id=uuid.uuid4(), name="hr", kind=RepositoryKind.HTTPS, url="https://h/hr")
     world.session.add(hr)
     world.session.flush()
     term = {"name": "Salary cost", "definition": "Pay.", "owner": "hr", "links": links}
+    term["translations"] = translations or {}
     write_glossary(world.session, world.env_id, hr.id, {**_GLOSSARY, "glossary": {key: term}})
     world.session.commit()
 
@@ -377,3 +382,26 @@ def test_table_terms_lists_the_table_and_column_terms_in_the_reader_language(
         TermRef("net_revenue", "Net revenue"),
     )
     assert table_terms(world.session, env_id, "gold.nothing", (), "en").columns == {}
+
+
+def test_synonyms_come_from_every_reader_language_also_one_without_a_translated_name(
+    world: World,
+) -> None:
+    _deploy_hr(
+        world,
+        "salary_cost",
+        {},
+        {
+            "de": {"synonyms": ["Umsatz", "Pay"]},
+            "fr": {"name": "Coût salarial", "synonyms": ["masse salariale", "UMSATZ"]},
+            "es": {"name": "Coste salarial", "synonyms": ["nómina"]},
+        },
+    )
+    only_synonyms = world.service.get(world.bob, "dev", "salary_cost", languages=("de",))
+    assert (only_synonyms.language, only_synonyms.name) == ("en", "Salary cost")
+    assert only_synonyms.synonyms == ("Umsatz", "Pay")
+    both = world.service.get(world.bob, "dev", "salary_cost", languages=("es", "de", "fr"))
+    assert (both.language, both.name) == ("es", "Coste salarial")
+    assert both.synonyms == ("nómina", "Umsatz", "Pay", "masse salariale")
+    main_first = world.service.get(world.bob, "dev", "salary_cost", languages=("en", "de"))
+    assert main_first.synonyms == ()
