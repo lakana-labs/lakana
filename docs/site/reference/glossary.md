@@ -78,16 +78,20 @@ Every deploy and dry run checks the glossary against the project and the environ
 nothing when a check fails. A linked table is one the project builds, or one that exists in the
 environment and that you, the deployer, may read; a table this repository built before and the new
 version no longer builds counts as missing. A link's columns are checked against the columns the
-asset's `SELECT` returns, or the table's current columns for any other table. Each refusal names
-the file and line, the term id and what to do:
+asset's `SELECT` returns, or the table's current columns for any other table. The columns of a
+project table that the deploy cannot see, one built by `SELECT *` or by a Python asset, are not
+checked at deploy: such a link is kept as written and resolves when the glossary is read. Each
+refusal names the file and line, the term id and what to do. The examples are for
+`glossary/sales.yaml` above, with the mistake on the line they name (for the artifact,
+`gold.dim_store: []` on line 10 written as `gold.churn_model: [score]`):
 
 | Problem | Message | Fix |
 |---|---|---|
-| A linked column the table does not have | `glossary/sales.yaml:7: net_revenue links gold.fact_sales column net_amout, which gold.fact_sales does not have (columns: date, store_id, net_amount); fix the column name or remove the link.` | Correct the column, or remove it from the list. At most 20 columns are listed. |
-| A linked table that is missing, or that you may not read | `glossary/sales.yaml:6: net_revenue links gold.fact_sale, which does not exist in environment dev, or you may not read it; fix the table name (did you mean gold.fact_sales?), build the table first, or ask for READ_TABLE on it.` | Correct the name, deploy and run the table's project first, or ask an admin for `READ_TABLE`. |
-| Columns of an artifact | ``glossary/models.yaml:6: net_revenue links columns of gold.churn_model, an artifact, which has no columns; link the artifact itself with `gold.churn_model: []`, or remove the link.`` | Link the artifact with an empty list. |
-| A related id no repository defines | `glossary/sales.yaml:10: net_revenue names gros_revenue under related:, which is not a term of this repository or of another repository deployed to dev; fix the id (did you mean gross_revenue?), or remove it from related:.` | Correct the id, or remove it. |
-| A term id another repository owns | `glossary/sales.yaml:1: net_revenue is a term of repository finance in dev, and a term id belongs to the repository that deployed it first; rename the term here, or remove it from finance first.` | Rename the term, or remove it from the other repository and deploy that first. |
+| A linked column the table does not have | `glossary/sales.yaml:9: net_revenue links gold.fact_sales column net_amout, which gold.fact_sales does not have (columns: date, store_id, net_amount); fix the column name or remove the link.` | Correct the column, or remove it from the list. At most 20 columns are listed. |
+| A linked table that is missing, or that you may not read | `glossary/sales.yaml:9: net_revenue links gold.fact_sale, which does not exist in environment dev, or you may not read it; fix the table name (did you mean gold.fact_sales?), build the table first, or ask for READ_TABLE on it.` | Correct the name, deploy and run the table's project first, or ask an admin for `READ_TABLE`. |
+| Columns of an artifact | ``glossary/sales.yaml:10: net_revenue links columns of gold.churn_model, an artifact, which has no columns; link the artifact itself with `gold.churn_model: []`, or remove the link.`` | Link the artifact with an empty list. |
+| A related id no repository defines | `glossary/sales.yaml:11: net_revenue names gros_revenue under related:, which is not a term of this repository or of another repository deployed to dev; fix the id (did you mean gross_revenue?), or remove it from related:.` | Correct the id, or remove it. |
+| A term id another repository owns | `glossary/sales.yaml:2: net_revenue is a term of repository finance in dev, and a term id belongs to the repository that deployed it first; rename the term here, or remove it from finance first.` | Rename the term, or remove it from the other repository and deploy that first. |
 
 A message about another repository's table names its columns or kind only to a reader who may read
 that table; anyone else sees the missing-table message in its place.

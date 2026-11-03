@@ -3562,6 +3562,23 @@ def test_a_term_another_repository_owns_refuses_the_deploy(
     )
 
 
+def test_a_link_to_a_table_the_deployer_may_not_read_reads_as_missing(
+    session: Session, principal: PrincipalRef, world: World
+) -> None:
+    """Under real grants, a wrong column of an unreadable table reveals nothing of the table."""
+    _build_table(session, principal, "gold.secret")
+    ci = _deployer_under_grants(session, principal)
+    term = _TERM.replace("bronze.events: []", "gold.secret: [nope]")
+    commit(world.repo_path, {"assets/silver/clean.sql": _GLOSSARY_SQL, "glossary/sales.yaml": term})
+    run = _deploy_as(session, ci, world, "analytics")
+    assert run.status is DeployStatus.FAILED
+    assert run.error_message == (
+        "glossary/sales.yaml:8: net_revenue links gold.secret, which does not exist in "
+        "environment dev, or you may not read it; fix the table name, build the table first, or "
+        "ask for READ_TABLE on it."
+    )
+
+
 def test_a_column_of_another_repositorys_table_is_checked_and_withheld(
     session: Session, principal: PrincipalRef, world: World
 ) -> None:
