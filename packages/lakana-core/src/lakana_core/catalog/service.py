@@ -1106,7 +1106,7 @@ def _snapshot_numbers_checked(
         clients number them. It also keeps the number away from the 2^63-1 ceiling, after
         which no snapshot could be added.
     parented
-        Whether the snapshot names a parent: on a format v2 table pyiceberg then refuses a
+        Whether the snapshot names a parent: on a format v2 or later table pyiceberg then refuses a
         sequence number not above `last` itself, with the text the commit already withholds
         from a writer without READ, so it is left to pyiceberg.
 
@@ -1134,9 +1134,9 @@ def _snapshot_numbers_checked(
         )
     if format_version >= 2 and sequence_number is None:
         raise ValidationError(
-            "A snapshot on a format v2 table needs a sequence number: the table's last plus one "
-            "per snapshot the commit adds; load the table again and commit again with a client "
-            "that sets it."
+            "A snapshot on a format v2 or later table needs a sequence number: the table's last "
+            "plus one per snapshot the commit adds; load the table again and commit again with a "
+            "client that sets it."
         )
     pyiceberg_checks = format_version == 2 and parented
     if format_version >= 2 and not pyiceberg_checks and sequence <= last:
