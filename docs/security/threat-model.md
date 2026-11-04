@@ -19,6 +19,10 @@ What an attacker, or an over-broad grant, could reach:
 - **Table data in object storage** — the Parquet/Iceberg data files under a managed zone.
 - **Catalog metadata** — table schemas, partitioning, snapshot history, namespace
   structure; reveals shape and existence of data even without reading it.
+  Glossary terms (their names, synonyms, definitions and links) are readable by anyone who may
+  read the environment; a link to an unreadable table is left out, but a link to a table that
+  does not exist is shown as missing, so someone who knows a term's declared links (the file is
+  in the repository) can tell a missing table from an unreadable one. Accepted (#375, Q8).
 - **Credentials and secrets** — session cookies, PATs, task tokens, and the secrets stored
   for connections and tasks.
 - **The audit log** — itself sensitive, since query text and `WHERE` clauses can contain

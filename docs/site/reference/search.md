@@ -1,6 +1,6 @@
 # Search
 
-One search over the tables, columns, labels, descriptions, runs and principals of an environment: the
+One search over the tables, columns, labels, descriptions, runs, principals and glossary terms of an environment: the
 route, the matching and ranking rules, who sees what, the limits, the command, the SDK, and how the
 columns of tables that existed before search are filled in. For the steps, see
 [Find a table](../how-to/find-a-table.md).
@@ -9,15 +9,24 @@ columns of tables that existed before search are filled in. For the steps, see
 
 | Kind | Matched against | `matched` is |
 |---|---|---|
-| `table` | the table's name, its name with the namespace (`silver.orders`), its shown label, its shown description, its declared grain | `name`, `label`, `description` or `grain` |
-| `column` | the column's name, its shown label, its shown description, the label and description of its measure | `name`, `label`, `description` or `measure` |
+| `table` | the table's name, its name with the namespace (`silver.orders`), its shown label, its shown description, its declared grain; the name and synonyms of a glossary term that links it | `name`, `label`, `description`, `grain` or `term` |
+| `column` | the column's name, its shown label, its shown description, the label and description of its measure; the name and synonyms of a glossary term that links it | `name`, `label`, `description`, `measure` or `term` |
 | `run` | the run's id (four hex characters or more, with or without dashes), its job, its repository | `id`, `job` or `repository` |
 | `principal` | the principal's name | `name` |
+| `term` | the term's key, its shown name, its synonyms (main language always, translated ones in your languages), its definition | `name`, `synonym` or `definition` |
 
 The *grain* is the sentence the table's asset header declares (`grain:`); a table that declares none
 has no grain to match. Key columns are found as columns. The declared kind (`fact`, `dimension`,
 `wide`, `staging`) is not matched as text: to find the tables of one kind, filter with
 `--model-kind` (`model_kind` over REST and in the SDK).
+
+A table or column linked from a glossary term is found by that term's name and synonyms, not by its
+definition, with `matched: term` and the term's key in `term`: "revenue" finds the term
+`net_revenue`, the column `gold.fact_sales.net_amount` it links, and the tables it links as a
+whole. A term is found by the synonyms it *shows* you: those of its main language, then those of
+your languages that come before the term's main language in your list (all of them when the main
+language is not in your list). The links are those the term declares, see
+[Glossary](glossary.md).
 
 A table is a managed table, an external table, a view or an artifact, as in the table listing
 (`table_kind` is `TABLE`, `EXTERNAL`, `VIEW` or `ARTIFACT`). An artifact has no columns and no
@@ -62,7 +71,7 @@ text is trimmed and must be 1 to 200 characters.
 ## Ranking and paging
 
 Results are ordered by: how well the name or a label matched (0 exact, 1 starts with, 2 contains,
-3 only a description, grain or measure text matched), then the kind (tables, columns, runs, principals), then the name. A match in a grain ranks as a match in the description. A page has
+3 only a description, grain or measure text matched), then the kind (tables, columns, runs, principals, terms), then the name. A match in a grain ranks as a match in the description. A synonym of a term ranks like a name, and a term's key like its name (when both match equally, `name` is reported); the term's definition ranks like a description. At one rank, an item found by its own text comes before the same kind of match through a term, and rows still tied go by the smallest term key. A table or column found by its own text and by a term is one result: the own text decides `matched`. A page has
 `limit` results (1 to 100, 20 by default) after `offset` (0 or more). Both count only what you may
 read.
 
@@ -73,6 +82,8 @@ read.
 | table, column | `READ_TABLE` on the table, asked per table as the table listing asks it (grants on the table, its namespace or the environment, and a task token's asset scope all count) |
 | run | `READ_ENVIRONMENT` |
 | principal | the right to list principals: `MANAGE_PRINCIPAL`, which the `ADMIN` role holds |
+| term | `READ_ENVIRONMENT`; decided once, before the terms are looked for |
+| table or column found by a term (`matched: term`) | `READ_TABLE` on the table, as above, and `READ_ENVIRONMENT`, because the hit carries the term's key |
 
 A result you may not see is left out, never refused. A label, a description, a grain, a kind, a measure's label and description, and
 every translation of them are matched and shown, even as a snippet, only for a table you may read: a label of a table you may
@@ -94,14 +105,14 @@ may read everything; a longer or more exact text finds them.
 | Parameter | Meaning |
 |---|---|
 | `q` | Required. The text, 1 to 200 characters after trimming. |
-| `kind` | Optional: `table`, `column`, `run` or `principal`. |
-| `model_kind` | Optional: `fact`, `dimension`, `wide` or `staging`. Only tables whose asset header declares this kind; columns, runs and principals are left out. Another value is `422`. |
+| `kind` | Optional: `table`, `column`, `run`, `principal` or `term`. |
+| `model_kind` | Optional: `fact`, `dimension`, `wide` or `staging`. Only tables whose asset header declares this kind; columns, runs, principals and terms are left out. Another value is `422`. |
 | `lang` | Optional: the language to match translated texts in, any case (`de`, `fr-CH`). Without it, your profile's language, then `Accept-Language`, then the instance's main language. A value that is not a language tag is `422` and names the tag. |
 | `limit` | Results per page, 1 to 100 (20). |
 | `offset` | Results to skip (0). |
 
 The answer is `{"results": [...], "limit": N, "offset": N, "has_more": true|false}`. Every result has
-`kind`, `name` (`silver.orders`, `silver.orders.status`, the run id, or the principal's name),
+`kind`, `name` (`silver.orders`, `silver.orders.status`, the run id, the principal's name, or the term's key),
 `matched`, `snippet`, `language` and `translated`; the rest depends on the kind and is `null` (`false` for `translated`) otherwise.
 
 | Kind | Further fields |
@@ -110,8 +121,9 @@ The answer is `{"results": [...], "limit": N, "offset": N, "has_more": true|fals
 | `column` | `namespace`, `table`, `column`, `column_type` |
 | `run` | `run_id`, `job`, `repository`, `status` |
 | `principal` | `principal`, `principal_type` |
+| `term` | `term` (the key), `repository`, `language`, `translated` |
 
-`snippet` is set when `matched` is `label`, `description`, `grain` or `measure`: at most 160 characters of that text around
+`snippet` is set when `matched` is `label`, `description`, `grain` or `measure`, and for every term and every `matched: term` hit: at most 160 characters of that text around
 the first hit. `language` is set on a table or column result that a text matched, and `translated` is `true` when that text is a translation rather than a header text (see [Languages](#languages)). A bad `q`,
 `limit`, `offset` or `kind` is `422` and says the range. `matched` may gain values in a later release; a client should treat
 one it does not know as a match in a text.
