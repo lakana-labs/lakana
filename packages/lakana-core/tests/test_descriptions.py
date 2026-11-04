@@ -1017,7 +1017,15 @@ def _with_health(health: Mapping[str, object] | None) -> dict:
 def test_a_deploy_writes_the_tables_health_effects(
     session: Session, catalog_with_orders: CatalogService
 ) -> None:
-    """The entry's effects land on the table; a redeploy without them resets it to `None`."""
+    """The entry's effects land on the table; a redeploy without them resets it to `None`.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    catalog_with_orders
+        The catalog with `silver.orders`.
+    """
     sync_project_descriptions(session, _env_id(session), _with_health({"volume": "block"}))
     session.commit()
     assert session.scalars(select(Table)).one().health_effects == {"volume": "block"}
@@ -1029,7 +1037,15 @@ def test_a_deploy_writes_the_tables_health_effects(
 def test_a_deploy_keeps_only_valid_effects_and_none_for_an_external_table(
     session: Session, catalog_with_orders: CatalogService
 ) -> None:
-    """A garbled entry keeps its valid effects; an external table never gets effects."""
+    """A garbled entry keeps its valid effects; an external table never gets effects.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    catalog_with_orders
+        The catalog with `silver.orders`.
+    """
     garbled = {"volume": "loud", "range.price": "off", "freshness": 3}
     sync_project_descriptions(session, _env_id(session), _with_health(garbled))
     session.commit()
@@ -1045,7 +1061,15 @@ def test_a_deploy_keeps_only_valid_effects_and_none_for_an_external_table(
 def test_a_deploy_that_drops_the_asset_clears_its_effects(
     session: Session, catalog_with_orders: CatalogService
 ) -> None:
-    """`clear_removed_models` resets the effects of a table the project no longer produces."""
+    """`clear_removed_models` resets the effects of a table the project no longer produces.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    catalog_with_orders
+        The catalog with `silver.orders`.
+    """
     previous = _with_health({"volume": "block"})
     sync_project_descriptions(session, _env_id(session), previous)
     session.commit()
@@ -1057,7 +1081,17 @@ def test_a_deploy_that_drops_the_asset_clears_its_effects(
 def test_a_table_created_after_the_deploy_gets_its_effects_and_its_first_signals_obey_them(
     session: Session, tmp_path: Path, principal: PrincipalRef
 ) -> None:
-    """A create-mode write records its first snapshot's signals with the deployed effects."""
+    """A create-mode write records its first snapshot's signals with the deployed effects.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    tmp_path
+        Storage root.
+    principal
+        The deployer, writer and reader.
+    """
     catalog = _prepared_catalog(session, tmp_path, AllowAllAuthorization(), namespaces=[_SILVER])
     _deploy(session, principal, _with_health({"null_rate": "off", "volume": "block"}))
     data = pa.table(
@@ -1084,7 +1118,17 @@ def test_a_table_created_after_the_deploy_gets_its_effects_and_its_first_signals
 def test_table_get_shows_the_effects_and_marks_a_column_the_table_does_not_have(
     session: Session, catalog_with_orders: CatalogService, principal: PrincipalRef
 ) -> None:
-    """`health` holds the stored effects; `health_missing` the keys naming no column of it."""
+    """`health` holds the stored effects; `health_missing` the keys naming no column of it.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    catalog_with_orders
+        The catalog with `silver.orders`.
+    principal
+        The deployer, writer and reader.
+    """
     plain = _described(catalog_with_orders, principal)
     assert (plain.health, plain.health_missing) == ({}, ())
     session.scalars(select(Table)).one().health_effects = {

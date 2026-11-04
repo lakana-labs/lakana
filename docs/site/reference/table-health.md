@@ -203,9 +203,9 @@ have then has no effect, and `lakana table get` marks it, as in
 `range of pricee off (no such column)`.
 
 The effects apply to a managed table from the next deploy on, or from its creation when a run
-creates it after the deploy. A table that no asset builds, or whose asset the deploy removed, uses
-the defaults: every signal warns. `lakana table get NAME` lists every effect that is not the
-default `warn`, in the order of its keys, as in
+creates it after the deploy. A table that no asset builds, whose asset a deploy removed, or whose
+repository was undeployed uses the defaults: every signal warns. `lakana table get NAME` lists
+every effect that is not the default `warn`, in the order of its keys, as in
 `Health (not the default warn): range of price off, volume block`.
 
 A project in which a table declares `health:` (in the asset or as a default in `lakana.yaml`)

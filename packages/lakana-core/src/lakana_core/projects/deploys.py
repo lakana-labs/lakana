@@ -46,7 +46,7 @@ from lakana_core.catalog.glossary import (
 from lakana_core.catalog.graph_model import NodeKind, parse_node
 from lakana_core.catalog.graph_service import GraphService
 from lakana_core.catalog.identity import resolve_table_id
-from lakana_core.catalog.model_metadata import clear_removed_models
+from lakana_core.catalog.model_metadata import clear_health_effects, clear_removed_models
 from lakana_core.ci_oidc.exchange import ci_scope_for_run
 from lakana_core.ci_oidc.scope import (
     ALREADY_USED_MESSAGE,
@@ -2279,7 +2279,8 @@ class DeployService:
         """Remove a repository's deployment pointer and run principal binding.
 
         Data and project versions stay: the repository's tables become orphans and
-        its project versions remain as history; the repository's glossary terms go. The
+        its project versions remain as history; the repository's glossary terms go, and so do
+        the health effects of its tables (no asset builds them, so every signal warns). The
         pointer row is deleted first and the active-run check runs after it in the same
         transaction, so a run start racing this call either commits first (and this call is
         refused) or finds the pointer gone (`lock_deployment`).
@@ -2359,6 +2360,9 @@ class DeployService:
             .execution_options(synchronize_session=False)
         )
         delete_glossary(self._session, env.id, repo.id)
+        # The pointer's foreign key keeps its version.
+        manifest = self._session.get_one(JobVersion, version_id).manifest_json
+        clear_health_effects(self._session, env.id, manifest)
         AuditService(self._session).record(
             p.id,
             AuditEventType.UNDEPLOYED,

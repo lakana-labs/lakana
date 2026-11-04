@@ -27,17 +27,17 @@ class NotificationState(enum.StrEnum):
 class NotificationDelivery(Base):
     """One notification: the event of one run of a job and where it goes.
 
-        The row is written in the transaction that finishes the run, so a run that ended has its
-        notification queued and a run that did not has none. It is both the queue the delivery loop
-        claims from and the record the run view shows. The unique key on (`run_id`, `event`) lets a
-        run queue an event only once. A test notification has no run (`run_id` is null, and null
-        values do not collide) and the event ``test``.
+    The row is written in the transaction that finishes the run, so a run that ended has its
+    notification queued and a run that did not has none. It is both the queue the delivery loop
+    claims from and the record the run view shows. The unique key on (`run_id`, `event`) lets a
+    run queue an event only once. A test notification has no run (`run_id` is null, and null
+    values do not collide) and the event ``test``.
 
     A delivery of a fired health signal has no run (`run_id` is null), the event ``health`` and
     the signal's id; (`health_signal_id`, `job`) is unique, so a signal is queued once per
     building job, and null ids never collide.
 
-        The row never holds the webhook's URL or a signing key, only the name of the secret.
+    The row never holds the webhook's URL or a signing key, only the name of the secret.
     """
 
     __tablename__ = "notification_deliveries"

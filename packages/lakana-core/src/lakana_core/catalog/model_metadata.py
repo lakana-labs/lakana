@@ -326,6 +326,27 @@ def clear_removed_models(
                 session.delete(measure)
 
 
+def clear_health_effects(session: Session, environment_id: uuid.UUID, manifest: object) -> None:
+    """Reset the health effects of every table a manifest produces in an environment.
+
+    Called by an undeploy, in its transaction: no asset builds those tables any more, so every
+    signal warns again. Nothing is committed.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    environment_id
+        The environment.
+    manifest
+        The manifest of the version that was current; untrusted.
+    """
+    for dotted in manifest_assets(manifest):
+        row = find_project_table(session, environment_id, dotted)
+        if row is not None:
+            row.health_effects = None
+
+
 def read_table_model(session: Session, row: Table) -> TableModel | None:
     """Read the model a table's row records.
 
