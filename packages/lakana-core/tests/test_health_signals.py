@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -22,6 +22,7 @@ from pyiceberg.types import (
     TimestampType,
 )
 
+from lakana_core.catalog import health_signals
 from lakana_core.catalog.health_signals import (
     MIN_HISTORY,
     Band,
@@ -32,9 +33,11 @@ from lakana_core.catalog.health_signals import (
     apply_effects,
     column_metrics,
     columns_of,
+    freshness_signal,
     learn_band,
     null_rate_signal,
     range_signal,
+    schedule_threshold,
     schema_signal,
     volume_signal,
 )
@@ -550,9 +553,7 @@ def test_a_bound_that_is_not_finite_is_not_stored() -> None:
 
 def test_an_unknown_signal_has_no_text() -> None:
     assert (
-        alert_text(
-            "t.t", "freshness", None, "fired", {}, {"low": 0}, snapshot_id=1, observed_at=_AT
-        )
+        alert_text("t.t", "lateness", None, "fired", {}, {"low": 0}, snapshot_id=1, observed_at=_AT)
         is None
     )
 
@@ -610,3 +611,188 @@ def test_a_date_bound_beyond_the_calendar_does_not_raise() -> None:
 def test_freshness_never_blocks() -> None:
     effects = HealthEffects({"freshness": "block", "volume": "block"})
     assert (effects.of("freshness"), effects.of("volume")) == ("warn", "block")
+
+
+_FRIDAY = datetime(2026, 10, 30, 6, 5, tzinfo=UTC)  # a Friday
+
+
+def _commits(count: int, every: timedelta) -> list[datetime]:
+    """Build commit times, newest first, ending at `_FRIDAY`.
+
+    Parameters
+    ----------
+    count
+        How many.
+    every
+        The gap.
+
+    Returns
+    -------
+    list of datetime
+        The times.
+    """
+    return [_FRIDAY - every * i for i in range(count)]
+
+
+def test_a_daily_schedule_allows_two_days() -> None:
+    assert schedule_threshold("0 6 * * *", "UTC", _FRIDAY) == pytest.approx(2 * 86_400)
+
+
+def test_a_weekday_job_is_not_late_on_sunday() -> None:
+    limit = schedule_threshold("0 6 * * 1-5", "UTC", _FRIDAY)
+    assert limit == (datetime(2026, 11, 3, 6, 0, tzinfo=UTC) - _FRIDAY).total_seconds()
+    assert limit is not None
+    sunday = _FRIDAY + timedelta(days=2)
+    seen = freshness_signal(
+        now=sunday, commit_times=_commits(8, timedelta(days=1)), thresholds=[(limit, "nightly")]
+    )
+    assert seen.state == "ok"
+
+
+def test_a_schedule_that_cannot_be_read_gives_no_threshold() -> None:
+    assert schedule_threshold("not a cron", "UTC", _FRIDAY) is None
+    assert schedule_threshold("0 6 * * *", "Nowhere/Atlantis", _FRIDAY) is None
+
+
+@pytest.mark.parametrize("fires", [[None], [_FRIDAY + timedelta(days=1), None]])
+def test_a_schedule_that_does_not_fire_twice_gives_no_threshold(
+    monkeypatch: pytest.MonkeyPatch, fires: list[datetime | None]
+) -> None:
+    answers = iter(fires)
+    monkeypatch.setattr(health_signals, "next_fire_after", lambda *args: next(answers))
+    assert schedule_threshold("0 6 * * *", "UTC", _FRIDAY) is None
+
+
+def test_freshness_fires_past_the_schedule_and_names_the_job() -> None:
+    late = freshness_signal(
+        now=_FRIDAY + timedelta(days=3),
+        commit_times=_commits(8, timedelta(days=1)),
+        thresholds=[(2 * 86_400.0, "nightly"), (7 * 86_400.0, "weekly")],
+    )
+    assert (late.state, late.observed, late.band) == (
+        "fired",
+        {
+            "seconds": 3 * 86_400,
+            "last_commit_at": _FRIDAY.isoformat(),
+            "source": "schedule",
+            "job": "nightly",
+        },
+        {"high": 172_800.0},
+    )
+    text = alert_text(
+        "gold.t",
+        "freshness",
+        None,
+        "fired",
+        late.observed,
+        late.band,
+        snapshot_id=4711,
+        observed_at=_FRIDAY + timedelta(days=3),
+    )
+    assert text == (
+        "gold.t: freshness 3 days since the last snapshot, usually within 2 days (last snapshot "
+        "4711, 30 Oct 06:05 UTC); check that job nightly still runs (lakana runs list), or set "
+        "health: {freshness: off} if this table is updated rarely"
+    )
+
+
+def test_without_a_schedule_freshness_needs_eight_commits() -> None:
+    hourly = timedelta(hours=1)
+    now = _FRIDAY + timedelta(hours=5)
+    young = freshness_signal(now=now, commit_times=_commits(7, hourly), thresholds=[])
+    assert (young.state, young.band, young.observed) == (
+        "no_history",
+        None,
+        {"seconds": 18_000, "last_commit_at": _FRIDAY.isoformat(), "source": None, "job": None},
+    )
+    late = freshness_signal(now=now, commit_times=_commits(8, hourly), thresholds=[])
+    assert late.observed is not None
+    assert (late.state, late.band, late.observed["source"], late.observed["job"]) == (
+        "fired",
+        {"high": 10_800.0},
+        "history",
+        None,
+    )
+    text = alert_text(
+        "gold.t",
+        "freshness",
+        None,
+        "fired",
+        late.observed,
+        late.band,
+        snapshot_id=1,
+        observed_at=_FRIDAY,
+    )
+    assert text is not None
+    assert "freshness 5 hours since the last snapshot, usually within 3 hours" in text
+    assert text.endswith(
+        "check what writes this table, or set health: {freshness: off} if it is updated rarely"
+    )
+
+
+def test_the_history_rule_reads_only_the_newest_commits() -> None:
+    """Only the gaps of the newest `HISTORY` + 1 commits count: an old slow period is forgotten."""
+    recent = _commits(health_signals.HISTORY + 1, timedelta(hours=1))
+    slow = [recent[-1] - timedelta(days=d) for d in range(1, 40)]
+    seen = freshness_signal(
+        now=_FRIDAY + timedelta(hours=4), commit_times=recent + slow, thresholds=[]
+    )
+    assert (seen.state, seen.band) == ("fired", {"high": 10_800.0})
+
+
+@pytest.mark.parametrize(
+    ("seconds", "shown"),
+    [
+        (59, "0 minutes"),
+        (60, "1 minute"),
+        (2_700, "45 minutes"),
+        (3_600, "60 minutes"),
+        (7_200, "2 hours"),
+        (108_000, "30 hours"),
+        (86_400 * 2, "2 days"),
+        (86_400 * 3, "3 days"),
+    ],
+)
+def test_durations_read_in_plain_units(seconds: int, shown: str) -> None:
+    observed = {
+        "seconds": seconds,
+        "last_commit_at": _FRIDAY.isoformat(),
+        "source": "history",
+        "job": None,
+    }
+    text = alert_text(
+        "t.t",
+        "freshness",
+        None,
+        "fired",
+        observed,
+        {"high": 3_600.0},
+        snapshot_id=1,
+        observed_at=_FRIDAY,
+    )
+    assert text is not None and f"freshness {shown} since" in text
+    assert "usually within 60 minutes" in text
+
+
+def test_a_day_reads_in_hours_and_an_hour_and_a_half_in_minutes() -> None:
+    observed = {"seconds": 86_400, "last_commit_at": _FRIDAY.isoformat(), "source": "history"}
+    text = alert_text(
+        "t.t",
+        "freshness",
+        None,
+        "fired",
+        {**observed, "job": None},
+        {"high": 3_600.0 * 1.5},
+        snapshot_id=1,
+        observed_at=_FRIDAY,
+    )
+    assert text is not None and "freshness 24 hours since" in text
+    assert "usually within 90 minutes" in text
+
+
+def test_a_value_free_freshness_alert_names_what_writes_the_table() -> None:
+    text = health_signals.value_free_alert(
+        "gold.t", "freshness", None, snapshot_id=7, observed_at=_FRIDAY, environment="dev"
+    )
+    assert "health signal freshness fired at snapshot 7" in text
+    assert "check what writes gold.t, or set health: {freshness: off} if this is expected" in text

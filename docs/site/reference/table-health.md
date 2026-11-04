@@ -318,7 +318,8 @@ definition. A policy that does not apply to you changes nothing you see.
   values under a name the current schema no longer has are left out too, and a table whose
   metadata cannot be read hides all values from you.
 - **Row filter.** If a row filter applies to you, every value-revealing number (bounds, null
-  rates, bands and alert values) is left out for all columns. `volume` and `schema` stay.
+  rates, bands and alert values) is left out for all columns. `volume`, `freshness` and `schema`
+  stay: `last_write_at` shows when the table was last written anyway.
 - **A masked column renamed since the mask was written.** All values are hidden, as the query
   path refuses such reads.
 - **A kept table** (a failed check kept its data): the routes show aggregates and snapshot ids,
@@ -338,7 +339,9 @@ observations, newest first.
 | `cursor` | The `next_cursor` of the previous page. |
 
 The answer is `{"items": [...], "next_cursor": ...}`; `next_cursor` is `null` on the last page.
-`LAKANA_HEALTH__RETENTION_DAYS` (90 by default, at least 7) is how far back `days` may reach.
+`LAKANA_HEALTH__RETENTION_DAYS` (90 by default, at least 7) is how far back `days` may reach. The
+workers' hourly sweep (`LAKANA_RUN__SWEEP_INTERVAL`) deletes older observations, but keeps the
+newest of each signal and column, so the current state never goes.
 
 ## Commands
 

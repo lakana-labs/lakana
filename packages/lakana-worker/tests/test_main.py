@@ -851,6 +851,7 @@ def _housekeeping(
     columns: mock.MagicMock | None = None,
     locations: mock.MagicMock | None = None,
     sizes: mock.MagicMock | None = None,
+    health: mock.MagicMock | None = None,
 ) -> None:
     """Run `main`, then the housekeeping callable it gave the scheduler, once.
 
@@ -874,6 +875,8 @@ def _housekeeping(
         Stands in for `sweep_table_locations`; a mock that succeeds when `None`.
     sizes
         Stands in for `measure_table_sizes`; a mock that succeeds when `None`.
+    health
+        Stands in for `sweep_health`; a mock that succeeds when `None`.
     """
     monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{tmp_path}/lakana.db")
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg"))
@@ -887,6 +890,7 @@ def _housekeeping(
         mock.patch("lakana_worker.__main__.backfill_table_columns", columns or mock.MagicMock()),
         mock.patch("lakana_worker.__main__.sweep_table_locations", locations or mock.MagicMock()),
         mock.patch("lakana_worker.__main__.measure_table_sizes", sizes or mock.MagicMock()),
+        mock.patch("lakana_worker.__main__.sweep_health", health or mock.MagicMock()),
         mock.patch("lakana_worker.__main__.signal.signal"),
     ):
         scheduler_mock.return_value.start.return_value.is_alive.return_value = False
@@ -987,6 +991,38 @@ def test_a_failing_table_reads_sweep_is_logged_and_does_not_raise(
     assert "sweep_failed" in {getattr(r, "event", None) for r in caplog.records}
 
 
+def test_housekeeping_also_sweeps_table_health_with_the_kept_period(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("LAKANA_HEALTH__RETENTION_DAYS", "45")
+    artifacts, health = mock.MagicMock(), mock.MagicMock()
+    _housekeeping(tmp_path, monkeypatch, artifacts, mock.MagicMock(), health=health)
+    assert health.call_count == 1
+    call = health.call_args
+    assert call.kwargs["now"] == artifacts.call_args.kwargs["now"]
+    assert call.kwargs["rotation"] == artifacts.call_args.kwargs["rotation"] == 0
+    assert call.kwargs["retention_days"] == 45
+    assert call.kwargs["should_stop"]() is False
+
+
+def test_a_failing_table_health_sweep_is_logged_and_the_others_still_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    columns = mock.MagicMock()
+    with caplog.at_level(logging.WARNING):
+        _housekeeping(
+            tmp_path,
+            monkeypatch,
+            mock.MagicMock(),
+            mock.MagicMock(),
+            columns=columns,
+            health=mock.MagicMock(side_effect=RuntimeError),
+        )
+    assert "The table health sweep failed (RuntimeError)." in caplog.text
+    assert "sweep_failed" in {getattr(r, "event", None) for r in caplog.records}
+    assert columns.call_count == 1
+
+
 def test_housekeeping_also_stores_the_columns_of_tables_that_have_none(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1072,6 +1108,7 @@ def test_the_start_up_log_says_when_nothing_collects_leftovers(
     assert "artifact" in lines[0] and "not removed" in lines[0]
     assert "tables whose create never finished" in lines[0]
     assert "package cache is not trimmed" in lines[0]
+    assert "table health signals are neither checked for freshness nor deleted" in lines[0]
 
 
 def test_the_worker_warns_at_start_up_only_when_old_format_secrets_are_accepted(

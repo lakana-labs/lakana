@@ -393,6 +393,74 @@ def test_a_set_back_row_is_in_the_history_marked_and_never_the_current_state(
     ]
 
 
+def _freshness_row(
+    session: Session, state: str, *, minutes: int, set_back: bool = False
+) -> TableHealthSignal:
+    """Record a freshness row of `silver.orders`, which has no sequence number of its own.
+
+    Parameters
+    ----------
+    session
+        Database session; commits.
+    state
+        Its state.
+    minutes
+        Minutes after `_NOW`.
+    set_back
+        Whether a set-back has marked the row.
+
+    Returns
+    -------
+    TableHealthSignal
+        The row.
+    """
+    late = {
+        "seconds": 259_200,
+        "last_commit_at": _NOW.isoformat(),
+        "source": "history",
+        "job": None,
+    }
+    row = _add(
+        session,
+        "freshness",
+        state,
+        observed=late,
+        band={"high": 86_400.0},
+        minutes=minutes,
+        set_back=set_back,
+    )
+    row.sequence_number = None
+    session.commit()
+    return row
+
+
+def test_a_freshness_row_shows_next_to_the_commit_signals(session: Session, tmp_path: Path) -> None:
+    """Show the newest freshness row not set back, by time, with the schema and volume rows.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    tmp_path
+        Storage root.
+    """
+    _catalog(session, tmp_path)
+    _add(session, "schema", "ok", observed=_SCHEMA)
+    _add(session, "volume", "ok", observed={"added": 3, "total": 3})
+    fired = _freshness_row(session, "fired", minutes=60)
+    _freshness_row(session, "ok", minutes=120)
+    _freshness_row(session, "off", minutes=180, set_back=True)
+    shown = current_signals(session, fired.table_id, "silver.orders", Visibility(filtered=True))
+    assert [(s.signal, s.state) for s in shown] == [
+        ("freshness", "ok"),
+        ("volume", "ok"),
+        ("schema", "ok"),
+    ]
+    assert shown[0].last_fired_at == fired.observed_at
+    assert shown[0].alert is not None
+    assert shown[0].alert.startswith("silver.orders: freshness 3 days since the last snapshot")
+
+
 def test_a_signal_switched_off_replaces_its_column_rows(session: Session, tmp_path: Path) -> None:
     """Show only the off row of a signal the newest commit switched off (F10 a).
 
@@ -473,7 +541,7 @@ def test_a_compaction_keeps_the_column_signals_of_the_commit_before(
     _add(session, "volume", "ok", observed={"added": 3, "total": 3})
     _add(session, "null_rate", "ok", column="id", observed={"nulls": 0, "values": 3, "rate": 0.0})
     compaction = _add(session, "schema", "ok", observed=_SCHEMA, minutes=5)
-    _add(session, "freshness", "ok", observed={"age_hours": 1.0}, minutes=7)
+    _freshness_row(session, "ok", minutes=7)
     shown = current_signals(session, first.table_id, "silver.orders", Visibility())
     assert [(s.signal, s.column, s.observed_at) for s in shown] == [
         ("freshness", None, _NOW + timedelta(minutes=7)),

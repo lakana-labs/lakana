@@ -8,6 +8,7 @@ signal and column; no signal but `schema` fires with fewer than `MIN_HISTORY`.
 
 from __future__ import annotations
 
+import itertools
 import math
 import statistics
 import struct
@@ -33,6 +34,7 @@ from pyiceberg.types import (
 )
 
 from lakana_core.identifiers import shown
+from lakana_core.jobs.cron import next_fire_after
 
 SIGNALS = ("freshness", "volume", "null_rate", "range", "schema")
 """Every signal, in the order they are shown."""
@@ -54,6 +56,10 @@ NULL_RATE_FLOOR = 0.02
 RANGE_FLOOR_SHARE = 0.01
 MAX_HEALTH_COLUMNS = 200
 """The most top-level columns one commit evaluates, in schema order; the rest record nothing."""
+FRESHNESS_SCHEDULE_FACTOR = 2.0
+"""A scheduled table is late after this many intervals of its schedule."""
+FRESHNESS_HISTORY_FACTOR = 3.0
+"""A table without a schedule is late after this many median intervals of its commits."""
 
 _RANGE_KINDS: tuple[tuple[tuple[type[PrimitiveType], ...], str], ...] = (
     ((IntegerType, LongType), "integer"),
@@ -618,6 +624,87 @@ def schema_signal(
     return Observation("schema", None, state, observed, None)
 
 
+def schedule_threshold(cron: str, timezone: str, last_commit_at: datetime) -> float | None:
+    """Say how long after its last commit a scheduled table is late.
+
+    Twice the gap between the first two fires after the commit, but never before the second of
+    them has passed, so a weekday job is not late over the weekend.
+
+    Parameters
+    ----------
+    cron
+        The building job's cron expression.
+    timezone
+        Its zone.
+    last_commit_at
+        The table's last commit.
+
+    Returns
+    -------
+    float or None
+        Seconds; `None` when the expression does not fire twice (or cannot be read).
+    """
+    try:
+        first = next_fire_after(cron, timezone, last_commit_at)
+        second = None if first is None else next_fire_after(cron, timezone, first)
+    except ValueError:
+        return None
+    if first is None or second is None:
+        return None
+    gap = (second - first).total_seconds()
+    return max(FRESHNESS_SCHEDULE_FACTOR * gap, (second - last_commit_at).total_seconds())
+
+
+def freshness_signal(
+    *,
+    now: datetime,
+    commit_times: Sequence[datetime],
+    thresholds: Sequence[tuple[float, str]],
+) -> Observation:
+    """Say whether a table is late: whether its last commit is longer ago than usual.
+
+    The limit is the smallest of `thresholds`, the schedules of the jobs that build the table;
+    without one, `FRESHNESS_HISTORY_FACTOR` times the median gap between the newest `HISTORY` + 1
+    commits. Either way a table with fewer than `MIN_HISTORY` commits is not judged.
+
+    Parameters
+    ----------
+    now
+        The time of the sweep.
+    commit_times
+        When the table's commits happened, newest first; at least one.
+    thresholds
+        (seconds, job) for each scheduled job that builds the table, is not paused and has a
+        limit (`schedule_threshold`).
+
+    Returns
+    -------
+    Observation
+        Observed ``seconds`` since the last commit, ``last_commit_at`` (ISO 8601), ``source``
+        (``schedule``, ``history`` or `None` without enough history) and ``job`` (the job whose
+        schedule set the limit, or `None`); band ``{"high": seconds}``.
+    """
+    last = commit_times[0]
+    observed: dict[str, Any] = {
+        "seconds": int((now - last).total_seconds()),
+        "last_commit_at": last.isoformat(),
+        "source": None,
+        "job": None,
+    }
+    if len(commit_times) < MIN_HISTORY:
+        return Observation("freshness", None, "no_history", observed, None)
+    if thresholds:
+        limit, job = min(thresholds)
+        observed |= {"source": "schedule", "job": job}
+    else:
+        recent = commit_times[: HISTORY + 1]
+        gaps = [(newer - older).total_seconds() for newer, older in itertools.pairwise(recent)]
+        limit = FRESHNESS_HISTORY_FACTOR * statistics.median(gaps)
+        observed["source"] = "history"
+    state = "fired" if observed["seconds"] > limit else "ok"
+    return Observation("freshness", None, state, observed, {"high": limit})
+
+
 @dataclass(frozen=True)
 class HealthEffects:
     """What each signal does when it fires: warn, block or nothing at all.
@@ -841,6 +928,64 @@ def _schema_changes(observed: Mapping[str, Any]) -> str:
     return ", ".join(label + " and ".join(items) for label, items in groups if items)
 
 
+def _duration(seconds: float) -> str:
+    """Format a duration in the plainest unit, rounded down.
+
+    Parameters
+    ----------
+    seconds
+        The duration.
+
+    Returns
+    -------
+    str
+        Minutes under two hours, hours under two days, else days; ``1 minute`` in the singular.
+    """
+    whole = max(int(seconds), 0)
+    if whole < 7_200:
+        count, unit = whole // 60, "minute"
+    elif whole < 172_800:
+        count, unit = whole // 3_600, "hour"
+    else:
+        count, unit = whole // 86_400, "day"
+    return f"{count} {unit}" if count == 1 else f"{count} {unit}s"
+
+
+def _freshness_text(
+    name: str, observed: Mapping[str, Any], usual: Mapping[str, Any], at: str
+) -> str:
+    """Write the alert of a table that is late.
+
+    Parameters
+    ----------
+    name
+        The table's name, as shown.
+    observed
+        The stored observed values.
+    usual
+        The stored band.
+    at
+        The snapshot, for the text.
+
+    Returns
+    -------
+    str
+        The text, naming the job whose schedule set the limit when there is one.
+    """
+    last = datetime.fromisoformat(observed["last_commit_at"]).astimezone(UTC)
+    job = observed.get("job")
+    step = (
+        f"check that job {shown(job)} still runs (lakana runs list), or set "
+        "health: {freshness: off} if this table is updated rarely"
+        if job
+        else "check what writes this table, or set health: {freshness: off} if it is updated rarely"
+    )
+    return (
+        f"{name}: freshness {_duration(observed['seconds'])} since the last snapshot, usually "
+        f"within {_duration(usual['high'])} (last {at}, {last:%d %b %H:%M} UTC); {step}"
+    )
+
+
 def alert_text(
     table: str,
     signal: str,
@@ -873,7 +1018,8 @@ def alert_text(
     snapshot_id
         The snapshot that fired.
     observed_at
-        When the observation was recorded.
+        When the observation was recorded; a freshness alert gives the time of the last
+        snapshot instead, from `observed`.
 
     Returns
     -------
@@ -884,6 +1030,8 @@ def alert_text(
         return None
     usual: Mapping[str, Any] = band or {}
     name, col = shown(table), shown(column)
+    if signal == "freshness":
+        return _freshness_text(name, observed, usual, f"snapshot {snapshot_id}")
     at = f"snapshot {snapshot_id}, {observed_at.astimezone(UTC):%d %b %H:%M} UTC"
     if signal == "volume":
         direction = "less" if observed["added"] < usual["low"] else "more"
@@ -918,6 +1066,7 @@ def alert_text(
 
 
 _NEXT_STEP = {
+    "freshness": "check what writes {table}",
     "volume": "check the source extract",
     "null_rate": "check what fills {column} upstream",
     "range": "check the source for wrong units or test rows",

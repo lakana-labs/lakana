@@ -55,6 +55,15 @@ _MANIFEST = {
 }
 """A deployed project whose job ``nightly`` builds `silver.orders` and notifies."""
 
+_MANIFEST_WITHOUT_SCHEDULE = {
+    **_MANIFEST,
+    "jobs": {
+        **_MANIFEST["jobs"],
+        "nightly": {k: v for k, v in _MANIFEST["jobs"]["nightly"].items() if k != "schedule"},
+    },
+}
+"""`_MANIFEST` with job ``nightly`` unscheduled."""
+
 
 def _rows(ids: list[int]) -> pa.Table:
     """Build rows of `silver.orders`, the status of every other row null.
@@ -95,29 +104,33 @@ def health_catalog(session: Session, tmp_path: Path, principal: PrincipalRef) ->
     return built
 
 
-def _table_id(session: Session) -> uuid.UUID:
-    """Look up the id of `silver.orders`.
+def _table_id(session: Session, name: str = "orders") -> uuid.UUID:
+    """Look up the id of a table, `silver.orders` by default.
 
     Parameters
     ----------
     session
         Database session.
+    name
+        The table's name, without its namespace.
 
     Returns
     -------
     uuid.UUID
         The id.
     """
-    return session.scalars(select(Table.id).where(Table.name == "orders")).one()
+    return session.scalars(select(Table.id).where(Table.name == name)).one()
 
 
-def _environment_id(session: Session) -> uuid.UUID:
-    """Look up the environment of `silver.orders`.
+def _environment_id(session: Session, name: str = "orders") -> uuid.UUID:
+    """Look up the environment of a table, `silver.orders` by default.
 
     Parameters
     ----------
     session
         Database session.
+    name
+        The table's name, without its namespace.
 
     Returns
     -------
@@ -127,7 +140,7 @@ def _environment_id(session: Session) -> uuid.UUID:
     return session.scalars(
         select(Namespace.environment_id)
         .join(Table, Table.namespace_id == Namespace.id)
-        .where(Table.name == "orders")
+        .where(Table.name == name)
     ).one()
 
 
@@ -140,8 +153,9 @@ def _seed(
     column: str | None = None,
     first_day: int = 0,
     state: str = "ok",
+    table: str = "orders",
 ) -> None:
-    """Record a history of one signal for `silver.orders`, one day apart, before today.
+    """Record a history of one signal of a table, one day apart, from `_T0`.
 
     Parameters
     ----------
@@ -159,9 +173,11 @@ def _seed(
         The day after `_T0` of the oldest row.
     state
         The state of every row.
+    table
+        The table's name, without its namespace; `silver.orders` by default.
     """
-    table_id = _table_id(session)
-    environment_id = _environment_id(session)
+    table_id = _table_id(session, table)
+    environment_id = _environment_id(session, table)
     for day in range(first_day, first_day + count):
         session.add(
             TableHealthSignal(

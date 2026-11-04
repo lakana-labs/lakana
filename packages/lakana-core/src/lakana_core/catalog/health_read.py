@@ -36,7 +36,7 @@ from sqlalchemy.orm import Session
 
 from lakana_core.auth import PrincipalRef
 from lakana_core.catalog.health_record import NEWEST_COMMIT, NOT_SET_BACK, ranked
-from lakana_core.catalog.health_signals import COLUMN_SIGNALS, SIGNALS, alert_text
+from lakana_core.catalog.health_signals import COLUMN_SIGNALS, COMMIT_SIGNALS, SIGNALS, alert_text
 from lakana_core.errors import ValidationError
 from lakana_core.identifiers import TableRef, shown
 from lakana_core.models import TableHealthSignal
@@ -388,6 +388,38 @@ def _newest_of(session: Session, table_id: uuid.UUID, signal: str) -> TableHealt
     ).first()
 
 
+def newest_freshness(session: Session, table_id: uuid.UUID) -> TableHealthSignal | None:
+    """Read a table's newest freshness row that no set-back marked.
+
+    A freshness row belongs to no commit of its own (the sweep writes it, without a sequence
+    number), so the newest is the latest observed; the index on ``(table_id, signal,
+    sequence_number, observed_at, …)`` serves it.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    table_id
+        The table.
+
+    Returns
+    -------
+    TableHealthSignal or None
+        The row; `None` when the table has none.
+    """
+    return session.scalars(
+        select(TableHealthSignal)
+        .where(
+            TableHealthSignal.table_id == table_id,
+            TableHealthSignal.signal == "freshness",
+            TableHealthSignal.sequence_number.is_(None),
+            NOT_SET_BACK,
+        )
+        .order_by(TableHealthSignal.observed_at.desc(), TableHealthSignal.id.desc())
+        .limit(1)
+    ).first()
+
+
 def _commit_rows(
     session: Session, table_id: uuid.UUID, anchors: list[TableHealthSignal]
 ) -> list[TableHealthSignal]:
@@ -430,7 +462,8 @@ def current_signals(
 ) -> list[SignalView]:
     """Show the current state of each signal of a table, with the last time each fired.
 
-    Schema, volume and freshness are each their newest row. Null rate and range are the rows
+    Schema and volume are each the row of the newest commit to record them, freshness its newest
+    row by time (`newest_freshness`: the hourly sweep writes it). Null rate and range are the rows
     of the newest commit that wrote any of them, which a commit reading the added files does for
     every column it observed: a signal switched off there shows as its off row, and a column it
     no longer observed (a dropped one, say) is left out. A compaction or a commit that adds no
@@ -472,7 +505,9 @@ def current_signals(
         found = (_newest_of(session, table_id, signal) for signal in signals)
         return [row for row in found if row is not None]
 
-    rows = newest([signal for signal in SIGNALS if signal not in COLUMN_SIGNALS])
+    rows = newest(signal for signal in COMMIT_SIGNALS if signal not in COLUMN_SIGNALS)
+    freshness = newest_freshness(session, table_id)
+    rows += [] if freshness is None else [freshness]
     rows += _commit_rows(session, table_id, newest(COLUMN_SIGNALS))
     rows.sort(key=lambda row: (SIGNALS.index(row.signal), row.column_name or ""))
     fired = _last_fired(session, table_id)
