@@ -3233,8 +3233,8 @@ class SearchHit:
     matched
         The field that matched: ``name``, ``label``, ``description``, ``grain``, ``measure`` (a
         column's measure label or description), ``id``, ``job``, ``repository``, ``synonym`` or
-        ``definition`` (a term's) or ``term`` (a table or column found by a term's name or synonym). Treat a value
-        you do not know as a match elsewhere; the server may add more.
+        ``definition`` (a term's) or ``term`` (a table or column found by a term's name or
+        synonym). Treat a value you do not know as a match elsewhere; the server may add more.
     snippet
         For a label, description, grain, measure or term match, and for every term hit, at most
         160 characters of the text around the hit.

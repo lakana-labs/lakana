@@ -86,9 +86,7 @@ def _no_terms(environment: str, owner: str | None, repository: str | None) -> st
     filters = {"owner": owner, "repository": repository}
     given = {name: value for name, value in filters.items() if value is not None}
     if not given:
-        return (
-            f"No terms in {where}. A repository defines them in glossary/*.yaml: {_GLOSSARY_URL}"
-        )
+        return f"No terms in {where}. A repository defines them in glossary/*.yaml: {_GLOSSARY_URL}"
     named = " and ".join(f"{name} {_output.inline(repr(value))}" for name, value in given.items())
     options = " and ".join(f"--{name}" for name in given)
     return f"No terms in {where} with {named}. Drop {options} to see every term."
