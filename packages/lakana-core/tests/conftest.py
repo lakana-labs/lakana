@@ -8,13 +8,13 @@ import datetime
 import uuid
 from collections.abc import Iterator
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
-from graph_test_helpers import StarWorld, build_star
 from sqlalchemy.orm import Session
 
 from lakana_core.auth import AllowAllAuthorization, PrincipalRef
@@ -23,6 +23,9 @@ from lakana_core.config import DatabaseConfig
 from lakana_core.db import create_engine
 from lakana_core.models import Base, Principal, PrincipalType
 from lakana_core.storage.resolver import StorageResolver
+
+if TYPE_CHECKING:
+    from graph_test_helpers import StarWorld
 
 
 @pytest.fixture
@@ -120,7 +123,7 @@ def test_ca_pem() -> str:
 
 
 @pytest.fixture
-def star(session: Session, tmp_path: Path, principal: PrincipalRef) -> StarWorld:
+def star(session: Session, tmp_path: Path, principal: PrincipalRef) -> "StarWorld":
     """Provide the star schema of `graph_test_helpers`.
 
     Parameters
@@ -137,4 +140,6 @@ def star(session: Session, tmp_path: Path, principal: PrincipalRef) -> StarWorld
     StarWorld
         The world.
     """
+    from graph_test_helpers import build_star
+
     return build_star(session, tmp_path, principal)

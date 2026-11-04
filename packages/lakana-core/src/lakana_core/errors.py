@@ -69,6 +69,14 @@ class AuditUnavailableError(LakanaError):
     """
 
 
+class GraphBusyError(LakanaError):
+    """A metadata graph question ran past its time budget and was stopped.
+
+    The server answers 503 with ``Retry-After``: the same question may fit when the server is
+    less busy, and a narrower one fits sooner (`lakana_core.catalog.graph_model.BUSY`).
+    """
+
+
 class WriteOutcomeUnknownError(LakanaError):
     """A write's commit was not acknowledged and the table could not be asked what became of it.
 

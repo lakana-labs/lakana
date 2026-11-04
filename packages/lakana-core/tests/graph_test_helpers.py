@@ -123,6 +123,7 @@ def asset_entry(
         "table": table,
         "path": f"assets/{table.replace('.', '/')}.sql",
         "kind": "sql",
+        "write": "replace",
         "key": list(key),
         "references": list(reads),
         "columns": list(columns) if columns is not None else [c for c, _ in TABLES[table]],
