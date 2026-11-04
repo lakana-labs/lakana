@@ -3070,7 +3070,8 @@ class DeployOut(BaseModel):
         without checks.
     warnings
         What the deploy leaves for its owner to act on, as sentences (a removed asset whose
-        table is kept after a failed check).
+        table is kept after a failed check; a removed table or column that other repositories
+        declare something on, shown only to a reader who may see it).
     waiting_for
         Why a queued deploy has not started: a stable `code`, one sentence in `message` that
         names the next step, and the numbers it uses; null when it is not waiting. Set on the

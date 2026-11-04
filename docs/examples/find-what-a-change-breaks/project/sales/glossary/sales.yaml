@@ -1,0 +1,6 @@
+store:
+  name: Store
+  definition: A shop where sales happen.
+  owner: sales-team
+  links:
+    gold.dim_store: [store_id]

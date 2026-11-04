@@ -46,6 +46,8 @@ Answers always carry the ids.
 |---|---|---|---|
 | What feeds it, what it feeds | `lineage?node=&direction=up\|down\|both&depth=&lang=&limit=&cursor=` | `lineage(env, node, direction=, depth=, lang=, page_size=)` | `lineage NODE [--column] [--direction] [--depth] [--lang]` |
 | What lies next to it | `neighbours?node=&kinds=&lang=&limit=&cursor=` | `neighbours(env, node, kinds=, lang=, page_size=)` | `neighbours NODE [--column] [--kind]... [--lang]` |
+| What depends on it | `impact?node=&key=&lang=&limit=&cursor=` | `impact(env, node, key=, lang=, page_size=)` | `impact NODE [--column \| --key] [--lang]` |
+| How two tables join | `join-path?from=&to=&lang=` | `join_path(env, from_table, to_table, lang=)` | `join-path FROM TO [--lang]` |
 
 **Lineage** walks the tables and assets upstream (what feeds the start), downstream (what it
 feeds) or both (the default). `depth` counts the assets crossed, from 1 to 10, and is 3 when not
@@ -57,10 +59,84 @@ fed by it, `both` is on a loop through it, `start` is where the walk began, and 
 a column start by a reference. With `-o json`, the edges say the same. Both commands show a table's
 label in the language `--lang` asks for.
 
+For example, what feeds `gold.fact_sales`, in the two-repository project of
+[Find what a change breaks](../how-to/find-what-a-change-breaks.md):
+
+<!-- source: docs/examples/find-what-a-change-breaks/run.sh#lineage -->
+```bash
+lakana graph lineage gold.fact_sales --direction up --env dev
+```
+
+<!-- output: find-what-a-change-breaks#lineage -->
+```text
+┏━━━━━━━━━━┳━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━┓
+┃ distance ┃ side  ┃ kind  ┃ name            ┃ label ┃ repository ┃
+┡━━━━━━━━━━╇━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━┩
+│ 0        │ start │ table │ gold.fact_sales │       │ sales      │
+│ 1        │ up    │ asset │ gold.fact_sales │       │ sales      │
+│ 1        │ up    │ table │ gold.dim_store  │       │ stores     │
+│ 1        │ up    │ table │ bronze.sales    │       │ sales      │
+│ 2        │ up    │ asset │ bronze.sales    │       │ sales      │
+│ 2        │ up    │ asset │ gold.dim_store  │       │ stores     │
+│ 2        │ up    │ table │ bronze.stores   │       │ stores     │
+│ 3        │ up    │ asset │ bronze.stores   │       │ stores     │
+└──────────┴───────┴───────┴─────────────────┴───────┴────────────┘
+side: up feeds the start, down is fed by it, both is on a loop through it, join is joined to a column start by a reference.
+```
+
+The runs record a lineage of their own, shown per table by `lakana table lineage`; this one comes
+from the declarations, before and without a run.
+
 **Neighbours** lists what is one edge away, in either direction, optionally only edges of the
 kinds you name.
 
-Every answer is a page of at most 500 nodes, sorted by distance, then id, with the edges between
+**Impact** lists everything the projects declare that depends on a table, a column or a table's
+declared key (`key=true`, `--key`; refused for a column, and for a table that declares no key).
+The start is a table or a column. The answer holds:
+
+- the references to it, and their generated `ref_` checks;
+- the measures, column masks and glossary terms on its columns, and the checks on its key;
+- its checks, row filters and glossary terms;
+- the asset that builds it, everything downstream of it (the assets and the tables they build), and
+  the jobs that run any of those assets.
+
+Every node but the start carries a `reason`, for example `references gold.dim_store.store_id`,
+`checks the key of gold.dim_store`, `links gold.dim_store.store_id`, `builds gold.dim_store` or
+`downstream of gold.dim_store`. For a column or a key, what only *may* use it has `may_use: true`:
+the table's hand-written checks, its row filters, and everything downstream, because Lakana does
+not read SQL to find which columns a query uses. References to the table and terms on the table
+name the table, not the column, so they are left out of a column's answer. A measure on a column
+reaches a key's impact only through the fact table that declares it. Each node carries its
+`distance` from the start, settled by the shortest way. In the CLI's table, `may_use` shows as
+`yes`.
+
+**Join paths** shows how two tables join over declared references, in either direction. It
+returns every path of the shortest length, at most 4 steps long, and at most 10 paths in the order
+of their references' ids; `more_paths` is `true` when more of that length exist. A step names the
+reference, both tables with their kind and grain, and the columns to join on. A step along a
+reference, from the table that declares it to its target, is `many_to_one`. A step against it is
+`one_to_many` with `fans_out: true`: each row may meet many, so a sum over the far side counts
+rows more than once. When there is no path (or none you may see), `paths` is empty and `reason`
+says so, with the same text either way.
+
+```json
+{
+  "paths": [
+    {"steps": [
+      {"reference": "reference:2b9d…", "from_table": "table:41a7…", "from_name": "gold.fact_sales",
+       "to_table": "table:7c1e…", "to_name": "gold.dim_store",
+       "from_columns": ["store_id"], "to_columns": ["store_id"],
+       "direction": "many_to_one", "fans_out": false,
+       "from_model_kind": "fact", "from_grain": "One row per store and calendar day.",
+       "to_model_kind": "dimension", "to_grain": "One row per store."}
+    ]}
+  ],
+  "reason": null,
+  "more_paths": false
+}
+```
+
+Every lineage, neighbours and impact answer is a page of at most 500 nodes, sorted by distance, then id, with the edges between
 them:
 
 ```json
@@ -98,6 +174,10 @@ route you may see reaches it. A start you may not see is answered like one that 
 
 A job shows its edge to an asset only when you may see the asset.
 
+Impact and join paths follow the same rules: a reason names only a node you may see, a join path
+never runs through a table or reference you may not see, and the text for "no path" is the same
+whether there is none or you may see none.
+
 A node's `repository`, and a table's `owner` (the owner of the asset that builds it), come from
 what is deployed to the environment: you see them only with `READ_ENVIRONMENT`. Without it they
 are `null`.
@@ -113,3 +193,30 @@ are `null`.
 - A walk that runs longer than 10 seconds is stopped with `503` and `Retry-After`. The time counts
   everything the question does, including what it looks at and you may not see. Try again, or ask
   a narrower question.
+- A join path asks for two different tables: the same table twice, or a start that is not a table,
+  is refused with `422`.
+
+## The deploy warning
+
+A deploy that removes a column, or stops building a table, that another repository declares
+something on still goes through and prints a warning:
+
+The line names the removed column or table, the commands that show everything it affects, and the
+declarations of other repositories that use it, each with its repository. The how-to shows one:
+[What a deploy tells you](../how-to/find-what-a-change-breaks.md#what-a-deploy-tells-you).
+
+- It never refuses the deploy.
+- It covers removed tables and columns. A changed column type is not seen at deploy, because a
+  project records no types ([#446](https://github.com/lakana-labs/lakana/issues/446)).
+  A column counts as removed only when both the deployed and the new version of its asset list
+  their columns, which a `SELECT` with named columns does; `SELECT *` and Python assets are not
+  checked.
+- It lists only the references, measures, checks and glossary terms of other repositories. What
+  only *may* use the column (the `may_use` nodes) is left to `lakana graph impact`.
+- It is computed with what the deployer may see: a deployer without `READ_ENVIRONMENT` gets no
+  impact warning, because the repositories of what depends on the table are not visible to them.
+- It is shown to the deployer, and to a reader of the deploy who has `READ_ENVIRONMENT` and may
+  read every table it names (the removed table, and the tables of the references and checks it
+  lists). Other readers are not shown it, and nothing tells them it exists.
+- At most 20 removed tables and columns are checked; one more line says how many were not. A check
+  that takes longer than 2 seconds stops, the deploy goes on, and a line says so.
