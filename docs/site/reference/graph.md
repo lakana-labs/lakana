@@ -90,52 +90,6 @@ from the declarations, before and without a run.
 **Neighbours** lists what is one edge away, in either direction, optionally only edges of the
 kinds you name.
 
-**Impact** lists everything the projects declare that depends on a table, a column or a table's
-declared key (`key=true`, `--key`; refused for a column, and for a table that declares no key).
-The start is a table or a column. The answer holds:
-
-- the references to it, and their generated `ref_` checks;
-- the measures, column masks and glossary terms on its columns, and the checks on its key;
-- its checks, row filters and glossary terms;
-- the asset that builds it, everything downstream of it (the assets and the tables they build), and
-  the jobs that run any of those assets.
-
-Every node but the start carries a `reason`, for example `references gold.dim_store.store_id`,
-`checks the key of gold.dim_store`, `links gold.dim_store.store_id`, `builds gold.dim_store` or
-`downstream of gold.dim_store`. For a column or a key, what only *may* use it has `may_use: true`:
-the table's hand-written checks, its row filters, and everything downstream, because Lakana does
-not read SQL to find which columns a query uses. References to the table and terms on the table
-name the table, not the column, so they are left out of a column's answer. A measure on a column
-reaches a key's impact only through the fact table that declares it. Each node carries its
-`distance` from the start, settled by the shortest way. In the CLI's table, `may_use` shows as
-`yes`.
-
-**Join paths** shows how two tables join over declared references, in either direction. It
-returns every path of the shortest length, at most 4 steps long, and at most 10 paths in the order
-of their references' ids; `more_paths` is `true` when more of that length exist. A step names the
-reference, both tables with their kind and grain, and the columns to join on. A step along a
-reference, from the table that declares it to its target, is `many_to_one`. A step against it is
-`one_to_many` with `fans_out: true`: each row may meet many, so a sum over the far side counts
-rows more than once. When there is no path (or none you may see), `paths` is empty and `reason`
-says so, with the same text either way.
-
-```json
-{
-  "paths": [
-    {"steps": [
-      {"reference": "reference:2b9d…", "from_table": "table:41a7…", "from_name": "gold.fact_sales",
-       "to_table": "table:7c1e…", "to_name": "gold.dim_store",
-       "from_columns": ["store_id"], "to_columns": ["store_id"],
-       "direction": "many_to_one", "fans_out": false,
-       "from_model_kind": "fact", "from_grain": "One row per store and calendar day.",
-       "to_model_kind": "dimension", "to_grain": "One row per store."}
-    ]}
-  ],
-  "reason": null,
-  "more_paths": false
-}
-```
-
 Every lineage, neighbours and impact answer is a page of at most 500 nodes, sorted by distance, then id, with the edges between
 them:
 
@@ -157,6 +111,56 @@ them:
 Pass `next_cursor` back as `cursor` with the same question for the next page. Each edge is on the
 page of its later node, so all pages together carry each edge once. The SDK and the CLI read every
 page for you.
+
+## Impact
+
+**Impact** lists everything the projects declare that depends on a table, a column or a table's
+declared key (`key=true`, `--key`; refused for a column, and for a table that declares no key).
+The start is a table or a column. The answer holds:
+
+- the references to it, and their generated `ref_` checks;
+- the measures, column masks and glossary terms on its columns, and the checks on its key;
+- its checks, row filters and glossary terms;
+- the asset that builds it, everything downstream of it (the assets and the tables they build), and
+  the jobs that run any of those assets.
+
+Every node but the start carries a `reason`, for example `references gold.dim_store.store_id`,
+`checks the key of gold.dim_store`, `links gold.dim_store.store_id`, `builds gold.dim_store` or
+`downstream of gold.dim_store`. For a column or a key, what only *may* use it has `may_use: true`:
+the table's hand-written checks, its row filters, and everything downstream, because Lakana does
+not read SQL to find which columns a query uses. References to the table and terms on the table
+name the table, not the column, so they are left out of a column's answer. A measure on a column
+reaches a key's impact only through the fact table that declares it. Each node carries its
+`distance` from the start, settled by the shortest way. In the CLI's table, `may_use` shows as
+`yes`.
+
+## Join paths
+
+**Join paths** shows how two tables join over declared references, in either direction. It
+returns every path of the shortest length, at most 4 steps long, and at most 10 paths in the order
+of their references' ids; `more_paths` is `true` when more of that length exist. A step names the
+reference, both tables with their kind and grain, and the columns to join on. A step along a
+reference, from the table that declares it to its target, is `many_to_one`. A step against it is
+`one_to_many` with `fans_out: true`: each row may meet many, so a sum over the near side's numbers
+counts rows more than once. When there is no path (or none you may see), `paths` is empty and `reason`
+says so, with the same text either way.
+
+```json
+{
+  "paths": [
+    {"steps": [
+      {"reference": "reference:2b9d…", "from_table": "table:41a7…", "from_name": "gold.fact_sales",
+       "to_table": "table:7c1e…", "to_name": "gold.dim_store",
+       "from_columns": ["store_id"], "to_columns": ["store_id"],
+       "direction": "many_to_one", "fans_out": false,
+       "from_model_kind": "fact", "from_grain": "One row per store and calendar day.",
+       "to_model_kind": "dimension", "to_grain": "One row per store."}
+    ]}
+  ],
+  "reason": null,
+  "more_paths": false
+}
+```
 
 ## Who sees what
 
@@ -199,9 +203,7 @@ are `null`.
 ## The deploy warning
 
 A deploy that removes a column, or stops building a table, that another repository declares
-something on still goes through and prints a warning:
-
-The line names the removed column or table, the commands that show everything it affects, and the
+something on still goes through and prints a warning. The line names the removed column or table, the commands that show everything it affects, and the
 declarations of other repositories that use it, each with its repository. The how-to shows one:
 [What a deploy tells you](../how-to/find-what-a-change-breaks.md#what-a-deploy-tells-you).
 

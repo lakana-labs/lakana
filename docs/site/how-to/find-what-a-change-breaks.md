@@ -5,7 +5,7 @@ measures, glossary terms, policies and jobs that the projects of every repositor
 answers from those declarations and shows only what you may see.
 
 This page uses two repositories: `stores` builds the dimension `gold.dim_store`, and `sales`
-builds the fact `gold.fact_sales`, which references it. Both are deployed to `dev` and have run:
+builds the fact `gold.fact_sales`, which references it. Both were added with `lakana repo add`, then deployed to `dev` and run:
 
 <!-- source: docs/examples/find-what-a-change-breaks/run.sh#deploy-sales -->
 ```bash
