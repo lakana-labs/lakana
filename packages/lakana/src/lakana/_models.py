@@ -822,6 +822,9 @@ class HealthSignal:
         and `alert`.
     last_fired_at
         When this signal and column last fired; only in the current state.
+    set_back
+        Whether a failed check set the observed snapshot back: the row is no longer the table's
+        data and shows only in the history, kept as the reason a blocking check gave.
     """
 
     id: str
@@ -836,6 +839,7 @@ class HealthSignal:
     alert: str | None
     values_hidden: bool
     last_fired_at: datetime | None = None
+    set_back: bool = False
 
 
 @dataclass(frozen=True)

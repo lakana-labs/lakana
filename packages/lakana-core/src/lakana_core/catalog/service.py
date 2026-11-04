@@ -5615,11 +5615,12 @@ class CatalogService:
         def settle() -> None:
             """Mark, clear the stamp, restore the note and record: the statements after the swap.
 
-            The health signals of the snapshots set back are deleted with them (#340). A
-            set-back that makes the schema before current again also drops the task run's
-            column change (`TaskRun.schema_change_json`): the columns and their field ids are
-            the old ones again, so neither the note, the warnings nor the notification line may
-            say otherwise.
+            The health signals of the snapshots set back are marked as set back, or deleted
+            for a first build left not published (`forget_set_back`, #340). A set-back that
+            makes the schema before current again also drops the task run's column change
+            (`TaskRun.schema_change_json`): the columns and their field ids are the old ones
+            again, so neither the note, the warnings nor the notification line may say
+            otherwise.
             """
             if restores_schema:
                 self._session.execute(

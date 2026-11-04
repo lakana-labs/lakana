@@ -14,7 +14,8 @@ class TableHealthSignal(Base):
     """One observation of one health signal of a table (#340).
 
     A commit adds one row per signal and column (`lakana_core.catalog.health_record`); a check
-    that sets the table back deletes the rows of the snapshots it set back.
+    that sets the table back marks the rows of the snapshots it set back (`set_back_at`), which
+    then stay in the history only.
 
     Attributes
     ----------
@@ -45,6 +46,10 @@ class TableHealthSignal(Base):
         ``warn``, ``block`` or ``off``, as the table's `health:` said when it was observed.
     observed_at : datetime.datetime
         When, by the database's clock.
+    set_back_at : datetime.datetime or None
+        When a check set the observed snapshot back; `None` while it is the table's data. A
+        marked row is neither the current state, nor part of a band, nor where a band's window
+        starts; the history shows it as set back.
     """
 
     __tablename__ = "table_health_signals"
@@ -82,3 +87,4 @@ class TableHealthSignal(Base):
     state: Mapped[str] = mapped_column(String(16))
     effect: Mapped[str] = mapped_column(String(8))
     observed_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    set_back_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)

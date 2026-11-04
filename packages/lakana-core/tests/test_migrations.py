@@ -5040,7 +5040,8 @@ def test_0064_adds_the_health_effects_and_the_signal_of_a_delivery(
 ) -> None:
     """Revision `0064`: `tables.health_effects`, `notification_deliveries.health_signal_id`.
 
-    The delivery's column has a foreign key to `table_health_signals` and is unique together
+    Also `table_health_signals.set_back_at`, which marks the rows of a snapshot that was set
+    back. The delivery's column has a foreign key to `table_health_signals` and is unique together
     with `job`; the downgrade removes both columns.
 
     Parameters
@@ -5061,6 +5062,9 @@ def test_0064_adds_the_health_effects_and_the_signal_of_a_delivery(
         assert "health_signal_id" in {
             c["name"] for c in inspector.get_columns("notification_deliveries")
         }
+        assert {c["name"]: c["nullable"] for c in inspector.get_columns("table_health_signals")}[
+            "set_back_at"
+        ]
         assert {
             (f["referred_table"], f["options"].get("ondelete"))
             for f in inspector.get_foreign_keys("notification_deliveries")
@@ -5079,6 +5083,9 @@ def test_0064_adds_the_health_effects_and_the_signal_of_a_delivery(
         assert "health_effects" not in {c["name"] for c in inspector.get_columns("tables")}
         assert "health_signal_id" not in {
             c["name"] for c in inspector.get_columns("notification_deliveries")
+        }
+        assert "set_back_at" not in {
+            c["name"] for c in inspector.get_columns("table_health_signals")
         }
         assert "uq_notification_deliveries_health_signal_id_job" not in {
             u["name"] for u in inspector.get_unique_constraints("notification_deliveries")

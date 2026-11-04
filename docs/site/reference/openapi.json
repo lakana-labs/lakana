@@ -21434,6 +21434,11 @@
               }
             ],
             "title": "Last Fired At"
+          },
+          "set_back": {
+            "type": "boolean",
+            "title": "Set Back",
+            "default": false
           }
         },
         "type": "object",
@@ -21451,7 +21456,7 @@
           "values_hidden"
         ],
         "title": "HealthSignalOut",
-        "description": "One health signal of a table, as the caller may see it.\n\nParameters\n----------\nid\n    The observation's id.\nsignal\n    ``freshness``, ``volume``, ``null_rate``, ``range`` or ``schema``.\ncolumn\n    The column, for a column signal.\nstate\n    ``ok``, ``fired``, ``no_history``, ``no_metrics`` or ``off``.\neffect\n    The effect that applied to the observation.\nsnapshot_id\n    The snapshot observed.\nobserved_at\n    When it was recorded.\nobserved\n    What was observed, keys per signal in the table health reference; `null` when hidden.\nband\n    The usual band the observation was judged against; `null` when hidden or none.\nalert\n    The text of the newest fired observation (current state) or of this one (history);\n    `null` when it did not fire or its values are hidden.\nvalues_hidden\n    Whether a column mask or row filter that applies to the caller left out `observed`,\n    `band` and `alert`.\nlast_fired_at\n    When this signal and column last fired; only in the current state."
+        "description": "One health signal of a table, as the caller may see it.\n\nParameters\n----------\nid\n    The observation's id.\nsignal\n    ``freshness``, ``volume``, ``null_rate``, ``range`` or ``schema``.\ncolumn\n    The column, for a column signal.\nstate\n    ``ok``, ``fired``, ``no_history``, ``no_metrics`` or ``off``.\neffect\n    The effect that applied to the observation.\nsnapshot_id\n    The snapshot observed.\nobserved_at\n    When it was recorded.\nobserved\n    What was observed, keys per signal in the table health reference; `null` when hidden.\nband\n    The usual band the observation was judged against; `null` when hidden or none.\nalert\n    The text of the newest fired observation (current state) or of this one (history);\n    `null` when it did not fire or its values are hidden.\nvalues_hidden\n    Whether a column mask or row filter that applies to the caller left out `observed`,\n    `band` and `alert`.\nlast_fired_at\n    When this signal and column last fired; only in the current state.\nset_back\n    Whether a failed check set the observed snapshot back: the row is no longer the table's\n    data and shows only in the history, kept as the reason a blocking check gave."
       },
       "HealthSignalPageOut": {
         "properties": {

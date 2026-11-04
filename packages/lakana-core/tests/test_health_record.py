@@ -19,7 +19,7 @@ from pyiceberg.schema import Schema
 from pyiceberg.table.snapshots import Operation, Summary
 from pyiceberg.table.update import SetPropertiesUpdate
 from pyiceberg.types import DoubleType, LongType, NestedField, StringType
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
@@ -593,6 +593,39 @@ def test_the_history_reaches_back_only_twice_history_commits(
     found = recent_observations(session, _table_id(session))
     assert len(found["volume", None]) == 1
     assert len(found["range", "id"]) == 3
+
+
+def test_set_back_rows_neither_feed_the_band_nor_reach_back_its_window(
+    catalog: CatalogService, session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Rows a set-back marked are not the table's data: no value, and no commit of the window.
+
+    Parameters
+    ----------
+    catalog
+        The catalog, which creates the table.
+    session
+        Database session.
+    monkeypatch
+        Lowers `HISTORY` to three.
+    """
+    monkeypatch.setattr(health_record, "HISTORY", 3)
+    _seed(session, "volume", {"added": 5, "total": 5}, count=3)
+    _seed(session, "schema", {"columns": []}, count=6, first_day=2)
+    _seed(session, "volume", {"added": 999, "total": 999}, count=2, first_day=10)
+    session.execute(
+        update(TableHealthSignal)
+        .where(
+            or_(
+                TableHealthSignal.snapshot_id > 10,
+                and_(TableHealthSignal.signal == "schema", TableHealthSignal.snapshot_id > 5),
+            )
+        )
+        .values(set_back_at=_T0)
+    )
+    session.commit()
+    found = recent_observations(session, _table_id(session))
+    assert found["volume", None] == [{"added": 5, "total": 5}] * 3
 
 
 @pytest.mark.parametrize(

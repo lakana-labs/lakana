@@ -82,6 +82,7 @@ def _add(
     sequence: int | None = None,
     snapshot: int = 4711,
     row_id: uuid.UUID | None = None,
+    set_back: bool = False,
 ) -> TableHealthSignal:
     """Record one signal of `silver.orders`, `minutes` after `_NOW`.
 
@@ -107,6 +108,8 @@ def _add(
         The snapshot observed.
     row_id
         The row's id; a random one by default.
+    set_back
+        Whether a set-back has marked the row.
 
     Returns
     -------
@@ -131,6 +134,7 @@ def _add(
         state=state,
         effect="warn",
         observed_at=_NOW + timedelta(minutes=minutes),
+        set_back_at=_NOW + timedelta(minutes=minutes + 1) if set_back else None,
     )
     session.add(row)
     session.commit()
@@ -333,6 +337,60 @@ def test_the_current_state_is_the_newest_row_with_the_last_fired_alert(
     assert status.alert is not None
     assert status.alert.startswith("silver.orders: null rate of status 38.0 %")
     assert shown[0].alert is None and shown[0].last_fired_at is None
+
+
+def test_a_set_back_row_is_in_the_history_marked_and_never_the_current_state(
+    session: Session, tmp_path: Path
+) -> None:
+    """Leave the rows a set-back marked out of the current state and its last firing.
+
+    The history keeps them, marked: a fired one is why a blocking check set the table back.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    tmp_path
+        Storage root.
+    """
+    _catalog(session, tmp_path)
+    kept = _add(session, "volume", "ok", observed={"added": 3, "total": 3})
+    _add(session, "null_rate", "ok", column="status", observed=_NULLS)
+    _add(
+        session, "volume", "fired", observed={"added": 900, "total": 903}, minutes=5, set_back=True
+    )
+    _add(
+        session,
+        "null_rate",
+        "fired",
+        column="status",
+        observed=_NULLS,
+        band=_RATE_BAND,
+        minutes=5,
+        set_back=True,
+    )
+    shown = current_signals(session, kept.table_id, "silver.orders", Visibility())
+    assert [(s.signal, s.state, s.last_fired_at, s.alert, s.set_back) for s in shown] == [
+        ("volume", "ok", None, None, False),
+        ("null_rate", "ok", None, None, False),
+    ]
+    history = signal_history(
+        session,
+        kept.table_id,
+        "silver.orders",
+        Visibility(),
+        since=_NOW - timedelta(days=1),
+        signal=None,
+        column=None,
+        limit=10,
+        cursor=None,
+    )
+    assert sorted((s.signal, s.state, s.set_back) for s in history.items) == [
+        ("null_rate", "fired", True),
+        ("null_rate", "ok", False),
+        ("volume", "fired", True),
+        ("volume", "ok", False),
+    ]
 
 
 def test_a_signal_switched_off_replaces_its_column_rows(session: Session, tmp_path: Path) -> None:

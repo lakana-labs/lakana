@@ -1,4 +1,4 @@
-"""A table's health effects, and the health signal a notification delivery is about.
+"""A table's health effects, the health signal a delivery is about, and a set-back's mark.
 
 Revision ID: d6f0a2b4c8e9
 Revises: c5e9f1a3b7d8
@@ -21,9 +21,11 @@ depends_on: str | Sequence[str] | None = None
 def upgrade() -> None:
     """Upgrade schema.
 
-    Two nullable columns: a table's effects arrive with its next deploy; a delivery of a health
-    signal names it.
+    Three nullable columns: a table's effects arrive with its next deploy; a delivery of a health
+    signal names it; a signal whose snapshot a check set back is marked with the time.
     """
+    with op.batch_alter_table("table_health_signals") as batch_op:
+        batch_op.add_column(sa.Column("set_back_at", sa.DateTime(timezone=True), nullable=True))
     with op.batch_alter_table("tables") as batch_op:
         batch_op.add_column(sa.Column("health_effects", sa.JSON(), nullable=True))
     with op.batch_alter_table("notification_deliveries") as batch_op:
@@ -53,3 +55,5 @@ def downgrade() -> None:
         batch_op.drop_column("health_signal_id")
     with op.batch_alter_table("tables") as batch_op:
         batch_op.drop_column("health_effects")
+    with op.batch_alter_table("table_health_signals") as batch_op:
+        batch_op.drop_column("set_back_at")

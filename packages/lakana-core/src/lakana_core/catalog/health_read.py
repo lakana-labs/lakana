@@ -13,6 +13,10 @@ under any name the current schema does not have (history whose column cannot be 
 whose column was renamed since it was written is refused by the query path
 (`policy.renames.renamed_policy_column`); here every value of the table is hidden instead, as
 for a row filter, and so it is when the table's metadata cannot be read, or the table has none.
+
+A row whose snapshot a check set back (`health_record.forget_set_back`) is no longer the table's
+data: the current state and its last firings leave it out (`NOT_SET_BACK`), and the history
+shows it marked (`SignalView.set_back`), under the same rules of what is hidden.
 """
 
 from __future__ import annotations
@@ -31,7 +35,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from lakana_core.auth import PrincipalRef
-from lakana_core.catalog.health_record import NEWEST_COMMIT, ranked
+from lakana_core.catalog.health_record import NEWEST_COMMIT, NOT_SET_BACK, ranked
 from lakana_core.catalog.health_signals import COLUMN_SIGNALS, SIGNALS, alert_text
 from lakana_core.errors import ValidationError
 from lakana_core.identifiers import TableRef, shown
@@ -80,6 +84,8 @@ class SignalView:
         Whether `observed`, `band` and `alert` were left out for this reader.
     last_fired_at
         When this signal and column last fired; only for the current state.
+    set_back
+        Whether a check set the observed snapshot back; only the history shows such a row.
     """
 
     id: uuid.UUID
@@ -94,6 +100,7 @@ class SignalView:
     alert: str | None
     values_hidden: bool
     last_fired_at: datetime | None = None
+    set_back: bool = False
 
 
 @dataclass(frozen=True)
@@ -314,6 +321,7 @@ def _view(
         alert=alert,
         values_hidden=hidden,
         last_fired_at=last_fired.observed_at if current and last_fired is not None else None,
+        set_back=row.set_back_at is not None,
     )
 
 
@@ -337,7 +345,9 @@ def _last_fired(
     dict
         (signal, column) → its newest fired row.
     """
-    window = ranked(TableHealthSignal.table_id == table_id, TableHealthSignal.state == "fired")
+    window = ranked(
+        TableHealthSignal.table_id == table_id, TableHealthSignal.state == "fired", NOT_SET_BACK
+    )
     rows = session.scalars(
         select(TableHealthSignal)
         .join(window, window.c.id == TableHealthSignal.id)
@@ -371,6 +381,7 @@ def _newest_of(session: Session, table_id: uuid.UUID, signal: str) -> TableHealt
             TableHealthSignal.table_id == table_id,
             TableHealthSignal.signal == signal,
             TableHealthSignal.sequence_number.is_not(None),
+            NOT_SET_BACK,
         )
         .order_by(*NEWEST_COMMIT)
         .limit(1)
@@ -408,6 +419,7 @@ def _commit_rows(
                 TableHealthSignal.sequence_number == newest.sequence_number,
                 TableHealthSignal.snapshot_id == newest.snapshot_id,
                 TableHealthSignal.observed_at == newest.observed_at,
+                NOT_SET_BACK,
             )
         )
     )
@@ -425,7 +437,7 @@ def current_signals(
     data files (a delete) writes none, so the commit before it is shown. "Newest" is
     `NEWEST_COMMIT`: by the snapshot's sequence number, then time, so two commits that share a
     time never mix. Each is found with one ordered seek, so the work does not grow with the
-    table's history.
+    table's history. A row a set-back marked takes no part, nor in the last firings.
 
     Parameters
     ----------

@@ -2035,6 +2035,31 @@ def test_table_health_signals_lists_the_history_and_the_next_page(tmp_path: Path
     ) in plain
 
 
+def test_table_health_signals_marks_what_a_check_set_back(tmp_path: Path) -> None:
+    """A signal of a snapshot a check set back says so in its state; the others do not.
+
+    Parameters
+    ----------
+    tmp_path
+        Pytest's per-test directory.
+    """
+    api = FakeApi()
+    set_back = {**_SIGNAL, "set_back": True}
+    kept = {**_SIGNAL, "id": "6f1c0d7e-0000-4000-8000-000000000003", "state": "ok"}
+    api.on(
+        "GET",
+        f"{_BASE}/sales/health/signals",
+        json={"items": [set_back, kept], "next_cursor": None},
+    )
+    result = invoke(
+        make_state(tmp_path, api), "table", "health", "bronze.sales", "--env", "dev", "--signals"
+    )
+    assert result.exit_code == 0, result.stderr
+    plain = _plain(result.stdout)
+    assert plain.count("fired (set back)") == 1
+    assert "ok (set back)" not in plain
+
+
 def test_table_health_signals_json_keeps_the_page(tmp_path: Path) -> None:
     api = FakeApi()
     api.on("GET", f"{_BASE}/sales/health/signals", json={"items": [_SIGNAL], "next_cursor": None})

@@ -3020,7 +3020,10 @@ def test_0063_on_postgres() -> None:
 
 
 def test_0064_on_postgres() -> None:
-    """0064 adds the effects and the signal of a delivery; a signal's delete cascades to it."""
+    """0064 adds the effects, the signal of a delivery and the set-back mark of a signal.
+
+    A signal's delete cascades to its delivery; the mark is a nullable time with a zone.
+    """
     revision_0063 = "c5e9f1a3b7d8"
     revision_0064 = "d6f0a2b4c8e9"
     with PostgresContainer("postgres:16", driver="pg8000") as pg:
@@ -3031,6 +3034,10 @@ def test_0064_on_postgres() -> None:
         assert _alembic_version(engine) == revision_0064
         inspector = sqlalchemy.inspect(engine)
         assert "health_effects" in {c["name"] for c in inspector.get_columns("tables")}
+        set_back = {c["name"]: c for c in inspector.get_columns("table_health_signals")}[
+            "set_back_at"
+        ]
+        assert set_back["nullable"] and getattr(set_back["type"], "timezone", False)
         assert {
             u["name"]: u["column_names"]
             for u in inspector.get_unique_constraints("notification_deliveries")
@@ -3072,5 +3079,8 @@ def test_0064_on_postgres() -> None:
         assert "health_effects" not in {c["name"] for c in inspector.get_columns("tables")}
         assert "health_signal_id" not in {
             c["name"] for c in inspector.get_columns("notification_deliveries")
+        }
+        assert "set_back_at" not in {
+            c["name"] for c in inspector.get_columns("table_health_signals")
         }
         engine.dispose()

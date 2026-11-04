@@ -758,6 +758,22 @@ def _check_state(check: CheckHealth) -> str:
     return check.outcome
 
 
+def _signal_state(signal: HealthSignal) -> str:
+    """Name a signal's state as the history shows it.
+
+    Parameters
+    ----------
+    signal
+        One observation of the history.
+
+    Returns
+    -------
+    str
+        The state, with ``(set back)`` when a failed check set its snapshot back.
+    """
+    return f"{signal.state} (set back)" if signal.set_back else signal.state
+
+
 _SIGNAL_COLUMNS = ["signal", "column", "state", "effect", "observed_at"]
 """The columns of the current signals of `table health`."""
 
@@ -926,7 +942,12 @@ def health(
             )
             _output.emit(state, f"No health signals {window}.")
             return
-        _output.emit(state, page.items, columns=_SIGNAL_HISTORY_COLUMNS)
+        _output.emit(
+            state,
+            page.items,
+            columns=_SIGNAL_HISTORY_COLUMNS,
+            derived={"state": _signal_state},
+        )
         _output_fired(state, page.items)
         _output_hidden(state, page.items)
         more_results(

@@ -445,28 +445,36 @@ def test_a_replaced_table_goes_back_to_the_snapshot_before(
     assert _row(session).unpublished_run_id is None
 
 
-def _health_snapshots(session: Session) -> set[int | None]:
+def _health_snapshots(session: Session, *, set_back: bool = False) -> set[int | None]:
     """Read the snapshots the recorded health signals observe.
 
     Parameters
     ----------
     session
         Database session.
+    set_back
+        Read the rows a set-back marked instead of the others.
 
     Returns
     -------
     set of int or None
         Each row's ``snapshot_id``.
     """
-    return set(session.scalars(select(TableHealthSignal.snapshot_id)))
+    marked = TableHealthSignal.set_back_at.is_not(None)
+    return set(
+        session.scalars(
+            select(TableHealthSignal.snapshot_id).where(marked if set_back else ~marked)
+        )
+    )
 
 
-def test_a_set_back_deletes_the_health_signals_of_the_snapshots_it_sets_back(
+def test_a_set_back_marks_the_health_signals_of_the_snapshots_it_sets_back(
     session: Session, principal: PrincipalRef, tmp_path: Path
 ) -> None:
-    """Delete the signals of every snapshot between the one set back to and the failed one (M1).
+    """Mark the signals of every snapshot between the one set back to and the failed one (M1).
 
-    They neither show as the table's current state nor feed the baseline.
+    They neither show as the table's current state nor feed the baseline, but the history keeps
+    them: a fired one is why a blocking health check set the table back.
 
     Parameters
     ----------
@@ -488,12 +496,16 @@ def test_a_set_back_deletes_the_health_signals_of_the_snapshots_it_sets_back(
 
     assert _roll_back(catalog, principal, task, written).outcome is RollbackOutcome.ROLLED_BACK
     assert _health_snapshots(session) == {before}
+    assert _health_snapshots(session, set_back=True) == {middle, after}
 
 
 def test_a_first_build_that_is_set_back_keeps_no_health_signals(
     session: Session, principal: PrincipalRef, tmp_path: Path
 ) -> None:
     """Delete the signals of a first build that is not published, so no reader sees its values.
+
+    The table's data is refused to every reader until a build publishes it, so its numbers are
+    not kept, marked or not.
 
     Parameters
     ----------
@@ -513,6 +525,7 @@ def test_a_first_build_that_is_set_back_keeps_no_health_signals(
 
     assert _roll_back(catalog, principal, task, written).outcome is RollbackOutcome.UNPUBLISHED
     assert _health_snapshots(session) == set()
+    assert _health_snapshots(session, set_back=True) == set()
 
 
 def test_a_second_writers_commit_is_never_discarded(

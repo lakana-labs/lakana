@@ -11,7 +11,7 @@ import pyarrow as pa
 import pyarrow.ipc
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from lakana_core.catalog import service as catalog_service
@@ -24,6 +24,7 @@ from lakana_core.models import (
     QueryRun,
     QueryRunStatus,
     Table,
+    TableHealthSignal,
     TableRead,
     TaskRun,
     WriteMode,
@@ -462,6 +463,28 @@ def test_the_signal_history_pages_and_bounds_days(client: TestClient) -> None:
     ) in refused.text
     unknown = client.get(url, headers=AUTH_HEADER, params={"signal": "rows"})
     assert unknown.status_code == 422 and "There is no health signal `rows`" in unknown.text
+
+
+def test_the_history_marks_a_signal_whose_snapshot_was_set_back(client: TestClient) -> None:
+    """`set_back` is `true` for a row a set-back marked, `false` otherwise; health leaves it out.
+
+    Parameters
+    ----------
+    client
+        The test client.
+    """
+    _table(client, rows=2)
+    with Session(client.app.state.engine) as session:
+        session.execute(
+            update(TableHealthSignal)
+            .where(TableHealthSignal.signal == "volume")
+            .values(set_back_at=datetime.now(UTC))
+        )
+        session.commit()
+    items = client.get(f"{_TABLES}/t/health/signals", headers=AUTH_HEADER).json()["items"]
+    assert [s["set_back"] for s in items] == [s["signal"] == "volume" for s in items]
+    assert any(s["set_back"] for s in items) and not all(s["set_back"] for s in items)
+    assert "volume" not in {s["signal"] for s in _health(client).json()["signals"]}
 
 
 def test_a_mask_leaves_out_the_values_of_its_column(client: TestClient) -> None:

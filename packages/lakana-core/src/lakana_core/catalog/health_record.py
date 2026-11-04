@@ -23,7 +23,7 @@ from pyiceberg.io import FileIO
 from pyiceberg.manifest import DataFile
 from pyiceberg.table.metadata import TableMetadata
 from pyiceberg.table.snapshots import Operation, Snapshot
-from sqlalchemy import ColumnElement, Subquery, and_, delete, func, not_, select
+from sqlalchemy import ColumnElement, Subquery, and_, delete, func, not_, select, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import InstrumentedAttribute, Session
 from sqlalchemy.sql.elements import UnaryExpression
@@ -43,6 +43,7 @@ from lakana_core.catalog.health_signals import (
     schema_signal,
     volume_signal,
 )
+from lakana_core.db import db_now
 from lakana_core.errors import StorageUnavailableError, ValidationError
 from lakana_core.identifiers import shown
 from lakana_core.models import TableHealthSignal
@@ -62,6 +63,10 @@ _BY_COLUMN: tuple[InstrumentedAttribute[Any], ...] = (
     TableHealthSignal.signal,
     TableHealthSignal.column_name,
 )
+
+NOT_SET_BACK: ColumnElement[bool] = TableHealthSignal.set_back_at.is_(None)
+"""The rows that are still the table's data: a set-back (`forget_set_back`) marks the others,
+which only the history shows."""
 
 NEWEST_COMMIT: tuple[UnaryExpression[Any], ...] = (
     TableHealthSignal.sequence_number.desc(),
@@ -136,8 +141,9 @@ def recent_observations(
     -------
     dict
         (signal, column) → observed values, newest first, at most `HISTORY` each, from rows in
-        state ``ok``, ``fired`` or ``no_history``; a fired row whose effect was ``block`` is left
-        out, because its data was set back.
+        state ``ok``, ``fired`` or ``no_history``. A row whose snapshot was set back is left out,
+        and does not count towards the window either; so is a fired row whose effect was
+        ``block``, whose data is set back unless the set-back failed.
     """
     since = session.scalar(
         select(TableHealthSignal.observed_at)
@@ -145,6 +151,7 @@ def recent_observations(
             TableHealthSignal.table_id == table_id,
             TableHealthSignal.signal == "schema",
             TableHealthSignal.sequence_number.is_not(None),
+            NOT_SET_BACK,
         )
         .order_by(*NEWEST_COMMIT)
         .offset(2 * HISTORY - 1)
@@ -155,6 +162,7 @@ def recent_observations(
         TableHealthSignal.signal.in_(("volume", "null_rate", "range")),
         TableHealthSignal.state.in_(_LEARNED_STATES),
         not_(and_(TableHealthSignal.state == "fired", TableHealthSignal.effect == "block")),
+        NOT_SET_BACK,
     ]
     if since is not None:
         conditions.append(TableHealthSignal.observed_at >= since)
@@ -486,10 +494,15 @@ def forget_set_back(
     after: int | None,
     until: int | None,
 ) -> None:
-    """Delete the signals of the snapshots a set-back takes out of ``main``, uncommitted.
+    """Mark the signals of the snapshots a set-back takes out of ``main``, uncommitted.
 
     A check that sets a table back (`CatalogService.roll_back`) makes them no longer the table's
-    data: their rows must neither show as its current state nor feed a later baseline.
+    data: they must neither show as its current state nor feed a later baseline (`NOT_SET_BACK`).
+    The history keeps them, marked with the time: a fired one is why a blocking health check
+    set the table back, and a notification names it. Retention deletes them like any row.
+
+    A first build that is left not published (`until` is `None`) has its rows deleted instead:
+    its data is refused to every reader until a build publishes it, so its numbers are not kept.
 
     Parameters
     ----------
@@ -513,8 +526,11 @@ def forget_set_back(
         gone.append(snapshot.snapshot_id)
         parent = snapshot.parent_snapshot_id
         snapshot = None if parent is None else metadata.snapshot_by_id(parent)
-    session.execute(
-        delete(TableHealthSignal)
-        .where(TableHealthSignal.table_id == table_id, TableHealthSignal.snapshot_id.in_(gone))
-        .execution_options(synchronize_session=False)
-    )
+    rows = (TableHealthSignal.table_id == table_id, TableHealthSignal.snapshot_id.in_(gone))
+    if until is None:
+        statement = delete(TableHealthSignal).where(*rows)
+    else:
+        statement = (
+            update(TableHealthSignal).where(*rows, NOT_SET_BACK).values(set_back_at=db_now(session))
+        )
+    session.execute(statement.execution_options(synchronize_session=False))
