@@ -888,11 +888,13 @@ _NOTHING_OF_A_KEPT_TABLE = {
     "table_health": (
         "the newest result of each check and the last maintenance's counts, which are numbers "
         "and names, and the current health signals (counts, null rates and column bounds, "
-        "hidden for a masked or filtered reader); no rows, no snapshot, no file location"
+        "hidden for a masked or filtered reader); no rows, snapshot ids, no snapshot metadata, no "
+        "file location"
     ),
     "table_health_signals": (
         "the history of the health signals: counts, null rates and column bounds, hidden for a "
-        "masked or filtered reader; no rows, no snapshot, no file location"
+        "masked or filtered reader; no rows, snapshot ids, no snapshot metadata, no file "
+        "location"
     ),
     "set_table_description": "a write of text; it returns nothing of the table",
     "set_column_description": "a write of text; it returns nothing of the table",

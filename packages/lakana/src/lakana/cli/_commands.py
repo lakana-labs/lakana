@@ -40,7 +40,7 @@ COMMANDS: dict[str, tuple[str, ...]] = {
     "table retention": ("tables.retention", "tables.set_retention"),
     "table expiring": ("tables.expiring",),
     "table describe": ("tables.describe",),
-    "table health": ("tables.health",),
+    "table health": ("tables.health", "tables.health_signals", "tables.iter_health_signals"),
     "table append": ("tables.get", "tables.append"),
     "table replace": ("tables.get", "tables.replace"),
     "table merge": ("tables.get", "tables.merge"),

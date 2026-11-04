@@ -1870,6 +1870,120 @@ def _health(tmp_path: Path, body: dict[str, Any], *args: str) -> tuple[FakeApi, 
     return api, result
 
 
+_SIGNAL = {
+    "id": "6f1c0d7e-0000-4000-8000-000000000001",
+    "signal": "volume",
+    "column": None,
+    "state": "fired",
+    "effect": "warn",
+    "snapshot_id": 4711,
+    "observed_at": "2026-11-03T06:00:00Z",
+    "observed": {"added": 120, "total": 120},
+    "band": {"low": 9800.0, "high": 10400.0, "median": 10100.0},
+    "alert": (
+        "bronze.sales: volume 120 rows, usually 9,800\u201310,400 "
+        "(snapshot 4711, 03 Nov 06:00 UTC); "
+        "check the source extract, or set health: {volume: off} if this table now loads less"
+    ),
+    "values_hidden": False,
+    "last_fired_at": "2026-11-03T06:00:00Z",
+}
+
+
+def test_table_health_shows_the_signals_and_what_fired(tmp_path: Path) -> None:
+    hidden = {
+        **_SIGNAL,
+        "id": "6f1c0d7e-0000-4000-8000-000000000002",
+        "signal": "null_rate",
+        "column": "price",
+        "state": "ok",
+        "observed": None,
+        "band": None,
+        "alert": None,
+        "values_hidden": True,
+    }
+    _, result = _health(tmp_path, {**_HEALTH, "signals": [_SIGNAL, hidden]})
+    assert result.exit_code == 0, result.stderr
+    plain = _plain(result.stdout)
+    assert "Signals:" in plain and "volume" in plain and "fired" in plain
+    assert "Fired: bronze.sales: volume 120 rows, usually 9,800\u201310,400" in plain
+    assert "Some values are hidden: a column mask or row filter applies to you." in plain
+
+
+def test_table_health_without_signals_says_when_they_start(tmp_path: Path) -> None:
+    _, result = _health(tmp_path, _HEALTH)
+    assert "Signals: none recorded yet; they start with the table's next write." in _plain(
+        result.stdout
+    )
+
+
+def test_table_health_signals_lists_the_history_and_the_next_page(tmp_path: Path) -> None:
+    api = FakeApi()
+    api.on("GET", f"{_BASE}/sales/health/signals", json={"items": [_SIGNAL], "next_cursor": "abc"})
+    result = invoke(
+        make_state(tmp_path, api),
+        "table",
+        "health",
+        "bronze.sales",
+        "--env",
+        "dev",
+        "--signals",
+        "--signal",
+        "volume",
+        "--limit",
+        "1",
+    )
+    assert result.exit_code == 0, result.stderr
+    assert dict(api.requests[-1].url.params) == {"signal": "volume", "limit": "1"}
+    plain = _plain(result.stdout)
+    assert "4711" in plain
+    assert (
+        "More results: lakana table health bronze.sales --env dev --signals --signal volume "
+        "--limit 1 --cursor abc"
+    ) in plain
+
+
+def test_table_health_signals_json_keeps_the_page(tmp_path: Path) -> None:
+    api = FakeApi()
+    api.on("GET", f"{_BASE}/sales/health/signals", json={"items": [_SIGNAL], "next_cursor": None})
+    result = invoke(
+        make_state(tmp_path, api),
+        "--output",
+        "json",
+        "table",
+        "health",
+        "bronze.sales",
+        "--env",
+        "dev",
+        "--signals",
+    )
+    assert result.exit_code == 0, result.stderr
+    assert json.loads(result.stdout)["items"][0]["snapshot_id"] == 4711
+
+
+def test_table_health_does_not_say_values_are_hidden_when_they_are_not(tmp_path: Path) -> None:
+    _, result = _health(tmp_path, {**_HEALTH, "signals": [_SIGNAL]})
+    assert "Signals:" in _plain(result.stdout)
+    assert "hidden" not in _plain(result.stdout)
+
+
+def test_table_health_signals_says_when_the_window_is_empty(tmp_path: Path) -> None:
+    api = FakeApi()
+    api.on("GET", f"{_BASE}/sales/health/signals", json={"items": [], "next_cursor": None})
+    result = invoke(
+        make_state(tmp_path, api),
+        "table",
+        "health",
+        "bronze.sales",
+        "--env",
+        "dev",
+        "--signals",
+        "--days",
+        "7",
+    )
+    assert "No health signals in the last 7 days." in _plain(result.stdout)
+
+
 def test_table_health_shows_maintenance_checks_and_readers(tmp_path: Path) -> None:
     api, result = _health(tmp_path, _HEALTH)
 
@@ -2351,7 +2465,7 @@ def test_table_health_with_only_withheld_checks_says_so_and_not_none(tmp_path: P
     _, result = _health(tmp_path, {**_HEALTH, "checks": [], "hidden_checks": 2})
     plain = _plain(result.stdout)
     assert "2 checks of references to tables you cannot read are not shown." in plain
-    assert "none recorded" not in plain
+    assert "Checks: none recorded" not in plain
 
 
 def test_table_get_shows_the_label_the_languages_and_the_coverage(tmp_path: Path) -> None:

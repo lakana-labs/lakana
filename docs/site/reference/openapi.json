@@ -2846,7 +2846,7 @@
           "tables"
         ],
         "summary": "Show a table's health",
-        "description": "Shows the table's last maintenance, the newest result of each of its checks and, when asked, who read it. Needs `READ_TABLE`. Answers 404 when the table does not exist and 422 when `days` is outside 1 to the period the server keeps. Answers 503 when `readers` names someone other than the caller and the audit entry for that could not be written; nothing is returned then.",
+        "description": "Shows the table's last maintenance, the newest result of each of its checks, its health signals and, when asked, who read it. Needs `READ_TABLE`. Answers 404 when the table does not exist and 422 when `days` is outside 1 to the period the server keeps. Answers 503 when `readers` names someone other than the caller and the audit entry for that could not be written; nothing is returned then.",
         "operationId": "get_table_health_api_v1_environments__env__namespaces__path__tables__name__health_get",
         "parameters": [
           {
@@ -2958,6 +2958,199 @@
           },
           "503": {
             "description": "The server cannot do this right now; ask again after the time in `Retry-After`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/environments/{env}/namespaces/{path}/tables/{name}/health/signals": {
+      "get": {
+        "tags": [
+          "tables"
+        ],
+        "summary": "List the history of a table's health signals, newest first",
+        "description": "Needs `READ_TABLE`. The values of a masked column, and every null rate and range under a row filter that applies to the caller, are left out. Answers 404 when the table does not exist and 422 for `days` outside 1 to the kept period, an unknown `signal` or a foreign `cursor`.",
+        "operationId": "list_table_health_signals_api_v1_environments__env__namespaces__path__tables__name__health_signals_get",
+        "parameters": [
+          {
+            "name": "env",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Env"
+            },
+            "description": "Environment name."
+          },
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            },
+            "description": "Dot-joined namespace path."
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            },
+            "description": "Table name."
+          },
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Days"
+            },
+            "description": "How far back, from 1 to the kept period (90 by default); 30 (or the kept period, if shorter) when absent."
+          },
+          {
+            "name": "signal",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Signal"
+            },
+            "description": "Only this signal."
+          },
+          {
+            "name": "column",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Column"
+            },
+            "description": "Only this column."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            },
+            "description": "The most rows of the page (1 to 200, default 100)."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            },
+            "description": "The `next_cursor` of the previous page."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthSignalPageOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token is missing, wrong, expired or revoked.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
             "content": {
               "application/json": {
                 "schema": {
@@ -21145,6 +21338,150 @@
         "type": "object",
         "title": "HTTPValidationError"
       },
+      "HealthSignalOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "signal": {
+            "type": "string",
+            "title": "Signal"
+          },
+          "column": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Column"
+          },
+          "state": {
+            "type": "string",
+            "title": "State"
+          },
+          "effect": {
+            "type": "string",
+            "title": "Effect"
+          },
+          "snapshot_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snapshot Id"
+          },
+          "observed_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Observed At"
+          },
+          "observed": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed"
+          },
+          "band": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Band"
+          },
+          "alert": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alert"
+          },
+          "values_hidden": {
+            "type": "boolean",
+            "title": "Values Hidden"
+          },
+          "last_fired_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Fired At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "signal",
+          "column",
+          "state",
+          "effect",
+          "snapshot_id",
+          "observed_at",
+          "observed",
+          "band",
+          "alert",
+          "values_hidden"
+        ],
+        "title": "HealthSignalOut",
+        "description": "One health signal of a table, as the caller may see it.\n\nParameters\n----------\nid\n    The observation's id.\nsignal\n    ``freshness``, ``volume``, ``null_rate``, ``range`` or ``schema``.\ncolumn\n    The column, for a column signal.\nstate\n    ``ok``, ``fired``, ``no_history``, ``no_metrics`` or ``off``.\neffect\n    The effect that applied to the observation.\nsnapshot_id\n    The snapshot observed.\nobserved_at\n    When it was recorded.\nobserved\n    What was observed, keys per signal in the table health reference; `null` when hidden.\nband\n    The usual band the observation was judged against; `null` when hidden or none.\nalert\n    The text of the newest fired observation (current state) or of this one (history);\n    `null` when it did not fire or its values are hidden.\nvalues_hidden\n    Whether a column mask or row filter that applies to the caller left out `observed`,\n    `band` and `alert`.\nlast_fired_at\n    When this signal and column last fired; only in the current state."
+      },
+      "HealthSignalPageOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/HealthSignalOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "HealthSignalPageOut",
+        "description": "One page of the history of a table's health signals, newest first.\n\nParameters\n----------\nitems\n    The observations.\nnext_cursor\n    Pass it as `cursor` for the next page; `null` on the last."
+      },
       "HistoryOut": {
         "properties": {
           "snapshot_id": {
@@ -24505,6 +24842,14 @@
             "type": "integer",
             "title": "Hidden Checks",
             "default": 0
+          },
+          "signals": {
+            "items": {
+              "$ref": "#/components/schemas/HealthSignalOut"
+            },
+            "type": "array",
+            "title": "Signals",
+            "default": []
           }
         },
         "type": "object",
@@ -24515,7 +24860,7 @@
           "readers"
         ],
         "title": "TableHealthOut",
-        "description": "A table's health at a glance.\n\nParameters\n----------\ndays\n    The window `readers` covers.\nlast_maintenance\n    The last maintenance that changed the table; `None` if there is none.\nchecks\n    The newest result of each check of the table.\nreaders\n    Who read the table in the window, most reads first; `None` for a caller who may not see\n    the table's grants.\nhidden_checks\n    How many results were left out of `checks`: generated reference checks whose target the\n    caller may not read."
+        "description": "A table's health at a glance.\n\nParameters\n----------\ndays\n    The window `readers` covers.\nlast_maintenance\n    The last maintenance that changed the table; `None` if there is none.\nchecks\n    The newest result of each check of the table.\nreaders\n    Who read the table in the window, most reads first; `None` for a caller who may not see\n    the table's grants.\nhidden_checks\n    How many results were left out of `checks`: generated reference checks whose target the\n    caller may not read.\nsignals\n    The current state of each health signal, values hidden where a column mask or row filter\n    applies to the caller."
       },
       "TableModelOut": {
         "properties": {

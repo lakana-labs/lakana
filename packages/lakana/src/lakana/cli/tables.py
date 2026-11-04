@@ -16,6 +16,7 @@ from lakana._models import (
     CheckHealth,
     Column,
     DroppedTable,
+    HealthSignal,
     Lineage,
     Measure,
     ModelReference,
@@ -24,6 +25,7 @@ from lakana._models import (
 )
 from lakana.cli import _files, _output, _retention
 from lakana.cli._break_glass import BREAK_GLASS, REASON, break_glass_reason
+from lakana.cli._paging import CURSOR, LIMIT, more_results
 from lakana.cli._state import CliError, CliState, confirm, resolve_environment, state_of
 from lakana.cli.artifacts import human_size
 from lakana.cli.checks import check_shown, withheld_line
@@ -747,6 +749,28 @@ def _check_state(check: CheckHealth) -> str:
     return check.outcome
 
 
+_SIGNAL_COLUMNS = ["signal", "column", "state", "effect", "observed_at"]
+"""The columns of the current signals of `table health`."""
+
+_SIGNAL_HISTORY_COLUMNS = ["observed_at", "signal", "column", "state", "effect", "snapshot_id"]
+"""The columns of `table health --signals`."""
+
+
+def _output_fired(state: CliState, signals: list[HealthSignal]) -> None:
+    """Print one `Fired:` line for each signal that fired and shows its alert.
+
+    Parameters
+    ----------
+    state
+        The CLI state.
+    signals
+        The signals shown.
+    """
+    for shown in signals:
+        if shown.state == "fired" and shown.alert:
+            _output.emit(state, f"Fired: {shown.alert}")
+
+
 @table_app.command("health")
 def health(
     ctx: typer.Context,
@@ -756,16 +780,32 @@ def health(
         typer.Option(
             "--days",
             min=1,
-            help="Readers over this many days (up to the server's kept period, 90 by default).",
+            help=(
+                "Readers over this many days; with --signals, the history (up to the server's "
+                "kept period, 90 by default)."
+            ),
         ),
     ] = None,
+    signals: Annotated[
+        bool, typer.Option("--signals", help="Show the history of the health signals instead.")
+    ] = False,
+    signal: Annotated[
+        str | None,
+        typer.Option(
+            "--signal", help="Only this signal: freshness, volume, null_rate, range or schema."
+        ),
+    ] = None,
+    column: Annotated[str | None, typer.Option("--column", help="Only this column.")] = None,
+    limit: LIMIT = None,
+    cursor: CURSOR = None,
     env: _ENV = None,
 ) -> None:
     """Show table NAME's last maintenance, the newest result of each check, and who reads it.
 
     Readers are counted from the queries that succeeded, per person and day. You see them only
-    with the ADMIN role. A Python task's reads of its inputs count too. Use --output json for every
-    field.
+    with the ADMIN role. A Python task's reads of its inputs count too. Also shows each health
+    signal (freshness, volume, null rate, range, schema), what fired, and with --signals their
+    history. Use --output json for every field.
 
     Parameters
     ----------
@@ -774,12 +814,48 @@ def health(
     name
         The qualified table name.
     days
-        The window of the readers in days.
+        The window of the readers in days, or of the history with --signals.
+    signals
+        Show the history of the health signals instead.
+    signal
+        Only this signal, with --signals.
+    column
+        Only this column, with --signals.
+    limit
+        Most observations to list, with --signals.
+    cursor
+        Continue after the page that printed this cursor, with --signals.
     env
         The environment.
     """
     state = state_of(ctx)
     environment = resolve_environment(state, env)
+    if signals:
+        page = state.client().tables.health_signals(
+            environment, name, days=days, signal=signal, column=column, limit=limit, cursor=cursor
+        )
+        if state.output == "json":
+            _output.emit(state, page)
+            return
+        if not page.items:
+            _output.emit(state, f"No health signals in the last {days or 30} days.")
+            return
+        _output.emit(state, page.items, columns=_SIGNAL_HISTORY_COLUMNS)
+        _output_fired(state, page.items)
+        more_results(
+            state,
+            ["lakana", "table", "health", name],
+            {
+                "--env": environment,
+                "--signals": True,
+                "--signal": signal,
+                "--column": column,
+                "--days": days,
+                "--limit": limit,
+            },
+            page.next_cursor,
+        )
+        return
     found = state.client().tables.health(environment, name, days=days)
     if state.output == "json":
         _output.emit(state, found)
@@ -803,6 +879,14 @@ def health(
         _output.emit(state, found.readers)
     else:
         _output.emit(state, f"Readers, last {found.days} days: none.")
+    if not found.signals:
+        _output.emit(state, "Signals: none recorded yet; they start with the table's next write.")
+        return
+    _output.emit(state, "Signals:")
+    _output.emit(state, found.signals, columns=_SIGNAL_COLUMNS)
+    _output_fired(state, found.signals)
+    if any(s.values_hidden for s in found.signals):
+        _output.emit(state, "Some values are hidden: a column mask or row filter applies to you.")
 
 
 def _now_shows(texts: Table | Column | None) -> str:

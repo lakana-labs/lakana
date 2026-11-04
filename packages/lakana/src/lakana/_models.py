@@ -782,6 +782,70 @@ class Reader:
     last_read_at: datetime
 
 
+@dataclass(frozen=True)
+class HealthSignal:
+    """One health signal of a table.
+
+    Parameters
+    ----------
+    id
+        The observation's id.
+    signal
+        ``freshness``, ``volume``, ``null_rate``, ``range`` or ``schema``.
+    column
+        The column, for a column signal.
+    state
+        ``ok``, ``fired``, ``no_history``, ``no_metrics`` or ``off``.
+    effect
+        The effect that applied to the observation.
+    snapshot_id
+        The snapshot observed.
+    observed_at
+        When it was recorded.
+    observed
+        What was observed, keys per signal in the table health reference; `None` when hidden.
+    band
+        The usual band the observation was judged against; `None` when hidden or none.
+    alert
+        The text of the newest fired observation (current state) or of this one (history);
+        `None` when it did not fire or its values are hidden.
+    values_hidden
+        Whether a column mask or row filter that applies to you left out `observed`, `band`
+        and `alert`.
+    last_fired_at
+        When this signal and column last fired; only in the current state.
+    """
+
+    id: str
+    signal: str
+    column: str | None
+    state: str
+    effect: str
+    snapshot_id: int | None
+    observed_at: datetime
+    observed: dict[str, Any] | None
+    band: dict[str, Any] | None
+    alert: str | None
+    values_hidden: bool
+    last_fired_at: datetime | None = None
+
+
+@dataclass(frozen=True)
+class HealthSignalPage:
+    """One page of the history of a table's health signals, newest first.
+
+    Parameters
+    ----------
+    items
+        The observations.
+    next_cursor
+        Pass it as `cursor` for the next page; `None` on the last.
+    """
+
+    items: list[HealthSignal]
+    next_cursor: str | None
+
+
 # jscpd:ignore-end
 
 
@@ -803,6 +867,8 @@ class TableHealth:
     hidden_checks
         How many results were left out of `checks`: generated reference checks whose target you
         may not read; 0 from an older server.
+    signals
+        The current state of each health signal; `[]` from a server older than health signals.
     """
 
     days: int
@@ -810,6 +876,7 @@ class TableHealth:
     checks: list[CheckHealth]
     readers: list[Reader] | None
     hidden_checks: int = 0
+    signals: list[HealthSignal] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

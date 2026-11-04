@@ -108,6 +108,9 @@ ROUTES: dict[str, Route] = {
     "tables.health": Route(
         "GET", "/api/v1/environments/{env}/namespaces/{path}/tables/{name}/health"
     ),
+    "tables.health_signals": Route(
+        "GET", "/api/v1/environments/{env}/namespaces/{path}/tables/{name}/health/signals"
+    ),
     "tables.describe": Route("PATCH", "/api/v1/environments/{env}/namespaces/{path}/tables/{name}"),
     "tables.describe_column": Route(
         "PUT",

@@ -187,6 +187,7 @@ def test_the_health_of_a_fresh_table_is_empty(client: TestClient) -> None:
         "checks": [],
         "readers": [],
         "hidden_checks": 0,
+        "signals": [],
     }
 
 
@@ -261,7 +262,14 @@ def test_a_reader_sees_the_health_but_not_the_readers(client: TestClient) -> Non
     shown = _health(client, headers=reader)
     assert shown.status_code == 200, shown.text
     assert shown.json()["readers"] is None
-    assert set(shown.json()) == {"days", "last_maintenance", "checks", "readers", "hidden_checks"}
+    assert set(shown.json()) == {
+        "days",
+        "last_maintenance",
+        "checks",
+        "readers",
+        "hidden_checks",
+        "signals",
+    }
     assert [r["principal"] for r in _health(client).json()["readers"]] == ["admin"]
 
 
@@ -413,3 +421,67 @@ def _second_task(session: Session, first: TaskRun) -> uuid.UUID:
     session.add(second)
     session.flush()
     return second.id
+
+
+def test_an_append_records_signals_that_health_shows(client: TestClient) -> None:
+    _table(client, rows=3)
+    signals = _health(client).json()["signals"]
+    assert {(s["signal"], s["column"], s["state"]) for s in signals} >= {
+        ("volume", None, "no_history"),
+        ("schema", None, "ok"),
+        ("null_rate", "note", "no_history"),
+    }
+    volume = next(s for s in signals if s["signal"] == "volume")
+    assert (volume["observed"], volume["effect"], volume["values_hidden"]) == (
+        {"added": 3, "total": 3},
+        "warn",
+        False,
+    )
+
+
+def test_the_signal_history_pages_and_bounds_days(client: TestClient) -> None:
+    _table(client, rows=2)
+    url = f"{_TABLES}/t/health/signals"
+    first = client.get(url, headers=AUTH_HEADER, params={"limit": 1})
+    assert first.status_code == 200, first.text
+    assert len(first.json()["items"]) == 1 and first.json()["next_cursor"]
+    second = client.get(
+        url, headers=AUTH_HEADER, params={"limit": 1, "cursor": first.json()["next_cursor"]}
+    )
+    assert second.json()["items"][0]["id"] != first.json()["items"][0]["id"]
+    assert client.get(url, headers=AUTH_HEADER, params={"days": 7}).status_code == 200
+    refused = client.get(url, headers=AUTH_HEADER, params={"days": 91})
+    assert refused.status_code == 422
+    assert (
+        "days must be between 1 and 90 (got 91). The platform keeps health signals for 90 days; "
+        "an administrator can change that with LAKANA_HEALTH__RETENTION_DAYS."
+    ) in refused.text
+    unknown = client.get(url, headers=AUTH_HEADER, params={"signal": "rows"})
+    assert unknown.status_code == 422 and "There is no health signal `rows`" in unknown.text
+
+
+def test_a_mask_leaves_out_the_values_of_its_column(client: TestClient) -> None:
+    _table(client, rows=3)
+    masked = client.post(
+        "/api/v1/column-masks",
+        headers=AUTH_HEADER,
+        json={
+            "principal": "admin",
+            "environment": "dev",
+            "namespace": "gold",
+            "table": "t",
+            "column": "note",
+            "expression": "'***'",
+        },
+    )
+    assert masked.status_code == 201, masked.text
+    signals = _health(client).json()["signals"]
+    note = next(s for s in signals if s["signal"] == "null_rate" and s["column"] == "note")
+    assert (note["observed"], note["band"], note["alert"], note["values_hidden"]) == (
+        None,
+        None,
+        None,
+        True,
+    )
+    volume = next(s for s in signals if s["signal"] == "volume")
+    assert volume["observed"] == {"added": 3, "total": 3}

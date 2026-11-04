@@ -58,6 +58,8 @@ from lakana_server.api.platform.schemas import (
     DroppedTableOut,
     ExternalTableCreate,
     ExternalTableOut,
+    HealthSignalOut,
+    HealthSignalPageOut,
     HistoryOut,
     LineageEdgeOut,
     LineageNodeOut,
@@ -1163,10 +1165,10 @@ def get_table_health(
 ) -> TableHealthOut:
     """Show a table's health.
 
-    Shows the table's last maintenance, the newest result of each of its checks and, when
-    asked, who read it. Needs `READ_TABLE`. Answers 404 when the table does not exist and
-    422 when `days` is outside 1 to the period the server keeps. Answers 503 when `readers`
-    names someone other than the caller and the audit entry for that could not be written;
+    Shows the table's last maintenance, the newest result of each of its checks, its health
+    signals and, when asked, who read it. Needs `READ_TABLE`. Answers 404 when the table does not
+    exist and 422 when `days` is outside 1 to the period the server keeps. Answers 503 when
+    `readers` names someone other than the caller and the audit entry for that could not be written;
     nothing is returned then.
 
     Parameters
@@ -1217,6 +1219,94 @@ def get_table_health(
     ref = TableRef(environment=env, namespace=NamespacePath.from_parts(path.split(".")), name=name)
     health = catalog.table_health(principal, ref, days=days, now=datetime.now(UTC))
     return TableHealthOut.model_validate(health, from_attributes=True)
+
+
+@router.get(
+    "/{name}/health/signals", response_model=HealthSignalPageOut, responses=errors(403, 404)
+)
+def list_table_health_signals(
+    env: str,
+    path: str,
+    name: str,
+    request: Request,
+    days: int | None = Query(default=None),
+    signal: str | None = Query(default=None),
+    column: str | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=200),
+    cursor: str | None = Query(default=None),
+    principal: PrincipalRef = Depends(get_principal),
+    catalog: CatalogService = Depends(get_catalog),
+) -> HealthSignalPageOut:
+    """List the history of a table's health signals, newest first.
+
+    Needs `READ_TABLE`. The values of a masked column, and every null rate and range under a row
+    filter that applies to the caller, are left out. Answers 404 when the table does not exist and
+    422 for `days` outside 1 to the kept period, an unknown `signal` or a foreign `cursor`.
+
+    Parameters
+    ----------
+    env
+        Environment name.
+    path
+        Dot-joined namespace path.
+    name
+        Table name.
+    request
+        The current request, for `LAKANA_HEALTH__RETENTION_DAYS`.
+    days
+        How far back, from 1 to the kept period (90 by default); 30 (or the kept period, if
+        shorter) when absent.
+    signal
+        Only this signal.
+    column
+        Only this column.
+    limit
+        The most rows of the page (1 to 200, default 100).
+    cursor
+        The `next_cursor` of the previous page.
+    principal
+        The authenticated caller.
+    catalog
+        The catalog service for this request.
+
+    Returns
+    -------
+    HealthSignalPageOut
+        One page.
+
+    Raises
+    ------
+    lakana_core.errors.ValidationError
+        Mapped to 422 for `days` outside its range, an unknown signal or a foreign cursor.
+    lakana_core.errors.NotFoundError
+        Mapped to 404.
+    lakana_core.errors.PermissionDenied
+        Mapped to 403 without READ_TABLE.
+    """
+    keep = request.app.state.settings.health.retention_days
+    if days is None:
+        days = min(30, keep)
+    elif not 1 <= days <= keep:
+        raise ValidationError(
+            f"days must be between 1 and {keep} (got {days}). The platform keeps health signals "
+            f"for {keep} days; an administrator can change that with "
+            "LAKANA_HEALTH__RETENTION_DAYS."
+        )
+    ref = TableRef(environment=env, namespace=NamespacePath.from_parts(path.split(".")), name=name)
+    page = catalog.table_health_signals(
+        principal,
+        ref,
+        days=days,
+        signal=signal,
+        column=column,
+        limit=limit,
+        cursor=cursor,
+        now=datetime.now(UTC),
+    )
+    return HealthSignalPageOut(
+        items=[HealthSignalOut.model_validate(v, from_attributes=True) for v in page.items],
+        next_cursor=page.next_cursor,
+    )
 
 
 _EDIT_LANG_DESCRIPTION = (
