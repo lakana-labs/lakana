@@ -6,19 +6,28 @@ import json
 import logging
 import sys
 import uuid
-from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
 
 import pyarrow as pa
 import pytest
 from core_test_helpers import _prepared_catalog
+from health_test_helpers import (
+    _ORDERS,
+    _SILVER,
+    _T0,
+    _environment_id,
+    _rows,
+    _seed,
+    _table_id,
+    health_catalog,
+)
 from pyiceberg.conversions import to_bytes
 from pyiceberg.manifest import DataFile
 from pyiceberg.schema import Schema
 from pyiceberg.table.snapshots import Operation, Summary
 from pyiceberg.table.update import SetPropertiesUpdate
-from pyiceberg.types import DoubleType, LongType, NestedField, StringType
+from pyiceberg.types import DoubleType, NestedField
 from sqlalchemy import and_, or_, select, update
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
@@ -29,34 +38,8 @@ from lakana_core.catalog.health_record import commit_observations, recent_observ
 from lakana_core.catalog.health_signals import HealthEffects, Observation
 from lakana_core.catalog.service import CatalogService
 from lakana_core.errors import ValidationError
-from lakana_core.identifiers import NamespacePath, TableRef
-from lakana_core.models import Namespace, Table, TableHealthSignal, WriteMode
-
-_SILVER = NamespacePath.from_parts(["silver"])
-_ORDERS = TableRef("dev", _SILVER, "orders")
-_SCHEMA = Schema(
-    NestedField(1, "id", LongType(), required=True),
-    NestedField(2, "status", StringType(), required=False),
-)
-_ARROW = pa.schema([pa.field("id", pa.int64(), nullable=False), pa.field("status", pa.string())])
-_T0 = datetime(2026, 10, 1, tzinfo=UTC)
-
-
-def _rows(ids: list[int]) -> pa.Table:
-    """Build rows of `silver.orders`, the status of every other row null.
-
-    Parameters
-    ----------
-    ids
-        The ids.
-
-    Returns
-    -------
-    pa.Table
-        The rows.
-    """
-    status = [None if i % 2 else "s" for i in ids]
-    return pa.table({"id": ids, "status": status}, schema=_ARROW)
+from lakana_core.identifiers import TableRef
+from lakana_core.models import Table, TableHealthSignal, WriteMode
 
 
 @pytest.fixture
@@ -77,45 +60,7 @@ def catalog(session: Session, tmp_path: Path, principal: PrincipalRef) -> Catalo
     CatalogService
         The catalog.
     """
-    built = _prepared_catalog(session, tmp_path, AllowAllAuthorization(), namespaces=[_SILVER])
-    built.create_table(principal, _ORDERS, schema=_SCHEMA)
-    return built
-
-
-def _table_id(session: Session) -> uuid.UUID:
-    """Look up the id of `silver.orders`.
-
-    Parameters
-    ----------
-    session
-        Database session.
-
-    Returns
-    -------
-    uuid.UUID
-        The id.
-    """
-    return session.scalars(select(Table.id).where(Table.name == "orders")).one()
-
-
-def _environment_id(session: Session) -> uuid.UUID:
-    """Look up the environment of `silver.orders`.
-
-    Parameters
-    ----------
-    session
-        Database session.
-
-    Returns
-    -------
-    uuid.UUID
-        The id.
-    """
-    return session.scalars(
-        select(Namespace.environment_id)
-        .join(Table, Table.namespace_id == Namespace.id)
-        .where(Table.name == "orders")
-    ).one()
+    return health_catalog(session, tmp_path, principal)
 
 
 def _signals(session: Session) -> list[tuple[str, str | None, str, str]]:
@@ -136,54 +81,6 @@ def _signals(session: Session) -> list[tuple[str, str | None, str, str]]:
         ((r.signal, r.column_name, r.state, r.effect) for r in rows),
         key=lambda row: (row[0], row[1] or "", row[2], row[3]),
     )
-
-
-def _seed(
-    session: Session,
-    signal: str,
-    observed: dict,
-    *,
-    count: int = 8,
-    column: str | None = None,
-    first_day: int = 0,
-) -> None:
-    """Record a history of one signal for `silver.orders`, one day apart, before today.
-
-    Parameters
-    ----------
-    session
-        Database session; commits.
-    signal
-        The signal.
-    observed
-        The observed value of every row.
-    count
-        How many rows.
-    column
-        The column, for a column signal.
-    first_day
-        The day after `_T0` of the oldest row.
-    """
-    table_id = _table_id(session)
-    environment_id = _environment_id(session)
-    for day in range(first_day, first_day + count):
-        session.add(
-            TableHealthSignal(
-                id=uuid.uuid4(),
-                environment_id=environment_id,
-                table_id=table_id,
-                signal=signal,
-                column_name=column,
-                snapshot_id=day + 1,
-                sequence_number=day + 1,
-                observed=observed,
-                band=None,
-                state="ok",
-                effect="warn",
-                observed_at=_T0 + timedelta(days=day),
-            )
-        )
-    session.commit()
 
 
 def _recording(monkeypatch: pytest.MonkeyPatch) -> list[tuple]:

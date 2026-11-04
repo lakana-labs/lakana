@@ -3565,7 +3565,7 @@ class NotificationOut(BaseModel):
         The delivery id: the ``delivery_id`` a receiver sees, and what
         ``GET /environments/{env}/notifications/{id}`` takes.
     event
-        ``failed``, ``recovered``, ``columns_changed`` or ``test``.
+        ``failed``, ``recovered``, ``columns_changed``, ``health`` or ``test``.
     state
         ``pending``, ``delivered`` or ``failed``.
     attempts

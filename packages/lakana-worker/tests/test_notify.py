@@ -26,6 +26,7 @@ from lakana_core.models import (
     Base,
     Environment,
     JobVersion,
+    Namespace,
     NotificationDelivery,
     NotificationState,
     Principal,
@@ -38,6 +39,9 @@ from lakana_core.models import (
     RunTrigger,
     Secret,
     SecretUseKind,
+    Table,
+    TableHealthSignal,
+    TableType,
     TaskRun,
     TaskStatus,
 )
@@ -623,6 +627,55 @@ def test_a_test_delivery_has_no_run_and_says_so(world: World) -> None:
     assert data["event"] == "test"
     assert data["run_id"] == "00000000-0000-0000-0000-000000000000"
     assert data["delivery_id"] == str(row_id)
+    assert world.row(row_id).state is NotificationState.DELIVERED
+
+
+def test_a_health_delivery_carries_the_table_and_the_alert_of_its_signal(world: World) -> None:
+    with Session(world.engine) as session:
+        namespace = Namespace(id=uuid.uuid4(), environment_id=world.env_id, path="silver")
+        session.add(namespace)
+        session.flush()
+        table = Table(
+            id=uuid.uuid4(), namespace_id=namespace.id, name="orders", table_type=TableType.ICEBERG
+        )
+        session.add(table)
+        session.flush()
+        signal = TableHealthSignal(
+            id=uuid.uuid4(),
+            environment_id=world.env_id,
+            table_id=table.id,
+            signal="volume",
+            column_name=None,
+            snapshot_id=7,
+            sequence_number=7,
+            observed={"added": 3, "total": 3},
+            band={"low": 900, "high": 1_100, "median": 1_000},
+            state="fired",
+            effect="warn",
+            observed_at=T0,
+        )
+        session.add(signal)
+        session.commit()
+        signal_id = signal.id
+    row_id = world.delivery(event="health", run=False)
+    with Session(world.engine) as session:
+        session.execute(
+            update(NotificationDelivery)
+            .where(NotificationDelivery.id == row_id)
+            .values(health_signal_id=signal_id)
+        )
+        session.commit()
+    sent = Sent()
+    deliver_due(world.engine, T0, settings(sent), limit=10)
+    data = json.loads(sent.requests[0][1])
+    assert (data["event"], data["table"], data["run_id"], data["delivery_id"]) == (
+        "health",
+        "silver.orders",
+        "",
+        str(row_id),
+    )
+    assert data["alert"].startswith("silver.orders: volume 3 rows, usually 900")
+    assert data["command"] == "lakana table health silver.orders --env prod"
     assert world.row(row_id).state is NotificationState.DELIVERED
 
 

@@ -915,3 +915,61 @@ def alert_text(
             f"{name} still works, or set health: {{schema: off}} if such changes are expected"
         )
     return None
+
+
+_NEXT_STEP = {
+    "volume": "check the source extract",
+    "null_rate": "check what fills {column} upstream",
+    "range": "check the source for wrong units or test rows",
+    "schema": "check that what reads {table} still works",
+}
+"""The first half of a value-free alert's next step, per signal (as `alert_text` words it)."""
+
+
+def value_free_alert(
+    table: str,
+    signal: str,
+    column: str | None,
+    *,
+    snapshot_id: int | None,
+    observed_at: datetime,
+    environment: str,
+) -> str:
+    """Write the alert of a fired signal without any value or band.
+
+    For a reader nobody can ask (a notification's webhook): it names the table, the signal, the
+    column, the snapshot, the time and the next step, like a blocking health check's text
+    (`lakana_core.runs.checks.HEALTH_BLOCKED`), and never says why the values are left out.
+
+    Parameters
+    ----------
+    table
+        The table's name.
+    signal
+        One of `SIGNALS`.
+    column
+        The column, for a column signal.
+    snapshot_id
+        The snapshot that fired.
+    observed_at
+        When the observation was recorded.
+    environment
+        The environment's name, for the command.
+
+    Returns
+    -------
+    str
+        The text.
+    """
+    name, col = shown(table), shown(column)
+    what = signal if column is None else f"{signal} of {col}"
+    setting = f"{{{signal}: off}}" if column is None else f"{{{signal}: {{{col}: off}}}}"
+    step = _NEXT_STEP.get(signal, "check the data the table is built from").format(
+        column=col, table=name
+    )
+    return (
+        f"{name}: health signal {what} fired at snapshot {snapshot_id} "
+        f"({observed_at.astimezone(UTC):%d %b %H:%M} UTC); `lakana table health {name} --env "
+        f"{shown(environment)} --signals` shows its usual band and new value to readers who may "
+        f"see them; {step}, or set health: {setting} if this is expected"
+    )

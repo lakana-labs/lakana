@@ -22543,7 +22543,7 @@
           "delivered_at"
         ],
         "title": "NotificationOut",
-        "description": "One notification of a run.\n\nParameters\n----------\nid\n    The delivery id: the ``delivery_id`` a receiver sees, and what\n    ``GET /environments/{env}/notifications/{id}`` takes.\nevent\n    ``failed``, ``recovered``, ``columns_changed`` or ``test``.\nstate\n    ``pending``, ``delivered`` or ``failed``.\nattempts\n    Attempts made so far.\nmax_attempts\n    Attempts before the delivery counts as failed.\nlast_result\n    A short text on the last attempt; never the URL.\ndelivered_at\n    When it was delivered."
+        "description": "One notification of a run.\n\nParameters\n----------\nid\n    The delivery id: the ``delivery_id`` a receiver sees, and what\n    ``GET /environments/{env}/notifications/{id}`` takes.\nevent\n    ``failed``, ``recovered``, ``columns_changed``, ``health`` or ``test``.\nstate\n    ``pending``, ``delivered`` or ``failed``.\nattempts\n    Attempts made so far.\nmax_attempts\n    Attempts before the delivery counts as failed.\nlast_result\n    A short text on the last attempt; never the URL.\ndelivered_at\n    When it was delivered."
       },
       "NotifyTestOut": {
         "properties": {

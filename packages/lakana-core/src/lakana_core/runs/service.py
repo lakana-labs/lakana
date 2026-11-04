@@ -90,6 +90,7 @@ from lakana_core.runs.selection import (
     downstream_closure,
     resolve_selection,
     selected_upstreams,
+    selection_of,
 )
 from lakana_core.runs.store import upstream_names
 from lakana_core.runs.waiting import (
@@ -1618,14 +1619,7 @@ class RunService:
             raise NotFoundError(
                 job_missing_message(version.manifest_json, job, repo.name, env.name)
             )
-        patterns = entry.get("select")
-        return Selection(
-            patterns=tuple(x for x in patterns if isinstance(x, str))
-            if isinstance(patterns, list)
-            else (),
-            upstream=entry.get("upstream") is True,
-            downstream=entry.get("downstream") is True,
-        )
+        return selection_of(entry)
 
     def prepare_start(
         self,

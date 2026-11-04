@@ -1,7 +1,9 @@
 """Deciding the event of a finished run of a job, and queuing its notification.
 
 Both run inside the transaction that finishes the run (`lakana_core.runs.store`), so the
-notification is queued exactly when the run is finished and not otherwise.
+notification is queued exactly when the run is finished and not otherwise. A fired table health
+signal is queued by the commit that records it
+(`lakana_core.catalog.health_jobs.queue_health_notifications`, #340).
 """
 
 from __future__ import annotations
@@ -33,6 +35,10 @@ COLUMNS_CHANGED = "columns_changed"
 """The event of a run that succeeded, reports no other event, and whose writes removed or replaced
 a column (`TaskRun.schema_change_json`). Sent whether or not a row filter or column mask uses the
 column: the endpoint is no administrator, so the message must not tell that a policy exists."""
+
+HEALTH = "health"
+"""The event of a fired table health signal; its delivery has no run and names the signal
+(`NotificationDelivery.health_signal_id`)."""
 
 
 def decide_event(session: Session, run: Run) -> str | None:
@@ -127,11 +133,11 @@ def new_delivery(
     notify
         The job's `notify:`.
     event
-        ``failed``, ``recovered``, ``columns_changed`` or ``test``.
+        ``failed``, ``recovered``, ``columns_changed``, ``health`` or ``test``.
     now
         When the first attempt is due.
     run_id
-        The run; `None` for a test.
+        The run; `None` for a test and for ``health``.
     environment_id
         The environment.
     repository_id

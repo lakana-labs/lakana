@@ -168,12 +168,13 @@ fails the write.
 
 ### What a signal does: `health:`
 
-A fired signal warns by default: it is recorded and shown. You choose, per signal, between three
-effects:
+A fired signal warns by default: it is recorded, shown, and sent to the jobs that build the table
+(see [Messages to the jobs that build the table](#messages-to-the-jobs-that-build-the-table)). You
+choose, per signal, between three effects:
 
 | Effect | What it does |
 |---|---|
-| `warn` | The default. The signal is recorded and shown when it fires. |
+| `warn` | The default. The signal is recorded, shown and sent to the building jobs' `notify:` when it fires. |
 | `block` | A firing signal fails the run and sets the table back, as a blocking check does. |
 | `off` | The signal is not evaluated for the table or column, and shows as `off`. |
 
@@ -238,6 +239,38 @@ every effect that is not the default `warn`, in the order of its keys, as in
 A project in which a table declares `health:` (in the asset or as a default in `lakana.yaml`)
 deploys manifest version 14. Upgrade the workers before you deploy it: a worker of an earlier
 release refuses that manifest. A project without `health:` keeps its version.
+
+### Messages to the jobs that build the table
+
+A fired signal whose effect is `warn` is sent to the jobs that build the table: every job of the
+environment's current deployments whose selection holds it and that declares `notify:` (see
+[Get told when a job fails](../how-to/get-told-when-a-job-fails.md)). Each job gets one message
+with the event `health`, through its own webhook and format. A table that no job with `notify:`
+builds is only shown.
+
+- **Once per firing.** A signal that keeps firing commit after commit sends one message, not one
+  per run; it sends again only after an observation of the same signal and column that did not
+  fire. A firing whose snapshot a check set back does not count.
+- **`block`.** A firing that a run's own `health_<signal>` check judges fails the run, and the
+  run's `failed` message names the check, so no `health` message is sent for it. A `block` signal
+  that fires without such a check, in a write outside a run or in a run that started before the
+  deploy that set `block`, is sent like a `warn` one.
+- **What it says.** The title reads ``Lakana: table `gold.orders` needs a look in `prod` ``, then
+  the signal's alert, the job and repository, the command `lakana table health TABLE --env ENV`
+  and the delivery id. In `json` the event is `health`, `run_id`, `status`, `commit` and `trigger`
+  are empty, and two keys are added: `table` and `alert`.
+- **Values.** Whoever reads the channel is outside Lakana: nobody can ask whether a policy applies
+  to them. For a table with any row filter, and for a `null_rate` or `range` signal of a table
+  with any column mask, the alert names only the table, the signal, the column, the snapshot, the
+  time and the next step, never the usual band or the new value. The message does not say why.
+  Without a policy it is the signal's `alert` (see [Fields of a signal](#fields-of-a-signal)),
+  with the band and the value.
+- **Set back later.** A message already queued is still sent when a later check sets the
+  firing's snapshot back: it tells of a firing that happened.
+
+The alert of a `null_rate` signal of a table with a column mask reads:
+
+> gold.orders: health signal null_rate of email fired at snapshot 4711 (03 Nov 06:00 UTC); `lakana table health gold.orders --env prod --signals` shows its usual band and new value to readers who may see them; check what fills email upstream, or set health: {null_rate: {email: off}} if this is expected
 
 ### What `observed` and `band` hold
 

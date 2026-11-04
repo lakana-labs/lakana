@@ -2782,7 +2782,7 @@ class Notification:
     id
         The delivery id, the same as the ``delivery_id`` of the message the receiver got.
     event
-        ``failed``, ``recovered``, ``columns_changed`` or ``test``.
+        ``failed``, ``recovered``, ``columns_changed``, ``health`` or ``test``.
     state
         ``pending`` (waiting for a first or another attempt), ``delivered`` or ``failed``.
     attempts
