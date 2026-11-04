@@ -17,7 +17,6 @@ generated for each run.
 
 from __future__ import annotations
 
-import json
 import secrets
 import time
 import tomllib
@@ -31,6 +30,7 @@ import docker_stack
 import pytest
 import test_docker_task_egress_integration as egress_cases
 from docker_stack import PYTHON, Stack
+from e2e_report import last_report
 from test_docker_task_egress_integration import (
     Sources,
     _address,
@@ -117,7 +117,7 @@ INSERT INTO dbo.customers VALUES
 """
 """The source tables; the page's ``reader.sql`` adds the login."""
 
-_PROBE = """import importlib.util, json
+_PROBE = """import importlib.util, json, sys
 from pathlib import Path
 
 from lakana import asset
@@ -130,10 +130,12 @@ def probe(ctx):
     spec.loader.exec_module(recipe)
     function = getattr(recipe, {function!r})
     table = function(ctx) if {with_context!r} else function()
-    print("E2E " + json.dumps(
+    report = "E2E " + json.dumps(
         {{"schema": [[f.name, str(f.type)] for f in table.schema], "rows": table.to_pylist()}},
         default=str,
-    ), flush=True)
+    )
+    sys.stdout.write(report + "\n")
+    sys.stdout.flush()
     raise RuntimeError("the probe is done")
 """
 """The task: the example's function, called as the harness would, and what it returned."""
@@ -439,11 +441,10 @@ def _run(
     with sources.stack.configured(relay_reachable=reachable):
         outcome = runner.run(task, output.extend, StopSignal())
     text = output.decode(errors="replace")
-    reports = [line for line in text.splitlines() if line.startswith("E2E ")]
     assert outcome.succeeded is False, text
     assert server.reader not in text
     assert not [name for name in sources.stack.labelled() if "task" in name]
-    return (json.loads(reports[-1].removeprefix("E2E ")) if reports else None), text, outcome
+    return last_report(text), text, outcome
 
 
 def test_the_driver_pins_are_the_examples() -> None:
