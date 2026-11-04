@@ -6401,6 +6401,138 @@
         }
       }
     },
+    "/api/v1/environments/{env}/graph/join-path": {
+      "get": {
+        "tags": [
+          "graph"
+        ],
+        "summary": "Show how two tables join: every declared path of minimal length over references",
+        "description": "A path has at most 4 steps, and at most 10 paths are returned, in the order of their references' ids (`more_paths` says when more exist). A step follows a reference either way: `many_to_one` from the table that declares it to its target, `one_to_many` with `fans_out: true` back, where each row may meet many. A step names the reference, the columns to join on, and both tables' kind and grain. No path, or none you may see, gives an empty `paths` with a `reason`; a path through a table you may not see is never returned, and nothing in the answer counts or marks it. Answers 404 when a table or the environment does not exist or you may not see it (one answer for both), 422 for something that is not a table or the same table twice, or a question too large to walk, and 503 with `Retry-After` when the walk ran past its time.",
+        "operationId": "graph_join_path_api_v1_environments__env__graph_join_path_get",
+        "parameters": [
+          {
+            "name": "env",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Env"
+            },
+            "description": "Environment name."
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "The table to start from: A node id from an answer, or a table's dotted name such as gold.dim_store; a column as column:gold.dim_store/store_id.",
+              "title": "From"
+            },
+            "description": "The table to start from: A node id from an answer, or a table's dotted name such as gold.dim_store; a column as column:gold.dim_store/store_id."
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "The table to reach, named the same way.",
+              "title": "To"
+            },
+            "description": "The table to reach, named the same way."
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The language of the texts, such as de or fr-CH; without it, your profile's language, then Accept-Language, then the instance's main language.",
+              "title": "Lang"
+            },
+            "description": "The language of the texts, such as de or fr-CH; without it, your profile's language, then Accept-Language, then the instance's main language."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JoinPathsOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token is missing, wrong, expired or revoked.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The server cannot do this right now; ask again after the time in `Retry-After`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/environments/{env}/namespaces/{path}/artifacts/{name}/uploads": {
       "post": {
         "tags": [
@@ -21327,6 +21459,169 @@
         ],
         "title": "JobStartOut",
         "description": "What a start of a job did: the run (201) or the waiting start (202).\n\nParameters\n----------\nrun\n    The queued run, or null when the start waits.\nwaiting\n    The waiting start, or null when a run was queued."
+      },
+      "JoinPathOut": {
+        "properties": {
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/JoinStepOut"
+            },
+            "type": "array",
+            "title": "Steps"
+          }
+        },
+        "type": "object",
+        "required": [
+          "steps"
+        ],
+        "title": "JoinPathOut",
+        "description": "A join path.\n\nParameters\n----------\nsteps\n    Its steps, in order, from `from` to `to`."
+      },
+      "JoinPathsOut": {
+        "properties": {
+          "paths": {
+            "items": {
+              "$ref": "#/components/schemas/JoinPathOut"
+            },
+            "type": "array",
+            "title": "Paths"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "more_paths": {
+            "type": "boolean",
+            "title": "More Paths"
+          }
+        },
+        "type": "object",
+        "required": [
+          "paths",
+          "reason",
+          "more_paths"
+        ],
+        "title": "JoinPathsOut",
+        "description": "Every declared join path of minimal length between two tables: at most 4 steps, 10 paths.\n\nParameters\n----------\npaths\n    The paths, in the order of their references' ids; empty when there is none.\nreason\n    Why there is none, and what to do; `null` when there are paths.\nmore_paths\n    `true` when more than 10 paths of that length exist."
+      },
+      "JoinStepOut": {
+        "properties": {
+          "reference": {
+            "type": "string",
+            "title": "Reference"
+          },
+          "from_table": {
+            "type": "string",
+            "title": "From Table"
+          },
+          "from_name": {
+            "type": "string",
+            "title": "From Name"
+          },
+          "to_table": {
+            "type": "string",
+            "title": "To Table"
+          },
+          "to_name": {
+            "type": "string",
+            "title": "To Name"
+          },
+          "from_columns": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "From Columns"
+          },
+          "to_columns": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "To Columns"
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "many_to_one",
+              "one_to_many"
+            ],
+            "title": "Direction"
+          },
+          "fans_out": {
+            "type": "boolean",
+            "title": "Fans Out"
+          },
+          "from_model_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Model Kind"
+          },
+          "from_grain": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Grain"
+          },
+          "to_model_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To Model Kind"
+          },
+          "to_grain": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To Grain"
+          }
+        },
+        "type": "object",
+        "required": [
+          "reference",
+          "from_table",
+          "from_name",
+          "to_table",
+          "to_name",
+          "from_columns",
+          "to_columns",
+          "direction",
+          "fans_out",
+          "from_model_kind",
+          "from_grain",
+          "to_model_kind",
+          "to_grain"
+        ],
+        "title": "JoinStepOut",
+        "description": "One step of a join path.\n\nParameters\n----------\nreference\n    The reference it follows (`reference:<uuid>`).\nfrom_table\n    The table it leaves (`table:<uuid>`).\nfrom_name\n    Its dotted name.\nto_table\n    The table it reaches.\nto_name\n    Its dotted name.\nfrom_columns\n    The columns of `from_table` to join on.\nto_columns\n    The columns of `to_table` they equal, in the same order.\ndirection\n    `many_to_one` along the reference (from the table that declares it), `one_to_many`\n    against it.\nfans_out\n    `true` for a `one_to_many` step: each row of `from_table` may meet many rows.\nfrom_model_kind\n    `from_table`'s declared kind, such as `fact` or `dimension`.\nfrom_grain\n    Its grain, in your language.\nto_model_kind\n    `to_table`'s declared kind.\nto_grain\n    Its grain, in your language."
       },
       "LastMaintenanceOut": {
         "properties": {

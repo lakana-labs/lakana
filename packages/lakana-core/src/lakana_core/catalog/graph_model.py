@@ -36,6 +36,12 @@ GRAPH_TIME_BUDGET_SECONDS = 10.0
 MAX_NODE_ID = 2048
 """The longest text a caller may send as a node."""
 
+MAX_JOIN_HOPS = 4
+"""The most references one join path follows (Q3)."""
+
+MAX_JOIN_PATHS = 10
+"""The most join paths one answer returns (Q3)."""
+
 
 class NodeKind(enum.StrEnum):
     """What a node is; the value is its id's prefix."""
@@ -136,6 +142,20 @@ NO_KEY = (
     "`{table}` declares no key, so its key has no impact to show. Declare one in the asset header "
     "(key: [column, ...]), or ask for the whole table: lakana graph impact {table} --env {env}"
 )
+JOIN_KINDS = (
+    "A join path runs between two tables, and `{node}` is a {word}. Give the table's dotted name, "
+    "such as gold.fact_sales."
+)
+SAME_TABLE = (
+    "from and to are the same table, `{table}`, and a join path joins two tables. To see what it "
+    "joins to, ask: lakana graph neighbours {table} --kind references --env {env}"
+)
+NO_PATH = (
+    "No declared path of at most 4 references joins `{start}` and `{goal}`. Declare the reference "
+    "in the asset header of one of them (references: {{column: table}}), or check the names with: "
+    "lakana graph neighbours {start} --kind references --env {env}"
+)
+"""The answer when no path exists and when every path runs through a hidden node: the same."""
 
 _UNSAFE = frozenset({"Cc", "Cf", "Cs", "Zl", "Zp"})
 _PREFIXES = {kind.value: kind for kind in NodeKind}

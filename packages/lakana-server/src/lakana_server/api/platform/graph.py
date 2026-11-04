@@ -1,4 +1,4 @@
-"""The metadata graph routes of the platform API: lineage, neighbours and impact (#374)."""
+"""The metadata graph routes of the platform API: lineage, neighbours, impact, join path (#374)."""
 
 from __future__ import annotations
 
@@ -16,7 +16,14 @@ from lakana_core.catalog.graph_model import (
 )
 from lakana_core.catalog.graph_service import MAX_GRAPH_CURSOR, GraphService
 from lakana_server.api.platform.languages import LANG_DESCRIPTION, reader_languages
-from lakana_server.api.platform.schemas import GraphEdgeOut, GraphNodeOut, GraphOut
+from lakana_server.api.platform.schemas import (
+    GraphEdgeOut,
+    GraphNodeOut,
+    GraphOut,
+    JoinPathOut,
+    JoinPathsOut,
+    JoinStepOut,
+)
 from lakana_server.api.responses import errors
 from lakana_server.api.routing import AuthenticateFirstRoute
 from lakana_server.deps import get_graph_service, get_main_language, get_principal
@@ -279,4 +286,71 @@ def graph_impact(
             limit=limit,
             cursor=cursor,
         )
+    )
+
+
+@router.get("/join-path", response_model=JoinPathsOut, responses=errors(404, 503))
+def graph_join_path(
+    request: Request,
+    env: str,
+    start: str = Query(alias="from", description="The table to start from: " + NODE_DESCRIPTION),
+    goal: str = Query(alias="to", description="The table to reach, named the same way."),
+    lang: str | None = _LANG,
+    principal: PrincipalRef = _PRINCIPAL,
+    service: GraphService = _SERVICE,
+    main_language: str = _MAIN_LANGUAGE,
+) -> JoinPathsOut:
+    """Show how two tables join: every declared path of minimal length over references.
+
+    A path has at most 4 steps, and at most 10 paths are returned, in the order of their
+    references' ids (`more_paths` says when more exist). A step follows a reference either way:
+    `many_to_one` from the table that declares it to its target, `one_to_many` with
+    `fans_out: true` back, where each row may meet many. A step names the reference, the columns
+    to join on, and both tables' kind and grain. No path, or none you may see, gives an empty
+    `paths` with a `reason`; a path through a table you may not see is never returned, and
+    nothing in the answer counts or marks it. Answers 404 when a table or the environment does
+    not exist or you may not see it (one answer for both), 422 for something that is not a table
+    or the same table twice, or a question too large to walk, and 503 with `Retry-After` when
+    the walk ran past its time.
+
+    Parameters
+    ----------
+    request
+        The request, for `Accept-Language`.
+    env
+        Environment name.
+    start
+        The table to start from (`from`).
+    goal
+        The table to reach (`to`).
+    lang
+        The language of grains.
+    principal
+        The authenticated caller.
+    service
+        The graph reader.
+    main_language
+        The instance's main language.
+
+    Returns
+    -------
+    JoinPathsOut
+        The paths, or none with the reason.
+    """
+    answer = service.join_path(
+        principal,
+        env,
+        start,
+        goal,
+        languages=reader_languages(request, lang, principal, main_language),
+    )
+    return JoinPathsOut(
+        paths=[
+            JoinPathOut(
+                steps=[JoinStepOut.model_validate(dataclasses.asdict(s)) for s in path.steps]
+            )
+            for path in answer.paths
+        ],
+        reason=answer.reason,
+        more_paths=answer.more_paths,
     )

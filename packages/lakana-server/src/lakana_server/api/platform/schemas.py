@@ -2800,6 +2800,85 @@ class GraphOut(BaseModel):
     next_cursor: str | None
 
 
+class JoinStepOut(BaseModel):
+    """One step of a join path.
+
+    Parameters
+    ----------
+    reference
+        The reference it follows (`reference:<uuid>`).
+    from_table
+        The table it leaves (`table:<uuid>`).
+    from_name
+        Its dotted name.
+    to_table
+        The table it reaches.
+    to_name
+        Its dotted name.
+    from_columns
+        The columns of `from_table` to join on.
+    to_columns
+        The columns of `to_table` they equal, in the same order.
+    direction
+        `many_to_one` along the reference (from the table that declares it), `one_to_many`
+        against it.
+    fans_out
+        `true` for a `one_to_many` step: each row of `from_table` may meet many rows.
+    from_model_kind
+        `from_table`'s declared kind, such as `fact` or `dimension`.
+    from_grain
+        Its grain, in your language.
+    to_model_kind
+        `to_table`'s declared kind.
+    to_grain
+        Its grain, in your language.
+    """
+
+    reference: str
+    from_table: str
+    from_name: str
+    to_table: str
+    to_name: str
+    from_columns: list[str]
+    to_columns: list[str]
+    direction: Literal["many_to_one", "one_to_many"]
+    fans_out: bool
+    from_model_kind: str | None
+    from_grain: str | None
+    to_model_kind: str | None
+    to_grain: str | None
+
+
+class JoinPathOut(BaseModel):
+    """A join path.
+
+    Parameters
+    ----------
+    steps
+        Its steps, in order, from `from` to `to`.
+    """
+
+    steps: list[JoinStepOut]
+
+
+class JoinPathsOut(BaseModel):
+    """Every declared join path of minimal length between two tables: at most 4 steps, 10 paths.
+
+    Parameters
+    ----------
+    paths
+        The paths, in the order of their references' ids; empty when there is none.
+    reason
+        Why there is none, and what to do; `null` when there are paths.
+    more_paths
+        `true` when more than 10 paths of that length exist.
+    """
+
+    paths: list[JoinPathOut]
+    reason: str | None
+    more_paths: bool
+
+
 class ConnectionTestOut(BaseModel):
     """Response body for a connection test.
 

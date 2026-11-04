@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import enum
+import sys
 from collections import defaultdict, deque
 from collections.abc import Callable, Iterable, Mapping
 from typing import Annotated
@@ -14,7 +15,7 @@ from lakana.cli import _output
 from lakana.cli._state import CliError, CliState, resolve_environment, state_of
 
 graph_app = typer.Typer(
-    help="Ask the metadata graph: lineage, neighbours and impact.",
+    help="Ask the metadata graph: lineage, neighbours, impact and join paths.",
     no_args_is_help=True,
 )
 
@@ -39,6 +40,7 @@ _MAY_USE_NOTE = (
     "or something downstream); SQL is not parsed, so look before you change it."
 )
 _COLUMN_AND_KEY = "--column and --key ask different questions; give one of them."
+_MORE_PATHS = "More paths of this length exist; ask a narrower pair of tables to see them."
 
 
 class _Direction(enum.StrEnum):
@@ -322,6 +324,54 @@ def impact(
         derived={"may_use": lambda n: "yes" if n.may_use else ""},
         footnotes={"may_use": _MAY_USE_NOTE},
     )
+
+
+@graph_app.command("join-path")
+def join_path(
+    ctx: typer.Context,
+    from_table: Annotated[str, typer.Argument(metavar="FROM", help="The table to start from.")],
+    to_table: Annotated[str, typer.Argument(metavar="TO", help="The table to reach.")],
+    lang: _LANG = None,
+    env: _ENV = None,
+) -> None:
+    """Show how FROM joins TO over declared references: each step's columns, and where rows fan out.
+
+    Parameters
+    ----------
+    ctx
+        The Typer context.
+    from_table
+        The table to start from.
+    to_table
+        The table to reach.
+    lang
+        The language of grains.
+    env
+        The environment.
+    """
+    state = state_of(ctx)
+    answer = state.client().graph.join_path(
+        resolve_environment(state, env), from_table, to_table, lang=lang
+    )
+    if state.output == "json":
+        _output.print_json(answer)
+        return
+    inline = _output.inline
+    if not answer.paths:
+        _output.emit(state, inline(answer.reason or "", 500))
+        return
+    lines: list[str] = []
+    for number, path in enumerate(answer.paths, start=1):
+        lines.append(f"Path {number}:")
+        for s in path.steps:
+            pairs = zip(s.from_columns, s.to_columns, strict=True)
+            on = " and ".join(f"{inline(a)} = {inline(b)}" for a, b in pairs)
+            way = "one to many, fans out" if s.fans_out else "many to one"
+            kinds = f"{inline(s.from_model_kind or '?')} → {inline(s.to_model_kind or '?')}"
+            lines.append(f"  {inline(s.from_name)} → {inline(s.to_name)} on {on} ({way}: {kinds})")
+    if answer.more_paths:
+        lines.append(_MORE_PATHS)
+    sys.stdout.write("\n".join(lines) + "\n")
 
 
 def register(app: typer.Typer) -> None:

@@ -1,4 +1,4 @@
-"""Walking the metadata graph for one reader: `lineage`, `neighbours` and `impact` (#374).
+"""Walking the metadata graph for one reader: `lineage`, `neighbours`, `impact`, `join_path` (#374).
 
 Every node goes through `_Visibility` before a walk reaches it (spec §4):
 - a table, its columns, measures and checks need `READ_TABLE` on the table;
@@ -34,6 +34,7 @@ from sqlalchemy.orm import Session
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable, permits_each
 from lakana_core.catalog.glossary_read import term_names
 from lakana_core.catalog.graph_impact import impact_of
+from lakana_core.catalog.graph_join import JoinPath, JoinPaths, JoinStep, shortest_paths
 from lakana_core.catalog.graph_load import (
     AssetRecord,
     CheckRecord,
@@ -55,6 +56,7 @@ from lakana_core.catalog.graph_model import (
     DEFAULT_GRAPH_DEPTH,
     GRAPH_TIME_BUDGET_SECONDS,
     IMPACT_KINDS,
+    JOIN_KINDS,
     KEY_NEEDS_TABLE,
     KIND_WORDS,
     LINEAGE_KINDS,
@@ -65,6 +67,8 @@ from lakana_core.catalog.graph_model import (
     NO_ENVIRONMENT,
     NO_KEY,
     NO_NODE,
+    NO_PATH,
+    SAME_TABLE,
     TOO_LARGE,
     EdgeKind,
     GraphEdge,
@@ -955,6 +959,99 @@ class GraphService:
         hits, edges = impact_of(ctx, root, key=key)
         found = {n: _Found(h.distance, h.reason, h.may_use) for n, h in hits.items()}
         return self._page(ctx, _IMPACT, found, edges, languages, limit, after)
+
+    def join_path(
+        self,
+        p: PrincipalRef,
+        environment: str,
+        start: str,
+        goal: str,
+        *,
+        languages: Sequence[str] = (),
+    ) -> JoinPaths:
+        """Find every declared path of minimal length joining two tables.
+
+        A path has at most `MAX_JOIN_HOPS` steps, and at most `MAX_JOIN_PATHS` paths are
+        returned (`graph_join`). No path, and none the reader may see, give the same `NO_PATH`.
+
+        Parameters
+        ----------
+        p
+            The reader.
+        environment
+            The environment's name.
+        start
+            The table to start from: a node id or a dotted name.
+        goal
+            The table to reach.
+        languages
+            The reader's languages, most wanted first, for the grains.
+
+        Returns
+        -------
+        JoinPaths
+            The paths, or none with the reason.
+
+        Raises
+        ------
+        ValidationError
+            For a start or goal that is not a table (`JOIN_KINDS`), the same table twice
+            (`SAME_TABLE`), a node out of bounds, or past the step budget.
+        NotFoundError
+            If the environment, `start` or `goal` does not exist or is hidden.
+        GraphBusyError
+            Past the time budget.
+        """
+        refs = [parse_node(text) for text in (start, goal)]
+        for text, ref in zip((start, goal), refs, strict=True):
+            if ref.kind is not NodeKind.TABLE:
+                raise ValidationError(
+                    JOIN_KINDS.format(node=shown(text), word=KIND_WORDS[ref.kind])
+                )
+        ctx = self._open(p, environment, start)
+        first, last = self._root(ctx, start, refs[0]), self._root(ctx, goal, refs[1])
+        tables = ctx.graph.tables
+        a, b = tables[table_part(first)], tables[table_part(last)]
+        if a.id == b.id:
+            raise ValidationError(SAME_TABLE.format(table=a.ref.dotted(), env=shown(environment)))
+        found, more = shortest_paths(ctx, a.id, b.id)
+        if not found:
+            reason = NO_PATH.format(
+                start=a.ref.dotted(), goal=b.ref.dotted(), env=shown(environment)
+            )
+            return JoinPaths((), reason, False)
+        reached = {a.id} | {hop.to_table for path in found for hop in path}
+        rows = _translation_rows(self._session, reached)
+        grains = {
+            t: _chosen(tables[t], rows, languages, self._main_language, "grain") for t in reached
+        }
+        paths: list[JoinPath] = []
+        for path in found:
+            steps: list[JoinStep] = []
+            here = a.id
+            for hop in path:
+                there, record = hop.to_table, hop.reference
+                own, target = (record.source_column,), (record.target_column,)
+                steps.append(
+                    JoinStep(
+                        reference=record.id,
+                        from_table=table_node(here),
+                        from_name=tables[here].ref.dotted(),
+                        to_table=table_node(there),
+                        to_name=tables[there].ref.dotted(),
+                        from_columns=own if hop.forward else target,
+                        to_columns=target if hop.forward else own,
+                        direction="many_to_one" if hop.forward else "one_to_many",
+                        fans_out=not hop.forward,
+                        from_model_kind=tables[here].model_kind,
+                        from_grain=grains[here],
+                        to_model_kind=tables[there].model_kind,
+                        to_grain=grains[there],
+                    )
+                )
+                here = there
+            paths.append(JoinPath(tuple(steps)))
+        return JoinPaths(tuple(paths), None, more)
 
     def _page(
         self,

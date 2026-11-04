@@ -1972,7 +1972,7 @@ A link shows only when you may read its table; one whose table does not exist, o
 
 Usage: `lakana graph [OPTIONS] COMMAND [ARGS]...`
 
-Ask the metadata graph: lineage, neighbours and impact.
+Ask the metadata graph: lineage, neighbours, impact and join paths.
 
 ### `lakana graph lineage`
 
@@ -2014,6 +2014,19 @@ Show what the projects declare that depends on NODE, with the reason for each.
 | `NODE` | text | required | A table's dotted name, such as gold.dim_store, or a node id. |
 | `--column` | text | none | A column of the table NODE names. |
 | `--key` | flag | off | Ask about the table's declared key. |
+| `--lang` | text | none | Show labels in this language, such as de. |
+| `--env` | text | none | Environment (default: the profile's). |
+
+### `lakana graph join-path`
+
+Usage: `lakana graph join-path [OPTIONS] {FROM} {TO}`
+
+Show how FROM joins TO over declared references: each step's columns, and where rows fan out.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `FROM` | text | required | The table to start from. |
+| `TO` | text | required | The table to reach. |
 | `--lang` | text | none | Show labels in this language, such as de. |
 | `--env` | text | none | Environment (default: the profile's). |
 

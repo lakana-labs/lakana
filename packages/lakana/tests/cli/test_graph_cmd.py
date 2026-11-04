@@ -291,3 +291,91 @@ def test_impact_refuses_column_and_key_together(tmp_path: Path) -> None:
     assert result.exit_code == 2
     assert "--column and --key ask different questions; give one of them." in result.output
     assert api.requests == []
+
+
+_JOIN = "/api/v1/environments/prod/graph/join-path"
+_JOIN_STEP = {
+    "reference": "reference:1",
+    "from_table": "table:1",
+    "from_name": "gold.dim_store",
+    "to_table": "table:2",
+    "to_name": "gold.fact_sales",
+    "from_columns": ["store_id"],
+    "to_columns": ["store_id"],
+    "direction": "one_to_many",
+    "fans_out": True,
+    "from_model_kind": "dimension",
+    "from_grain": "g",
+    "to_model_kind": "fact",
+    "to_grain": "h",
+}
+
+
+def test_join_path_prints_each_step_and_the_reason_when_there_is_none(tmp_path: Path) -> None:
+    api = FakeApi()
+    api.on(
+        "GET", _JOIN, json={"paths": [{"steps": [_JOIN_STEP]}], "reason": None, "more_paths": False}
+    )
+    args = ("graph", "join-path", "gold.dim_store", "gold.fact_sales", "--env", "prod")
+    result = invoke(make_state(tmp_path, api), *args)
+    assert result.exit_code == 0, result.output
+    assert result.output.splitlines() == [
+        "Path 1:",
+        "  gold.dim_store → gold.fact_sales on store_id = store_id (one to many, fans out: "
+        "dimension → fact)",
+    ]
+    none = FakeApi()
+    reason = "No declared path of at most 4 references joins `a` and `b`."
+    none.on("GET", _JOIN, json={"paths": [], "reason": reason, "more_paths": False})
+    result = invoke(make_state(tmp_path, none), "graph", "join-path", "a", "b", "--env", "prod")
+    assert result.output.strip() == reason
+
+
+def test_join_path_says_when_more_paths_exist(tmp_path: Path) -> None:
+    back = {
+        **_JOIN_STEP,
+        "from_name": "gold.fact_sales",
+        "to_name": "gold.dim_store",
+        "direction": "many_to_one",
+        "fans_out": False,
+        "from_model_kind": None,
+        "to_model_kind": "dimension",
+    }
+    api = FakeApi()
+    api.on(
+        "GET",
+        _JOIN,
+        json={"paths": [{"steps": [back]}, {"steps": [back]}], "reason": None, "more_paths": True},
+    )
+    result = invoke(make_state(tmp_path, api), "graph", "join-path", "a", "b", "--env", "prod")
+    assert result.exit_code == 0, result.output
+    lines = result.output.splitlines()
+    assert lines[1] == (
+        "  gold.fact_sales → gold.dim_store on store_id = store_id (many to one: ? → dimension)"
+    )
+    assert lines[2] == "Path 2:"
+    assert (
+        lines[-1] == "More paths of this length exist; ask a narrower pair of tables to see them."
+    )
+
+
+def test_join_path_json_output_has_the_paths(tmp_path: Path) -> None:
+    api = FakeApi()
+    api.on(
+        "GET", _JOIN, json={"paths": [{"steps": [_JOIN_STEP]}], "reason": None, "more_paths": False}
+    )
+    result = invoke(
+        make_state(tmp_path, api),
+        "--output",
+        "json",
+        "graph",
+        "join-path",
+        "a",
+        "b",
+        "--env",
+        "prod",
+    )
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.output)
+    assert data["more_paths"] is False and data["reason"] is None
+    assert data["paths"][0]["steps"][0]["from_columns"] == ["store_id"]

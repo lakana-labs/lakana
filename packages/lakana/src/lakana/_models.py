@@ -2142,6 +2142,90 @@ class Graph:
     edges: tuple[GraphEdge, ...]
 
 
+# jscpd:ignore-start
+# The fields mirror the REST `JoinStepOut` and core's `JoinStep`; the SDK depends on neither.
+@dataclass(frozen=True)
+class JoinStep:
+    """One step of a join path (`client.graph.join_path`).
+
+    Parameters
+    ----------
+    reference
+        The reference it follows (``reference:<uuid>``).
+    from_table
+        The table it leaves (``table:<uuid>``).
+    from_name
+        Its dotted name.
+    to_table
+        The table it reaches.
+    to_name
+        Its dotted name.
+    from_columns
+        The columns of `from_table` to join on.
+    to_columns
+        The columns of `to_table` they equal, in the same order.
+    direction
+        ``many_to_one`` along the reference, ``one_to_many`` against it.
+    fans_out
+        `True` for a ``one_to_many`` step: each row of `from_table` may meet many rows.
+    from_model_kind
+        `from_table`'s declared kind, such as ``fact``.
+    from_grain
+        Its grain, in your language.
+    to_model_kind
+        `to_table`'s declared kind.
+    to_grain
+        Its grain, in your language.
+    """
+
+    reference: str
+    from_table: str
+    from_name: str
+    to_table: str
+    to_name: str
+    from_columns: tuple[str, ...]
+    to_columns: tuple[str, ...]
+    direction: str
+    fans_out: bool
+    from_model_kind: str | None
+    from_grain: str | None
+    to_model_kind: str | None
+    to_grain: str | None
+
+
+# jscpd:ignore-end
+@dataclass(frozen=True)
+class JoinPath:
+    """A join path.
+
+    Parameters
+    ----------
+    steps
+        Its steps, from the first table to the second.
+    """
+
+    steps: tuple[JoinStep, ...]
+
+
+@dataclass(frozen=True)
+class JoinPaths:
+    """How two tables join: every declared path of minimal length (at most 4 steps, 10 paths).
+
+    Parameters
+    ----------
+    paths
+        The paths, in the order of their references' ids; empty when there is none.
+    reason
+        Why there is none, and what to do; `None` when there are paths.
+    more_paths
+        `True` when more than 10 paths of that length exist.
+    """
+
+    paths: tuple[JoinPath, ...]
+    reason: str | None
+    more_paths: bool
+
+
 @dataclass(frozen=True)
 class DeployAccepted:
     """A queued deploy run.

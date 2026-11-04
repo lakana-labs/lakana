@@ -167,3 +167,64 @@ def test_impact_sends_the_key_flag_only_when_set() -> None:
     assert dict(sent[1].url.params) == {"node": "gold.dim_store"}
     assert sent[0].url.path == "/api/v1/environments/dev/graph/impact"
     assert (graph.nodes[0].reason, graph.nodes[0].may_use) == (None, False)
+
+
+_STEP: dict[str, Any] = {
+    "reference": "reference:1",
+    "from_table": "table:1",
+    "from_name": "gold.f",
+    "to_table": "table:2",
+    "to_name": "gold.d",
+    "from_columns": ["k"],
+    "to_columns": ["k"],
+    "direction": "many_to_one",
+    "fans_out": False,
+    "from_model_kind": "fact",
+    "from_grain": "g",
+    "to_model_kind": "dimension",
+    "to_grain": "h",
+    "new": 1,
+}
+
+
+def test_join_path_reads_the_paths() -> None:
+    sent: list[httpx.Request] = []
+    body = {"paths": [{"steps": [_STEP]}], "reason": None, "more_paths": False}
+    answer = _graph([body], sent).join_path("dev", "gold.f", "gold.d")
+    _graph([body], sent).join_path("dev", "gold.f", "gold.d", lang="de")
+    assert sent[0].url.path == "/api/v1/environments/dev/graph/join-path"
+    assert dict(sent[0].url.params) == {"from": "gold.f", "to": "gold.d"}
+    assert dict(sent[1].url.params)["lang"] == "de"
+    step = answer.paths[0].steps[0]
+    assert (step.from_columns, step.to_columns, step.fans_out) == (("k",), ("k",), False)
+    assert (answer.reason, answer.more_paths) == (None, False)
+
+
+def test_join_path_without_a_path_reads_the_reason() -> None:
+    body = {"paths": [], "reason": "No declared path.", "more_paths": False}
+    answer = _graph([body], []).join_path("dev", "a", "b")
+    assert (answer.paths, answer.reason) == ((), "No declared path.")
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"paths": "x", "reason": None, "more_paths": False},
+        {"paths": [{"steps": [["x"]]}], "reason": None, "more_paths": False},
+        {"paths": [{"steps": [{"reference": "r"}]}], "reason": None, "more_paths": False},
+        {"paths": [{}], "reason": None, "more_paths": False},
+        {"paths": []},
+        [],
+    ],
+)
+def test_an_odd_join_path_answer_is_invalid(body: Any) -> None:  # ruff: ignore[any-type]
+    with pytest.raises(InvalidResponse, match="the join paths"):
+        _graph([body], []).join_path("dev", "a", "b")
+
+
+def test_join_path_on_a_bare_404_says_to_upgrade_and_passes_a_detail_through() -> None:
+    with pytest.raises(NotFound, match=r"This server has no metadata graph routes\."):
+        _graph_status(404, {"detail": "Not Found"}).join_path("dev", "a", "b")
+    with pytest.raises(NotFound) as caught:
+        _graph_status(404, {"detail": "There is no node `a`."}).join_path("dev", "a", "b")
+    assert "no metadata graph routes" not in str(caught.value)
