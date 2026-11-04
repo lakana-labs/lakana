@@ -5181,20 +5181,21 @@ class CatalogService:
         sqlalchemy.exc.SQLAlchemyError
             If the database failed: the commit fails, as for the signal rows themselves.
         """
-        if not rows:
+        fired = [row for row in rows if row.state == "fired"]
+        if not fired:  # the usual commit: no statement at all
             return []
         table = ref.dotted()
+        task_run_id = None if run is None else run.task_run_id
         try:
             with self._session.no_autoflush:
-                judged = judged_by_run(
-                    self._session, None if run is None else run.task_run_id, table
-                )
+                blocks = any(row.effect == "block" for row in fired)
+                judged = judged_by_run(self._session, task_run_id if blocks else None, table)
                 return queue_health_notifications(
                     self._session,
                     environment_id=environment_id,
                     table=table,
-                    rows=rows_to_tell(rows, judged=judged),
-                    now=rows[0].observed_at,
+                    rows=rows_to_tell(fired, judged=judged),
+                    now=fired[0].observed_at,
                 )
         except SQLAlchemyError:
             raise

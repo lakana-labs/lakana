@@ -19,6 +19,7 @@ from health_test_helpers import (
     health_catalog,
 )
 from sqlalchemy import select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 import lakana_core.catalog.service as service_module
@@ -540,3 +541,34 @@ def test_a_damaged_row_sends_the_text_without_values(
 ) -> None:
     delivery = _fired(session, "null_rate", "status", {"nulls": 1}, {"low": 0.0})
     assert facts_for_health(session, delivery, "dev", delivery.id).alert == _QUIET_NULLS
+
+
+def test_a_database_error_while_queuing_fails_the_write(
+    catalog: CatalogService,
+    session: Session,
+    principal: PrincipalRef,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _deployed(session, _MANIFEST)
+    _seed(session, "volume", {"added": 1_000, "total": 1_000})
+
+    def gone(*args: object, **kwargs: object) -> list[NotificationDelivery]:
+        raise OperationalError("SELECT", {}, Exception("gone"))
+
+    monkeypatch.setattr(service_module, "queue_health_notifications", gone)
+    with pytest.raises(OperationalError):
+        catalog.append(principal, _ORDERS, _rows([1, 2, 3]))
+
+
+def test_rows_that_did_not_fire_queue_nothing() -> None:
+    quiet = TableHealthSignal(id=uuid.uuid4(), signal="volume", state="ok", effect="warn")
+    assert (
+        queue_health_notifications(
+            None,  # ty: ignore[invalid-argument-type]
+            environment_id=uuid.uuid4(),
+            table="silver.orders",
+            rows=[quiet],
+            now=_FIRED_AT,
+        )
+        == []
+    )
