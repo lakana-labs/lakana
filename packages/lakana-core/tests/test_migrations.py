@@ -4974,3 +4974,55 @@ def test_0062_adds_the_glossary_tables_and_downgrades_cleanly(
         assert not set(tables) & set(inspect(engine).get_table_names())
     finally:
         engine.dispose()
+
+
+_REVISION_0063 = "c5e9f1a3b7d8"
+
+
+@pytest.mark.usefixtures("_without_fsync")
+def test_0063_adds_the_health_signals_table_and_downgrades_cleanly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Revision `0063`: `table_health_signals` with its index; the downgrade drops it.
+
+    Parameters
+    ----------
+    tmp_path
+        Holds the throwaway SQLite file.
+    monkeypatch
+        Points `lakana_core.config.Settings` at that file.
+    """
+    db_path = tmp_path / "migrated.db"
+    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    config = Config(str(ALEMBIC_INI))
+    command.upgrade(config, _REVISION_0063)
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        inspector = inspect(engine)
+        assert {c["name"] for c in inspector.get_columns("table_health_signals")} == {
+            "id",
+            "environment_id",
+            "table_id",
+            "signal",
+            "column_name",
+            "snapshot_id",
+            "observed",
+            "band",
+            "state",
+            "effect",
+            "observed_at",
+        }
+        assert "ix_table_health_signals_table_id_observed_at" in {
+            i["name"] for i in inspector.get_indexes("table_health_signals")
+        }
+        assert {
+            f["referred_table"] for f in inspector.get_foreign_keys("table_health_signals")
+        } == {"environments", "tables"}
+    finally:
+        engine.dispose()
+    command.downgrade(config, _REVISION_0062)
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        assert "table_health_signals" not in inspect(engine).get_table_names()
+    finally:
+        engine.dispose()

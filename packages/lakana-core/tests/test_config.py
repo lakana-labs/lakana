@@ -1230,3 +1230,16 @@ def test_run_ingestion_roots_read_from_settings_and_env(monkeypatch: pytest.Monk
     }
     monkeypatch.setenv("LAKANA_RUN__INGESTION_ROOTS", '{"shared": "/srv/in"}')
     assert Settings().run.ingestion_roots == {"shared": "/srv/in"}
+
+
+def test_health_keeps_ninety_days_and_refuses_less_than_seven(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from lakana_core.config import HealthConfig
+
+    assert HealthConfig().retention_days == 90
+    with pytest.raises(PydanticValidationError, match="greater than or equal to 7"):
+        HealthConfig(retention_days=6)
+    monkeypatch.setenv("LAKANA_DATABASE__URL", "sqlite:///x.db")
+    monkeypatch.setenv("LAKANA_HEALTH__RETENTION_DAYS", "30")
+    assert Settings().health.retention_days == 30
