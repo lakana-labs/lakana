@@ -11,6 +11,7 @@ from __future__ import annotations
 import dataclasses
 import difflib
 import re
+import time
 import uuid
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -33,7 +34,7 @@ from lakana_core.catalog.glossary import (
     terms_elsewhere,
     write_glossary,
 )
-from lakana_core.catalog.graph_model import NodeKind
+from lakana_core.catalog.graph_model import NodeKind, parse_node
 from lakana_core.catalog.graph_service import GraphService
 from lakana_core.catalog.identity import resolve_table_id
 from lakana_core.catalog.model_metadata import clear_removed_models
@@ -164,17 +165,43 @@ The next step comes before the list, which has no bound: the CLI cuts a long war
 cut must not take the next step with it."""
 
 IMPACT_MORE = (
-    "this deploy also removes {count} more tables or columns that were not checked against other "
+    "this deploy also removes {count} more {things} that {were} not checked against other "
     "repositories; see each with: lakana graph impact TABLE --env {env}"
 )
 """The removals past `_MAX_IMPACT_WARNINGS`, which were not checked."""
 
 IMPACT_UNCHECKED = (
-    "this deploy removes or stops building {count} tables or columns, and Lakana could not check "
-    "in time what other repositories declare on them; see it with: lakana graph impact {command} "
+    "this deploy removes or stops building {count} {things}, and Lakana could not check in time "
+    "what other repositories declare on {them}; see it with: lakana graph impact {command} "
     "--env {env}"
 )
 """The check ran past its budget: the deploy goes on, and says so."""
+
+IMPACT_UNREADABLE = (
+    "this deploy {what}, whose name holds a control or format character or is too long to look "
+    "up in the metadata graph, so Lakana did not check what other repositories declare on it; "
+    "rename it, or see what depends on its table with: lakana graph impact {table} --env {env}"
+)
+"""A removed item whose name is no graph node's: it alone goes unchecked."""
+
+
+def _counted(count: int) -> dict[str, object]:
+    """Fill the counted words of `IMPACT_MORE` and `IMPACT_UNCHECKED`.
+
+    Parameters
+    ----------
+    count
+        How many tables and columns.
+
+    Returns
+    -------
+    dict
+        ``count``, ``things``, ``were`` and ``them``, singular for one.
+    """
+    if count == 1:
+        return {"count": 1, "things": "table or column", "were": "was", "them": "it"}
+    return {"count": count, "things": "tables or columns", "were": "were", "them": "them"}
+
 
 _BREAKING = {
     NodeKind.REFERENCE: "reference",
@@ -220,9 +247,9 @@ def _removed_items(previous: object, manifest: object) -> list[tuple[str, str, s
         items.extend(
             (
                 f"column:{table}/{column}",
-                f"removes the column `{column}` of `{table}`",
+                f"removes the column `{shown(column)}` of `{table}`",
                 table,
-                f"{table} --column {column}",
+                f"{table} --column {shown(column)}",
             )
             for column in before
             if isinstance(column, str) and column not in kept
@@ -628,14 +655,22 @@ class DeployService:
     lease_seconds
         The run lease (`LAKANA_RUN__LEASE_SECONDS`): a worker whose heartbeat is older does not
         count as alive when a queued deploy says why it waits.
+    graph_clock
+        Seconds, monotonic, for the budget of the impact check; a test passes its own.
     """
 
     def __init__(
-        self, session: Session, authz: AuthorizationService, lease_seconds: int = 60
+        self,
+        session: Session,
+        authz: AuthorizationService,
+        lease_seconds: int = 60,
+        *,
+        graph_clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._session = session
         self._authz = authz
         self._lease_seconds = lease_seconds
+        self._graph_clock = graph_clock
 
     # -- lookups ---------------------------------------------------------
 
@@ -860,7 +895,8 @@ class DeployService:
 
         Computed with `p`'s visibility: what `p` may not see is left out and not counted. At most
         `_MAX_IMPACT_WARNINGS` items are checked, and one more line counts the rest. The deploy
-        never fails for this: a walk past its budget leaves one line instead.
+        never fails for this: a walk past its budget leaves one line instead, and an item whose
+        name is no graph node's a line of its own.
 
         Parameters
         ----------
@@ -885,20 +921,41 @@ class DeployService:
         if not items:
             return []
         checked = items[:_MAX_IMPACT_WARNINGS]
-        graph = GraphService(self._session, self._authz, budget_seconds=_IMPACT_BUDGET_SECONDS)
+        unreadable: set[str] = set()
+        for item in checked:
+            try:
+                parse_node(item[0])
+            except ValidationError:
+                unreadable.add(item[0])
+        graph = GraphService(
+            self._session,
+            self._authz,
+            clock=self._graph_clock,
+            budget_seconds=_IMPACT_BUDGET_SECONDS,
+        )
         try:
-            answers = graph.breakage(p, env_name, [item[0] for item in checked])
+            answers = graph.breakage(
+                p, env_name, [item[0] for item in checked if item[0] not in unreadable]
+            )
         except (ValidationError, GraphBusyError):
             return [
                 {
                     "warning": IMPACT_UNCHECKED.format(
-                        count=len(items), command=items[0][3], env=env_name
+                        **_counted(len(items)), command=items[0][3], env=env_name
                     ),
                     "tables": sorted({item[2] for item in items}),
                 }
             ]
         warnings: list[dict[str, object]] = []
         for node, what, table, command in checked:
+            if node in unreadable:
+                warnings.append(
+                    {
+                        "warning": IMPACT_UNREADABLE.format(what=what, table=table, env=env_name),
+                        "tables": [table],
+                    }
+                )
+                continue
             broken = sorted(
                 (_BREAKING[g.kind], g.name, g.repository, named)
                 for g, named in answers.get(node, ())
@@ -919,7 +976,7 @@ class DeployService:
             warnings.append(
                 {
                     "warning": IMPACT_MORE.format(
-                        count=len(items) - _MAX_IMPACT_WARNINGS, env=env_name
+                        **_counted(len(items) - _MAX_IMPACT_WARNINGS), env=env_name
                     ),
                     "tables": sorted({item[2] for item in items}),
                 }

@@ -1058,8 +1058,9 @@ class GraphService:
     ) -> dict[str, tuple[tuple[GraphNode, tuple[str, ...]], ...]]:
         """Compute `impact` for several tables and columns at once, for a deploy's warning.
 
-        One load serves every node, and one budget covers them all. A node that does not exist,
-        or that `p` may not see, gets nothing.
+        One load and one build of the nodes serve every node, and one budget covers them all:
+        the clock is read after each walk and after the build. A node that does not exist, or
+        that `p` may not see, gets nothing.
 
         Parameters
         ----------
@@ -1086,19 +1087,32 @@ class GraphService:
             If the environment does not exist.
         """
         ctx = self._open(p, environment, nodes[0] if nodes else "")
-        answers: dict[str, tuple[tuple[GraphNode, tuple[str, ...]], ...]] = {}
+        walked: list[tuple[str, list[tuple[str, _Found]]]] = []
         for node in nodes:
             found = ctx.graph.resolve(parse_node(node))
             if found is None or not ctx.visible.node(found):
                 continue
             hits, _ = impact_of(ctx, found, key=False)
-            entries = [
-                (n, _Found(h.distance, h.reason, h.may_use))
-                for n, h in sorted(hits.items())
-                if n != found
-            ]
-            built = self._nodes(ctx, entries, ())
-            answers[node] = tuple((g, _named_tables(ctx.graph, g.id)) for g in built)
+            walked.append(
+                (
+                    node,
+                    [
+                        (n, _Found(h.distance, h.reason, h.may_use))
+                        for n, h in sorted(hits.items())
+                        if n != found
+                    ],
+                )
+            )
+            ctx.budget.check()
+        # One build for every answer, so its statements do not grow with the number of nodes.
+        built = self._nodes(ctx, [e for _, entries in walked for e in entries], ())
+        ctx.budget.check()
+        answers: dict[str, tuple[tuple[GraphNode, tuple[str, ...]], ...]] = {}
+        start = 0
+        for node, entries in walked:
+            end = start + len(entries)
+            answers[node] = tuple((g, _named_tables(ctx.graph, g.id)) for g in built[start:end])
+            start = end
         return answers
 
     def _page(

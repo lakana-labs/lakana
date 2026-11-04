@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import time
 import uuid
+from collections.abc import Callable, Collection
 from pathlib import Path
 from typing import Any
 
@@ -12,10 +14,17 @@ from sqlalchemy.orm import Session
 from test_projects_deploys import _claimed, _principal
 
 from lakana_core.auth import PrincipalRef
+from lakana_core.catalog import graph_service
 from lakana_core.catalog.glossary import write_glossary
 from lakana_core.catalog.graph_service import GraphService
 from lakana_core.errors import ValidationError
-from lakana_core.models import DeployKind, DeployRun, Repository, RepositoryKind
+from lakana_core.models import (
+    DeployKind,
+    DeployRun,
+    Repository,
+    RepositoryKind,
+    TextTranslation,
+)
 from lakana_core.projects.deploys import DeployService
 from lakana_core.projects.diff import DeployDiff
 
@@ -100,6 +109,7 @@ def _deploy(
     grants: Grants,
     manifest: dict[str, Any],
     kind: DeployKind = DeployKind.DEPLOY,
+    clock: Callable[[], float] = time.monotonic,
 ) -> DeployRun:
     """Submit and record a deploy (or dry run) of `stores` with `manifest`, as `p`.
 
@@ -115,13 +125,15 @@ def _deploy(
         The new manifest.
     kind
         `DeployKind.DEPLOY` or `DeployKind.DRY_RUN`.
+    clock
+        The clock of the graph check.
 
     Returns
     -------
     DeployRun
         The recorded run.
     """
-    service = DeployService(star.session, grants)
+    service = DeployService(star.session, grants, graph_clock=clock)
     view = service.submit(p, "dev", repository="stores", kind=kind, ref="main")
     run = _claimed(star.session, star.session.get(DeployRun, view.id))
     run.resolved_sha = uuid.uuid4().hex + "00000000"  # each deploy its own commit
@@ -194,7 +206,7 @@ def test_a_table_no_longer_built_warns_with_the_whole_tables_dependents(star: St
         in (entry["warning"])
     )
     assert "glossary term `shop` (glossary)" in entry["warning"]
-    assert "`store` (stores)" not in entry["warning"]  # its own repository's term is not another's
+    assert "(stores)" not in entry["warning"]  # its own repository's declarations are not another's
 
 
 def test_the_deployers_visibility_leaves_out_what_it_may_not_see(star: StarWorld) -> None:
@@ -277,8 +289,8 @@ def test_a_check_past_its_budget_leaves_one_line_and_still_deploys(
     run = _deploy(star, p, _everything(), _stores_without(column=True))
     assert run.warnings_json == [
         {
-            "warning": "this deploy removes or stops building 1 tables or columns, and Lakana "
-            "could not check in time what other repositories declare on them; see it with: "
+            "warning": "this deploy removes or stops building 1 table or column, and Lakana "
+            "could not check in time what other repositories declare on it; see it with: "
             "lakana graph impact gold.dim_store --column store_id --env dev",
             "tables": ["gold.dim_store"],
         }
@@ -315,3 +327,55 @@ def test_breakage_names_a_references_and_a_ref_checks_target_table(star: StarWor
         "gold.dim_date",
     )
     assert named["table", "gold.fact_sales"] == ()
+
+
+def test_a_slow_node_build_ends_in_the_unchecked_line_within_the_budget(
+    star: StarWorld, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = [0.0]
+    read = graph_service._translation_rows
+
+    def slow_rows(
+        session: Session, table_ids: Collection[uuid.UUID]
+    ) -> dict[uuid.UUID, list[TextTranslation]]:
+        now[0] += 3.0  # building the nodes takes longer than the whole 2 s budget
+        return read(session, table_ids)
+
+    monkeypatch.setattr(graph_service, "_translation_rows", slow_rows)
+    p = _principal(star.session, "deployer")
+    run = _deploy(star, p, _everything(), _stores_without(column=True), clock=lambda: now[0])
+    assert [e["warning"] for e in _stored(run)] == [
+        "this deploy removes or stops building 1 table or column, and Lakana could not check in "
+        "time what other repositories declare on it; see it with: lakana graph impact "
+        "gold.dim_store --column store_id --env dev"
+    ]
+    assert run.job_version_id is not None
+
+
+def test_a_name_the_graph_cannot_read_gets_its_own_line(star: StarWorld) -> None:
+    p = _principal(star.session, "deployer")
+    odd = "a\u200eb"  # a format character, which no node name may hold
+    wide = stores_manifest()
+    wide["assets"][0]["columns"] = ["store_id", "store_name", odd]
+    _deploy(star, p, _everything(), wide)
+    run = _deploy(star, p, _everything(), _stores_without(column=True))
+    lines = [e["warning"] for e in _stored(run)]
+    assert lines == [
+        _COLUMN,
+        "this deploy removes the column `a\\u200eb` of `gold.dim_store`, whose name holds a "
+        "control or format character or is too long to look up in the metadata graph, so Lakana "
+        "did not check what other repositories declare on it; rename it, or see what "
+        "depends on its table with: lakana graph impact gold.dim_store --env dev",
+    ]
+
+
+def test_several_removals_past_the_check_are_counted_in_the_plural(star: StarWorld) -> None:
+    p = _principal(star.session, "deployer")
+    wide = stores_manifest()
+    wide["assets"][0]["columns"] = ["store_id", "store_name", *(f"c{i}" for i in range(20))]
+    _deploy(star, p, _everything(), wide)
+    run = _deploy(star, p, _everything(), _stores_without(column=True))
+    assert [e["warning"] for e in _stored(run)][-1] == (
+        "this deploy also removes 1 more table or column that was not checked against other "
+        "repositories; see each with: lakana graph impact TABLE --env dev"
+    )
