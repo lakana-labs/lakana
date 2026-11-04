@@ -366,6 +366,7 @@ def _row(
     matched: _Expr,
     *fields: _Expr,
     sort_source: _Expr | None = None,
+    by_term: bool = False,
 ) -> _Candidates:
     """Start a candidate select with the columns every kind shares.
 
@@ -387,6 +388,9 @@ def _row(
     sort_source
         The last tie-break, an integer: which text of one table or column comes first. `None`
         (``0``) for a main-language row, which so comes before every translation.
+    by_term
+        Whether the row is a table or column found by a term, which a row of the item's own
+        text at the same rank and source comes before.
 
     Returns
     -------
@@ -400,6 +404,7 @@ def _row(
         sort_name.label("sort_name"),
         sort_id.label("sort_id"),
         (literal_column("0") if sort_source is None else sort_source).label("sort_source"),
+        literal_column("1" if by_term else "0").label("by_term"),
         matched.label("matched"),
         *(cast(f, Text).label(f"f{i}") for i, f in enumerate(payload, start=1)),
     ]
@@ -625,6 +630,13 @@ class CatalogSearch:
             union.c.sort_name,
             union.c.sort_id,
             union.c.sort_source,
+            # Rows of one item that tie so far differ in what `_hit` shows of the first: its own
+            # text comes before a term's, then the smallest term key, then the matched text
+            # (f3 of a term, f4 of a table or column; f3 of those is fixed per item).
+            union.c.by_term,
+            union.c.f7,
+            union.c.f3,
+            union.c.f4,
         )
         readable: dict[tuple[str, str], bool] = {}
         seen: set[tuple[object, ...]] = set()
@@ -1176,8 +1188,9 @@ def _terms(match: _Match, environment_id: uuid.UUID) -> _Candidates:
     Returns
     -------
     Select
-        Candidates of the term kind, one row per main-language synonym. A synonym ranks like a
-        name, which wins a tie; a definition ranks after names (3).
+        Candidates of the term kind, one row per matching main-language synonym (one row when
+        none matches). A synonym ranks like a name, which wins a tie; a definition ranks after
+        names (3).
     """
     synonym = aliased(GlossaryTermText)
     name_rank = match.rank([GlossaryTerm.name, GlossaryTerm.term_key], otherwise=3)
@@ -1211,6 +1224,8 @@ def _terms(match: _Match, environment_id: uuid.UUID) -> _Candidates:
                 synonym.term_id == GlossaryTerm.id,
                 synonym.language == MAIN_TEXT_LANGUAGE,
                 synonym.field == "synonym",
+                # Only a matching synonym joins, so a term is one row unless several match.
+                match.contains(synonym.text),
             ),
         )
         .where(
@@ -1290,8 +1305,9 @@ class _TermWords:
     word
         The alias of the term's texts that count as its words.
     joined
-        The condition that outer-joins `word`: a main-language synonym, or a translated name or
-        synonym in a language the term shows.
+        The condition that outer-joins `word`: a matching main-language synonym, or a matching
+        translated name or synonym in a language the term shows; only matching words join, so a
+        link is one row unless several of its term's words match.
     rank
         The better of the name's and the word's rank, 3 when neither matches.
     text
@@ -1337,7 +1353,7 @@ def _term_words(match: _Match, languages: Sequence[str], main_language: str) -> 
     by_word = word_rank < name_rank
     return _TermWords(
         word,
-        and_(word.term_id == GlossaryTerm.id, shown),
+        and_(word.term_id == GlossaryTerm.id, shown, match.contains(word.text)),
         case((by_word, word_rank), else_=name_rank),
         case((by_word, word.text), else_=GlossaryTerm.name),
         or_(name_rank < 3, word_rank < 3),
@@ -1439,6 +1455,7 @@ def _tables_by_term(
         Table.model_kind,
         null(),
         GlossaryTerm.term_key,
+        by_term=True,
     )
     query = _linked_by_term(query, words, environment_id, columns=False)
     return query.where(Table.model_kind == model_kind) if model_kind is not None else query
@@ -1481,6 +1498,7 @@ def _columns_by_term(
         TableColumn.type,
         null(),
         GlossaryTerm.term_key,
+        by_term=True,
     )
     return _linked_by_term(query, words, environment_id, columns=True)
 

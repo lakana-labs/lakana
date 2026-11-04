@@ -10,7 +10,7 @@ import pytest
 from core_test_helpers import FakeColumnCatalog, _config
 from pyiceberg.schema import Schema
 from pyiceberg.types import LongType, NestedField, StringType
-from sqlalchemy import event, select, update
+from sqlalchemy import event, select, text, update
 from sqlalchemy.orm import Session
 
 from lakana_core.auth import Action, AllowAllAuthorization, PrincipalRef, SecurableKind
@@ -1330,3 +1330,161 @@ def test_without_read_environment_there_are_no_terms_and_no_term_matches(world: 
     assert world.search(carol, "fulfilment").results == []
     assert world.search(carol, "fulfilment", kind=SearchKind.TERM).results == []
     assert [h.name for h in world.search(carol, "status").results] == ["silver.orders.status"]
+
+
+def _deploy(world: World, glossary: dict[str, dict[str, object]]) -> None:
+    """Write a glossary from the repository `shop`.
+
+    Parameters
+    ----------
+    world
+        The fixture's world.
+    glossary
+        The manifest's `glossary` section.
+    """
+    repo = Repository(id=uuid.uuid4(), name="shop", kind=RepositoryKind.LOCAL, url="/r")
+    world.session.add(repo)
+    world.session.flush()
+    env_id = world.session.scalars(select(Environment.id).where(Environment.name == "dev")).one()
+    write_glossary(world.session, env_id, repo.id, {"version": 13, "glossary": glossary})
+    world.session.commit()
+
+
+def _linked(name: str, synonyms: list[str], links: dict[str, list[str]]) -> dict[str, object]:
+    """Build one term of a manifest.
+
+    Parameters
+    ----------
+    name
+        Its name.
+    synonyms
+        Its main-language synonyms.
+    links
+        Its links in manifest form.
+
+    Returns
+    -------
+    dict
+        The term.
+    """
+    return {
+        "name": name,
+        "definition": "Plain.",
+        "owner": "ops",
+        "synonyms": synonyms,
+        "links": links,
+    }
+
+
+def _both_scan_orders(world: World, q: str, kind: SearchKind) -> list[SearchPage]:
+    """Search twice, with SQLite scanning tables forwards and then backwards.
+
+    `reverse_unordered_selects` reverses what an unordered scan returns, so rows that tie on
+    every sort key come out the other way round unless the query breaks the tie.
+
+    Parameters
+    ----------
+    world
+        The fixture's world.
+    q
+        The query.
+    kind
+        Only this kind.
+
+    Returns
+    -------
+    list of SearchPage
+        The page of each scan order.
+    """
+    pages = []
+    for reverse in ("OFF", "ON"):
+        world.session.execute(text(f"PRAGMA reverse_unordered_selects = {reverse}"))
+        pages.append(world.search(world.bob, q, kind=kind))
+    world.session.execute(text("PRAGMA reverse_unordered_selects = OFF"))
+    return pages
+
+
+def test_two_terms_at_one_rank_give_a_column_the_smaller_key_every_time(world: World) -> None:
+    status = {"silver.orders": ["status"]}
+    _deploy(
+        world,
+        {
+            "zeta": _linked("Zeta", ["fulfilment"], status),
+            "alpha": _linked("Alpha", ["fulfilment"], status),
+            "mid": _linked("Mid", ["fulfil", "fulfilment x", "fulfilment"], status),
+        },
+    )
+    for page in _both_scan_orders(world, "fulfilment", SearchKind.COLUMN):
+        assert [(h.name, h.term, h.snippet) for h in page.results] == [
+            ("silver.orders.status", "alpha", "fulfilment")
+        ]
+    (mid,) = world.search(world.bob, "mid", kind=SearchKind.TERM).results
+    assert mid.matched == "name"
+    for page in _both_scan_orders(world, "fulfil", SearchKind.TERM):
+        assert [(h.name, h.matched, h.snippet) for h in page.results if h.name == "mid"] == [
+            ("mid", "synonym", "fulfil")
+        ]
+
+
+def test_a_column_named_like_a_synonym_is_matched_by_its_name(world: World) -> None:
+    _deploy(world, {"state": _linked("State", ["status"], {"silver.orders": ["status"]})})
+    for page in _both_scan_orders(world, "status", SearchKind.COLUMN):
+        assert [(h.name, h.matched, h.term) for h in page.results] == [
+            ("silver.orders.status", "name", None)
+        ]
+
+
+def test_a_term_with_many_synonyms_is_one_candidate_of_the_bounded_scan(world: World) -> None:
+    many = [f"other word {i}" for i in range(6)]
+    _deploy(
+        world,
+        {
+            "order_state": _linked("Order state", many, {"silver.orders": ["status"]}),
+            "progress": {
+                "name": "Progress",
+                "definition": "Where an order stands.",
+                "owner": "ops",
+            },
+        },
+    )
+    with mock.patch.object(search_module, "MAX_SCANNED", 2):
+        terms = world.search(world.bob, "order", kind=SearchKind.TERM).results
+        columns = world.search(world.bob, "order st", kind=SearchKind.COLUMN).results
+    assert [h.name for h in terms] == ["order_state", "progress"]
+    assert [(h.name, h.term) for h in columns] == [("silver.orders.status", "order_state")]
+    with mock.patch.object(search_module, "MAX_SCANNED", 1):
+        assert [h.name for h in world.search(world.bob, "o", kind=SearchKind.TERM).results] == [
+            "order_state"
+        ]
+
+
+def test_rows_that_tie_on_rank_and_item_are_ordered_by_the_tie_breaks(world: World) -> None:
+    """SQLite happens to keep ties in input order; Postgres does not, so the query must say it."""
+    statements: list[str] = []
+
+    def _keep(_conn: object, _cursor: object, statement: str, *args: object) -> None:
+        """Keep each statement.
+
+        Parameters
+        ----------
+        _conn
+            The connection.
+        _cursor
+            The cursor.
+        statement
+            The SQL.
+        *args
+            The rest.
+        """
+        statements.append(statement)
+
+    engine = world.session.get_bind()
+    event.listen(engine, "before_cursor_execute", _keep)
+    try:
+        world.search(world.bob, "o")
+    finally:
+        event.remove(engine, "before_cursor_execute", _keep)
+    ranked = next(s for s in statements if "ORDER BY hits.rank" in s)
+    order = " ".join(ranked.split("ORDER BY", 1)[1].split()).split(" LIMIT")[0]
+    assert order.startswith("hits.rank, hits.kind_order, hits.sort_name, hits.sort_id, ")
+    assert order.endswith("hits.sort_source, hits.by_term, hits.f7, hits.f3, hits.f4"), order
