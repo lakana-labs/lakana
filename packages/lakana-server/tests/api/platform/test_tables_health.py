@@ -293,6 +293,8 @@ def test_someone_without_read_table_is_refused_like_on_the_other_routes(
     outsider = _person(client, "otto")
     assert client.get(f"{_TABLES}/t", headers=outsider).status_code == 403
     assert _health(client, headers=outsider).status_code == 403
+    history = client.get(f"{_TABLES}/t/health/signals", headers=outsider)
+    assert history.status_code == 403
 
 
 def test_a_table_that_does_not_exist_is_404(client: TestClient) -> None:

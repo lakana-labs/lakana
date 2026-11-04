@@ -3,7 +3,8 @@
 Each key is a command path as typed (`"env list"`); each value names the SDK
 methods that command calls: `"<client resource>.<method>"`, `"client.<method>"`
 for methods on `lakana.Client`, or `"query_run.<method>"` for the `QueryRun`
-handle. `LOCAL_COMMANDS` touch only the profile file (and, for `login`,
+handle. An `iter_*` or `iter` method is mapped to the command that lists the same rows, which
+pages by hand with `--cursor`. `LOCAL_COMMANDS` touch only the profile file (and, for `login`,
 `whoami`, which `whoami` itself covers).
 """
 

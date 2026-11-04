@@ -1967,6 +1967,48 @@ def test_table_health_does_not_say_values_are_hidden_when_they_are_not(tmp_path:
     assert "hidden" not in _plain(result.stdout)
 
 
+def test_a_fired_alert_with_a_line_break_cannot_forge_a_line(tmp_path: Path) -> None:
+    forged = {**_SIGNAL, "alert": "volume low\nFired: forged"}
+    _, result = _health(tmp_path, {**_HEALTH, "signals": [forged]})
+    assert "Fired: volume low\\nFired: forged" in _plain(result.stdout)
+    assert not [line for line in result.stdout.splitlines() if line.startswith("Fired: forged")]
+
+
+def test_the_history_says_when_values_are_hidden(tmp_path: Path) -> None:
+    hidden = {**_SIGNAL, "observed": None, "band": None, "alert": None, "values_hidden": True}
+    api = FakeApi()
+    api.on("GET", f"{_BASE}/sales/health/signals", json={"items": [hidden], "next_cursor": None})
+    result = invoke(
+        make_state(tmp_path, api), "table", "health", "bronze.sales", "--env", "dev", "--signals"
+    )
+    assert "Some values are hidden: a column mask or row filter applies to you." in _plain(
+        result.stdout
+    )
+
+
+@pytest.mark.parametrize("flag", ["--signal", "--column", "--limit", "--cursor"])
+def test_a_history_option_without_signals_names_the_cause_and_the_next_step(
+    tmp_path: Path, flag: str
+) -> None:
+    value = "5" if flag == "--limit" else "x"
+    _, result = _health(tmp_path, _HEALTH, flag, value)
+    assert result.exit_code != 0
+    assert f"{flag} works only with --signals; add --signals to list the history" in _plain(
+        result.stderr + result.stdout
+    )
+
+
+def test_an_empty_default_window_does_not_claim_30_days(tmp_path: Path) -> None:
+    api = FakeApi()
+    api.on("GET", f"{_BASE}/sales/health/signals", json={"items": [], "next_cursor": None})
+    result = invoke(
+        make_state(tmp_path, api), "table", "health", "bronze.sales", "--env", "dev", "--signals"
+    )
+    plain = _plain(result.stdout)
+    assert "No health signals in the default window (30 days, fewer if the server keeps" in plain
+    assert "in the last 30 days" not in plain
+
+
 def test_table_health_signals_says_when_the_window_is_empty(tmp_path: Path) -> None:
     api = FakeApi()
     api.on("GET", f"{_BASE}/sales/health/signals", json={"items": [], "next_cursor": None})

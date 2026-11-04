@@ -768,7 +768,21 @@ def _output_fired(state: CliState, signals: list[HealthSignal]) -> None:
     """
     for shown in signals:
         if shown.state == "fired" and shown.alert:
-            _output.emit(state, f"Fired: {shown.alert}")
+            _output.emit(state, _output.inline(f"Fired: {shown.alert}", 1000))
+
+
+def _output_hidden(state: CliState, signals: list[HealthSignal]) -> None:
+    """Say that values are hidden, when a column mask or row filter left some out.
+
+    Parameters
+    ----------
+    state
+        The CLI state.
+    signals
+        The signals shown.
+    """
+    if any(s.values_hidden for s in signals):
+        _output.emit(state, "Some values are hidden: a column mask or row filter applies to you.")
 
 
 @table_app.command("health")
@@ -827,9 +841,30 @@ def health(
         Continue after the page that printed this cursor, with --signals.
     env
         The environment.
+
+    Raises
+    ------
+    CliError
+        If `--signal`, `--column`, `--limit` or `--cursor` is given without `--signals`.
     """
     state = state_of(ctx)
     environment = resolve_environment(state, env)
+    if not signals:
+        only_with = [
+            flag
+            for flag, given in (
+                ("--signal", signal),
+                ("--column", column),
+                ("--limit", limit),
+                ("--cursor", cursor),
+            )
+            if given is not None
+        ]
+        if only_with:
+            raise CliError(
+                f"{', '.join(only_with)} works only with --signals; add --signals to list the "
+                "history of the health signals."
+            )
     if signals:
         page = state.client().tables.health_signals(
             environment, name, days=days, signal=signal, column=column, limit=limit, cursor=cursor
@@ -838,10 +873,16 @@ def health(
             _output.emit(state, page)
             return
         if not page.items:
-            _output.emit(state, f"No health signals in the last {days or 30} days.")
+            window = (
+                f"in the last {days} days"
+                if days is not None
+                else "in the default window (30 days, fewer if the server keeps signals for less)"
+            )
+            _output.emit(state, f"No health signals {window}.")
             return
         _output.emit(state, page.items, columns=_SIGNAL_HISTORY_COLUMNS)
         _output_fired(state, page.items)
+        _output_hidden(state, page.items)
         more_results(
             state,
             ["lakana", "table", "health", name],
@@ -885,8 +926,7 @@ def health(
     _output.emit(state, "Signals:")
     _output.emit(state, found.signals, columns=_SIGNAL_COLUMNS)
     _output_fired(state, found.signals)
-    if any(s.values_hidden for s in found.signals):
-        _output.emit(state, "Some values are hidden: a column mask or row filter applies to you.")
+    _output_hidden(state, found.signals)
 
 
 def _now_shows(texts: Table | Column | None) -> str:

@@ -1,8 +1,9 @@
 # Table health
 
 What Lakana tells you about the state of a table without reading its rows: when it was last
-written, how big it is, when it was last maintained, how its checks stand, and who reads it, and what its recent snapshots say. The
-numbers of the current snapshot are in `lakana table get`; the rest is in `lakana table health`.
+written, how big it is, when it was last maintained, how its checks stand, who reads it, and what
+its recent snapshots say. The numbers of the current snapshot are in `lakana table get`; the rest
+is in `lakana table health`.
 
 ## The numbers of the current snapshot
 
@@ -138,8 +139,10 @@ has not happened since signals were introduced shows none.
 
 **The band.** Over the table's last 30 snapshots, the median plus and minus 4 times the median
 absolute deviation, widened by a floor so that small or very steady tables do not alert on noise:
-at least 10 rows and 10 % for `volume`, 2 percentage points for `null_rate`, 1 % of the learned
-span for `range`. No signal but `schema` fires before the table has 8 snapshots.
+at least 10 rows and 10 % for `volume`, 2 percentage points for `null_rate`, and for `range`, on
+each side, 1 % of the learned span (for integers and other numbers, of the larger of the span and the bounds'
+magnitude) and at least one unit: 1 for integers, 1 day for dates, 1 hour for timestamps, none for
+other numbers. No signal but `schema` fires before the table has 8 snapshots.
 
 **States.** `ok`: inside the band. `fired`: outside it (`alert` says how). `no_history`: fewer than
 8 snapshots, so there is no band yet. `no_metrics`: nothing can be said, and the observation never
