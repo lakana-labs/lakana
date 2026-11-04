@@ -17,25 +17,30 @@ for a row filter, and so it is when the table's metadata cannot be read, or the 
 
 from __future__ import annotations
 
+import logging
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+from pyiceberg.schema import index_by_name
 from pyiceberg.table.metadata import TableMetadata
 from sqlalchemy import ColumnElement, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from lakana_core.auth import PrincipalRef
 from lakana_core.catalog.health_record import ranked
 from lakana_core.catalog.health_signals import COLUMN_SIGNALS, SIGNALS, alert_text
-from lakana_core.errors import StorageUnavailableError, ValidationError
-from lakana_core.identifiers import TableRef
+from lakana_core.errors import ValidationError
+from lakana_core.identifiers import TableRef, shown
 from lakana_core.models import TableHealthSignal
 from lakana_core.pagination import Page, newest_first
 from lakana_core.policy.renames import renamed_policy_column
 from lakana_core.policy.resolver import PolicyResolver
+
+logger = logging.getLogger(__name__)
 
 HISTORY_KIND = "health_signals"
 """The cursor kind of the history (`pagination.encode_cursor`)."""
@@ -165,7 +170,13 @@ def visibility_for(
     Visibility
         Everything value-revealing hidden when the policies cannot be read, when a column a
         mask uses was renamed since the mask was written, or when no metadata says which names
-        a masked column has had (none, or unreadable).
+        a masked column has had: none, or a read that failed for any reason but the database's
+        (storage that did not answer, a missing or refused file, a damaged one).
+
+    Raises
+    ------
+    sqlalchemy.exc.SQLAlchemyError
+        If the database failed while the metadata was read.
     """
     try:
         policy = PolicyResolver(session).resolve(p, ref, table_id=table_id)
@@ -178,7 +189,15 @@ def visibility_for(
         return Visibility()
     try:
         current = metadata()
-    except StorageUnavailableError:
+    except SQLAlchemyError:
+        raise
+    except Exception as exc:  # fail closed: a broken table must not fail its health
+        logger.warning(
+            "The metadata of %s could not be read for its health signals (%s); every value is "
+            "hidden from a masked reader.",
+            shown(ref.dotted()),
+            type(exc).__name__,
+        )
         return Visibility(masked=masked, filtered=True)
     if current is None or renamed_policy_column(current, policy.policies) is not None:
         return Visibility(masked=masked, filtered=True)
@@ -203,13 +222,14 @@ def _every_name(metadata: TableMetadata, masked: frozenset[str]) -> frozenset[st
     frozenset of str
         `masked` and each earlier name of the same field ids, case-folded.
     """
-    schema = metadata.schema()
-    ids = set()
-    for name in masked:
-        try:
-            ids.add(schema.find_field(name, case_sensitive=False).field_id)
-        except ValueError:
-            continue  # a mask on a column the table no longer has hides that name only
+    # Compared case-folded on both sides: pyiceberg's case-insensitive lookup lowers instead,
+    # and `"Maß".lower()` is not `"Maß".casefold()`. A mask on a column the table no longer has
+    # finds no field and hides that name only.
+    ids = {
+        field_id
+        for name, field_id in index_by_name(metadata.schema()).items()
+        if name.casefold() in masked
+    }
     names = set(masked)
     for each in metadata.schemas:
         for field_id in ids:

@@ -15,6 +15,7 @@ from pyiceberg.table.metadata import TableMetadata, TableMetadataV2
 from pyiceberg.table.sorting import SortOrder
 from pyiceberg.types import DoubleType, LongType, NestedField
 from sqlalchemy import select, update
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from lakana_core.auth import Action, PrincipalRef
@@ -661,6 +662,106 @@ def test_a_mask_written_after_a_rename_hides_the_old_name(
     assert not seen.filtered
     assert seen.hides("null_rate", "salary") and seen.hides("range", "pay")
     assert not seen.hides("range", "id")
+
+
+def test_a_mask_on_a_name_that_casefolds_apart_from_its_lower_case_hides_the_old_name(
+    session: Session, tmp_path: Path, principal: PrincipalRef, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Hide `x`'s old rows from a reader masked on `Maß`, the same field renamed (I1).
+
+    `"Maß".casefold()` is ``mass`` and its `lower()` ``maß``: the field is found by comparing
+    case-folded names, so its earlier name `x`, reused by a new column, stays hidden.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    tmp_path
+        Storage root.
+    principal
+        The reader.
+    monkeypatch
+        Pytest's monkeypatch.
+    """
+    _answer_with(monkeypatch, _mask_on("Maß", 1))
+    seen = _visibility(session, tmp_path, principal, lambda: _schemas({2: "x"}, {2: "Maß", 3: "x"}))
+    assert not seen.filtered
+    assert seen.hides("range", "x") and seen.hides("null_rate", "MASS")
+    assert not seen.hides("range", "id")
+
+
+@pytest.mark.parametrize(
+    "error",
+    [FileNotFoundError("gone"), PermissionError("denied"), ValueError("not a metadata file")],
+    ids=["missing", "refused", "corrupt"],
+)
+def test_metadata_that_cannot_be_read_hides_every_value(
+    session: Session,
+    tmp_path: Path,
+    principal: PrincipalRef,
+    monkeypatch: pytest.MonkeyPatch,
+    error: Exception,
+) -> None:
+    """Hide every value when the metadata read fails for any reason but the database (I2).
+
+    Parameters
+    ----------
+    session
+        Database session.
+    tmp_path
+        Storage root.
+    principal
+        The reader.
+    monkeypatch
+        Pytest's monkeypatch.
+    error
+        What the read raises.
+    """
+
+    def broken() -> TableMetadata | None:
+        """Fail as the metadata read does.
+
+        Raises
+        ------
+        Exception
+            `error`, always.
+        """
+        raise error
+
+    _answer_with(monkeypatch, _PRICE_MASK)
+    assert _visibility(session, tmp_path, principal, broken).filtered
+
+
+def test_a_database_error_while_reading_the_metadata_is_not_hidden(
+    session: Session, tmp_path: Path, principal: PrincipalRef, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Let a database error raised while reading the metadata propagate.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    tmp_path
+        Storage root.
+    principal
+        The reader.
+    monkeypatch
+        Pytest's monkeypatch.
+    """
+
+    def database_down() -> TableMetadata | None:
+        """Fail as a lost database connection does.
+
+        Raises
+        ------
+        OperationalError
+            Always.
+        """
+        raise OperationalError("SELECT 1", {}, Exception("connection lost"))
+
+    _answer_with(monkeypatch, _PRICE_MASK)
+    with pytest.raises(OperationalError):
+        _visibility(session, tmp_path, principal, database_down)
 
 
 def test_unreachable_metadata_hides_every_value(

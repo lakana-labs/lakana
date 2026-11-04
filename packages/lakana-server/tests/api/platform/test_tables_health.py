@@ -9,10 +9,12 @@ from datetime import UTC, datetime, timedelta
 import httpx
 import pyarrow as pa
 import pyarrow.ipc
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from lakana_core.catalog import service as catalog_service
 from lakana_core.config import TableReadsConfig
 from lakana_core.models import (
     CheckOutcome,
@@ -464,6 +466,27 @@ def test_the_signal_history_pages_and_bounds_days(client: TestClient) -> None:
 
 def test_a_mask_leaves_out_the_values_of_its_column(client: TestClient) -> None:
     _table(client, rows=3)
+    _mask_note(client)
+    signals = _health(client).json()["signals"]
+    note = next(s for s in signals if s["signal"] == "null_rate" and s["column"] == "note")
+    assert (note["observed"], note["band"], note["alert"], note["values_hidden"]) == (
+        None,
+        None,
+        None,
+        True,
+    )
+    volume = next(s for s in signals if s["signal"] == "volume")
+    assert volume["observed"] == {"added": 3, "total": 3}
+
+
+def _mask_note(client: TestClient) -> None:
+    """Mask `gold.t.note` for the bootstrap administrator.
+
+    Parameters
+    ----------
+    client
+        The test client.
+    """
     masked = client.post(
         "/api/v1/column-masks",
         headers=AUTH_HEADER,
@@ -477,13 +500,58 @@ def test_a_mask_leaves_out_the_values_of_its_column(client: TestClient) -> None:
         },
     )
     assert masked.status_code == 201, masked.text
-    signals = _health(client).json()["signals"]
+
+
+@pytest.mark.parametrize(
+    "error",
+    [FileNotFoundError("gone"), PermissionError("denied"), ValueError("not a metadata file")],
+    ids=["missing", "refused", "corrupt"],
+)
+def test_metadata_that_cannot_be_read_hides_a_masked_readers_values(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, error: Exception
+) -> None:
+    """Answer 200 with the values hidden, never 500, when a masked reader's metadata read fails.
+
+    An unmasked reader never reads the metadata, so its answer does not change.
+
+    Parameters
+    ----------
+    client
+        The test client.
+    monkeypatch
+        Pytest's monkeypatch.
+    error
+        What the metadata read raises.
+    """
+    _table(client, rows=3)
+    unmasked = _health(client).json()
+
+    def broken(file_io: object, location: str) -> object:
+        """Fail as the metadata read does.
+
+        Parameters
+        ----------
+        file_io
+            Ignored.
+        location
+            Ignored.
+
+        Raises
+        ------
+        Exception
+            `error`, always.
+        """
+        raise error
+
+    with monkeypatch.context() as patched:
+        patched.setattr(catalog_service, "read_metadata", broken)
+        assert _health(client).json() == unmasked
+    _mask_note(client)
+    monkeypatch.setattr(catalog_service, "read_metadata", broken)
+    answer = _health(client)
+    assert answer.status_code == 200, answer.text
+    signals = answer.json()["signals"]
     note = next(s for s in signals if s["signal"] == "null_rate" and s["column"] == "note")
-    assert (note["observed"], note["band"], note["alert"], note["values_hidden"]) == (
-        None,
-        None,
-        None,
-        True,
-    )
+    assert (note["observed"], note["values_hidden"]) == (None, True)
     volume = next(s for s in signals if s["signal"] == "volume")
     assert volume["observed"] == {"added": 3, "total": 3}
