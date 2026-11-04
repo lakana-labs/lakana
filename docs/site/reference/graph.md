@@ -44,8 +44,8 @@ Answers always carry the ids.
 
 | Question | REST (`GET /api/v1/environments/{env}/graph/...`) | SDK (`client.graph.`) | CLI (`lakana graph ...`) |
 |---|---|---|---|
-| What feeds it, what it feeds | `lineage?node=&direction=up\|down\|both&depth=` | `lineage(env, node, direction=, depth=)` | `lineage NODE [--column] [--direction] [--depth]` |
-| What lies next to it | `neighbours?node=&kinds=` | `neighbours(env, node, kinds=)` | `neighbours NODE [--column] [--kind]...` |
+| What feeds it, what it feeds | `lineage?node=&direction=up\|down\|both&depth=&lang=&limit=&cursor=` | `lineage(env, node, direction=, depth=, lang=, page_size=)` | `lineage NODE [--column] [--direction] [--depth] [--lang]` |
+| What lies next to it | `neighbours?node=&kinds=&lang=&limit=&cursor=` | `neighbours(env, node, kinds=, lang=, page_size=)` | `neighbours NODE [--column] [--kind]... [--lang]` |
 
 **Lineage** walks the tables and assets upstream (what feeds the start), downstream (what it
 feeds) or both (the default). `depth` counts the assets crossed, from 1 to 10, and is 3 when not

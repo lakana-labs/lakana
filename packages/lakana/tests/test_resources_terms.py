@@ -137,3 +137,9 @@ def test_a_missing_term_keeps_the_servers_own_message() -> None:
     )
     with pytest.raises(NotFound, match="Term `x` does not exist"):
         Terms(HttpTransport(_CONFIG, http_client=client)).get("dev", "x")
+
+
+def test_iter_stops_on_a_cursor_the_server_repeats() -> None:
+    terms = _terms({"items": [_TERM], "next_cursor": "c1"}, [])
+    with pytest.raises(InvalidResponse, match="same page cursor twice"):
+        list(terms.iter("dev"))

@@ -14,6 +14,8 @@ Pages:
 - [Merging rows into a table](merge.md): the key, the counts, the first merge, the command, the SDK, the REST route, who may merge, every refusal, the audit event and the limits.
 - [Loading a local file](load.md): `lakana load` into the bronze layer, the formats it reads, the SDK, the REST route, who may load and every refusal.
 - [Table health](table-health.md): the numbers of a table's snapshot, its last maintenance, the newest result of each check and who reads it; the fields, the rules, the settings, commands, SDK and routes.
+- [Glossary](glossary.md): the files of a business glossary, the fields of a term, how terms link to tables and columns, commands, SDK and routes.
+- [Metadata graph](graph.md): the nodes and edges of the graph, lineage and neighbours by REST, SDK and command, who sees what, paging and limits.
 - [Search](search.md): what is matched, the ranking, who sees what, the route, the command, the SDK and how the columns of existing tables are filled in.
 
 - [Runs, queries and deploys lists](lists.md): the filters, the order and the cursor of the three lists, the refusals, commands, SDK and routes.

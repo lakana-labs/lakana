@@ -2723,7 +2723,7 @@ class GraphNodeOut(BaseModel):
     name
         A name to read: a dotted table, `<table>.<column>`, a term's key.
     distance
-        Steps from the start: assets crossed for lineage, 1 for a neighbour, hops for impact.
+        Steps from the start: assets crossed for lineage, 1 for a neighbour.
     table_type
         A table's `managed`, `external`, `view` or `artifact`.
     model_kind
@@ -2741,9 +2741,9 @@ class GraphNodeOut(BaseModel):
     column_type
         A column's type.
     reason
-        Why `impact` lists it.
+        Always `null` for lineage and neighbours.
     may_use
-        `true` when `impact` lists it because it may use the column (its SQL is not parsed).
+        Always `false` for lineage and neighbours.
     """
 
     id: str

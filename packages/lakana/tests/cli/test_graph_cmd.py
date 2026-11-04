@@ -125,3 +125,10 @@ def test_json_output_has_the_nodes_and_the_edges(tmp_path: Path) -> None:
         "prod",
     )
     assert set(json.loads(result.output)) == {"nodes", "edges"}
+
+
+def test_lineage_leaves_the_depth_to_the_server(tmp_path: Path) -> None:
+    api = FakeApi()
+    api.on("GET", _LINEAGE, json={"nodes": [_ROOT], "edges": [], "next_cursor": None})
+    invoke(make_state(tmp_path, api), "graph", "lineage", "gold.dim_store", "--env", "prod")
+    assert "depth" not in api.requests[0].url.params

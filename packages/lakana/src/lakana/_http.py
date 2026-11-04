@@ -123,6 +123,35 @@ class _Page(Protocol[_T_co]):
         """The cursor of the next page, or `None` on the last."""
 
 
+def _next_cursor(cursor: str, seen: set[str]) -> str:
+    """Record a page's cursor, refusing one a server has sent before.
+
+    Parameters
+    ----------
+    cursor
+        The `next_cursor` of the page just read.
+    seen
+        The cursors of the earlier pages; receives `cursor`.
+
+    Returns
+    -------
+    str
+        `cursor`.
+
+    Raises
+    ------
+    InvalidResponse
+        If the server sent this cursor before, so that paging would never end.
+    """
+    if cursor in seen:
+        raise InvalidResponse(
+            "The server sent the same page cursor twice, so the list would never end. "
+            "Check the URL, or upgrade the server and the SDK to matching releases."
+        )
+    seen.add(cursor)
+    return cursor
+
+
 def every_page(fetch: Callable[[str | None], _Page[_T_co]]) -> Iterator[_T_co]:
     """Yield every row of a paged list, fetching one page after the other.
 
@@ -137,12 +166,13 @@ def every_page(fetch: Callable[[str | None], _Page[_T_co]]) -> Iterator[_T_co]:
         Each row, once, in the list's order.
     """
     cursor: str | None = None
+    seen: set[str] = set()
     while True:
         page = fetch(cursor)
         yield from page.items
         if page.next_cursor is None:
             return
-        cursor = page.next_cursor
+        cursor = _next_cursor(page.next_cursor, seen)
 
 
 def csv_param(values: str | Sequence[str] | None) -> str | None:

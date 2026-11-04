@@ -2083,9 +2083,9 @@ class GraphNode:
     column_type
         A column's type.
     reason
-        Why an impact answer lists it.
+        Always `None` for lineage and neighbours.
     may_use
-        Whether an impact answer lists it because it may use the column.
+        Always `False` for lineage and neighbours.
     """
 
     id: str

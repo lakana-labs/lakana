@@ -82,7 +82,10 @@ def lineage(
         _Direction,
         typer.Option("--direction", help="up (what feeds it), down (what it feeds), or both."),
     ] = _Direction.BOTH,
-    depth: Annotated[int, typer.Option("--depth", help="Assets to cross, 1 to 10.")] = 3,
+    depth: Annotated[
+        int | None,
+        typer.Option("--depth", help="Assets to cross, 1 to 10 (default: the server's, 3)."),
+    ] = None,
     lang: _LANG = None,
     env: _ENV = None,
 ) -> None:

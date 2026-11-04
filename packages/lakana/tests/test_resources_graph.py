@@ -141,3 +141,9 @@ def test_a_404_with_a_detail_passes_through() -> None:
         )
     assert "There is no node `t`" in str(caught.value)
     assert "no metadata graph routes" not in str(caught.value)
+
+
+def test_a_cursor_the_server_repeats_is_invalid() -> None:
+    page = {"nodes": [_NODE], "edges": [], "next_cursor": "c1"}
+    with pytest.raises(InvalidResponse, match="same page cursor twice"):
+        _graph([page, page, page], []).lineage("dev", "t")

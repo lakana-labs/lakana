@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
-from lakana._http import HttpTransport, query_params
+from lakana._http import HttpTransport, _next_cursor, query_params
 from lakana._models import Graph, GraphEdge, GraphNode, known_fields
 from lakana._routes import ROUTES
 from lakana.errors import InvalidResponse, NotFound
@@ -83,11 +83,12 @@ class MetadataGraph:
             If the environment or the node does not exist or is hidden, or the server has no
             graph routes.
         lakana.errors.InvalidResponse
-            If a page is not shaped like a `GraphOut`.
+            If a page is not shaped like a `GraphOut`, or the server repeats a cursor.
         """
         nodes: list[GraphNode] = []
         edges: list[GraphEdge] = []
         cursor: str | None = None
+        seen: set[str] = set()
         while True:
             try:
                 response = self._transport.request(
@@ -103,6 +104,7 @@ class MetadataGraph:
             edges += page_edges
             if cursor is None:
                 return Graph(tuple(nodes), tuple(edges))
+            _next_cursor(cursor, seen)
 
     def lineage(
         self,

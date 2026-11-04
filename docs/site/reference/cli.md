@@ -1985,7 +1985,7 @@ Show the tables and assets upstream and downstream of NODE, as the projects decl
 | `NODE` | text | required | A table's dotted name, such as gold.dim_store, or a node id. |
 | `--column` | text | none | A column of the table NODE names. |
 | `--direction` | one of `up`, `down`, `both` | `both` | up (what feeds it), down (what it feeds), or both. |
-| `--depth` | whole number | `3` | Assets to cross, 1 to 10. |
+| `--depth` | whole number | none | Assets to cross, 1 to 10 (default: the server's, 3). |
 | `--lang` | text | none | Show labels in this language, such as de. |
 | `--env` | text | none | Environment (default: the profile's). |
 
