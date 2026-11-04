@@ -366,6 +366,17 @@ links to the tables and columns they are about, checked and deployed with the pr
   that are not glossary terms) is refused at deploy. Rename or remove that content, or move it
   out of the root, before you upgrade.
 
+### Choose what a table health signal does
+
+A table's header, an `@asset(health=...)` argument or `lakana.yaml` can set each health signal to
+`warn`, `block` or `off`. See [Table health](../reference/table-health.md#what-a-signal-does-health).
+
+- **Upgrade the workers before deploying a project that declares `health:`.** Such a project deploys
+  manifest version 14, which a worker of an earlier release refuses. Every other project keeps its
+  manifest version.
+- A deploy refuses an unknown signal, a column the table does not have, `block` on `freshness` and
+  `health:` on a view, with the file and the next step.
+
 ## Notes for 0.21.0
 
 ### Python tasks: builds that cannot succeed fail at once, and a task proves its write

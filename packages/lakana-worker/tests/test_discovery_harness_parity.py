@@ -393,6 +393,13 @@ _ARGUMENT_CASES: dict[str, str] = {
     "key-on-artifact": 'output="artifact", key=["id"]',
     "replace-and-empty-key-on-artifact": 'output="artifact", write="replace", key=[]',
     "materialize-incremental": 'materialize="incremental"',
+    "health-off": 'health="off"',
+    "health-mapping": 'health={"volume": "block", "range": {"price": "off"}}',
+    "health-unknown-signal": 'health={"rows": "warn"}',
+    "health-bad-effect": 'health={"volume": "loud"}',
+    "health-freshness-block": 'health={"freshness": "block"}',
+    "health-columns-on-volume": 'health={"volume": {"x": "off"}}',
+    "health-on-artifact": 'output="artifact", health="off"',
 }
 
 
@@ -639,6 +646,14 @@ def test_the_sdk_routes_the_kinds_the_worker_routes() -> None:
 
     assert {kind.value for kind in PROXY_KINDS} == sdk_connections._PROXY_KINDS
     assert sdk_connections._RELAY_HOST == RELAY_ALIAS
+
+
+def test_the_health_signals_and_effects_are_the_same_in_core_and_the_sdk() -> None:
+    from lakana_core.catalog.health_signals import COLUMN_SIGNALS, EFFECTS, SIGNALS
+
+    assert sdk_assets._HEALTH_SIGNALS == SIGNALS
+    assert sdk_assets._HEALTH_EFFECTS == EFFECTS
+    assert frozenset(sdk_assets._COLUMN_SIGNALS) == COLUMN_SIGNALS
 
 
 def test_the_model_kinds_are_the_same_in_core_and_the_sdk() -> None:

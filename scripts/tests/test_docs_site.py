@@ -17,7 +17,7 @@ EXEMPT = (
     "scripts/tests/test_docs_site.py",
     "scripts/tests/test_docs_only.py",
 )
-NOT_TESTED_CEILING = 54
+NOT_TESTED_CEILING = 55
 UNCHECKED_OUTPUT_CEILING = 78
 """Blocks marked as not tested; it only goes down, apart from the rises below.
 
@@ -33,6 +33,9 @@ the site's rules forbid, and each now stands in a block. Four of the five blocks
 with placeholders (`<name>`, `<n>`, `<env>`) that no example can run, and the fifth reads the
 log of a running Compose stack. Store, delete and drop of an artifact are run by the example of
 the tutorial.
+
+The health section of `asset-front-matter.md` rose it from 54 to 55: its SQL header is not parsed by
+the block checker, so `test_the_front_matter_in_a_sql_block_is_valid` parses it instead.
 
 The column-mask page rose it from 41 to 44: its three command blocks need an
 administrator's profile and the profiles of two readers on a running instance, which the

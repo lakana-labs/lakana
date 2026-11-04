@@ -3929,3 +3929,66 @@ def test_a_project_without_layers_keeps_its_manifest_and_hints(
     version = session.get(JobVersion, run.job_version_id)
     assert version is not None
     assert "layers" not in version.manifest_json
+
+
+def test_a_deploy_refuses_a_health_column_the_table_lacks(
+    session: Session, principal: PrincipalRef, world: World
+) -> None:
+    """A per-column `health:` entry names a column of the SELECT, at the header's line."""
+    commit(
+        world.repo_path,
+        {
+            "assets/gold/t.sql": ("/* lakana\nhealth: {range: {price: off}}\n*/\nSELECT 1 AS id\n"),
+        },
+    )
+    run = _submit_and_run(session, principal, world)
+    assert run.status is DeployStatus.FAILED
+    assert run.error_message is not None
+    assert (
+        "assets/gold/t.sql:1: health: range names column price, which gold.t does not have "
+        "(columns: id); fix the name or remove it" in run.error_message
+    )
+
+
+def test_a_deploy_refuses_health_on_a_view(
+    session: Session, principal: PrincipalRef, world: World
+) -> None:
+    """A view has no snapshots, so `health:` on it is refused with the way out."""
+    commit(
+        world.repo_path,
+        {
+            "assets/gold/v.sql": (
+                "/* lakana\nmaterialize: view\nhealth: off\n*/\nSELECT 1 AS id\n"
+            ),
+        },
+    )
+    run = _submit_and_run(session, principal, world)
+    assert run.status is DeployStatus.FAILED
+    assert run.error_message is not None
+    assert (
+        "assets/gold/v.sql:1: health: does not apply to a view, which has no snapshots to "
+        "watch; remove it, or materialize the asset as a table" in run.error_message
+    )
+
+
+@pytest.mark.parametrize(
+    ("health", "message"),
+    [
+        ("{rows: warn}", "health: rows is not a health signal; use freshness, volume"),
+        ("{freshness: block}", "health: freshness cannot block: it fires between runs"),
+        ("{volume: loud}", "health: volume must be warn, block or off, not loud"),
+    ],
+)
+def test_a_deploy_refuses_a_bad_health_value_with_the_file(
+    session: Session, principal: PrincipalRef, world: World, health: str, message: str
+) -> None:
+    """An unknown signal and `block` on freshness name the file, the cause and the next step."""
+    commit(
+        world.repo_path,
+        {"assets/gold/t.sql": f"/* lakana\nhealth: {health}\n*/\nSELECT 1 AS id\n"},
+    )
+    run = _submit_and_run(session, principal, world)
+    assert run.status is DeployStatus.FAILED
+    assert run.error_message is not None
+    assert run.error_message.startswith("assets/gold/t.sql:")
+    assert message in run.error_message

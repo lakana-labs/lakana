@@ -25,6 +25,7 @@ from lakana_core.projects.asset_model import (
     normalized_write,
 )
 from lakana_core.projects.dag import ProjectGraph
+from lakana_core.projects.health import resolve_effects
 from lakana_core.projects.history_columns import HistorySpec, added_column_descriptions
 from lakana_core.projects.layers import LayersConfig
 from lakana_core.projects.measures import MeasureEntry, measure_entries, read_measure_entries
@@ -40,7 +41,7 @@ if TYPE_CHECKING:
     from lakana_core.projects.checks import ParsedCheck
     from lakana_core.projects.frontmatter import AssetMetadata
 
-MANIFEST_VERSION = 13
+MANIFEST_VERSION = 14
 """Bumped when the manifest's shape changes. Version 2 adds `kind` per asset and
 `lock_sha256`; a version-1 manifest is read as all-SQL. Version 3 adds `output`,
 `keep_versions` and `input_kinds` per Python asset; versions 1 and 2 are read as all-table.
@@ -80,6 +81,9 @@ release ignores it and does the same.
 Version 13 is written only when the project has a `glossary/` folder (`GLOSSARY_VERSION`); such
 a manifest has a top-level `glossary` (read with `lakana_core.projects.glossary.manifest_glossary`)
 and a `checks` list.
+Version 14 is written only when a table asset's resolved `health:` (the asset's over
+`lakana.yaml`'s) is not empty (`HEALTH_VERSION`); such an entry carries `health`, the flat map read
+with `lakana_core.projects.health.entry_effects`.
 """
 
 VERSION_WITHOUT_CHECKS = 3
@@ -127,7 +131,12 @@ GLOSSARY_VERSION = 13
 """The version of a manifest whose project has a `glossary/` folder; a worker of an earlier
 release refuses it, so only a project with a glossary needs the workers upgraded first."""
 
-LISTS_CHECKS = (4, 5, 6, 7, 8, 9, 10, 11, 12, 13)
+HEALTH_VERSION = 14
+"""The version of a manifest in which a table asset's resolved `health:` is not empty; a worker of
+an earlier release refuses it, because it would neither block nor skip what it says. Only a project
+that declares `health:` needs the workers upgraded first."""
+
+LISTS_CHECKS = (4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14)
 """The versions whose manifest always carries a `checks` list (version 4 a non-empty one). A
 tuple, not a set: a stored version may be any JSON value, a list too, and must not raise."""
 
@@ -227,6 +236,7 @@ def _entry(
     artifacts: frozenset[str],
     references: Sequence[ResolvedReference] = (),
     translations: Mapping[str, Any] | None = None,
+    health: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     """Serialize one asset.
 
@@ -243,6 +253,8 @@ def _entry(
     translations
         Language → the table's texts in it, recorded as `metadata.translations` when there are
         any.
+    health
+        The asset's resolved `health:` (`resolve_effects`); recorded as `health` when not empty.
 
     Returns
     -------
@@ -305,6 +317,8 @@ def _entry(
         }
         if asset.output == "artifact":
             entry["materialize"] = entry["write_mode"] = entry["first_write_mode"] = "artifact"
+    if health:
+        entry["health"] = dict(health)
     if declares_model(asset.metadata):
         model: dict[str, Any] = {
             "kind": asset.metadata.kind,
@@ -325,6 +339,27 @@ def _entry(
             model["measures"] = measure_entries(asset.metadata.measures)
         entry["model"] = model
     return entry
+
+
+def _health(asset: ParsedAsset, config: ResolvedProjectConfig) -> dict[str, str]:
+    """Resolve the health effects of one asset, for a table that has snapshots to watch.
+
+    Parameters
+    ----------
+    asset
+        The parsed asset.
+    config
+        `lakana.yaml` resolved for the target environment.
+
+    Returns
+    -------
+    dict
+        `resolve_effects` of the project's `health:` and the asset's; empty for a view and an
+        artifact, whose task runs gain no checks.
+    """
+    if asset.output != "table" or asset.metadata.materialize == "view":
+        return {}
+    return resolve_effects(config.health, asset.metadata.health)
 
 
 def _unset_fields(job: JobConfig) -> set[str]:
@@ -357,6 +392,7 @@ def _version(
     uses_texts: bool = False,
     uses_history: bool = False,
     uses_glossary: bool = False,
+    uses_health: bool = False,
 ) -> int:
     """Pick the lowest manifest version that carries everything the project declares.
 
@@ -380,10 +416,13 @@ def _version(
         Whether an asset uses `write: history` or a reference declares `at:`.
     uses_glossary
         Whether the project has a `glossary/` folder.
+    uses_health
+        Whether a table asset's resolved `health:` is not empty.
 
     Returns
     -------
     int
+        `HEALTH_VERSION` when a table's `health:` is not empty, else
         `GLOSSARY_VERSION` when the project has a glossary, else
         `HISTORY_VERSION` when the project uses history, else `TEXTS_VERSION` when the project
         uses texts, else `MEASURES_VERSION` when an asset
@@ -394,6 +433,8 @@ def _version(
         `JOBS_VERSION` with jobs, `CHECKS_VERSION` with checks, `VERSION_WITHOUT_CHECKS`
         otherwise.
     """
+    if uses_health:
+        return HEALTH_VERSION
     if uses_glossary:
         return GLOSSARY_VERSION
     if uses_history:
@@ -535,6 +576,7 @@ def build_manifest(
         or bool(texts)
         or any(a.metadata.label is not None or a.metadata.column_labels() for a in assets)
     )
+    health = {a.table: _health(a, config) for a in assets}
     version = _version(
         config,
         has_checks=bool(checks),
@@ -546,16 +588,24 @@ def build_manifest(
         uses_history=any(asset.metadata.write == "history" for asset in assets)
         or any(r.at is not None for refs in resolved.values() for r in refs),
         uses_glossary=glossary is not None,
+        uses_health=any(health.values()),
     )
     manifest: dict[str, Any] = {
         "version": version,
         "assets": [
-            _entry(asset, caps, known, resolved.get(asset.table, ()), texts.get(asset.table))
+            _entry(
+                asset,
+                caps,
+                known,
+                resolved.get(asset.table, ()),
+                texts.get(asset.table),
+                health[asset.table],
+            )
             for asset in sorted(assets, key=lambda a: a.table)
         ],
         "edges": [list(edge) for edge in graph.edges],
         "external_inputs": list(graph.external_inputs),
-        "config": config.model_dump(mode="json", exclude={"jobs"}),
+        "config": config.model_dump(mode="json", exclude={"jobs", "health"}),
     }
     if config.jobs:
         manifest["jobs"] = {
@@ -583,6 +633,7 @@ def build_manifest(
         TEXTS_VERSION,
         HISTORY_VERSION,
         GLOSSARY_VERSION,
+        HEALTH_VERSION,
     )
     if checks or config.jobs or version in lists_empty:
         manifest["checks"] = [_check_entry(check) for check in sorted(checks, key=lambda c: c.name)]

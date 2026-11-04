@@ -57,6 +57,7 @@ from lakana_core.projects.deploys import DeclaredConnections, DeployService, con
 from lakana_core.projects.diff import diff_manifests
 from lakana_core.projects.discovery import discover
 from lakana_core.projects.glossary import glossary_entries, parse_glossary
+from lakana_core.projects.health import health_issues
 from lakana_core.projects.issues import ProjectIssue, ProjectValidationError, withheld_lines
 from lakana_core.projects.jobs import job_issues
 from lakana_core.projects.layer_rules import layer_hints, layer_issues
@@ -879,6 +880,7 @@ def _deploy(
                 principal, environment_name, repository_id, checks, assets
             )
             + project_model_issues(assets)
+            + health_issues(assets)
             + translation_problems
             + glossary_problems
             + translation_issues(project, assets, translations, translatable)

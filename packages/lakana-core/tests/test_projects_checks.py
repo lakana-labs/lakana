@@ -778,7 +778,7 @@ def test_a_manifest_without_checks_is_unchanged() -> None:
         ],
         "edges": [],
         "external_inputs": ["bronze.raw"],
-        "config": config.model_dump(mode="json", exclude={"jobs"}),
+        "config": config.model_dump(mode="json", exclude={"jobs", "health"}),
     }
 
 

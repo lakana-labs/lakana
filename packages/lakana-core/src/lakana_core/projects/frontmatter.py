@@ -26,6 +26,7 @@ from lakana_core.projects.asset_model import (
     write_choice_message,
     write_rule_issues,
 )
+from lakana_core.projects.health import normalize_health
 from lakana_core.projects.issues import ProjectIssue, ProjectValidationError
 from lakana_core.projects.limits import DeployLimits
 from lakana_core.projects.measures import (
@@ -233,6 +234,11 @@ class AssetMetadata(SafeTextModel):
     checks
         Check family (``key``, ``references``, ``measures``) → what a failure does (``block``,
         ``keep`` or ``warn``).
+    health
+        Table health signals (``freshness``, ``volume``, ``null_rate``, ``range``, ``schema``) →
+        ``warn``, ``block`` or ``off``, or a column → effect for ``null_rate`` and ``range``;
+        read into the flat map ``signal`` or ``signal.column`` → effect
+        (`lakana_core.projects.health`).
     watermark
         The column whose largest value the next run starts after, for ``write: append`` (and
         optionally ``merge``).
@@ -265,6 +271,7 @@ class AssetMetadata(SafeTextModel):
     references: dict[str, str | ReferenceSpec] = Field(default_factory=dict)
     measures: dict[str, MeasureSpec] = Field(default_factory=dict)
     checks: dict[str, str] = Field(default_factory=dict)
+    health: dict[str, str] = Field(default_factory=dict)
     watermark: str | None = None
     valid_from: str | None = None
     close_missing: StrictBool | None = None
@@ -621,6 +628,23 @@ class AssetMetadata(SafeTextModel):
             if mode not in CHECK_MODES:
                 raise ValueError(f"{family} must be block, keep or warn")
         return value
+
+    @field_validator("health", mode="before")
+    @classmethod
+    def _health_is_known(cls, value: object) -> dict[str, str]:
+        """Read `health:` into the flat map, refusing what is not a signal or an effect.
+
+        Parameters
+        ----------
+        value
+            The field's value as YAML or the decorator gave it.
+
+        Returns
+        -------
+        dict
+            The flat map (`projects.health.normalize_health`).
+        """
+        return normalize_health(value)
 
     @field_validator("watermark")
     @classmethod

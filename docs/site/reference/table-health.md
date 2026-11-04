@@ -163,6 +163,44 @@ that are damaged count as `not_recorded`.
 or time limit records `no_metrics` with reason `unreadable` for `null_rate` and `range`; it never
 fails the write.
 
+### What a signal does: `health:`
+
+A fired signal warns by default: it is recorded and shown. You choose, per signal, between three
+effects:
+
+| Effect | What it does |
+|---|---|
+| `warn` | The default. The signal is recorded and shown when it fires. |
+| `block` | A firing signal fails the run and sets the table back, as a blocking check does. |
+| `off` | The signal is not evaluated for the table or column, and shows as `off`. |
+
+Write `health:` in the asset's `/* lakana … */` block, or as `health=` in `@asset(...)`: `off` for
+every signal, or a mapping of signals to an effect. `null_rate` and `range` may instead name single
+columns.
+
+The header example, a table that is not published when its row count jumps and whose `price` may
+swing, is in [Asset front-matter](asset-front-matter.md#health-what-the-tables-signals-do).
+
+A project default goes in [`lakana.yaml`](lakana-yaml.md#health) under `health:`; the asset's own
+entries win over it. `freshness` cannot `block`: it fires between runs, when there is no write to
+stop. A view, an external table and an artifact have no snapshots, so they take no `health:`.
+Write `off` unquoted or quoted; `on`, `yes` and `true` are not effects. A deploy refuses a bad
+`health:` with the file, the cause and the next step:
+
+| Text | Cause |
+|---|---|
+| ``health: rows is not a health signal; use freshness, volume, null_rate, range or schema`` | A signal that does not exist. |
+| ``health: volume must be warn, block or off, not loud`` | Any other effect. |
+| ``health: freshness cannot block: it fires between runs, when there is no write to stop; use warn or off`` | `block` on `freshness`. |
+| ``health: volume is about the whole table; give it warn, block or off, not columns`` | Columns under a signal that is not per column. |
+| ``health: null_rate takes warn, block or off in lakana.yaml; name single columns in an asset's header`` | Columns in `lakana.yaml`. |
+| ``health: range names column price, which gold.orders does not have (columns: order_id); fix the name or remove it`` | A column the table's `SELECT` does not return. |
+| ``health: does not apply to a view, which has no snapshots to watch; remove it, or materialize the asset as a table`` | `health:` on a view. |
+
+A project in which a table declares `health:` (in the asset or as a default in `lakana.yaml`)
+deploys manifest version 14. Upgrade the workers before you deploy it: a worker of an earlier
+release refuses that manifest. A project without `health:` keeps its version.
+
 ### What `observed` and `band` hold
 
 | Signal | `observed` | `band` |

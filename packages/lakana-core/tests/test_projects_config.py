@@ -966,3 +966,35 @@ def test_a_long_key_is_cut_in_an_issue() -> None:
 )
 def test_a_value_of_the_wrong_type_names_the_shape(text: str, expected: str) -> None:
     assert [issue.render() for issue in _issues(text)] == [expected]
+
+
+def test_health_in_lakana_yaml_is_the_project_default_and_an_environment_may_change_it() -> None:
+    """`health:` reads to the flat map; an environment goes over the base signal by signal."""
+    config = parse_project_config(
+        "health: {volume: block, schema: off}\n"
+        "environments:\n  dev:\n    health: {volume: off}\n  other:\n    health: off\n"
+    )
+    assert config.health == {"schema": "off", "volume": "block"}
+    assert config.resolved_for("prod").health == {"schema": "off", "volume": "block"}
+    assert config.resolved_for("dev").health == {"schema": "off", "volume": "off"}
+    assert set(config.resolved_for("other").health.values()) == {"off"}
+
+
+@pytest.mark.parametrize(
+    ("text", "message"),
+    [
+        ("health: {rows: warn}\n", "health: rows is not a health signal"),
+        ("health: {freshness: block}\n", "health: freshness cannot block"),
+        (
+            "health: {range: {price: off}}\n",
+            "health: range takes warn, block or off in lakana.yaml",
+        ),
+        ("health: loud\n", "health: takes off, or a mapping"),
+    ],
+)
+def test_a_bad_health_in_lakana_yaml_is_refused_with_the_next_step(text: str, message: str) -> None:
+    """The file and the field come first, then the cause and the next step."""
+    with pytest.raises(ProjectValidationError) as refused:
+        parse_project_config(text)
+    assert refused.value.issues[0].path == "lakana.yaml"
+    assert message in refused.value.issues[0].message

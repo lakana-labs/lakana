@@ -20,6 +20,8 @@ properties:                  # free-form strings, stored for later milestones
   team_channel: "#data"
 checks:                      # see "The default of the checks"
   on_failure: warn           # block or warn; each check may state its own
+health:                      # see "Health"
+  volume: block              # warn (the default), block or off, per signal
 jobs:                        # see "Jobs"
   daily_gold:
     select: ["gold.*"]
@@ -295,6 +297,24 @@ where readers find it, so it can only be set on a check: put `on_failure: keep` 
 /* lakana */ block.``): it leaves failing data where readers find it, so you choose it check by
 check. [Check your data](../how-to/check-your-data.md#adding-checks-to-a-pipeline-that-already-runs) walks
 through the order in which to turn checks on.
+
+## Health
+
+`health:` sets what each [table health signal](table-health.md#what-a-signal-does-health) does for
+every table the project builds: `warn` (the default), `block` or `off`. Write `off` alone to turn
+every signal off, or a mapping:
+
+```yaml
+health:
+  volume: block      # a write that suddenly adds or drops many rows is set back
+  schema: warn
+  freshness: off
+```
+
+An asset's own `health:` goes over it, signal by signal, and only an asset can name single columns.
+`freshness` cannot `block`. A view and an artifact take no `health:`, also not from here. An
+`environments:` override may set `health:` too, for example `off` in `dev`. A project that declares
+`health:` deploys manifest version 14, which needs workers of this release or later.
 
 ## Retries and timeouts
 
