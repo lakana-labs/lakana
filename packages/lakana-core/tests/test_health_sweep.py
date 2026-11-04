@@ -34,6 +34,7 @@ _NOW = datetime(2026, 10, 20, tzinfo=UTC)
 """Twelve days after the newest of eight daily commits that `_seed` writes (1 to 8 October)."""
 
 _COLUMNS = {"columns": [["id", "long"]]}
+_ADDED = {"added": 1, "total": 1}
 _GOLD = NamespacePath.from_parts(["gold"])
 
 
@@ -130,7 +131,7 @@ def _gold_tables(session: Session, tmp_path: Path, *names: str) -> None:
         tables=[TableRef("dev", _GOLD, name) for name in names],
     )
     for name in names:
-        _seed(session, "schema", _COLUMNS, table=name)
+        _seed(session, "volume", _ADDED, table=name)
 
 
 def _stop_after(calls: int) -> Callable[[], bool]:
@@ -154,7 +155,7 @@ def test_a_late_table_fires_once_and_is_notified_once(
     catalog: CatalogService, session: Session
 ) -> None:
     _deployed(session, _MANIFEST_WITHOUT_SCHEDULE)
-    _seed(session, "schema", _COLUMNS)
+    _seed(session, "volume", _ADDED)
     first = _sweep(session)
     second = _sweep(session, _NOW + timedelta(hours=1), rotation=1)
     (row,) = _freshness(session)
@@ -177,7 +178,7 @@ def test_a_scheduled_job_sets_the_limit_and_is_named(
     catalog: CatalogService, session: Session
 ) -> None:
     _deployed(session, _MANIFEST)
-    _seed(session, "schema", _COLUMNS)
+    _seed(session, "volume", _ADDED)
     _sweep(session)
     (row,) = _freshness(session)
     assert row.observed is not None
@@ -192,9 +193,9 @@ def test_a_scheduled_job_sets_the_limit_and_is_named(
 def test_a_fresh_table_records_ok_and_a_new_commit_records_again(
     catalog: CatalogService, session: Session
 ) -> None:
-    _seed(session, "schema", _COLUMNS)
+    _seed(session, "volume", _ADDED)
     _sweep(session, datetime(2026, 10, 9, tzinfo=UTC))
-    _seed(session, "schema", _COLUMNS, count=1, first_day=8)
+    _seed(session, "volume", _ADDED, count=1, first_day=8)
     _sweep(session, datetime(2026, 10, 9, 12, tzinfo=UTC))
     assert [(r.state, r.snapshot_id) for r in _freshness(session)] == [("ok", 8), ("ok", 9)]
 
@@ -202,16 +203,16 @@ def test_a_fresh_table_records_ok_and_a_new_commit_records_again(
 def test_a_table_that_stays_late_is_told_once(catalog: CatalogService, session: Session) -> None:
     """A commit that comes late again records a new fired row, but sends no second message."""
     _deployed(session, _MANIFEST_WITHOUT_SCHEDULE)
-    _seed(session, "schema", _COLUMNS)
+    _seed(session, "volume", _ADDED)
     _sweep(session)
-    _seed(session, "schema", _COLUMNS, count=1, first_day=8)
+    _seed(session, "volume", _ADDED, count=1, first_day=8)
     _sweep(session, _NOW + timedelta(days=4))
     assert [(r.state, r.snapshot_id) for r in _freshness(session)] == [("fired", 8), ("fired", 9)]
     assert len(session.scalars(select(NotificationDelivery)).all()) == 1
 
 
 def test_a_young_table_has_no_freshness_yet(catalog: CatalogService, session: Session) -> None:
-    _seed(session, "schema", _COLUMNS, count=7)
+    _seed(session, "volume", _ADDED, count=7)
     swept = _sweep(session)
     (row,) = _freshness(session)
     assert (row.state, row.band, swept.recorded) == ("no_history", None, 1)
@@ -222,16 +223,14 @@ def test_freshness_that_is_off_records_off(catalog: CatalogService, session: Ses
     assert table is not None
     table.health_effects = {"freshness": "off"}
     session.commit()
-    _seed(session, "schema", _COLUMNS)
+    _seed(session, "volume", _ADDED)
     _sweep(session)
     (row,) = _freshness(session)
     assert (row.state, row.effect, row.observed, row.band) == ("off", "off", None, None)
 
 
-def test_a_paused_scheduled_job_falls_back_to_the_history(
-    catalog: CatalogService, session: Session
-) -> None:
-    """A paused job sets no limit: the table is late by its own history, and no job is named."""
+def test_a_paused_scheduled_job_records_off(catalog: CatalogService, session: Session) -> None:
+    """A paused job is not expected to write: no firing, and so no message."""
     repository_id = _deployed(session, _MANIFEST)
     session.add(
         JobSchedule(
@@ -243,15 +242,26 @@ def test_a_paused_scheduled_job_falls_back_to_the_history(
         )
     )
     session.commit()
-    _seed(session, "schema", _COLUMNS)
+    _seed(session, "volume", _ADDED)
+    _sweep(session)
+    (row,) = _freshness(session)
+    assert (row.state, row.observed, row.effect) == ("off", {"reason": "paused"}, "warn")
+    assert session.scalars(select(NotificationDelivery)).all() == []
+
+
+def test_a_compaction_does_not_make_a_stale_table_fresh(
+    catalog: CatalogService, session: Session
+) -> None:
+    """Only a commit that adds data counts: a compaction records a schema row, no volume row."""
+    _seed(session, "volume", _ADDED)
+    _seed(session, "schema", _COLUMNS, count=1, first_day=18)
     _sweep(session)
     (row,) = _freshness(session)
     assert row.observed is not None
-    assert (row.state, row.band, row.observed["source"], row.observed["job"]) == (
+    assert (row.state, row.snapshot_id, row.observed["last_commit_at"]) == (
         "fired",
-        {"high": 3 * 86_400.0},
-        "history",
-        None,
+        8,
+        "2026-10-08T00:00:00+00:00",
     )
 
 
@@ -260,7 +270,7 @@ def test_a_schedule_without_two_fires_falls_back_to_the_history(
 ) -> None:
     monkeypatch.setattr(health_signals, "next_fire_after", lambda *args: None)
     _deployed(session, _MANIFEST)
-    _seed(session, "schema", _COLUMNS)
+    _seed(session, "volume", _ADDED)
     _sweep(session)
     (row,) = _freshness(session)
     assert row.observed is not None
@@ -274,7 +284,7 @@ def test_the_newest_commit_counts_and_a_set_back_one_does_not(
 
     A set-back freshness row is no longer the table's state, so the next sweep records anew.
     """
-    _seed(session, "schema", _COLUMNS, count=9)
+    _seed(session, "volume", _ADDED, count=9)
     session.execute(
         update(TableHealthSignal)
         .where(TableHealthSignal.snapshot_id == 9)
@@ -298,7 +308,7 @@ def test_the_newest_commit_counts_and_a_set_back_one_does_not(
 def test_a_table_without_commits_is_not_evaluated(
     catalog: CatalogService, session: Session
 ) -> None:
-    _seed(session, "volume", {"added": 1, "total": 1}, count=1)
+    _seed(session, "schema", _COLUMNS, count=1)
     swept = _sweep(session)
     assert (swept.evaluated, _freshness(session)) == (0, [])
 
@@ -306,7 +316,7 @@ def test_a_table_without_commits_is_not_evaluated(
 def test_retention_deletes_old_rows_but_keeps_the_newest_of_each(
     catalog: CatalogService, session: Session
 ) -> None:
-    _seed(session, "volume", {"added": 1, "total": 1}, count=3)
+    _seed(session, "schema", _COLUMNS, count=3)
     _seed(session, "range", {}, count=1, column=None)
     _seed(session, "range", {}, count=2, column="id", first_day=1)
     _seed(session, "null_rate", {}, count=1, column="id", first_day=90)
@@ -317,7 +327,7 @@ def test_retention_deletes_old_rows_but_keeps_the_newest_of_each(
         ).order_by(TableHealthSignal.signal, TableHealthSignal.column_name)
     ).all()
     assert sorted(remaining, key=str) == sorted(
-        [("volume", None, 3), ("range", None, 1), ("range", "id", 3), ("null_rate", "id", 91)],
+        [("schema", None, 3), ("range", None, 1), ("range", "id", 3), ("null_rate", "id", 91)],
         key=str,
     )
     assert swept.deleted == 3
@@ -326,7 +336,7 @@ def test_retention_deletes_old_rows_but_keeps_the_newest_of_each(
 def test_retention_deletes_old_set_back_rows_and_keeps_the_newest_unmarked(
     catalog: CatalogService, session: Session
 ) -> None:
-    _seed(session, "volume", {"added": 1, "total": 1}, count=3)
+    _seed(session, "schema", _COLUMNS, count=3)
     session.execute(
         update(TableHealthSignal)
         .where(TableHealthSignal.snapshot_id == 3)
@@ -341,7 +351,7 @@ def test_retention_deletes_old_set_back_rows_and_keeps_the_newest_unmarked(
 def test_retention_keeps_rows_within_the_kept_period(
     catalog: CatalogService, session: Session
 ) -> None:
-    _seed(session, "volume", {"added": 1, "total": 1}, count=3)
+    _seed(session, "schema", _COLUMNS, count=3)
     swept = _sweep(session, datetime(2026, 12, 31, tzinfo=UTC))
     assert swept.deleted == 1
     assert sorted(session.scalars(select(TableHealthSignal.snapshot_id)).all(), key=str) == [2, 3]
@@ -351,7 +361,7 @@ def test_retention_deletes_in_batches_and_stops_when_asked(
     catalog: CatalogService, session: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(health_sweep, "RETENTION_BATCH", 1)
-    _seed(session, "volume", {"added": 1, "total": 1}, count=3)
+    _seed(session, "schema", _COLUMNS, count=3)
     later = datetime(2027, 3, 1, tzinfo=UTC)
     assert _sweep(session, later, should_stop=_stop_after(1)).deleted == 1
     assert _sweep(session, later).deleted == 1
@@ -380,7 +390,7 @@ def test_the_rotation_wraps_around_without_a_table_twice(
 
 
 def test_the_sweep_stops_when_asked(catalog: CatalogService, session: Session) -> None:
-    _seed(session, "schema", _COLUMNS)
+    _seed(session, "volume", _ADDED)
     swept = _sweep(session, should_stop=lambda: True)
     assert swept == HealthSweep(evaluated=0, recorded=0, deleted=0)
     assert _freshness(session) == []
@@ -390,7 +400,7 @@ def test_the_sweep_stops_at_its_deadline(
     catalog: CatalogService, session: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(health_sweep, "HEALTH_SWEEP_MAX_SECONDS", -1.0)
-    _seed(session, "schema", _COLUMNS)
+    _seed(session, "volume", _ADDED)
     assert _sweep(session).evaluated == 0
 
 
@@ -437,7 +447,7 @@ def test_a_table_that_cannot_be_checked_is_logged_and_the_next_is(
 def test_a_table_dropped_during_the_sweep_is_skipped(
     catalog: CatalogService, session: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _seed(session, "schema", _COLUMNS)
+    _seed(session, "volume", _ADDED)
     real = _table_id(session)
     monkeypatch.setattr(health_sweep, "_candidates", lambda *args: [uuid.uuid4(), real])
     assert _sweep(session).evaluated == 1
@@ -461,7 +471,7 @@ def test_a_database_error_ends_the_sweep(
     monkeypatch
         The fixture.
     """
-    _seed(session, "schema", _COLUMNS)
+    _seed(session, "volume", _ADDED)
 
     def failing(*args: object) -> list[object]:
         """Fail as the database would.

@@ -142,6 +142,7 @@ keeps no signals: nobody may read its data.
 
 | Signal | Observed per snapshot | Fires when |
 |---|---|---|
+| `freshness` | time since the last snapshot that added data, checked hourly | it is longer than the schedule of the job that builds the table allows, or than its own history |
 | `volume` | rows added by the snapshot and the table's total | the rows added fall outside the usual band |
 | `null_rate` (per column) | null count divided by value count | the rate falls outside the usual band |
 | `range` (per column) | lower and upper bound of the column | a bound lies beyond the learned minimum or maximum by more than the band |
@@ -153,6 +154,16 @@ at least 10 rows and 10 % for `volume`, 2 percentage points for `null_rate`, and
 each side, 1 % of the learned span (for integers and other numbers, of the larger of the span and the bounds'
 magnitude) and at least one unit: 1 for integers, 1 day for dates, 1 hour for timestamps, none for
 other numbers. No signal but `schema` fires before the table has 8 snapshots.
+
+**Freshness.** The workers check it hourly, with the other sweeps (`LAKANA_RUN__SWEEP_INTERVAL`),
+and record a new observation only when its state or the last snapshot changes. It counts only
+snapshots that added data: a compaction does not make a stale table fresh. A table built by a
+scheduled job is late after twice the interval of that schedule, and never before the second run
+after its last snapshot has passed, so a weekday job is not late over the weekend. With several
+such jobs, the shortest limit counts. A table without one is late after 3 times the median gap
+between its last 31 snapshots, and at least 1 hour; a schedule that cannot be read counts as none.
+A table whose scheduled jobs are all paused shows `off` with `observed.reason` `paused`: it is not
+expected to change, and nothing is sent. `freshness` cannot `block`.
 
 **States.** `ok`: inside the band. `fired`: outside it (`alert` says how). `no_history`: fewer than
 8 snapshots, so there is no band yet. `no_metrics`: nothing can be said, and the observation never
@@ -341,7 +352,10 @@ observations, newest first.
 The answer is `{"items": [...], "next_cursor": ...}`; `next_cursor` is `null` on the last page.
 `LAKANA_HEALTH__RETENTION_DAYS` (90 by default, at least 7) is how far back `days` may reach. The
 workers' hourly sweep (`LAKANA_RUN__SWEEP_INTERVAL`) deletes older observations, but keeps the
-newest of each signal and column, so the current state never goes.
+newest of each signal and column, so the current state never goes. Each sweep handles at most
+500 tables and the next sweep the next 500, so with more tables the deletion takes several hours
+to come round. A message still waiting to be delivered when its signal is deleted is dropped with
+it.
 
 ## Commands
 

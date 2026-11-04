@@ -644,7 +644,10 @@ def test_a_weekday_job_is_not_late_on_sunday() -> None:
     assert limit is not None
     sunday = _FRIDAY + timedelta(days=2)
     seen = freshness_signal(
-        now=sunday, commit_times=_commits(8, timedelta(days=1)), thresholds=[(limit, "nightly")]
+        now=sunday,
+        commit_times=_commits(8, timedelta(days=1)),
+        thresholds=[(limit, "nightly")],
+        paused=False,
     )
     assert seen.state == "ok"
 
@@ -668,6 +671,7 @@ def test_freshness_fires_past_the_schedule_and_names_the_job() -> None:
         now=_FRIDAY + timedelta(days=3),
         commit_times=_commits(8, timedelta(days=1)),
         thresholds=[(2 * 86_400.0, "nightly"), (7 * 86_400.0, "weekly")],
+        paused=False,
     )
     assert (late.state, late.observed, late.band) == (
         "fired",
@@ -699,13 +703,13 @@ def test_freshness_fires_past_the_schedule_and_names_the_job() -> None:
 def test_without_a_schedule_freshness_needs_eight_commits() -> None:
     hourly = timedelta(hours=1)
     now = _FRIDAY + timedelta(hours=5)
-    young = freshness_signal(now=now, commit_times=_commits(7, hourly), thresholds=[])
+    young = freshness_signal(now=now, commit_times=_commits(7, hourly), thresholds=[], paused=False)
     assert (young.state, young.band, young.observed) == (
         "no_history",
         None,
         {"seconds": 18_000, "last_commit_at": _FRIDAY.isoformat(), "source": None, "job": None},
     )
-    late = freshness_signal(now=now, commit_times=_commits(8, hourly), thresholds=[])
+    late = freshness_signal(now=now, commit_times=_commits(8, hourly), thresholds=[], paused=False)
     assert late.observed is not None
     assert (late.state, late.band, late.observed["source"], late.observed["job"]) == (
         "fired",
@@ -735,9 +739,32 @@ def test_the_history_rule_reads_only_the_newest_commits() -> None:
     recent = _commits(health_signals.HISTORY + 1, timedelta(hours=1))
     slow = [recent[-1] - timedelta(days=d) for d in range(1, 40)]
     seen = freshness_signal(
-        now=_FRIDAY + timedelta(hours=4), commit_times=recent + slow, thresholds=[]
+        now=_FRIDAY + timedelta(hours=4), commit_times=recent + slow, thresholds=[], paused=False
     )
     assert (seen.state, seen.band) == ("fired", {"high": 10_800.0})
+
+
+def test_a_paused_job_turns_freshness_off() -> None:
+    paused = freshness_signal(
+        now=_FRIDAY + timedelta(days=9),
+        commit_times=_commits(8, timedelta(days=1)),
+        thresholds=[],
+        paused=True,
+    )
+    assert (paused.state, paused.observed, paused.band) == ("off", {"reason": "paused"}, None)
+
+
+def test_the_history_rule_allows_at_least_an_hour() -> None:
+    """Commits within the same second give a median gap of 0, which must not fire at once."""
+    burst = [_FRIDAY] * 8
+    soon = freshness_signal(
+        now=_FRIDAY + timedelta(minutes=30), commit_times=burst, thresholds=[], paused=False
+    )
+    assert (soon.state, soon.band) == ("ok", {"high": 3_600.0})
+    later = freshness_signal(
+        now=_FRIDAY + timedelta(minutes=61), commit_times=burst, thresholds=[], paused=False
+    )
+    assert later.state == "fired"
 
 
 @pytest.mark.parametrize(

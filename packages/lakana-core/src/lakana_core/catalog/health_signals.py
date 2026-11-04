@@ -60,6 +60,8 @@ FRESHNESS_SCHEDULE_FACTOR = 2.0
 """A scheduled table is late after this many intervals of its schedule."""
 FRESHNESS_HISTORY_FACTOR = 3.0
 """A table without a schedule is late after this many median intervals of its commits."""
+FRESHNESS_MIN_SECONDS = 3_600.0
+"""The least limit of the history rule, so commits within the same second do not fire at once."""
 
 _RANGE_KINDS: tuple[tuple[tuple[type[PrimitiveType], ...], str], ...] = (
     ((IntegerType, LongType), "integer"),
@@ -660,12 +662,15 @@ def freshness_signal(
     now: datetime,
     commit_times: Sequence[datetime],
     thresholds: Sequence[tuple[float, str]],
+    paused: bool,
 ) -> Observation:
     """Say whether a table is late: whether its last commit is longer ago than usual.
 
     The limit is the smallest of `thresholds`, the schedules of the jobs that build the table;
     without one, `FRESHNESS_HISTORY_FACTOR` times the median gap between the newest `HISTORY` + 1
-    commits. Either way a table with fewer than `MIN_HISTORY` commits is not judged.
+    commits, at least `FRESHNESS_MIN_SECONDS`. Either way a table with fewer than `MIN_HISTORY`
+    commits is not judged, and a table whose scheduled jobs are all paused is not expected to
+    change.
 
     Parameters
     ----------
@@ -676,14 +681,19 @@ def freshness_signal(
     thresholds
         (seconds, job) for each scheduled job that builds the table, is not paused and has a
         limit (`schedule_threshold`).
+    paused
+        Whether the table has scheduled building jobs and every one of them is paused.
 
     Returns
     -------
     Observation
-        Observed ``seconds`` since the last commit, ``last_commit_at`` (ISO 8601), ``source``
+        ``off`` with observed ``{"reason": "paused"}`` when `paused`. Otherwise observed
+        ``seconds`` since the last commit, ``last_commit_at`` (ISO 8601), ``source``
         (``schedule``, ``history`` or `None` without enough history) and ``job`` (the job whose
         schedule set the limit, or `None`); band ``{"high": seconds}``.
     """
+    if paused:
+        return Observation("freshness", None, "off", {"reason": "paused"}, None)
     last = commit_times[0]
     observed: dict[str, Any] = {
         "seconds": int((now - last).total_seconds()),
@@ -699,7 +709,7 @@ def freshness_signal(
     else:
         recent = commit_times[: HISTORY + 1]
         gaps = [(newer - older).total_seconds() for newer, older in itertools.pairwise(recent)]
-        limit = FRESHNESS_HISTORY_FACTOR * statistics.median(gaps)
+        limit = max(FRESHNESS_HISTORY_FACTOR * statistics.median(gaps), FRESHNESS_MIN_SECONDS)
         observed["source"] = "history"
     state = "fired" if observed["seconds"] > limit else "ok"
     return Observation("freshness", None, state, observed, {"high": limit})

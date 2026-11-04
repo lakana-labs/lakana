@@ -9,11 +9,14 @@ For each table it first deletes the rows observed before the kept period
 each signal and column that no set-back marked is kept however old, so a table's current state
 never goes; a marked row goes once it is older than the kept period.
 
-Then it observes freshness: the time since the table's last commit, against the schedules of the
-jobs that build the table, or its own history (`health_signals.freshness_signal`). A table with
-no commit recorded since signals exist is not judged. A row is recorded only when the state or
-the last commit changed, so a table that stays late or on time adds nothing; a fired row is told
-to the notify targets of the building jobs once (`health_jobs.queue_health_notifications`).
+Then it observes freshness: the time since the table's last commit that added data (one with a
+``volume`` row; a compaction records only ``schema``, so maintenance cannot hide a stale source),
+against the schedules of the jobs that build the table, or its own history
+(`health_signals.freshness_signal`). A table whose scheduled building jobs are all paused records
+``off``. A table with no such commit recorded since signals exist is not judged. A row is
+recorded only when the state or the last commit changed, so a table that stays late or on time
+adds nothing; a fired row is told to the notify targets of the building jobs once
+(`health_jobs.queue_health_notifications`).
 """
 
 from __future__ import annotations
@@ -213,7 +216,7 @@ def _deployed(session: Session, environment_id: uuid.UUID) -> _Deployed:
 
 def _thresholds(
     deployed: _Deployed, table: str, last_commit_at: datetime
-) -> list[tuple[float, str]]:
+) -> tuple[list[tuple[float, str]], bool]:
     """Find the limits that the schedules of a table's building jobs set.
 
     Parameters
@@ -227,18 +230,27 @@ def _thresholds(
 
     Returns
     -------
-    list of tuple
-        (seconds, job) of each scheduled job that is not paused and whose schedule fires twice;
-        empty falls back to the table's history.
+    tuple
+        (seconds, job) of each scheduled job that is not paused and whose schedule fires twice
+        (empty falls back to the table's history), and whether there are scheduled jobs and all
+        of them are paused.
     """
+    scheduled = [
+        (job, job.schedule)
+        for job in building_jobs(deployed.manifests, table)
+        if job.schedule is not None
+    ]
+    running = [
+        (job.job, schedule)
+        for job, schedule in scheduled
+        if (job.repository_id, job.job) not in deployed.paused
+    ]
     found = []
-    for job in building_jobs(deployed.manifests, table):
-        if job.schedule is None or (job.repository_id, job.job) in deployed.paused:
-            continue
-        limit = schedule_threshold(*job.schedule, last_commit_at)
+    for name, (cron, zone) in running:
+        limit = schedule_threshold(cron, zone, last_commit_at)
         if limit is not None:
-            found.append((limit, job.job))
-    return found
+            found.append((limit, name))
+    return found, bool(scheduled) and not running
 
 
 def _check_freshness(
@@ -279,7 +291,7 @@ def _check_freshness(
         select(TableHealthSignal.observed_at, TableHealthSignal.snapshot_id)
         .where(
             TableHealthSignal.table_id == table_id,
-            TableHealthSignal.signal == "schema",
+            TableHealthSignal.signal == "volume",
             TableHealthSignal.sequence_number.is_not(None),
             NOT_SET_BACK,
         )
@@ -296,10 +308,12 @@ def _check_freshness(
     else:
         deployed = deployments.get(environment_id) or _deployed(session, environment_id)
         deployments[environment_id] = deployed
+        thresholds, paused = _thresholds(deployed, table, last_commit_at)
         observation = freshness_signal(
             now=now,
             commit_times=[at for at, _ in commits],
-            thresholds=_thresholds(deployed, table, last_commit_at),
+            thresholds=thresholds,
+            paused=paused,
         )
     previous = newest_freshness(session, table_id)
     if (

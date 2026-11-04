@@ -63,12 +63,12 @@ def test_retention_keeps_the_newest_unmarked_row_of_each_key_on_postgres(
 ) -> None:
     monkeypatch.setattr(health_sweep, "RETENTION_BATCH", 2)
     health_catalog(session, tmp_path, principal)
-    _seed(session, "schema", {"columns": [["id", "long"]]}, count=9)
+    _seed(session, "volume", {"added": 1, "total": 1}, count=9)
     _seed(session, "range", {}, count=1)
     _seed(session, "range", {}, count=3, column="id")
     session.execute(
         update(TableHealthSignal)
-        .where(TableHealthSignal.signal == "schema", TableHealthSignal.snapshot_id == 9)
+        .where(TableHealthSignal.signal == "volume", TableHealthSignal.snapshot_id == 9)
         .values(set_back_at=datetime(2026, 10, 10, tzinfo=UTC))
     )
     session.commit()
@@ -85,7 +85,7 @@ def test_retention_keeps_the_newest_unmarked_row_of_each_key_on_postgres(
         )
     ).all()
     assert sorted(remaining, key=str) == sorted(
-        [("schema", None, 8), ("range", None, 1), ("range", "id", 3), ("freshness", None, 8)],
+        [("volume", None, 8), ("range", None, 1), ("range", "id", 3), ("freshness", None, 8)],
         key=str,
     )
     assert (swept.deleted, swept.evaluated, swept.recorded) == (10, 1, 1)
