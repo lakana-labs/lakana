@@ -2,10 +2,10 @@
 
 A step follows a reference in either direction. From the table that declares it to its target it
 is `many_to_one`; back the other way it is `one_to_many` and fans out. A self-reference, a
-reference to a table that does not exist, and a reference whose own column is gone are never a
-step. Every path of minimal length, at most `MAX_JOIN_HOPS` steps, is found, in the order of its
-references' ids, and at most `MAX_JOIN_PATHS` are returned, with a flag when more exist. Columns
-are read in one batch per level of the search, never one table at a time.
+reference to a table that does not exist, and a reference whose own or target column is gone
+are never a step. Every path of minimal length, at most `MAX_JOIN_HOPS` steps, is found, in the
+order of its references' ids, and at most `MAX_JOIN_PATHS` are returned, with a flag when more
+exist. Columns are read in two batches per level of the search, never one table at a time.
 
 References come only from `_Context.around`, so a path never runs through a table or a
 reference the reader may not see (a reference needs both its table and its target readable, R3),
@@ -158,10 +158,12 @@ def _level_hops(ctx: _Context, tables: list[uuid.UUID]) -> dict[uuid.UUID, list[
 
     Back along a reference, the table is its target (the `references` edge to the table). Along
     one, a column of the table declares it (the `references` edge to the column), and its target
-    table exists. Either way the reference's own column must exist, as impact requires, so a
-    reference whose column is gone is followed in neither direction. The columns of the level's
-    tables and of the tables the references back come from are read in one batch first, so a
-    level costs one statement (per 500 tables) however wide it is.
+    table exists. Either way both of the reference's columns must exist, its own (as impact
+    requires) and its target, so a reference with either column gone is followed in neither
+    direction: a join on a dropped column would fail. The columns of the level's tables and of
+    the tables the references back come from are read in one batch first, and those of the
+    tables the references lead to in a second, so a level costs two statements (per 500
+    tables) however wide it is.
 
     Parameters
     ----------
@@ -183,14 +185,9 @@ def _level_hops(ctx: _Context, tables: list[uuid.UUID]) -> dict[uuid.UUID, list[
     }
     sources = {r.source_table_id for records in back.values() for r in records}
     ctx.graph.preload_columns({*tables, *sources})
-    hops: dict[uuid.UUID, list[Hop]] = {}
+    forward: dict[uuid.UUID, list[Hop]] = {}
     for table_id in tables:
-        found = [
-            Hop(record, record.source_table_id, False)
-            for record in back[table_id]
-            if record.source_table_id != table_id
-            and ctx.graph.exists(column_node(record.source_table_id, record.source_column))
-        ]
+        forward[table_id] = []
         for _, column in ctx.around(table_node(table_id), (EdgeKind.HAS_COLUMN,)):
             for _, node in ctx.around(column, (EdgeKind.REFERENCES,)):
                 record = _record(ctx, node)
@@ -198,7 +195,22 @@ def _level_hops(ctx: _Context, tables: list[uuid.UUID]) -> dict[uuid.UUID, list[
                     continue  # the column is this reference's target, not its source
                 target = ctx.graph.table_ids.get(record.target_name)
                 if target is not None and target != table_id:
-                    found.append(Hop(record, target, True))
+                    forward[table_id].append(Hop(record, target, True))
+    ctx.graph.preload_columns({h.to_table for found in forward.values() for h in found})
+    hops: dict[uuid.UUID, list[Hop]] = {}
+    for table_id in tables:
+        found = [
+            Hop(record, record.source_table_id, False)
+            for record in back[table_id]
+            if record.source_table_id != table_id
+            and ctx.graph.exists(column_node(record.source_table_id, record.source_column))
+            and ctx.graph.exists(column_node(table_id, record.target_column))
+        ]
+        found.extend(
+            h
+            for h in forward[table_id]
+            if ctx.graph.exists(column_node(h.to_table, h.reference.target_column))
+        )
         hops[table_id] = sorted(found, key=lambda h: h.reference.id)
     return hops
 

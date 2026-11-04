@@ -385,3 +385,21 @@ def test_a_reference_whose_column_is_gone_is_followed_neither_way(
         for a, b in (("gold.p", "gold.q"), ("gold.q", "gold.p"))
     ]
     assert [(w.paths, w.reason is not None) for w in ways] == [((), True), ((), True)]
+
+
+def test_a_reference_whose_target_column_is_gone_is_followed_neither_way(
+    star: StarWorld, principal: PrincipalRef
+) -> None:
+    _chain(star, "gone", {"gold.p": [("q_id", "gold.q", "id")]})
+    star.session.execute(
+        delete(TableColumn).where(
+            TableColumn.table_id == star.table_id("gold.q"), TableColumn.name == "id"
+        )
+    )
+    star.session.commit()
+    ways = [
+        _service(star).join_path(principal, "dev", a, b)
+        for a, b in (("gold.p", "gold.q"), ("gold.q", "gold.p"))
+    ]
+    # Joining on `gold.q.id` would fail: the column was dropped, as after the deploy that warned.
+    assert [(w.paths, w.reason is not None) for w in ways] == [((), True), ((), True)]
