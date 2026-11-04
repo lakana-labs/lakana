@@ -700,7 +700,7 @@ def _live_entries(
         reader.__exit__(None, None, None)
 
 
-def _added_data_files(
+def added_data_files(
     snapshots: Sequence[Snapshot],
     metadata: TableMetadata,
     file_io: FileIO,
@@ -796,7 +796,7 @@ def _added_data_files(
 
 def check_added_files_have_field_ids(
     snapshots: Sequence[Snapshot], metadata: TableMetadata, file_io: FileIO, table: str
-) -> None:
+) -> list[DataFile]:
     """Refuse snapshots that add a data file without Iceberg field ids.
 
     Only files the commit's own snapshots add are read, each footer once, at most
@@ -819,6 +819,12 @@ def check_added_files_have_field_ids(
     table
         The table's dotted name, for the message.
 
+    Returns
+    -------
+    list of DataFile
+        The data files the snapshots add (`added_data_files`), for the commit's health
+        signals to reuse instead of reading the manifests again.
+
     Raises
     ------
     ValidationError
@@ -831,7 +837,7 @@ def check_added_files_have_field_ids(
         If storage failed while reading a footer or a manifest.
     """
     deadline = _clock() + CHECK_DEADLINE_SECONDS
-    files = _added_data_files(snapshots, metadata, file_io, table, deadline)
+    files = added_data_files(snapshots, metadata, file_io, table, deadline)
     for data_file in files:
         if data_file.file_format != FileFormat.PARQUET:
             raise ValidationError(
@@ -870,3 +876,4 @@ def check_added_files_have_field_ids(
     finally:
         # A read that is stuck is not waited for: the commit is refused now.
         pool.shutdown(wait=False, cancel_futures=True)
+    return files

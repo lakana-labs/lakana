@@ -39,10 +39,11 @@ from sqlalchemy.orm import Session
 
 from lakana_core.auth import PrincipalRef
 from lakana_core.catalog import field_ids as field_ids_module
+from lakana_core.catalog import health_record
 from lakana_core.catalog.service import CatalogService, LoadedTable
 from lakana_core.errors import ConflictError, StorageUnavailableError, ValidationError
 from lakana_core.identifiers import NamespacePath, TableRef, shown_path
-from lakana_core.models import Table, WriteMode
+from lakana_core.models import Table, TableHealthSignal, WriteMode
 
 _SCHEMA = Schema(
     NestedField(1, "id", LongType(), required=False),
@@ -740,6 +741,68 @@ def test_only_the_snapshots_of_the_commit_are_checked(
     assert reads == Counter({first_uri: 1, second_uri: 1})
 
 
+def test_the_health_signals_read_every_snapshot_of_the_commit_in_order(
+    catalog: CatalogService,
+    principal: PrincipalRef,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A commit of two snapshots reads only the files they add, the first one's included (#340).
+
+    With only the last snapshot, its parent would be unknown and every manifest it lists would
+    be read as added, the earlier file included.
+
+    Parameters
+    ----------
+    catalog
+        The catalog under test.
+    principal
+        The acting principal.
+    tmp_path
+        The storage root.
+    monkeypatch
+        Records the health signals' manifest reads.
+    """
+    ref, created = _created(catalog, principal, tmp_path)
+    earlier = _snapshot(
+        created.metadata, None, [_parquet(created, "e.parquet", field_ids=True)], 900_000_123
+    )
+    before = _commit_snapshots(catalog, principal, ref, [earlier], own_data_files=True)
+    first = _snapshot(
+        before.metadata, earlier, [_parquet(created, "f.parquet", field_ids=True)], 900_000_124
+    )
+    second = _snapshot(
+        before.metadata, first, [_parquet(created, "s.parquet", field_ids=True)], 900_000_125
+    )
+    reads: list[tuple[list[int], list[str]]] = []
+    real = health_record.added_data_files
+
+    def recording(snapshots: list[Snapshot], *args: object) -> list[DataFile]:
+        """Note which snapshots are read and what they add.
+
+        Parameters
+        ----------
+        snapshots
+            The snapshots to read.
+        *args
+            The read's other arguments.
+
+        Returns
+        -------
+        list of DataFile
+            What the real read returns.
+        """
+        files = real(snapshots, *args)  # ty: ignore[invalid-argument-type]
+        reads.append(([s.snapshot_id for s in snapshots], [Path(f.file_path).name for f in files]))
+        return files
+
+    monkeypatch.setattr(health_record, "added_data_files", recording)
+
+    _commit_snapshots(catalog, principal, ref, [first, second], own_data_files=True)
+
+    assert reads == [([900_000_124, 900_000_125], ["f.parquet", "s.parquet"])]
+
+
 def _forged_parent(snapshot: Snapshot, parent_id: int) -> Snapshot:
     """Copy a snapshot with another parent id, as a client may commit one.
 
@@ -941,6 +1004,51 @@ def test_no_database_session_is_open_while_manifests_and_footers_are_read(
     assert open_during_entries == [False] * 3
     assert open_during_footers == [False] * 3
     assert catalog.load_table(principal, ref).metadata.current_snapshot_id == 900_000_190
+
+
+def test_the_health_signals_reuse_the_files_the_check_read(
+    catalog: CatalogService,
+    principal: PrincipalRef,
+    session: Session,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A client commit's health signals come from the files the check read (#340).
+
+    The manifests are read once, while the session is released; the signals' history is
+    read afterwards.
+
+    Parameters
+    ----------
+    catalog
+        The catalog under test.
+    principal
+        The acting principal.
+    session
+        Database session.
+    tmp_path
+        The storage root.
+    monkeypatch
+        Records a second manifest read.
+    """
+    ref, created = _created(catalog, principal, tmp_path)
+    uris = [_parquet(created, f"h{i}.parquet", field_ids=True) for i in range(2)]
+    second_reads: list[object] = []
+    monkeypatch.setattr(
+        health_record, "added_data_files", lambda *args: second_reads.append(args) or []
+    )
+
+    _commit_files(catalog, principal, ref, created, uris, 900_000_191)
+
+    signals = {(r.signal, r.column_name) for r in session.scalars(select(TableHealthSignal))}
+    assert signals == {
+        ("volume", None),
+        ("schema", None),
+        ("null_rate", "id"),
+        ("null_rate", "name"),
+        ("range", "id"),
+    }
+    assert second_reads == []
 
 
 def test_the_cap_applies_while_a_manifest_is_being_read(

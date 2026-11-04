@@ -18,6 +18,7 @@ from typing import Any, Literal
 
 import pyarrow as pa
 from pyiceberg.io import FileIO
+from pyiceberg.manifest import DataFile
 from pyiceberg.partitioning import PartitionSpec
 from pyiceberg.schema import Schema
 from pyiceberg.table.metadata import TableMetadata
@@ -104,6 +105,8 @@ from lakana_core.catalog.health import (
     readers,
     snapshot_stats,
 )
+from lakana_core.catalog.health_record import commit_observations, signal_rows
+from lakana_core.catalog.health_signals import HealthEffects
 from lakana_core.catalog.history import (
     EARLIEST_START,
     HISTORY_KEY_PROPERTY,
@@ -292,6 +295,7 @@ from lakana_core.models import (
     RollbackOutcome,
     RowFilter,
     Table,
+    TableHealthSignal,
     TableLocationState,
     TableType,
     TaskRun,
@@ -2625,6 +2629,9 @@ class CatalogService:
         move of the location's claim to `LIVE` (`publish_location`): when the
         claim is no longer `CLAIMED` (the sweep abandoned it), nothing commits.
 
+        A commit that makes a new snapshot current records its health signals (`health_record`)
+        in the same transaction; computing them never fails the commit.
+
         Parameters
         ----------
         prepared
@@ -2666,6 +2673,21 @@ class CatalogService:
         # learn about them first.
         target = prepared.resolved.confine_to_root(target)
         written = write_metadata(prepared.resolved.file_io, metadata, target)
+        health = (
+            self._health_rows(
+                ref,
+                table_id=prepared.table_id,
+                environment_id=prepared.environment_id,
+                before=None,
+                after=metadata,
+                snapshots=metadata.snapshots,
+                file_io=prepared.resolved.file_io,
+                effects=HealthEffects.default(),
+                new_table=True,
+            )
+            if metadata.current_snapshot_id is not None
+            else []
+        )
         row = Table(
             id=prepared.table_id,
             namespace_id=prepared.namespace_id,
@@ -2682,6 +2704,7 @@ class CatalogService:
         sync_table_columns(self._session, row.id, from_iceberg_schema(metadata.schema()))
         try:
             self._session.flush()  # a name collision raises here, and SQLite's write lock is held
+            self._session.add_all(health)  # after the table row, for their foreign key
             if not lock_live_environment(self._session, prepared.environment_id):
                 self._session.rollback()
                 raise NotFoundError(
@@ -4495,6 +4518,9 @@ class CatalogService:
         locked` to the loser. `ConflictError` is not the only possible
         outcome of a lost race.
 
+        A commit that makes a new snapshot current records its health signals (`health_record`)
+        in the same transaction; computing them never fails the commit.
+
         Parameters
         ----------
         p
@@ -4603,7 +4629,7 @@ class CatalogService:
                 table_target(ref),
                 rollback=internal_rollback,
             )
-        _, row = self._find_table(ref)
+        namespace, row = self._find_table(ref)
         if row.table_type is TableType.ARTIFACT:
             raise NotFoundError(_not_exposed_artifact_message(ref.dotted()))
         if row.metadata_location is None:
@@ -4620,6 +4646,7 @@ class CatalogService:
         # the autoflush trap: nothing here can flush a pending write ahead
         # of the CAS's own `UPDATE` for it to compare against.
         table_id = row.id
+        environment_id = namespace.environment_id
         unpublished = row.unpublished_run_id is not None
         expected = row.metadata_location
         if expected_metadata_location is not None and expected != expected_metadata_location:
@@ -4689,6 +4716,7 @@ class CatalogService:
                 raise ValidationError(
                     "A committed snapshot's manifest list must lie under the table's own location."
                 )
+        checked_files: list[DataFile] | None = None
         if not maintenance and not internal_rollback and not own_data_files:
             # A file without field ids would read as NULL in every column: refused here, at
             # the one commit path other clients reach, after the manifest list is known to lie
@@ -4703,7 +4731,8 @@ class CatalogService:
                 # such a table has no earlier snapshot for a ref to be pointed at.)
                 if release_session:
                     self._release_session()
-                check_added_files_have_field_ids(
+                # The health signals below reuse the files, so they are not read twice.
+                checked_files = check_added_files_have_field_ids(
                     added_snapshots, current, resolved.file_io, ref.dotted()
                 )
         if any(isinstance(u, RemovePropertiesUpdate) for u in updates) and not (
@@ -4756,6 +4785,26 @@ class CatalogService:
             target = resolved.confine_to_root(target)
         with _storage_errors_as_lakana(internal_rollback):
             written = write_metadata(resolved.file_io, updated, target)
+        # Read before the swap: after it the `tables` row is locked until the commit.
+        health = (
+            self._health_rows(
+                ref,
+                table_id=table_id,
+                environment_id=environment_id,
+                before=current,
+                after=updated,
+                snapshots=[u.snapshot for u in updates if isinstance(u, AddSnapshotUpdate)],
+                file_io=resolved.file_io,
+                effects=HealthEffects.default(),
+                files=checked_files,
+            )
+            if not maintenance
+            and not internal_rollback
+            and has is not None
+            and has in added
+            and has != had
+            else []
+        )
 
         # Noted after every refusal above, so a commit that is refused leaves no note behind on
         # the guard for a later commit of the same target to take as its own.
@@ -4797,6 +4846,7 @@ class CatalogService:
             new_location=written,
             publish=not maintenance and updated.current_snapshot_id is not None,
         )
+        self._session.add_all(health)
         sync_table_columns(self._session, table_id, from_iceberg_schema(updated.schema()))
         if after_swap is not None:
             after_swap()
@@ -4807,6 +4857,74 @@ class CatalogService:
         self._commit_sent = True
         self._session.commit()
         return LoadedTable(ref=ref, uuid=table_id, metadata_location=written, metadata=updated)
+
+    def _health_rows(
+        self,
+        ref: TableRef,
+        *,
+        table_id: uuid.UUID,
+        environment_id: uuid.UUID,
+        before: TableMetadata | None,
+        after: TableMetadata,
+        snapshots: Sequence[Snapshot],
+        file_io: FileIO,
+        effects: HealthEffects,
+        files: Sequence[DataFile] | None = None,
+        new_table: bool = False,
+    ) -> list[TableHealthSignal]:
+        """Observe the health signals of a snapshot this commit makes current (#340).
+
+        Read without flushing, so nothing pending lands ahead of the pointer swap.
+
+        Parameters
+        ----------
+        ref
+            The table.
+        table_id
+            Its id.
+        environment_id
+            Its environment.
+        before
+            The metadata before the commit; `None` for a table being created.
+        after
+            The metadata the commit makes current.
+        snapshots
+            Every snapshot the commit adds, in commit order.
+        file_io
+            Reads the table's storage.
+        effects
+            The table's effects.
+        files
+            The data files the commit adds, when the field-id check read them; `None` reads
+            them.
+        new_table
+            Whether the table is being created: it has no history to read.
+
+        Returns
+        -------
+        list of TableHealthSignal
+            The rows to add after the swap.
+        """
+        with self._session.no_autoflush:
+            pairs = commit_observations(
+                self._session,
+                table=ref.dotted(),
+                table_id=None if new_table else table_id,
+                before=before,
+                after=after,
+                snapshots=snapshots,
+                file_io=file_io,
+                effects=effects,
+                files=files,
+            )
+            now = db_now(self._session)
+        return signal_rows(
+            pairs,
+            environment_id=environment_id,
+            table_id=table_id,
+            snapshot_id=after.current_snapshot_id,
+            now=now,
+        )
 
     def _commit_schema_change(
         self,

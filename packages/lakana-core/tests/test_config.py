@@ -15,6 +15,7 @@ from lakana_core.config import (
     ArtifactsConfig,
     DatabaseConfig,
     GitConfig,
+    HealthConfig,
     LogConfig,
     QueryLimitsConfig,
     RunConfig,
@@ -1235,8 +1236,13 @@ def test_run_ingestion_roots_read_from_settings_and_env(monkeypatch: pytest.Monk
 def test_health_keeps_ninety_days_and_refuses_less_than_seven(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from lakana_core.config import HealthConfig
+    """`LAKANA_HEALTH__RETENTION_DAYS` defaults to 90 and refuses fewer than seven days.
 
+    Parameters
+    ----------
+    monkeypatch
+        Sets the environment.
+    """
     assert HealthConfig().retention_days == 90
     with pytest.raises(PydanticValidationError, match="greater than or equal to 7"):
         HealthConfig(retention_days=6)
