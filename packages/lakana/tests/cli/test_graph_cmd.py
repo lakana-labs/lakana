@@ -347,15 +347,19 @@ def test_join_path_says_when_more_paths_exist(tmp_path: Path) -> None:
         _JOIN,
         json={"paths": [{"steps": [back]}, {"steps": [back]}], "reason": None, "more_paths": True},
     )
-    result = invoke(make_state(tmp_path, api), "graph", "join-path", "a", "b", "--env", "prod")
+    result = invoke(
+        make_state(tmp_path, api), "graph", "join-path", "gold.a", "gold.b", "--env", "prod"
+    )
     assert result.exit_code == 0, result.output
     lines = result.output.splitlines()
     assert lines[1] == (
         "  gold.fact_sales → gold.dim_store on store_id = store_id (many to one: ? → dimension)"
     )
     assert lines[2] == "Path 2:"
-    assert (
-        lines[-1] == "More paths of this length exist; ask a narrower pair of tables to see them."
+    assert lines[-1] == (
+        "Only the first 10 paths of this length are shown. To see the others, list the tables "
+        "gold.a joins to with: lakana graph neighbours gold.a --kind references --env prod, then "
+        "ask for the join path from one of them to gold.b."
     )
 
 

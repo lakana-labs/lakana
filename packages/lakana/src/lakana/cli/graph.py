@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import enum
+import shlex
 import sys
 from collections import defaultdict, deque
 from collections.abc import Callable, Iterable, Mapping
@@ -40,7 +41,11 @@ _MAY_USE_NOTE = (
     "or something downstream); SQL is not parsed, so look before you change it."
 )
 _COLUMN_AND_KEY = "--column and --key ask different questions; give one of them."
-_MORE_PATHS = "More paths of this length exist; ask a narrower pair of tables to see them."
+_MORE_PATHS = (
+    "Only the first 10 paths of this length are shown. To see the others, list the tables "
+    "{start} joins to with: lakana graph neighbours {start} --kind references --env {env}, then "
+    "ask for the join path from one of them to {goal}."
+)
 
 
 class _Direction(enum.StrEnum):
@@ -354,9 +359,8 @@ def join_path(
         The environment.
     """
     state = state_of(ctx)
-    answer = state.client().graph.join_path(
-        resolve_environment(state, env), from_table, to_table, lang=lang
-    )
+    environment = resolve_environment(state, env)
+    answer = state.client().graph.join_path(environment, from_table, to_table, lang=lang)
     if state.output == "json":
         _output.print_json(answer)
         return
@@ -371,7 +375,9 @@ def join_path(
             kinds = f"{inline(s.from_model_kind or '?')} → {inline(s.to_model_kind or '?')}"
             lines.append(f"  {inline(s.from_name)} → {inline(s.to_name)} on {on} ({way}: {kinds})")
     if answer.more_paths:
-        lines.append(_MORE_PATHS)
+        start, goal = shlex.quote(from_table), shlex.quote(to_table)
+        more = _MORE_PATHS.format(start=start, goal=goal, env=shlex.quote(environment))
+        lines.append(inline(more, 500))
     sys.stdout.write("\n".join(lines) + "\n")
 
 

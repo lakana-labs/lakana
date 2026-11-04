@@ -24,6 +24,7 @@ from lakana_core.auth import (
     PrincipalRef,
     Securable,
     SecurableKind,
+    TaskScope,
 )
 from lakana_core.catalog import graph_service
 from lakana_core.catalog.glossary import write_glossary
@@ -36,6 +37,7 @@ from lakana_core.grants.service import GrantService
 from lakana_core.models import (
     DeployKind,
     DeployRun,
+    DeployStatus,
     Namespace,
     Repository,
     RepositoryKind,
@@ -411,27 +413,57 @@ def test_several_removals_past_the_check_are_counted_in_the_plural(star: StarWor
     )
 
 
-def test_a_ci_token_is_shown_no_impact_warning_its_principals_grants_would_show(
-    star: StarWorld, principal: PrincipalRef
-) -> None:
-    # The documented CI setup: the service account holds DEPLOY and VIEWER on the environment.
+def _service_account(star: StarWorld, admin: PrincipalRef) -> PrincipalRef:
+    """Persist ``ci-dev`` as the documented CI setup has it: `DEPLOY` and `VIEWER` on `dev`.
+
+    Parameters
+    ----------
+    star
+        The world.
+    admin
+        Who grants.
+
+    Returns
+    -------
+    PrincipalRef
+        The account, without any token scope.
+    """
     p = _principal(star.session, "ci-dev")
     grants = GrantService(star.session, AllowAllAuthorization())
     grants.grant(
-        principal,
+        admin,
         principal="ci-dev",
         action=Action.DEPLOY,
         kind=SecurableKind.ENVIRONMENT,
         environment="dev",
     )
     grants.grant(
-        principal,
+        admin,
         principal="ci-dev",
         role=Role.VIEWER,
         kind=SecurableKind.ENVIRONMENT,
         environment="dev",
     )
-    run = _deploy(star, p, _everything(), _stores_without(column=True))
+    return p
+
+
+def _ci_token(star: StarWorld, p: PrincipalRef, run: DeployRun) -> PrincipalRef:
+    """Make `p`'s CI token, as the one that queued `run`.
+
+    Parameters
+    ----------
+    star
+        The world.
+    p
+        The service account.
+    run
+        The run; its `ci_token_id` is set, so the token may read it.
+
+    Returns
+    -------
+    PrincipalRef
+        The token's principal.
+    """
     scope = CiScope(
         token_id=uuid.uuid4(),
         rule_id=uuid.uuid4(),
@@ -442,14 +474,54 @@ def test_a_ci_token_is_shown_no_impact_warning_its_principals_grants_would_show(
         kinds=frozenset({"DEPLOY"}),
         sha=None,
     )
-    run.ci_token_id = scope.token_id  # the token queued it, so it may read it
+    run.ci_token_id = scope.token_id
     star.session.commit()
+    return dataclasses.replace(p, ci_scope=scope)
+
+
+_OTHERS = ("fact_sales", "ref_store_id", "shop", "(sales)", "(glossary)", "store_id")
+"""What the warning names of other repositories, and of the removed column."""
+
+
+def test_a_ci_token_is_shown_no_impact_warning_its_principals_grants_would_show(
+    star: StarWorld, principal: PrincipalRef
+) -> None:
+    p = _service_account(star, principal)
+    run = _deploy(star, p, _everything(), _stores_without(column=True))
+    token = _ci_token(star, p, run)
     service = DeployService(star.session, GrantAuthorization(star.session))
     assert service.get(p, "dev", run.id).warnings == [_COLUMN]  # the account itself sees it
-    token = dataclasses.replace(p, ci_scope=scope)
     shown = " ".join(service.get(token, "dev", run.id).warnings)
-    for name in ("fact_sales", "ref_store_id", "shop", "(sales)", "(glossary)", "store_id"):
+    for name in _OTHERS:
         assert name not in shown
+
+
+def test_a_task_token_of_the_deployer_is_shown_no_impact_warning_outside_its_scope(
+    star: StarWorld, principal: PrincipalRef
+) -> None:
+    p = _service_account(star, principal)
+    run = _deploy(star, p, _everything(), _stores_without(column=True))
+    task = dataclasses.replace(
+        p, task_scope=TaskScope(environment="dev", asset_scope=["bronze.*"], token_id=uuid.uuid4())
+    )
+    service = DeployService(star.session, GrantAuthorization(star.session))
+    shown = " ".join(service.get(task, "dev", run.id).warnings)
+    for name in _OTHERS:
+        assert name not in shown
+
+
+def test_a_ci_token_is_shown_a_failed_deploys_error_as_an_outside_reader_is(
+    star: StarWorld, principal: PrincipalRef
+) -> None:
+    p = _service_account(star, principal)
+    run = _deploy(star, p, _everything(), stores_manifest())
+    run.status = DeployStatus.FAILED
+    run.error_message = "the deploy failed\nreferences `gold.secret.id`, which is missing"
+    run.error_withheld_json = [{"index": 1, "withheld": "", "targets": ["gold.secret"]}]
+    token = _ci_token(star, p, run)
+    service = DeployService(star.session, GrantAuthorization(star.session))
+    assert service.get(p, "dev", run.id).error_message == run.error_message
+    assert service.get(token, "dev", run.id).error_message == "the deploy failed"
 
 
 _EXTRA = [f"c{i}" for i in range(19)]
@@ -701,3 +773,18 @@ def test_a_listing_asks_about_each_table_its_stored_warnings_name_once(star: Sta
     some = _Counted(tables[:-1])
     views = DeployService(star.session, some).history(reader, "dev")
     assert [v.warnings for v in views if v.warnings] == []
+
+
+def test_a_removed_item_the_graph_cannot_read_escapes_its_tables_name(star: StarWorld) -> None:
+    p = _principal(star.session, "deployer")
+    table = "gold.a b\x1b[2J"
+    old = {"version": 13, "assets": [{"table": table, "columns": ["id", "c"]}]}
+    new = {"version": 13, "assets": [{"table": table, "columns": ["id"]}]}
+    (entry,) = DeployService(star.session, _everything())._impact_warnings(
+        p, "dev", "stores", old, new
+    )
+    text = str(entry["warning"])
+    assert "\x1b" not in text
+    assert "`gold.a b\\x1b[2J`" in text
+    assert text.endswith("lakana graph impact --env dev gold.a b\\x1b[2J")
+    assert entry["tables"] == [table]

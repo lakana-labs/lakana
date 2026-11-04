@@ -227,7 +227,8 @@ it, each with its repository. The how-to shows one:
   read every table it names (the removed table, and the tables of the references and checks it
   lists). Other readers are not shown it, and nothing tells them it exists.
 - A CI token is never shown it, not even for its own deploy: a CI token reads nothing, so the
-  warning does not appear in a CI log. See it as a person with
+  warning does not appear in a CI log. A task token of the deployer is shown it only when its
+  declared assets cover every table it names. See it as a person with
   `lakana deploys get DEPLOY_ID --env ENV`.
 - At most 20 removed tables and columns are checked; one more line says how many were not. The
   check has a budget of 2 seconds and 200,000 edges. The time is read between its steps (after

@@ -287,6 +287,28 @@ def _typed(table: str, column: str | None = None) -> str:
     return f"{shlex.quote(table)} --column {shlex.quote(column)}"
 
 
+def _is_deployer(reader: PrincipalRef, run: DeployRun) -> bool:
+    """Say whether a reader sees a run as its deployer does.
+
+    A CI token or a task token of the deployer's principal is not the deployer: what the
+    deploy stored was written with the principal's own grants, which a token is narrowed from
+    (a CI token reads nothing; a task token reads only its declared assets).
+
+    Parameters
+    ----------
+    reader
+        The principal reading.
+    run
+        The run.
+
+    Returns
+    -------
+    bool
+        Whether `reader` is the run's principal, with neither a CI nor a task scope.
+    """
+    return reader.id == run.principal_id and reader.ci_scope is None and reader.task_scope is None
+
+
 def _removed_items(previous: object, manifest: object) -> list[tuple[str, str, str, str]]:
     """List the tables a new manifest stops building and the columns it removes (R12).
 
@@ -587,8 +609,9 @@ class DeployRunView:
         Things the deploy leaves for its owner to act on, as sentences: today, a removed asset
         whose table is kept after a failed check, read at the time of the request; then the
         ones the deploy stored: what it changed in the job schedules, and what a removed table
-        or column breaks in other repositories (shown only to the deployer, not to its CI token,
-        and to a reader who holds `READ_ENVIRONMENT` and may read every table they name).
+        or column breaks in other repositories (shown only to the deployer, not to its CI or
+        task tokens, and to a reader who holds `READ_ENVIRONMENT` and may read every table they
+        name).
     waiting_for
         Why a `QUEUED` run has not started (`DeployService.get` only; `None` for any other
         status and in a listing).
@@ -810,9 +833,9 @@ class DeployService:
             dropped from the diff and counted in `hidden_adopted`: adopting a
             table names one that exists outside any repository, which a
             READ_ENVIRONMENT reader is not entitled to learn. A reader who is not
-            the deployer gets each line of the error that tells of a reference
-            target it may not read as the line of a missing target
-            (`error_for_reader`).
+            the deployer (`_is_deployer`: a CI or task token of the deployer is not)
+            gets each line of the error that tells of a reference target it may not
+            read as the line of a missing target (`error_for_reader`).
         reads
             What earlier calls of a listing already read for the warnings; a new one when
             `None`.
@@ -846,7 +869,7 @@ class DeployService:
             hidden_adopted = len(adopted) - len(visible)
             diff = {**diff, "adopted": visible}
         error = run.error_message
-        if reader is not None and error is not None and reader.id != run.principal_id:
+        if reader is not None and error is not None and not _is_deployer(reader, run):
             error = error_for_reader(
                 error,
                 run.error_withheld_json,
@@ -1031,7 +1054,9 @@ class DeployService:
             if node in unreadable:
                 warnings.append(
                     {
-                        "warning": IMPACT_UNREADABLE.format(what=what, table=table, env=env_name),
+                        "warning": IMPACT_UNREADABLE.format(
+                            what=what, table=_typed(table), env=env_name
+                        ),
                         "tables": [table],
                     }
                 )
@@ -1070,7 +1095,7 @@ class DeployService:
 
         A sentence is shown to everyone who may read the run. A ``{"warning", "tables"}`` object
         (an impact warning, computed with the deployer's visibility) is shown to the deployer
-        (not to its CI token, which reads nothing), and to a reader who holds `READ_ENVIRONMENT`
+        (`_is_deployer`: not to its CI or task tokens), and to a reader who holds `READ_ENVIRONMENT`
         (it names glossary terms and repositories) and may read every table it names. Anything
         else is skipped, and so is every object for a view without a reader. The tables are
         asked about in one batch per run, each table once per listing (`_WarningReads`).
@@ -1101,9 +1126,7 @@ class DeployService:
             text, tables = entry.get("warning"), entry.get("tables")
             if isinstance(text, str) and isinstance(tables, list):
                 entries.append((text, tables))
-        # A CI token is never the deployer here: it reads nothing (`CiScope`), however
-        # widely its principal, with whose grants the warning was computed, may read.
-        deployer = reader is not None and reader.id == run.principal_id and reader.ci_scope is None
+        deployer = reader is not None and _is_deployer(reader, run)
         if reader is not None and not deployer and any(isinstance(e, tuple) for e in entries):
             names = {t for e in entries if isinstance(e, tuple) for t in e[1] if isinstance(t, str)}
             self._ask_reads(reader, env_name, names, reads)
