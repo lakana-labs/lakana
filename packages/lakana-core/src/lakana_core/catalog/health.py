@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from pyiceberg.table.metadata import TableMetadata
 from sqlalchemy import delete, func, select
@@ -34,6 +34,9 @@ from lakana_core.models import (
     TableRead,
     WriteMode,
 )
+
+if TYPE_CHECKING:
+    from lakana_core.catalog.health_read import SignalView
 
 __all__ = [
     "CheckHealth",
@@ -398,6 +401,8 @@ class TableHealth:
     hidden_checks
         How many results were left out of `checks`: generated reference checks whose target the
         caller may not read.
+    signals
+        The current state of each health signal, values hidden as `health_read` says.
     """
 
     days: int
@@ -405,6 +410,7 @@ class TableHealth:
     checks: list[CheckHealth]
     readers: list[Reader] | None
     hidden_checks: int = 0
+    signals: list[SignalView] = field(default_factory=list)
 
 
 def record_table_reads(

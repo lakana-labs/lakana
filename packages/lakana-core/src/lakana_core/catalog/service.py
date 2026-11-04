@@ -105,8 +105,16 @@ from lakana_core.catalog.health import (
     readers,
     snapshot_stats,
 )
+from lakana_core.catalog.health_read import (
+    UNKNOWN_SIGNAL_MESSAGE,
+    SignalView,
+    Visibility,
+    current_signals,
+    signal_history,
+    visibility_for,
+)
 from lakana_core.catalog.health_record import commit_observations, signal_rows
-from lakana_core.catalog.health_signals import HealthEffects
+from lakana_core.catalog.health_signals import SIGNALS, HealthEffects
 from lakana_core.catalog.history import (
     EARLIEST_START,
     HISTORY_KEY_PROPERTY,
@@ -302,7 +310,7 @@ from lakana_core.models import (
     WriteMode,
 )
 from lakana_core.models.run import TERMINAL_TASK_STATUSES
-from lakana_core.pagination import escape_like
+from lakana_core.pagination import Page, escape_like
 from lakana_core.policy.resolver import PolicyResolver
 from lakana_core.policy.schema_change import BrokenPolicy, broken_policies, changed_columns
 from lakana_core.projects.layers import LAYERS
@@ -3744,7 +3752,9 @@ class CatalogService:
         days: int,
         now: datetime,
     ) -> TableHealth:
-        """Show a table's last maintenance, the newest result of each of its checks and its readers.
+        """Show a table's last maintenance, newest check results, readers and health signals.
+
+        The signals' values are hidden as `health_read` says.
 
         Parameters
         ----------
@@ -3803,7 +3813,112 @@ class CatalogService:
             checks=checks,
             readers=shown,
             hidden_checks=len(every) - len(checks),
+            signals=current_signals(
+                self._session, row.id, ref.dotted(), self._health_visibility(p, ref, row)
+            ),
         )
+
+    def table_health_signals(
+        self,
+        p: PrincipalRef,
+        ref: TableRef,
+        *,
+        days: int,
+        signal: str | None,
+        column: str | None,
+        limit: int,
+        cursor: str | None,
+        now: datetime,
+    ) -> Page[SignalView]:
+        """List the history of a table's health signals, newest first.
+
+        Parameters
+        ----------
+        p
+            The acting principal.
+        ref
+            The table reference.
+        days
+            How far back, already checked against the kept period.
+        signal
+            Only this signal.
+        column
+            Only this column.
+        limit
+            The most rows of the page.
+        cursor
+            Where the previous page ended.
+        now
+            The present time.
+
+        Returns
+        -------
+        Page of SignalView
+            One page; values hidden as `health_read` says.
+
+        Raises
+        ------
+        PermissionDenied
+            If `p` may not read the table; checked before anything is read.
+        NotFoundError
+            If the table does not exist.
+        ValidationError
+            If `signal` is not a signal, or the cursor is not one of this list.
+        """
+        scope = Securable.table_scope(ref.environment, ref.namespace, ref.name)
+        self._authz.authorize(p, Action.READ_TABLE, scope)
+        if signal is not None and signal not in SIGNALS:
+            raise ValidationError(UNKNOWN_SIGNAL_MESSAGE.format(signal=shown(signal)))
+        _, row = self._find_table(ref)
+        return signal_history(
+            self._session,
+            row.id,
+            ref.dotted(),
+            self._health_visibility(p, ref, row),
+            since=now - timedelta(days=days),
+            signal=signal,
+            column=column,
+            limit=limit,
+            cursor=cursor,
+        )
+
+    def _health_visibility(self, p: PrincipalRef, ref: TableRef, row: Table) -> Visibility:
+        """Find which health signal values `p` may not see on a table.
+
+        Parameters
+        ----------
+        p
+            The reader.
+        ref
+            The table reference.
+        row
+            The table's row.
+
+        Returns
+        -------
+        Visibility
+            As `health_read.visibility_for` says; the current metadata is read only when a mask
+            applies, from the row's pointer (a table without one has no column to rename).
+        """
+
+        def metadata() -> TableMetadata | None:
+            """Read the table's current metadata.
+
+            Returns
+            -------
+            TableMetadata or None
+                `None` for a table without a metadata pointer.
+
+            Raises
+            ------
+            StorageUnavailableError
+                If the environment's storage did not answer.
+            """
+            if row.metadata_location is None:
+                return None
+            return self._to_loaded_table(ref, row).metadata
+
+        return visibility_for(self._session, p, ref, row.id, metadata=metadata)
 
     def _describe_row(self, p: PrincipalRef, ref: TableRef, row: Table) -> TableDescription:
         """Describe a table row by kind, without its descriptions.
