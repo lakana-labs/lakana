@@ -35,6 +35,10 @@ the next attempt replaces the table, which holds unchecked data until then. A wo
 after the write on its last attempt, or in a run that is cancelled, is followed by a claim
 that only sets the table back (`set_back_only`): it builds and checks nothing.
 
+A check of family `health` (`projects.health_checks`, from `health: {signal: block}`) counts
+nothing: `_health_result` reads whether the signal fired at the snapshot of the task's write, and
+a firing fails the check with a text that names no value, since every reader of the run reads it.
+
 What such a rollback undoes is the task run's own chain of writes and nothing else. The
 write guard records the tip of that chain in each write's own commit
 (`task_runs.own_snapshot_id`, `ProtectedWriteGuard._advance_own_tip`), and the rollback names
@@ -57,6 +61,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from lakana_core.auth import PrincipalRef, RunContext
+from lakana_core.catalog.health_signals import COLUMN_SIGNALS
 from lakana_core.catalog.identity import resolve_table_id, resolve_table_with_note
 from lakana_core.catalog.metadata import read_metadata
 from lakana_core.catalog.service import ROLLBACK_NOT_KNOWN_REASON, CatalogService, Rollback
@@ -73,11 +78,13 @@ from lakana_core.models import (
     RollbackOutcome,
     Run,
     Table,
+    TableHealthSignal,
     TableType,
     TaskRun,
     TaskStatus,
 )
 from lakana_core.projects.checks import CheckSpec, read_manifest_checks
+from lakana_core.projects.health_checks import HEALTH_FAMILY, health_specs
 from lakana_core.projects.manifest import manifest_assets
 from lakana_core.runs.check_message import (
     BLOCKING,
@@ -100,6 +107,7 @@ from lakana_core.runs.checks import (
     build_failure_message,
     error_of_exception,
     error_text,
+    health_blocked,
     kept_no_checks_error,
     mark_rollback_failed,
     record_result,
@@ -236,6 +244,8 @@ def _check_lines(
             found = "passed"
         elif result.outcome is CheckOutcome.ERRORED:
             found = f"errored: {result.error}"
+        elif result.failing_rows is None and result.error:
+            found = f"{result.outcome.value}: {result.error}"  # a health check counts no rows
         else:
             rows = "1 row" if result.failing_rows == 1 else f"{result.failing_rows} rows"
             found = f"{result.outcome.value}, {rows}"
@@ -387,6 +397,67 @@ def _counted_outcome(spec: CheckSpec, rows: int) -> CheckOutcome:
     if rows == 0:
         return CheckOutcome.PASSED
     return CheckOutcome.WARNED if spec.on_failure == "warn" else CheckOutcome.FAILED
+
+
+def _health_result(
+    session: Session,
+    spec: CheckSpec,
+    table_id: uuid.UUID | None,
+    snapshot: int | None,
+    environment: str,
+) -> tuple[CheckOutcome, str | None, int | None]:
+    """Judge a blocking health check by the signals recorded for the task's own snapshot.
+
+    The commit that wrote the snapshot recorded its signals in the same transaction, so they
+    are there when the check phase runs.
+
+    Parameters
+    ----------
+    session
+        Database session; read only, rolled back.
+    spec
+        The health check (`projects.health_checks.health_specs`).
+    table_id
+        The task's table, or `None` when it has none.
+    snapshot
+        The snapshot of the task's write (`Written.snapshot_after`), or `None` without one.
+    environment
+        The environment's name, for the text.
+
+    Returns
+    -------
+    tuple
+        The outcome, the error and the snapshot judged: ``failed`` with `health_blocked` when
+        the signal fired there (for a check of a whole column signal, in any column whose
+        firing was recorded as blocking); else ``passed``, no text, and the snapshot. A signal
+        that was not computed (no row, ``no_metrics``) passes: only a firing blocks.
+    """
+    names = () if spec.generated is None else spec.generated.columns
+    if snapshot is None or table_id is None or not names:
+        return CheckOutcome.PASSED, None, snapshot
+    signal, column = names[0], (names[1] if len(names) > 1 else None)
+    query = select(TableHealthSignal.id).where(
+        TableHealthSignal.table_id == table_id,
+        TableHealthSignal.snapshot_id == snapshot,
+        TableHealthSignal.signal == signal,
+        TableHealthSignal.state == "fired",
+    )
+    if column is not None:
+        query = query.where(TableHealthSignal.column_name == column)
+    elif signal in COLUMN_SIGNALS:
+        # Columns of their own effect (`range: {qty: warn}`) only warn.
+        query = query.where(TableHealthSignal.effect == "block")
+    else:
+        query = query.where(TableHealthSignal.column_name.is_(None))
+    fired = session.scalars(query.limit(1)).first()
+    session.rollback()
+    if fired is None:
+        return CheckOutcome.PASSED, None, snapshot
+    return (
+        CheckOutcome.FAILED,
+        health_blocked(signal, column, snapshot, spec.table, environment),
+        snapshot,
+    )
 
 
 def _stop_if_asked(session: Session, keeper: LeaseKeeper, run_id: uuid.UUID) -> None:
@@ -704,7 +775,8 @@ class _Phase:
     active
         Whether that principal is active.
     specs
-        The checks of the task's table in the run's project version that can be read.
+        The checks of the task's table in the run's project version that can be read, then its
+        blocking health checks (none for a ``source_check`` task, which wrote nothing).
     unreadable
         Whether the project version holds a check entry that cannot be read and may be this
         table's.
@@ -787,7 +859,12 @@ def _read_phase(session: Session, claimed: ClaimedTask, *, set_back: bool = Fals
         ref=ref,
         principal=principal,
         active=row.is_active,
-        specs=read.of(claimed.asset),
+        specs=read.of(claimed.asset)
+        + (
+            ()
+            if claimed.kind == SOURCE_CHECK
+            else health_specs(version.manifest_json, claimed.asset)
+        ),
         unreadable=read.unreadable_for(claimed.asset),
         is_asset=claimed.asset in manifest_assets(version.manifest_json),
     )
@@ -1489,8 +1566,18 @@ def _checks_under(
     for spec in specs:
         started = db_now(session)
         session.rollback()
+        health_snapshot: int | None = None
         if spec.name in refusals:
             counted, outcome, error = None, CheckOutcome.ERRORED, refusals[spec.name]
+        elif spec.generated is not None and spec.generated.family == HEALTH_FAMILY:
+            counted = None
+            outcome, error, health_snapshot = _health_result(
+                session,
+                spec,
+                table_id,
+                None if written is None else written.snapshot_after,
+                phase.environment,
+            )
         elif phase.active:
             counted, outcome, error = _count_one(
                 session,
@@ -1517,7 +1604,7 @@ def _checks_under(
             failing_rows=None if counted is None else counted.rows,
             error=error,
             table_id=table_id,
-            checked_snapshot_id=None if counted is None else counted.checked_snapshot_id,
+            checked_snapshot_id=health_snapshot if counted is None else counted.checked_snapshot_id,
             policy_applied=counted is not None and counted.policy_applied,
             query_run_id=None if counted is None else counted.query_run_id,
             started_at=started if counted is None else counted.started_at,

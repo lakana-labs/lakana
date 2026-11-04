@@ -134,7 +134,8 @@ class GeneratedFrom:
     Parameters
     ----------
     family
-        ``key``, ``references`` or ``measures`` (`CHECK_FAMILIES`).
+        ``key``, ``references`` or ``measures`` (`CHECK_FAMILIES`); ``health`` for a check
+        that `projects.health_checks` makes at run time, which a manifest never stores.
     columns
         The key's columns, the one referencing column, or the measure columns, sorted.
     target

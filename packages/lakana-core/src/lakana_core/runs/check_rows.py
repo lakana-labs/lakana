@@ -40,12 +40,14 @@ from lakana_core.projects.checks import (
     may_read_every,
     read_manifest_checks,
 )
+from lakana_core.projects.health_checks import is_health_check
 from lakana_core.runs.checks import (
     CHECK_ROWS_NOT_EVERY_TABLE,
     CHECK_ROWS_NOT_FOR_A_TASK,
     check_not_in_run_message,
     check_sql_gone_message,
     check_sql_unreadable_message,
+    health_check_rows_message,
     no_checked_snapshot_message,
     no_snapshot_could_not_run_message,
     no_snapshot_not_read_message,
@@ -152,7 +154,8 @@ def submit_check_rows(
         If the result names no snapshot: there are no rows to read.
     CheckSqlGoneError
         If the manifest of the run's project version holds no readable entry for the check,
-        or, with its own text, SQL whose tables cannot be listed.
+        or, with their own texts, for a health check (which has no SQL) and for SQL whose
+        tables cannot be listed.
     """
     env = authorize_run_read(session, authorization, p, environment)
     authorization.authorize(p, Action.SUBMIT_QUERY, Securable.environment_scope(environment))
@@ -195,6 +198,10 @@ def submit_check_rows(
         raise PermissionDenied(CHECK_ROWS_NOT_EVERY_TABLE)
     if result.checked_snapshot_id is None:
         raise NoCheckedSnapshotError(_no_snapshot_reason(session, result, names, env.name))
+    if spec is None and is_health_check(result.check_name, generated=result.generated):
+        raise CheckSqlGoneError(
+            health_check_rows_message(result.check_name, result.table_name, env.name)
+        )
     if spec is None:
         raise CheckSqlGoneError(check_sql_gone_message(run.id, env.name))
     if names is None:

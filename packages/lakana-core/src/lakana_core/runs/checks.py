@@ -157,7 +157,21 @@ so nothing is taken from it that is not one of these words.
 """
 
 _ONE_FAILED = "Check `{name}` failed: {rows} ({path})."
-"""The first sentence of the task's message for one failed blocking check (text M1)."""
+"""The first sentence of the task's message for one failed blocking check (text M1); a health
+check's text stands where the rows are (`_found`)."""
+
+HEALTH_BLOCKED = (
+    "health signal {what} fired at snapshot {snapshot}; `lakana table health {table} --env "
+    "{environment} --signals` shows its usual band and new value to readers who may see them; "
+    "fix the data the asset reads, or let such data through with health: {setting} in the asset "
+    "header"
+)
+"""The `error` of a blocking health check whose signal fired (`health_blocked`).
+
+It names no value: every reader of the run reads it, in the task's message and its log, and a
+reader of the run need not be one the health route shows the values to (a column mask or a row
+filter may apply to them). The history keeps the fired row after the set-back, marked, so the
+command shows it there."""
 
 _ONE_ERRORED = "Check `{name}` could not run ({path}): {error}"
 """The first sentence for one blocking check that could not run (text M1, second form)."""
@@ -643,6 +657,80 @@ def _rows(count: int | None) -> str:
     return "1 row" if count == 1 else f"{count or 0} rows"
 
 
+def health_blocked(
+    signal: str, column: str | None, snapshot: int, table: str, environment: str
+) -> str:
+    """Word the `error` of a blocking health check whose signal fired.
+
+    Parameters
+    ----------
+    signal
+        The signal.
+    column
+        The column of a check about one column; `None` for the whole signal.
+    snapshot
+        The snapshot it fired at.
+    table
+        The checked table.
+    environment
+        The environment's name.
+
+    Returns
+    -------
+    str
+        `HEALTH_BLOCKED`, names escaped; the setting that lets such data through is the check's
+        own: ``{volume: warn}``, or ``{range: {price: warn}}`` for one column.
+    """
+    what = signal if column is None else f"{signal} of {shown(column)}"
+    setting = (
+        f"{{{signal}: warn}}" if column is None else f"{{{signal}: {{{shown(column)}: warn}}}}"
+    )
+    return HEALTH_BLOCKED.format(
+        what=what,
+        snapshot=snapshot,
+        table=shown(table),
+        environment=shown(environment),
+        setting=setting,
+    )
+
+
+def _found(result: CheckResult) -> str:
+    """Say what a failed check found: its rows, or a health check's text.
+
+    Parameters
+    ----------
+    result
+        A failed result.
+
+    Returns
+    -------
+    str
+        The `error` of a failed result that carries one (only a health check does), else the
+        rows.
+    """
+    if _without_rows(result) and result.error:
+        return result.error
+    return _rows(result.failing_rows)
+
+
+def _without_rows(result: CheckResult) -> bool:
+    """Say whether a result is a failure that counted no rows: a health check's.
+
+    Parameters
+    ----------
+    result
+        A result.
+
+    Returns
+    -------
+    bool
+        Whether it failed with a text and no count.
+    """
+    return (
+        result.outcome is CheckOutcome.FAILED and result.failing_rows is None and bool(result.error)
+    )
+
+
 def _listing(results: Sequence[CheckResult]) -> str:
     """List checks by their short names with what each found, sorted, at most five.
 
@@ -659,9 +747,7 @@ def _listing(results: Sequence[CheckResult]) -> str:
     items = sorted(
         (
             shown(result.check_name.rpartition("/")[2]),
-            "could not run"
-            if result.outcome is CheckOutcome.ERRORED
-            else _rows(result.failing_rows),
+            "could not run" if result.outcome is CheckOutcome.ERRORED else _found(result),
         )
         for result in results
     )
@@ -695,7 +781,7 @@ def _first_sentence(blocking: Sequence[CheckResult], table: str, *, set_back: bo
     (only,) = blocking
     name, path = shown(only.check_name), shown(only.check_path)
     if only.outcome is not CheckOutcome.ERRORED:
-        return _ONE_FAILED.format(name=name, rows=_rows(only.failing_rows), path=path)
+        return _ONE_FAILED.format(name=name, rows=_found(only), path=path)
     error = only.error or _QUERY_FAILED
     sentence = _ONE_ERRORED.format(
         name=name, path=path, error=error if error.endswith(".") else f"{error}."
@@ -793,11 +879,14 @@ def rows_sentences(
     -------
     list of str
         One sentence for each result that read a snapshot, sorted by check name, at most three:
-        a check that read none has no rows to show, and a longer message would only repeat
-        itself. The three are counted among the checks that read a snapshot. A name that a
-        shell would split or interpret is in quotes; any other reads as it is.
+        a check that read none has no rows to show, nor has a health check, and a longer
+        message would only repeat itself. The three are counted among the checks that read a
+        snapshot. A name that a shell would split or interpret is in quotes; any other reads as
+        it is.
     """
-    names = sorted(r.check_name for r in results if r.checked_snapshot_id is not None)
+    names = sorted(
+        r.check_name for r in results if r.checked_snapshot_id is not None and not _without_rows(r)
+    )
     return [
         _LOOK_AT_THE_ROWS.format(
             run=run_id,
@@ -1870,6 +1959,35 @@ A deploy only stores SQL whose tables it could list, so such SQL was changed aft
 or was read by another version of the parser. Nobody can be checked against it, so it is never
 queued; the text names nothing from it.
 """
+
+
+HEALTH_CHECK_HAS_NO_ROWS = (
+    "Check `{check}` is a health check, which reads no rows. `lakana table health {table} --env "
+    "{environment} --signals` shows what it found to readers who may see the values."
+)
+"""The text of `CheckSqlGoneError` for a health check: it has no SQL, and never had."""
+
+
+def health_check_rows_message(check: str, table: str, environment: str) -> str:
+    """Word that a health check has no rows to show, and where its values are.
+
+    Parameters
+    ----------
+    check
+        The check's name.
+    table
+        The checked table.
+    environment
+        The environment's name.
+
+    Returns
+    -------
+    str
+        `HEALTH_CHECK_HAS_NO_ROWS` with the names escaped.
+    """
+    return HEALTH_CHECK_HAS_NO_ROWS.format(
+        check=shown(check), table=shown(table), environment=shown(environment)
+    )
 
 
 def check_sql_gone_message(run_id: uuid.UUID, environment: str) -> str:

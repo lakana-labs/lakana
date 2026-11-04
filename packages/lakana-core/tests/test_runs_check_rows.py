@@ -697,6 +697,35 @@ def _refused(session: Session, principal: PrincipalRef, result: CheckResult) -> 
     return str(denied.value)
 
 
+def test_a_health_check_has_no_rows_and_names_the_signal_history(
+    session: Session, principal: PrincipalRef, dev: uuid.UUID
+) -> None:
+    """A generated health check reads no rows: say so and name what shows its values.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    principal
+        The caller.
+    dev
+        The environment.
+    """
+    result = _checked(session, principal, sql=None)
+    result.check_name, result.generated = "gold.orders/health_volume", True
+    session.commit()
+
+    with pytest.raises(CheckSqlGoneError) as health:
+        _submit(session, principal, result, check="gold.orders/health_volume")
+
+    assert str(health.value) == (
+        "Check `gold.orders/health_volume` is a health check, which reads no rows. "
+        "`lakana table health gold.orders --env dev --signals` shows what it found to readers "
+        "who may see the values."
+    )
+    assert _queued(session) == 0
+
+
 def test_a_caller_who_may_not_read_every_table_of_the_check_is_refused(
     session: Session, principal: PrincipalRef, dev: uuid.UUID
 ) -> None:

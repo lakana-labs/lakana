@@ -53,6 +53,7 @@ from lakana_core.runs.checks import (
     error_of_exception,
     error_text,
     failure_message,
+    health_blocked,
     kept_check_message,
     kept_failure_message,
     kept_no_checks_error,
@@ -1631,6 +1632,7 @@ _COMMANDS = {
     "runs resume",
     "runs show",
     "table get",
+    "table health",
 }
 """The commands the texts of this module may name: every one exists in the CLI."""
 
@@ -1747,3 +1749,62 @@ def test_the_message_of_a_set_back_claim_says_what_became_of_the_table(
         set_back_result_message("Why", rollback, refused, table="silver.orders", environment="dev")
         == expected
     )
+
+
+_HEALTH = (
+    "health signal volume fired at snapshot 7; `lakana table health "
+    "silver.station_temperatures --env dev --signals` shows its usual band and new value to "
+    "readers who may see them; fix the data the asset reads, or let such data through with "
+    "health: {volume: warn} in the asset header"
+)
+"""The `error` of the fixture table's fired blocking volume check at snapshot 7."""
+
+
+def _health_result(check: str = "health_volume", error: str = _HEALTH) -> CheckResult:
+    """Build an unsaved failed blocking health check of the fixture's table, at snapshot 7.
+
+    Parameters
+    ----------
+    check
+        The check's short name.
+    error
+        Its text.
+
+    Returns
+    -------
+    CheckResult
+        The result: no rows, the text, the snapshot it judged.
+    """
+    result = _seen(_result(check, CheckOutcome.FAILED, error=error))
+    result.check_path = "assets/silver/station_temperatures.sql"
+    result.generated = True
+    return result
+
+
+def test_the_text_of_a_fired_health_check_names_no_value_and_the_way_out() -> None:
+    """Name the signal, column, snapshot, the command with the values, and both next steps."""
+    assert health_blocked("volume", None, 7, "silver.station_temperatures", "dev") == _HEALTH
+    column = health_blocked("range", "price", 7, "silver.station_temperatures", "dev")
+    assert column.startswith("health signal range of price fired at snapshot 7; ")
+    assert column.endswith("health: {range: {price: warn}} in the asset header")
+    odd = health_blocked("range", "pr\u00efce", 7, "silver.station_temperatures", "dev")
+    assert "range of pr\\xefce fired" in odd and "{range: {pr\\xefce: warn}}" in odd
+
+
+def test_the_message_of_a_fired_health_check_gives_its_text_and_no_rows_command() -> None:
+    """A health check reads no rows: its text stands where the rows would, and no command."""
+    message = _message([_health_result()], Rollback(RollbackOutcome.ROLLED_BACK))
+    assert message.startswith(
+        f"Check `silver.station_temperatures/health_volume` failed: {_HEALTH} "
+        "(assets/silver/station_temperatures.sql). The table was set back"
+    )
+    assert "Look at the rows" not in message
+    several = _message(
+        [_health_result(), _seen(_result("a", CheckOutcome.FAILED, rows=3))],
+        Rollback(RollbackOutcome.ROLLED_BACK),
+    )
+    assert several.startswith(
+        f"2 checks of `silver.station_temperatures` failed: `a` (3 rows), `health_volume` "
+        f"({_HEALTH})."
+    )
+    assert several.count("Look at the rows") == 1

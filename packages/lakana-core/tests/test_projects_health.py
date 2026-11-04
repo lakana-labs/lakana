@@ -8,6 +8,7 @@ import pytest
 from test_projects_dag import make_asset
 
 from lakana_core.catalog.health_signals import HealthEffects
+from lakana_core.projects.checks import GeneratedFrom
 from lakana_core.projects.frontmatter import AssetMetadata, parse_front_matter
 from lakana_core.projects.health import (
     entry_effects,
@@ -15,6 +16,7 @@ from lakana_core.projects.health import (
     normalize_health,
     resolve_effects,
 )
+from lakana_core.projects.health_checks import entry_health_specs, health_specs, is_health_check
 from lakana_core.projects.issues import ProjectValidationError
 from lakana_core.projects.parse import ParsedAsset
 from lakana_core.projects.project_config import parse_project_config
@@ -176,3 +178,66 @@ def test_nothing_is_checked_when_the_columns_are_not_known() -> None:
     """A star leaves the names to the run; assets without health are skipped."""
     star = _with(make_asset("gold.s", columns=None), health={"range": {"x": "off"}})
     assert health_issues([star, make_asset("gold.p")]) == []
+
+
+def test_each_block_entry_becomes_one_blocking_check() -> None:
+    """One check per `block` entry, sorted by name; no other effect, asset or kind gives one."""
+    manifest = {
+        "version": 14,
+        "assets": [
+            {
+                "table": "gold.t",
+                "path": "assets/gold/t.sql",
+                "health": {"volume": "block", "range.price": "block", "schema": "off"},
+            },
+            {"table": "gold.u", "path": "assets/gold/u.sql"},
+            {"table": "gold.n", "health": {"null_rate": "block", "freshness": "block"}},
+        ],
+    }
+    specs = health_specs(manifest, "gold.t")
+    assert [(s.name, s.check, s.on_failure, s.sql, s.generated) for s in specs] == [
+        (
+            "gold.t/health_range__price",
+            "health_range__price",
+            "block",
+            "",
+            GeneratedFrom("health", ("range", "price")),
+        ),
+        (
+            "gold.t/health_volume",
+            "health_volume",
+            "block",
+            "",
+            GeneratedFrom("health", ("volume",)),
+        ),
+    ]
+    assert {(s.path, s.table, s.description) for s in specs} == {
+        ("assets/gold/t.sql", "gold.t", "generated from health:")
+    }
+    assert health_specs(manifest, "gold.u") == ()
+    assert health_specs(manifest, "gold.x") == ()
+    assert health_specs({"assets": "damaged"}, "gold.t") == ()
+    # Freshness never blocks; an entry without a path names the asset's directory.
+    (null_rate,) = health_specs(manifest, "gold.n")
+    assert (null_rate.name, null_rate.path) == ("gold.n/health_null_rate", "assets/gold/n")
+
+
+@pytest.mark.parametrize("materialize", ["view", "artifact"])
+def test_a_view_or_an_artifact_never_gains_a_health_check(materialize: str) -> None:
+    """Only a table has snapshots to watch, so `health:` on anything else adds no check (F12).
+
+    Parameters
+    ----------
+    materialize
+        The entry's kind of output.
+    """
+    entry = {"table": "gold.v", "materialize": materialize, "health": {"volume": "block"}}
+    assert health_specs({"assets": [entry]}, "gold.v") == ()
+    assert entry_health_specs(entry, "gold.v") == ()
+
+
+def test_a_health_check_is_told_by_its_generated_name() -> None:
+    """A generated `health_` check is one; a hand-written check of that name is not."""
+    assert is_health_check("gold.t/health_volume", generated=True)
+    assert not is_health_check("gold.t/health_volume", generated=False)
+    assert not is_health_check("gold.t/key_id", generated=True)

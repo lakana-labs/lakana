@@ -133,9 +133,12 @@ and records none. A table with signals shows them in `lakana table health`; a ta
 write has not happened since signals were introduced shows none. Views, external tables and
 artifacts have no signals.
 
-When a failed check sets a table back, the signals of the snapshots it set back are deleted with
-them: they are not the table's data any more, so they neither show as its current state nor count
-towards the usual band.
+When a failed check sets a table back, the signals of the snapshots it set back are no longer the
+table's data: they neither show as its current state nor count towards the usual band. The history
+keeps them, marked `set_back` (`(set back)` after the state in `lakana table health --signals`), so
+the firing that made a blocking signal set the table back stays there to look at, as long as the
+other signals are kept. A first build that is left not published
+keeps no signals: nobody may read its data.
 
 | Signal | Observed per snapshot | Fires when |
 |---|---|---|
@@ -173,6 +176,23 @@ effects:
 | `warn` | The default. The signal is recorded and shown when it fires. |
 | `block` | A firing signal fails the run and sets the table back, as a blocking check does. |
 | `off` | The signal is not evaluated for the table or column, and shows as `off`. |
+
+**When a signal blocks.** Each `block` entry of a table adds one check to the table's task, named
+`health_<signal>` (`health_range__price` for one column), marked generated like the checks of the
+asset's header. It reads no rows: after the write, it looks at whether the signal fired at the
+snapshot the run wrote. `null_rate: block` or `range: block` fails when any column whose effect is
+`block` fired. When the signal fired, the check fails, the table is set back, and nothing
+downstream is built, as for any failed blocking check. The task's message, its log and
+`lakana check list` give the check's text, which names no value, because everyone who may read the
+run reads it:
+
+> Check `gold.orders/health_volume` failed: health signal volume fired at snapshot 4711; `lakana table health gold.orders --env prod --signals` shows its usual band and new value to readers who may see them; fix the data the asset reads, or let such data through with health: {volume: warn} in the asset header (assets/gold/orders.sql).
+
+The history shows the band and the value to those a mask or filter does not hide them from (see
+[Who sees what](#who-sees-what)). `lakana check rows` of such a check says that it reads no rows and
+names the same command. A signal that fired without `block` never stops a run, and a signal that
+was not computed (`no_history`, `no_metrics`) never blocks. A view or an artifact never gets such a
+check.
 
 Write `health:` in the asset's `/* lakana … */` block, or as `health=` in `@asset(...)`: `off` for
 every signal, or a mapping of signals to an effect. `null_rate` and `range` may instead name single
@@ -239,6 +259,7 @@ release refuses that manifest. A project without `health:` keeps its version.
 | `alert` | text or `null` | The text of the newest firing (in `health`) or of this observation (in the history); `null` when it did not fire or its values are hidden. |
 | `values_hidden` | boolean | `true` when `observed`, `band` and `alert` were left out for you. |
 | `last_fired_at` | time or `null` | In `health` only: when this signal and column last fired. |
+| `set_back` | boolean | `true` when a failed check set the observed snapshot back; such a row shows only in the history. |
 
 `GET .../tables/{name}/health` returns the current state of each signal in `signals`: the newest
 observation of each signal and column.
@@ -285,7 +306,7 @@ The answer is `{"items": [...], "next_cursor": ...}`; `next_cursor` is `null` on
 |---|---|
 | `lakana table health NAME` | Shows the last maintenance, the newest result of each check, the readers of the default window and the current state of each health signal, with the alerts that fired. A table without signals says why: a managed table gets them with its next write, a view, an external table or an artifact has none, and a server older than health signals does not report them (upgrade it). |
 | `lakana table health NAME --days N` | The same with the readers of the last N days. |
-| `lakana table health NAME --signals` | Lists the history of the health signals, newest first. Narrow it with `--signal S`, `--column C` and `--days N`; page with `--limit N` and `--cursor X`. |
+| `lakana table health NAME --signals` | Lists the history of the health signals, newest first; a signal whose snapshot a failed check set back has `(set back)` after its state. Narrow it with `--signal S`, `--column C` and `--days N`; page with `--limit N` and `--cursor X`. |
 | `lakana table health NAME --output json` | Every field of the answer as JSON. |
 | `lakana table get NAME` | Lists the effects of `health:` that are not the default `warn`, and marks one that names a column the table does not have. |
 | `lakana table get NAME --output json` | Includes `last_write_at`, `row_count`, `size_bytes`, `file_count`, `health` (the effects that are not `warn`, by `signal` or `signal.column`) and `health_missing` (the keys of `health` that name a column the table does not have). |
