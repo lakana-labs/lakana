@@ -3982,13 +3982,19 @@ work.
   note. A set-back that makes the schema before current again sets the task run's
   `schema_change_json` to NULL in its `settle` transaction, so no note, warning or notification line
   outlives the change. The task row is written for **every** write that removes or replaces a column, with
-  or without a policy, so its presence is no existence signal. Nobody without `MANAGE_POLICY` may
-  learn that a policy exists (`table get` shows none; listings need `MANAGE_POLICY`), the asset's
-  author included: the run view (`schema_change_for_reader`) gives every reader the same
+  or without a policy, so its presence is no existence signal. A non-administrator (without
+  `MANAGE_POLICY`) never learns of a policy that does not apply to them (`table get` shows none;
+  listings need `MANAGE_POLICY`), the asset's author included. A reader a policy applies to learns
+  of it only from its effect: masked query values, and the table health signals, which say per
+  column that values are hidden for them (`values_hidden`, and the CLI line "Some values are
+  hidden: a column mask or row filter applies to you.") because a mask or row filter applies to
+  them; the hidden values would reveal that anyway. They never say which policy, nor its
+  definition (pins: `test_health_read.py`, the server's `test_tables_health.py`). The run view (`schema_change_for_reader`) gives every reader the same
   `COLUMNS_CHANGED_NOTE` for such a task (it asks the reader to tell an administrator: no channel
   pushes it to one) and `policy_warnings` (id, kind, column, revoke command)
   only to a reader who `permits` `MANAGE_POLICY` on the instance; the REST, SDK and CLI output of a
-  non-administrator is identical for a table with policies and one without. A job's notification
+  non-administrator is identical for a table with policies that do not apply to them and one
+  without. A job's notification
   goes to a webhook the project chooses, not to administrators, so it is neutral too: the event
   `columns_changed` (or a line in `failed`/`recovered`) for every run that removed or replaced a
   column, naming only the table. Deploy does not warn: output columns and types are known only at

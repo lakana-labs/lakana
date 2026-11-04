@@ -197,7 +197,10 @@ observation of each signal and column.
 ### Who sees what
 
 The signal routes need `READ_TABLE`, like the rest of the health, and a missing right is `403`.
-Numbers can reveal values, so they are left out where a policy applies to you:
+Numbers can reveal values, so they are left out where a policy applies to you. `values_hidden`
+then tells you, per column, that values are hidden for you because a column mask or row filter
+applies to you (the missing values would show that anyway); it never says which policy, nor its
+definition. A policy that does not apply to you changes nothing you see.
 
 - **Masked column.** If a column mask applies to you, the signal's name, state, time and snapshot
   id are shown, but not `observed`, `band` or `alert` (`values_hidden` is `true`). A mask covers

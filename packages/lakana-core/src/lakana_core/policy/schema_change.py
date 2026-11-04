@@ -353,7 +353,7 @@ def schema_change_for_reader(
         `TaskRun.schema_change_json`; entries this module did not write are skipped.
     manages_policies
         Whether the reader may manage policies. Only then are the policies shown, with their ids:
-        nobody else may learn that a policy exists.
+        nobody else may learn which policies exist.
 
     Returns
     -------

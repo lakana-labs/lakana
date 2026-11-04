@@ -833,7 +833,8 @@ class Tables:
         qualified_name
             Dot-joined `"namespace.table"` name.
         days
-            How far back, from 1 to the server's kept period (90 by default); 30 when `None`.
+            How far back, from 1 to the server's health signal window
+            (``LAKANA_HEALTH__RETENTION_DAYS``, 90 by default); 30 when `None`.
         signal
             Only this signal: ``freshness``, ``volume``, ``null_rate``, ``range`` or ``schema``.
         column

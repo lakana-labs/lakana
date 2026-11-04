@@ -457,8 +457,8 @@ def test_the_signal_history_pages_and_bounds_days(client: TestClient) -> None:
     refused = client.get(url, headers=AUTH_HEADER, params={"days": 91})
     assert refused.status_code == 422
     assert (
-        "days must be between 1 and 90 (got 91). The platform keeps health signals for 90 days; "
-        "an administrator can change that with LAKANA_HEALTH__RETENTION_DAYS."
+        "days must be between 1 and 90 (got 91), the platform's health signal window "
+        "(LAKANA_HEALTH__RETENTION_DAYS); ask for fewer days."
     ) in refused.text
     unknown = client.get(url, headers=AUTH_HEADER, params={"signal": "rows"})
     assert unknown.status_code == 422 and "There is no health signal `rows`" in unknown.text

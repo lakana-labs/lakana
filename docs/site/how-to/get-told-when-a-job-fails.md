@@ -131,7 +131,7 @@ names the run's tables where that happened and nothing more: in **json**,
 a line such as
 ``The run removed or retyped columns of `gold.payments`; an administrator can see in `lakana runs show ...` what to check``.
 It is sent whether or not a row filter or column mask uses the column: whoever reads the channel may
-not be an administrator, and only an administrator may learn that a policy exists. Nothing tells an
+not be an administrator, and only an administrator may learn which policies exist. Nothing tells an
 administrator by itself; one sees the affected policies with `lakana runs show`
 ([When a table's columns change](../explanation/when-columns-change.md#the-run-that-changes-a-column-says-so)).
 

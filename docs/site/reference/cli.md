@@ -537,7 +537,7 @@ Readers are counted from the queries that succeeded, per person and day. You see
 | Name | Type | Default | Description |
 |---|---|---|---|
 | `NAME` | text | required |  |
-| `--days` | whole number, 1 or more | none | Readers over this many days; with --signals, the history (up to the server's kept period, 90 by default). |
+| `--days` | whole number, 1 or more | none | Readers over this many days; with --signals, the history (up to the server's health signal window, LAKANA_HEALTH__RETENTION_DAYS, 90 by default). |
 | `--signals` | flag | off | Show the history of the health signals instead. |
 | `--signal` | text | none | Only this signal: freshness, volume, null_rate, range or schema. |
 | `--column` | text | none | Only this column. |

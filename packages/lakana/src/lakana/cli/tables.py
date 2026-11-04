@@ -829,7 +829,7 @@ def health(
             min=1,
             help=(
                 "Readers over this many days; with --signals, the history (up to the server's "
-                "kept period, 90 by default)."
+                "health signal window, LAKANA_HEALTH__RETENTION_DAYS, 90 by default)."
             ),
         ),
     ] = None,

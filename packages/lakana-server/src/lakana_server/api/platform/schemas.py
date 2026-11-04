@@ -3508,7 +3508,7 @@ class TaskRunOut(BaseModel):
         For a caller who may manage policies (MANAGE_POLICY), the row filters and column masks
         those writes left out of date (`PolicyWarningOut`); reads by the people they apply to are
         refused until an administrator creates them again. Always empty for every other caller,
-        who may not learn that a policy exists.
+        who may not learn which policies exist.
     """
 
     asset: str

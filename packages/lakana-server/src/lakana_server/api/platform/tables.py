@@ -1254,8 +1254,8 @@ def list_table_health_signals(
     request
         The current request, for `LAKANA_HEALTH__RETENTION_DAYS`.
     days
-        How far back, from 1 to the kept period (90 by default); 30 (or the kept period, if
-        shorter) when absent.
+        How far back, from 1 to `LAKANA_HEALTH__RETENTION_DAYS` (90 by default); 30 (or that
+        window, if shorter) when absent.
     signal
         Only this signal.
     column
@@ -1288,9 +1288,8 @@ def list_table_health_signals(
         days = min(30, keep)
     elif not 1 <= days <= keep:
         raise ValidationError(
-            f"days must be between 1 and {keep} (got {days}). The platform keeps health signals "
-            f"for {keep} days; an administrator can change that with "
-            "LAKANA_HEALTH__RETENTION_DAYS."
+            f"days must be between 1 and {keep} (got {days}), the platform's health signal "
+            "window (LAKANA_HEALTH__RETENTION_DAYS); ask for fewer days."
         )
     ref = TableRef(environment=env, namespace=NamespacePath.from_parts(path.split(".")), name=name)
     page = catalog.table_health_signals(
