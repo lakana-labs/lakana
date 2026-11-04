@@ -7,6 +7,8 @@ Plain helper functions and classes live in `core_test_helpers.py`, not here
 import datetime
 import uuid
 from collections.abc import Iterator
+from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from cryptography import x509
@@ -21,6 +23,9 @@ from lakana_core.config import DatabaseConfig
 from lakana_core.db import create_engine
 from lakana_core.models import Base, Principal, PrincipalType
 from lakana_core.storage.resolver import StorageResolver
+
+if TYPE_CHECKING:
+    from graph_test_helpers import StarWorld
 
 
 @pytest.fixture
@@ -115,3 +120,26 @@ def test_ca_pem() -> str:
         .sign(key, hashes.SHA256())
     )
     return certificate.public_bytes(serialization.Encoding.PEM).decode("ascii")
+
+
+@pytest.fixture
+def star(session: Session, tmp_path: Path, principal: PrincipalRef) -> "StarWorld":
+    """Provide the star schema of `graph_test_helpers`.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    tmp_path
+        Storage root.
+    principal
+        The creating principal.
+
+    Returns
+    -------
+    StarWorld
+        The world.
+    """
+    from graph_test_helpers import build_star
+
+    return build_star(session, tmp_path, principal)

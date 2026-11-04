@@ -93,7 +93,12 @@ from lakana_core.projects.glossary import (
 )
 from lakana_core.projects.history_columns import history_table_columns
 from lakana_core.projects.issues import ProjectIssue, ProjectValidationError, error_for_reader
-from lakana_core.projects.lookups import deployment_row, environment_by_name, repository_by_name
+from lakana_core.projects.lookups import (
+    current_manifests,
+    deployment_row,
+    environment_by_name,
+    repository_by_name,
+)
 from lakana_core.projects.manifest import (
     entry_history,
     entry_model,
@@ -891,16 +896,12 @@ class DeployService:
         list of tuple
             ``(repository name, manifest)``, ordered by repository name.
         """
-        query = (
-            select(Repository.name, JobVersion.manifest_json)
-            .join(EnvironmentDeployment, EnvironmentDeployment.repository_id == Repository.id)
-            .join(JobVersion, JobVersion.id == EnvironmentDeployment.current_job_version_id)
-            .where(EnvironmentDeployment.environment_id == environment_id)
-            .order_by(Repository.name)
-        )
-        if repository_id is not None:
-            query = query.where(EnvironmentDeployment.repository_id != repository_id)
-        return [(name, manifest) for name, manifest in self._session.execute(query)]
+        return [
+            (name, manifest)
+            for _, name, manifest in current_manifests(
+                self._session, environment_id, exclude=repository_id
+            )
+        ]
 
     def _elsewhere_entries(
         self, environment_id: uuid.UUID, repository_id: uuid.UUID

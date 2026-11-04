@@ -20,6 +20,7 @@ from lakana_core.errors import (
     AuditUnavailableError,
     AuthenticationError,
     ConflictError,
+    GraphBusyError,
     KeptAfterCheckError,
     LakanaError,
     NoCheckedSnapshotError,
@@ -102,6 +103,7 @@ _STATUS_CODES: dict[type[LakanaError], int] = {
     StorageUnavailableError: 503,
     StorageRefusedError: 502,
     AuditUnavailableError: 503,
+    GraphBusyError: 503,
 }
 
 _RETRY_AFTER_SECONDS: dict[type[LakanaError], str] = {
@@ -109,6 +111,7 @@ _RETRY_AFTER_SECONDS: dict[type[LakanaError], str] = {
     DownloadConcurrencyLimitError: "1",
     StorageUnavailableError: "5",
     AuditUnavailableError: "5",
+    GraphBusyError: "5",
 }
 """Extra `Retry-After` header value, by exception type, beyond the plain
 status/body mapping `_STATUS_CODES` covers. Kept as its own small table

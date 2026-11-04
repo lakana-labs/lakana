@@ -7,12 +7,13 @@ from pathlib import Path
 
 import pytest
 from core_test_helpers import _minimal_schema, _prepared_catalog
-from sqlalchemy import select
+from sqlalchemy import event, select
 from sqlalchemy.orm import Session
 
 from lakana_core.auth import (
     Action,
     AllowAllAuthorization,
+    CiScope,
     PrincipalRef,
     Securable,
     SecurableKind,
@@ -1474,3 +1475,203 @@ def test_permits_agrees_with_authorize(
         raised = True
     assert raised is expected_denied
     assert authz.permits(principal, action, securable) is (not raised)
+
+
+@pytest.mark.parametrize(
+    "build_case", _PERMITS_AGREEMENT_CASES.values(), ids=list(_PERMITS_AGREEMENT_CASES)
+)
+def test_permits_each_agrees_with_permits(
+    session: Session, build_case: Callable[[Session], _PermitsCase]
+) -> None:
+    """A batch of one answers as `permits` does, across the resolution algorithm.
+
+    Parameters
+    ----------
+    session
+        Database session, shared with the case builder.
+    build_case
+        Persists the case and returns the principal, action, securable and expected decision.
+    """
+    principal, action, securable, expected_denied = build_case(session)
+    single = GrantAuthorization(session).permits(principal, action, securable)
+    batch = GrantAuthorization(session).permits_each(principal, [(action, securable)])
+    assert batch == [single] == [not expected_denied]
+
+
+def _mixed_world(session: Session) -> tuple[PrincipalRef, list[tuple[Action, Securable]]]:
+    """Grant on a table, a namespace and an environment, and ask about many objects at once.
+
+    Parameters
+    ----------
+    session
+        Database session.
+
+    Returns
+    -------
+    tuple
+        The reader, and the questions, some permitted and some not.
+    """
+    alice = _add_principal(session, "alice")
+    dev = _add_environment(session, "dev")
+    _add_environment(session, "prod")
+    bronze, gold = NamespacePath.from_parts(["bronze"]), NamespacePath.from_parts(["gold"])
+    eu = NamespacePath.from_parts(["gold", "eu"])
+    orders = _add_table(session, "dev", bronze, "orders")
+    _add_table(session, "dev", bronze, "stores")
+    for name in ("facts", "dims"):
+        _add_table(session, "dev", gold, name)
+    _add_table(session, "dev", eu, "sales")
+    _add_table(session, "prod", gold, "facts")
+    _add_grant(
+        session,
+        granted_by=alice.id,
+        principal_id=alice.id,
+        environment="dev",
+        action=Action.READ_TABLE,
+        kind=SecurableKind.TABLE,
+        namespace=bronze.joined(),
+        table="orders",
+        environment_id=dev,
+        table_id=orders,
+    )
+    _add_grant(
+        session,
+        granted_by=alice.id,
+        principal_id=alice.id,
+        environment="dev",
+        action=Action.READ_TABLE,
+        kind=SecurableKind.NAMESPACE,
+        namespace=gold.joined(),
+        environment_id=dev,
+    )
+    _add_grant(
+        session,
+        granted_by=alice.id,
+        principal_id=alice.id,
+        environment="dev",
+        action=Action.READ_ENVIRONMENT,
+        kind=SecurableKind.ENVIRONMENT,
+        environment_id=dev,
+    )
+    table = Securable.table_scope
+    questions = [
+        (Action.READ_TABLE, table("dev", bronze, "orders")),
+        (Action.READ_TABLE, table("dev", bronze, "stores")),
+        (Action.READ_TABLE, table("dev", gold, "facts")),
+        (Action.READ_TABLE, table("dev", eu, "sales")),
+        (Action.READ_TABLE, table("dev", gold, "missing")),
+        (Action.READ_TABLE, table("dev", bronze, "missing")),
+        (Action.READ_TABLE, table("prod", gold, "facts")),
+        (Action.READ_TABLE, table("nowhere", gold, "facts")),
+        (Action.WRITE_TABLE, table("dev", gold, "facts")),
+        (Action.READ_ENVIRONMENT, Securable.environment_scope("dev")),
+        (Action.READ_ENVIRONMENT, Securable.environment_scope("prod")),
+        (Action.MANAGE_POLICY, Securable.instance_scope()),
+        (Action.READ_NAMESPACE, Securable.namespace_scope("dev", gold)),
+    ]
+    return alice, questions
+
+
+_MIXED_ANSWERS = [True, False, True, True, True, False, False, False, False, True, False, False]
+"""What `_mixed_world`'s reader may do, question by question (the last one is left out)."""
+
+
+def test_permits_each_answers_a_mixed_batch_as_the_single_questions_do(session: Session) -> None:
+    alice, questions = _mixed_world(session)
+    single = [GrantAuthorization(session).permits(alice, a, s) for a, s in questions]
+    assert single[:-1] == _MIXED_ANSWERS
+    assert GrantAuthorization(session).permits_each(alice, questions) == single
+    assert GrantAuthorization(session).permits_each(alice, []) == []
+
+
+def test_permits_each_narrows_a_task_token_and_a_ci_token_as_permits_does(
+    session: Session,
+) -> None:
+    alice, questions = _mixed_world(session)
+    task = PrincipalRef(
+        id=alice.id,
+        name=alice.name,
+        type=alice.type,
+        task_scope=TaskScope(environment="dev", asset_scope=["gold.*"], token_id=uuid.uuid4()),
+    )
+    ci = PrincipalRef(
+        id=alice.id,
+        name=alice.name,
+        type=alice.type,
+        ci_scope=CiScope(
+            token_id=uuid.uuid4(),
+            rule_id=uuid.uuid4(),
+            environment="dev",
+            environment_id=uuid.uuid4(),
+            repository="sales",
+            repository_id=uuid.uuid4(),
+            kinds=frozenset(),
+            sha=None,
+        ),
+    )
+    for reader in (task, ci):
+        single = [GrantAuthorization(session).permits(reader, a, s) for a, s in questions]
+        assert GrantAuthorization(session).permits_each(reader, questions) == single
+    assert [GrantAuthorization(session).permits(task, a, s) for a, s in questions][:4] == [
+        False,
+        False,
+        True,
+        True,
+    ]
+
+
+def _statements(session: Session, ask: Callable[[], object]) -> int:
+    """Count the SQL statements a question issues.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    ask
+        The question.
+
+    Returns
+    -------
+    int
+        How many statements reached the database.
+    """
+    seen: list[object] = []
+
+    def count(*args: object) -> None:
+        """Note one statement.
+
+        Parameters
+        ----------
+        *args
+            What SQLAlchemy passes.
+        """
+        seen.append(args)
+
+    engine = session.get_bind()
+    event.listen(engine, "before_cursor_execute", count)
+    try:
+        ask()
+    finally:
+        event.remove(engine, "before_cursor_execute", count)
+    return len(seen)
+
+
+def test_permits_each_costs_the_same_statements_for_one_table_or_forty(session: Session) -> None:
+    alice, _ = _mixed_world(session)
+    gold = NamespacePath.from_parts(["gold"])
+    for i in range(40):
+        _add_table(session, "dev", gold, f"t{i}")
+
+    def ask(count: int) -> Callable[[], object]:
+        questions = [
+            (Action.READ_TABLE, Securable.table_scope("dev", gold, f"t{i}")) for i in range(count)
+        ]
+        return lambda: GrantAuthorization(session).permits_each(alice, questions)
+
+    one = _statements(session, ask(1))
+    assert one == _statements(session, ask(40)) == 4
+    authz = GrantAuthorization(session)
+    again = [(Action.READ_TABLE, Securable.table_scope("dev", gold, "t0"))] * 3
+    assert authz.permits_each(alice, again) == [True, True, True]
+    # The ids are kept for the instance's lifetime; only the grants are read again.
+    assert _statements(session, lambda: authz.permits_each(alice, again)) == 2

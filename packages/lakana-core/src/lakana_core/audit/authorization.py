@@ -5,13 +5,13 @@ from __future__ import annotations
 import logging
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
 from sqlalchemy.orm import Session
 
 from lakana_core.audit.denial_limiter import DenialAuditLimiter
 from lakana_core.audit.service import AuditService
-from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable
+from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable, permits_each
 from lakana_core.errors import PermissionDenied
 from lakana_core.identifiers import NamespacePath, shown
 from lakana_core.models import AuditEventType
@@ -172,6 +172,25 @@ class AuditingAuthorization:
             Whatever the wrapped service's `permits` returns.
         """
         return self._wrapped.permits(principal, action, securable)
+
+    def permits_each(
+        self, principal: PrincipalRef, questions: Sequence[tuple[Action, Securable]]
+    ) -> list[bool]:
+        """Delegate many visibility questions at once; record nothing, as `permits`.
+
+        Parameters
+        ----------
+        principal
+            The actor the questions are about.
+        questions
+            ``(action, securable)`` pairs.
+
+        Returns
+        -------
+        list of bool
+            Whatever the wrapped service answers (`lakana_core.auth.permits_each`).
+        """
+        return permits_each(self._wrapped, principal, questions)
 
 
 FLUSH_MAX_PRINCIPALS = 100

@@ -36,6 +36,7 @@ from lakana_server.api.platform.connections import router as connections_router
 from lakana_server.api.platform.deploys import router as deploys_router
 from lakana_server.api.platform.environments import router as environments_router
 from lakana_server.api.platform.grants import router as grants_router
+from lakana_server.api.platform.graph import router as graph_router
 from lakana_server.api.platform.groups import router as groups_router
 from lakana_server.api.platform.info import router as info_router
 from lakana_server.api.platform.jobs import router as jobs_router
@@ -78,6 +79,7 @@ ROUTERS = (
     expiring_tables_router,
     search_router,
     terms_router,
+    graph_router,
     artifacts_router,
     artifacts_environment_router,
     iceberg_router,

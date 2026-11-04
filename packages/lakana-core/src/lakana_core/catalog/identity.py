@@ -87,6 +87,34 @@ def resolve_table_id(
     ).scalar_one_or_none()
 
 
+def table_ids_in(session: Session, environment: str) -> dict[tuple[str, str], uuid.UUID]:
+    """Resolve every table of an environment to its id, in one statement.
+
+    The same joins and conditions as `resolve_table_id`, for every table at once: a caller that
+    asks about many tables of one environment pays one statement, not one per table.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    environment
+        The environment's name.
+
+    Returns
+    -------
+    dict
+        ``(namespace in storage form, table name)`` → the table's id; empty when no
+        environment has that name.
+    """
+    rows = session.execute(
+        select(Table.id, Namespace.path, Table.name)
+        .join(Namespace, Table.namespace_id == Namespace.id)
+        .join(Environment, Namespace.environment_id == Environment.id)
+        .where(Environment.name == environment, LIVE_ENVIRONMENT)
+    )
+    return {(path, name): table_id for table_id, path, name in rows}
+
+
 def resolve_table_with_note(
     session: Session, environment: str, namespace_joined: str, table: str
 ) -> tuple[uuid.UUID, KeptSeen] | None:

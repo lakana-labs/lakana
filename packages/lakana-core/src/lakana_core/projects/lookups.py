@@ -6,11 +6,19 @@ or raise 404", so the two services cannot drift apart in what they disclose.
 
 from __future__ import annotations
 
+import uuid
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from lakana_core.errors import NotFoundError
-from lakana_core.models import LIVE_ENVIRONMENT, Environment, EnvironmentDeployment, Repository
+from lakana_core.models import (
+    LIVE_ENVIRONMENT,
+    Environment,
+    EnvironmentDeployment,
+    JobVersion,
+    Repository,
+)
 
 
 def live_environment_names(session: Session) -> list[str]:
@@ -55,6 +63,38 @@ def environment_by_name(session: Session, name: str) -> Environment:
     if env is None:
         raise NotFoundError(f"No environment named {name!r}.")
     return env
+
+
+def current_manifests(
+    session: Session, environment_id: uuid.UUID, *, exclude: uuid.UUID | None = None
+) -> list[tuple[uuid.UUID, str, object]]:
+    """Read the current project version of every repository deployed to an environment.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    environment_id
+        The environment.
+    exclude
+        A repository to leave out, or `None` to include every repository.
+
+    Returns
+    -------
+    list of tuple
+        ``(project version id, repository name, manifest)``, ordered by repository name. The
+        manifest is untrusted: read it with `lakana_core.projects.manifest`'s readers.
+    """
+    query = (
+        select(JobVersion.id, Repository.name, JobVersion.manifest_json)
+        .join(EnvironmentDeployment, EnvironmentDeployment.repository_id == Repository.id)
+        .join(JobVersion, JobVersion.id == EnvironmentDeployment.current_job_version_id)
+        .where(EnvironmentDeployment.environment_id == environment_id)
+        .order_by(Repository.name)
+    )
+    if exclude is not None:
+        query = query.where(EnvironmentDeployment.repository_id != exclude)
+    return [(version_id, name, manifest) for version_id, name, manifest in session.execute(query)]
 
 
 def repository_by_name(session: Session, name: str) -> Repository:

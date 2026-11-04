@@ -795,3 +795,39 @@ def table_terms(
         tuple(sorted(table, key=lambda r: r.key)),
         {c: tuple(sorted(refs, key=lambda r: r.key)) for c, refs in columns.items()},
     )
+
+
+def term_names(
+    session: Session,
+    term_ids: Collection[uuid.UUID],
+    languages: Sequence[str],
+    main_language: str,
+) -> dict[uuid.UUID, str]:
+    """Name terms in a reader's language, as `GlossaryService` shows them.
+
+    Authorization is the caller's: the metadata graph names only terms its reader may see.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    term_ids
+        The terms; at most `_LOOKUP_CHUNK`, which one page of the graph never passes.
+    languages
+        The reader's canonical languages, most wanted first.
+    main_language
+        The instance's main language, for a term whose project declares none.
+
+    Returns
+    -------
+    dict
+        Term id → its shown name; a term that no longer exists is absent.
+    """
+    if not term_ids:
+        return {}
+    terms = list(session.scalars(select(GlossaryTerm).where(GlossaryTerm.id.in_(term_ids))))
+    texts = _texts_by_term(session, [term.id for term in terms])
+    return {
+        term.id: _shown(term, texts.get(term.id, []), languages, main_language).name
+        for term in terms
+    }

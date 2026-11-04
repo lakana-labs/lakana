@@ -11,6 +11,7 @@ from lakana_core.auth import (
     PrincipalRef,
     Securable,
     SecurableKind,
+    permits_each,
 )
 from lakana_core.errors import PermissionDenied
 from lakana_core.identifiers import NamespacePath
@@ -144,3 +145,58 @@ def test_manage_namespace_is_distinct_from_the_other_namespace_actions() -> None
         Action.READ_NAMESPACE,
         Action.DROP_NAMESPACE,
     }
+
+
+def test_permits_each_asks_one_question_at_a_time_of_a_service_without_a_batch(
+    principal: PrincipalRef,
+) -> None:
+    gold = NamespacePath.from_parts(["gold"])
+    questions = [
+        (Action.READ_TABLE, Securable.table_scope("dev", gold, "facts")),
+        (Action.DROP_TABLE, Securable.table_scope("dev", gold, "facts")),
+    ]
+
+    class _OnlyReads:
+        """Permits reading, nothing else."""
+
+        def authorize(self, principal: PrincipalRef, action: Action, securable: Securable) -> None:
+            """Refuse anything but reading.
+
+            Parameters
+            ----------
+            principal
+                Ignored.
+            action
+                The action.
+            securable
+                Ignored.
+
+            Raises
+            ------
+            PermissionDenied
+                For anything but `READ_TABLE`.
+            """
+            if action is not Action.READ_TABLE:
+                raise PermissionDenied("no")
+
+        def permits(self, principal: PrincipalRef, action: Action, securable: Securable) -> bool:
+            """Answer as `authorize`.
+
+            Parameters
+            ----------
+            principal
+                Ignored.
+            action
+                The action.
+            securable
+                Ignored.
+
+            Returns
+            -------
+            bool
+                Whether reading is asked.
+            """
+            return action is Action.READ_TABLE
+
+    assert permits_each(_OnlyReads(), principal, questions) == [True, False]
+    assert permits_each(AllowAllAuthorization(), principal, questions) == [True, True]

@@ -2707,6 +2707,99 @@ class TermPage(BaseModel):
     next_cursor: str | None
 
 
+class GraphNodeOut(BaseModel):
+    """A node of the metadata graph, with the attributes the caller may see.
+
+    Parameters
+    ----------
+    id
+        Its stable id (`table:<uuid>`, `column:<uuid>/<name>`, `asset:<repository>/<name>`,
+        `reference:<uuid>`, `measure:<uuid>`, `term:<uuid>`, `check:<uuid>/<name>`,
+        `row_filter:<uuid>`, `column_mask:<uuid>`, `job:<repository>/<name>`); store it and pass
+        it back as `node`.
+    kind
+        `table`, `column`, `asset`, `reference`, `measure`, `term`, `check`, `row_filter`,
+        `column_mask` or `job`.
+    name
+        A name to read: a dotted table, `<table>.<column>`, a term's key.
+    distance
+        Steps from the start: assets crossed for lineage, 1 for a neighbour.
+    table_type
+        A table's `managed`, `external`, `view` or `artifact`.
+    model_kind
+        A table's declared kind.
+    grain
+        A table's grain, in your language.
+    key
+        A table's declared key columns.
+    owner
+        The owner of a table's asset (`None` for a reader without ``READ_ENVIRONMENT``), an
+        asset or a term.
+    repository
+        The repository that declares it (or builds its table).
+    label
+        A table's label, or a term's name, in your language.
+    column_type
+        A column's type.
+    reason
+        Always `null` for lineage and neighbours.
+    may_use
+        Always `false` for lineage and neighbours.
+    """
+
+    id: str
+    kind: str
+    name: str
+    distance: int
+    table_type: str | None = None
+    model_kind: str | None = None
+    grain: str | None = None
+    key: list[str] | None = None
+    owner: str | None = None
+    repository: str | None = None
+    label: str | None = None
+    column_type: str | None = None
+    reason: str | None = None
+    may_use: bool = False
+
+
+class GraphEdgeOut(BaseModel):
+    """An edge of the metadata graph, from `source` to `target` (both node ids).
+
+    Parameters
+    ----------
+    kind
+        `reads`, `builds`, `references`, `measures`, `checks`, `filters`, `masks`, `links`,
+        `runs` or `has_column`.
+    source
+        The node it leaves.
+    target
+        The node it reaches.
+    """
+
+    kind: str
+    source: str
+    target: str
+
+
+class GraphOut(BaseModel):
+    """One page of a metadata graph answer: at most 500 nodes, sorted by distance, then id.
+
+    Parameters
+    ----------
+    nodes
+        The nodes of this page; the start is the first node of the first page.
+    edges
+        The edges whose later endpoint is on this page; all pages together carry each edge once.
+    next_cursor
+        Pass back as `?cursor=` with the same question for the next page; `null` on the last.
+    """
+
+    nodes: list[GraphNodeOut]
+    edges: list[GraphEdgeOut]
+    next_cursor: str | None
+
+
 class ConnectionTestOut(BaseModel):
     """Response body for a connection test.
 

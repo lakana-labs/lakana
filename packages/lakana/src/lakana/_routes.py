@@ -251,5 +251,7 @@ ROUTES: dict[str, Route] = {
     "search": Route("GET", "/api/v1/environments/{env}/search"),
     "terms.list": Route("GET", "/api/v1/environments/{env}/terms"),
     "terms.get": Route("GET", "/api/v1/environments/{env}/terms/{key}"),
+    "graph.lineage": Route("GET", "/api/v1/environments/{env}/graph/lineage"),
+    "graph.neighbours": Route("GET", "/api/v1/environments/{env}/graph/neighbours"),
     "info": Route("GET", "/api/v1/info"),
 }

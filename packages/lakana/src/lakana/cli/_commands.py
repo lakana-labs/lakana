@@ -112,6 +112,8 @@ COMMANDS: dict[str, tuple[str, ...]] = {
     "connection test": ("connections.test",),
     "term list": ("terms.list", "terms.iter"),
     "term get": ("terms.get",),
+    "graph lineage": ("graph.lineage",),
+    "graph neighbours": ("graph.neighbours",),
     "repo add": ("repositories.create",),
     "repo list": ("repositories.list",),
     "repo show": ("repositories.get",),

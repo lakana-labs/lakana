@@ -40,6 +40,7 @@ from lakana.resources.connections import Connections
 from lakana.resources.deploys import Deployments, Deploys, OrphanTables, ProjectVersions
 from lakana.resources.environments import Environments
 from lakana.resources.grants import Grants
+from lakana.resources.graph import MetadataGraph
 from lakana.resources.groups import Groups
 from lakana.resources.jobs import Jobs
 from lakana.resources.namespaces import Namespaces
@@ -113,6 +114,7 @@ class Client:
         self.task_connections = TaskConnections(self._transport)
         """For the helpers of `lakana.ingest` inside a task: the fetch of a declared connection."""
         self.terms = Terms(self._transport)
+        self.graph = MetadataGraph(self._transport)
         self.repositories = Repositories(self._transport)
         self.package_indexes = PackageIndexes(self._transport)
         self.ci_trust_rules = CiTrustRules(self._transport)
