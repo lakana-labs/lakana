@@ -1,0 +1,318 @@
+"""What depends on a table, a column or a table's key: the metadata graph's `impact` (#374, Q4).
+
+Everything declared that depends on the start is listed, each with a reason:
+
+- references to it, and their generated `ref_` checks;
+- measures, masks and glossary terms on its columns;
+- its checks and row filters, and glossary terms on the table;
+- the asset that builds it;
+- the assets downstream of it (transitively) and the tables they build;
+- the jobs that run any asset listed.
+
+For a column or a key, only what names those columns is certain. The table's hand-written checks,
+its row filters and everything downstream may use them, and carry `may_use` (SQL is not parsed).
+References to the table and terms on the table name the table, not the column, and are left out.
+
+The walk goes only through `_Context.around`, so it is cut at every node the reader may not see,
+and the budget counts it as it counts lineage. A reason names only the start, a table the walk
+reached, or the other end of a visible reference or asset; never a hidden node.
+
+Only the start table's columns are read (one statement, `has_column`): every other edge the walk
+follows leads to a record, an asset or a table, none of which reads columns.
+"""
+
+from __future__ import annotations
+
+from collections import deque
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+from lakana_core.catalog.graph_load import AssetRecord, CheckRecord, ReferenceRecord
+from lakana_core.catalog.graph_model import (
+    EdgeKind,
+    GraphEdge,
+    NodeKind,
+    node_kind,
+    table_node,
+    table_part,
+)
+
+if TYPE_CHECKING:
+    from lakana_core.catalog.graph_service import _Context
+
+_ON_COLUMN = (
+    EdgeKind.REFERENCES,
+    EdgeKind.MEASURES,
+    EdgeKind.CHECKS,
+    EdgeKind.MASKS,
+    EdgeKind.LINKS,
+)
+"""The edges by which something names a column."""
+
+_ON_TABLE = (
+    EdgeKind.REFERENCES,
+    EdgeKind.CHECKS,
+    EdgeKind.FILTERS,
+    EdgeKind.LINKS,
+    EdgeKind.BUILDS,
+)
+"""The edges by which something names a table."""
+
+_COLUMN_VERBS = {
+    EdgeKind.MEASURES: "a measure on",
+    EdgeKind.MASKS: "masks",
+    EdgeKind.LINKS: "links",
+}
+
+
+@dataclass(frozen=True)
+class Hit:
+    """A node impact lists.
+
+    Parameters
+    ----------
+    distance
+        Its distance from the start, in edges, the shortest found.
+    reason
+        Why it is listed; `None` for the start (and a column start's table).
+    may_use
+        Whether it only may use the start, rather than naming it.
+    """
+
+    distance: int
+    reason: str | None
+    may_use: bool
+
+
+class _Answer:
+    """The nodes and edges found so far; an edge is added only with both its ends in the answer.
+
+    Parameters
+    ----------
+    root
+        The start, at distance 0.
+    """
+
+    def __init__(self, root: str) -> None:
+        self.hits: dict[str, Hit] = {root: Hit(0, None, False)}
+        self.edges: set[GraphEdge] = set()
+
+    def add(self, node: str, distance: int, reason: str, may_use: bool, edge: GraphEdge) -> bool:
+        """Add a node reached through `edge`, whose other end is in the answer.
+
+        A node found again keeps its shortest distance. Its reason changes only when it was
+        listed as `may_use` and is now found as certain.
+
+        Parameters
+        ----------
+        node
+            The node reached.
+        distance
+            Its distance by this way.
+        reason
+            Why this way lists it.
+        may_use
+            Whether this way only may use the start.
+        edge
+            The edge it was reached by.
+
+        Returns
+        -------
+        bool
+            Whether the node is new, or became certain.
+        """
+        self.edges.add(edge)
+        old = self.hits.get(node)
+        if old is None or (old.may_use and not may_use):
+            shortest = distance if old is None else min(distance, old.distance)
+            self.hits[node] = Hit(shortest, reason, may_use)
+            return True
+        if distance < old.distance:
+            self.hits[node] = Hit(distance, old.reason, old.may_use)
+        return False
+
+
+def impact_of(ctx: _Context, root: str, *, key: bool) -> tuple[dict[str, Hit], set[GraphEdge]]:
+    """List what depends on a visible table, column or key.
+
+    Parameters
+    ----------
+    ctx
+        The request's context.
+    root
+        A table or column id the reader may see.
+    key
+        Whether the question is about the table's declared key (the caller checked it has one).
+
+    Returns
+    -------
+    tuple
+        The nodes, with their hits, and the edges between them.
+    """
+    table_id = table_part(root)
+    table = table_node(table_id)
+    dotted = ctx.graph.tables[table_id].ref.dotted()
+    answer = _Answer(root)
+    if node_kind(root) is NodeKind.COLUMN:
+        answer.hits[table] = Hit(0, None, False)
+        answer.edges.add(GraphEdge(EdgeKind.HAS_COLUMN, table, root))
+        columns, base, subject = [root], 0, root.partition("/")[2]
+    else:
+        wanted = set(ctx.graph.tables[table_id].key) if key else None
+        columns = [
+            column
+            for _, column in ctx.around(table, (EdgeKind.HAS_COLUMN,))
+            if wanted is None or column.partition("/")[2] in wanted
+        ]
+        base, subject = 1, ("its key" if key else None)
+        for column in columns if key else ():
+            edge = GraphEdge(EdgeKind.HAS_COLUMN, table, column)
+            answer.add(column, 1, f"a key column of {dotted}", False, edge)
+    for column in columns:
+        _on_column(ctx, answer, column, dotted, base)
+    _on_table(ctx, answer, table, dotted, subject)
+    _downstream(ctx, answer, table, may_use=subject is not None)
+    _jobs(ctx, answer)
+    return answer.hits, answer.edges
+
+
+def _on_column(ctx: _Context, answer: _Answer, column: str, dotted: str, base: int) -> None:
+    """Add what names one column: references, measures, key checks, masks and terms.
+
+    Parameters
+    ----------
+    ctx
+        The request's context.
+    answer
+        The answer; filled.
+    column
+        The column, of the start table.
+    dotted
+        The start table's name.
+    base
+        The column's distance.
+    """
+    table_id, name = table_part(column), column.partition("/")[2]
+    shown = f"{dotted}.{name}"
+    for edge, other in ctx.around(column, _ON_COLUMN):
+        record = ctx.graph.records[other]
+        if isinstance(record, ReferenceRecord):
+            own = record.source_table_id == table_id and record.source_column == name
+            reason = f"declared on {shown}" if own else f"references {shown}"
+        elif edge.kind is EdgeKind.CHECKS:
+            reason = f"checks the key of {dotted}"
+        else:
+            reason = f"{_COLUMN_VERBS[edge.kind]} {shown}"
+        if column not in answer.hits:
+            has = GraphEdge(EdgeKind.HAS_COLUMN, table_node(table_id), column)
+            answer.add(column, base, f"a column of {dotted}", False, has)
+        if answer.add(other, base + 1, reason, False, edge) and isinstance(record, ReferenceRecord):
+            _reference_checks(ctx, answer, record, base + 2)
+
+
+def _reference_checks(
+    ctx: _Context, answer: _Answer, reference: ReferenceRecord, distance: int
+) -> None:
+    """Add the generated `ref_` check of a reference.
+
+    Parameters
+    ----------
+    ctx
+        The request's context.
+    answer
+        The answer, which holds the reference; filled.
+    reference
+        The reference.
+    distance
+        The check's distance.
+    """
+    source = ctx.graph.tables[reference.source_table_id].ref.dotted()
+    reason = f"checks the reference {source}.{reference.source_column}"
+    for edge, check in ctx.around(reference.id, (EdgeKind.CHECKS,)):
+        answer.add(check, distance, reason, False, edge)
+
+
+def _on_table(ctx: _Context, answer: _Answer, table: str, dotted: str, subject: str | None) -> None:
+    """Add what hangs on the start table itself.
+
+    Parameters
+    ----------
+    ctx
+        The request's context.
+    answer
+        The answer; filled.
+    table
+        The start table.
+    dotted
+        Its name.
+    subject
+        `None` for the whole table. For a column or key, what checks and row filters may use;
+        then references to the table, terms on it and its generated checks are left out.
+    """
+    may = "" if subject is None else f"; may use {subject}"
+    for edge, other in ctx.around(table, _ON_TABLE):
+        record = ctx.graph.records[other]
+        if edge.kind is EdgeKind.BUILDS:
+            answer.add(other, 1, f"builds {dotted}", False, edge)
+        elif edge.kind is EdgeKind.FILTERS:
+            answer.add(other, 1, f"filters {dotted}{may}", subject is not None, edge)
+        elif isinstance(record, CheckRecord):
+            if subject is None or record.family is None:
+                answer.add(other, 1, f"checks {dotted}{may}", subject is not None, edge)
+        elif subject is not None:
+            continue
+        elif isinstance(record, ReferenceRecord):
+            reason = f"references {record.target_name}.{record.target_column}"
+            if answer.add(other, 1, reason, False, edge):
+                _reference_checks(ctx, answer, record, 2)
+        else:
+            answer.add(other, 1, f"links {dotted}", False, edge)
+
+
+def _downstream(ctx: _Context, answer: _Answer, table: str, *, may_use: bool) -> None:
+    """Add the assets downstream of the table, transitively, and the tables they build.
+
+    An asset is always the source of its `reads` and `builds` edges and a table their target, so
+    the kinds alone say the direction.
+
+    Parameters
+    ----------
+    ctx
+        The request's context.
+    answer
+        The answer; filled.
+    table
+        The start table.
+    may_use
+        Whether what is downstream only may use the start (a column or key).
+    """
+    queue, seen = deque([table]), {table}
+    while queue:
+        current = queue.popleft()
+        reason = f"downstream of {ctx.graph.tables[table_part(current)].ref.dotted()}"
+        distance = answer.hits[current].distance + 1
+        for read, asset in ctx.around(current, (EdgeKind.READS,)):
+            answer.add(asset, distance, reason, may_use, read)
+            for built_edge, built in ctx.around(asset, (EdgeKind.BUILDS,)):
+                answer.add(built, distance, reason, may_use, built_edge)
+                if built not in seen:
+                    seen.add(built)
+                    queue.append(built)
+
+
+def _jobs(ctx: _Context, answer: _Answer) -> None:
+    """Add the jobs that run any listed asset; a job is `may_use` only through `may_use` assets.
+
+    Parameters
+    ----------
+    ctx
+        The request's context.
+    answer
+        The answer; filled.
+    """
+    for node, hit in sorted(answer.hits.items()):
+        record = ctx.graph.records.get(node)
+        if not isinstance(record, AssetRecord):
+            continue
+        for edge, job in ctx.around(node, (EdgeKind.RUNS,)):
+            answer.add(job, hit.distance + 1, f"runs {record.name}", hit.may_use, edge)

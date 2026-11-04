@@ -11,10 +11,10 @@ import typer
 
 from lakana._models import Graph, GraphNode
 from lakana.cli import _output
-from lakana.cli._state import CliState, resolve_environment, state_of
+from lakana.cli._state import CliError, CliState, resolve_environment, state_of
 
 graph_app = typer.Typer(
-    help="Ask the metadata graph: lineage and neighbours.",
+    help="Ask the metadata graph: lineage, neighbours and impact.",
     no_args_is_help=True,
 )
 
@@ -32,6 +32,13 @@ _SIDE_NOTE = (
     "side: up feeds the start, down is fed by it, both is on a loop through it, join is "
     "joined to a column start by a reference."
 )
+
+_IMPACT_COLUMNS = ["distance", "kind", "name", "reason", "may_use", "repository"]
+_MAY_USE_NOTE = (
+    "may_use: yes means it may use the column or key without naming it (a check, a row filter "
+    "or something downstream); SQL is not parsed, so look before you change it."
+)
+_COLUMN_AND_KEY = "--column and --key ask different questions; give one of them."
 
 
 class _Direction(enum.StrEnum):
@@ -263,6 +270,58 @@ def neighbours(
             _output.emit(state, f"No neighbours of {name} that you may see.")
         return
     _show(state, graph, _COLUMNS)
+
+
+@graph_app.command("impact")
+def impact(
+    ctx: typer.Context,
+    node: _NODE,
+    column: _COLUMN = None,
+    key: Annotated[bool, typer.Option("--key", help="Ask about the table's declared key.")] = False,
+    lang: _LANG = None,
+    env: _ENV = None,
+) -> None:
+    """Show what the projects declare that depends on NODE, with the reason for each.
+
+    Parameters
+    ----------
+    ctx
+        The Typer context.
+    node
+        A table.
+    column
+        A column of the table `node` names.
+    key
+        Ask about the table's declared key.
+    lang
+        The language of labels and names.
+    env
+        The environment.
+
+    Raises
+    ------
+    CliError
+        For --column and --key together (exit 2).
+    """
+    if column is not None and key:
+        raise CliError(_COLUMN_AND_KEY)
+    state = state_of(ctx)
+    graph = state.client().graph.impact(
+        resolve_environment(state, env), _node(node, column), key=key, lang=lang
+    )
+    if not [n for n in graph.nodes if n.reason] and state.output != "json":
+        name = _output.inline(graph.nodes[0].name if graph.nodes else node)
+        _output.emit(
+            state, f"Nothing the projects declare depends on {name}, as far as you may see."
+        )
+        return
+    _show(
+        state,
+        graph,
+        _IMPACT_COLUMNS,
+        derived={"may_use": lambda n: "yes" if n.may_use else ""},
+        footnotes={"may_use": _MAY_USE_NOTE},
+    )
 
 
 def register(app: typer.Typer) -> None:

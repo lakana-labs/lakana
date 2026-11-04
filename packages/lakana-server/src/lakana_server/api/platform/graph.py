@@ -1,4 +1,4 @@
-"""The metadata graph routes of the platform API: lineage and neighbours (#374)."""
+"""The metadata graph routes of the platform API: lineage, neighbours and impact (#374)."""
 
 from __future__ import annotations
 
@@ -203,6 +203,78 @@ def graph_neighbours(
             env,
             node,
             kinds=kinds or (),
+            languages=reader_languages(request, lang, principal, main_language),
+            limit=limit,
+            cursor=cursor,
+        )
+    )
+
+
+@router.get("/impact", response_model=GraphOut, responses=errors(404, 503))
+def graph_impact(
+    request: Request,
+    env: str,
+    node: str = Query(description=NODE_DESCRIPTION),
+    key: bool = Query(
+        default=False,
+        description="Ask about the table's declared key instead of the whole table.",
+    ),
+    lang: str | None = _LANG,
+    limit: int = _LIMIT,
+    cursor: str | None = _CURSOR,
+    principal: PrincipalRef = _PRINCIPAL,
+    service: GraphService = _SERVICE,
+    main_language: str = _MAIN_LANGUAGE,
+) -> GraphOut:
+    """List everything the projects declare that depends on a table, a column or a table's key.
+
+    The start is a table or a column; `key=true` asks about a table's declared key. The answer
+    holds the references to it and their generated checks, the measures, masks and glossary
+    terms on its columns, its checks, row filters and terms, the asset that builds it,
+    everything downstream of it, and the jobs that run any asset listed. Each node but the start
+    carries `reason`, such as `references gold.dim_store.store_id` or `downstream of
+    silver.orders`. For a column or a key, what only may use it carries `may_use: true`: the
+    table's hand-written checks, its row filters and everything downstream, because SQL is not
+    parsed. You see what lineage and neighbours would show you, and nothing beyond a node you may
+    not see. Answers 404 as lineage does, 422 for a start that is not a table or column, for
+    `key=true` with a column or on a table that declares no key, and for a limit or cursor out of
+    bounds or a question too large to walk, and 503 with `Retry-After` when the walk ran past its
+    time.
+
+    Parameters
+    ----------
+    request
+        The request, for `Accept-Language`.
+    env
+        Environment name.
+    node
+        The start.
+    key
+        Whether to ask about the table's declared key.
+    lang
+        The language of labels and names.
+    limit
+        Nodes per page.
+    cursor
+        The previous page's cursor.
+    principal
+        The authenticated caller.
+    service
+        The graph reader.
+    main_language
+        The instance's main language.
+
+    Returns
+    -------
+    GraphOut
+        One page.
+    """
+    return graph_out(
+        service.impact(
+            principal,
+            env,
+            node,
+            key=key,
             languages=reader_languages(request, lang, principal, main_language),
             limit=limit,
             cursor=cursor,

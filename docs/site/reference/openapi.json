@@ -6237,6 +6237,170 @@
         }
       }
     },
+    "/api/v1/environments/{env}/graph/impact": {
+      "get": {
+        "tags": [
+          "graph"
+        ],
+        "summary": "List everything the projects declare that depends on a table, a column or a table's key",
+        "description": "The start is a table or a column; `key=true` asks about a table's declared key. The answer holds the references to it and their generated checks, the measures, masks and glossary terms on its columns, its checks, row filters and terms, the asset that builds it, everything downstream of it, and the jobs that run any asset listed. Each node but the start carries `reason`, such as `references gold.dim_store.store_id` or `downstream of silver.orders`. For a column or a key, what only may use it carries `may_use: true`: the table's hand-written checks, its row filters and everything downstream, because SQL is not parsed. You see what lineage and neighbours would show you, and nothing beyond a node you may not see. Answers 404 as lineage does, 422 for a start that is not a table or column, for `key=true` with a column or on a table that declares no key, and for a limit or cursor out of bounds or a question too large to walk, and 503 with `Retry-After` when the walk ran past its time.",
+        "operationId": "graph_impact_api_v1_environments__env__graph_impact_get",
+        "parameters": [
+          {
+            "name": "env",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Env"
+            },
+            "description": "Environment name."
+          },
+          {
+            "name": "node",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "A node id from an answer, or a table's dotted name such as gold.dim_store; a column as column:gold.dim_store/store_id.",
+              "title": "Node"
+            },
+            "description": "A node id from an answer, or a table's dotted name such as gold.dim_store; a column as column:gold.dim_store/store_id."
+          },
+          {
+            "name": "key",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Ask about the table's declared key instead of the whole table.",
+              "default": false,
+              "title": "Key"
+            },
+            "description": "Ask about the table's declared key instead of the whole table."
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The language of the texts, such as de or fr-CH; without it, your profile's language, then Accept-Language, then the instance's main language.",
+              "title": "Lang"
+            },
+            "description": "The language of the texts, such as de or fr-CH; without it, your profile's language, then Accept-Language, then the instance's main language."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "description": "Most nodes per page, 1 to 500.",
+              "default": 500,
+              "title": "Limit"
+            },
+            "description": "Most nodes per page, 1 to 500."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 10978
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The `next_cursor` of the previous page, sent with the same question.",
+              "title": "Cursor"
+            },
+            "description": "The `next_cursor` of the previous page, sent with the same question."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GraphOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token is missing, wrong, expired or revoked.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The server cannot do this right now; ask again after the time in `Retry-After`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/environments/{env}/namespaces/{path}/artifacts/{name}/uploads": {
       "post": {
         "tags": [

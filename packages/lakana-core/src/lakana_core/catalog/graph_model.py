@@ -117,11 +117,24 @@ LINEAGE_KINDS = (
 )
 TOO_LARGE = (
     "This question reaches more of the graph than one request may walk ({steps} edges). Ask a "
-    "narrower one: a smaller --depth or one --direction for lineage, or --kind for neighbours."
+    "narrower one: a smaller --depth or one --direction for lineage, or --kind for neighbours; "
+    "instead of impact, lineage --direction down with a small --depth."
 )
 BUSY = (
     "The graph walk took longer than {seconds:g} s and was stopped. Try again in a moment; if it "
     "keeps happening, ask a narrower question (a smaller --depth, one --direction, or --kind)."
+)
+IMPACT_KINDS = (
+    "Impact is asked of a table or a column, and `{node}` is a {word}. Ask for its neighbours "
+    "instead: lakana graph neighbours {node} --env {env}"
+)
+KEY_NEEDS_TABLE = (
+    "key=true asks for the impact of a table's key, and `{node}` is a column. Ask for the column "
+    "without --key, or for its table with --key."
+)
+NO_KEY = (
+    "`{table}` declares no key, so its key has no impact to show. Declare one in the asset header "
+    "(key: [column, ...]), or ask for the whole table: lakana graph impact {table} --env {env}"
 )
 
 _UNSAFE = frozenset({"Cc", "Cf", "Cs", "Zl", "Zp"})

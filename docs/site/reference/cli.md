@@ -1972,7 +1972,7 @@ A link shows only when you may read its table; one whose table does not exist, o
 
 Usage: `lakana graph [OPTIONS] COMMAND [ARGS]...`
 
-Ask the metadata graph: lineage and neighbours.
+Ask the metadata graph: lineage, neighbours and impact.
 
 ### `lakana graph lineage`
 
@@ -2000,6 +2000,20 @@ Show what is one edge away from NODE: columns, assets, references, checks, terms
 | `NODE` | text | required | A table's dotted name, such as gold.dim_store, or a node id. |
 | `--column` | text | none | A column of the table NODE names. |
 | `--kind` | text, repeatable | none | Only edges of this kind; repeat for several. |
+| `--lang` | text | none | Show labels in this language, such as de. |
+| `--env` | text | none | Environment (default: the profile's). |
+
+### `lakana graph impact`
+
+Usage: `lakana graph impact [OPTIONS] {node}`
+
+Show what the projects declare that depends on NODE, with the reason for each.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `NODE` | text | required | A table's dotted name, such as gold.dim_store, or a node id. |
+| `--column` | text | none | A column of the table NODE names. |
+| `--key` | flag | off | Ask about the table's declared key. |
 | `--lang` | text | none | Show labels in this language, such as de. |
 | `--env` | text | none | Environment (default: the profile's). |
 

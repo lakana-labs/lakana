@@ -1,4 +1,4 @@
-"""The metadata graph's lineage and neighbours on a real PostgreSQL (#374)."""
+"""The metadata graph's lineage, neighbours and impact on a real PostgreSQL (#374)."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from graph_test_helpers import Grants, build_star
+from graph_test_helpers import KEY_IMPACT, Grants, build_star
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 from testcontainers.postgres import PostgresContainer
@@ -71,3 +71,14 @@ def test_lineage_and_neighbours_read_the_same_on_postgres(
     }
     near = service.neighbours(principal, "dev", "column:gold.dim_store/store_id")
     assert star.reference("gold.fact_sales", "store_id") in {n.id for n in near.nodes}
+
+
+def test_impact_reads_the_same_on_postgres(
+    session: Session, tmp_path: Path, principal: PrincipalRef
+) -> None:
+    star = build_star(session, tmp_path, principal)
+    star.add_row_filter(principal, "gold.dim_store")
+    page = GraphService(session, Grants(policies=True), "en").impact(
+        principal, "dev", "gold.dim_store", key=True
+    )
+    assert {(n.kind, n.name, n.reason, n.may_use) for n in page.nodes} == KEY_IMPACT

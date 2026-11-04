@@ -11,8 +11,9 @@ hand-written check, two generated `ref_` checks, the glossary term `net_revenue`
 
 from __future__ import annotations
 
+import time
 import uuid
-from collections.abc import Collection
+from collections.abc import Callable, Collection
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -27,7 +28,8 @@ from sqlalchemy.orm import Session
 from lakana_core.auth import Action, AllowAllAuthorization, PrincipalRef, Securable
 from lakana_core.catalog.descriptions import sync_project_descriptions
 from lakana_core.catalog.glossary import write_glossary
-from lakana_core.catalog.graph_model import NodeKind, row_node
+from lakana_core.catalog.graph_model import MAX_GRAPH_STEPS, NodeKind, row_node
+from lakana_core.catalog.graph_service import GraphService
 from lakana_core.errors import PermissionDenied
 from lakana_core.identifiers import NamespacePath, TableRef
 from lakana_core.models import (
@@ -57,6 +59,40 @@ TABLES: dict[str, tuple[tuple[str, str], ...]] = {
     "gold.fact_sales": (("date", "date"), ("store_id", "long"), ("net_amount", "double")),
 }
 """Every table of the star, with its columns and their types."""
+
+KEY_IMPACT: frozenset[tuple[NodeKind, str, str | None, bool]] = frozenset(
+    {
+        (NodeKind.TABLE, "gold.dim_store", None, False),
+        (NodeKind.COLUMN, "gold.dim_store.store_id", "a key column of gold.dim_store", False),
+        (
+            NodeKind.REFERENCE,
+            "gold.fact_sales.store_id → gold.dim_store.store_id",
+            "references gold.dim_store.store_id",
+            False,
+        ),
+        (
+            NodeKind.CHECK,
+            "gold.fact_sales/ref_store_id",
+            "checks the reference gold.fact_sales.store_id",
+            False,
+        ),
+        (NodeKind.CHECK, "gold.dim_store/key_unique", "checks the key of gold.dim_store", False),
+        (NodeKind.CHECK, "gold.dim_store/key_not_null", "checks the key of gold.dim_store", False),
+        (NodeKind.TERM, "store", "links gold.dim_store.store_id", False),
+        (
+            NodeKind.ROW_FILTER,
+            "row filter on gold.dim_store",
+            "filters gold.dim_store; may use its key",
+            True,
+        ),
+        (NodeKind.ASSET, "gold.dim_store", "builds gold.dim_store", False),
+        (NodeKind.ASSET, "gold.fact_sales", "downstream of gold.dim_store", True),
+        (NodeKind.TABLE, "gold.fact_sales", "downstream of gold.dim_store", True),
+        (NodeKind.JOB, "sales/nightly", "runs gold.fact_sales", True),
+    }
+)
+"""`(kind, name, reason, may_use)` of every node of the impact of `gold.dim_store`'s key,
+once `StarWorld.add_row_filter` has put a row filter on it."""
 
 _NET = {
     "column": "net_amount",
@@ -540,6 +576,67 @@ class StarWorld:
         model = RowFilter if kind is NodeKind.ROW_FILTER else ColumnMask
         return row_node(kind, self.session.scalars(select(model.id)).one())
 
+    def add_row_filter(self, principal: PrincipalRef, dotted: str) -> str:
+        """Put a row filter on a table of the star; flushed, not committed.
+
+        Parameters
+        ----------
+        principal
+            The principal it filters and that creates it.
+        dotted
+            The table.
+
+        Returns
+        -------
+        str
+            Its node id.
+        """
+        ref = TableRef.from_dotted("dev", dotted)
+        row = RowFilter(
+            id=uuid.uuid4(),
+            principal_id=principal.id,
+            environment="dev",
+            namespace=ref.namespace.joined(),
+            table=ref.name,
+            environment_id=self.env_id,
+            table_id=self.table_id(dotted),
+            created_by=principal.id,
+            created_at=datetime.now(UTC),
+            expression="store_id > 0",
+        )
+        self.session.add(row)
+        self.session.flush()
+        return row_node(NodeKind.ROW_FILTER, row.id)
+
+
+def graph_service_for(
+    star: StarWorld,
+    grants: Grants | None = None,
+    *,
+    clock: Callable[[], float] = time.monotonic,
+    max_steps: int = MAX_GRAPH_STEPS,
+) -> GraphService:
+    """Build the graph service over the star.
+
+    Parameters
+    ----------
+    star
+        The world.
+    grants
+        What the reader may do; everything, policies included, when `None`.
+    clock
+        The service's clock.
+    max_steps
+        The step budget.
+
+    Returns
+    -------
+    GraphService
+        The service.
+    """
+    authz = grants or Grants(policies=True)
+    return GraphService(star.session, authz, "en", clock=clock, max_steps=max_steps)
+
 
 def build_star(session: Session, tmp_path: Path, principal: PrincipalRef) -> StarWorld:
     """Create the star in `dev`: tables, both deployments, model rows, terms and policies.
@@ -584,36 +681,21 @@ def build_star(session: Session, tmp_path: Path, principal: PrincipalRef) -> Sta
         repos[name] = repo
     session.flush()
     world = StarWorld(session, env_id, repos)
-    gold = NamespacePath.from_parts(["gold"]).joined()
-    now = datetime.now(UTC)
-    session.add_all(
-        [
-            RowFilter(
-                id=uuid.uuid4(),
-                principal_id=principal.id,
-                environment="dev",
-                namespace=gold,
-                table="fact_sales",
-                environment_id=env_id,
-                table_id=world.table_id("gold.fact_sales"),
-                created_by=principal.id,
-                created_at=now,
-                expression="store_id > 0",
-            ),
-            ColumnMask(
-                id=uuid.uuid4(),
-                principal_id=principal.id,
-                environment="dev",
-                namespace=gold,
-                table="dim_store",
-                column="store_name",
-                environment_id=env_id,
-                table_id=world.table_id("gold.dim_store"),
-                created_by=principal.id,
-                created_at=now,
-                expression="NULL",
-            ),
-        ]
+    world.add_row_filter(principal, "gold.fact_sales")
+    session.add(
+        ColumnMask(
+            id=uuid.uuid4(),
+            principal_id=principal.id,
+            environment="dev",
+            namespace=NamespacePath.from_parts(["gold"]).joined(),
+            table="dim_store",
+            column="store_name",
+            environment_id=env_id,
+            table_id=world.table_id("gold.dim_store"),
+            created_by=principal.id,
+            created_at=datetime.now(UTC),
+            expression="NULL",
+        )
     )
     session.commit()
     return world

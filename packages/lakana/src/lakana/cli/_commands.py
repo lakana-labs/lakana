@@ -114,6 +114,7 @@ COMMANDS: dict[str, tuple[str, ...]] = {
     "term get": ("terms.get",),
     "graph lineage": ("graph.lineage",),
     "graph neighbours": ("graph.neighbours",),
+    "graph impact": ("graph.impact",),
     "repo add": ("repositories.create",),
     "repo list": ("repositories.list",),
     "repo show": ("repositories.get",),

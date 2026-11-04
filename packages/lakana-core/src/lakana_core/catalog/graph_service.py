@@ -1,4 +1,4 @@
-"""Walking the metadata graph for one reader: `lineage` and `neighbours` (#374).
+"""Walking the metadata graph for one reader: `lineage`, `neighbours` and `impact` (#374).
 
 Every node goes through `_Visibility` before a walk reaches it (spec §4):
 - a table, its columns, measures and checks need `READ_TABLE` on the table;
@@ -33,6 +33,7 @@ from sqlalchemy.orm import Session
 
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable, permits_each
 from lakana_core.catalog.glossary_read import term_names
+from lakana_core.catalog.graph_impact import impact_of
 from lakana_core.catalog.graph_load import (
     AssetRecord,
     CheckRecord,
@@ -53,6 +54,8 @@ from lakana_core.catalog.graph_model import (
     BUSY,
     DEFAULT_GRAPH_DEPTH,
     GRAPH_TIME_BUDGET_SECONDS,
+    IMPACT_KINDS,
+    KEY_NEEDS_TABLE,
     KIND_WORDS,
     LINEAGE_KINDS,
     MAX_GRAPH_DEPTH,
@@ -60,6 +63,7 @@ from lakana_core.catalog.graph_model import (
     MAX_GRAPH_STEPS,
     MAX_NODE_ID,
     NO_ENVIRONMENT,
+    NO_KEY,
     NO_NODE,
     TOO_LARGE,
     EdgeKind,
@@ -441,6 +445,7 @@ def _key(distance: int, node_id: str) -> str:
 
 _LINEAGE = "graph-lineage"
 _NEIGHBOURS = "graph-neighbours"
+_IMPACT = "graph-impact"
 
 
 def _after(list_kind: str, cursor: str | None) -> str | None:
@@ -449,7 +454,7 @@ def _after(list_kind: str, cursor: str | None) -> str | None:
     Parameters
     ----------
     list_kind
-        The list asked: `_LINEAGE` or `_NEIGHBOURS`.
+        The list asked: `_LINEAGE`, `_NEIGHBOURS` or `_IMPACT`.
     cursor
         The previous page's `next_cursor`, or `None`.
 
@@ -880,6 +885,76 @@ class GraphService:
             edges.add(edge)
             found.setdefault(other, _Found(1))
         return self._page(ctx, _NEIGHBOURS, found, edges, languages, limit, after)
+
+    def impact(
+        self,
+        p: PrincipalRef,
+        environment: str,
+        node: str,
+        *,
+        key: bool = False,
+        languages: Sequence[str] = (),
+        limit: int = MAX_GRAPH_PAGE,
+        cursor: str | None = None,
+    ) -> GraphPage:
+        """List everything declared that depends on a table, a column or a table's key.
+
+        Each node but the start carries its `reason`; what only may use a column or key carries
+        `may_use` (`graph_impact`). The walk is cut at every node the reader may not see.
+
+        Parameters
+        ----------
+        p
+            The reader.
+        environment
+            The environment's name.
+        node
+            The start, a table or a column: a node id or a named form.
+        key
+            Ask about the table's declared key instead of the whole table.
+        languages
+            The reader's languages, most wanted first.
+        limit
+            Nodes per page, 1 to `MAX_GRAPH_PAGE`.
+        cursor
+            The `next_cursor` of the previous page.
+
+        Returns
+        -------
+        GraphPage
+            One page of the answer: the start at distance 0 (with its table, for a column), then
+            the rest by distance in edges.
+
+        Raises
+        ------
+        ValidationError
+            For a start that is not a table or column (`IMPACT_KINDS`), `key` with a column
+            (`KEY_NEEDS_TABLE`), `key` on a table without a declared key (`NO_KEY`), a node,
+            limit or cursor out of bounds, or past the step budget.
+        NotFoundError
+            If the environment or the start does not exist or is hidden.
+        GraphBusyError
+            Past the time budget.
+        """
+        _check_limit(limit)
+        ref = parse_node(node)
+        if ref.kind not in (NodeKind.TABLE, NodeKind.COLUMN):
+            raise ValidationError(
+                IMPACT_KINDS.format(
+                    node=shown(node), word=KIND_WORDS[ref.kind], env=shown(environment)
+                )
+            )
+        if key and ref.kind is NodeKind.COLUMN:
+            raise ValidationError(KEY_NEEDS_TABLE.format(node=shown(node)))
+        after = _after(_IMPACT, cursor)
+        ctx = self._open(p, environment, node)
+        root = self._root(ctx, node, ref)
+        table = ctx.graph.tables[table_part(root)]
+        if key and not table.key:
+            raise ValidationError(NO_KEY.format(table=table.ref.dotted(), env=shown(environment)))
+        hits, edges = impact_of(ctx, root, key=key)
+        found = {n: _Found(h.distance, h.reason, h.may_use) for n, h in hits.items()}
+        return self._page(ctx, _IMPACT, found, edges, languages, limit, after)
 
     def _page(
         self,

@@ -147,3 +147,23 @@ def test_a_cursor_the_server_repeats_is_invalid() -> None:
     page = {"nodes": [_NODE], "edges": [], "next_cursor": "c1"}
     with pytest.raises(InvalidResponse, match="same page cursor twice"):
         _graph([page, page, page], []).lineage("dev", "t")
+
+
+def test_impact_sends_the_key_flag_only_when_set() -> None:
+    sent: list[httpx.Request] = []
+    body = {
+        "nodes": [{**_NODE, "reason": None, "may_use": False}],
+        "edges": [],
+        "next_cursor": None,
+    }
+    graph = _graph([body], sent).impact("dev", "gold.dim_store", key=True, lang="de", page_size=9)
+    _graph([body], sent).impact("dev", "gold.dim_store")
+    assert dict(sent[0].url.params) == {
+        "node": "gold.dim_store",
+        "key": "true",
+        "lang": "de",
+        "limit": "9",
+    }
+    assert dict(sent[1].url.params) == {"node": "gold.dim_store"}
+    assert sent[0].url.path == "/api/v1/environments/dev/graph/impact"
+    assert (graph.nodes[0].reason, graph.nodes[0].may_use) == (None, False)

@@ -106,9 +106,10 @@ are `null`.
 
 - `depth` is 1 to 10 and the page size (`limit` in REST, `page_size` in the SDK) is 1 to 500;
   outside them, the answer is `422` with the range. A cursor the server did not issue for this list
-  (lineage or neighbours), or a malformed one, is refused with `422` before any work is done.
+  (lineage, neighbours or impact), or a malformed one, is refused with `422` before any work is done.
 - A question that would follow more than 200,000 edges is refused with `422`. Ask a narrower one:
-  a smaller depth, one direction, or neighbours of some kinds.
+  a smaller depth, one direction, or neighbours of some kinds; instead of impact, lineage
+  downstream with a small depth.
 - A walk that runs longer than 10 seconds is stopped with `503` and `Retry-After`. The time counts
   everything the question does, including what it looks at and you may not see. Try again, or ask
   a narrower question.

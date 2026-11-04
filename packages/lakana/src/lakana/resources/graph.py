@@ -49,7 +49,7 @@ def _page_from_json(data: dict[str, Any]) -> tuple[list[GraphNode], list[GraphEd
 
 
 class MetadataGraph:
-    """The `graph` resource of the platform API: lineage and neighbours.
+    """The `graph` resource of the platform API: lineage, neighbours and impact.
 
     Parameters
     ----------
@@ -190,3 +190,51 @@ class MetadataGraph:
         if kinds:
             params["kinds"] = list(kinds)
         return self._every_page("graph.neighbours", environment, params)
+
+    def impact(
+        self,
+        environment: str,
+        node: str,
+        *,
+        key: bool = False,
+        lang: str | None = None,
+        page_size: int | None = None,
+    ) -> Graph:
+        """List everything declared that depends on a table, a column or (``key=True``) its key.
+
+        Each node but the start carries `reason`, such as ``references gold.dim_store.store_id``;
+        for a column or a key, `may_use` marks what only may use it: the table's hand-written
+        checks, its row filters and everything downstream, because SQL is not parsed.
+
+        Parameters
+        ----------
+        environment
+            The environment.
+        node
+            A table's dotted name or id, or a column as ``column:gold.dim_store/store_id``.
+        key
+            Ask about the table's declared key instead of the whole table.
+        lang
+            The language of labels and names.
+        page_size
+            Nodes per request (1 to 500); `None` leaves it to the server (500).
+
+        Returns
+        -------
+        Graph
+            The start first, then what depends on it, every page read.
+
+        Raises
+        ------
+        lakana.errors.NotFound
+            If the environment or the node does not exist or you may not see it, or the server
+            has no graph routes.
+        lakana.errors.ValidationError
+            If the node is not a table or a column, or `key` is set for a column or a table that
+            declares no key.
+        """
+        return self._every_page(
+            "graph.impact",
+            environment,
+            query_params(node=node, key="true" if key else None, lang=lang, limit=page_size),
+        )

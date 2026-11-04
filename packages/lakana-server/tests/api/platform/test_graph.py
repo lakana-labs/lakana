@@ -429,3 +429,44 @@ def test_the_next_cursor_after_a_long_column_name_is_accepted(client: TestClient
     )
     assert second.status_code == 200, second.text
     assert [n["name"] for n in second.json()["nodes"]] == ["gold.wide.b"]
+
+
+def test_impact_has_the_documented_shape_and_follows_the_readers_grants(client: TestClient) -> None:
+    _star(client)
+    answer = client.get(f"{_GRAPH}/impact", headers=AUTH_HEADER, params={"node": "gold.dim_store"})
+    assert answer.status_code == 200, answer.text
+    body = answer.json()
+    assert set(body) == {"nodes", "edges", "next_cursor"}
+    listed = {(n["kind"], n["name"], n["reason"], n["may_use"]) for n in body["nodes"]}
+    assert {
+        (
+            "reference",
+            "gold.fact_sales.store_id → gold.dim_store.store_id",
+            "references gold.dim_store.store_id",
+            False,
+        ),
+        (
+            "check",
+            "gold.fact_sales/ref_store_id",
+            "checks the reference gold.fact_sales.store_id",
+            False,
+        ),
+        (
+            "job",
+            "sales/nightly",
+            "runs gold.fact_sales",
+            False,
+        ),  # a whole table: downstream is certain
+    } <= listed
+    alice = _alice(client)
+    hidden = client.get(f"{_GRAPH}/impact", headers=alice, params={"node": "gold.dim_store"})
+    assert hidden.status_code == 404
+    assert hidden.json()["detail"] == NO_NODE.format(node="gold.dim_store", env="dev")
+    mine = client.get(f"{_GRAPH}/impact", headers=alice, params={"node": "gold.fact_sales"}).json()
+    kinds = {n["kind"] for n in mine["nodes"]}
+    assert "row_filter" not in kinds and "check" not in kinds and "reference" not in kinds
+    assert not [n for n in mine["nodes"] if "dim_store" in (n["reason"] or "")]
+    key = client.get(
+        f"{_GRAPH}/impact", headers=AUTH_HEADER, params={"node": "gold.dim_store", "key": "true"}
+    )
+    assert key.status_code == 422 and "declares no key" in key.json()["detail"]

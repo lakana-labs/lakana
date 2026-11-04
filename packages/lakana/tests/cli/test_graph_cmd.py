@@ -219,3 +219,75 @@ def test_lang_shows_the_labels_in_table_mode(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.output
     assert "label" in result.output and "Magasins" in result.output
     assert api.requests[0].url.params["lang"] == "fr"
+
+
+_IMPACT = "/api/v1/environments/prod/graph/impact"
+
+
+def test_impact_prints_reasons_and_marks_may_use(tmp_path: Path) -> None:
+    api = FakeApi()
+    fact = {
+        "id": "asset:s/f",
+        "kind": "asset",
+        "name": "gold.fact_sales",
+        "distance": 1,
+        "reason": "downstream of gold.dim_store",
+        "may_use": True,
+        "repository": "sales",
+    }
+    root = {**_ROOT, "reason": None, "may_use": False}
+    api.on("GET", _IMPACT, json={"nodes": [root, fact], "edges": [], "next_cursor": None})
+    result = invoke(
+        make_state(tmp_path, api), "graph", "impact", "gold.dim_store", "--key", "--env", "prod"
+    )
+    assert result.exit_code == 0, result.output
+    row = next(line for line in result.output.splitlines() if "gold.fact_sales" in line)
+    assert "downstream of gold.dim_store" in row and "yes" in row.split()
+    start = next(line for line in result.output.splitlines() if "gold.dim_store" in line)
+    assert "yes" not in start.split()
+    assert "may_use" in result.output and "SQL is not parsed" in result.output
+    assert dict(api.requests[0].url.params) == {"node": "gold.dim_store", "key": "true"}
+
+
+def test_impact_of_a_column_sends_the_column_form(tmp_path: Path) -> None:
+    api = FakeApi()
+    api.on("GET", _IMPACT, json={"nodes": [_ROOT], "edges": [], "next_cursor": None})
+    invoke(
+        make_state(tmp_path, api),
+        "graph",
+        "impact",
+        "gold.dim_store",
+        "--column",
+        "store_id",
+        "--env",
+        "prod",
+    )
+    assert dict(api.requests[0].url.params) == {"node": "column:gold.dim_store/store_id"}
+
+
+def test_impact_with_nothing_depending_says_so(tmp_path: Path) -> None:
+    api = FakeApi()
+    api.on("GET", _IMPACT, json={"nodes": [_ROOT], "edges": [], "next_cursor": None})
+    result = invoke(make_state(tmp_path, api), "graph", "impact", "gold.dim_store", "--env", "prod")
+    assert result.exit_code == 0, result.output
+    assert result.output.strip() == (
+        "Nothing the projects declare depends on gold.dim_store, as far as you may see."
+    )
+
+
+def test_impact_refuses_column_and_key_together(tmp_path: Path) -> None:
+    api = FakeApi()
+    result = invoke(
+        make_state(tmp_path, api),
+        "graph",
+        "impact",
+        "gold.dim_store",
+        "--column",
+        "a",
+        "--key",
+        "--env",
+        "prod",
+    )
+    assert result.exit_code == 2
+    assert "--column and --key ask different questions; give one of them." in result.output
+    assert api.requests == []
