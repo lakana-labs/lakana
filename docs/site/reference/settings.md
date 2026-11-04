@@ -72,7 +72,7 @@ Compose](../how-to/deploy-with-compose.md).
 
 | Variable | Type | Default | Read by | Description |
 |---|---|---|---|---|
-| `LAKANA_HEALTH__RETENTION_DAYS` | whole number, 7 or more | `90` | server, worker | Days of health signals kept for each table (default 90, at least 7, so a weekly job has a history); `lakana table health --signals` looks back at most this far. |
+| `LAKANA_HEALTH__RETENTION_DAYS` | whole number, 7 or more | `90` | server, worker | How many days back the history of a table's health signals reaches (default 90, at least 7, so a weekly job has a history): `lakana table health --signals` and `days` of `GET .../health/signals` look back at most this far. |
 
 ## `LAKANA_APPEND__*`
 

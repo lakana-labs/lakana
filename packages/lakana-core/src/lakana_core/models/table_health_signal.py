@@ -13,9 +13,8 @@ from lakana_core.models.base import Base, UTCDateTime
 class TableHealthSignal(Base):
     """One observation of one health signal of a table (#340).
 
-    A commit adds one row per signal and column (`lakana_core.catalog.health_record`), the
-    scheduler's sweep one per change of a table's freshness, and the sweep deletes the rows older
-    than `LAKANA_HEALTH__RETENTION_DAYS` except the newest of each signal and column.
+    A commit adds one row per signal and column (`lakana_core.catalog.health_record`); a check
+    that sets the table back deletes the rows of the snapshots it set back.
 
     Attributes
     ----------

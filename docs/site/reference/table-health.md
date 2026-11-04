@@ -127,8 +127,15 @@ deletes the older counts at the next sweep; raising it does not bring back count
 
 Every snapshot Lakana commits (a run, an append, a merge, a history write, a REST write) records
 what it says about the table, from its summary and the column metrics Iceberg already holds. No
-row is read. A table with signals shows them in `lakana table health`; a table whose first write
-has not happened since signals were introduced shows none.
+row is read. Signals are recorded when a commit adds a snapshot and makes it current: a commit that
+moves `main` to a snapshot that already exists (a fast-forward of a branch, say) adds no snapshot
+and records none. A table with signals shows them in `lakana table health`; a table whose first
+write has not happened since signals were introduced shows none. Views, external tables and
+artifacts have no signals.
+
+When a failed check sets a table back, the signals of the snapshots it set back are deleted with
+them: they are not the table's data any more, so they neither show as its current state nor count
+towards the usual band.
 
 | Signal | Observed per snapshot | Fires when |
 |---|---|---|
@@ -147,11 +154,14 @@ other numbers. No signal but `schema` fires before the table has 8 snapshots.
 **States.** `ok`: inside the band. `fired`: outside it (`alert` says how). `no_history`: fewer than
 8 snapshots, so there is no band yet. `no_metrics`: nothing can be said, and the observation never
 guesses; `observed.reason` tells why (`not_recorded`: Iceberg did not record the column's metrics,
-`no_rows`, `unreadable`: the metrics are damaged, `not_finite`: a number too large to judge, `error`).
+`no_rows`, `unreadable`: the added files' manifests could not be read, or were too many or too
+slow to read within the limits below, `not_finite`: a number too large to judge, `error`). Metrics
+that are damaged count as `not_recorded`.
 
-**Limits per commit.** Signals are computed for at most 200 columns, from at most 2,000 added
-files, within 5 seconds. A commit over a limit records `no_metrics` for what it could not read; it
-never fails the write.
+**Limits per commit.** Signals are computed for the first 200 top-level columns, from at most
+2,000 added files, within 5 seconds. Columns past the 200th record nothing. A commit over the file
+or time limit records `no_metrics` with reason `unreadable` for `null_rate` and `range`; it never
+fails the write.
 
 ### What `observed` and `band` hold
 
@@ -215,14 +225,13 @@ observations, newest first.
 | `cursor` | The `next_cursor` of the previous page. |
 
 The answer is `{"items": [...], "next_cursor": ...}`; `next_cursor` is `null` on the last page.
-Signals are kept for `LAKANA_HEALTH__RETENTION_DAYS` days (90 by default, at least 7); the
-maintenance sweep deletes older rows.
+`LAKANA_HEALTH__RETENTION_DAYS` (90 by default, at least 7) is how far back `days` may reach.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `lakana table health NAME` | Shows the last maintenance, the newest result of each check and the readers of the default window. |
+| `lakana table health NAME` | Shows the last maintenance, the newest result of each check, the readers of the default window and the current state of each health signal, with the alerts that fired. A table without signals says why: a managed table gets them with its next write, a view, an external table or an artifact has none, and a server older than health signals does not report them (upgrade it). |
 | `lakana table health NAME --days N` | The same with the readers of the last N days. |
 | `lakana table health NAME --signals` | Lists the history of the health signals, newest first. Narrow it with `--signal S`, `--column C` and `--days N`; page with `--limit N` and `--cursor X`. |
 | `lakana table health NAME --output json` | Every field of the answer as JSON. |
@@ -238,8 +247,8 @@ Without a right to see the grants the command says that the readers are not show
 `Table.size_bytes` and `Table.file_count` hold the numbers of the snapshot; they are `None` for a
 server that is older than table health.
 
-`client.tables.health(...).signals` is a list of `HealthSignal` (empty from a server older than
-signals). `client.tables.health_signals(environment, "namespace.table", days=None, signal=None,
+`client.tables.health(...).signals` is a list of `HealthSignal`, or `None` from a server older
+than signals. `client.tables.health_signals(environment, "namespace.table", days=None, signal=None,
 column=None, limit=None, cursor=None)` returns one `HealthSignalPage` (`items`, `next_cursor`), and
 `client.tables.iter_health_signals(...)` yields every observation across the pages.
 

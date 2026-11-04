@@ -1050,15 +1050,16 @@ class AuditConfig(BaseModel):
 
 
 class HealthConfig(BaseModel):
-    """How long table health signals are kept, and how far back their history can be read.
+    """How far back the history of a table's health signals can be read.
 
     Read from ``LAKANA_HEALTH__RETENTION_DAYS``.
 
     Parameters
     ----------
     retention_days
-        Days of health signals kept for each table (default 90, at least 7, so a weekly job has
-        a history); `lakana table health --signals` looks back at most this far.
+        How many days back the history of a table's health signals reaches (default 90, at
+        least 7, so a weekly job has a history): `lakana table health --signals` and `days` of
+        `GET .../health/signals` look back at most this far.
     """
 
     retention_days: int = Field(default=90, ge=7)

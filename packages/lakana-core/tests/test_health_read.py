@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
@@ -516,6 +517,7 @@ def _vm_steps(session: Session, call: Callable[[], object]) -> int:
         How often SQLite's progress handler ran, once per thousand steps.
     """
     raw = session.connection().connection.driver_connection
+    assert isinstance(raw, sqlite3.Connection)
     steps = [0]
 
     def step() -> int:
