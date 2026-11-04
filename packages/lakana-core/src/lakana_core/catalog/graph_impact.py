@@ -65,6 +65,9 @@ _ON_TABLE = (
 )
 """The edges by which something names a table."""
 
+NAMING_KINDS = frozenset({NodeKind.REFERENCE, NodeKind.MEASURE, NodeKind.CHECK, NodeKind.TERM})
+"""The kinds of declaration that name a table or column, which a deploy's warning lists."""
+
 _COLUMN_VERBS = {
     EdgeKind.MEASURES: "a measure on",
     EdgeKind.MASKS: "masks",
@@ -139,7 +142,9 @@ class _Answer:
         return False
 
 
-def impact_of(ctx: _Context, root: str, *, key: bool) -> tuple[dict[str, Hit], set[GraphEdge]]:
+def impact_of(
+    ctx: _Context, root: str, *, key: bool, named_only: bool = False
+) -> tuple[dict[str, Hit], set[GraphEdge]]:
     """List what depends on a visible table, column or key.
 
     Parameters
@@ -150,6 +155,10 @@ def impact_of(ctx: _Context, root: str, *, key: bool) -> tuple[dict[str, Hit], s
         A table or column id the reader may see.
     key
         Whether the question is about the table's declared key (the caller checked it has one).
+    named_only
+        List only what names the start itself, for a deploy's warning: no tables declaring
+        the references found, nothing downstream and no jobs. Its cost then grows with the
+        declarations on the start, not with what lies downstream of it.
 
     Returns
     -------
@@ -178,9 +187,10 @@ def impact_of(ctx: _Context, root: str, *, key: bool) -> tuple[dict[str, Hit], s
     for column in columns:
         _on_column(ctx, answer, column, dotted, base)
     _on_table(ctx, answer, table, dotted, subject)
-    _referencing_tables(ctx, answer, table_id)
-    _downstream(ctx, answer, table, may_use=subject is not None)
-    _jobs(ctx, answer)
+    if not named_only:
+        _referencing_tables(ctx, answer, table_id)
+        _downstream(ctx, answer, table, may_use=subject is not None)
+        _jobs(ctx, answer)
     _settle(answer, [table, root])
     return answer.hits, answer.edges
 

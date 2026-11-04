@@ -33,7 +33,7 @@ from sqlalchemy.orm import Session
 
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable, permits_each
 from lakana_core.catalog.glossary_read import term_names
-from lakana_core.catalog.graph_impact import impact_of
+from lakana_core.catalog.graph_impact import NAMING_KINDS, impact_of
 from lakana_core.catalog.graph_join import JoinPath, JoinPaths, JoinStep, shortest_paths
 from lakana_core.catalog.graph_load import (
     AssetRecord,
@@ -1056,11 +1056,15 @@ class GraphService:
     def breakage(
         self, p: PrincipalRef, environment: str, nodes: Sequence[str]
     ) -> dict[str, tuple[tuple[GraphNode, tuple[str, ...]], ...]]:
-        """Compute `impact` for several tables and columns at once, for a deploy's warning.
+        """List the declarations that name each of several tables and columns, for a deploy.
 
-        One load and one build of the nodes serve every node, and one budget covers them all:
-        the clock is read after each walk and after the build. A node that does not exist, or
-        that `p` may not see, gets nothing.
+        Only the references, measures, checks and glossary terms that name a node itself are
+        listed (`impact_of` with ``named_only``), never what only may use it: nothing
+        downstream is walked, and only those declarations are built, in one build for every
+        node. So the cost grows with the declarations on the nodes, not with what lies
+        downstream of them, and one budget covers it all: the clock is read after each walk
+        and after the build. A node that does not exist, or that `p` may not see, gets
+        nothing.
 
         Parameters
         ----------
@@ -1074,8 +1078,8 @@ class GraphService:
         Returns
         -------
         dict
-            Node → each listed node (not the start) with the dotted tables it names
-            (`_named_tables`).
+            Node → each declaration naming it, with the dotted tables it names
+            (`_named_tables`), in node id order.
 
         Raises
         ------
@@ -1092,14 +1096,14 @@ class GraphService:
             found = ctx.graph.resolve(parse_node(node))
             if found is None or not ctx.visible.node(found):
                 continue
-            hits, _ = impact_of(ctx, found, key=False)
+            hits, _ = impact_of(ctx, found, key=False, named_only=True)
             walked.append(
                 (
                     node,
                     [
-                        (n, _Found(h.distance, h.reason, h.may_use))
+                        (n, _Found(h.distance, h.reason))
                         for n, h in sorted(hits.items())
-                        if n != found
+                        if not h.may_use and node_kind(n) in NAMING_KINDS
                     ],
                 )
             )

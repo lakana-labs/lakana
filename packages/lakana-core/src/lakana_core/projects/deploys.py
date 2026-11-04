@@ -11,7 +11,9 @@ from __future__ import annotations
 import dataclasses
 import difflib
 import re
+import shlex
 import time
+import unicodedata
 import uuid
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -25,7 +27,14 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm.exc import ObjectDeletedError, StaleDataError
 
 from lakana_core.audit.service import AuditService
-from lakana_core.auth import Action, AuthorizationService, CiScope, PrincipalRef, Securable
+from lakana_core.auth import (
+    Action,
+    AuthorizationService,
+    CiScope,
+    PrincipalRef,
+    Securable,
+    permits_each,
+)
 from lakana_core.catalog.columns import stored_columns
 from lakana_core.catalog.descriptions import sync_project_descriptions
 from lakana_core.catalog.glossary import (
@@ -156,31 +165,31 @@ _IMPACT_BUDGET_SECONDS = 2.0
 
 IMPACT_WARNING = (
     "this deploy {what}, which other repositories' declarations use; tell their owners, or keep "
-    "it, and see everything it affects with: lakana graph impact {command} --env {env} — the "
+    "it, and see everything it affects with: lakana graph impact --env {env} {command} — the "
     "declarations: {items}"
 )
 """A removed table or column that other repositories declare something on.
 
-The next step comes before the list, which has no bound: the CLI cuts a long warning, and the
-cut must not take the next step with it."""
+The next step comes before the list, which has no bound, and `--env` before the names: the CLI
+cuts a long warning at 500 characters, and the cut must not take the next step with it."""
 
 IMPACT_MORE = (
     "this deploy also removes {count} more {things} that {were} not checked against other "
-    "repositories; see each with: lakana graph impact TABLE --env {env}"
+    "repositories; see each with: lakana graph impact --env {env} TABLE"
 )
 """The removals past `_MAX_IMPACT_WARNINGS`, which were not checked."""
 
 IMPACT_UNCHECKED = (
     "this deploy removes or stops building {count} {things}, and Lakana could not check in time "
-    "what other repositories declare on {them}; see it with: lakana graph impact {command} "
-    "--env {env}"
+    "what other repositories declare on {them}; see it with: lakana graph impact --env {env} "
+    "{command}"
 )
 """The check ran past its budget: the deploy goes on, and says so."""
 
 IMPACT_UNREADABLE = (
     "this deploy {what}, whose name holds a control or format character or is too long to look "
     "up in the metadata graph, so Lakana did not check what other repositories declare on it; "
-    "rename it, or see what depends on its table with: lakana graph impact {table} --env {env}"
+    "rename it, or see what depends on its table with: lakana graph impact --env {env} {table}"
 )
 """A removed item whose name is no graph node's: it alone goes unchecked."""
 
@@ -212,6 +221,72 @@ _BREAKING = {
 """The kinds of node an impact warning lists, with the word it names each by."""
 
 
+_NAMED_CHARS = 100
+"""The most characters of a removed name a warning shows, and puts into a command."""
+
+_UNSAFE = frozenset({"Cc", "Cf", "Cs", "Zl", "Zp"})
+"""Characters a warning writes as escapes: control, format and surrogate characters, and line
+and paragraph separators, which could hide or forge text in a terminal or a CI log."""
+
+
+def _named(name: str) -> str:
+    """Show a removed name in a warning: as it is, but for escaped unsafe characters, and short.
+
+    Parameters
+    ----------
+    name
+        A table or column name from a manifest; untrusted.
+
+    Returns
+    -------
+    str
+        `name` with each `_UNSAFE` character ASCII-escaped (non-ASCII letters stay as they
+        are), cut at `_NAMED_CHARS` characters with ``…``.
+    """
+    text = "".join(ascii(c)[1:-1] if unicodedata.category(c) in _UNSAFE else c for c in name)
+    return text if len(text) <= _NAMED_CHARS else text[:_NAMED_CHARS] + "…"
+
+
+def _pastable(name: str) -> bool:
+    """Say whether a name can go into a command as it is: short, and without `_UNSAFE` characters.
+
+    Parameters
+    ----------
+    name
+        A table or column name from a manifest; untrusted.
+
+    Returns
+    -------
+    bool
+        The answer.
+    """
+    return len(name) <= _NAMED_CHARS and _named(name) == name
+
+
+def _typed(table: str, column: str | None = None) -> str:
+    """Write the arguments of the `lakana graph impact` hint, quoted for a shell.
+
+    Parameters
+    ----------
+    table
+        The removed column's table, or the removed table.
+    column
+        The removed column; `None` for a table.
+
+    Returns
+    -------
+    str
+        ``TABLE --column COLUMN``, each part shell-quoted only where it needs it; the table
+        alone for a table and for a column that is not `_pastable`; the table as `_named`
+        shows it when it is not `_pastable` itself.
+    """
+    if not _pastable(table):
+        return _named(table)
+    if column is None or not _pastable(column):
+        return shlex.quote(table)
+    return f"{shlex.quote(table)} --column {shlex.quote(column)}"
+
+
 def _removed_items(previous: object, manifest: object) -> list[tuple[str, str, str, str]]:
     """List the tables a new manifest stops building and the columns it removes (R12).
 
@@ -235,7 +310,7 @@ def _removed_items(previous: object, manifest: object) -> list[tuple[str, str, s
     """
     old, new = manifest_assets(previous), manifest_assets(manifest)
     items: list[tuple[str, str, str, str]] = [
-        (table, f"no longer builds `{table}`", table, table)
+        (table, f"no longer builds `{_named(table)}`", table, _typed(table))
         for table in sorted(old)
         if table not in new
     ]
@@ -247,9 +322,9 @@ def _removed_items(previous: object, manifest: object) -> list[tuple[str, str, s
         items.extend(
             (
                 f"column:{table}/{column}",
-                f"removes the column `{shown(column)}` of `{table}`",
+                f"removes the column `{_named(column)}` of `{_named(table)}`",
                 table,
-                f"{table} --column {shown(column)}",
+                _typed(table, column),
             )
             for column in before
             if isinstance(column, str) and column not in kept
@@ -457,10 +532,14 @@ class _WarningReads:
         Environment id to its kept tables (`kept_tables`).
     current
         Repository id to the tables its current deployment builds; `None` when it has none.
+    may_read
+        ``(environment, dotted)`` to whether the reader may read that table, asked in batches
+        (`permits_each`) for the tables the stored warnings name; one reader per instance.
     """
 
     kept: dict[uuid.UUID, dict[str, uuid.UUID]] = field(default_factory=dict)
     current: dict[uuid.UUID, set[str] | None] = field(default_factory=dict)
+    may_read: dict[tuple[str, str], bool] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -508,8 +587,8 @@ class DeployRunView:
         Things the deploy leaves for its owner to act on, as sentences: today, a removed asset
         whose table is kept after a failed check, read at the time of the request; then the
         ones the deploy stored: what it changed in the job schedules, and what a removed table
-        or column breaks in other repositories (shown only to the deployer, and to a reader who
-        holds `READ_ENVIRONMENT` and may read every table they name).
+        or column breaks in other repositories (shown only to the deployer, not to its CI token,
+        and to a reader who holds `READ_ENVIRONMENT` and may read every table they name).
     waiting_for
         Why a `QUEUED` run has not started (`DeployService.get` only; `None` for any other
         status and in a listing).
@@ -748,6 +827,7 @@ class DeployService:
         NotFoundError
             If the run's environment or repository was deleted meanwhile.
         """
+        reads = reads or _WarningReads()
         env_name = self._session.execute(
             select(Environment.name).where(Environment.id == run.environment_id)
         ).scalar_one_or_none()
@@ -791,8 +871,8 @@ class DeployService:
             hidden_adopted=hidden_adopted,
             checks=run.checks_json,
             warnings=[
-                *self._kept_removed_warnings(run, env_name, reader, diff, reads or _WarningReads()),
-                *self._stored_warnings(run, env_name, reader),
+                *self._kept_removed_warnings(run, env_name, reader, diff, reads),
+                *self._stored_warnings(run, env_name, reader, reads),
             ],
             job_starts=job_starts_view(
                 run.job_starts_json,
@@ -959,7 +1039,7 @@ class DeployService:
             broken = sorted(
                 (_BREAKING[g.kind], g.name, g.repository, named)
                 for g, named in answers.get(node, ())
-                if g.kind in _BREAKING and not g.may_use and g.repository not in (None, repo_name)
+                if g.repository not in (None, repo_name)
             )
             if not broken:
                 continue
@@ -984,15 +1064,16 @@ class DeployService:
         return warnings
 
     def _stored_warnings(
-        self, run: DeployRun, env_name: str, reader: PrincipalRef | None
+        self, run: DeployRun, env_name: str, reader: PrincipalRef | None, reads: _WarningReads
     ) -> list[str]:
         """Show a run's stored warnings to a reader.
 
         A sentence is shown to everyone who may read the run. A ``{"warning", "tables"}`` object
-        (an impact warning, computed with the deployer's visibility) is shown to the deployer,
-        and to a reader who holds `READ_ENVIRONMENT` (it names glossary terms and repositories)
-        and may read every table it names. Anything else is skipped, and so is every object for
-        a view without a reader.
+        (an impact warning, computed with the deployer's visibility) is shown to the deployer
+        (not to its CI token, which reads nothing), and to a reader who holds `READ_ENVIRONMENT`
+        (it names glossary terms and repositories) and may read every table it names. Anything
+        else is skipped, and so is every object for a view without a reader. The tables are
+        asked about in one batch per run, each table once per listing (`_WarningReads`).
 
         Parameters
         ----------
@@ -1002,34 +1083,84 @@ class DeployService:
             Its environment's name.
         reader
             The principal reading; `None` for a view that shows no reader-dependent part.
+        reads
+            What earlier runs of the listing already asked; filled.
 
         Returns
         -------
         list of str
             The warnings shown, in the stored order.
         """
-        shown_warnings: list[str] = []
-        environment: bool | None = None
+        entries: list[str | tuple[str, list[str]]] = []
         for entry in run.warnings_json or []:
             if isinstance(entry, str):
-                shown_warnings.append(entry)
+                entries.append(entry)
                 continue
             if reader is None or not isinstance(entry, dict):
                 continue
             text, tables = entry.get("warning"), entry.get("tables")
-            if not (isinstance(text, str) and isinstance(tables, list)):
-                continue
-            if reader.id != run.principal_id:
-                if environment is None:
-                    environment = self._authz.permits(
-                        reader, Action.READ_ENVIRONMENT, Securable.environment_scope(env_name)
-                    )
-                if not environment or not all(
-                    isinstance(t, str) and self._may_read(reader, env_name, t) for t in tables
-                ):
-                    continue
-            shown_warnings.append(text)
+            if isinstance(text, str) and isinstance(tables, list):
+                entries.append((text, tables))
+        # A CI token is never the deployer here: it reads nothing (`CiScope`), however
+        # widely its principal, with whose grants the warning was computed, may read.
+        deployer = reader is not None and reader.id == run.principal_id and reader.ci_scope is None
+        if reader is not None and not deployer and any(isinstance(e, tuple) for e in entries):
+            names = {t for e in entries if isinstance(e, tuple) for t in e[1] if isinstance(t, str)}
+            self._ask_reads(reader, env_name, names, reads)
+        shown_warnings: list[str] = []
+        for entry in entries:
+            if isinstance(entry, str):
+                shown_warnings.append(entry)
+            elif deployer or (
+                reads.may_read[env_name, ""]
+                and all(
+                    isinstance(t, str) and reads.may_read.get((env_name, t), False)
+                    for t in entry[1]
+                )
+            ):
+                shown_warnings.append(entry[0])
         return shown_warnings
+
+    def _ask_reads(
+        self, reader: PrincipalRef, env_name: str, names: set[str], reads: _WarningReads
+    ) -> None:
+        """Ask, in one batch, what `reads` does not hold yet: `READ_ENVIRONMENT` and tables.
+
+        `READ_ENVIRONMENT` is kept under the table name ``""``, which no table has.
+
+        Parameters
+        ----------
+        reader
+            The principal reading.
+        env_name
+            The environment's name.
+        names
+            Dotted table names from stored warnings; untrusted, so a name that is no table
+            name is kept as unreadable without asking.
+        reads
+            The listing's answers; filled.
+        """
+        questions: list[tuple[Action, Securable]] = []
+        keys: list[tuple[str, str]] = []
+        if (env_name, "") not in reads.may_read:
+            questions.append((Action.READ_ENVIRONMENT, Securable.environment_scope(env_name)))
+            keys.append((env_name, ""))
+        for name in sorted(names):
+            if (env_name, name) in reads.may_read:
+                continue
+            try:
+                ref = TableRef.from_dotted(env_name, name)
+            except ValidationError:
+                reads.may_read[env_name, name] = False
+                continue
+            questions.append(
+                (Action.READ_TABLE, Securable.table_scope(env_name, ref.namespace, ref.name))
+            )
+            keys.append((env_name, name))
+        if questions:
+            reads.may_read.update(
+                zip(keys, permits_each(self._authz, reader, questions), strict=True)
+            )
 
     def current_job_version(
         self, environment_id: uuid.UUID, repository_id: uuid.UUID

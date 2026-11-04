@@ -142,8 +142,9 @@ of their references' ids; `more_paths` is `true` when more of that length exist.
 reference, both tables with their kind and grain, and the columns to join on. A step along a
 reference, from the table that declares it to its target, is `many_to_one`. A step against it is
 `one_to_many` with `fans_out: true`: each row may meet many, so a sum over the near side's numbers
-counts rows more than once. When there is no path (or none you may see), `paths` is empty and `reason`
-says so, with the same text either way.
+counts rows more than once. A reference whose column, on either side, no longer exists is never a
+step, because a join on it would fail. When there is no path (or none you may see), `paths` is
+empty and `reason` says so, with the same text either way.
 
 ```json
 {
@@ -203,8 +204,9 @@ are `null`.
 ## The deploy warning
 
 A deploy that removes a column, or stops building a table, that another repository declares
-something on still goes through and prints a warning. The line names the removed column or table, the commands that show everything it affects, and the
-declarations of other repositories that use it, each with its repository. The how-to shows one:
+something on still goes through and prints a warning. The line names the removed column or table,
+the command that shows everything it affects, and the declarations of other repositories that use
+it, each with its repository. The how-to shows one:
 [What a deploy tells you](../how-to/find-what-a-change-breaks.md#what-a-deploy-tells-you).
 
 - It never refuses the deploy.
@@ -213,12 +215,21 @@ declarations of other repositories that use it, each with its repository. The ho
   A column counts as removed only when both the deployed and the new version of its asset list
   their columns, which a `SELECT` with named columns does; `SELECT *` and Python assets are not
   checked.
-- It lists only the references, measures, checks and glossary terms of other repositories. What
-  only *may* use the column (the `may_use` nodes) is left to `lakana graph impact`.
+- It lists only the references, measures, checks and glossary terms of other repositories that
+  name the removed column or table. What only *may* use it (the `may_use` nodes) and what lies
+  downstream are left to `lakana graph impact`, so the check stays short however much is
+  downstream.
 - It is computed with what the deployer may see: a deployer without `READ_ENVIRONMENT` gets no
   impact warning, because the repositories of what depends on the table are not visible to them.
 - It is shown to the deployer, and to a reader of the deploy who has `READ_ENVIRONMENT` and may
   read every table it names (the removed table, and the tables of the references and checks it
   lists). Other readers are not shown it, and nothing tells them it exists.
-- At most 20 removed tables and columns are checked; one more line says how many were not. A check
-  that takes longer than 2 seconds stops, the deploy goes on, and a line says so.
+- A CI token is never shown it, not even for its own deploy: a CI token reads nothing, so the
+  warning does not appear in a CI log. See it as a person with
+  `lakana deploys get DEPLOY_ID --env ENV`.
+- At most 20 removed tables and columns are checked; one more line says how many were not. The
+  check has a budget of 2 seconds and 200,000 edges. The time is read between its steps (after
+  loading the graph, after deciding what the deployer may see, after each removed table or column,
+  and after building the lines), so a check can run past 2 seconds by the length of one step. A
+  check past either budget ends, the deploy goes on, and one line says Lakana could not check in
+  time.
