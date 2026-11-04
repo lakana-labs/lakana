@@ -351,7 +351,7 @@ def test_search_shows_a_term_hit_with_its_repository(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.stderr
     plain = _plain(result.stdout)
     assert "term order_state synonym shop fulfilment" in plain
-    assert "column silver.orders.status term string fulfilment" in plain
+    assert "column silver.orders.status term (order_state) string fulfilment" in plain
     assert [h["term"] for h in json.loads(as_json.stdout)["results"]] == ["order_state"] * 2
 
 

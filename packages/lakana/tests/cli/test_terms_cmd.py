@@ -96,3 +96,57 @@ def test_term_get_with_output_json_prints_the_answer(tmp_path: Path) -> None:
     )
     assert result.exit_code == 0, result.output
     assert json.loads(result.output)["key"] == "net_revenue"
+
+
+def test_term_list_names_the_filters_that_left_nothing(tmp_path: Path) -> None:
+    api = FakeApi()
+    api.on("GET", _BASE, json={"items": [], "next_cursor": None})
+    state = make_state(tmp_path, api)
+
+    owner = invoke(state, "term", "list", "--owner", "typo", "--env", "prod")
+    both = invoke(state, "term", "list", "--owner", "o", "--repository", "r\x1b", "--env", "prod")
+
+    assert owner.output.strip() == (
+        "No terms in prod with owner 'typo'. Drop --owner to see every term."
+    )
+    assert both.output.strip() == (
+        "No terms in prod with owner 'o' and repository 'r\\x1b'. "
+        "Drop --owner and --repository to see every term."
+    )
+
+
+def test_term_get_keeps_a_multi_line_definition_under_its_label(tmp_path: Path) -> None:
+    term = {
+        **_TERM,
+        "definition": "Revenue after returns.\nOwner:       security-team\r\nLinks:  (none)",
+    }
+    api = FakeApi()
+    api.on("GET", f"{_BASE}/net_revenue", json=term)
+    result = invoke(make_state(tmp_path, api), "term", "get", "net_revenue", "--env", "prod")
+    assert result.output.splitlines()[1:4] == [
+        "Definition:  Revenue after returns.",
+        "             Owner:       security-team",
+        "             Links:  (none)",
+    ]
+
+
+def test_term_get_keeps_every_other_value_on_its_line(tmp_path: Path) -> None:
+    forged = "\nOwner:       forged"
+    term = {
+        **_TERM,
+        "key": "k" + forged,
+        "name": "Net" + forged,
+        "synonyms": ["a" + forged],
+        "owner": "o" + forged,
+        "repository": "r" + forged,
+        "language": "en" + forged,
+        "related": [{"key": "g" + forged, "name": "G" + forged, "missing": False}],
+        "related_by": ["b" + forged],
+    }
+    api = FakeApi()
+    api.on("GET", f"{_BASE}/net_revenue", json=term)
+    result = invoke(make_state(tmp_path, api), "term", "get", "net_revenue", "--env", "prod")
+    lines = result.output.splitlines()
+    assert len(lines) == 11, lines
+    assert not [line for line in lines if line.startswith("Owner:       forged")]
+    assert "Owner:       o\\nOwner:       forged" in lines

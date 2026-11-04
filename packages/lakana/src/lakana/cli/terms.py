@@ -58,15 +58,56 @@ def list_terms(
         state.client().terms.iter(environment, owner=owner, repository=repository, lang=lang)
     )
     if not terms and state.output != "json":
-        _output.emit(
-            state,
-            f"No terms in {_output.inline(environment)}. A repository defines them in "
-            f"glossary/*.yaml: {_GLOSSARY_URL}",
-        )
+        _output.emit(state, _no_terms(environment, owner, repository))
         return
     _output.emit(
         state, terms, columns=["key", "name", "owner", "repository"], droppable=["repository"]
     )
+
+
+def _no_terms(environment: str, owner: str | None, repository: str | None) -> str:
+    """Say why `term list` found nothing: the filters, or a glossary without terms.
+
+    Parameters
+    ----------
+    environment
+        The environment.
+    owner
+        The `--owner` filter, if given.
+    repository
+        The `--repository` filter, if given.
+
+    Returns
+    -------
+    str
+        The message, safe to print.
+    """
+    where = _output.inline(environment)
+    filters = {"owner": owner, "repository": repository}
+    given = {name: value for name, value in filters.items() if value is not None}
+    if not given:
+        return (
+            f"No terms in {where}. A repository defines them in glossary/*.yaml: {_GLOSSARY_URL}"
+        )
+    named = " and ".join(f"{name} {_output.inline(repr(value))}" for name, value in given.items())
+    options = " and ".join(f"--{name}" for name in given)
+    return f"No terms in {where} with {named}. Drop {options} to see every term."
+
+
+def _block(text: str) -> str:
+    """Keep a text of several lines under its label, each line after the first indented.
+
+    Parameters
+    ----------
+    text
+        The text, such as a definition.
+
+    Returns
+    -------
+    str
+        The text, safe to print, so that no line of it can pass for a label of its own.
+    """
+    return _output.safe_text(text).replace("\n", "\n" + " " * len("Definition:  "))
 
 
 def _link_line(link: TermLink) -> str:
@@ -90,8 +131,8 @@ def _link_line(link: TermLink) -> str:
 def get(ctx: typer.Context, key: str, lang: _LANG = None, env: _ENV = None) -> None:
     """Show term KEY: its definition, synonyms, owner, links and related terms.
 
-    A link shows only when you may read its table; one whose table does not exist shows as
-    missing.
+    A link shows only when you may read its table; one whose table does not exist, or whose
+    column the table no longer has, shows as missing.
 
     Parameters
     ----------
@@ -109,22 +150,24 @@ def get(ctx: typer.Context, key: str, lang: _LANG = None, env: _ENV = None) -> N
     if state.output == "json":
         _output.print_json(term)
         return
+    inline = _output.inline
     related = ", ".join(
-        f"{r.key} — {r.name}" if r.name else f"{r.key} (missing)" for r in term.related
+        f"{inline(r.key)} — {inline(r.name)}" if r.name else f"{inline(r.key)} (missing)"
+        for r in term.related
     )
     lines = [
-        f"Term:        {term.key} — {term.name}",
-        f"Definition:  {term.definition}",
-        f"Synonyms:    {', '.join(term.synonyms) or '(none)'}",
-        f"Owner:       {term.owner}",
-        f"Repository:  {term.repository}",
-        f"Language:    {term.language}",
+        f"Term:        {inline(term.key)} — {inline(term.name)}",
+        f"Definition:  {_block(term.definition)}",
+        f"Synonyms:    {', '.join(inline(s) for s in term.synonyms) or '(none)'}",
+        f"Owner:       {inline(term.owner)}",
+        f"Repository:  {inline(term.repository)}",
+        f"Language:    {inline(term.language)}",
         "Links:" if term.links else "Links:       (none you may read)",
         *(_link_line(link) for link in term.links),
         f"Related:     {related or '(none)'}",
-        f"Named by:    {', '.join(term.related_by) or '(none)'}",
+        f"Named by:    {', '.join(inline(k) for k in term.related_by) or '(none)'}",
     ]
-    sys.stdout.write(_output.safe_text("\n".join(lines)) + "\n")
+    sys.stdout.write("\n".join(lines) + "\n")
 
 
 def register(app: typer.Typer) -> None:

@@ -94,8 +94,8 @@ lakana search revenue --env dev
 └────────┴──────────────────────────────┴─────────┴───────────────┴───────────────┘
 ```
 
-A table or column found by a term says `term` in `matched`. `lakana --output json search` also gives
-the term's key in `term`. Ranking and who sees what are in [Search](../reference/search.md).
+A table or column found by a term says `term` and that term's key in `matched`; `lakana --output json
+search` gives the key in `term`. Ranking and who sees what are in [Search](../reference/search.md).
 
 ## Read a term, and a table's terms
 

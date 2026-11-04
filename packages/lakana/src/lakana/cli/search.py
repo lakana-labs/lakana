@@ -59,10 +59,15 @@ def _matched(hit: SearchHit) -> str:
     Returns
     -------
     str
-        The field, followed by ``[language]`` when a translation matched; a text in the table's
-        main language shows the field alone.
+        The field, followed by ``[language]`` when a translation matched, or for a table or
+        column found through a term by ``(key)`` of that term; a text in the table's main
+        language shows the field alone.
     """
-    return f"{hit.matched} [{hit.language}]" if hit.translated and hit.language else hit.matched
+    if hit.translated and hit.language:
+        return f"{hit.matched} [{hit.language}]"
+    if hit.matched == "term" and hit.term:
+        return f"term ({hit.term})"
+    return hit.matched
 
 
 def _where(hit: SearchHit) -> str:
@@ -129,8 +134,8 @@ def search(
     repository. A table is also found by the grain its asset header declares, and shows its kind
     in brackets after its name; a column by the label or description of its declared measure.
     Glossary terms are found by their name, synonyms and definition; a table or column a term
-    links is found by the term's name and synonyms, and shows `term` in the matched column.
-    You see only what you may read. Use --output json for every field.
+    links is found by the term's name and synonyms, and shows `term` and that term's key in the
+    matched column. You see only what you may read. Use --output json for every field.
 
     Parameters
     ----------
