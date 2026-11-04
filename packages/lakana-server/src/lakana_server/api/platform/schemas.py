@@ -4129,16 +4129,17 @@ class SearchHitOut(BaseModel):
     Parameters
     ----------
     kind
-        What was found: ``table``, ``column``, ``run`` or ``principal``.
+        What was found: ``table``, ``column``, ``run``, ``principal`` or ``term``.
     name
-        A display name: ``namespace.table``, ``namespace.table.column``, the run id or the
-        principal's name.
+        A display name: ``namespace.table``, ``namespace.table.column``, the run id, the
+        principal's name or the term's key.
     matched
         The field that matched: ``name``, ``label``, ``description``, ``grain``, ``measure`` (a
-        column's measure label or description), ``id``, ``job`` or ``repository``.
+        column's measure label or description), ``id``, ``job``, ``repository``, ``synonym`` (a
+        term's) or ``term`` (a table or column found by a term's name or synonym).
     snippet
-        For a label, description, grain or measure match, at most 160 characters of the text
-        around the hit.
+        For a label, description, grain, measure or term match, and for every term hit, at most
+        160 characters of the text around the hit.
     namespace
         For a table or column, its namespace, dotted.
     table
@@ -4157,7 +4158,7 @@ class SearchHitOut(BaseModel):
     job
         For a run, its job, if it has one.
     repository
-        For a run, its repository.
+        For a run or a term, its repository.
     status
         For a run, its status.
     principal
@@ -4166,18 +4167,33 @@ class SearchHitOut(BaseModel):
         For a principal, ``USER`` or ``SERVICE_ACCOUNT``.
     language
         For a table or column that a text matched, the language of that text (a translation in
-        one of your languages, or the table's main language); ``null`` for a name match and for
-        runs and principals.
+        one of your languages, or the table's main language); for a term that a translated text
+        matched, its language; ``null`` for a name match, a term match, a term's main-language
+        text, and for runs and principals.
     translated
-        Whether the text that matched is a translation, in a language other than the table's main
-        one; ``false`` for a header text, a name, a run and a principal.
+        Whether the text that matched is a translation, in a language other than the table's or
+        term's main one; ``false`` for a header text, a name, a run and a principal.
+    term
+        For a term, its key; for a table or column with `matched` ``term``, the key of the term
+        whose name or synonym matched.
     """
 
     model_config = ConfigDict(from_attributes=True)
 
-    kind: Literal["table", "column", "run", "principal"]
+    kind: Literal["table", "column", "run", "principal", "term"]
     name: str
-    matched: Literal["name", "label", "description", "grain", "measure", "id", "job", "repository"]
+    matched: Literal[
+        "name",
+        "label",
+        "description",
+        "grain",
+        "measure",
+        "id",
+        "job",
+        "repository",
+        "synonym",
+        "term",
+    ]
     snippet: str | None
     namespace: str | None
     table: str | None
@@ -4193,6 +4209,7 @@ class SearchHitOut(BaseModel):
     principal_type: str | None
     language: str | None = None
     translated: bool = False
+    term: str | None = None
 
 
 class SearchOut(BaseModel):
@@ -4203,7 +4220,8 @@ class SearchOut(BaseModel):
     results
         The hits, best first: exact matches of a name or label, then prefix, then substring,
         then description matches; within each, tables before columns before runs before
-        principals. A table or column appears once, however many of its texts match.
+        principals before terms. A table, column or term appears once, however many of its
+        texts match.
     limit
         The page size asked for.
     offset

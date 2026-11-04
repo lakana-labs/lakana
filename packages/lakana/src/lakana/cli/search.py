@@ -1,4 +1,4 @@
-"""`lakana search`: find tables, columns, runs and people by a text."""
+"""`lakana search`: find tables, columns, runs, people and glossary terms by a text."""
 
 from __future__ import annotations
 
@@ -20,6 +20,7 @@ class Kind(StrEnum):
     column = "column"
     run = "run"
     principal = "principal"
+    term = "term"
 
 
 class ModelKind(StrEnum):
@@ -76,7 +77,7 @@ def _where(hit: SearchHit) -> str:
     -------
     str
         The table's kind for a table, the column's type for a column, the job and repository
-        for a run, the principal's type for a principal.
+        for a run, the repository for a term, the principal's type for a principal.
     """
     if hit.kind == "table":
         return (hit.table_kind or "").lower()
@@ -84,6 +85,8 @@ def _where(hit: SearchHit) -> str:
         return hit.column_type or ""
     if hit.kind == "run":
         return " / ".join(part for part in (hit.repository, hit.job) if part)
+    if hit.kind == "term":
+        return hit.repository or ""
     return (hit.principal_type or "").lower()
 
 
@@ -115,7 +118,7 @@ def search(
         str | None, typer.Option("--env", help="Environment (default: the profile's).")
     ] = None,
 ) -> None:
-    """Find tables, columns, labels, descriptions, runs and people that match TEXT.
+    """Find tables, columns, labels, descriptions, runs, people and glossary terms that match TEXT.
 
     Matching ignores case and finds TEXT anywhere in a name, label or description. Exact matches
     come first, then names and labels that start with TEXT, then those that contain it, then
@@ -125,6 +128,8 @@ def search(
     Runs are found by the first four or more characters of their id, their job or their
     repository. A table is also found by the grain its asset header declares, and shows its kind
     in brackets after its name; a column by the label or description of its declared measure.
+    Glossary terms are found by their name, synonyms and definition; a table or column a term
+    links is found by the term's name and synonyms, and shows `term` in the matched column.
     You see only what you may read. Use --output json for every field.
 
     Parameters
@@ -164,8 +169,8 @@ def search(
         _output.emit(
             state,
             f"No match for {_output.inline(repr(text))}. Search looks at table names, column "
-            "names, labels, descriptions, grains, run ids, jobs, repositories and (for admins) "
-            "people; try a shorter text.",
+            "names, labels, descriptions, grains, glossary terms and their synonyms, run ids, "
+            "jobs, repositories and (for admins) people; try a shorter text.",
         )
         return
     _output.emit(

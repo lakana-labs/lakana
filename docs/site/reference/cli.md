@@ -168,14 +168,14 @@ Run REPO's deployed project version; exit 0 on success, 1 otherwise, 7 if one is
 
 Usage: `lakana search [OPTIONS] {TEXT}`
 
-Find tables, columns, labels, descriptions, runs and people that match TEXT.
+Find tables, columns, labels, descriptions, runs, people and glossary terms that match TEXT.
 
-Matching ignores case and finds TEXT anywhere in a name, label or description. Exact matches come first, then names and labels that start with TEXT, then those that contain it, then descriptions. Texts in a table's main language always match; translated ones in your language (--lang, else your profile's, else the instance's main language), and the matched column shows a translation's language in brackets. A table or column is listed once. Runs are found by the first four or more characters of their id, their job or their repository. A table is also found by the grain its asset header declares, and shows its kind in brackets after its name; a column by the label or description of its declared measure. You see only what you may read. Use --output json for every field.
+Matching ignores case and finds TEXT anywhere in a name, label or description. Exact matches come first, then names and labels that start with TEXT, then those that contain it, then descriptions. Texts in a table's main language always match; translated ones in your language (--lang, else your profile's, else the instance's main language), and the matched column shows a translation's language in brackets. A table or column is listed once. Runs are found by the first four or more characters of their id, their job or their repository. A table is also found by the grain its asset header declares, and shows its kind in brackets after its name; a column by the label or description of its declared measure. Glossary terms are found by their name, synonyms and definition; a table or column a term links is found by the term's name and synonyms, and shows `term` in the matched column. You see only what you may read. Use --output json for every field.
 
 | Name | Type | Default | Description |
 |---|---|---|---|
 | `TEXT` | text | required | What to find; 1 to 200 characters. |
-| `--kind` | one of `table`, `column`, `run`, `principal` | none | Only this kind of result. |
+| `--kind` | one of `table`, `column`, `run`, `principal`, `term` | none | Only this kind of result. |
 | `--model-kind` | one of `fact`, `dimension`, `wide`, `staging` | none | Only tables whose asset header declares this kind; other results are left out. |
 | `--limit` | whole number, 1 to 100 | `20` | Most results to show (1 to 100). |
 | `--offset` | whole number, 0 or more | `0` | Results to skip, to show the next page. |

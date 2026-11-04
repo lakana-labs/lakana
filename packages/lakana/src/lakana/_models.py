@@ -3226,17 +3226,18 @@ class SearchHit:
     Parameters
     ----------
     kind
-        What was found: ``table``, ``column``, ``run`` or ``principal``.
+        What was found: ``table``, ``column``, ``run``, ``principal`` or ``term``.
     name
-        A display name: ``namespace.table``, ``namespace.table.column``, the run id or the
-        principal's name.
+        A display name: ``namespace.table``, ``namespace.table.column``, the run id, the
+        principal's name or the term's key.
     matched
         The field that matched: ``name``, ``label``, ``description``, ``grain``, ``measure`` (a
-        column's measure label or description), ``id``, ``job`` or ``repository``. Treat a value
+        column's measure label or description), ``id``, ``job``, ``repository``, ``synonym`` (a
+        term's) or ``term`` (a table or column found by a term's name or synonym). Treat a value
         you do not know as a match elsewhere; the server may add more.
     snippet
-        For a label, description, grain or measure match, at most 160 characters of the text
-        around the hit.
+        For a label, description, grain, measure or term match, and for every term hit, at most
+        160 characters of the text around the hit.
     namespace
         For a table or column, its namespace, dotted.
     table
@@ -3255,7 +3256,7 @@ class SearchHit:
     job
         For a run, its job, if it has one.
     repository
-        For a run, its repository.
+        For a run or a term, its repository.
     status
         For a run, its status.
     principal
@@ -3263,11 +3264,15 @@ class SearchHit:
     principal_type
         For a principal, ``USER`` or ``SERVICE_ACCOUNT``.
     language
-        For a table or column that a text matched, the language of that text; `None` for a name
-        match and for runs and principals.
+        For a table or column that a text matched, the language of that text; for a term that a
+        translated text matched, its language; `None` for a name match, a term match, a term's
+        main-language text, and for runs and principals.
     translated
-        Whether the text that matched is a translation, in a language other than the table's main
-        one; `False` for a header text, a name, a run and a principal.
+        Whether the text that matched is a translation, in a language other than the table's or
+        term's main one; `False` for a header text, a name, a run and a principal.
+    term
+        For a term, its key; for a table or column with ``matched`` ``term``, the key of the term
+        whose name or synonym matched.
     """
 
     kind: str
@@ -3288,6 +3293,7 @@ class SearchHit:
     principal_type: str | None = None
     language: str | None = None
     translated: bool = False
+    term: str | None = None
 
 
 @dataclass(frozen=True)

@@ -15,6 +15,8 @@ from sqlalchemy.orm import Session
 
 from lakana_core.auth import Action, AllowAllAuthorization, PrincipalRef, SecurableKind
 from lakana_core.catalog import search as search_module
+from lakana_core.catalog.glossary import write_glossary
+from lakana_core.catalog.glossary_read import GlossaryService
 from lakana_core.catalog.json_schema import ColumnSpec
 from lakana_core.catalog.search import CatalogSearch, SearchKind, SearchPage
 from lakana_core.catalog.service import CatalogService
@@ -1094,3 +1096,237 @@ def test_a_hit_says_whether_a_translation_matched(world: World) -> None:
     (column,) = _search(world, world.bob, "statut", ("fr",)).results
     assert (column.language, column.translated) == ("fr", True)
     assert _search(world, world.bob, "payroll").results[0].translated is False
+
+
+def _glossary(world: World) -> None:
+    """Write two terms that both link `silver.orders.status`, one also `silver.payroll`.
+
+    Parameters
+    ----------
+    world
+        The fixture's world.
+    """
+    repo = Repository(id=uuid.uuid4(), name="shop", kind=RepositoryKind.LOCAL, url="/r")
+    world.session.add(repo)
+    world.session.flush()
+    env_id = world.session.scalars(select(Environment.id).where(Environment.name == "dev")).one()
+    term = {"definition": "Where an order stands.", "owner": "ops"}
+    glossary = {
+        "order_state": {
+            **term,
+            "name": "Order state",
+            "synonyms": ["fulfilment"],
+            "links": {"silver.orders": ["status"]},
+        },
+        "progress": {
+            **term,
+            "name": "Progress",
+            "synonyms": ["fulfilment stage"],
+            "links": {"silver.orders": ["status"], "silver.payroll": []},
+            "translations": {
+                "de": {
+                    "name": "Fortschritt",
+                    "definition": "Wie weit eine Bestellung ist.",
+                    "synonyms": ["Erfüllung"],
+                }
+            },
+        },
+    }
+    write_glossary(world.session, env_id, repo.id, {"version": 13, "glossary": glossary})
+    world.session.commit()
+
+
+def _environment_reader(world: World, name: str, *tables: str) -> PrincipalRef:
+    """Create a caller who may read `dev` and only the given tables of `silver`.
+
+    Parameters
+    ----------
+    world
+        The fixture's world.
+    name
+        The caller's name.
+    *tables
+        The tables of `silver` it may read.
+
+    Returns
+    -------
+    PrincipalRef
+        The caller.
+    """
+    who = _person(world.session, name)
+    grants = GrantService(world.session, AllowAllAuthorization())
+    grants.grant(
+        world.admin,
+        principal=name,
+        action=Action.READ_ENVIRONMENT,
+        kind=SecurableKind.ENVIRONMENT,
+        environment="dev",
+    )
+    for table in tables:
+        grants.grant(
+            world.admin,
+            principal=name,
+            action=Action.READ_TABLE,
+            kind=SecurableKind.TABLE,
+            environment="dev",
+            namespace="silver",
+            table=table,
+        )
+    return who
+
+
+def test_a_synonym_finds_the_term_ranked_and_matched(world: World) -> None:
+    _glossary(world)
+    hits = world.search(world.bob, "fulfilment", kind=SearchKind.TERM).results
+    assert [(h.name, h.matched, h.term, h.repository, h.snippet) for h in hits] == [
+        ("order_state", "synonym", "order_state", "shop", "fulfilment"),
+        ("progress", "synonym", "progress", "shop", "fulfilment stage"),
+    ]
+    assert {(h.kind, h.language, h.translated) for h in hits} == {(SearchKind.TERM, None, False)}
+    by_definition = world.search(world.bob, "stands", kind=SearchKind.TERM).results
+    assert {(h.matched, h.snippet) for h in by_definition} == {
+        ("definition", "Where an order stands.")
+    }
+    (by_name,) = world.search(world.bob, "order state", kind=SearchKind.TERM).results
+    assert (by_name.name, by_name.matched, by_name.snippet) == (
+        "order_state",
+        "name",
+        "Order state",
+    )
+    (by_key,) = world.search(world.bob, "order_state", kind=SearchKind.TERM).results
+    assert by_key.matched == "name"
+
+
+def test_a_name_wins_a_tie_with_a_synonym_and_ranks_before_a_definition(world: World) -> None:
+    _glossary(world)
+    hits = world.search(world.bob, "progress", kind=SearchKind.TERM).results
+    assert [(h.name, h.matched) for h in hits] == [("progress", "name")]
+    ordered = world.search(world.bob, "order", kind=SearchKind.TERM).results
+    assert [(h.name, h.matched) for h in ordered] == [
+        ("order_state", "name"),
+        ("progress", "definition"),
+    ]
+
+
+def test_a_term_finds_its_column_once_and_only_for_a_reader_of_the_table(world: World) -> None:
+    _glossary(world)
+    bob = world.search(world.bob, "fulfilment").results
+    assert [(h.kind, h.name, h.matched, h.term) for h in bob] == [
+        ("column", "silver.orders.status", "term", "order_state"),
+        ("term", "order_state", "synonym", "order_state"),
+        ("table", "silver.payroll", "term", "progress"),
+        ("term", "progress", "synonym", "progress"),
+    ]
+    column, _, table, _ = bob
+    assert (column.snippet, column.column_type, column.language) == ("fulfilment", "string", None)
+    assert (table.snippet, table.table_kind, table.translated) == (
+        "fulfilment stage",
+        "TABLE",
+        False,
+    )
+    assert world.search(world.alice, "fulfilment").results == []
+    dave = _environment_reader(world, "dave", "orders")
+    seen = [(h.kind, h.name) for h in world.search(dave, "fulfilment").results]
+    assert seen == [
+        ("column", "silver.orders.status"),
+        ("term", "order_state"),
+        ("term", "progress"),
+    ]
+
+
+def test_a_term_found_table_keeps_its_own_better_match_and_the_kind_filters(world: World) -> None:
+    _glossary(world)
+    assert world.names(world.bob, "fulfilment", kind=SearchKind.TABLE) == ["table:silver.payroll"]
+    assert world.names(world.bob, "fulfilment", kind=SearchKind.COLUMN) == [
+        "column:silver.orders.status"
+    ]
+    assert world.names(world.bob, "progress", kind=SearchKind.TABLE) == ["table:silver.payroll"]
+    search = CatalogSearch(world.session, GrantAuthorization(world.session))
+    assert search.search(world.bob, "dev", "fulfilment", model_kind="fact").results == []
+    world.session.execute(update(Table).where(Table.name == "payroll").values(model_kind="fact"))
+    world.session.commit()
+    (fact,) = search.search(world.bob, "dev", "fulfilment", model_kind="fact").results
+    assert (fact.name, fact.matched, fact.term, fact.model_kind) == (
+        "silver.payroll",
+        "term",
+        "progress",
+        "fact",
+    )
+
+
+def test_translated_synonyms_match_only_in_the_reader_language(world: World) -> None:
+    _glossary(world)
+    search = CatalogSearch(world.session, GrantAuthorization(world.session))
+    german = search.search(
+        world.bob, "dev", "Erfüllung", kind=SearchKind.TERM, languages=("de-AT",)
+    )
+    assert [(h.name, h.matched, h.language, h.translated) for h in german.results] == [
+        ("progress", "synonym", "de", True)
+    ]
+    assert search.search(world.bob, "dev", "Erfüllung", kind=SearchKind.TERM).results == []
+    found = search.search(world.bob, "dev", "Erfüllung", languages=("de",)).results
+    assert [(h.kind, h.name, h.matched, h.term) for h in found if h.kind != "term"] == [
+        ("table", "silver.payroll", "term", "progress"),
+        ("column", "silver.orders.status", "term", "progress"),
+    ]
+    assert search.search(world.bob, "dev", "Erfüllung").results == []
+
+
+def test_a_translated_synonym_matches_exactly_when_the_term_shows_it(world: World) -> None:
+    _glossary(world)
+    search = CatalogSearch(world.session, GrantAuthorization(world.session))
+    terms = GlossaryService(world.session, GrantAuthorization(world.session))
+    for languages, shown in ((("de", "en"), True), (("en", "de"), False), (("fr", "de"), True)):
+        hits = search.search(world.bob, "dev", "Erfüllung", languages=languages).results
+        synonyms = terms.get(world.bob, "dev", "progress", languages=languages).synonyms
+        assert ("Erfüllung" in synonyms) is shown, languages
+        assert bool(hits) is shown, languages
+
+
+def test_a_translated_name_or_definition_finds_the_term_in_the_reader_language(
+    world: World,
+) -> None:
+    _glossary(world)
+    search = CatalogSearch(world.session, GrantAuthorization(world.session))
+    german = ("de",)
+    (name,) = search.search(
+        world.bob, "dev", "fortschritt", kind=SearchKind.TERM, languages=german
+    ).results
+    assert (name.name, name.matched, name.snippet, name.language) == (
+        "progress",
+        "name",
+        "Fortschritt",
+        "de",
+    )
+    (definition,) = search.search(
+        world.bob, "dev", "bestellung", kind=SearchKind.TERM, languages=german
+    ).results
+    assert (definition.matched, definition.language, definition.translated) == (
+        "definition",
+        "de",
+        True,
+    )
+    by_name = search.search(world.bob, "dev", "fortschritt", languages=german).results
+    assert {(h.kind, h.matched) for h in by_name} == {
+        ("term", "name"),
+        ("table", "term"),
+        ("column", "term"),
+    }
+    assert search.search(world.bob, "dev", "fortschritt").results == []
+
+
+def test_without_read_environment_there_are_no_terms_and_no_term_matches(world: World) -> None:
+    _glossary(world)
+    carol = _person(world.session, "carol")
+    GrantService(world.session, AllowAllAuthorization()).grant(
+        world.admin,
+        principal="carol",
+        action=Action.READ_TABLE,
+        kind=SecurableKind.TABLE,
+        environment="dev",
+        namespace="silver",
+        table="orders",
+    )
+    assert world.search(carol, "fulfilment").results == []
+    assert world.search(carol, "fulfilment", kind=SearchKind.TERM).results == []
+    assert [h.name for h in world.search(carol, "status").results] == ["silver.orders.status"]

@@ -377,23 +377,26 @@ class Client:
         environment: str,
         q: str,
         *,
-        kind: Literal["table", "column", "run", "principal"] | None = None,
+        kind: Literal["table", "column", "run", "principal", "term"] | None = None,
         model_kind: Literal["fact", "dimension", "wide", "staging"] | None = None,
         limit: int = 20,
         offset: int = 0,
         lang: str | None = None,
     ) -> SearchPage:
-        """Find tables, columns, labels, descriptions, runs and principals by a text.
+        """Find tables, columns, labels, descriptions, runs, principals and terms by a text.
 
         Matching ignores case and finds the text anywhere in a name, label or description. Exact
         matches come first, then names and labels that start with the text, then names and labels
         that contain it, then descriptions and declared grains; within each, tables come before
-        columns, runs and principals. Texts in a table's main language always match; translated
-        texts match in your language, and each hit's ``language`` says which language matched.
-        A table or column is one hit, however many of its texts match. You see only
-        what you may read: tables and columns with ``READ_TABLE`` on the table, runs with
+        columns, runs, principals and terms. Texts in a table's main language always match;
+        translated texts match in your language, and each hit's ``language`` says which language
+        matched. A table, column or term is one hit, however many of its texts match. You see
+        only what you may read: tables and columns with ``READ_TABLE`` on the table, runs with
         ``READ_ENVIRONMENT`` (found by the first four or more characters of the id, the job or the
-        repository), principals if you may list them.
+        repository), principals if you may list them, glossary terms with ``READ_ENVIRONMENT``
+        (found by their name, synonyms and definition). A table or column a term links is also
+        found by the term's name and synonyms, with ``matched`` ``term`` and the term's key in
+        ``term``, if you may read the environment and the table.
 
         Parameters
         ----------
@@ -402,7 +405,7 @@ class Client:
         q
             The text, 1 to 200 characters after trimming.
         kind
-            Only this kind of hit: ``table``, ``column``, ``run`` or ``principal``.
+            Only this kind of hit: ``table``, ``column``, ``run``, ``principal`` or ``term``.
         model_kind
             Only tables whose asset header declares this ``kind``: ``fact``, ``dimension``,
             ``wide`` or ``staging``; other hits are left out.

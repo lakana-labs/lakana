@@ -5411,7 +5411,7 @@
           "search"
         ],
         "summary": "Search an environment",
-        "description": "Finds tables, columns, runs, jobs, repositories and principals whose names, labels or descriptions, a table's declared grain, or the label or description of a column's declared measure contain `q` (1 to 200 characters, case-insensitive; run ids need four characters or more), one page at a time. Texts in a table's main language always match; translated texts match in your languages (`lang`, else your profile's language, else `Accept-Language`, else the instance's main language), and each hit says which language matched. A table or column is one hit, however many of its texts match. What the caller may not read is left out of the hits, not refused: tables and columns need `READ_TABLE`, runs `READ_ENVIRONMENT`, principals the right to list them. Needs `READ_ENVIRONMENT`. Answers 404 when the environment does not exist and 422 for a `q`, `model_kind`, `lang` or paging value out of range.",
+        "description": "Finds tables, columns, runs, jobs, repositories, principals and glossary terms whose names, labels or descriptions, a table's declared grain, the label or description of a column's declared measure, or a term's synonyms or definition contain `q` (1 to 200 characters, case-insensitive; run ids need four characters or more), one page at a time. Texts in a table's main language always match; translated texts match in your languages (`lang`, else your profile's language, else `Accept-Language`, else the instance's main language), and each hit says which language matched. A table or column a term links is also found by the term's name and synonyms, with `matched: term` and the term's key in `term`. A table, column or term is one hit, however many of its texts match. What the caller may not read is left out of the hits, not refused: tables and columns need `READ_TABLE`, runs `READ_ENVIRONMENT`, principals the right to list them. Glossary terms need `READ_ENVIRONMENT`. A table or column found by a term's name or synonym (`matched: term`) needs `READ_ENVIRONMENT` and the table's `READ_TABLE`. Needs `READ_ENVIRONMENT`. Answers 404 when the environment does not exist and 422 for a `q`, `model_kind`, `lang` or paging value out of range.",
         "operationId": "search_api_v1_environments__env__search_get",
         "parameters": [
           {
@@ -22950,7 +22950,8 @@
               "table",
               "column",
               "run",
-              "principal"
+              "principal",
+              "term"
             ],
             "title": "Kind"
           },
@@ -22968,7 +22969,9 @@
               "measure",
               "id",
               "job",
-              "repository"
+              "repository",
+              "synonym",
+              "term"
             ],
             "title": "Matched"
           },
@@ -23131,6 +23134,17 @@
             "type": "boolean",
             "title": "Translated",
             "default": false
+          },
+          "term": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Term"
           }
         },
         "type": "object",
@@ -23153,7 +23167,7 @@
           "principal_type"
         ],
         "title": "SearchHitOut",
-        "description": "One search hit.\n\nParameters\n----------\nkind\n    What was found: ``table``, ``column``, ``run`` or ``principal``.\nname\n    A display name: ``namespace.table``, ``namespace.table.column``, the run id or the\n    principal's name.\nmatched\n    The field that matched: ``name``, ``label``, ``description``, ``grain``, ``measure`` (a\n    column's measure label or description), ``id``, ``job`` or ``repository``.\nsnippet\n    For a label, description, grain or measure match, at most 160 characters of the text\n    around the hit.\nnamespace\n    For a table or column, its namespace, dotted.\ntable\n    For a table or column, the table's name.\ntable_kind\n    For a table, ``TABLE``, ``EXTERNAL``, ``VIEW`` or ``ARTIFACT``.\nmodel_kind\n    For a table whose asset header declares one, its ``kind``: ``fact``, ``dimension``,\n    ``wide`` or ``staging``.\ncolumn\n    For a column, its name.\ncolumn_type\n    For a column, its type.\nrun_id\n    For a run, its id.\njob\n    For a run, its job, if it has one.\nrepository\n    For a run, its repository.\nstatus\n    For a run, its status.\nprincipal\n    For a principal, its name.\nprincipal_type\n    For a principal, ``USER`` or ``SERVICE_ACCOUNT``.\nlanguage\n    For a table or column that a text matched, the language of that text (a translation in\n    one of your languages, or the table's main language); ``null`` for a name match and for\n    runs and principals.\ntranslated\n    Whether the text that matched is a translation, in a language other than the table's main\n    one; ``false`` for a header text, a name, a run and a principal."
+        "description": "One search hit.\n\nParameters\n----------\nkind\n    What was found: ``table``, ``column``, ``run``, ``principal`` or ``term``.\nname\n    A display name: ``namespace.table``, ``namespace.table.column``, the run id, the\n    principal's name or the term's key.\nmatched\n    The field that matched: ``name``, ``label``, ``description``, ``grain``, ``measure`` (a\n    column's measure label or description), ``id``, ``job``, ``repository``, ``synonym`` (a\n    term's) or ``term`` (a table or column found by a term's name or synonym).\nsnippet\n    For a label, description, grain, measure or term match, and for every term hit, at most\n    160 characters of the text around the hit.\nnamespace\n    For a table or column, its namespace, dotted.\ntable\n    For a table or column, the table's name.\ntable_kind\n    For a table, ``TABLE``, ``EXTERNAL``, ``VIEW`` or ``ARTIFACT``.\nmodel_kind\n    For a table whose asset header declares one, its ``kind``: ``fact``, ``dimension``,\n    ``wide`` or ``staging``.\ncolumn\n    For a column, its name.\ncolumn_type\n    For a column, its type.\nrun_id\n    For a run, its id.\njob\n    For a run, its job, if it has one.\nrepository\n    For a run or a term, its repository.\nstatus\n    For a run, its status.\nprincipal\n    For a principal, its name.\nprincipal_type\n    For a principal, ``USER`` or ``SERVICE_ACCOUNT``.\nlanguage\n    For a table or column that a text matched, the language of that text (a translation in\n    one of your languages, or the table's main language); for a term that a translated text\n    matched, its language; ``null`` for a name match, a term match, a term's main-language\n    text, and for runs and principals.\ntranslated\n    Whether the text that matched is a translation, in a language other than the table's or\n    term's main one; ``false`` for a header text, a name, a run and a principal.\nterm\n    For a term, its key; for a table or column with `matched` ``term``, the key of the term\n    whose name or synonym matched."
       },
       "SearchKind": {
         "type": "string",
@@ -23161,7 +23175,8 @@
           "table",
           "column",
           "run",
-          "principal"
+          "principal",
+          "term"
         ],
         "title": "SearchKind",
         "description": "What a hit is."
@@ -23196,7 +23211,7 @@
           "has_more"
         ],
         "title": "SearchOut",
-        "description": "One page of search hits.\n\nParameters\n----------\nresults\n    The hits, best first: exact matches of a name or label, then prefix, then substring,\n    then description matches; within each, tables before columns before runs before\n    principals. A table or column appears once, however many of its texts match.\nlimit\n    The page size asked for.\noffset\n    How many hits were skipped.\nhas_more\n    Whether a hit follows this page."
+        "description": "One page of search hits.\n\nParameters\n----------\nresults\n    The hits, best first: exact matches of a name or label, then prefix, then substring,\n    then description matches; within each, tables before columns before runs before\n    principals before terms. A table, column or term appears once, however many of its\n    texts match.\nlimit\n    The page size asked for.\noffset\n    How many hits were skipped.\nhas_more\n    Whether a hit follows this page."
       },
       "SecretBind": {
         "properties": {
