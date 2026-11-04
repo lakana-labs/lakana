@@ -147,6 +147,10 @@ def _show(
 ) -> None:
     """Print a graph: its nodes as a table, or nodes and edges as JSON.
 
+    The table lists the nodes by distance, then kind, then name: the server's order breaks ties
+    by node id, which holds a random part, and a table that changes order between two runs of
+    the same question is hard to read and to compare. JSON keeps the server's order.
+
     Parameters
     ----------
     state
@@ -165,7 +169,7 @@ def _show(
         return
     _output.emit(
         state,
-        list(graph.nodes),
+        sorted(graph.nodes, key=lambda n: (n.distance, n.kind, n.name, n.id)),
         columns=columns,
         droppable=["label", "repository"],
         derived=derived,

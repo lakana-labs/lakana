@@ -57,7 +57,9 @@ its table, plus the references that name the column and what they join it to.
 In the CLI's table, the `side` column says where each node lies: `up` feeds the start, `down` is
 fed by it, `both` is on a loop through it, `start` is where the walk began, and `join` is joined to
 a column start by a reference. With `-o json`, the edges say the same. Both commands show a table's
-label in the language `--lang` asks for.
+label in the language `--lang` asks for. The CLI's table lists the nodes by distance, then kind,
+then name; JSON and the SDK keep the server's order (by distance, then node id), which the cursors
+follow.
 
 For example, what feeds `gold.fact_sales`, in the two-repository project of
 [Find what a change breaks](../how-to/find-what-a-change-breaks.md):
@@ -74,8 +76,8 @@ lakana graph lineage gold.fact_sales --direction up --env dev
 ┡━━━━━━━━━━╇━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━┩
 │ 0        │ start │ table │ gold.fact_sales │       │ sales      │
 │ 1        │ up    │ asset │ gold.fact_sales │       │ sales      │
-│ 1        │ up    │ table │ gold.dim_store  │       │ stores     │
 │ 1        │ up    │ table │ bronze.sales    │       │ sales      │
+│ 1        │ up    │ table │ gold.dim_store  │       │ stores     │
 │ 2        │ up    │ asset │ bronze.sales    │       │ sales      │
 │ 2        │ up    │ asset │ gold.dim_store  │       │ stores     │
 │ 2        │ up    │ table │ bronze.stores   │       │ stores     │

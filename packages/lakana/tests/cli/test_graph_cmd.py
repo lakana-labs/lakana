@@ -379,3 +379,34 @@ def test_join_path_json_output_has_the_paths(tmp_path: Path) -> None:
     data = json.loads(result.output)
     assert data["more_paths"] is False and data["reason"] is None
     assert data["paths"][0]["steps"][0]["from_columns"] == ["store_id"]
+
+
+def test_the_table_lists_nodes_by_distance_kind_and_name_whatever_their_ids(
+    tmp_path: Path,
+) -> None:
+    def node(node_id: str, kind: str, name: str, distance: int) -> dict[str, object]:
+        return {**_ROOT, "id": node_id, "kind": kind, "name": name, "distance": distance}
+
+    # The server orders by distance and id, and ids are random: the table must not show that.
+    nodes = [
+        _ROOT,
+        node("asset:9", "asset", "gold.fact_sales", 1),
+        node("table:2", "table", "gold.dim_date", 1),
+        node("table:3", "table", "bronze.sales", 1),
+        node("asset:1", "asset", "bronze.sales", 2),
+    ]
+    api = FakeApi()
+    api.on("GET", _LINEAGE, json={"nodes": nodes, "edges": [], "next_cursor": None})
+    result = invoke(
+        make_state(tmp_path, api), "graph", "lineage", "gold.dim_store", "--env", "prod"
+    )
+    assert result.exit_code == 0, result.output
+    rows = [line for line in result.output.splitlines() if "│" in line]
+    names = [row.split("│")[4].strip() for row in rows]
+    assert names == [
+        "gold.dim_store",
+        "gold.fact_sales",
+        "bronze.sales",
+        "gold.dim_date",
+        "bronze.sales",
+    ]

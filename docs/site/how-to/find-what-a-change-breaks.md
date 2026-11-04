@@ -27,8 +27,8 @@ lakana graph impact gold.dim_store --column store_id --env dev
 ┡━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━┩
 │ 0        │ column    │ gold.dim_store.store_id        │                                │         │
 │ 0        │ table     │ gold.dim_store                 │                                │         │
-│ 1        │ asset     │ gold.fact_sales                │ downstream of gold.dim_store   │ yes     │
 │ 1        │ asset     │ gold.dim_store                 │ builds gold.dim_store          │         │
+│ 1        │ asset     │ gold.fact_sales                │ downstream of gold.dim_store   │ yes     │
 │ 1        │ check     │ gold.dim_store/key_not_null    │ checks the key of              │         │
 │          │           │                                │ gold.dim_store                 │         │
 │ 1        │ check     │ gold.dim_store/key_unique      │ checks the key of              │         │
