@@ -1911,10 +1911,79 @@ def test_table_health_shows_the_signals_and_what_fired(tmp_path: Path) -> None:
 
 
 def test_table_health_without_signals_says_when_they_start(tmp_path: Path) -> None:
-    _, result = _health(tmp_path, _HEALTH)
+    """A managed table without signals gets them with its next write.
+
+    Parameters
+    ----------
+    tmp_path
+        Pytest's per-test directory.
+    """
+    api = FakeApi()
+    api.on("GET", f"{_BASE}/sales/health", json={**_HEALTH, "signals": []})
+    api.on("GET", f"{_BASE}/sales", json=_TABLE)
+    result = invoke(make_state(tmp_path, api), "table", "health", "bronze.sales", "--env", "dev")
+    assert result.exit_code == 0, result.stderr
     assert "Signals: none recorded yet; they start with the table's next write." in _plain(
         result.stdout
     )
+
+
+@pytest.mark.parametrize(
+    ("kind", "said"),
+    [
+        ("VIEW", "Signals: none. A view has no health signals; the tables it reads have them."),
+        (
+            "EXTERNAL",
+            "Signals: none. Only managed tables record health signals; bronze.sales is an "
+            "external table.",
+        ),
+        (
+            "ARTIFACT",
+            "Signals: none. Only managed tables record health signals; bronze.sales is an "
+            "artifact.",
+        ),
+    ],
+)
+def test_table_health_of_what_has_no_signals_does_not_promise_them(
+    tmp_path: Path, kind: str, said: str
+) -> None:
+    """A view, an external table or an artifact never gets signals, so none are promised (M6).
+
+    Parameters
+    ----------
+    tmp_path
+        Pytest's per-test directory.
+    kind
+        The table's kind.
+    said
+        What the command says.
+    """
+    api = FakeApi()
+    api.on("GET", f"{_BASE}/sales/health", json={**_HEALTH, "signals": []})
+    api.on("GET", f"{_BASE}/sales", json={**_TABLE, "kind": kind})
+    result = invoke(make_state(tmp_path, api), "table", "health", "bronze.sales", "--env", "dev")
+    assert result.exit_code == 0, result.stderr
+    plain = _plain(result.stdout)
+    assert said in plain
+    assert "next write" not in plain
+
+
+def test_table_health_from_a_server_without_signals_says_to_upgrade_it(tmp_path: Path) -> None:
+    """An answer without a `signals` field comes from a server older than health signals.
+
+    Parameters
+    ----------
+    tmp_path
+        Pytest's per-test directory.
+    """
+    _, result = _health(tmp_path, _HEALTH)
+    assert result.exit_code == 0, result.stderr
+    plain = _plain(result.stdout)
+    assert (
+        "Signals: not reported. This server is older than health signals; upgrade it to see "
+        "them." in plain
+    )
+    assert "next write" not in plain
 
 
 def test_table_health_signals_lists_the_history_and_the_next_page(tmp_path: Path) -> None:

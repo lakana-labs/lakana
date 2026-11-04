@@ -2761,10 +2761,12 @@ _SIGNAL_BODY = {
 
 
 def test_tables_health_parses_signals_and_tolerates_their_absence() -> None:
-    """`signals` parse into `HealthSignal`; an older server's body has none."""
+    """`signals` parse into `HealthSignal`; an older server's body has none, so `None`."""
     bodies = [{**_HEALTH_BODY, "signals": [_SIGNAL_BODY]}, _HEALTH_BODY]
     tables = Tables(_transport(lambda request: httpx.Response(200, json=bodies.pop(0))))
-    (signal,) = tables.health("dev", "bronze.sales").signals
+    signals = tables.health("dev", "bronze.sales").signals
+    assert signals is not None
+    (signal,) = signals
     assert (signal.signal, signal.snapshot_id, signal.observed) == (
         "volume",
         4711,
@@ -2772,7 +2774,7 @@ def test_tables_health_parses_signals_and_tolerates_their_absence() -> None:
     )
     assert signal.observed_at == datetime.fromisoformat("2026-11-03T06:00:00+00:00")
     assert signal.last_fired_at == signal.observed_at
-    assert tables.health("dev", "bronze.sales").signals == []
+    assert tables.health("dev", "bronze.sales").signals is None
 
 
 def test_tables_health_signals_sends_only_what_is_given_and_iterates() -> None:

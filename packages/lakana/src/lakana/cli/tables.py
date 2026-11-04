@@ -785,6 +785,39 @@ def _output_hidden(state: CliState, signals: list[HealthSignal]) -> None:
         _output.emit(state, "Some values are hidden: a column mask or row filter applies to you.")
 
 
+_WITHOUT_SIGNALS = {"EXTERNAL": "an external table", "ARTIFACT": "an artifact"}
+"""What a kind that never records health signals is called, besides a view."""
+
+
+def _no_signals_line(state: CliState, environment: str, name: str) -> str:
+    """Say why a table shows no health signals, by its kind.
+
+    Parameters
+    ----------
+    state
+        The CLI state, for the client.
+    environment
+        The environment.
+    name
+        The table's qualified name.
+
+    Returns
+    -------
+    str
+        For a managed table, that its next write records them; for a view, an external table
+        or an artifact, that it never has any.
+    """
+    kind = state.client().tables.get(environment, name).kind
+    if kind == "VIEW":
+        return "Signals: none. A view has no health signals; the tables it reads have them."
+    if kind in _WITHOUT_SIGNALS:
+        return (
+            "Signals: none. Only managed tables record health signals; "
+            f"{_output.inline(name)} is {_WITHOUT_SIGNALS[kind]}."
+        )
+    return "Signals: none recorded yet; they start with the table's next write."
+
+
 @table_app.command("health")
 def health(
     ctx: typer.Context,
@@ -920,8 +953,15 @@ def health(
         _output.emit(state, found.readers)
     else:
         _output.emit(state, f"Readers, last {found.days} days: none.")
+    if found.signals is None:
+        _output.emit(
+            state,
+            "Signals: not reported. This server is older than health signals; upgrade it to "
+            "see them.",
+        )
+        return
     if not found.signals:
-        _output.emit(state, "Signals: none recorded yet; they start with the table's next write.")
+        _output.emit(state, _no_signals_line(state, environment, name))
         return
     _output.emit(state, "Signals:")
     _output.emit(state, found.signals, columns=_SIGNAL_COLUMNS)

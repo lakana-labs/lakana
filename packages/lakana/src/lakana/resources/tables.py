@@ -360,7 +360,7 @@ def _health_from_json(data: dict[str, Any]) -> TableHealth:
         ),
         checks=[_check_from_json(c) for c in data["checks"]],
         hidden_checks=data.get("hidden_checks", 0),
-        signals=[_signal_from_json(s) for s in data.get("signals", [])],
+        signals=None if "signals" not in data else [_signal_from_json(s) for s in data["signals"]],
         readers=None
         if readers is None
         else [

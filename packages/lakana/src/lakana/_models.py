@@ -868,7 +868,8 @@ class TableHealth:
         How many results were left out of `checks`: generated reference checks whose target you
         may not read; 0 from an older server.
     signals
-        The current state of each health signal; `[]` from a server older than health signals.
+        The current state of each health signal; `None` from a server older than health
+        signals, which does not report them.
     """
 
     days: int
@@ -876,7 +877,7 @@ class TableHealth:
     checks: list[CheckHealth]
     readers: list[Reader] | None
     hidden_checks: int = 0
-    signals: list[HealthSignal] = field(default_factory=list)
+    signals: list[HealthSignal] | None = field(default_factory=list)
 
 
 @dataclass(frozen=True)
