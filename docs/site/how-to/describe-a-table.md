@@ -62,6 +62,9 @@ term, `lakana table get` ends the columns with a `Terms:` section: the terms of 
 then `column: term id — name` for each column. You see it if you may read the environment as well as
 the table; without that right the section is left out.
 
+To see what depends on a table or one of its columns, and how it joins other tables, see
+[Find what a change breaks](find-what-a-change-breaks.md).
+
 ## Go back to the project's text
 
 `--reset` removes your edits of the description and the label, so the project's texts show again. A

@@ -60,6 +60,7 @@ nav:
       - how-to/describe-a-table.md
       - how-to/translate-labels-and-descriptions.md
       - how-to/keep-a-glossary.md
+      - how-to/find-what-a-change-breaks.md
       - how-to/drop-and-restore-a-table.md
       - how-to/let-tables-expire.md
       - how-to/clean-up-files-left-by-older-releases.md

@@ -278,8 +278,10 @@ lakana orphans --env dev                     # produced earlier, by no current d
 
 A deploy prints the resolved SHA and a diff, and when the project has checks, a list of them under
 `Checks:`, and one `warning:` line on stderr for each table that is kept after a failed check and
-whose asset the deploy removes (see [Check your data](check-your-data.md); `--output json` has
-them in `warnings`). The diff has: added, removed (now orphaned), adopted (the table
+whose asset the deploy removes (see [Check your data](check-your-data.md)), and one for each table
+or column it removes that another repository declares something on (see
+[Find what a change breaks](find-what-a-change-breaks.md#what-a-deploy-tells-you)); `--output json`
+has them in `warnings`. The diff has: added, removed (now orphaned), adopted (the table
 existed but no deployment produced it), materialization, SQL (formatting changes ignored) and
 metadata changes. Jobs are listed apart from the tables, under `Jobs:`, as added, removed or
 changed; a changed job names what changed: `selection` (the patterns or

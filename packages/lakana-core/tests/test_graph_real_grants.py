@@ -180,9 +180,10 @@ def _statements(star: StarWorld, ask: Callable[[], object]) -> int:
     return len(seen)
 
 
+@pytest.mark.parametrize("question", ["lineage", "impact"])
 @pytest.mark.parametrize("scope", ["fact_only", "namespace"])
 def test_the_grants_cost_the_same_statements_for_twenty_assets_or_two_hundred(
-    star: StarWorld, scope: str
+    star: StarWorld, scope: str, question: str
 ) -> None:
     reader = _reader(star)
     _grant(star, reader, Action.READ_ENVIRONMENT, SecurableKind.ENVIRONMENT)
@@ -194,6 +195,9 @@ def test_the_grants_cost_the_same_statements_for_twenty_assets_or_two_hundred(
         _grant(star, reader, Action.READ_TABLE, SecurableKind.TABLE, **where)
 
     def walk() -> object:
+        if question == "impact":
+            # The whole answer on one page: every downstream table and asset is on it.
+            return _service(star).impact(reader, "dev", "gold.fact_sales")
         return _service(star).lineage(
             reader, "dev", "gold.fact_sales", direction=LineageWay.DOWN, depth=1, limit=1
         )
@@ -202,6 +206,11 @@ def test_the_grants_cost_the_same_statements_for_twenty_assets_or_two_hundred(
     twenty = _statements(star, walk)
     _fan(star, 180, "b")
     assert _statements(star, walk) == twenty
+    if question == "impact":
+        seen = _service(star).impact(reader, "dev", "gold.fact_sales").nodes
+        downstream = [n for n in seen if (n.reason or "").startswith("downstream")]
+        assert len(downstream) == (0 if scope == "fact_only" else 400)
+        return
     seen = _service(star).lineage(reader, "dev", "gold.fact_sales", direction=LineageWay.DOWN)
     assert len(seen.nodes) == (1 if scope == "fact_only" else 401)
 

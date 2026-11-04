@@ -219,3 +219,198 @@ def test_lang_shows_the_labels_in_table_mode(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.output
     assert "label" in result.output and "Magasins" in result.output
     assert api.requests[0].url.params["lang"] == "fr"
+
+
+_IMPACT = "/api/v1/environments/prod/graph/impact"
+
+
+def test_impact_prints_reasons_and_marks_may_use(tmp_path: Path) -> None:
+    api = FakeApi()
+    fact = {
+        "id": "asset:s/f",
+        "kind": "asset",
+        "name": "gold.fact_sales",
+        "distance": 1,
+        "reason": "downstream of gold.dim_store",
+        "may_use": True,
+        "repository": "sales",
+    }
+    root = {**_ROOT, "reason": None, "may_use": False}
+    api.on("GET", _IMPACT, json={"nodes": [root, fact], "edges": [], "next_cursor": None})
+    result = invoke(
+        make_state(tmp_path, api), "graph", "impact", "gold.dim_store", "--key", "--env", "prod"
+    )
+    assert result.exit_code == 0, result.output
+    row = next(line for line in result.output.splitlines() if "gold.fact_sales" in line)
+    assert "downstream of gold.dim_store" in row and "yes" in row.split()
+    start = next(line for line in result.output.splitlines() if "gold.dim_store" in line)
+    assert "yes" not in start.split()
+    assert "may_use" in result.output and "SQL is not parsed" in result.output
+    assert dict(api.requests[0].url.params) == {"node": "gold.dim_store", "key": "true"}
+
+
+def test_impact_of_a_column_sends_the_column_form(tmp_path: Path) -> None:
+    api = FakeApi()
+    api.on("GET", _IMPACT, json={"nodes": [_ROOT], "edges": [], "next_cursor": None})
+    invoke(
+        make_state(tmp_path, api),
+        "graph",
+        "impact",
+        "gold.dim_store",
+        "--column",
+        "store_id",
+        "--env",
+        "prod",
+    )
+    assert dict(api.requests[0].url.params) == {"node": "column:gold.dim_store/store_id"}
+
+
+def test_impact_with_nothing_depending_says_so(tmp_path: Path) -> None:
+    api = FakeApi()
+    api.on("GET", _IMPACT, json={"nodes": [_ROOT], "edges": [], "next_cursor": None})
+    result = invoke(make_state(tmp_path, api), "graph", "impact", "gold.dim_store", "--env", "prod")
+    assert result.exit_code == 0, result.output
+    assert result.output.strip() == (
+        "Nothing the projects declare depends on gold.dim_store, as far as you may see."
+    )
+
+
+def test_impact_refuses_column_and_key_together(tmp_path: Path) -> None:
+    api = FakeApi()
+    result = invoke(
+        make_state(tmp_path, api),
+        "graph",
+        "impact",
+        "gold.dim_store",
+        "--column",
+        "a",
+        "--key",
+        "--env",
+        "prod",
+    )
+    assert result.exit_code == 2
+    assert "--column and --key ask different questions; give one of them." in result.output
+    assert api.requests == []
+
+
+_JOIN = "/api/v1/environments/prod/graph/join-path"
+_JOIN_STEP = {
+    "reference": "reference:1",
+    "from_table": "table:1",
+    "from_name": "gold.dim_store",
+    "to_table": "table:2",
+    "to_name": "gold.fact_sales",
+    "from_columns": ["store_id"],
+    "to_columns": ["store_id"],
+    "direction": "one_to_many",
+    "fans_out": True,
+    "from_model_kind": "dimension",
+    "from_grain": "g",
+    "to_model_kind": "fact",
+    "to_grain": "h",
+}
+
+
+def test_join_path_prints_each_step_and_the_reason_when_there_is_none(tmp_path: Path) -> None:
+    api = FakeApi()
+    api.on(
+        "GET", _JOIN, json={"paths": [{"steps": [_JOIN_STEP]}], "reason": None, "more_paths": False}
+    )
+    args = ("graph", "join-path", "gold.dim_store", "gold.fact_sales", "--env", "prod")
+    result = invoke(make_state(tmp_path, api), *args)
+    assert result.exit_code == 0, result.output
+    assert result.output.splitlines() == [
+        "Path 1:",
+        "  gold.dim_store → gold.fact_sales on store_id = store_id (one to many, fans out: "
+        "dimension → fact)",
+    ]
+    none = FakeApi()
+    reason = "No declared path of at most 4 references joins `a` and `b`."
+    none.on("GET", _JOIN, json={"paths": [], "reason": reason, "more_paths": False})
+    result = invoke(make_state(tmp_path, none), "graph", "join-path", "a", "b", "--env", "prod")
+    assert result.output.strip() == reason
+
+
+def test_join_path_says_when_more_paths_exist(tmp_path: Path) -> None:
+    back = {
+        **_JOIN_STEP,
+        "from_name": "gold.fact_sales",
+        "to_name": "gold.dim_store",
+        "direction": "many_to_one",
+        "fans_out": False,
+        "from_model_kind": None,
+        "to_model_kind": "dimension",
+    }
+    api = FakeApi()
+    api.on(
+        "GET",
+        _JOIN,
+        json={"paths": [{"steps": [back]}, {"steps": [back]}], "reason": None, "more_paths": True},
+    )
+    result = invoke(
+        make_state(tmp_path, api), "graph", "join-path", "gold.a", "gold.b", "--env", "prod"
+    )
+    assert result.exit_code == 0, result.output
+    lines = result.output.splitlines()
+    assert lines[1] == (
+        "  gold.fact_sales → gold.dim_store on store_id = store_id (many to one: ? → dimension)"
+    )
+    assert lines[2] == "Path 2:"
+    assert lines[-1] == (
+        "Only the first 10 paths of this length are shown. To see the others, list the tables "
+        "gold.a joins to with: lakana graph neighbours gold.a --kind references --env prod, then "
+        "ask for the join path from one of them to gold.b."
+    )
+
+
+def test_join_path_json_output_has_the_paths(tmp_path: Path) -> None:
+    api = FakeApi()
+    api.on(
+        "GET", _JOIN, json={"paths": [{"steps": [_JOIN_STEP]}], "reason": None, "more_paths": False}
+    )
+    result = invoke(
+        make_state(tmp_path, api),
+        "--output",
+        "json",
+        "graph",
+        "join-path",
+        "a",
+        "b",
+        "--env",
+        "prod",
+    )
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.output)
+    assert data["more_paths"] is False and data["reason"] is None
+    assert data["paths"][0]["steps"][0]["from_columns"] == ["store_id"]
+
+
+def test_the_table_lists_nodes_by_distance_kind_and_name_whatever_their_ids(
+    tmp_path: Path,
+) -> None:
+    def node(node_id: str, kind: str, name: str, distance: int) -> dict[str, object]:
+        return {**_ROOT, "id": node_id, "kind": kind, "name": name, "distance": distance}
+
+    # The server orders by distance and id, and ids are random: the table must not show that.
+    nodes = [
+        _ROOT,
+        node("asset:9", "asset", "gold.fact_sales", 1),
+        node("table:2", "table", "gold.dim_date", 1),
+        node("table:3", "table", "bronze.sales", 1),
+        node("asset:1", "asset", "bronze.sales", 2),
+    ]
+    api = FakeApi()
+    api.on("GET", _LINEAGE, json={"nodes": nodes, "edges": [], "next_cursor": None})
+    result = invoke(
+        make_state(tmp_path, api), "graph", "lineage", "gold.dim_store", "--env", "prod"
+    )
+    assert result.exit_code == 0, result.output
+    rows = [line for line in result.output.splitlines() if "│" in line]
+    names = [row.split("│")[4].strip() for row in rows]
+    assert names == [
+        "gold.dim_store",
+        "gold.fact_sales",
+        "bronze.sales",
+        "gold.dim_date",
+        "bronze.sales",
+    ]

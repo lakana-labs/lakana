@@ -3,18 +3,17 @@
 from __future__ import annotations
 
 import itertools
-import time
 import uuid
 from collections.abc import Callable
 
 import pytest
 from graph_test_helpers import Grants, StarWorld, asset_entry, point
+from graph_test_helpers import graph_service_for as _service
 from sqlalchemy import event
 
 from lakana_core.auth import PrincipalRef
 from lakana_core.catalog import graph_service
 from lakana_core.catalog.graph_model import (
-    MAX_GRAPH_STEPS,
     EdgeKind,
     GraphPage,
     LineageWay,
@@ -34,35 +33,6 @@ _EVERY_BUT_SILVER = {
     "gold.fact_sales",
 }
 """Every table of the star except `silver.sales`."""
-
-
-def _service(
-    star: StarWorld,
-    grants: Grants | None = None,
-    *,
-    clock: Callable[[], float] = time.monotonic,
-    max_steps: int = MAX_GRAPH_STEPS,
-) -> GraphService:
-    """Build the service over the star.
-
-    Parameters
-    ----------
-    star
-        The world.
-    grants
-        What the reader may do; everything, policies included, when `None`.
-    clock
-        The service's clock.
-    max_steps
-        The step budget.
-
-    Returns
-    -------
-    GraphService
-        The service.
-    """
-    authz = grants or Grants(policies=True)
-    return GraphService(star.session, authz, "en", clock=clock, max_steps=max_steps)
 
 
 def _seen(page: GraphPage) -> set[tuple[NodeKind, str, int]]:
@@ -608,7 +578,7 @@ def _fewest_steps(star: StarWorld, grants: Grants, ask: Callable[[GraphService],
     raise AssertionError("no budget under 200 steps answers")
 
 
-@pytest.mark.parametrize("question", ["lineage", "neighbours"])
+@pytest.mark.parametrize("question", ["lineage", "neighbours", "impact"])
 def test_nothing_hidden_changes_a_page_a_cursor_or_the_budget(
     star: StarWorld, principal: PrincipalRef, question: str
 ) -> None:
@@ -640,7 +610,8 @@ def test_the_step_budget_refuses_and_counts_only_what_the_reader_sees(
         _service(star, max_steps=3).lineage(principal, "dev", "gold.dim_store", depth=10)
     assert str(caught.value) == (
         "This question reaches more of the graph than one request may walk (3 edges). Ask a "
-        "narrower one: a smaller --depth or one --direction for lineage, or --kind for neighbours."
+        "narrower one: a smaller --depth or one --direction for lineage, or --kind for neighbours; "
+        "instead of impact, lineage --direction down with a small --depth."
     )
     alone = _service(star, Grants({"gold.dim_store"}, environment=False), max_steps=0)
     assert len(alone.lineage(principal, "dev", "gold.dim_store", depth=10).nodes) == 1
@@ -661,18 +632,20 @@ def test_the_time_budget_refuses_with_busy_after_loading(
     assert str(caught.value) == _BUSY
 
 
+@pytest.mark.parametrize("question", ["lineage", "impact"])
 def test_the_time_budget_refuses_with_busy_while_walking(
-    star: StarWorld, principal: PrincipalRef, monkeypatch: pytest.MonkeyPatch
+    star: StarWorld, principal: PrincipalRef, monkeypatch: pytest.MonkeyPatch, question: str
 ) -> None:
     monkeypatch.setattr(graph_service, "_CHECK_EVERY", 1)
     # Started, loaded, the visibility batch answered in time; then the walk runs out.
     clock = itertools.chain([0.0, 0.0, 0.0], itertools.repeat(100.0))
+    ask = getattr(_service(star, clock=lambda: next(clock)), question)
     with pytest.raises(GraphBusyError) as caught:
-        _service(star, clock=lambda: next(clock)).lineage(principal, "dev", "gold.dim_store")
+        ask(principal, "dev", "gold.dim_store")
     assert str(caught.value) == _BUSY
 
 
-@pytest.mark.parametrize("question", ["lineage", "neighbours"])
+@pytest.mark.parametrize("question", ["lineage", "neighbours", "impact"])
 @pytest.mark.parametrize("cursor", ["%%%", "eyJrIjogMX0", "eyJrIjogInRlcm1zIiwgIm4iOiAieCJ9"])
 def test_a_cursor_it_could_not_have_issued_is_refused_before_the_graph_is_read(
     star: StarWorld, principal: PrincipalRef, question: str, cursor: str

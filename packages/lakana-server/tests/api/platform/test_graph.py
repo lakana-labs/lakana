@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Iterator
 from typing import Any
 
 from fastapi.testclient import TestClient
@@ -379,17 +380,19 @@ def test_a_walk_past_its_time_is_503_with_retry_after(client: TestClient) -> Non
     _star(client)
     ticks = iter([0.0, 100.0, 200.0, 300.0])
 
-    def slow() -> GraphService:
-        """Build a service whose clock runs out at once.
+    def slow() -> Iterator[GraphService]:
+        """Build a service whose clock runs out at once, and close its session after the request.
 
-        Returns
-        -------
+        Yields
+        ------
         GraphService
             The service.
         """
-        return GraphService(
-            Session(client.app.state.engine), AllowAllAuthorization(), clock=lambda: next(ticks)
-        )
+        session = Session(client.app.state.engine)
+        try:
+            yield GraphService(session, AllowAllAuthorization(), clock=lambda: next(ticks))
+        finally:
+            session.close()
 
     client.app.dependency_overrides[get_graph_service] = slow
     try:
@@ -429,3 +432,80 @@ def test_the_next_cursor_after_a_long_column_name_is_accepted(client: TestClient
     )
     assert second.status_code == 200, second.text
     assert [n["name"] for n in second.json()["nodes"]] == ["gold.wide.b"]
+
+
+def test_impact_has_the_documented_shape_and_follows_the_readers_grants(client: TestClient) -> None:
+    _star(client)
+    answer = client.get(f"{_GRAPH}/impact", headers=AUTH_HEADER, params={"node": "gold.dim_store"})
+    assert answer.status_code == 200, answer.text
+    body = answer.json()
+    assert set(body) == {"nodes", "edges", "next_cursor"}
+    listed = {(n["kind"], n["name"], n["reason"], n["may_use"]) for n in body["nodes"]}
+    assert {
+        (
+            "reference",
+            "gold.fact_sales.store_id → gold.dim_store.store_id",
+            "references gold.dim_store.store_id",
+            False,
+        ),
+        (
+            "check",
+            "gold.fact_sales/ref_store_id",
+            "checks the reference gold.fact_sales.store_id",
+            False,
+        ),
+        (
+            "job",
+            "sales/nightly",
+            "runs gold.fact_sales",
+            False,
+        ),  # a whole table: downstream is certain
+    } <= listed
+    alice = _alice(client)
+    hidden = client.get(f"{_GRAPH}/impact", headers=alice, params={"node": "gold.dim_store"})
+    assert hidden.status_code == 404
+    assert hidden.json()["detail"] == NO_NODE.format(node="gold.dim_store", env="dev")
+    mine = client.get(f"{_GRAPH}/impact", headers=alice, params={"node": "gold.fact_sales"}).json()
+    kinds = {n["kind"] for n in mine["nodes"]}
+    assert "row_filter" not in kinds and "check" not in kinds and "reference" not in kinds
+    assert not [n for n in mine["nodes"] if "dim_store" in (n["reason"] or "")]
+    key = client.get(
+        f"{_GRAPH}/impact", headers=AUTH_HEADER, params={"node": "gold.dim_store", "key": "true"}
+    )
+    assert key.status_code == 422 and "declares no key" in key.json()["detail"]
+
+
+def test_join_path_has_the_documented_shape_and_hides_what_the_reader_may_not_see(
+    client: TestClient,
+) -> None:
+    _star(client)
+    pair = {"from": "gold.fact_sales", "to": "gold.dim_store"}
+    answer = client.get(f"{_GRAPH}/join-path", headers=AUTH_HEADER, params=pair)
+    assert answer.status_code == 200, answer.text
+    body = answer.json()
+    assert set(body) == {"paths", "reason", "more_paths"}
+    (step,) = body["paths"][0]["steps"]
+    assert (step["from_name"], step["to_name"], step["direction"], step["fans_out"]) == (
+        "gold.fact_sales",
+        "gold.dim_store",
+        "many_to_one",
+        False,
+    )
+    assert step["from_columns"] == ["store_id"] and step["reference"].startswith("reference:")
+    assert (step["from_model_kind"], step["from_grain"]) == ("fact", "g")
+    none = client.get(
+        f"{_GRAPH}/join-path",
+        headers=AUTH_HEADER,
+        params={"from": "bronze.stores_raw", "to": "gold.dim_store"},
+    ).json()
+    assert none["paths"] == [] and none["reason"].startswith("No declared path")
+    same = client.get(
+        f"{_GRAPH}/join-path",
+        headers=AUTH_HEADER,
+        params={"from": "gold.dim_store", "to": "gold.dim_store"},
+    )
+    assert same.status_code == 422 and "same table" in same.json()["detail"]
+    alice = _alice(client)
+    hidden = client.get(f"{_GRAPH}/join-path", headers=alice, params=pair)
+    assert hidden.status_code == 404
+    assert hidden.json()["detail"] == NO_NODE.format(node="gold.dim_store", env="dev")

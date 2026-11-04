@@ -1,4 +1,4 @@
-"""Walking the metadata graph for one reader: `lineage` and `neighbours` (#374).
+"""Walking the metadata graph for one reader: `lineage`, `neighbours`, `impact`, `join_path` (#374).
 
 Every node goes through `_Visibility` before a walk reaches it (spec §4):
 - a table, its columns, measures and checks need `READ_TABLE` on the table;
@@ -33,6 +33,8 @@ from sqlalchemy.orm import Session
 
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable, permits_each
 from lakana_core.catalog.glossary_read import term_names
+from lakana_core.catalog.graph_impact import NAMING_KINDS, impact_of
+from lakana_core.catalog.graph_join import JoinPath, JoinPaths, JoinStep, shortest_paths
 from lakana_core.catalog.graph_load import (
     AssetRecord,
     CheckRecord,
@@ -53,6 +55,9 @@ from lakana_core.catalog.graph_model import (
     BUSY,
     DEFAULT_GRAPH_DEPTH,
     GRAPH_TIME_BUDGET_SECONDS,
+    IMPACT_KINDS,
+    JOIN_KINDS,
+    KEY_NEEDS_TABLE,
     KIND_WORDS,
     LINEAGE_KINDS,
     MAX_GRAPH_DEPTH,
@@ -60,7 +65,10 @@ from lakana_core.catalog.graph_model import (
     MAX_GRAPH_STEPS,
     MAX_NODE_ID,
     NO_ENVIRONMENT,
+    NO_KEY,
     NO_NODE,
+    NO_PATH,
+    SAME_TABLE,
     TOO_LARGE,
     EdgeKind,
     GraphEdge,
@@ -441,6 +449,7 @@ def _key(distance: int, node_id: str) -> str:
 
 _LINEAGE = "graph-lineage"
 _NEIGHBOURS = "graph-neighbours"
+_IMPACT = "graph-impact"
 
 
 def _after(list_kind: str, cursor: str | None) -> str | None:
@@ -449,7 +458,7 @@ def _after(list_kind: str, cursor: str | None) -> str | None:
     Parameters
     ----------
     list_kind
-        The list asked: `_LINEAGE` or `_NEIGHBOURS`.
+        The list asked: `_LINEAGE`, `_NEIGHBOURS` or `_IMPACT`.
     cursor
         The previous page's `next_cursor`, or `None`.
 
@@ -881,6 +890,235 @@ class GraphService:
             found.setdefault(other, _Found(1))
         return self._page(ctx, _NEIGHBOURS, found, edges, languages, limit, after)
 
+    def impact(
+        self,
+        p: PrincipalRef,
+        environment: str,
+        node: str,
+        *,
+        key: bool = False,
+        languages: Sequence[str] = (),
+        limit: int = MAX_GRAPH_PAGE,
+        cursor: str | None = None,
+    ) -> GraphPage:
+        """List everything declared that depends on a table, a column or a table's key.
+
+        Each node but the start carries its `reason`; what only may use a column or key carries
+        `may_use` (`graph_impact`). The walk is cut at every node the reader may not see.
+
+        Parameters
+        ----------
+        p
+            The reader.
+        environment
+            The environment's name.
+        node
+            The start, a table or a column: a node id or a named form.
+        key
+            Ask about the table's declared key instead of the whole table.
+        languages
+            The reader's languages, most wanted first.
+        limit
+            Nodes per page, 1 to `MAX_GRAPH_PAGE`.
+        cursor
+            The `next_cursor` of the previous page.
+
+        Returns
+        -------
+        GraphPage
+            One page of the answer: the start at distance 0 (with its table, for a column), then
+            the rest by distance in edges.
+
+        Raises
+        ------
+        ValidationError
+            For a start that is not a table or column (`IMPACT_KINDS`), `key` with a column
+            (`KEY_NEEDS_TABLE`), `key` on a table without a declared key (`NO_KEY`), a node,
+            limit or cursor out of bounds, or past the step budget.
+        NotFoundError
+            If the environment or the start does not exist or is hidden.
+        GraphBusyError
+            Past the time budget.
+        """
+        _check_limit(limit)
+        ref = parse_node(node)
+        if ref.kind not in (NodeKind.TABLE, NodeKind.COLUMN):
+            raise ValidationError(
+                IMPACT_KINDS.format(
+                    node=shown(node), word=KIND_WORDS[ref.kind], env=shown(environment)
+                )
+            )
+        if key and ref.kind is NodeKind.COLUMN:
+            raise ValidationError(KEY_NEEDS_TABLE.format(node=shown(node)))
+        after = _after(_IMPACT, cursor)
+        ctx = self._open(p, environment, node)
+        root = self._root(ctx, node, ref)
+        table = ctx.graph.tables[table_part(root)]
+        if key and not table.key:
+            raise ValidationError(NO_KEY.format(table=table.ref.dotted(), env=shown(environment)))
+        hits, edges = impact_of(ctx, root, key=key)
+        found = {n: _Found(h.distance, h.reason, h.may_use) for n, h in hits.items()}
+        return self._page(ctx, _IMPACT, found, edges, languages, limit, after)
+
+    def join_path(
+        self,
+        p: PrincipalRef,
+        environment: str,
+        start: str,
+        goal: str,
+        *,
+        languages: Sequence[str] = (),
+    ) -> JoinPaths:
+        """Find every declared path of minimal length joining two tables.
+
+        A path has at most `MAX_JOIN_HOPS` steps, and at most `MAX_JOIN_PATHS` paths are
+        returned (`graph_join`). No path, and none the reader may see, give the same `NO_PATH`.
+
+        Parameters
+        ----------
+        p
+            The reader.
+        environment
+            The environment's name.
+        start
+            The table to start from: a node id or a dotted name.
+        goal
+            The table to reach.
+        languages
+            The reader's languages, most wanted first, for the grains.
+
+        Returns
+        -------
+        JoinPaths
+            The paths, or none with the reason.
+
+        Raises
+        ------
+        ValidationError
+            For a start or goal that is not a table (`JOIN_KINDS`), the same table twice
+            (`SAME_TABLE`), a node out of bounds, or past the step budget.
+        NotFoundError
+            If the environment, `start` or `goal` does not exist or is hidden.
+        GraphBusyError
+            Past the time budget.
+        """
+        refs = [parse_node(text) for text in (start, goal)]
+        for text, ref in zip((start, goal), refs, strict=True):
+            if ref.kind is not NodeKind.TABLE:
+                raise ValidationError(
+                    JOIN_KINDS.format(node=shown(text), word=KIND_WORDS[ref.kind])
+                )
+        ctx = self._open(p, environment, start)
+        first, last = self._root(ctx, start, refs[0]), self._root(ctx, goal, refs[1])
+        tables = ctx.graph.tables
+        a, b = tables[table_part(first)], tables[table_part(last)]
+        if a.id == b.id:
+            raise ValidationError(SAME_TABLE.format(table=a.ref.dotted(), env=shown(environment)))
+        found, more = shortest_paths(ctx, a.id, b.id)
+        if not found:
+            reason = NO_PATH.format(
+                start=a.ref.dotted(), goal=b.ref.dotted(), env=shown(environment)
+            )
+            return JoinPaths((), reason, False)
+        reached = {a.id} | {hop.to_table for path in found for hop in path}
+        rows = _translation_rows(self._session, reached)
+        grains = {
+            t: _chosen(tables[t], rows, languages, self._main_language, "grain") for t in reached
+        }
+        paths: list[JoinPath] = []
+        for path in found:
+            steps: list[JoinStep] = []
+            here = a.id
+            for hop in path:
+                there, record = hop.to_table, hop.reference
+                own, target = (record.source_column,), (record.target_column,)
+                steps.append(
+                    JoinStep(
+                        reference=record.id,
+                        from_table=table_node(here),
+                        from_name=tables[here].ref.dotted(),
+                        to_table=table_node(there),
+                        to_name=tables[there].ref.dotted(),
+                        from_columns=own if hop.forward else target,
+                        to_columns=target if hop.forward else own,
+                        direction="many_to_one" if hop.forward else "one_to_many",
+                        fans_out=not hop.forward,
+                        from_model_kind=tables[here].model_kind,
+                        from_grain=grains[here],
+                        to_model_kind=tables[there].model_kind,
+                        to_grain=grains[there],
+                    )
+                )
+                here = there
+            paths.append(JoinPath(tuple(steps)))
+        return JoinPaths(tuple(paths), None, more)
+
+    def breakage(
+        self, p: PrincipalRef, environment: str, nodes: Sequence[str]
+    ) -> dict[str, tuple[tuple[GraphNode, tuple[str, ...]], ...]]:
+        """List the declarations that name each of several tables and columns, for a deploy.
+
+        Only the references, measures, checks and glossary terms that name a node itself are
+        listed (`impact_of` with ``named_only``), never what only may use it: nothing
+        downstream is walked, and only those declarations are built, in one build for every
+        node. So the cost grows with the declarations on the nodes, not with what lies
+        downstream of them, and one budget covers it all: the clock is read after each walk
+        and after the build. A node that does not exist, or that `p` may not see, gets
+        nothing.
+
+        Parameters
+        ----------
+        p
+            The deployer, whose visibility applies.
+        environment
+            The environment's name.
+        nodes
+            Named forms: a dotted table, or ``column:<table>/<column>``.
+
+        Returns
+        -------
+        dict
+            Node → each declaration naming it, with the dotted tables it names
+            (`_named_tables`), in node id order.
+
+        Raises
+        ------
+        ValidationError
+            For a node out of bounds, or past the step budget.
+        GraphBusyError
+            Past the time budget.
+        NotFoundError
+            If the environment does not exist.
+        """
+        ctx = self._open(p, environment, nodes[0] if nodes else "")
+        walked: list[tuple[str, list[tuple[str, _Found]]]] = []
+        for node in nodes:
+            found = ctx.graph.resolve(parse_node(node))
+            if found is None or not ctx.visible.node(found):
+                continue
+            hits, _ = impact_of(ctx, found, key=False, named_only=True)
+            walked.append(
+                (
+                    node,
+                    [
+                        (n, _Found(h.distance, h.reason))
+                        for n, h in sorted(hits.items())
+                        if not h.may_use and node_kind(n) in NAMING_KINDS
+                    ],
+                )
+            )
+            ctx.budget.check()
+        # One build for every answer, so its statements do not grow with the number of nodes.
+        built = self._nodes(ctx, [e for _, entries in walked for e in entries], ())
+        ctx.budget.check()
+        answers: dict[str, tuple[tuple[GraphNode, tuple[str, ...]], ...]] = {}
+        start = 0
+        for node, entries in walked:
+            end = start + len(entries)
+            answers[node] = tuple((g, _named_tables(ctx.graph, g.id)) for g in built[start:end])
+            start = end
+        return answers
+
     def _page(
         self,
         ctx: _Context,
@@ -1078,3 +1316,30 @@ def _repository(graph: EnvironmentGraph, table_id: uuid.UUID) -> str | None:
     """
     builder = graph.builder_of.get(table_id)
     return builder.repository if builder else None
+
+
+def _named_tables(graph: EnvironmentGraph, node_id: str) -> tuple[str, ...]:
+    """Name the tables a warning about a node names, so a reader sees it only if it may read them.
+
+    Parameters
+    ----------
+    graph
+        The environment's graph.
+    node_id
+        The node.
+
+    Returns
+    -------
+    tuple of str
+        Dotted tables: a reference its own and its target; a measure its table; a check its
+        table, and a generated ``ref_`` check its target too (R3); any other node none.
+    """
+    record = graph.records.get(node_id)
+    if isinstance(record, ReferenceRecord):
+        return (graph.tables[record.source_table_id].ref.dotted(), record.target_name)
+    if isinstance(record, CheckRecord):
+        table = graph.tables[record.table_id].ref.dotted()
+        return (table, record.target) if record.target else (table,)
+    if isinstance(record, MeasureRecord):
+        return (graph.tables[record.table_id].ref.dotted(),)
+    return ()

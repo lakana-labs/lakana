@@ -6,11 +6,44 @@ from collections.abc import Sequence
 from typing import Any
 
 from lakana._http import HttpTransport, _next_cursor, query_params
-from lakana._models import Graph, GraphEdge, GraphNode, known_fields
+from lakana._models import Graph, GraphEdge, GraphNode, JoinPath, JoinPaths, JoinStep, known_fields
 from lakana._routes import ROUTES
 from lakana.errors import InvalidResponse, NotFound
 from lakana.resources.artifacts import _ODD_ANSWER, _object
 from lakana.resources.terms import _no_routes
+
+
+def _join_paths_from_json(data: dict[str, Any]) -> JoinPaths:
+    """Read a join path answer; a field this SDK does not know is ignored.
+
+    Parameters
+    ----------
+    data
+        The decoded object of a `JoinPathsOut`.
+
+    Returns
+    -------
+    JoinPaths
+        The answer.
+
+    Raises
+    ------
+    InvalidResponse
+        If the answer is not shaped like a `JoinPathsOut`.
+    """
+    try:
+        paths = []
+        for path in data["paths"]:
+            steps = []
+            for step in path["steps"]:
+                fields = known_fields(JoinStep, step)
+                fields["from_columns"] = tuple(step["from_columns"])
+                fields["to_columns"] = tuple(step["to_columns"])
+                steps.append(JoinStep(**fields))
+            paths.append(JoinPath(tuple(steps)))
+        return JoinPaths(tuple(paths), data["reason"], bool(data["more_paths"]))
+    except (AttributeError, KeyError, TypeError, ValueError):
+        raise InvalidResponse(_ODD_ANSWER.format(what="the join paths")) from None
 
 
 def _page_from_json(data: dict[str, Any]) -> tuple[list[GraphNode], list[GraphEdge], str | None]:
@@ -49,7 +82,7 @@ def _page_from_json(data: dict[str, Any]) -> tuple[list[GraphNode], list[GraphEd
 
 
 class MetadataGraph:
-    """The `graph` resource of the platform API: lineage and neighbours.
+    """The `graph` resource of the platform API: lineage, neighbours, impact and join paths.
 
     Parameters
     ----------
@@ -190,3 +223,96 @@ class MetadataGraph:
         if kinds:
             params["kinds"] = list(kinds)
         return self._every_page("graph.neighbours", environment, params)
+
+    def impact(
+        self,
+        environment: str,
+        node: str,
+        *,
+        key: bool = False,
+        lang: str | None = None,
+        page_size: int | None = None,
+    ) -> Graph:
+        """List everything declared that depends on a table, a column or (``key=True``) its key.
+
+        Each node but the start carries `reason`, such as ``references gold.dim_store.store_id``;
+        for a column or a key, `may_use` marks what only may use it: the table's hand-written
+        checks, its row filters and everything downstream, because SQL is not parsed.
+
+        Parameters
+        ----------
+        environment
+            The environment.
+        node
+            A table's dotted name or id, or a column as ``column:gold.dim_store/store_id``.
+        key
+            Ask about the table's declared key instead of the whole table.
+        lang
+            The language of labels and names.
+        page_size
+            Nodes per request (1 to 500); `None` leaves it to the server (500).
+
+        Returns
+        -------
+        Graph
+            The start first, then what depends on it, every page read.
+
+        Raises
+        ------
+        lakana.errors.NotFound
+            If the environment or the node does not exist or you may not see it, or the server
+            has no graph routes.
+        lakana.errors.ValidationError
+            If the node is not a table or a column, or `key` is set for a column or a table that
+            declares no key.
+        """
+        return self._every_page(
+            "graph.impact",
+            environment,
+            query_params(node=node, key="true" if key else None, lang=lang, limit=page_size),
+        )
+
+    def join_path(
+        self, environment: str, from_table: str, to_table: str, *, lang: str | None = None
+    ) -> JoinPaths:
+        """Show how two tables join: every declared path of minimal length over references.
+
+        A path has at most 4 steps and at most 10 paths are returned; `more_paths` says when
+        more exist. A step with `fans_out` goes from one row to possibly many (``one_to_many``).
+
+        Parameters
+        ----------
+        environment
+            The environment.
+        from_table
+            The table to start from: its dotted name or id.
+        to_table
+            The table to reach.
+        lang
+            The language of grains.
+
+        Returns
+        -------
+        JoinPaths
+            The paths, or none with the reason.
+
+        Raises
+        ------
+        lakana.errors.NotFound
+            If a table or the environment does not exist or you may not see it, or the server
+            has no graph routes.
+        lakana.errors.ValidationError
+            If either is not a table, or both are the same table.
+        lakana.errors.InvalidResponse
+            If the answer is not shaped like a `JoinPathsOut`.
+        """
+        try:
+            response = self._transport.request(
+                ROUTES["graph.join_path"],
+                path_params={"env": environment},
+                params=query_params(**{"from": from_table, "to": to_table, "lang": lang}),
+            )
+        except NotFound as error:
+            translated = _no_routes(error, "metadata graph", 374)
+            raise translated from None
+        return _join_paths_from_json(_object(response, "the join paths"))

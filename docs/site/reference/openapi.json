@@ -6237,6 +6237,302 @@
         }
       }
     },
+    "/api/v1/environments/{env}/graph/impact": {
+      "get": {
+        "tags": [
+          "graph"
+        ],
+        "summary": "List everything the projects declare that depends on a table, a column or a table's key",
+        "description": "The start is a table or a column; `key=true` asks about a table's declared key. The answer holds the references to it and their generated checks, the measures, masks and glossary terms on its columns, its checks, row filters and terms, the asset that builds it, everything downstream of it, and the jobs that run any asset listed. Each node but the start carries `reason`, such as `references gold.dim_store.store_id` or `downstream of silver.orders`. For a column or a key, what only may use it carries `may_use: true`: the table's hand-written checks, its row filters and everything downstream, because SQL is not parsed. You see what lineage and neighbours would show you, and nothing beyond a node you may not see. Answers 404 as lineage does, 422 for a start that is not a table or column, for `key=true` with a column or on a table that declares no key, and for a limit or cursor out of bounds or a question too large to walk, and 503 with `Retry-After` when the walk ran past its time.",
+        "operationId": "graph_impact_api_v1_environments__env__graph_impact_get",
+        "parameters": [
+          {
+            "name": "env",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Env"
+            },
+            "description": "Environment name."
+          },
+          {
+            "name": "node",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "A node id from an answer, or a table's dotted name such as gold.dim_store; a column as column:gold.dim_store/store_id.",
+              "title": "Node"
+            },
+            "description": "A node id from an answer, or a table's dotted name such as gold.dim_store; a column as column:gold.dim_store/store_id."
+          },
+          {
+            "name": "key",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Ask about the table's declared key instead of the whole table.",
+              "default": false,
+              "title": "Key"
+            },
+            "description": "Ask about the table's declared key instead of the whole table."
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The language of the texts, such as de or fr-CH; without it, your profile's language, then Accept-Language, then the instance's main language.",
+              "title": "Lang"
+            },
+            "description": "The language of the texts, such as de or fr-CH; without it, your profile's language, then Accept-Language, then the instance's main language."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "description": "Most nodes per page, 1 to 500.",
+              "default": 500,
+              "title": "Limit"
+            },
+            "description": "Most nodes per page, 1 to 500."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 10978
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The `next_cursor` of the previous page, sent with the same question.",
+              "title": "Cursor"
+            },
+            "description": "The `next_cursor` of the previous page, sent with the same question."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GraphOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token is missing, wrong, expired or revoked.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The server cannot do this right now; ask again after the time in `Retry-After`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/environments/{env}/graph/join-path": {
+      "get": {
+        "tags": [
+          "graph"
+        ],
+        "summary": "Show how two tables join: every declared path of minimal length over references",
+        "description": "A path has at most 4 steps, and at most 10 paths are returned, in the order of their references' ids (`more_paths` says when more exist). A step follows a reference either way: `many_to_one` from the table that declares it to its target, `one_to_many` with `fans_out: true` back, where each row may meet many. A step names the reference, the columns to join on, and both tables' kind and grain. No path, or none you may see, gives an empty `paths` with a `reason`; a path through a table you may not see is never returned, and nothing in the answer counts or marks it. Answers 404 when a table or the environment does not exist or you may not see it (one answer for both), 422 for something that is not a table or the same table twice, or a question too large to walk, and 503 with `Retry-After` when the walk ran past its time.",
+        "operationId": "graph_join_path_api_v1_environments__env__graph_join_path_get",
+        "parameters": [
+          {
+            "name": "env",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Env"
+            },
+            "description": "Environment name."
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "The table to start from: A node id from an answer, or a table's dotted name such as gold.dim_store; a column as column:gold.dim_store/store_id.",
+              "title": "From"
+            },
+            "description": "The table to start from: A node id from an answer, or a table's dotted name such as gold.dim_store; a column as column:gold.dim_store/store_id."
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "The table to reach, named the same way.",
+              "title": "To"
+            },
+            "description": "The table to reach, named the same way."
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The language of the texts, such as de or fr-CH; without it, your profile's language, then Accept-Language, then the instance's main language.",
+              "title": "Lang"
+            },
+            "description": "The language of the texts, such as de or fr-CH; without it, your profile's language, then Accept-Language, then the instance's main language."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JoinPathsOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token is missing, wrong, expired or revoked.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The server cannot do this right now; ask again after the time in `Retry-After`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/environments/{env}/namespaces/{path}/artifacts/{name}/uploads": {
       "post": {
         "tags": [
@@ -19904,7 +20200,7 @@
           "finished_at"
         ],
         "title": "DeployOut",
-        "description": "Response body for a deploy run.\n\nParameters\n----------\nid\n    The run's id.\nenvironment\n    Environment name.\nrepository\n    Repository name.\nkind\n    ``deploy``, ``dry_run`` or ``rollback``.\nstatus\n    ``queued``, ``running``, ``succeeded`` or ``failed``.\nrequested_ref\n    Ref or SHA asked for.\nresolved_sha\n    The commit fetched.\nrollback_to_project_version_id\n    A rollback's target.\nerror_message\n    Why it failed.\ndiff\n    Table names per change category.\nproject_version_id\n    The project version it made current.\nprincipal_id\n    Who submitted it.\ncreated_at\n    Queued at.\nstarted_at\n    Claimed at.\nfinished_at\n    Finished at.\nhidden_adopted\n    Adopted tables left out of `diff` because the caller may not read them.\nchecks\n    The checks the project has, table to ``[{\"check\", \"on_failure\"}]``; `None` for a run\n    without checks.\nwarnings\n    What the deploy leaves for its owner to act on, as sentences (a removed asset whose\n    table is kept after a failed check).\nwaiting_for\n    Why a queued deploy has not started: a stable `code`, one sentence in `message` that\n    names the next step, and the numbers it uses; null when it is not waiting. Set on the\n    single read (`GET .../deploys/{id}`) only, null in the history.\njob_starts\n    The jobs with `on_deploy: true` that a successful deploy started, by name, each with\n    what came of its start; empty for a run that starts no job (a dry run, a rollback, a\n    failed deploy, a deploy of the commit already current)."
+        "description": "Response body for a deploy run.\n\nParameters\n----------\nid\n    The run's id.\nenvironment\n    Environment name.\nrepository\n    Repository name.\nkind\n    ``deploy``, ``dry_run`` or ``rollback``.\nstatus\n    ``queued``, ``running``, ``succeeded`` or ``failed``.\nrequested_ref\n    Ref or SHA asked for.\nresolved_sha\n    The commit fetched.\nrollback_to_project_version_id\n    A rollback's target.\nerror_message\n    Why it failed.\ndiff\n    Table names per change category.\nproject_version_id\n    The project version it made current.\nprincipal_id\n    Who submitted it.\ncreated_at\n    Queued at.\nstarted_at\n    Claimed at.\nfinished_at\n    Finished at.\nhidden_adopted\n    Adopted tables left out of `diff` because the caller may not read them.\nchecks\n    The checks the project has, table to ``[{\"check\", \"on_failure\"}]``; `None` for a run\n    without checks.\nwarnings\n    What the deploy leaves for its owner to act on, as sentences (a removed asset whose\n    table is kept after a failed check; a removed table or column that other repositories\n    declare something on, shown only to a reader who may see it).\nwaiting_for\n    Why a queued deploy has not started: a stable `code`, one sentence in `message` that\n    names the next step, and the numbers it uses; null when it is not waiting. Set on the\n    single read (`GET .../deploys/{id}`) only, null in the history.\njob_starts\n    The jobs with `on_deploy: true` that a successful deploy started, by name, each with\n    what came of its start; empty for a run that starts no job (a dry run, a rollback, a\n    failed deploy, a deploy of the commit already current)."
       },
       "DeployTriggerOut": {
         "properties": {
@@ -21163,6 +21459,169 @@
         ],
         "title": "JobStartOut",
         "description": "What a start of a job did: the run (201) or the waiting start (202).\n\nParameters\n----------\nrun\n    The queued run, or null when the start waits.\nwaiting\n    The waiting start, or null when a run was queued."
+      },
+      "JoinPathOut": {
+        "properties": {
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/JoinStepOut"
+            },
+            "type": "array",
+            "title": "Steps"
+          }
+        },
+        "type": "object",
+        "required": [
+          "steps"
+        ],
+        "title": "JoinPathOut",
+        "description": "A join path.\n\nParameters\n----------\nsteps\n    Its steps, in order, from `from` to `to`."
+      },
+      "JoinPathsOut": {
+        "properties": {
+          "paths": {
+            "items": {
+              "$ref": "#/components/schemas/JoinPathOut"
+            },
+            "type": "array",
+            "title": "Paths"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "more_paths": {
+            "type": "boolean",
+            "title": "More Paths"
+          }
+        },
+        "type": "object",
+        "required": [
+          "paths",
+          "reason",
+          "more_paths"
+        ],
+        "title": "JoinPathsOut",
+        "description": "Every declared join path of minimal length between two tables: at most 4 steps, 10 paths.\n\nParameters\n----------\npaths\n    The paths, in the order of their references' ids; empty when there is none.\nreason\n    Why there is none, and what to do; `null` when there are paths.\nmore_paths\n    `true` when more than 10 paths of that length exist."
+      },
+      "JoinStepOut": {
+        "properties": {
+          "reference": {
+            "type": "string",
+            "title": "Reference"
+          },
+          "from_table": {
+            "type": "string",
+            "title": "From Table"
+          },
+          "from_name": {
+            "type": "string",
+            "title": "From Name"
+          },
+          "to_table": {
+            "type": "string",
+            "title": "To Table"
+          },
+          "to_name": {
+            "type": "string",
+            "title": "To Name"
+          },
+          "from_columns": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "From Columns"
+          },
+          "to_columns": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "To Columns"
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "many_to_one",
+              "one_to_many"
+            ],
+            "title": "Direction"
+          },
+          "fans_out": {
+            "type": "boolean",
+            "title": "Fans Out"
+          },
+          "from_model_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Model Kind"
+          },
+          "from_grain": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Grain"
+          },
+          "to_model_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To Model Kind"
+          },
+          "to_grain": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To Grain"
+          }
+        },
+        "type": "object",
+        "required": [
+          "reference",
+          "from_table",
+          "from_name",
+          "to_table",
+          "to_name",
+          "from_columns",
+          "to_columns",
+          "direction",
+          "fans_out",
+          "from_model_kind",
+          "from_grain",
+          "to_model_kind",
+          "to_grain"
+        ],
+        "title": "JoinStepOut",
+        "description": "One step of a join path.\n\nParameters\n----------\nreference\n    The reference it follows (`reference:<uuid>`).\nfrom_table\n    The table it leaves (`table:<uuid>`).\nfrom_name\n    Its dotted name.\nto_table\n    The table it reaches.\nto_name\n    Its dotted name.\nfrom_columns\n    The columns of `from_table` to join on.\nto_columns\n    The columns of `to_table` they equal, in the same order.\ndirection\n    `many_to_one` along the reference (from the table that declares it), `one_to_many`\n    against it.\nfans_out\n    `true` for a `one_to_many` step: each row of `from_table` may meet many rows.\nfrom_model_kind\n    `from_table`'s declared kind, such as `fact` or `dimension`.\nfrom_grain\n    Its grain, in your language.\nto_model_kind\n    `to_table`'s declared kind.\nto_grain\n    Its grain, in your language."
       },
       "LastMaintenanceOut": {
         "properties": {
