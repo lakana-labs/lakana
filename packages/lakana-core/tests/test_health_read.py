@@ -14,7 +14,7 @@ from pyiceberg.schema import Schema
 from pyiceberg.table.metadata import TableMetadata, TableMetadataV2
 from pyiceberg.table.sorting import SortOrder
 from pyiceberg.types import DoubleType, LongType, NestedField
-from sqlalchemy import select, update
+from sqlalchemy import insert, select, update
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
@@ -78,6 +78,9 @@ def _add(
     observed: dict | None = None,
     band: dict | None = None,
     minutes: int = 0,
+    sequence: int | None = None,
+    snapshot: int = 4711,
+    row_id: uuid.UUID | None = None,
 ) -> TableHealthSignal:
     """Record one signal of `silver.orders`, `minutes` after `_NOW`.
 
@@ -97,6 +100,12 @@ def _add(
         Its band.
     minutes
         Minutes after `_NOW`.
+    sequence
+        The snapshot's sequence number; by default one that orders as `minutes` does.
+    snapshot
+        The snapshot observed.
+    row_id
+        The row's id; a random one by default.
 
     Returns
     -------
@@ -109,12 +118,13 @@ def _add(
         .where(Table.name == "orders")
     ).one()
     row = TableHealthSignal(
-        id=uuid.uuid4(),
+        id=row_id or uuid.uuid4(),
         environment_id=environment_id,
         table_id=table_id,
         signal=signal,
         column_name=column,
-        snapshot_id=4711,
+        snapshot_id=snapshot,
+        sequence_number=100_000 + minutes if sequence is None else sequence,
         observed=observed,
         band=band,
         state=state,
@@ -124,6 +134,22 @@ def _add(
     session.add(row)
     session.commit()
     return row
+
+
+def _table_id(session: Session) -> uuid.UUID:
+    """Look up the id of `silver.orders`.
+
+    Parameters
+    ----------
+    session
+        Database session.
+
+    Returns
+    -------
+    uuid.UUID
+        The id.
+    """
+    return session.scalars(select(Table.id).where(Table.name == "orders")).one()
 
 
 def _no_metadata() -> TableMetadata | None:
@@ -419,6 +445,202 @@ def test_a_commit_without_column_rows_keeps_the_column_signals_before(
         ("volume", None, _NOW + timedelta(minutes=5)),
         ("range", "id", _NOW),
     ]
+
+
+def test_two_commits_in_the_same_second_never_mix(session: Session, tmp_path: Path) -> None:
+    """Order commits by snapshot sequence number, not by a time two commits can share (M2).
+
+    The older commit's rows have the larger ids, so ordering by time, then id, would take its
+    volume and add its column `b` to the newer commit's columns.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    tmp_path
+        Storage root.
+    """
+    _catalog(session, tmp_path)
+
+    def commit(sequence: int, total: int, columns: list[str], *, high_ids: bool) -> None:
+        """Record one commit's rows, all at `_NOW`.
+
+        Parameters
+        ----------
+        sequence
+            Its sequence number, also its snapshot.
+        total
+            Its row count.
+        columns
+            The columns it observed.
+        high_ids
+            Whether its row ids are the largest there are, rather than the smallest.
+        """
+        kinds = [("volume", None), ("schema", None), *(("null_rate", c) for c in columns)]
+        for n, (signal, column) in enumerate(kinds):
+            _add(
+                session,
+                signal,
+                "ok",
+                column=column,
+                observed={"added": 1, "total": total} if signal == "volume" else _SCHEMA,
+                sequence=sequence,
+                snapshot=sequence,
+                row_id=uuid.UUID(int=2**128 - 1 - n if high_ids else n + 1),
+            )
+
+    commit(1, 1, ["a", "b"], high_ids=True)
+    commit(2, 2, ["a"], high_ids=False)
+    shown = current_signals(session, _table_id(session), "silver.orders", Visibility())
+    assert [(s.signal, s.column, s.snapshot_id) for s in shown] == [
+        ("volume", None, 2),
+        ("null_rate", "a", 2),
+        ("schema", None, 2),
+    ]
+    assert shown[0].observed == {"added": 1, "total": 2}
+
+
+def _vm_steps(session: Session, call: Callable[[], object]) -> int:
+    """Count the SQLite virtual machine steps a call takes, in thousands.
+
+    Parameters
+    ----------
+    session
+        Database session on SQLite.
+    call
+        What to measure.
+
+    Returns
+    -------
+    int
+        How often SQLite's progress handler ran, once per thousand steps.
+    """
+    raw = session.connection().connection.driver_connection
+    steps = [0]
+
+    def step() -> int:
+        """Count one thousand steps.
+
+        Returns
+        -------
+        int
+            0, which lets the statement go on.
+        """
+        steps[0] += 1
+        return 0
+
+    raw.set_progress_handler(step, 1000)
+    try:
+        call()
+    finally:
+        raw.set_progress_handler(None, 0)
+    return steps[0]
+
+
+def _history(session: Session, table_id: uuid.UUID, commits: range, columns: int) -> None:
+    """Record many commits of unremarkable signals, one minute apart, `_NOW` being commit 0.
+
+    Parameters
+    ----------
+    session
+        Database session; commits.
+    table_id
+        The table.
+    commits
+        The commits' numbers, which are their sequence numbers and snapshots.
+    columns
+        How many columns each commit observed.
+    """
+    environment_id = session.scalars(select(Namespace.environment_id)).first()
+
+    def row(c: int, signal: str, column: str | None, observed: dict) -> dict:
+        """Give one row's values.
+
+        Parameters
+        ----------
+        c
+            The commit.
+        signal
+            The signal.
+        column
+            Its column.
+        observed
+            The observed values.
+
+        Returns
+        -------
+        dict
+            The row.
+        """
+        return {
+            "id": uuid.uuid4(),
+            "environment_id": environment_id,
+            "table_id": table_id,
+            "signal": signal,
+            "column_name": column,
+            "snapshot_id": 1000 + c,
+            "sequence_number": 1000 + c,
+            "observed": observed,
+            "band": None,
+            "state": "ok",
+            "effect": "warn",
+            "observed_at": _NOW + timedelta(minutes=c),
+        }
+
+    rows = []
+    for c in commits:
+        rows += [row(c, "volume", None, {"added": 1, "total": c}), row(c, "schema", None, _SCHEMA)]
+        for k in range(columns):
+            rows.append(row(c, "null_rate", f"c{k}", {"nulls": 0, "values": 1, "rate": 0.0}))
+            rows.append(row(c, "range", f"c{k}", {"lower": 0, "upper": 1, "kind": "integer"}))
+    session.execute(insert(TableHealthSignal), rows)
+    session.commit()
+
+
+def test_the_current_state_does_not_read_the_whole_history(
+    session: Session, tmp_path: Path
+) -> None:
+    """Take about the same work for a table with twenty times the history (M3).
+
+    Parameters
+    ----------
+    session
+        Database session.
+    tmp_path
+        Storage root.
+    """
+    _catalog(session, tmp_path)
+    table_id = _table_id(session)
+    _add(
+        session,
+        "null_rate",
+        "fired",
+        column="c0",
+        observed=_NULLS,
+        band=_RATE_BAND,
+        minutes=-1,
+        sequence=999,
+        snapshot=999,
+    )
+    _history(session, table_id, range(0, 10), columns=20)
+
+    def read() -> list[SignalView]:
+        """Read the current state.
+
+        Returns
+        -------
+        list of SignalView
+            It.
+        """
+        return current_signals(session, table_id, "silver.orders", Visibility())
+
+    short = read()
+    few = _vm_steps(session, read)
+    _history(session, table_id, range(-400, -200), columns=20)
+    assert read() == short
+    many = _vm_steps(session, read)
+    assert many < 2 * few + 10, (few, many)
+    assert next(s for s in short if s.column == "c0" and s.signal == "null_rate").last_fired_at
 
 
 def test_a_damaged_stored_value_gives_no_alert(session: Session, tmp_path: Path) -> None:

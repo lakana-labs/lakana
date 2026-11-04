@@ -2950,8 +2950,13 @@ def test_0063_on_postgres() -> None:
         engine = sqlalchemy.create_engine(url)
         assert _alembic_version(engine) == revision_0063
         inspector = sqlalchemy.inspect(engine)
-        assert "ix_table_health_signals_table_id_observed_at" in {
-            i["name"] for i in inspector.get_indexes("table_health_signals")
+        assert {i["name"] for i in inspector.get_indexes("table_health_signals")} == {
+            "ix_table_health_signals_table_id_observed_at",
+            "ix_table_health_signals_table_id_signal_sequence_number",
+            "ix_table_health_signals_table_id_state",
+        }
+        assert "sequence_number" in {
+            c["name"] for c in inspector.get_columns("table_health_signals")
         }
         now = datetime.now(UTC)
         env_id, namespace_id, table_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()

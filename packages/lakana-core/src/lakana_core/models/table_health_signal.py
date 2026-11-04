@@ -32,6 +32,10 @@ class TableHealthSignal(Base):
         signal that is off for the whole table.
     snapshot_id : int or None
         The snapshot observed; for ``freshness``, the table's last snapshot.
+    sequence_number : int or None
+        The Iceberg sequence number of `snapshot_id` (0 for a format v1 table), which orders a
+        table's commits where ``observed_at`` cannot: two commits can share a time. `None` for
+        a row without a snapshot.
     observed : dict or None
         What was observed (`docs/site/reference/table-health.md` lists the keys per signal).
     band : dict or None
@@ -46,7 +50,23 @@ class TableHealthSignal(Base):
 
     __tablename__ = "table_health_signals"
     __table_args__ = (
+        # The history pages and the time windows.
         Index("ix_table_health_signals_table_id_observed_at", "table_id", "observed_at"),
+        # The newest commit of each signal, found with one ordered seek (`health_read`), and the
+        # rows of that commit.
+        Index(
+            "ix_table_health_signals_table_id_signal_sequence_number",
+            "table_id",
+            "signal",
+            "sequence_number",
+            "observed_at",
+            "id",
+        ),
+        # The last firing of each signal and column, among the fired rows only, partitioned as
+        # the window ranks them.
+        Index(
+            "ix_table_health_signals_table_id_state", "table_id", "state", "signal", "column_name"
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
@@ -57,6 +77,7 @@ class TableHealthSignal(Base):
     signal: Mapped[str] = mapped_column(String(16))
     column_name: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     snapshot_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    sequence_number: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     observed: Mapped[dict[str, Any] | None] = mapped_column(JSON(none_as_null=True), nullable=True)
     band: Mapped[dict[str, Any] | None] = mapped_column(JSON(none_as_null=True), nullable=True)
     state: Mapped[str] = mapped_column(String(16))

@@ -31,6 +31,7 @@ def upgrade() -> None:
         sa.Column("signal", sa.String(length=16), nullable=False),
         sa.Column("column_name", sa.String(length=1024), nullable=True),
         sa.Column("snapshot_id", sa.BigInteger(), nullable=True),
+        sa.Column("sequence_number", sa.BigInteger(), nullable=True),
         sa.Column("observed", sa.JSON(), nullable=True),
         sa.Column("band", sa.JSON(), nullable=True),
         sa.Column("state", sa.String(length=16), nullable=False),
@@ -56,9 +57,26 @@ def upgrade() -> None:
         ["table_id", "observed_at"],
         unique=False,
     )
+    op.create_index(
+        "ix_table_health_signals_table_id_signal_sequence_number",
+        "table_health_signals",
+        ["table_id", "signal", "sequence_number", "observed_at", "id"],
+        unique=False,
+    )
+    op.create_index(
+        "ix_table_health_signals_table_id_state",
+        "table_health_signals",
+        ["table_id", "state", "signal", "column_name"],
+        unique=False,
+    )
 
 
 def downgrade() -> None:
     """Downgrade schema."""
+    op.drop_index("ix_table_health_signals_table_id_state", table_name="table_health_signals")
+    op.drop_index(
+        "ix_table_health_signals_table_id_signal_sequence_number",
+        table_name="table_health_signals",
+    )
     op.drop_index("ix_table_health_signals_table_id_observed_at", table_name="table_health_signals")
     op.drop_table("table_health_signals")

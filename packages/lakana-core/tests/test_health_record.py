@@ -174,6 +174,7 @@ def _seed(
                 signal=signal,
                 column_name=column,
                 snapshot_id=day + 1,
+                sequence_number=day + 1,
                 observed=observed,
                 band=None,
                 state="ok",
@@ -248,6 +249,11 @@ def test_an_append_records_the_commit_signals(
     assert volume.observed == {"added": 3, "total": 3}
     assert volume.snapshot_id is not None
     assert volume.environment_id == _environment_id(session)
+    current = catalog.load_table(principal, _ORDERS).metadata.current_snapshot()
+    assert current is not None
+    assert {r.sequence_number for r in session.scalars(select(TableHealthSignal))} == {
+        current.sequence_number
+    }
 
 
 def test_a_table_created_with_rows_records_its_first_snapshot(
@@ -588,6 +594,41 @@ def test_the_history_reaches_back_only_twice_history_commits(
     assert len(found["range", "id"]) == 3
 
 
+def test_the_history_is_ordered_by_sequence_number(
+    catalog: CatalogService, session: Session
+) -> None:
+    """Order the baseline by snapshot sequence number, not by a time commits can share (M2).
+
+    Parameters
+    ----------
+    catalog
+        The catalog, which creates the table.
+    session
+        Database session.
+    """
+    table_id, environment_id = _table_id(session), _environment_id(session)
+    for sequence in (1, 2, 3):
+        session.add(
+            TableHealthSignal(
+                id=uuid.UUID(int=10 - sequence),
+                environment_id=environment_id,
+                table_id=table_id,
+                signal="volume",
+                column_name=None,
+                snapshot_id=sequence,
+                sequence_number=sequence,
+                observed={"added": 1, "total": sequence},
+                band=None,
+                state="ok",
+                effect="warn",
+                observed_at=_T0,
+            )
+        )
+    session.commit()
+    found = recent_observations(session, table_id)
+    assert [o["total"] for o in found["volume", None]] == [3, 2, 1]
+
+
 def test_a_database_error_is_not_swallowed(
     catalog: CatalogService,
     session: Session,
@@ -788,6 +829,7 @@ def test_a_value_json_cannot_store_becomes_no_metrics(observed: dict, band: dict
         environment_id=uuid.uuid4(),
         table_id=uuid.uuid4(),
         snapshot_id=1,
+        sequence_number=1,
         now=_T0,
     )
     assert [(r.signal, r.column_name, r.state, r.effect, r.observed, r.band) for r in rows] == [

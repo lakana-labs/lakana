@@ -19,19 +19,19 @@ from __future__ import annotations
 
 import logging
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
 from pyiceberg.schema import index_by_name
 from pyiceberg.table.metadata import TableMetadata
-from sqlalchemy import ColumnElement, select
+from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from lakana_core.auth import PrincipalRef
-from lakana_core.catalog.health_record import ranked
+from lakana_core.catalog.health_record import NEWEST_COMMIT, ranked
 from lakana_core.catalog.health_signals import COLUMN_SIGNALS, SIGNALS, alert_text
 from lakana_core.errors import ValidationError
 from lakana_core.identifiers import TableRef, shown
@@ -317,10 +317,13 @@ def _view(
     )
 
 
-def _newest(
-    session: Session, table_id: uuid.UUID, *conditions: ColumnElement[bool]
+def _last_fired(
+    session: Session, table_id: uuid.UUID
 ) -> dict[tuple[str, str | None], TableHealthSignal]:
-    """Read the newest row of each signal and column of a table.
+    """Read the newest fired row of each signal and column of a table.
+
+    Only the fired rows are ranked, found through the index on ``(table_id, state, signal,
+    column_name)``.
 
     Parameters
     ----------
@@ -328,21 +331,86 @@ def _newest(
         Database session.
     table_id
         The table.
-    *conditions
-        Which rows take part.
 
     Returns
     -------
     dict
-        (signal, column) → its newest row.
+        (signal, column) → its newest fired row.
     """
-    window = ranked(TableHealthSignal.table_id == table_id, *conditions)
+    window = ranked(TableHealthSignal.table_id == table_id, TableHealthSignal.state == "fired")
     rows = session.scalars(
         select(TableHealthSignal)
         .join(window, window.c.id == TableHealthSignal.id)
         .where(window.c.position == 1)
     )
     return {(row.signal, row.column_name): row for row in rows}
+
+
+def _newest_of(session: Session, table_id: uuid.UUID, signal: str) -> TableHealthSignal | None:
+    """Read the row of a signal that the table's newest commit to record it wrote.
+
+    One ordered seek of the index on ``(table_id, signal, sequence_number, …)``.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    table_id
+        The table.
+    signal
+        The signal.
+
+    Returns
+    -------
+    TableHealthSignal or None
+        The row, `NEWEST_COMMIT` first; `None` when the signal has none.
+    """
+    return session.scalars(
+        select(TableHealthSignal)
+        .where(
+            TableHealthSignal.table_id == table_id,
+            TableHealthSignal.signal == signal,
+            TableHealthSignal.sequence_number.is_not(None),
+        )
+        .order_by(*NEWEST_COMMIT)
+        .limit(1)
+    ).first()
+
+
+def _commit_rows(
+    session: Session, table_id: uuid.UUID, anchors: list[TableHealthSignal]
+) -> list[TableHealthSignal]:
+    """Read the column rows of the newest commit that wrote any.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    table_id
+        The table.
+    anchors
+        The newest row of each column signal.
+
+    Returns
+    -------
+    list of TableHealthSignal
+        Every ``null_rate`` and ``range`` row of the newest anchor's commit: its sequence
+        number, snapshot and time.
+    """
+    if not anchors:
+        return []
+    newest = max(anchors, key=lambda row: (row.sequence_number, row.observed_at, row.id))
+    return list(
+        session.scalars(
+            select(TableHealthSignal).where(
+                TableHealthSignal.table_id == table_id,
+                TableHealthSignal.signal.in_(COLUMN_SIGNALS),
+                TableHealthSignal.sequence_number == newest.sequence_number,
+                TableHealthSignal.snapshot_id == newest.snapshot_id,
+                TableHealthSignal.observed_at == newest.observed_at,
+            )
+        )
+    )
 
 
 def current_signals(
@@ -354,7 +422,10 @@ def current_signals(
     of the newest commit that wrote any of them, which a commit reading the added files does for
     every column it observed: a signal switched off there shows as its off row, and a column it
     no longer observed (a dropped one, say) is left out. A compaction or a commit that adds no
-    data files (a delete) writes none, so the commit before it is shown.
+    data files (a delete) writes none, so the commit before it is shown. "Newest" is
+    `NEWEST_COMMIT`: by the snapshot's sequence number, then time, so two commits that share a
+    time never mix. Each is found with one ordered seek, so the work does not grow with the
+    table's history.
 
     Parameters
     ----------
@@ -372,18 +443,27 @@ def current_signals(
     list of SignalView
         In the order of `SIGNALS`, then by column.
     """
-    newest = _newest(session, table_id)
-    fired = _newest(session, table_id, TableHealthSignal.state == "fired")
-    column_at = max(
-        (row.observed_at for row in newest.values() if row.signal in COLUMN_SIGNALS),
-        default=None,
-    )
-    shown = [
-        row
-        for row in newest.values()
-        if row.signal not in COLUMN_SIGNALS or row.observed_at == column_at
-    ]
-    shown.sort(key=lambda row: (SIGNALS.index(row.signal), row.column_name or ""))
+
+    def newest(signals: Iterable[str]) -> list[TableHealthSignal]:
+        """Read the newest row of each signal.
+
+        Parameters
+        ----------
+        signals
+            The signals.
+
+        Returns
+        -------
+        list of TableHealthSignal
+            One row per signal that has any.
+        """
+        found = (_newest_of(session, table_id, signal) for signal in signals)
+        return [row for row in found if row is not None]
+
+    rows = newest([signal for signal in SIGNALS if signal not in COLUMN_SIGNALS])
+    rows += _commit_rows(session, table_id, newest(COLUMN_SIGNALS))
+    rows.sort(key=lambda row: (SIGNALS.index(row.signal), row.column_name or ""))
+    fired = _last_fired(session, table_id)
     return [
         _view(
             row,
@@ -392,7 +472,7 @@ def current_signals(
             last_fired=fired.get((row.signal, row.column_name)),
             current=True,
         )
-        for row in shown
+        for row in rows
     ]
 
 

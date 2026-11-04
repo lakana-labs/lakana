@@ -5006,14 +5006,17 @@ def test_0063_adds_the_health_signals_table_and_downgrades_cleanly(
             "signal",
             "column_name",
             "snapshot_id",
+            "sequence_number",
             "observed",
             "band",
             "state",
             "effect",
             "observed_at",
         }
-        assert "ix_table_health_signals_table_id_observed_at" in {
-            i["name"] for i in inspector.get_indexes("table_health_signals")
+        assert {i["name"] for i in inspector.get_indexes("table_health_signals")} == {
+            "ix_table_health_signals_table_id_observed_at",
+            "ix_table_health_signals_table_id_signal_sequence_number",
+            "ix_table_health_signals_table_id_state",
         }
         assert {
             f["referred_table"] for f in inspector.get_foreign_keys("table_health_signals")

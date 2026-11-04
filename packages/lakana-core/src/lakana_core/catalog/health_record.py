@@ -26,6 +26,7 @@ from pyiceberg.table.snapshots import Operation, Snapshot
 from sqlalchemy import ColumnElement, Subquery, and_, delete, func, not_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import InstrumentedAttribute, Session
+from sqlalchemy.sql.elements import UnaryExpression
 
 from lakana_core.catalog import field_ids
 from lakana_core.catalog.field_ids import added_data_files
@@ -59,6 +60,16 @@ _BY_COLUMN: tuple[InstrumentedAttribute[Any], ...] = (
     TableHealthSignal.column_name,
 )
 
+NEWEST_COMMIT: tuple[UnaryExpression[Any], ...] = (
+    TableHealthSignal.sequence_number.desc(),
+    TableHealthSignal.observed_at.desc(),
+    TableHealthSignal.id.desc(),
+)
+"""Newest first, for rows with a ``sequence_number``: the Iceberg sequence number orders a
+table's commits, which ``observed_at`` cannot (two commits can share a time, on SQLite within
+the same second); ``observed_at`` breaks the tie of a format v1 table, whose numbers are all 0.
+Served by the index on ``(table_id, signal, sequence_number, observed_at, id)``."""
+
 
 def ranked(
     *conditions: ColumnElement[bool],
@@ -66,9 +77,9 @@ def ranked(
 ) -> Subquery:
     """Rank the health signal rows newest first within each partition.
 
-    The one window over `table_health_signals` that the history, the current state of a
-    table and the retention share: rows are ordered by ``observed_at`` then ``id``, both
-    descending, so position 1 is the newest row and ties break the same way everywhere.
+    The one window over `table_health_signals` that the baseline and the last firings share:
+    rows are ordered as `NEWEST_COMMIT` says, a row without a sequence number last, so position
+    1 is the newest row and ties break the same way everywhere.
 
     Parameters
     ----------
@@ -88,7 +99,10 @@ def ranked(
             func.row_number()
             .over(
                 partition_by=tuple(partition),
-                order_by=(TableHealthSignal.observed_at.desc(), TableHealthSignal.id.desc()),
+                order_by=(
+                    TableHealthSignal.sequence_number.desc().nulls_last(),
+                    *NEWEST_COMMIT[1:],
+                ),
             )
             .label("position"),
         )
@@ -124,8 +138,12 @@ def recent_observations(
     """
     since = session.scalar(
         select(TableHealthSignal.observed_at)
-        .where(TableHealthSignal.table_id == table_id, TableHealthSignal.signal == "schema")
-        .order_by(TableHealthSignal.observed_at.desc(), TableHealthSignal.id.desc())
+        .where(
+            TableHealthSignal.table_id == table_id,
+            TableHealthSignal.signal == "schema",
+            TableHealthSignal.sequence_number.is_not(None),
+        )
+        .order_by(*NEWEST_COMMIT)
         .offset(2 * HISTORY - 1)
         .limit(1)
     )
@@ -142,7 +160,7 @@ def recent_observations(
         select(TableHealthSignal.signal, TableHealthSignal.column_name, TableHealthSignal.observed)
         .join(window, window.c.id == TableHealthSignal.id)
         .where(window.c.position <= HISTORY)
-        .order_by(TableHealthSignal.observed_at.desc(), TableHealthSignal.id.desc())
+        .order_by(window.c.position)
     )
     found: dict[tuple[str, str | None], list[dict[str, Any]]] = defaultdict(list)
     for signal, column, observed in rows:
@@ -379,6 +397,7 @@ def signal_rows(
     environment_id: uuid.UUID,
     table_id: uuid.UUID,
     snapshot_id: int | None,
+    sequence_number: int | None,
     now: datetime,
 ) -> list[TableHealthSignal]:
     """Build the rows of a commit's observations.
@@ -393,6 +412,8 @@ def signal_rows(
         The table.
     snapshot_id
         The new snapshot.
+    sequence_number
+        Its sequence number.
     now
         The database's time.
 
@@ -414,6 +435,7 @@ def signal_rows(
                 signal=o.signal,
                 column_name=o.column,
                 snapshot_id=snapshot_id,
+                sequence_number=sequence_number,
                 observed=o.observed if stored else None,
                 band=o.band if stored else None,
                 state=o.state if stored else "no_metrics",

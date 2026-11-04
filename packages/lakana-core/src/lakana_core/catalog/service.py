@@ -5033,11 +5033,14 @@ class CatalogService:
                 files=files,
             )
             now = db_now(self._session)
+        snapshot = after.current_snapshot()
         return signal_rows(
             pairs,
             environment_id=environment_id,
             table_id=table_id,
             snapshot_id=after.current_snapshot_id,
+            # A format v1 table has no sequence numbers: Iceberg reads them as 0.
+            sequence_number=None if snapshot is None else snapshot.sequence_number or 0,
             now=now,
         )
 
