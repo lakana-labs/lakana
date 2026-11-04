@@ -23,7 +23,6 @@ from sqlalchemy.orm import Session
 
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable
 from lakana_core.catalog.glossary import MAIN_TEXT_LANGUAGE
-from lakana_core.catalog.model_metadata import find_project_table
 from lakana_core.errors import NotFoundError, ValidationError
 from lakana_core.identifiers import TableRef
 from lakana_core.languages import DEFAULT_MAIN_LANGUAGE, lookup_chain
@@ -34,15 +33,20 @@ from lakana_core.models import (
     GlossaryTermLink,
     GlossaryTermRelated,
     GlossaryTermText,
+    Namespace,
     Repository,
+    Table,
     TableColumn,
 )
 from lakana_core.pagination import Page, by_key
 from lakana_core.projects.glossary import folded_text
-from lakana_core.projects.project_config import unsafe_identifier
 from lakana_core.projects.lookups import environment_by_name
+from lakana_core.projects.project_config import unsafe_identifier
 
 _TERM_LIST = "terms"
+
+_LOOKUP_CHUNK = 500
+"""The most names or ids one statement of `_Links.load` looks up, well under any driver's limit."""
 """The kind the terms' cursor names."""
 
 LinkKind = Literal["table", "column", "measure"]
@@ -329,40 +333,74 @@ class _Links:
         self._environment_id = environment_id
         self._tables: dict[str, _Table | None] = {}
 
-    def _table(self, dotted: str) -> _Table | None:
-        """Look a linked table up, with what the reader may see of it.
+    def load(self, dotted_names: Iterable[str]) -> None:
+        """Look up the linked tables not looked up yet, a few statements for all of them.
+
+        One statement finds the tables, a chunk of names at a time, and one each reads the
+        columns and the measures of those the reader may read; only the authorization is asked
+        per table, as every listing asks it.
 
         Parameters
         ----------
-        dotted
-            The table name the link gives.
-
-        Returns
-        -------
-        _Table or None
-            The table, or `None` when it does not exist.
+        dotted_names
+            The table names the links give; untrusted, so one that is not a table name is
+            simply not found.
         """
-        if dotted in self._tables:
-            return self._tables[dotted]
-        row = find_project_table(self._session, self._environment_id, dotted)
-        found: _Table | None = None
-        if row is not None:
-            ref = TableRef.from_dotted(self._environment, dotted)
-            found = _Table(False)
-            if self._authz.permits(
-                self._p,
-                Action.READ_TABLE,
-                Securable.table_scope(self._environment, ref.namespace, ref.name),
-            ):
-                columns = select(TableColumn.name).where(TableColumn.table_id == row.id)
-                measures = select(DeclaredMeasure.column).where(DeclaredMeasure.table_id == row.id)
-                found = _Table(
-                    True,
-                    frozenset(self._session.scalars(columns)),
-                    frozenset(self._session.scalars(measures)),
+        wanted: dict[tuple[str, str], list[str]] = {}
+        for dotted in set(dotted_names) - self._tables.keys():
+            self._tables[dotted] = None
+            try:
+                ref = TableRef.from_dotted(self._environment, dotted)
+            except ValidationError:
+                continue
+            wanted.setdefault((ref.namespace.joined(), ref.name), []).append(dotted)
+        names = sorted(wanted)
+        readable: dict[uuid.UUID, list[str]] = {}
+        for at in range(0, len(names), _LOOKUP_CHUNK):
+            chunk = names[at : at + _LOOKUP_CHUNK]
+            rows = self._session.execute(
+                select(Table.id, Namespace.path, Table.name)
+                .join(Namespace, Namespace.id == Table.namespace_id)
+                .where(
+                    Namespace.environment_id == self._environment_id,
+                    Namespace.path.in_({path for path, _ in chunk}),
+                    Table.name.in_({name for _, name in chunk}),
                 )
-        self._tables[dotted] = found
-        return found
+            ).all()
+            for table_id, path, name in rows:
+                spellings = wanted.get((path, name), [])
+                if not spellings:
+                    continue
+                for dotted in spellings:
+                    self._tables[dotted] = _Table(False)
+                ref = TableRef.from_dotted(self._environment, spellings[0])
+                if self._authz.permits(
+                    self._p,
+                    Action.READ_TABLE,
+                    Securable.table_scope(self._environment, ref.namespace, ref.name),
+                ):
+                    readable[table_id] = spellings
+        columns: dict[uuid.UUID, set[str]] = {table_id: set() for table_id in readable}
+        measures: dict[uuid.UUID, set[str]] = {table_id: set() for table_id in readable}
+        ids = sorted(readable)
+        for at in range(0, len(ids), _LOOKUP_CHUNK):
+            chunk = ids[at : at + _LOOKUP_CHUNK]
+            for table_id, name in self._session.execute(
+                select(TableColumn.table_id, TableColumn.name).where(
+                    TableColumn.table_id.in_(chunk)
+                )
+            ):
+                columns[table_id].add(name)
+            for table_id, name in self._session.execute(
+                select(DeclaredMeasure.table_id, DeclaredMeasure.column).where(
+                    DeclaredMeasure.table_id.in_(chunk)
+                )
+            ):
+                measures[table_id].add(name)
+        for table_id, spellings in readable.items():
+            seen = _Table(True, frozenset(columns[table_id]), frozenset(measures[table_id]))
+            for dotted in spellings:
+                self._tables[dotted] = seen
 
     def view(self, link: GlossaryTermLink) -> TermLinkView | None:
         """Show a link to the reader, or leave it out.
@@ -376,9 +414,14 @@ class _Links:
         -------
         TermLinkView or None
             The link; `None` when its table exists and the reader may not read it.
+
+        Raises
+        ------
+        KeyError
+            If `load` was not given the link's table first.
         """
         table, column = link.table_name, link.column_name
-        found = self._table(table)
+        found = self._tables[table]
         if found is not None and not found.readable:
             return None
         if column is None:
@@ -673,6 +716,7 @@ class GlossaryService:
         ).all():
             naming.setdefault(related_key, set()).add(by)
         resolver = _Links(self._session, self._authz, p, environment, environment_id)
+        resolver.load(r.table_name for rows in links.values() for r in rows)
         main = self._main_language
         views: list[TermView] = []
         for term in terms:

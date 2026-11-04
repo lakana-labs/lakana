@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -11,12 +12,18 @@ import pytest
 from core_test_helpers import _config
 from pyiceberg.schema import Schema
 from pyiceberg.types import LongType, NestedField
-from sqlalchemy import select
+from sqlalchemy import event, select
 from sqlalchemy.orm import Session
 
 from lakana_core.auth import Action, AllowAllAuthorization, PrincipalRef, SecurableKind
 from lakana_core.catalog.glossary import write_glossary
-from lakana_core.catalog.glossary_read import GlossaryService, TermRef, table_terms
+from lakana_core.catalog.glossary_read import (
+    GlossaryService,
+    TermLinkView,
+    TermRef,
+    _Links,
+    table_terms,
+)
 from lakana_core.catalog.identity import resolve_environment_id
 from lakana_core.catalog.service import CatalogService
 from lakana_core.errors import NotFoundError, PermissionDenied, ValidationError
@@ -26,6 +33,7 @@ from lakana_core.grants.service import GrantService
 from lakana_core.identifiers import NamespacePath, TableRef
 from lakana_core.models import (
     DeclaredMeasure,
+    GlossaryTermLink,
     Principal,
     PrincipalType,
     Repository,
@@ -450,8 +458,100 @@ _UNSAFE = "contains a control, format or surrogate character (such as NUL), whic
     ],
 )
 def test_a_key_or_filter_no_term_can_have_is_refused_before_the_database(
-    world: World, call: Any, message: str
+    world: World, call: Callable[[GlossaryService, PrincipalRef], object], message: str
 ) -> None:
     with pytest.raises(ValidationError) as caught:
         call(world.service, world.bob)
     assert str(caught.value) == message
+
+
+def _statements_of_a_page(world: World, tables: int) -> list[str]:
+    """Deploy 20 terms that link `tables` tables each, and keep the statements of listing them.
+
+    Every term links the two tables of the fixture and `tables - 2` that do not exist.
+
+    Parameters
+    ----------
+    world
+        The fixture.
+    tables
+        The tables each term links, at least 2.
+
+    Returns
+    -------
+    list of str
+        The statements one page of `list` sent.
+    """
+    links = {"gold.fact_sales": ["net_amount", "date", "gone"], "gold.payroll": []}
+    term = {"definition": "D.", "owner": "o"}
+    glossary = {
+        f"t{i:02d}": {
+            **term,
+            "name": f"T {i}",
+            "links": {**links, **{f"gold.absent_{i}_{j}": [] for j in range(tables - 2)}},
+        }
+        for i in range(20)
+    }
+    shop = world.session.scalars(select(Repository.id).where(Repository.name == "shop")).one()
+    write_glossary(world.session, world.env_id, shop, {**_GLOSSARY, "glossary": glossary})
+    world.session.commit()
+    statements: list[str] = []
+
+    def _keep(_conn: object, _cursor: object, statement: str, *args: object) -> None:
+        """Keep each statement.
+
+        Parameters
+        ----------
+        _conn
+            The connection.
+        _cursor
+            The cursor.
+        statement
+            The SQL.
+        *args
+            The rest.
+        """
+        statements.append(statement)
+
+    service = GlossaryService(world.session, AllowAllAuthorization())
+    engine = world.session.get_bind()
+    event.listen(engine, "before_cursor_execute", _keep)
+    try:
+        page = service.list(world.bob, "dev", limit=20)
+    finally:
+        event.remove(engine, "before_cursor_execute", _keep)
+    assert len(page.items) == 20
+    assert {(link.table, link.column, link.kind, link.missing) for link in page.items[0].links} == {
+        ("gold.fact_sales", "net_amount", "measure", False),
+        ("gold.fact_sales", "date", "column", False),
+        ("gold.fact_sales", "gone", "column", True),
+        ("gold.payroll", None, "table", False),
+        *((f"gold.absent_0_{j}", None, "table", True) for j in range(tables - 2)),
+    }
+    return statements
+
+
+def test_a_page_of_terms_looks_its_linked_tables_up_in_a_few_statements(world: World) -> None:
+    few = len(_statements_of_a_page(world, 2))
+    many = len(_statements_of_a_page(world, 20))
+    assert many == few, (few, many)
+
+
+def test_a_link_name_matched_only_in_parts_or_not_a_table_name_is_missing(world: World) -> None:
+    links = {"gold.fact_sales": [], "other.payroll": []}
+    term = {"name": "T", "definition": "D.", "owner": "o", "links": links}
+    shop = world.session.scalars(select(Repository.id).where(Repository.name == "shop")).one()
+    write_glossary(world.session, world.env_id, shop, {**_GLOSSARY, "glossary": {"t": term}})
+    world.session.commit()
+    resolver = _Links(world.session, AllowAllAuthorization(), world.bob, "dev", world.env_id)
+
+    shown = world.service.get(world.bob, "dev", "t")
+    resolver.load(["not a name"])
+
+    assert [(link.table, link.missing) for link in shown.links] == [
+        ("gold.fact_sales", False),
+        ("other.payroll", True),
+    ]
+    assert resolver.view(GlossaryTermLink(table_name="not a name", column_name=None)) == (
+        TermLinkView("not a name", None, "table", True)
+    )
