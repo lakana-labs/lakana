@@ -532,3 +532,47 @@ def test_a_term_search_without_read_table_hides_the_linked_tables_without_a_trac
         found = client.get(_SEARCH, headers=outsider, params={"q": "fulfilment", "kind": kind})
         assert found.json() == {"results": [], "limit": 20, "offset": 0, "has_more": False}
     assert client.get(_SEARCH, headers=viewer, params={"q": "fulfilment"}).json()["results"] == []
+
+
+def test_a_word_only_a_definition_holds_finds_the_term(client: TestClient) -> None:
+    _glossary(client)
+
+    found = client.get(_SEARCH, headers=AUTH_HEADER, params={"q": "stands", "kind": "term"})
+
+    assert found.status_code == 200, found.text
+    assert [(h["name"], h["matched"]) for h in found.json()["results"]] == [
+        ("order_state", "definition"),
+        ("progress", "definition"),
+    ]
+
+
+def test_a_word_only_a_translated_definition_holds_finds_the_term(client: TestClient) -> None:
+    _setup(client)
+    glossary = {
+        "version": 13,
+        "glossary": {
+            "progress": {
+                **_TERM,
+                "name": "Progress",
+                "translations": {"de": {"definition": "Wie weit eine Bestellung ist."}},
+            }
+        },
+    }
+    with Session(client.app.state.engine) as session:
+        env = session.scalars(select(Environment.id).where(Environment.name == "dev")).one()
+        shop = Repository(id=uuid.uuid4(), name="shop", kind=RepositoryKind.LOCAL, url="/shop")
+        session.add(shop)
+        session.flush()
+        write_glossary(session, env, shop.id, glossary)
+        session.commit()
+
+    found = client.get(_SEARCH, headers=AUTH_HEADER, params={"q": "bestellung", "lang": "de"})
+
+    assert found.status_code == 200, found.text
+    (hit,) = found.json()["results"]
+    assert (hit["name"], hit["matched"], hit["language"], hit["translated"]) == (
+        "progress",
+        "definition",
+        "de",
+        True,
+    )

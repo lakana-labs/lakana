@@ -3232,8 +3232,8 @@ class SearchHit:
         principal's name or the term's key.
     matched
         The field that matched: ``name``, ``label``, ``description``, ``grain``, ``measure`` (a
-        column's measure label or description), ``id``, ``job``, ``repository``, ``synonym`` (a
-        term's) or ``term`` (a table or column found by a term's name or synonym). Treat a value
+        column's measure label or description), ``id``, ``job``, ``repository``, ``synonym`` or
+        ``definition`` (a term's) or ``term`` (a table or column found by a term's name or synonym). Treat a value
         you do not know as a match elsewhere; the server may add more.
     snippet
         For a label, description, grain, measure or term match, and for every term hit, at most

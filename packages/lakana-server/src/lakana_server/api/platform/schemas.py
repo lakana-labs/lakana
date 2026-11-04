@@ -4135,8 +4135,8 @@ class SearchHitOut(BaseModel):
         principal's name or the term's key.
     matched
         The field that matched: ``name``, ``label``, ``description``, ``grain``, ``measure`` (a
-        column's measure label or description), ``id``, ``job``, ``repository``, ``synonym`` (a
-        term's) or ``term`` (a table or column found by a term's name or synonym).
+        column's measure label or description), ``id``, ``job``, ``repository``, ``synonym`` or
+        ``definition`` (a term's) or ``term`` (a table or column found by a term's name or synonym).
     snippet
         For a label, description, grain, measure or term match, and for every term hit, at most
         160 characters of the text around the hit.
@@ -4192,6 +4192,7 @@ class SearchHitOut(BaseModel):
         "job",
         "repository",
         "synonym",
+        "definition",
         "term",
     ]
     snippet: str | None
