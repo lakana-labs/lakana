@@ -83,15 +83,15 @@ lakana search revenue --env dev
 
 <!-- output: glossary#search -->
 ```text
-┏━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┓
-┃ kind   ┃ name                         ┃ matched ┃ where         ┃ snippet       ┃
-┡━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━┩
-│ table  │ gold.dim_store [dimension]   │ term    │ table         │ revenue       │
-│ column │ gold.fact_sales.net_amount   │ term    │ decimal(38,1) │ revenue       │
-│ term   │ net_revenue                  │ synonym │ shop          │ revenue       │
-│ column │ gold.fact_sales.gross_amount │ term    │ decimal(38,1) │ Gross revenue │
-│ term   │ gross_revenue                │ name    │ shop          │ Gross revenue │
-└────────┴──────────────────────────────┴─────────┴───────────────┴───────────────┘
+┏━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┓
+┃ kind   ┃ name                         ┃ matched              ┃ where         ┃ snippet       ┃
+┡━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━┩
+│ table  │ gold.dim_store [dimension]   │ term (net_revenue)   │ table         │ revenue       │
+│ column │ gold.fact_sales.net_amount   │ term (net_revenue)   │ decimal(38,1) │ revenue       │
+│ term   │ net_revenue                  │ synonym              │ shop          │ revenue       │
+│ column │ gold.fact_sales.gross_amount │ term (gross_revenue) │ decimal(38,1) │ Gross revenue │
+│ term   │ gross_revenue                │ name                 │ shop          │ Gross revenue │
+└────────┴──────────────────────────────┴──────────────────────┴───────────────┴───────────────┘
 ```
 
 A table or column found by a term says `term` and that term's key in `matched`; `lakana --output json
