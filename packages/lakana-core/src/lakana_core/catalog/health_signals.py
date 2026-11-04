@@ -66,6 +66,8 @@ _RANGE_UNIT = {"integer": 1, "number": 0, "date": 1, "timestamp": 3_600_000_000}
 _SPAN_ONLY = frozenset({"date", "timestamp"})
 """Kinds whose values sit far from zero, so the tolerance follows the span alone."""
 _EPOCH = date(1970, 1, 1)
+_MAX_COUNT = 2**63 - 1
+_MAX_COUNT_DIGITS = 19
 _DASH = "\N{EN DASH}"
 _DAMAGED = (ValueError, TypeError, ArithmeticError, struct.error)
 
@@ -203,13 +205,14 @@ def _whole(value: object) -> int | None:
     Returns
     -------
     int or None
-        The value as a whole number of zero or more; `None` otherwise.
+        The value as a whole number from zero to 2**63 - 1, written in plain ASCII digits;
+        `None` otherwise.
     """
-    try:
-        number = int(str(value))
-    except ValueError:
+    text = str(value)
+    if not (text.isascii() and text.isdigit()) or len(text) > _MAX_COUNT_DIGITS:
         return None
-    return number if number >= 0 else None
+    number = int(text)
+    return number if number <= _MAX_COUNT else None
 
 
 def _number(value: object) -> float | int | None:
@@ -227,7 +230,10 @@ def _number(value: object) -> float | int | None:
     """
     if isinstance(value, bool) or not isinstance(value, int | float):
         return None
-    return value if math.isfinite(value) else None
+    try:
+        return value if math.isfinite(value) else None
+    except OverflowError:
+        return None
 
 
 def _numbers(history: Iterable[Mapping[str, Any]], key: str) -> list[float | int]:
@@ -625,11 +631,12 @@ class HealthEffects:
         Returns
         -------
         str
-            One of `EFFECTS`.
+            One of `EFFECTS`; a freshness signal never blocks, so ``block`` reads as ``warn``.
         """
         if column is not None and f"{signal}.{column}" in self.entries:
             return self.entries[f"{signal}.{column}"]
-        return self.entries.get(signal, DEFAULT_EFFECT)
+        effect = self.entries.get(signal, DEFAULT_EFFECT)
+        return DEFAULT_EFFECT if signal == "freshness" and effect == "block" else effect
 
     def flat(self) -> dict[str, str]:
         """Give the entries as they are stored.
@@ -740,10 +747,13 @@ def _bound_text(kind: str, value: float) -> str:
     """
     if kind == "integer":
         return f"{int(value):,}"
-    if kind == "date":
-        return (_EPOCH + timedelta(days=int(value))).isoformat()
-    if kind == "timestamp":
-        return datetime.fromtimestamp(value / 1e6, UTC).strftime("%Y-%m-%d %H:%M UTC")
+    try:
+        if kind == "date":
+            return (_EPOCH + timedelta(days=int(value))).isoformat()
+        if kind == "timestamp":
+            return datetime.fromtimestamp(value / 1e6, UTC).strftime("%Y-%m-%d %H:%M UTC")
+    except (OverflowError, OSError, ValueError):
+        pass
     return format(value, ",.6g")
 
 

@@ -525,3 +525,44 @@ def test_a_schema_text_names_only_what_changed() -> None:
         observed_at=_AT,
     )
     assert text is not None and "schema changed: added a (int) and b (long) (snapshot" in text
+
+
+@pytest.mark.parametrize("bad", ["9" * 400, str(2**63), " 12 ", "1_0", "١٢", "-3", "+3", "1.5", ""])
+def test_a_count_that_is_not_plain_digits_in_range_has_no_value(bad: str) -> None:
+    assert volume_signal({"added-records": bad}, []).state == "no_metrics"
+    assert volume_signal({"added-records": str(2**63 - 1)}, []).observed == {
+        "added": 2**63 - 1,
+        "total": None,
+    }
+
+
+def test_a_history_with_a_huge_number_does_not_break_the_signals() -> None:
+    history = [{"added": 10**400}, {"rate": 10**400, "lower": 10**400, "upper": 10**400}]
+    history += _volumes(*[10_000] * 8)
+    assert volume_signal({"added-records": "10000"}, history).state == "ok"
+    rates = [{"nulls": 0, "values": 1, "rate": 0.0}] * 8 + history
+    assert null_rate_signal("note", ColumnMetrics(0, 1, None, None, None), rates).state == "ok"
+    ranges = [{"lower": 0, "upper": 5, "kind": "integer"}] * 8 + history
+    assert range_signal("qty", ColumnMetrics(0, 1, 1, 4, "integer"), ranges) is not None
+    huge = range_signal("qty", ColumnMetrics(0, 1, 1, 10**400, "integer"), ranges)
+    assert huge is not None and huge.state == "no_metrics"
+
+
+def test_a_date_bound_beyond_the_calendar_does_not_raise() -> None:
+    for kind, bound in (("date", 10**9), ("date", -(10**9)), ("timestamp", 10**25)):
+        text = alert_text(
+            "t.t",
+            "range",
+            "day",
+            "fired",
+            {"lower": 0, "upper": bound, "kind": kind},
+            {"min": bound, "max": bound, "low": 0, "high": 0},
+            snapshot_id=1,
+            observed_at=_AT,
+        )
+        assert text is not None and "range of day" in text
+
+
+def test_freshness_never_blocks() -> None:
+    effects = HealthEffects({"freshness": "block", "volume": "block"})
+    assert (effects.of("freshness"), effects.of("volume")) == ("warn", "block")
