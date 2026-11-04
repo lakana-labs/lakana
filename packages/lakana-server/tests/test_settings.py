@@ -5,7 +5,7 @@ from pathlib import Path
 import pydantic
 import pytest
 
-from lakana_core.config import ArtifactsConfig, DatabaseConfig, SecretsConfig
+from lakana_core.config import ArtifactsConfig, DatabaseConfig, HealthConfig, SecretsConfig
 from lakana_server.settings import Settings
 
 
@@ -188,3 +188,19 @@ def test_a_main_language_that_is_not_a_tag_stops_the_start(
     monkeypatch.setenv("LAKANA_MAIN_LANGUAGE", "English")
     with pytest.raises(pydantic.ValidationError, match="is not a language tag Lakana takes"):
         Settings()
+
+
+def test_health_settings_have_defaults_and_read_the_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The server's settings carry the health section with its defaults and environment.
+
+    Parameters
+    ----------
+    monkeypatch
+        Sets the environment.
+    """
+    monkeypatch.setenv("LAKANA_DATABASE__URL", "sqlite://")
+    assert Settings().health == HealthConfig(retention_days=90)
+    monkeypatch.setenv("LAKANA_HEALTH__RETENTION_DAYS", "30")
+    assert Settings().health == HealthConfig(retention_days=30)

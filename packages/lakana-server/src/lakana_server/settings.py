@@ -11,6 +11,7 @@ from lakana_core.config import (
     AuditConfig,
     DatabaseConfig,
     DenialAuditConfig,
+    HealthConfig,
     LogConfig,
     QueryLimitsConfig,
     RunConfig,
@@ -188,6 +189,8 @@ class Settings(BaseSettings):
         How long the reads of a table are kept and how far back its health shows them
         (`LAKANA_TABLE_READS__KEEP_DAYS`, `LAKANA_TABLE_READS__DEFAULT_DAYS`); the worker reads
         the kept period too.
+    health
+        How long table health signals are kept (`LAKANA_HEALTH__RETENTION_DAYS`).
     append
         Governed Arrow-append bounds: body size (`LAKANA_APPEND__MAX_BYTES`),
         concurrency (`LAKANA_APPEND__MAX_CONCURRENT`), body-read deadline
@@ -252,6 +255,7 @@ class Settings(BaseSettings):
     artifacts: ArtifactsConfig = ArtifactsConfig()
     tables: TableUndoConfig = TableUndoConfig()
     table_reads: TableReadsConfig = TableReadsConfig()
+    health: HealthConfig = HealthConfig()
     append: AppendConfig = AppendConfig()
     request_body: RequestBodyConfig = RequestBodyConfig()
     auth_audit: AuthAuditConfig = AuthAuditConfig()

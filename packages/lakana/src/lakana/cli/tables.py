@@ -16,6 +16,7 @@ from lakana._models import (
     CheckHealth,
     Column,
     DroppedTable,
+    HealthSignal,
     Lineage,
     Measure,
     ModelReference,
@@ -24,10 +25,11 @@ from lakana._models import (
 )
 from lakana.cli import _files, _output, _retention
 from lakana.cli._break_glass import BREAK_GLASS, REASON, break_glass_reason
+from lakana.cli._paging import CURSOR, LIMIT, more_results
 from lakana.cli._state import CliError, CliState, confirm, resolve_environment, state_of
 from lakana.cli.artifacts import human_size
 from lakana.cli.checks import check_shown, withheld_line
-from lakana.errors import ValidationError
+from lakana.errors import LakanaError, ValidationError
 
 if TYPE_CHECKING:
     import pyarrow as pa
@@ -747,6 +749,79 @@ def _check_state(check: CheckHealth) -> str:
     return check.outcome
 
 
+_SIGNAL_COLUMNS = ["signal", "column", "state", "effect", "observed_at"]
+"""The columns of the current signals of `table health`."""
+
+_SIGNAL_HISTORY_COLUMNS = ["observed_at", "signal", "column", "state", "effect", "snapshot_id"]
+"""The columns of `table health --signals`."""
+
+
+def _output_fired(state: CliState, signals: list[HealthSignal]) -> None:
+    """Print one `Fired:` line for each signal that fired and shows its alert.
+
+    Parameters
+    ----------
+    state
+        The CLI state.
+    signals
+        The signals shown.
+    """
+    for shown in signals:
+        if shown.state == "fired" and shown.alert:
+            _output.emit(state, _output.inline(f"Fired: {shown.alert}", 1000))
+
+
+def _output_hidden(state: CliState, signals: list[HealthSignal]) -> None:
+    """Say that values are hidden, when a column mask or row filter left some out.
+
+    Parameters
+    ----------
+    state
+        The CLI state.
+    signals
+        The signals shown.
+    """
+    if any(s.values_hidden for s in signals):
+        _output.emit(state, "Some values are hidden: a column mask or row filter applies to you.")
+
+
+_WITHOUT_SIGNALS = {"EXTERNAL": "an external table", "ARTIFACT": "an artifact"}
+"""What a kind that never records health signals is called, besides a view."""
+
+
+def _no_signals_line(state: CliState, environment: str, name: str) -> str:
+    """Say why a table shows no health signals, by its kind.
+
+    Parameters
+    ----------
+    state
+        The CLI state, for the client.
+    environment
+        The environment.
+    name
+        The table's qualified name.
+
+    Returns
+    -------
+    str
+        For a managed table, that its next write records them; for a view, an external table
+        or an artifact, that it never has any; when the table cannot be looked up again
+        (storage down, dropped meanwhile), only that none are recorded.
+    """
+    try:
+        kind = state.client().tables.get(environment, name).kind
+    except LakanaError:
+        return "Signals: none recorded."
+    if kind == "VIEW":
+        return "Signals: none. A view has no health signals; the tables it reads have them."
+    if kind in _WITHOUT_SIGNALS:
+        return (
+            "Signals: none. Only managed tables record health signals; "
+            f"{_output.inline(name)} is {_WITHOUT_SIGNALS[kind]}."
+        )
+    return "Signals: none recorded yet; they start with the table's next write."
+
+
 @table_app.command("health")
 def health(
     ctx: typer.Context,
@@ -756,16 +831,32 @@ def health(
         typer.Option(
             "--days",
             min=1,
-            help="Readers over this many days (up to the server's kept period, 90 by default).",
+            help=(
+                "Readers over this many days; with --signals, the history (up to the server's "
+                "health signal window, LAKANA_HEALTH__RETENTION_DAYS, 90 by default)."
+            ),
         ),
     ] = None,
+    signals: Annotated[
+        bool, typer.Option("--signals", help="Show the history of the health signals instead.")
+    ] = False,
+    signal: Annotated[
+        str | None,
+        typer.Option(
+            "--signal", help="Only this signal: freshness, volume, null_rate, range or schema."
+        ),
+    ] = None,
+    column: Annotated[str | None, typer.Option("--column", help="Only this column.")] = None,
+    limit: LIMIT = None,
+    cursor: CURSOR = None,
     env: _ENV = None,
 ) -> None:
     """Show table NAME's last maintenance, the newest result of each check, and who reads it.
 
     Readers are counted from the queries that succeeded, per person and day. You see them only
-    with the ADMIN role. A Python task's reads of its inputs count too. Use --output json for every
-    field.
+    with the ADMIN role. A Python task's reads of its inputs count too. Also shows each health
+    signal (freshness, volume, null rate, range, schema), what fired, and with --signals their
+    history. Use --output json for every field.
 
     Parameters
     ----------
@@ -774,12 +865,75 @@ def health(
     name
         The qualified table name.
     days
-        The window of the readers in days.
+        The window of the readers in days, or of the history with --signals.
+    signals
+        Show the history of the health signals instead.
+    signal
+        Only this signal, with --signals.
+    column
+        Only this column, with --signals.
+    limit
+        Most observations to list, with --signals.
+    cursor
+        Continue after the page that printed this cursor, with --signals.
     env
         The environment.
+
+    Raises
+    ------
+    CliError
+        If `--signal`, `--column`, `--limit` or `--cursor` is given without `--signals`.
     """
     state = state_of(ctx)
     environment = resolve_environment(state, env)
+    if not signals:
+        only_with = [
+            flag
+            for flag, given in (
+                ("--signal", signal),
+                ("--column", column),
+                ("--limit", limit),
+                ("--cursor", cursor),
+            )
+            if given is not None
+        ]
+        if only_with:
+            raise CliError(
+                f"{', '.join(only_with)} works only with --signals; add --signals to list the "
+                "history of the health signals."
+            )
+    if signals:
+        page = state.client().tables.health_signals(
+            environment, name, days=days, signal=signal, column=column, limit=limit, cursor=cursor
+        )
+        if state.output == "json":
+            _output.emit(state, page)
+            return
+        if not page.items:
+            window = (
+                f"in the last {days} days"
+                if days is not None
+                else "in the default window (30 days, fewer if the server keeps signals for less)"
+            )
+            _output.emit(state, f"No health signals {window}.")
+            return
+        _output.emit(state, page.items, columns=_SIGNAL_HISTORY_COLUMNS)
+        _output_fired(state, page.items)
+        _output_hidden(state, page.items)
+        more_results(
+            state,
+            ["lakana", "table", "health", name],
+            {
+                "--env": environment,
+                "--signals": True,
+                "--signal": signal,
+                "--column": column,
+                "--days": days,
+                "--limit": limit,
+            },
+            page.next_cursor,
+        )
+        return
     found = state.client().tables.health(environment, name, days=days)
     if state.output == "json":
         _output.emit(state, found)
@@ -803,6 +957,20 @@ def health(
         _output.emit(state, found.readers)
     else:
         _output.emit(state, f"Readers, last {found.days} days: none.")
+    if found.signals is None:
+        _output.emit(
+            state,
+            "Signals: not reported. This server is older than health signals; upgrade it to "
+            "see them.",
+        )
+        return
+    if not found.signals:
+        _output.emit(state, _no_signals_line(state, environment, name))
+        return
+    _output.emit(state, "Signals:")
+    _output.emit(state, found.signals, columns=_SIGNAL_COLUMNS)
+    _output_fired(state, found.signals)
+    _output_hidden(state, found.signals)
 
 
 def _now_shows(texts: Table | Column | None) -> str:

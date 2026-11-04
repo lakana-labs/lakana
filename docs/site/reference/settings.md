@@ -68,6 +68,12 @@ Compose](../how-to/deploy-with-compose.md).
 | `LAKANA_TABLE_READS__KEEP_DAYS` | whole number, 1 or more | `90` | server, worker | Days of read counts kept for each table (default 90). A worker deletes older counts, and the health of a table can look back at most this many days. |
 | `LAKANA_TABLE_READS__DEFAULT_DAYS` | whole number, 1 or more | `30` | server, worker | Days of reads that the health of a table shows when the request names none (default 30); at most `LAKANA_TABLE_READS__KEEP_DAYS`. |
 
+## `LAKANA_HEALTH__*`
+
+| Variable | Type | Default | Read by | Description |
+|---|---|---|---|---|
+| `LAKANA_HEALTH__RETENTION_DAYS` | whole number, 7 or more | `90` | server, worker | How many days back the history of a table's health signals reaches (default 90, at least 7, so a weekly job has a history): `lakana table health --signals` and `days` of `GET .../health/signals` look back at most this far. |
+
 ## `LAKANA_APPEND__*`
 
 | Variable | Type | Default | Read by | Description |

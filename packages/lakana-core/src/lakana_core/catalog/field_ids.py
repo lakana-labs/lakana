@@ -17,7 +17,7 @@ from __future__ import annotations
 import io
 import logging
 import time
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Collection, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeout
 from typing import TypeVar, cast
@@ -700,12 +700,13 @@ def _live_entries(
         reader.__exit__(None, None, None)
 
 
-def _added_data_files(
+def added_data_files(
     snapshots: Sequence[Snapshot],
     metadata: TableMetadata,
     file_io: FileIO,
     table: str,
     deadline: float,
+    skip: Collection[int] = frozenset(),
 ) -> list[DataFile]:
     """List the data files the snapshots of one commit add, from manifests their parents lack.
 
@@ -726,6 +727,9 @@ def _added_data_files(
         The table's dotted name, for the message.
     deadline
         When the check's time is up, on the clock `_clock` reads.
+    skip
+        Ids of snapshots whose files are left out (a compaction's, for the health signals);
+        they still count as parents of the snapshots after them.
 
     Returns
     -------
@@ -755,6 +759,8 @@ def _added_data_files(
             else earlier.get(parent_id) or metadata.snapshot_by_id(parent_id)
         )
         earlier[snapshot.snapshot_id] = snapshot
+        if snapshot.snapshot_id in skip:
+            continue
         try:
             known: set[str] = set()
             if parent is not None:
@@ -796,7 +802,7 @@ def _added_data_files(
 
 def check_added_files_have_field_ids(
     snapshots: Sequence[Snapshot], metadata: TableMetadata, file_io: FileIO, table: str
-) -> None:
+) -> list[DataFile]:
     """Refuse snapshots that add a data file without Iceberg field ids.
 
     Only files the commit's own snapshots add are read, each footer once, at most
@@ -819,6 +825,12 @@ def check_added_files_have_field_ids(
     table
         The table's dotted name, for the message.
 
+    Returns
+    -------
+    list of DataFile
+        The data files the snapshots add (`added_data_files`), for the commit's health
+        signals to reuse instead of reading the manifests again.
+
     Raises
     ------
     ValidationError
@@ -831,7 +843,7 @@ def check_added_files_have_field_ids(
         If storage failed while reading a footer or a manifest.
     """
     deadline = _clock() + CHECK_DEADLINE_SECONDS
-    files = _added_data_files(snapshots, metadata, file_io, table, deadline)
+    files = added_data_files(snapshots, metadata, file_io, table, deadline)
     for data_file in files:
         if data_file.file_format != FileFormat.PARQUET:
             raise ValidationError(
@@ -870,3 +882,4 @@ def check_added_files_have_field_ids(
     finally:
         # A read that is stuck is not waited for: the commit is refused now.
         pool.shutdown(wait=False, cancel_futures=True)
+    return files

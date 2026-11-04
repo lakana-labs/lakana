@@ -907,13 +907,16 @@ def _forge_snapshot_under_own_location(
             writer.add(entry)
     manifest_file = writer.to_manifest_file()
 
+    # The next sequence number, as the Iceberg spec requires and the commit checks, so the
+    # forged snapshot reaches the read-time refusal it exists for.
+    sequence_number = getattr(loaded.metadata, "last_sequence_number", 0) + 1
     manifest_list_path = f"{loaded.metadata.location}/metadata/{snapshot_id}-forged-snap.avro"
     with write_manifest_list(
         format_version=loaded.metadata.format_version,
         output_file=resolved.file_io.new_output(manifest_list_path),
         snapshot_id=snapshot_id,
         parent_snapshot_id=None,
-        sequence_number=1,
+        sequence_number=sequence_number,
         avro_compression="null",
     ) as list_writer:
         list_writer.add_manifests([manifest_file])
@@ -921,7 +924,7 @@ def _forge_snapshot_under_own_location(
     return Snapshot(
         snapshot_id=snapshot_id,
         parent_snapshot_id=None,
-        sequence_number=1,
+        sequence_number=sequence_number,
         timestamp_ms=int(time.time() * 1000),
         manifest_list=manifest_list_path,
         summary=Summary(operation=Operation.APPEND),

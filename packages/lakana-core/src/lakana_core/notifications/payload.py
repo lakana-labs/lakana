@@ -91,7 +91,7 @@ class Facts:
     columns_changed
         The run's own tables whose columns a write removed or replaced, whether or not a row
         filter or column mask uses them. Nothing more is said: the endpoint is no administrator,
-        and only an administrator may learn that a policy exists (`lakana runs show` shows them).
+        and only an administrator may learn which policies exist (`lakana runs show` shows them).
     checks_unfinished
         The failed tasks whose checks never finished (`FailureCode.CHECKS_UNFINISHED`): the
         platform stopped trying them and set their tables back where it could.

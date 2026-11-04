@@ -2743,6 +2743,63 @@ def test_tables_health_gets_the_health_route_and_parses_it() -> None:
     assert [(r.principal, r.read_count) for r in health.readers] == [("ada", 5)]
 
 
+_SIGNAL_BODY = {
+    "id": "6f1c0d7e-0000-4000-8000-000000000001",
+    "signal": "volume",
+    "column": None,
+    "state": "fired",
+    "effect": "warn",
+    "snapshot_id": 4711,
+    "observed_at": "2026-11-03T06:00:00+00:00",
+    "observed": {"added": 120, "total": 120},
+    "band": None,
+    "alert": "bronze.sales: volume 120 rows",
+    "values_hidden": False,
+    "last_fired_at": "2026-11-03T06:00:00+00:00",
+    "added_later": 1,
+}
+
+
+def test_tables_health_parses_signals_and_tolerates_their_absence() -> None:
+    """`signals` parse into `HealthSignal`; an older server's body has none, so `None`."""
+    bodies = [{**_HEALTH_BODY, "signals": [_SIGNAL_BODY]}, _HEALTH_BODY]
+    tables = Tables(_transport(lambda request: httpx.Response(200, json=bodies.pop(0))))
+    signals = tables.health("dev", "bronze.sales").signals
+    assert signals is not None
+    (signal,) = signals
+    assert (signal.signal, signal.snapshot_id, signal.observed) == (
+        "volume",
+        4711,
+        {"added": 120, "total": 120},
+    )
+    assert signal.observed_at == datetime.fromisoformat("2026-11-03T06:00:00+00:00")
+    assert signal.last_fired_at == signal.observed_at
+    assert tables.health("dev", "bronze.sales").signals is None
+
+
+def test_tables_health_signals_sends_only_what_is_given_and_iterates() -> None:
+    """`health_signals` GETs the history route; `iter_health_signals` follows the cursor."""
+    seen: list[httpx.Request] = []
+    pages = [
+        {"items": [_SIGNAL_BODY], "next_cursor": "c2"},
+        {"items": [{**_SIGNAL_BODY, "last_fired_at": None}], "next_cursor": None},
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json=pages[1 if request.url.params.get("cursor") else 0])
+
+    tables = Tables(_transport(handler))
+    page = tables.health_signals("dev", "bronze.sales", signal="volume", limit=5)
+    path = "/api/v1/environments/dev/namespaces/bronze/tables/sales/health/signals"
+    assert (seen[0].method, seen[0].url.path) == ("GET", path)
+    assert dict(seen[0].url.params) == {"signal": "volume", "limit": "5"}
+    assert page.next_cursor == "c2" and len(page.items) == 1
+    every = list(tables.iter_health_signals("dev", "bronze.sales"))
+    assert [s.last_fired_at is None for s in every] == [False, True]
+    assert dict(seen[-1].url.params) == {"cursor": "c2"}
+
+
 def test_tables_health_reads_the_generated_mark_of_a_check() -> None:
     """A check from the asset's header carries `generated`; an older server's body has none."""
     (check,) = cast("list[dict[str, object]]", _HEALTH_BODY["checks"])

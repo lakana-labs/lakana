@@ -9,10 +9,12 @@ from datetime import UTC, datetime, timedelta
 import httpx
 import pyarrow as pa
 import pyarrow.ipc
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from lakana_core.catalog import service as catalog_service
 from lakana_core.config import TableReadsConfig
 from lakana_core.models import (
     CheckOutcome,
@@ -187,6 +189,7 @@ def test_the_health_of_a_fresh_table_is_empty(client: TestClient) -> None:
         "checks": [],
         "readers": [],
         "hidden_checks": 0,
+        "signals": [],
     }
 
 
@@ -261,7 +264,14 @@ def test_a_reader_sees_the_health_but_not_the_readers(client: TestClient) -> Non
     shown = _health(client, headers=reader)
     assert shown.status_code == 200, shown.text
     assert shown.json()["readers"] is None
-    assert set(shown.json()) == {"days", "last_maintenance", "checks", "readers", "hidden_checks"}
+    assert set(shown.json()) == {
+        "days",
+        "last_maintenance",
+        "checks",
+        "readers",
+        "hidden_checks",
+        "signals",
+    }
     assert [r["principal"] for r in _health(client).json()["readers"]] == ["admin"]
 
 
@@ -285,6 +295,8 @@ def test_someone_without_read_table_is_refused_like_on_the_other_routes(
     outsider = _person(client, "otto")
     assert client.get(f"{_TABLES}/t", headers=outsider).status_code == 403
     assert _health(client, headers=outsider).status_code == 403
+    history = client.get(f"{_TABLES}/t/health/signals", headers=outsider)
+    assert history.status_code == 403
 
 
 def test_a_table_that_does_not_exist_is_404(client: TestClient) -> None:
@@ -413,3 +425,133 @@ def _second_task(session: Session, first: TaskRun) -> uuid.UUID:
     session.add(second)
     session.flush()
     return second.id
+
+
+def test_an_append_records_signals_that_health_shows(client: TestClient) -> None:
+    _table(client, rows=3)
+    signals = _health(client).json()["signals"]
+    assert {(s["signal"], s["column"], s["state"]) for s in signals} >= {
+        ("volume", None, "no_history"),
+        ("schema", None, "ok"),
+        ("null_rate", "note", "no_history"),
+    }
+    volume = next(s for s in signals if s["signal"] == "volume")
+    assert (volume["observed"], volume["effect"], volume["values_hidden"]) == (
+        {"added": 3, "total": 3},
+        "warn",
+        False,
+    )
+
+
+def test_the_signal_history_pages_and_bounds_days(client: TestClient) -> None:
+    _table(client, rows=2)
+    url = f"{_TABLES}/t/health/signals"
+    first = client.get(url, headers=AUTH_HEADER, params={"limit": 1})
+    assert first.status_code == 200, first.text
+    assert len(first.json()["items"]) == 1 and first.json()["next_cursor"]
+    second = client.get(
+        url, headers=AUTH_HEADER, params={"limit": 1, "cursor": first.json()["next_cursor"]}
+    )
+    assert second.json()["items"][0]["id"] != first.json()["items"][0]["id"]
+    assert client.get(url, headers=AUTH_HEADER, params={"days": 7}).status_code == 200
+    refused = client.get(url, headers=AUTH_HEADER, params={"days": 91})
+    assert refused.status_code == 422
+    assert (
+        "days must be between 1 and 90 (got 91), the platform's health signal window "
+        "(LAKANA_HEALTH__RETENTION_DAYS); ask for fewer days."
+    ) in refused.text
+    unknown = client.get(url, headers=AUTH_HEADER, params={"signal": "rows"})
+    assert unknown.status_code == 422 and "There is no health signal `rows`" in unknown.text
+
+
+def test_a_mask_leaves_out_the_values_of_its_column(client: TestClient) -> None:
+    _table(client, rows=3)
+    _mask_note(client)
+    signals = _health(client).json()["signals"]
+    note = next(s for s in signals if s["signal"] == "null_rate" and s["column"] == "note")
+    assert (note["observed"], note["band"], note["alert"], note["values_hidden"]) == (
+        None,
+        None,
+        None,
+        True,
+    )
+    volume = next(s for s in signals if s["signal"] == "volume")
+    assert volume["observed"] == {"added": 3, "total": 3}
+
+
+def _mask_note(client: TestClient) -> None:
+    """Mask `gold.t.note` for the bootstrap administrator.
+
+    Parameters
+    ----------
+    client
+        The test client.
+    """
+    masked = client.post(
+        "/api/v1/column-masks",
+        headers=AUTH_HEADER,
+        json={
+            "principal": "admin",
+            "environment": "dev",
+            "namespace": "gold",
+            "table": "t",
+            "column": "note",
+            "expression": "'***'",
+        },
+    )
+    assert masked.status_code == 201, masked.text
+
+
+@pytest.mark.parametrize(
+    "error",
+    [FileNotFoundError("gone"), PermissionError("denied"), ValueError("not a metadata file")],
+    ids=["missing", "refused", "corrupt"],
+)
+def test_metadata_that_cannot_be_read_hides_a_masked_readers_values(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, error: Exception
+) -> None:
+    """Answer 200 with the values hidden, never 500, when a masked reader's metadata read fails.
+
+    An unmasked reader never reads the metadata, so its answer does not change.
+
+    Parameters
+    ----------
+    client
+        The test client.
+    monkeypatch
+        Pytest's monkeypatch.
+    error
+        What the metadata read raises.
+    """
+    _table(client, rows=3)
+    unmasked = _health(client).json()
+
+    def broken(file_io: object, location: str) -> object:
+        """Fail as the metadata read does.
+
+        Parameters
+        ----------
+        file_io
+            Ignored.
+        location
+            Ignored.
+
+        Raises
+        ------
+        Exception
+            `error`, always.
+        """
+        raise error
+
+    with monkeypatch.context() as patched:
+        patched.setattr(catalog_service, "read_metadata", broken)
+        assert _health(client).json() == unmasked
+    _mask_note(client)
+    monkeypatch.setattr(catalog_service, "read_metadata", broken)
+    answer = _health(client)
+    assert answer.status_code == 200, answer.text
+    signals = answer.json()["signals"]
+    note = next(s for s in signals if s["signal"] == "null_rate" and s["column"] == "note")
+    assert (note["observed"], note["values_hidden"]) == (None, True)
+    volume = next(s for s in signals if s["signal"] == "volume")
+    assert volume["observed"] == {"added": 3, "total": 3}

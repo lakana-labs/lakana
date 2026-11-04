@@ -20,6 +20,7 @@ from lakana_core.models.declared_reference import DeclaredReference
 from lakana_core.models.declared_measure import DeclaredMeasure
 from lakana_core.models.text_translation import TextTranslation
 from lakana_core.models.table_location import TableLocation, TableLocationState
+from lakana_core.models.table_health_signal import TableHealthSignal
 from lakana_core.models.table_read import TableRead
 from lakana_core.models.artifact import ArtifactBlob, ArtifactUpload, ArtifactVersion
 from lakana_core.models.row_filter import RowFilter
@@ -127,6 +128,7 @@ __all__ = [
     "SecretUseKind",
     "Table",
     "TableColumn",
+    "TableHealthSignal",
     "TableLocation",
     "TableLocationState",
     "TableRead",

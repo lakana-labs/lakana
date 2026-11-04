@@ -1,15 +1,17 @@
 """Integration tests against a real PostgreSQL instance."""
 
 import io
+import sys
 import uuid
 from pathlib import Path
 
 import httpx
+import pyarrow as pa
 import pytest
 from core_test_helpers import SeaweedFsContainer
 from pyiceberg.schema import Schema
-from pyiceberg.types import LongType, NestedField
-from sqlalchemy import text
+from pyiceberg.types import DoubleType, LongType, NestedField
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 from testcontainers.postgres import PostgresContainer
 
@@ -19,7 +21,7 @@ from lakana_core.catalog.service import CatalogService
 from lakana_core.config import DatabaseConfig, StorageConfig
 from lakana_core.db import create_engine
 from lakana_core.identifiers import NAMESPACE_SEPARATOR, NamespacePath, TableRef
-from lakana_core.models import Base, Environment
+from lakana_core.models import Base, Environment, TableHealthSignal
 from lakana_core.storage.fsspec_storage import FsspecStorage
 from lakana_core.storage.resolver import StorageResolver
 
@@ -163,6 +165,45 @@ def test_list_tables_orders_by_name_on_postgres(tmp_path: Path) -> None:
             listed = catalog.list_tables(principal, "dev", ns)
 
     assert [ref.name for ref in listed] == ["alpha", "bravo", "charlie"]
+
+
+def test_a_table_with_extreme_bounds_keeps_taking_appends_on_postgres(tmp_path: Path) -> None:
+    """Postgres `json` refuses Infinity: a range band that would overflow must not reach it (#340).
+
+    Eight appends holding `-DBL_MAX` give the history whose band overflows; the ninth append
+    must land, as must every one before it.
+
+    Parameters
+    ----------
+    tmp_path
+        The storage root.
+    """
+    with PostgresContainer("postgres:16-alpine", driver="pg8000") as pg:
+        engine = create_engine(DatabaseConfig(url=pg.get_connection_url()))
+        Base.metadata.create_all(engine)
+        with Session(engine) as session:
+            catalog = CatalogService(session, StorageResolver(session), AllowAllAuthorization())
+            principal = ensure_bootstrap_principal(session, "admin")
+            catalog.create_environment(
+                principal,
+                name="dev",
+                storage=StorageConfig(scheme="file", root=f"file://{tmp_path}", options={}),
+            )
+            ref = TableRef(
+                environment="dev", namespace=NamespacePath.from_parts(["gold"]), name="prices"
+            )
+            catalog.create_table(
+                principal, ref, schema=Schema(NestedField(1, "price", DoubleType()))
+            )
+            rows = pa.table({"price": pa.array([-sys.float_info.max, 5.0])})
+            for _ in range(9):
+                catalog.append(principal, ref, rows)
+            states = session.scalars(
+                select(TableHealthSignal.state).where(TableHealthSignal.signal == "range")
+            ).all()
+
+    assert len(states) == 9
+    assert "no_metrics" in states
 
 
 def test_resolve_read_url_against_real_seaweedfs() -> None:

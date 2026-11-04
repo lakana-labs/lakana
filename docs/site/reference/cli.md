@@ -532,12 +532,17 @@ Usage: `lakana table health [OPTIONS] {name}`
 
 Show table NAME's last maintenance, the newest result of each check, and who reads it.
 
-Readers are counted from the queries that succeeded, per person and day. You see them only with the ADMIN role. A Python task's reads of its inputs count too. Use --output json for every field.
+Readers are counted from the queries that succeeded, per person and day. You see them only with the ADMIN role. A Python task's reads of its inputs count too. Also shows each health signal (freshness, volume, null rate, range, schema), what fired, and with --signals their history. Use --output json for every field.
 
 | Name | Type | Default | Description |
 |---|---|---|---|
 | `NAME` | text | required |  |
-| `--days` | whole number, 1 or more | none | Readers over this many days (up to the server's kept period, 90 by default). |
+| `--days` | whole number, 1 or more | none | Readers over this many days; with --signals, the history (up to the server's health signal window, LAKANA_HEALTH__RETENTION_DAYS, 90 by default). |
+| `--signals` | flag | off | Show the history of the health signals instead. |
+| `--signal` | text | none | Only this signal: freshness, volume, null_rate, range or schema. |
+| `--column` | text | none | Only this column. |
+| `--limit` | whole number, 1 to 200 | none | Most rows to list (default 100). |
+| `--cursor` | text | none | Continue after the page that printed this cursor. |
 | `--env` | text | none | Environment (default: the profile's). |
 
 ### `lakana table describe`

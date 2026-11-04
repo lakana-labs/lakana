@@ -52,6 +52,7 @@ from lakana_core.models import (
     RollbackOutcome,
     Run,
     Table,
+    TableHealthSignal,
     TaskRun,
     WriteMode,
 )
@@ -442,6 +443,76 @@ def test_a_replaced_table_goes_back_to_the_snapshot_before(
     }
     assert read_written(session, task.id) is None
     assert _row(session).unpublished_run_id is None
+
+
+def _health_snapshots(session: Session) -> set[int | None]:
+    """Read the snapshots the recorded health signals observe.
+
+    Parameters
+    ----------
+    session
+        Database session.
+
+    Returns
+    -------
+    set of int or None
+        Each row's ``snapshot_id``.
+    """
+    return set(session.scalars(select(TableHealthSignal.snapshot_id)))
+
+
+def test_a_set_back_deletes_the_health_signals_of_the_snapshots_it_sets_back(
+    session: Session, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    """Delete the signals of every snapshot between the one set back to and the failed one (M1).
+
+    They neither show as the table's current state nor feed the baseline.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    principal
+        The writer.
+    tmp_path
+        Storage root.
+    """
+    catalog = _catalog(session, principal, tmp_path)
+    before = _write(catalog, principal, _orders([1], ["eu"]), WriteMode.CREATE).snapshot_id
+    middle = _write(catalog, principal, _orders([2], ["eu"]), WriteMode.APPEND).snapshot_id
+    after = _write(catalog, principal, _orders([3], ["us"]), WriteMode.APPEND).snapshot_id
+    assert _health_snapshots(session) == {before, middle, after}
+    task = _task(session, principal)
+    written = Written(_row(session).id, before, after, publishes=False)
+    _stamp(session, task, written)
+
+    assert _roll_back(catalog, principal, task, written).outcome is RollbackOutcome.ROLLED_BACK
+    assert _health_snapshots(session) == {before}
+
+
+def test_a_first_build_that_is_set_back_keeps_no_health_signals(
+    session: Session, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    """Delete the signals of a first build that is not published, so no reader sees its values.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    principal
+        The writer.
+    tmp_path
+        Storage root.
+    """
+    catalog = _catalog(session, principal, tmp_path)
+    after = _write(catalog, principal, _orders([1, 1], ["eu", "eu"]), WriteMode.CREATE).snapshot_id
+    assert _health_snapshots(session) == {after}
+    task = _task(session, principal)
+    written = Written(_row(session).id, None, after, publishes=True)
+    _stamp(session, task, written)
+
+    assert _roll_back(catalog, principal, task, written).outcome is RollbackOutcome.UNPUBLISHED
+    assert _health_snapshots(session) == set()
 
 
 def test_a_second_writers_commit_is_never_discarded(

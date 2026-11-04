@@ -1870,6 +1870,254 @@ def _health(tmp_path: Path, body: dict[str, Any], *args: str) -> tuple[FakeApi, 
     return api, result
 
 
+_SIGNAL = {
+    "id": "6f1c0d7e-0000-4000-8000-000000000001",
+    "signal": "volume",
+    "column": None,
+    "state": "fired",
+    "effect": "warn",
+    "snapshot_id": 4711,
+    "observed_at": "2026-11-03T06:00:00Z",
+    "observed": {"added": 120, "total": 120},
+    "band": {"low": 9800.0, "high": 10400.0, "median": 10100.0},
+    "alert": (
+        "bronze.sales: volume 120 rows, usually 9,800\u201310,400 "
+        "(snapshot 4711, 03 Nov 06:00 UTC); "
+        "check the source extract, or set health: {volume: off} if this table now loads less"
+    ),
+    "values_hidden": False,
+    "last_fired_at": "2026-11-03T06:00:00Z",
+}
+
+
+def test_table_health_shows_the_signals_and_what_fired(tmp_path: Path) -> None:
+    hidden = {
+        **_SIGNAL,
+        "id": "6f1c0d7e-0000-4000-8000-000000000002",
+        "signal": "null_rate",
+        "column": "price",
+        "state": "ok",
+        "observed": None,
+        "band": None,
+        "alert": None,
+        "values_hidden": True,
+    }
+    _, result = _health(tmp_path, {**_HEALTH, "signals": [_SIGNAL, hidden]})
+    assert result.exit_code == 0, result.stderr
+    plain = _plain(result.stdout)
+    assert "Signals:" in plain and "volume" in plain and "fired" in plain
+    assert "Fired: bronze.sales: volume 120 rows, usually 9,800\u201310,400" in plain
+    assert "Some values are hidden: a column mask or row filter applies to you." in plain
+
+
+def test_table_health_without_signals_says_when_they_start(tmp_path: Path) -> None:
+    """A managed table without signals gets them with its next write.
+
+    Parameters
+    ----------
+    tmp_path
+        Pytest's per-test directory.
+    """
+    api = FakeApi()
+    api.on("GET", f"{_BASE}/sales/health", json={**_HEALTH, "signals": []})
+    api.on("GET", f"{_BASE}/sales", json=_TABLE)
+    result = invoke(make_state(tmp_path, api), "table", "health", "bronze.sales", "--env", "dev")
+    assert result.exit_code == 0, result.stderr
+    assert "Signals: none recorded yet; they start with the table's next write." in _plain(
+        result.stdout
+    )
+
+
+@pytest.mark.parametrize(
+    ("kind", "said"),
+    [
+        ("VIEW", "Signals: none. A view has no health signals; the tables it reads have them."),
+        (
+            "EXTERNAL",
+            "Signals: none. Only managed tables record health signals; bronze.sales is an "
+            "external table.",
+        ),
+        (
+            "ARTIFACT",
+            "Signals: none. Only managed tables record health signals; bronze.sales is an "
+            "artifact.",
+        ),
+    ],
+)
+def test_table_health_of_what_has_no_signals_does_not_promise_them(
+    tmp_path: Path, kind: str, said: str
+) -> None:
+    """A view, an external table or an artifact never gets signals, so none are promised (M6).
+
+    Parameters
+    ----------
+    tmp_path
+        Pytest's per-test directory.
+    kind
+        The table's kind.
+    said
+        What the command says.
+    """
+    api = FakeApi()
+    api.on("GET", f"{_BASE}/sales/health", json={**_HEALTH, "signals": []})
+    api.on("GET", f"{_BASE}/sales", json={**_TABLE, "kind": kind})
+    result = invoke(make_state(tmp_path, api), "table", "health", "bronze.sales", "--env", "dev")
+    assert result.exit_code == 0, result.stderr
+    plain = _plain(result.stdout)
+    assert said in plain
+    assert "next write" not in plain
+
+
+@pytest.mark.parametrize("status", [404, 503])
+def test_table_health_says_none_recorded_when_the_table_cannot_be_read_again(
+    tmp_path: Path, status: int
+) -> None:
+    """A failing lookup of the table's kind gives the neutral line and keeps exit 0 (N3).
+
+    Parameters
+    ----------
+    tmp_path
+        Pytest's per-test directory.
+    status
+        What the table's own route answers.
+    """
+    api = FakeApi()
+    api.on("GET", f"{_BASE}/sales/health", json={**_HEALTH, "signals": []})
+    api.on("GET", f"{_BASE}/sales", status=status, json={"detail": "storage unreachable"})
+    result = invoke(make_state(tmp_path, api), "table", "health", "bronze.sales", "--env", "dev")
+    assert result.exit_code == 0, result.stderr
+    plain = _plain(result.stdout)
+    assert "Signals: none recorded." in plain
+    assert "next write" not in plain
+
+
+def test_table_health_from_a_server_without_signals_says_to_upgrade_it(tmp_path: Path) -> None:
+    """An answer without a `signals` field comes from a server older than health signals.
+
+    Parameters
+    ----------
+    tmp_path
+        Pytest's per-test directory.
+    """
+    _, result = _health(tmp_path, _HEALTH)
+    assert result.exit_code == 0, result.stderr
+    plain = _plain(result.stdout)
+    assert (
+        "Signals: not reported. This server is older than health signals; upgrade it to see "
+        "them." in plain
+    )
+    assert "next write" not in plain
+
+
+def test_table_health_signals_lists_the_history_and_the_next_page(tmp_path: Path) -> None:
+    api = FakeApi()
+    api.on("GET", f"{_BASE}/sales/health/signals", json={"items": [_SIGNAL], "next_cursor": "abc"})
+    result = invoke(
+        make_state(tmp_path, api),
+        "table",
+        "health",
+        "bronze.sales",
+        "--env",
+        "dev",
+        "--signals",
+        "--signal",
+        "volume",
+        "--limit",
+        "1",
+    )
+    assert result.exit_code == 0, result.stderr
+    assert dict(api.requests[-1].url.params) == {"signal": "volume", "limit": "1"}
+    plain = _plain(result.stdout)
+    assert "4711" in plain
+    assert (
+        "More results: lakana table health bronze.sales --env dev --signals --signal volume "
+        "--limit 1 --cursor abc"
+    ) in plain
+
+
+def test_table_health_signals_json_keeps_the_page(tmp_path: Path) -> None:
+    api = FakeApi()
+    api.on("GET", f"{_BASE}/sales/health/signals", json={"items": [_SIGNAL], "next_cursor": None})
+    result = invoke(
+        make_state(tmp_path, api),
+        "--output",
+        "json",
+        "table",
+        "health",
+        "bronze.sales",
+        "--env",
+        "dev",
+        "--signals",
+    )
+    assert result.exit_code == 0, result.stderr
+    assert json.loads(result.stdout)["items"][0]["snapshot_id"] == 4711
+
+
+def test_table_health_does_not_say_values_are_hidden_when_they_are_not(tmp_path: Path) -> None:
+    _, result = _health(tmp_path, {**_HEALTH, "signals": [_SIGNAL]})
+    assert "Signals:" in _plain(result.stdout)
+    assert "hidden" not in _plain(result.stdout)
+
+
+def test_a_fired_alert_with_a_line_break_cannot_forge_a_line(tmp_path: Path) -> None:
+    forged = {**_SIGNAL, "alert": "volume low\nFired: forged"}
+    _, result = _health(tmp_path, {**_HEALTH, "signals": [forged]})
+    assert "Fired: volume low\\nFired: forged" in _plain(result.stdout)
+    assert not [line for line in result.stdout.splitlines() if line.startswith("Fired: forged")]
+
+
+def test_the_history_says_when_values_are_hidden(tmp_path: Path) -> None:
+    hidden = {**_SIGNAL, "observed": None, "band": None, "alert": None, "values_hidden": True}
+    api = FakeApi()
+    api.on("GET", f"{_BASE}/sales/health/signals", json={"items": [hidden], "next_cursor": None})
+    result = invoke(
+        make_state(tmp_path, api), "table", "health", "bronze.sales", "--env", "dev", "--signals"
+    )
+    assert "Some values are hidden: a column mask or row filter applies to you." in _plain(
+        result.stdout
+    )
+
+
+@pytest.mark.parametrize("flag", ["--signal", "--column", "--limit", "--cursor"])
+def test_a_history_option_without_signals_names_the_cause_and_the_next_step(
+    tmp_path: Path, flag: str
+) -> None:
+    value = "5" if flag == "--limit" else "x"
+    _, result = _health(tmp_path, _HEALTH, flag, value)
+    assert result.exit_code != 0
+    assert f"{flag} works only with --signals; add --signals to list the history" in _plain(
+        result.stderr + result.stdout
+    )
+
+
+def test_an_empty_default_window_does_not_claim_30_days(tmp_path: Path) -> None:
+    api = FakeApi()
+    api.on("GET", f"{_BASE}/sales/health/signals", json={"items": [], "next_cursor": None})
+    result = invoke(
+        make_state(tmp_path, api), "table", "health", "bronze.sales", "--env", "dev", "--signals"
+    )
+    plain = _plain(result.stdout)
+    assert "No health signals in the default window (30 days, fewer if the server keeps" in plain
+    assert "in the last 30 days" not in plain
+
+
+def test_table_health_signals_says_when_the_window_is_empty(tmp_path: Path) -> None:
+    api = FakeApi()
+    api.on("GET", f"{_BASE}/sales/health/signals", json={"items": [], "next_cursor": None})
+    result = invoke(
+        make_state(tmp_path, api),
+        "table",
+        "health",
+        "bronze.sales",
+        "--env",
+        "dev",
+        "--signals",
+        "--days",
+        "7",
+    )
+    assert "No health signals in the last 7 days." in _plain(result.stdout)
+
+
 def test_table_health_shows_maintenance_checks_and_readers(tmp_path: Path) -> None:
     api, result = _health(tmp_path, _HEALTH)
 
@@ -2351,7 +2599,7 @@ def test_table_health_with_only_withheld_checks_says_so_and_not_none(tmp_path: P
     _, result = _health(tmp_path, {**_HEALTH, "checks": [], "hidden_checks": 2})
     plain = _plain(result.stdout)
     assert "2 checks of references to tables you cannot read are not shown." in plain
-    assert "none recorded" not in plain
+    assert "Checks: none recorded" not in plain
 
 
 def test_table_get_shows_the_label_the_languages_and_the_coverage(tmp_path: Path) -> None:

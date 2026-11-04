@@ -1271,6 +1271,68 @@ class ReaderOut(BaseModel):
     last_read_at: datetime
 
 
+class HealthSignalOut(BaseModel):
+    """One health signal of a table, as the caller may see it.
+
+    Parameters
+    ----------
+    id
+        The observation's id.
+    signal
+        ``freshness``, ``volume``, ``null_rate``, ``range`` or ``schema``.
+    column
+        The column, for a column signal.
+    state
+        ``ok``, ``fired``, ``no_history``, ``no_metrics`` or ``off``.
+    effect
+        The effect that applied to the observation.
+    snapshot_id
+        The snapshot observed.
+    observed_at
+        When it was recorded.
+    observed
+        What was observed, keys per signal in the table health reference; `null` when hidden.
+    band
+        The usual band the observation was judged against; `null` when hidden or none.
+    alert
+        The text of the newest fired observation (current state) or of this one (history);
+        `null` when it did not fire or its values are hidden.
+    values_hidden
+        Whether a column mask or row filter that applies to the caller left out `observed`,
+        `band` and `alert`.
+    last_fired_at
+        When this signal and column last fired; only in the current state.
+    """
+
+    id: uuid.UUID
+    signal: str
+    column: str | None
+    state: str
+    effect: str
+    snapshot_id: int | None
+    observed_at: datetime
+    observed: dict[str, Any] | None
+    band: dict[str, Any] | None
+    alert: str | None
+    values_hidden: bool
+    last_fired_at: datetime | None = None
+
+
+class HealthSignalPageOut(BaseModel):
+    """One page of the history of a table's health signals, newest first.
+
+    Parameters
+    ----------
+    items
+        The observations.
+    next_cursor
+        Pass it as `cursor` for the next page; `null` on the last.
+    """
+
+    items: list[HealthSignalOut]
+    next_cursor: str | None
+
+
 class TableHealthOut(BaseModel):
     """A table's health at a glance.
 
@@ -1288,6 +1350,9 @@ class TableHealthOut(BaseModel):
     hidden_checks
         How many results were left out of `checks`: generated reference checks whose target the
         caller may not read.
+    signals
+        The current state of each health signal, values hidden where a column mask or row filter
+        applies to the caller.
     """
 
     days: int
@@ -1295,6 +1360,7 @@ class TableHealthOut(BaseModel):
     checks: list[CheckHealthOut]
     readers: list[ReaderOut] | None
     hidden_checks: int = 0
+    signals: list[HealthSignalOut] = []
 
 
 class DescriptionIn(BaseModel):
@@ -3442,7 +3508,7 @@ class TaskRunOut(BaseModel):
         For a caller who may manage policies (MANAGE_POLICY), the row filters and column masks
         those writes left out of date (`PolicyWarningOut`); reads by the people they apply to are
         refused until an administrator creates them again. Always empty for every other caller,
-        who may not learn that a policy exists.
+        who may not learn which policies exist.
     """
 
     asset: str

@@ -1049,6 +1049,22 @@ class AuditConfig(BaseModel):
         return cleaned
 
 
+class HealthConfig(BaseModel):
+    """How far back the history of a table's health signals can be read.
+
+    Read from ``LAKANA_HEALTH__RETENTION_DAYS``.
+
+    Parameters
+    ----------
+    retention_days
+        How many days back the history of a table's health signals reaches (default 90, at
+        least 7, so a weekly job has a history): `lakana table health --signals` and `days` of
+        `GET .../health/signals` look back at most this far.
+    """
+
+    retention_days: int = Field(default=90, ge=7)
+
+
 class TableReadsConfig(BaseModel):
     """How long the reads of a table are kept, and how far back its health shows them.
 
@@ -1607,6 +1623,8 @@ class Settings(BaseSettings):
     table_reads
         How long the reads of a table are kept and how far back its health shows them
         (`LAKANA_TABLE_READS__*`).
+    health
+        How long table health signals are kept (`LAKANA_HEALTH__*`).
     tables
         How long the storage location of a create that did not finish is kept
         (`LAKANA_TABLES__*`).
@@ -1633,6 +1651,7 @@ class Settings(BaseSettings):
     audit: AuditConfig = AuditConfig()
     artifacts: ArtifactsConfig = ArtifactsConfig()
     table_reads: TableReadsConfig = TableReadsConfig()
+    health: HealthConfig = HealthConfig()
     tables: TablesConfig = TablesConfig()
     repo_roots: list[str] = []
 

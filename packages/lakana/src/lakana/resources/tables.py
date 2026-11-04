@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import enum
 import io
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from datetime import date, datetime
 from typing import Any, Protocol
 
@@ -24,13 +24,15 @@ from lakana._arrow import (
     normalize_view_columns,
     schema_to_columns,
 )
-from lakana._http import HttpTransport
+from lakana._http import HttpTransport, every_page, query_params
 from lakana._models import (
     AppendResult,
     CheckHealth,
     Column,
     DroppedTable,
     ExternalTable,
+    HealthSignal,
+    HealthSignalPage,
     HistoryResult,
     LastMaintenance,
     Lineage,
@@ -50,6 +52,7 @@ from lakana._models import (
     TermRef,
     TranslationCoverage,
     WriteResult,
+    known_fields,
 )
 from lakana._routes import ROUTES
 from lakana.errors import Conflict, LakanaConnectionError, LakanaError, ValidationError
@@ -307,6 +310,26 @@ def _references_from_json(data: dict[str, Any]) -> TableReferences:
     )
 
 
+def _signal_from_json(data: dict[str, Any]) -> HealthSignal:
+    """Build a `HealthSignal` from one `HealthSignalOut` JSON object.
+
+    Parameters
+    ----------
+    data
+        The object; keys this SDK does not know are ignored.
+
+    Returns
+    -------
+    HealthSignal
+        The signal.
+    """
+    fields = known_fields(HealthSignal, data)
+    fields["observed_at"] = datetime.fromisoformat(data["observed_at"])
+    fired = data.get("last_fired_at")
+    fields["last_fired_at"] = None if fired is None else datetime.fromisoformat(fired)
+    return HealthSignal(**fields)
+
+
 def _health_from_json(data: dict[str, Any]) -> TableHealth:
     """Build a `TableHealth` from the platform API's JSON response body.
 
@@ -337,6 +360,7 @@ def _health_from_json(data: dict[str, Any]) -> TableHealth:
         ),
         checks=[_check_from_json(c) for c in data["checks"]],
         hidden_checks=data.get("hidden_checks", 0),
+        signals=None if "signals" not in data else [_signal_from_json(s) for s in data["signals"]],
         readers=None
         if readers is None
         else [
@@ -785,6 +809,104 @@ class Tables:
             params=None if days is None else {"days": days},
         )
         return _health_from_json(response.json())
+
+    def health_signals(
+        self,
+        environment: str,
+        qualified_name: str,
+        *,
+        days: int | None = None,
+        signal: str | None = None,
+        column: str | None = None,
+        limit: int | None = None,
+        cursor: str | None = None,
+    ) -> HealthSignalPage:
+        """List one page of the history of a table's health signals, newest first.
+
+        The values of a masked column, and every null rate and range under a row filter that
+        applies to you, are left out (`values_hidden`).
+
+        Parameters
+        ----------
+        environment
+            The environment name.
+        qualified_name
+            Dot-joined `"namespace.table"` name.
+        days
+            How far back, from 1 to the server's health signal window
+            (``LAKANA_HEALTH__RETENTION_DAYS``, 90 by default); 30 when `None`.
+        signal
+            Only this signal: ``freshness``, ``volume``, ``null_rate``, ``range`` or ``schema``.
+        column
+            Only this column.
+        limit
+            Most observations returned (1 to 200); the server's default (100) when `None`.
+        cursor
+            A previous page's `next_cursor`.
+
+        Returns
+        -------
+        HealthSignalPage
+            The observations and the cursor of the next page (`None` on the last).
+
+        Raises
+        ------
+        lakana.errors.NotFound
+            If no such table exists.
+        lakana.errors.PermissionDenied
+            Without `READ_TABLE` on the table.
+        lakana.errors.ValidationError
+            If `days` is outside the range, `signal` is unknown or `cursor` is foreign; the
+            message names it.
+        """
+        namespace, name = _split_namespace_table(qualified_name)
+        response = self._transport.request(
+            ROUTES["tables.health_signals"],
+            path_params={"env": environment, "path": namespace, "name": name},
+            params=query_params(
+                days=days, signal=signal, column=column, limit=limit, cursor=cursor
+            ),
+        )
+        body = response.json()
+        return HealthSignalPage(
+            items=[_signal_from_json(item) for item in body["items"]],
+            next_cursor=body["next_cursor"],
+        )
+
+    def iter_health_signals(
+        self,
+        environment: str,
+        qualified_name: str,
+        *,
+        days: int | None = None,
+        signal: str | None = None,
+        column: str | None = None,
+    ) -> Iterator[HealthSignal]:
+        """Yield every observation of the history of a table's health signals, newest first.
+
+        Parameters
+        ----------
+        environment
+            The environment name.
+        qualified_name
+            Dot-joined `"namespace.table"` name.
+        days
+            How far back; 30 when `None`.
+        signal
+            Only this signal.
+        column
+            Only this column.
+
+        Returns
+        -------
+        Iterator of HealthSignal
+            Each observation, once; raises as `health_signals` does.
+        """
+        return every_page(
+            lambda cursor: self.health_signals(
+                environment, qualified_name, days=days, signal=signal, column=column, cursor=cursor
+            )
+        )
 
     def describe(
         self,

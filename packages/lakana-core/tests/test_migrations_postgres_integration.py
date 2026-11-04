@@ -2937,3 +2937,66 @@ def test_0062_on_postgres() -> None:
         assert _alembic_version(engine) == revision_0061
         assert "glossary_terms" not in sqlalchemy.inspect(engine).get_table_names()
         engine.dispose()
+
+
+def test_0063_on_postgres() -> None:
+    """0063 creates the health signals table; a table's delete cascades; a downgrade drops it."""
+    revision_0062 = "b4d8e0f2a6c7"
+    revision_0063 = "c5e9f1a3b7d8"
+    with PostgresContainer("postgres:16", driver="pg8000") as pg:
+        url = pg.get_connection_url()
+        migrate.upgrade(url, revision_0062)
+        migrate.upgrade(url, revision_0063)
+        engine = sqlalchemy.create_engine(url)
+        assert _alembic_version(engine) == revision_0063
+        inspector = sqlalchemy.inspect(engine)
+        assert {i["name"] for i in inspector.get_indexes("table_health_signals")} == {
+            "ix_table_health_signals_table_id_observed_at",
+            "ix_table_health_signals_table_id_signal_sequence_number",
+            "ix_table_health_signals_table_id_state",
+        }
+        assert "sequence_number" in {
+            c["name"] for c in inspector.get_columns("table_health_signals")
+        }
+        now = datetime.now(UTC)
+        env_id, namespace_id, table_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+        with engine.begin() as conn:
+            conn.execute(
+                sqlalchemy.text(
+                    "INSERT INTO environments (id, name, storage_root, storage_options, "
+                    "is_protected, properties, created_at, updated_at) "
+                    "VALUES (:id, 'dev', 's3://bucket/dev', :options, false, :props, :now, :now)"
+                ),
+                {"id": env_id, "options": json.dumps({}), "props": json.dumps({}), "now": now},
+            )
+            conn.execute(
+                sqlalchemy.text(
+                    "INSERT INTO namespaces (id, environment_id, path, properties, owner_id) "
+                    "VALUES (:id, :environment_id, 'gold', :props, NULL)"
+                ),
+                {"id": namespace_id, "environment_id": env_id, "props": json.dumps({})},
+            )
+            conn.execute(
+                sqlalchemy.text(
+                    "INSERT INTO tables (id, namespace_id, name, table_type, created_at, "
+                    "updated_at) VALUES (:id, :namespace_id, 'orders', 'ICEBERG', :now, :now)"
+                ),
+                {"id": table_id, "namespace_id": namespace_id, "now": now},
+            )
+            conn.execute(
+                sqlalchemy.text(
+                    "INSERT INTO table_health_signals (id, environment_id, table_id, signal, "
+                    "state, effect, observed_at) "
+                    "VALUES (:id, :env, :table, 'volume', 'ok', 'warn', :now)"
+                ),
+                {"id": uuid.uuid4(), "env": env_id, "table": table_id, "now": now},
+            )
+        count = sqlalchemy.text("SELECT count(*) FROM table_health_signals")
+        with engine.begin() as conn:
+            assert conn.execute(count).scalar_one() == 1
+            conn.execute(sqlalchemy.text("DELETE FROM tables WHERE id = :id"), {"id": table_id})
+            assert conn.execute(count).scalar_one() == 0
+        migrate.downgrade(url, revision_0062)
+        assert _alembic_version(engine) == revision_0062
+        assert "table_health_signals" not in sqlalchemy.inspect(engine).get_table_names()
+        engine.dispose()

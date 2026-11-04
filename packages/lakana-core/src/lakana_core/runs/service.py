@@ -320,8 +320,8 @@ class TaskRunView:
         policy is affected.
     policy_warnings
         The row filters and column masks those writes left out of date, with their ids, for a
-        reader who may manage policies; empty for everyone else, who may not learn that a policy
-        exists (`lakana_core.policy.schema_change.schema_change_for_reader`).
+        reader who may manage policies; empty for everyone else, who may not learn which policies
+        exist (`lakana_core.policy.schema_change.schema_change_for_reader`).
     """
 
     asset: str

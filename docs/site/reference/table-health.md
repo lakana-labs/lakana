@@ -1,8 +1,9 @@
 # Table health
 
 What Lakana tells you about the state of a table without reading its rows: when it was last
-written, how big it is, when it was last maintained, how its checks stand, and who reads it. The
-numbers of the current snapshot are in `lakana table get`; the rest is in `lakana table health`.
+written, how big it is, when it was last maintained, how its checks stand, who reads it, and what
+its recent snapshots say. The numbers of the current snapshot are in `lakana table get`; the rest
+is in `lakana table health`.
 
 ## The numbers of the current snapshot
 
@@ -122,12 +123,120 @@ with a message that names the setting if the default window is above the kept pe
 the message gives the range and names `LAKANA_TABLE_READS__KEEP_DAYS`. Lowering the kept period
 deletes the older counts at the next sweep; raising it does not bring back counts already deleted.
 
+## Signals
+
+Every snapshot Lakana commits (a run, an append, a merge, a history write, a REST write) records
+what it says about the table, from its summary and the column metrics Iceberg already holds. No
+row is read. Signals are recorded when a commit adds a snapshot and makes it current: a commit that
+moves `main` to a snapshot that already exists (a fast-forward of a branch, say) adds no snapshot
+and records none. A table with signals shows them in `lakana table health`; a table whose first
+write has not happened since signals were introduced shows none. Views, external tables and
+artifacts have no signals.
+
+When a failed check sets a table back, the signals of the snapshots it set back are deleted with
+them: they are not the table's data any more, so they neither show as its current state nor count
+towards the usual band.
+
+| Signal | Observed per snapshot | Fires when |
+|---|---|---|
+| `volume` | rows added by the snapshot and the table's total | the rows added fall outside the usual band |
+| `null_rate` (per column) | null count divided by value count | the rate falls outside the usual band |
+| `range` (per column) | lower and upper bound of the column | a bound lies beyond the learned minimum or maximum by more than the band |
+| `schema` | the column list and types | a column is added, dropped or retyped |
+
+**The band.** Over the table's last 30 snapshots, the median plus and minus 4 times the median
+absolute deviation, widened by a floor so that small or very steady tables do not alert on noise:
+at least 10 rows and 10 % for `volume`, 2 percentage points for `null_rate`, and for `range`, on
+each side, 1 % of the learned span (for integers and other numbers, of the larger of the span and the bounds'
+magnitude) and at least one unit: 1 for integers, 1 day for dates, 1 hour for timestamps, none for
+other numbers. No signal but `schema` fires before the table has 8 snapshots.
+
+**States.** `ok`: inside the band. `fired`: outside it (`alert` says how). `no_history`: fewer than
+8 snapshots, so there is no band yet. `no_metrics`: nothing can be said, and the observation never
+guesses; `observed.reason` tells why (`not_recorded`: Iceberg did not record the column's metrics,
+`no_rows`, `unreadable`: the added files' manifests could not be read, or were too many or too
+slow to read within the limits below, `not_finite`: a number too large to judge, `error`). Metrics
+that are damaged count as `not_recorded`.
+
+**Limits per commit.** Signals are computed for the first 200 top-level columns, from at most
+2,000 added files, within 5 seconds. Columns past the 200th record nothing. A commit over the file
+or time limit records `no_metrics` with reason `unreadable` for `null_rate` and `range`; it never
+fails the write.
+
+### What `observed` and `band` hold
+
+| Signal | `observed` | `band` |
+|---|---|---|
+| `volume` | `added`, `total` | `low`, `high`, `median` |
+| `null_rate` | `nulls`, `values`, `rate` | `low`, `high`, `median` |
+| `range` | `lower`, `upper`, `kind` | `min`, `max` (learned), `low`, `high` (the limits) |
+| `schema` | `columns`, `added`, `dropped`, `retyped` | none |
+| `no_metrics` (any) | `reason` | none |
+
+`kind` of a `range` is `integer`, `number`, `date` (bounds as days since 1970-01-01) or
+`timestamp` (bounds as microseconds since 1970-01-01 UTC).
+
+### Fields of a signal
+
+| Field | Type | Meaning |
+|---|---|---|
+| `id` | UUID | The observation. |
+| `signal`, `column` | text, text or `null` | Which signal, and the column for `null_rate` and `range`. |
+| `state` | text | One of the states above. |
+| `effect` | text | The effect that applied; `warn` by default. |
+| `snapshot_id` | integer or `null` | The snapshot observed. |
+| `observed_at` | time | When it was recorded (UTC). |
+| `observed`, `band` | object or `null` | As in the table above; `null` when hidden. |
+| `alert` | text or `null` | The text of the newest firing (in `health`) or of this observation (in the history); `null` when it did not fire or its values are hidden. |
+| `values_hidden` | boolean | `true` when `observed`, `band` and `alert` were left out for you. |
+| `last_fired_at` | time or `null` | In `health` only: when this signal and column last fired. |
+
+`GET .../tables/{name}/health` returns the current state of each signal in `signals`: the newest
+observation of each signal and column.
+
+### Who sees what
+
+The signal routes need `READ_TABLE`, like the rest of the health, and a missing right is `403`.
+Numbers can reveal values, so they are left out where a policy applies to you. `values_hidden`
+then tells you, per column, that values are hidden for you because a column mask or row filter
+applies to you (the missing values would show that anyway); it never says which policy, nor its
+definition. A policy that does not apply to you changes nothing you see.
+
+- **Masked column.** If a column mask applies to you, the signal's name, state, time and snapshot
+  id are shown, but not `observed`, `band` or `alert` (`values_hidden` is `true`). A mask covers
+  every name the column has had, so a rename does not lift it. When any mask applies to you,
+  values under a name the current schema no longer has are left out too, and a table whose
+  metadata cannot be read hides all values from you.
+- **Row filter.** If a row filter applies to you, every value-revealing number (bounds, null
+  rates, bands and alert values) is left out for all columns. `volume` and `schema` stay.
+- **A masked column renamed since the mask was written.** All values are hidden, as the query
+  path refuses such reads.
+- **A kept table** (a failed check kept its data): the routes show aggregates and snapshot ids,
+  never rows, current metadata or file locations.
+
+### The history
+
+`GET /api/v1/environments/{env}/namespaces/{path}/tables/{name}/health/signals` lists the
+observations, newest first.
+
+| Parameter | Meaning |
+|---|---|
+| `days` | How far back, from 1 to the kept period; 30 by default. A number outside the range is refused with `422` and the message names the range and `LAKANA_HEALTH__RETENTION_DAYS`. |
+| `signal` | Only this signal. An unknown name is refused with `422`. |
+| `column` | Only this column. |
+| `limit` | Observations per page, 1 to 200 (100 by default). |
+| `cursor` | The `next_cursor` of the previous page. |
+
+The answer is `{"items": [...], "next_cursor": ...}`; `next_cursor` is `null` on the last page.
+`LAKANA_HEALTH__RETENTION_DAYS` (90 by default, at least 7) is how far back `days` may reach.
+
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `lakana table health NAME` | Shows the last maintenance, the newest result of each check and the readers of the default window. |
+| `lakana table health NAME` | Shows the last maintenance, the newest result of each check, the readers of the default window and the current state of each health signal, with the alerts that fired. A table without signals says why: a managed table gets them with its next write, a view, an external table or an artifact has none, and a server older than health signals does not report them (upgrade it). |
 | `lakana table health NAME --days N` | The same with the readers of the last N days. |
+| `lakana table health NAME --signals` | Lists the history of the health signals, newest first. Narrow it with `--signal S`, `--column C` and `--days N`; page with `--limit N` and `--cursor X`. |
 | `lakana table health NAME --output json` | Every field of the answer as JSON. |
 | `lakana table get NAME --output json` | Includes `last_write_at`, `row_count`, `size_bytes` and `file_count`. |
 
@@ -140,6 +249,11 @@ Without a right to see the grants the command says that the readers are not show
 `readers` (a list of `Reader`, or `None`). `Table.last_write_at`, `Table.row_count`,
 `Table.size_bytes` and `Table.file_count` hold the numbers of the snapshot; they are `None` for a
 server that is older than table health.
+
+`client.tables.health(...).signals` is a list of `HealthSignal`, or `None` from a server older
+than signals. `client.tables.health_signals(environment, "namespace.table", days=None, signal=None,
+column=None, limit=None, cursor=None)` returns one `HealthSignalPage` (`items`, `next_cursor`), and
+`client.tables.iter_health_signals(...)` yields every observation across the pages.
 
 ## Audit
 

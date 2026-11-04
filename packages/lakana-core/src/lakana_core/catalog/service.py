@@ -18,6 +18,7 @@ from typing import Any, Literal
 
 import pyarrow as pa
 from pyiceberg.io import FileIO
+from pyiceberg.manifest import DataFile
 from pyiceberg.partitioning import PartitionSpec
 from pyiceberg.schema import Schema
 from pyiceberg.table.metadata import TableMetadata
@@ -104,6 +105,16 @@ from lakana_core.catalog.health import (
     readers,
     snapshot_stats,
 )
+from lakana_core.catalog.health_read import (
+    UNKNOWN_SIGNAL_MESSAGE,
+    SignalView,
+    Visibility,
+    current_signals,
+    signal_history,
+    visibility_for,
+)
+from lakana_core.catalog.health_record import commit_observations, forget_set_back, signal_rows
+from lakana_core.catalog.health_signals import SIGNALS, HealthEffects
 from lakana_core.catalog.history import (
     EARLIEST_START,
     HISTORY_KEY_PROPERTY,
@@ -292,13 +303,14 @@ from lakana_core.models import (
     RollbackOutcome,
     RowFilter,
     Table,
+    TableHealthSignal,
     TableLocationState,
     TableType,
     TaskRun,
     WriteMode,
 )
 from lakana_core.models.run import TERMINAL_TASK_STATUSES
-from lakana_core.pagination import escape_like
+from lakana_core.pagination import Page, escape_like
 from lakana_core.policy.resolver import PolicyResolver
 from lakana_core.policy.schema_change import BrokenPolicy, broken_policies, changed_columns
 from lakana_core.projects.layers import LAYERS
@@ -1060,6 +1072,85 @@ def _refusal_before_lookup(update: TableUpdate) -> str | None:
     if isinstance(update, (RemoveSchemasUpdate, RemovePartitionSpecsUpdate)):
         return _NO_SCHEMA_OR_SPEC_REMOVAL
     return None
+
+
+_MAX_LONG = 2**63 - 1
+"""The largest snapshot id or sequence number: Iceberg stores both as a signed 64-bit long."""
+
+
+def _snapshot_numbers_checked(
+    format_version: int,
+    *,
+    snapshot_id: int,
+    sequence_number: int | None,
+    last: int,
+    at_most: int,
+    parented: bool = False,
+) -> int:
+    """Refuse a snapshot whose id or sequence number the Iceberg spec does not allow.
+
+    Parameters
+    ----------
+    format_version
+        The table's format version; from 2 on, sequence numbers must grow.
+    snapshot_id
+        The new snapshot's id.
+    sequence_number
+        Its sequence number; `None` counts as 0 on format v1 and is refused from v2 on, where
+        pyiceberg would set the table's last sequence number back to 0.
+    last
+        The table's last sequence number before this snapshot.
+    at_most
+        The highest it may take: the table's last sequence number before the commit plus this
+        snapshot's place among the snapshots the commit adds (1 for the first), as Iceberg's
+        clients number them. It also keeps the number away from the 2^63-1 ceiling, after
+        which no snapshot could be added.
+    parented
+        Whether the snapshot names a parent: on a format v2 table pyiceberg then refuses a
+        sequence number not above `last` itself, with the text the commit already withholds
+        from a writer without READ, so it is left to pyiceberg.
+
+    Returns
+    -------
+    int
+        The table's last sequence number after it.
+
+    Raises
+    ------
+    ValidationError
+        If the id or the sequence number lies outside 0 to 2^63-1, or if, on a format v2 or
+        later table, the sequence number is missing, is not above `last` or is above `at_most` (the
+        client built its commit on metadata that is out of date, or does not number snapshots
+        as the Iceberg specification does). The messages leave the table's numbers out, which
+        a writer without READ on the table may not see. Format v1 has no sequence numbers to
+        compare.
+    """
+    sequence = sequence_number or 0
+    if not (0 <= snapshot_id <= _MAX_LONG and 0 <= sequence <= _MAX_LONG):
+        raise ValidationError(
+            "A snapshot's id and sequence number must be between 0 and 2^63-1 (got id "
+            f"{snapshot_id}, sequence number {sequence}); the Iceberg client that sent this "
+            "commit does not follow the Iceberg spec. Commit again with a client that does."
+        )
+    if format_version >= 2 and sequence_number is None:
+        raise ValidationError(
+            "A snapshot on a format v2 table needs a sequence number: the table's last plus one "
+            "per snapshot the commit adds; load the table again and commit again with a client "
+            "that sets it."
+        )
+    pyiceberg_checks = format_version == 2 and parented
+    if format_version >= 2 and not pyiceberg_checks and sequence <= last:
+        raise ValidationError(
+            f"A new snapshot's sequence number ({sequence}) must be above the table's last "
+            "sequence number; load the table again and commit again."
+        )
+    if format_version >= 2 and sequence > at_most:
+        raise ValidationError(
+            f"A new snapshot's sequence number ({sequence}) must be at most the table's last "
+            "sequence number plus one per snapshot the commit adds; load the table again and "
+            "commit again."
+        )
+    return max(last, sequence)
 
 
 def _layouts_added(update: TableUpdate) -> set[tuple[str, int]]:
@@ -2625,6 +2716,9 @@ class CatalogService:
         move of the location's claim to `LIVE` (`publish_location`): when the
         claim is no longer `CLAIMED` (the sweep abandoned it), nothing commits.
 
+        A commit that makes a new snapshot current records its health signals (`health_record`)
+        in the same transaction; computing them never fails the commit.
+
         Parameters
         ----------
         prepared
@@ -2666,6 +2760,21 @@ class CatalogService:
         # learn about them first.
         target = prepared.resolved.confine_to_root(target)
         written = write_metadata(prepared.resolved.file_io, metadata, target)
+        health = (
+            self._health_rows(
+                ref,
+                table_id=prepared.table_id,
+                environment_id=prepared.environment_id,
+                before=None,
+                after=metadata,
+                snapshots=metadata.snapshots,
+                file_io=prepared.resolved.file_io,
+                effects=HealthEffects.default(),
+                new_table=True,
+            )
+            if metadata.current_snapshot_id is not None
+            else []
+        )
         row = Table(
             id=prepared.table_id,
             namespace_id=prepared.namespace_id,
@@ -2682,6 +2791,7 @@ class CatalogService:
         sync_table_columns(self._session, row.id, from_iceberg_schema(metadata.schema()))
         try:
             self._session.flush()  # a name collision raises here, and SQLite's write lock is held
+            self._session.add_all(health)  # after the table row, for their foreign key
             if not lock_live_environment(self._session, prepared.environment_id):
                 self._session.rollback()
                 raise NotFoundError(
@@ -3721,7 +3831,9 @@ class CatalogService:
         days: int,
         now: datetime,
     ) -> TableHealth:
-        """Show a table's last maintenance, the newest result of each of its checks and its readers.
+        """Show a table's last maintenance, newest check results, readers and health signals.
+
+        The signals' values are hidden as `health_read` says.
 
         Parameters
         ----------
@@ -3780,7 +3892,112 @@ class CatalogService:
             checks=checks,
             readers=shown,
             hidden_checks=len(every) - len(checks),
+            signals=current_signals(
+                self._session, row.id, ref.dotted(), self._health_visibility(p, ref, row)
+            ),
         )
+
+    def table_health_signals(
+        self,
+        p: PrincipalRef,
+        ref: TableRef,
+        *,
+        days: int,
+        signal: str | None,
+        column: str | None,
+        limit: int,
+        cursor: str | None,
+        now: datetime,
+    ) -> Page[SignalView]:
+        """List the history of a table's health signals, newest first.
+
+        Parameters
+        ----------
+        p
+            The acting principal.
+        ref
+            The table reference.
+        days
+            How far back, already checked against the kept period.
+        signal
+            Only this signal.
+        column
+            Only this column.
+        limit
+            The most rows of the page.
+        cursor
+            Where the previous page ended.
+        now
+            The present time.
+
+        Returns
+        -------
+        Page of SignalView
+            One page; values hidden as `health_read` says.
+
+        Raises
+        ------
+        PermissionDenied
+            If `p` may not read the table; checked before anything is read.
+        NotFoundError
+            If the table does not exist.
+        ValidationError
+            If `signal` is not a signal, or the cursor is not one of this list.
+        """
+        scope = Securable.table_scope(ref.environment, ref.namespace, ref.name)
+        self._authz.authorize(p, Action.READ_TABLE, scope)
+        if signal is not None and signal not in SIGNALS:
+            raise ValidationError(UNKNOWN_SIGNAL_MESSAGE.format(signal=shown(signal)))
+        _, row = self._find_table(ref)
+        return signal_history(
+            self._session,
+            row.id,
+            ref.dotted(),
+            self._health_visibility(p, ref, row),
+            since=now - timedelta(days=days),
+            signal=signal,
+            column=column,
+            limit=limit,
+            cursor=cursor,
+        )
+
+    def _health_visibility(self, p: PrincipalRef, ref: TableRef, row: Table) -> Visibility:
+        """Find which health signal values `p` may not see on a table.
+
+        Parameters
+        ----------
+        p
+            The reader.
+        ref
+            The table reference.
+        row
+            The table's row.
+
+        Returns
+        -------
+        Visibility
+            As `health_read.visibility_for` says; the current metadata is read only when a mask
+            applies, from the row's pointer (a table without one has no column to rename).
+        """
+
+        def metadata() -> TableMetadata | None:
+            """Read the table's current metadata.
+
+            Returns
+            -------
+            TableMetadata or None
+                `None` for a table without a metadata pointer.
+
+            Raises
+            ------
+            StorageUnavailableError
+                If the environment's storage did not answer.
+            """
+            if row.metadata_location is None:
+                return None
+            return self._to_loaded_table(ref, row).metadata
+
+        return visibility_for(self._session, p, ref, row.id, metadata=metadata)
 
     def _describe_row(self, p: PrincipalRef, ref: TableRef, row: Table) -> TableDescription:
         """Describe a table row by kind, without its descriptions.
@@ -4495,6 +4712,9 @@ class CatalogService:
         locked` to the loser. `ConflictError` is not the only possible
         outcome of a lost race.
 
+        A commit that makes a new snapshot current records its health signals (`health_record`)
+        in the same transaction; computing them never fails the commit.
+
         Parameters
         ----------
         p
@@ -4550,8 +4770,11 @@ class CatalogService:
             table property that `ResolvedStorage.validate_table_properties`
             refuses; if `updates` includes an `AddSnapshotUpdate` whose
             `snapshot.manifest_list` does not lie under the table's own
-            location; if a snapshot the commit adds names a data file that is not Parquet,
-            cannot be read, or has no Iceberg field ids
+            location, whose snapshot id or sequence number lies outside 0 to 2^63-1, or
+            whose sequence number on a format v2 table is not above the table's last or is above
+            it by more than one per snapshot the commit adds; if a
+            snapshot the commit adds names a data file that is not Parquet, cannot be read, or
+            has no Iceberg field ids
             (`field_ids.check_added_files_have_field_ids`; also if there are more than 2,000 such
             files or the check takes over a minute), unless `own_data_files`; if the
             metadata location computed from the table's
@@ -4603,7 +4826,7 @@ class CatalogService:
                 table_target(ref),
                 rollback=internal_rollback,
             )
-        _, row = self._find_table(ref)
+        namespace, row = self._find_table(ref)
         if row.table_type is TableType.ARTIFACT:
             raise NotFoundError(_not_exposed_artifact_message(ref.dotted()))
         if row.metadata_location is None:
@@ -4620,6 +4843,7 @@ class CatalogService:
         # the autoflush trap: nothing here can flush a pending write ahead
         # of the CAS's own `UPDATE` for it to compare against.
         table_id = row.id
+        environment_id = namespace.environment_id
         unpublished = row.unpublished_run_id is not None
         expected = row.metadata_location
         if expected_metadata_location is not None and expected != expected_metadata_location:
@@ -4653,6 +4877,8 @@ class CatalogService:
         known_specs = {spec.spec_id for spec in current.partition_specs}
         known_orders = {order.order_id for order in current.sort_orders}
         added_layouts: set[tuple[str, int]] = set()
+        last_sequence = getattr(current, "last_sequence_number", 0)  # format v1 has none: 0
+        ceiling, added_count = last_sequence, 0
         for table_update in updates:
             if isinstance(table_update, SetLocationUpdate):
                 raise ValidationError("A table's location cannot change.")
@@ -4683,12 +4909,22 @@ class CatalogService:
                 and not self._may_see_state(p, ref)
             ):
                 raise ValidationError(_EARLIER_SCHEMA_NEEDS_READ)
-            if isinstance(table_update, AddSnapshotUpdate) and not is_within_location(
-                current.location, table_update.snapshot.manifest_list
-            ):
-                raise ValidationError(
-                    "A committed snapshot's manifest list must lie under the table's own location."
+            if isinstance(table_update, AddSnapshotUpdate):
+                if not is_within_location(current.location, table_update.snapshot.manifest_list):
+                    raise ValidationError(
+                        "A committed snapshot's manifest list must lie under the table's own "
+                        "location."
+                    )
+                added_count += 1
+                last_sequence = _snapshot_numbers_checked(
+                    current.format_version,
+                    snapshot_id=table_update.snapshot.snapshot_id,
+                    sequence_number=table_update.snapshot.sequence_number,
+                    last=last_sequence,
+                    at_most=ceiling + added_count,
+                    parented=table_update.snapshot.parent_snapshot_id is not None,
                 )
+        checked_files: list[DataFile] | None = None
         if not maintenance and not internal_rollback and not own_data_files:
             # A file without field ids would read as NULL in every column: refused here, at
             # the one commit path other clients reach, after the manifest list is known to lie
@@ -4703,7 +4939,8 @@ class CatalogService:
                 # such a table has no earlier snapshot for a ref to be pointed at.)
                 if release_session:
                     self._release_session()
-                check_added_files_have_field_ids(
+                # The health signals below reuse the files, so they are not read twice.
+                checked_files = check_added_files_have_field_ids(
                     added_snapshots, current, resolved.file_io, ref.dotted()
                 )
         if any(isinstance(u, RemovePropertiesUpdate) for u in updates) and not (
@@ -4756,6 +4993,26 @@ class CatalogService:
             target = resolved.confine_to_root(target)
         with _storage_errors_as_lakana(internal_rollback):
             written = write_metadata(resolved.file_io, updated, target)
+        # Read before the swap: after it the `tables` row is locked until the commit.
+        health = (
+            self._health_rows(
+                ref,
+                table_id=table_id,
+                environment_id=environment_id,
+                before=current,
+                after=updated,
+                snapshots=[u.snapshot for u in updates if isinstance(u, AddSnapshotUpdate)],
+                file_io=resolved.file_io,
+                effects=HealthEffects.default(),
+                files=checked_files,
+            )
+            if not maintenance
+            and not internal_rollback
+            and has is not None
+            and has in added
+            and has != had
+            else []
+        )
 
         # Noted after every refusal above, so a commit that is refused leaves no note behind on
         # the guard for a later commit of the same target to take as its own.
@@ -4797,6 +5054,7 @@ class CatalogService:
             new_location=written,
             publish=not maintenance and updated.current_snapshot_id is not None,
         )
+        self._session.add_all(health)
         sync_table_columns(self._session, table_id, from_iceberg_schema(updated.schema()))
         if after_swap is not None:
             after_swap()
@@ -4807,6 +5065,82 @@ class CatalogService:
         self._commit_sent = True
         self._session.commit()
         return LoadedTable(ref=ref, uuid=table_id, metadata_location=written, metadata=updated)
+
+    def _health_rows(
+        self,
+        ref: TableRef,
+        *,
+        table_id: uuid.UUID,
+        environment_id: uuid.UUID,
+        before: TableMetadata | None,
+        after: TableMetadata,
+        snapshots: Sequence[Snapshot],
+        file_io: FileIO,
+        effects: HealthEffects,
+        files: Sequence[DataFile] | None = None,
+        new_table: bool = False,
+    ) -> list[TableHealthSignal]:
+        """Observe the health signals of a snapshot this commit makes current (#340).
+
+        Read without flushing, so nothing pending lands ahead of the pointer swap.
+
+        Parameters
+        ----------
+        ref
+            The table.
+        table_id
+            Its id.
+        environment_id
+            Its environment.
+        before
+            The metadata before the commit; `None` for a table being created.
+        after
+            The metadata the commit makes current.
+        snapshots
+            Every snapshot the commit adds, in commit order.
+        file_io
+            Reads the table's storage.
+        effects
+            The table's effects.
+        files
+            The data files the commit adds, when the field-id check read them; `None` reads
+            them.
+        new_table
+            Whether the table is being created: it has no history to read.
+
+        Returns
+        -------
+        list of TableHealthSignal
+            The rows to add after the swap.
+        """
+        with self._session.no_autoflush:
+            pairs = commit_observations(
+                self._session,
+                table=ref.dotted(),
+                table_id=None if new_table else table_id,
+                before=before,
+                after=after,
+                snapshots=snapshots,
+                file_io=file_io,
+                effects=effects,
+                files=files,
+            )
+            now = db_now(self._session)
+        snapshot = after.current_snapshot()
+        return signal_rows(
+            pairs,
+            environment_id=environment_id,
+            table_id=table_id,
+            snapshot_id=after.current_snapshot_id,
+            # A format v1 table has no sequence numbers: Iceberg reads them as 0, whatever a
+            # client wrote into the snapshot.
+            sequence_number=None
+            if snapshot is None
+            else 0
+            if after.format_version == 1
+            else snapshot.sequence_number or 0,
+            now=now,
+        )
 
     def _commit_schema_change(
         self,
@@ -5240,7 +5574,8 @@ class CatalogService:
         def settle() -> None:
             """Mark, clear the stamp, restore the note and record: the statements after the swap.
 
-            A set-back that makes the schema before current again also drops the task run's
+            The health signals of the snapshots set back are deleted with them (#340). A
+            set-back that makes the schema before current again also drops the task run's
             column change (`TaskRun.schema_change_json`): the columns and their field ids are
             the old ones again, so neither the note, the warnings nor the notification line may
             say otherwise.
@@ -5259,6 +5594,13 @@ class CatalogService:
                     .values(unpublished_run_id=run_id)
                     .execution_options(synchronize_session=False)
                 )
+            forget_set_back(
+                self._session,
+                table_id,
+                current,
+                after=after,
+                until=None if written.publishes or before is None else before,
+            )
             self._clear_stamp(task_run_id)
             restored = restore_kept(
                 self._session,
