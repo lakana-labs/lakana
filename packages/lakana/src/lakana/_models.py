@@ -234,6 +234,9 @@ class Column:
     description_language
         The language of `description`; `None` exactly when `description` is, and from a server
         older than translations.
+    terms
+        The glossary terms that link the column; ``()`` from a server older than the glossary,
+        and without ``READ_ENVIRONMENT``.
     """
 
     name: str
@@ -245,6 +248,7 @@ class Column:
     label_source: str | None = None
     label_language: str | None = None
     description_language: str | None = None
+    terms: tuple[TermRef, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -594,6 +598,9 @@ class Table:
     translations
         Per language that has texts for the table, how many of its main-language texts it has;
         empty without translations, and from a server older than them.
+    terms
+        The glossary terms that link the table itself; ``()`` from a server older than the
+        glossary, and without ``READ_ENVIRONMENT``.
     """
 
     name: str
@@ -624,6 +631,7 @@ class Table:
     language: str = "en"
     main_language: str = "en"
     translations: tuple[TranslationCoverage, ...] = ()
+    terms: tuple[TermRef, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -1925,6 +1933,122 @@ class ConnectionPage:
 
 
 @dataclass(frozen=True)
+class TermLink:
+    """One table, column or measure a glossary term points to.
+
+    Parameters
+    ----------
+    table
+        The dotted table name.
+    column
+        The column or measure; `None` for a link to the whole table.
+    kind
+        ``table``, ``column`` or ``measure``.
+    missing
+        Whether the table does not exist in the environment, or no longer has the column.
+    """
+
+    table: str
+    column: str | None
+    kind: str
+    missing: bool
+
+
+@dataclass(frozen=True)
+class RelatedTerm:
+    """A term another term names as related.
+
+    Parameters
+    ----------
+    key
+        The related term's id.
+    name
+        Its name in the reader's language; `None` when no such term exists.
+    missing
+        Whether no term of that id exists.
+    """
+
+    key: str
+    name: str | None
+    missing: bool
+
+
+@dataclass(frozen=True)
+class Term:
+    """A business glossary term, with its texts in the reader's language.
+
+    Parameters
+    ----------
+    key
+        The term's id in the glossary.
+    id
+        The term's UUID, stable across deploys.
+    name
+        The name in `language`.
+    definition
+        What the term means, in `language`.
+    synonyms
+        Other names for the term.
+    owner
+        Who answers for the definition.
+    repository
+        The repository whose glossary defines it.
+    language
+        The language of `name` and `definition`.
+    links
+        What the term points to that the caller may read.
+    related
+        The terms this term names as related.
+    related_by
+        The ids of the terms that name this term as related.
+    """
+
+    key: str
+    id: str
+    name: str
+    definition: str
+    synonyms: tuple[str, ...]
+    owner: str
+    repository: str
+    language: str
+    links: tuple[TermLink, ...]
+    related: tuple[RelatedTerm, ...]
+    related_by: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class TermPage:
+    """One page of an environment's glossary terms, sorted by key.
+
+    Parameters
+    ----------
+    items
+        The terms of this page.
+    next_cursor
+        Pass back as `cursor=` to fetch the next page; `None` on the last page.
+    """
+
+    items: list[Term]
+    next_cursor: str | None
+
+
+@dataclass(frozen=True)
+class TermRef:
+    """A short reference to a term.
+
+    Parameters
+    ----------
+    key
+        The term's id.
+    name
+        The term's name in the reader's language.
+    """
+
+    key: str
+    name: str
+
+
+@dataclass(frozen=True)
 class DeployAccepted:
     """A queued deploy run.
 
@@ -3102,17 +3226,18 @@ class SearchHit:
     Parameters
     ----------
     kind
-        What was found: ``table``, ``column``, ``run`` or ``principal``.
+        What was found: ``table``, ``column``, ``run``, ``principal`` or ``term``.
     name
-        A display name: ``namespace.table``, ``namespace.table.column``, the run id or the
-        principal's name.
+        A display name: ``namespace.table``, ``namespace.table.column``, the run id, the
+        principal's name or the term's key.
     matched
         The field that matched: ``name``, ``label``, ``description``, ``grain``, ``measure`` (a
-        column's measure label or description), ``id``, ``job`` or ``repository``. Treat a value
-        you do not know as a match elsewhere; the server may add more.
+        column's measure label or description), ``id``, ``job``, ``repository``, ``synonym`` or
+        ``definition`` (a term's) or ``term`` (a table or column found by a term's name or
+        synonym). Treat a value you do not know as a match elsewhere; the server may add more.
     snippet
-        For a label, description, grain or measure match, at most 160 characters of the text
-        around the hit.
+        For a label, description, grain, measure or term match, and for every term hit, at most
+        160 characters of the text around the hit.
     namespace
         For a table or column, its namespace, dotted.
     table
@@ -3131,7 +3256,7 @@ class SearchHit:
     job
         For a run, its job, if it has one.
     repository
-        For a run, its repository.
+        For a run or a term, its repository.
     status
         For a run, its status.
     principal
@@ -3139,11 +3264,15 @@ class SearchHit:
     principal_type
         For a principal, ``USER`` or ``SERVICE_ACCOUNT``.
     language
-        For a table or column that a text matched, the language of that text; `None` for a name
-        match and for runs and principals.
+        For a table or column that a text matched, the language of that text; for a term that a
+        translated text matched, its language; `None` for a name match, a term match, a term's
+        main-language text, and for runs and principals.
     translated
-        Whether the text that matched is a translation, in a language other than the table's main
-        one; `False` for a header text, a name, a run and a principal.
+        Whether the text that matched is a translation, in a language other than the table's or
+        term's main one; `False` for a header text, a name, a run and a principal.
+    term
+        For a term, its key; for a table or column with ``matched`` ``term``, the key of the term
+        whose name or synonym matched.
     """
 
     kind: str
@@ -3164,6 +3293,7 @@ class SearchHit:
     principal_type: str | None = None
     language: str | None = None
     translated: bool = False
+    term: str | None = None
 
 
 @dataclass(frozen=True)

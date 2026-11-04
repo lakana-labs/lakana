@@ -22,6 +22,8 @@ terminal, the SDK or through REST. You need an environment with at least one tab
   with `matched` `measure`;
 - runs: the first four or more characters of a run's id, its job and its repository;
 - people and service accounts, if you may list them.
+- glossary terms (`kind` `term`) by their name, synonyms and definition, and the tables and columns a term
+  links by the term's name and synonyms, with `matched` `term` (see [Keep a glossary](keep-a-glossary.md)).
 
 ## Search
 
@@ -37,11 +39,11 @@ piece of it, at most 160 characters around the hit.
 The best matches come first: a name or label that is exactly your text, then names and labels that
 start with it, then those that contain it, then descriptions that contain it. A table or column is
 listed once, under its best match. Among equals, tables come before columns,
-columns before runs and runs before people.
+columns before runs, runs before people and people before terms.
 
 ## Look for one kind of thing
 
-`--kind` takes `table`, `column`, `run` or `principal`:
+`--kind` takes `table`, `column`, `run`, `principal` or `term`:
 
 <!-- source: docs/examples/find-a-table/run.sh#kind -->
 ```bash
@@ -55,7 +57,7 @@ description.
 
 A table whose asset header declares a `kind` shows it in brackets after its name, as in
 `gold.dim_store [dimension]`. `--model-kind` keeps only the tables of one kind (`fact`,
-`dimension`, `wide` or `staging`) and leaves out columns, runs and people:
+`dimension`, `wide` or `staging`) and leaves out columns, runs, people and terms:
 
 <!-- source: docs/examples/find-a-table/run.sh#model-kind -->
 ```bash

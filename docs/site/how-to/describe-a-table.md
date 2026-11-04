@@ -57,6 +57,11 @@ lakana table get silver.orders
 With `--output json` the answer also says where each text came from: `description_source` is
 `edited` for your text and `project` for the header's.
 
+When the project's [glossary](../reference/glossary.md) links the table, or one of its columns, to a
+term, `lakana table get` ends the columns with a `Terms:` section: the terms of the table first,
+then `column: term id — name` for each column. You see it if you may read the environment as well as
+the table; without that right the section is left out.
+
 ## Go back to the project's text
 
 `--reset` removes your edits of the description and the label, so the project's texts show again. A

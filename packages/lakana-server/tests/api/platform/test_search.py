@@ -9,7 +9,16 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from lakana_core.catalog.descriptions import sync_project_descriptions
-from lakana_core.models import DeclaredMeasure, Environment, Namespace, Principal, Table
+from lakana_core.catalog.glossary import write_glossary
+from lakana_core.models import (
+    DeclaredMeasure,
+    Environment,
+    Namespace,
+    Principal,
+    Repository,
+    RepositoryKind,
+    Table,
+)
 from tests.conftest import AUTH_HEADER
 from tests.server_test_helpers import create_environment
 
@@ -387,3 +396,183 @@ def test_a_translation_of_a_table_the_caller_may_not_read_matches_nothing(
     assert hidden.json()["results"] == [] and hidden.json()["has_more"] is False
     shown = client.get(_SEARCH, params={"q": "ventes", "lang": "fr"}, headers=AUTH_HEADER)
     assert [h["name"] for h in shown.json()["results"]] == ["gold.t"]
+
+
+_TERM = {"definition": "Where an order stands.", "owner": "ops"}
+
+_GLOSSARY = {
+    "version": 13,
+    "glossary": {
+        "order_state": {
+            **_TERM,
+            "name": "Order state",
+            "synonyms": ["fulfilment"],
+            "links": {"silver.orders": ["status"]},
+        },
+        "progress": {
+            **_TERM,
+            "name": "Progress",
+            "synonyms": ["fulfilment stage"],
+            "links": {"silver.orders": ["status"], "silver.payroll": []},
+        },
+    },
+}
+"""Two terms that link `silver.orders.status`, one of them also `silver.payroll`."""
+
+
+def _glossary(client: TestClient) -> None:
+    """Create the tables of `_setup` and deploy `_GLOSSARY` from the repository `shop`.
+
+    Parameters
+    ----------
+    client
+        The test client.
+    """
+    _setup(client)
+    with Session(client.app.state.engine) as session:
+        env = session.scalars(select(Environment.id).where(Environment.name == "dev")).one()
+        shop = Repository(id=uuid.uuid4(), name="shop", kind=RepositoryKind.LOCAL, url="/shop")
+        session.add(shop)
+        session.flush()
+        write_glossary(session, env, shop.id, _GLOSSARY)
+        session.commit()
+
+
+def _environment_reader(client: TestClient, name: str) -> dict[str, str]:
+    """Create a user who may read `dev` itself and no table, and return its headers.
+
+    Parameters
+    ----------
+    client
+        The test client.
+    name
+        The principal's name.
+
+    Returns
+    -------
+    dict
+        The `Authorization` header.
+    """
+    client.post("/api/v1/principals", headers=AUTH_HEADER, json={"name": name, "type": "USER"})
+    granted = client.post(
+        "/api/v1/grants",
+        headers=AUTH_HEADER,
+        json={
+            "principal": name,
+            "action": "READ_ENVIRONMENT",
+            "kind": "ENVIRONMENT",
+            "environment": "dev",
+        },
+    )
+    assert granted.status_code < 300, granted.text
+    issued = client.post(
+        f"/api/v1/principals/{name}/tokens", headers=AUTH_HEADER, json={"name": name}
+    )
+    return {"Authorization": f"Bearer {issued.json()['token']}"}
+
+
+def test_a_term_search_returns_the_documented_shape(client: TestClient) -> None:
+    _glossary(client)
+
+    terms = client.get(_SEARCH, headers=AUTH_HEADER, params={"q": "fulfilment", "kind": "term"})
+    every = client.get(_SEARCH, headers=AUTH_HEADER, params={"q": "fulfilment"})
+
+    assert terms.status_code == 200, terms.text
+    first = terms.json()["results"][0]
+    assert (first["kind"], first["name"], first["matched"], first["term"]) == (
+        "term",
+        "order_state",
+        "synonym",
+        "order_state",
+    )
+    assert (first["repository"], first["snippet"], first["language"]) == (
+        "shop",
+        "fulfilment",
+        None,
+    )
+    assert [(h["kind"], h["name"], h["matched"], h["term"]) for h in every.json()["results"]] == [
+        ("column", "silver.orders.status", "term", "order_state"),
+        ("term", "order_state", "synonym", "order_state"),
+        ("table", "silver.payroll", "term", "progress"),
+        ("term", "progress", "synonym", "progress"),
+    ]
+
+
+def test_a_term_search_without_read_table_hides_the_linked_tables_without_a_trace(
+    client: TestClient,
+) -> None:
+    _glossary(client)
+    outsider = _environment_reader(client, "olga")
+    viewer = _person(client, "vera", table="orders")
+
+    pages = [
+        client.get(
+            _SEARCH, headers=outsider, params={"q": "fulfilment", "limit": 1, "offset": offset}
+        ).json()
+        for offset in range(3)
+    ]
+
+    assert [[h["name"] for h in page["results"]] for page in pages] == [
+        ["order_state"],
+        ["progress"],
+        [],
+    ]
+    assert [(page["limit"], page["has_more"]) for page in pages] == [
+        (1, True),
+        (1, False),
+        (1, False),
+    ]
+    assert "orders" not in str(pages) and "payroll" not in str(pages)
+    whole = client.get(_SEARCH, headers=outsider, params={"q": "fulfilment"}).json()
+    term_only = client.get(
+        _SEARCH, headers=outsider, params={"q": "fulfilment", "kind": "term"}
+    ).json()
+    assert whole == term_only
+    for kind in ("table", "column"):
+        found = client.get(_SEARCH, headers=outsider, params={"q": "fulfilment", "kind": kind})
+        assert found.json() == {"results": [], "limit": 20, "offset": 0, "has_more": False}
+    assert client.get(_SEARCH, headers=viewer, params={"q": "fulfilment"}).json()["results"] == []
+
+
+def test_a_word_only_a_definition_holds_finds_the_term(client: TestClient) -> None:
+    _glossary(client)
+
+    found = client.get(_SEARCH, headers=AUTH_HEADER, params={"q": "stands", "kind": "term"})
+
+    assert found.status_code == 200, found.text
+    assert [(h["name"], h["matched"]) for h in found.json()["results"]] == [
+        ("order_state", "definition"),
+        ("progress", "definition"),
+    ]
+
+
+def test_a_word_only_a_translated_definition_holds_finds_the_term(client: TestClient) -> None:
+    _setup(client)
+    glossary = {
+        "version": 13,
+        "glossary": {
+            "progress": {
+                **_TERM,
+                "name": "Progress",
+                "translations": {"de": {"definition": "Wie weit eine Bestellung ist."}},
+            }
+        },
+    }
+    with Session(client.app.state.engine) as session:
+        env = session.scalars(select(Environment.id).where(Environment.name == "dev")).one()
+        shop = Repository(id=uuid.uuid4(), name="shop", kind=RepositoryKind.LOCAL, url="/shop")
+        session.add(shop)
+        session.flush()
+        write_glossary(session, env, shop.id, glossary)
+        session.commit()
+
+    found = client.get(_SEARCH, headers=AUTH_HEADER, params={"q": "bestellung", "lang": "de"})
+
+    assert found.status_code == 200, found.text
+    (hit,) = found.json()["results"]
+    assert (hit["name"], hit["matched"], hit["language"], hit["translated"]) == (
+        "progress",
+        "definition",
+        "de",
+        True,
+    )

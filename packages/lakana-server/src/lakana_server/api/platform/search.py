@@ -1,4 +1,4 @@
-"""The search route of the platform API: tables, columns, labels, descriptions, runs, principals."""
+"""The search route of the platform API: tables, columns, texts, runs, principals and terms."""
 
 from __future__ import annotations
 
@@ -40,17 +40,20 @@ def search(
 ) -> SearchOut:
     """Search an environment.
 
-    Finds tables, columns, runs, jobs, repositories and principals whose names, labels or
-    descriptions, a table's declared grain, or the label or description of a column's
-    declared measure contain `q` (1 to 200 characters, case-insensitive; run ids need four
-    characters or more), one page at a time. Texts in a table's main language always match;
-    translated texts match in your languages (`lang`, else your profile's language, else
-    `Accept-Language`, else the instance's main language), and each hit says which language
-    matched. A table or column is one hit, however many of its texts match. What the caller may
-    not read is left out of the hits, not refused: tables and columns need `READ_TABLE`, runs
-    `READ_ENVIRONMENT`, principals the right to list them. Needs `READ_ENVIRONMENT`. Answers 404
-    when the environment does not exist and 422 for a `q`, `model_kind`, `lang` or paging value
-    out of range.
+    Finds tables, columns, runs, jobs, repositories, principals and glossary terms whose names,
+    labels or descriptions, a table's declared grain, the label or description of a column's
+    declared measure, or a term's synonyms or definition contain `q` (1 to 200 characters,
+    case-insensitive; run ids need four characters or more), one page at a time. Texts in a table's
+    main language always match; translated texts match in your languages (`lang`, else your
+    profile's language, else `Accept-Language`, else the instance's main language), and each hit
+    says which language matched. A table or column a term links is also found by the term's name and
+    synonyms, with `matched: term` and the term's key in `term`. A table, column or term is one hit,
+    however many of its texts match. What the caller may not read is left out of the hits, not
+    refused: tables and columns need `READ_TABLE`, runs `READ_ENVIRONMENT`, principals the right to
+    list them. Glossary terms need `READ_ENVIRONMENT`. A table or column found by a term's name or
+    synonym (`matched: term`) needs `READ_ENVIRONMENT` and the table's `READ_TABLE`. Needs
+    `READ_ENVIRONMENT`. Answers 404 when the environment does not exist and 422 for a `q`,
+    `model_kind`, `lang` or paging value out of range.
 
     Parameters
     ----------
@@ -60,7 +63,8 @@ def search(
         Environment name.
     q
         The text to find in names and descriptions, in run ids (four characters or more), jobs
-        and repositories, and in principal names. Trimmed, 1 to 200 characters.
+        and repositories, in principal names, and in terms' names, synonyms and definitions.
+        Trimmed, 1 to 200 characters.
     kind
         Only hits of this kind.
     model_kind
@@ -81,9 +85,9 @@ def search(
     Returns
     -------
     SearchOut
-        The page. A table and its columns appear only with `READ_TABLE` on the table, runs only
-        with `READ_ENVIRONMENT`, principals only for a caller who may list them; what the caller
-        may not see is left out, not refused.
+        The page. A table and its columns appear only with `READ_TABLE` on the table, runs and
+        terms only with `READ_ENVIRONMENT`, principals only for a caller who may list them; what
+        the caller may not see is left out, not refused.
 
     Raises
     ------

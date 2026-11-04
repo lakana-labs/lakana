@@ -54,6 +54,7 @@ from lakana_server.api.platform.tables import expiring_router as expiring_tables
 from lakana_server.api.platform.tables import router as tables_router
 from lakana_server.api.platform.task_connections import router as task_connections_router
 from lakana_server.api.platform.task_tokens import router as task_tokens_router
+from lakana_server.api.platform.terms import router as terms_router
 from lakana_server.api.platform.tokens import router as tokens_router
 from lakana_server.api.platform.whoami import router as whoami_router
 from lakana_server.api.routing import describe_openapi
@@ -76,6 +77,7 @@ ROUTERS = (
     dropped_tables_router,
     expiring_tables_router,
     search_router,
+    terms_router,
     artifacts_router,
     artifacts_environment_router,
     iceberg_router,

@@ -10,7 +10,16 @@ from datetime import UTC, datetime, timedelta, timezone
 import pytest
 
 from lakana_core.errors import ValidationError
-from lakana_core.pagination import Position, decode_cursor, encode_cursor, parse_choices
+from lakana_core.pagination import (
+    _BAD_CURSOR,
+    _OTHER_LIST,
+    Position,
+    decode_cursor,
+    decode_key_cursor,
+    encode_cursor,
+    encode_key_cursor,
+    parse_choices,
+)
 
 _AT = datetime(2026, 10, 11, 12, 0, tzinfo=UTC)
 
@@ -111,3 +120,26 @@ def test_parse_choices_may_ignore_the_letter_case() -> None:
         parse_choices("status", ["nope"], Upper, any_case=True)
     with pytest.raises(ValidationError, match="must be one of QUEUED"):
         parse_choices("status", ["queued"], Upper)
+
+
+def test_a_key_cursor_round_trips_and_refuses_another_list() -> None:
+    assert decode_key_cursor("terms", encode_key_cursor("terms", "net_revenue")) == "net_revenue"
+    with pytest.raises(ValidationError) as other:
+        decode_key_cursor("terms", encode_cursor("runs", _AT, uuid.uuid4()))
+    assert str(other.value) == _OTHER_LIST.format(expected="terms", actual="runs")
+    nul, surrogate = (
+        _raw(b'{"k": "terms", "n": "a\\u0000"}'),
+        _raw(b'{"k": "terms", "n": "\\ud800"}'),
+    )
+    for bad in (
+        "%%%",
+        _raw(b"[1]"),
+        _raw(b'{"k": 1}'),
+        _raw(b'{"k": "terms"}'),
+        _raw(b"{"),
+        nul,
+        surrogate,
+    ):
+        with pytest.raises(ValidationError) as caught:
+            decode_key_cursor("terms", bad)
+        assert str(caught.value) == _BAD_CURSOR

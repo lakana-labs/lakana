@@ -46,6 +46,7 @@ from lakana.cli import (
     secrets,
     server,
     tables,
+    terms,
     tokens,
 )
 from lakana.cli._state import CliError, CliState, ci_oidc_in_use, state_of
@@ -434,6 +435,7 @@ _REGISTRARS: tuple[Callable[[typer.Typer], None], ...] = (
     deploys.register,
     runs.register,
     search.register,
+    terms.register,
     jobs.register,
     checks.register,
     project_init.register,

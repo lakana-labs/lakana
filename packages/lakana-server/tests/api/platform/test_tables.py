@@ -22,10 +22,18 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
 from lakana_core.catalog.descriptions import sync_project_descriptions
+from lakana_core.catalog.glossary import write_glossary
 from lakana_core.catalog.model_metadata import write_model_entry
 from lakana_core.catalog.service import LoadedTable
 from lakana_core.identifiers import NamespacePath, TableRef
-from lakana_core.models import Environment, Namespace, Table, TableType
+from lakana_core.models import (
+    Environment,
+    Namespace,
+    Repository,
+    RepositoryKind,
+    Table,
+    TableType,
+)
 from lakana_server.api.platform.schemas import TableOut
 from lakana_server.api.platform.tables import _to_out
 from lakana_server.settings import Settings
@@ -1037,3 +1045,94 @@ def test_a_measure_id_follows_a_rename_of_its_table(client: TestClient) -> None:
     assert body["model"]["measures"] == [
         {"id": "gold.fact_orders/measure_id", **_SALES_MEASURE_SHOWN}
     ]
+
+
+_TERMS_GLOSSARY = {
+    "version": 13,
+    "main_language": "en",
+    "glossary": {
+        "orders": {
+            "name": "Orders",
+            "definition": "An order.",
+            "owner": "sales",
+            "links": {"silver.orders": []},
+        },
+        "order_number": {
+            "name": "Order number",
+            "definition": "Its number.",
+            "owner": "sales",
+            "links": {"silver.orders": ["order_id"]},
+        },
+    },
+}
+
+
+def _orders_with_terms(client: TestClient) -> str:
+    """Create `silver.orders` and deploy a glossary that links it.
+
+    Parameters
+    ----------
+    client
+        The test client.
+
+    Returns
+    -------
+    str
+        The URL of the table.
+    """
+    create_environment(client)
+    created = client.post(
+        "/api/v1/environments/dev/namespaces/silver/tables",
+        headers=AUTH_HEADER,
+        json={
+            "name": "orders",
+            "schema": [
+                {"name": "order_id", "type": "long", "nullable": True},
+                {"name": "status", "type": "string", "nullable": True},
+            ],
+        },
+    )
+    assert created.status_code == 201, created.text
+    with Session(client.app.state.engine) as session:
+        env = session.scalars(select(Environment.id).where(Environment.name == "dev")).one()
+        shop = Repository(
+            id=uuid.uuid4(), name="shop", kind=RepositoryKind.HTTPS, url="https://h/shop"
+        )
+        session.add(shop)
+        session.commit()
+        write_glossary(session, env, shop.id, _TERMS_GLOSSARY)
+        session.commit()
+    return "/api/v1/environments/dev/namespaces/silver/tables/orders"
+
+
+def test_table_get_shows_the_terms_of_the_table_and_its_columns(client: TestClient) -> None:
+    url = _orders_with_terms(client)
+    body = client.get(url, headers=AUTH_HEADER).json()
+    assert body["terms"] == [{"key": "orders", "name": "Orders"}]
+    by_name = {c["name"]: c["terms"] for c in body["schema"]}
+    assert by_name == {"order_id": [{"key": "order_number", "name": "Order number"}], "status": []}
+
+
+def test_table_get_leaves_the_terms_out_without_read_environment(client: TestClient) -> None:
+    url = _orders_with_terms(client)
+    client.post("/api/v1/principals", headers=AUTH_HEADER, json={"name": "carol", "type": "USER"})
+    granted = client.post(
+        "/api/v1/grants",
+        headers=AUTH_HEADER,
+        json={
+            "principal": "carol",
+            "action": "READ_TABLE",
+            "kind": "TABLE",
+            "environment": "dev",
+            "namespace": "silver",
+            "table": "orders",
+        },
+    )
+    assert granted.status_code < 300, granted.text
+    issued = client.post(
+        "/api/v1/principals/carol/tokens", headers=AUTH_HEADER, json={"name": "carol"}
+    )
+    response = client.get(url, headers={"Authorization": f"Bearer {issued.json()['token']}"})
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["terms"] == [] and all(c["terms"] == [] for c in body["schema"])

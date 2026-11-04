@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -499,10 +500,13 @@ def test_a_refused_related_id_cannot_forge_a_line() -> None:
 def test_a_refused_synonym_cannot_forge_a_line(value: str) -> None:
     for text in (
         f"a:\n  name: A\n  definition: B\n  owner: c\n  synonyms: {value}\n",
-        "a:\n  name: A\n  definition: B\n  owner: c\n",
+        "a:\n  name: A\n  definition: B\n  owner: c\n  synonyms:\n"
+        + "".join(f"    - {json.dumps(synonym)}\n" for synonym in json.loads(value)),
     ):
         _, issues = _parse(("glossary/a.yaml", text))
-        assert all("\n" not in i and "\u202e" not in i and "\u2028" not in i for i in issues)
+        assert issues and all(
+            "\n" not in i and "\u202e" not in i and "\u2028" not in i for i in issues
+        ), issues
     _, problems = parse_translations(
         [
             DiscoveredTranslation(
@@ -559,13 +563,19 @@ def test_an_unreadable_root_a_linked_glossary_and_an_unreadable_folder(
     )
 
 
-def test_a_file_over_the_key_cap_and_a_term_that_is_not_a_mapping_are_refused() -> None:
-    from lakana_core.projects.glossary import MAX_GLOSSARY_ENTRIES
+def test_a_file_over_the_key_cap_and_a_term_that_is_not_a_mapping_are_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from lakana_core.projects import glossary as glossary_module
 
-    big = "a:\n  synonyms: [" + ", ".join("s" for _ in range(MAX_GLOSSARY_ENTRIES)) + "]\n"
+    monkeypatch.setattr(glossary_module, "MAX_GLOSSARY_ENTRIES", 20)
+    big = "a:\n  synonyms: [" + ", ".join("s" for _ in range(20)) + "]\n"
     _, too_many = _parse(("glossary/big.yaml", big))
     glossary, scalar = _parse(("glossary/a.yaml", "net_revenue: 5\n"))
-    assert len(too_many) == 1 and "has more than 50000 keys and list items" in too_many[0]
+    assert too_many == [
+        "glossary/big.yaml:2: has more than 20 keys and list items, and a glossary file has at "
+        "most 20; split it into several files under glossary/"
+    ]
     assert scalar == [
         "glossary/a.yaml:1: `net_revenue` must be a mapping of its fields, such as "
         "`net_revenue: {name: …, definition: …, owner: …}`"

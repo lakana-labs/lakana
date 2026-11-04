@@ -1,4 +1,4 @@
-"""Search an environment for tables, columns, labels, descriptions, runs and principals.
+"""Search an environment for tables, columns, labels, descriptions, runs, principals and terms.
 
 One query ranks every kind of hit together in the database: an exact match of a name or label
 first, then a prefix, then a substring, then a match in a description; within a rank tables come
@@ -7,7 +7,9 @@ hit by hit, with the checks the listings make, over chunks of the ranked candida
 and no text of one, is read out for a caller who may not read it, and the work is bounded by
 `MAX_SCANNED` candidates, not by the size of the environment. Texts in the main language always
 match; translated texts match only in the reader's languages, and a table or column found by
-several texts is one hit.
+several texts is one hit. A glossary term is found by its name, synonyms and definition, and a
+table or column a term links is found by that term's name and synonyms, in the languages the term
+shows them in.
 """
 
 from __future__ import annotations
@@ -36,9 +38,10 @@ from sqlalchemy import (
     select,
     union_all,
 )
-from sqlalchemy.orm import InstrumentedAttribute, Session
+from sqlalchemy.orm import InstrumentedAttribute, Session, aliased
 
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable
+from lakana_core.catalog.glossary import MAIN_TEXT_LANGUAGE
 from lakana_core.errors import NotFoundError, ValidationError
 from lakana_core.identifiers import NAMESPACE_SEPARATOR, NamespacePath
 from lakana_core.languages import DEFAULT_MAIN_LANGUAGE, lookup_chain
@@ -47,6 +50,9 @@ from lakana_core.models import (
     ColumnDescription,
     DeclaredMeasure,
     Environment,
+    GlossaryTerm,
+    GlossaryTermLink,
+    GlossaryTermText,
     Namespace,
     Principal,
     PrincipalType,
@@ -105,6 +111,8 @@ class _Candidate(Protocol):
     f5: str
     f6: str | None
     """The language of a matched text, for a table or column hit not matched by its name."""
+    f7: str | None
+    """The term's key of a table or column hit found by a term."""
 
 
 class SearchKind(enum.StrEnum):
@@ -114,6 +122,7 @@ class SearchKind(enum.StrEnum):
     COLUMN = "column"
     RUN = "run"
     PRINCIPAL = "principal"
+    TERM = "term"
 
 
 _KIND_ORDER = {
@@ -121,6 +130,7 @@ _KIND_ORDER = {
     SearchKind.COLUMN: 1,
     SearchKind.RUN: 2,
     SearchKind.PRINCIPAL: 3,
+    SearchKind.TERM: 4,
 }
 """The order of kinds within a rank."""
 
@@ -138,13 +148,14 @@ class SearchHit:
         What was found.
     name
         The display name: ``namespace.table`` for a table, ``namespace.table.column`` for a
-        column, the id for a run, the name for a principal.
+        column, the id for a run, the name for a principal, the key for a term.
     matched
         The field that matched: ``name``, ``label``, ``description``, ``grain``, ``measure`` (a
-        column's measure label or description), ``id``, ``job`` or ``repository``.
+        column's measure label or description), ``id``, ``job``, ``repository``, ``synonym`` (a
+        term's) or ``term`` (a table or column found by a term's name or synonym).
     snippet
-        For a label, description, grain or measure match, at most `SNIPPET_LENGTH` characters of
-        the text around the hit.
+        For a label, description, grain, measure or term match, and for every term hit, at most
+        `SNIPPET_LENGTH` characters of the text around the hit.
     namespace
         For a table or column, its namespace, dotted.
     table
@@ -163,7 +174,7 @@ class SearchHit:
     job
         For a run, its job, if it has one.
     repository
-        For a run, its repository.
+        For a run or a term, its repository.
     status
         For a run, its status.
     principal
@@ -171,11 +182,15 @@ class SearchHit:
     principal_type
         For a principal, ``USER`` or ``SERVICE_ACCOUNT``.
     language
-        For a table or column hit that a text matched, the language of that text; `None` for a
-        name match and for runs and principals.
+        For a table or column hit that a text matched, the language of that text; for a term hit
+        that a translated text matched, its language; `None` for a name match, a term match, a
+        term's main-language text, and for runs and principals.
     translated
-        Whether the text that matched is a translation (in a language other than the table's
-        main one); `False` for a header text, a name, a run and a principal.
+        Whether the text that matched is a translation (in a language other than the table's or
+        term's main one); `False` for a header text, a name, a run and a principal.
+    term
+        For a term hit, its key; for a table or column hit with `matched` ``term``, the key of the
+        term whose name or synonym matched.
     """
 
     kind: SearchKind
@@ -196,6 +211,7 @@ class SearchHit:
     principal_type: str | None = None
     language: str | None = None
     translated: bool = False
+    term: str | None = None
 
 
 # jscpd:ignore-end
@@ -350,6 +366,7 @@ def _row(
     matched: _Expr,
     *fields: _Expr,
     sort_source: _Expr | None = None,
+    by_term: bool = False,
 ) -> _Candidates:
     """Start a candidate select with the columns every kind shares.
 
@@ -367,23 +384,27 @@ def _row(
     matched
         The field that matched.
     *fields
-        Up to six payload columns, as text; the rest are null.
+        Up to seven payload columns, as text; the rest are null.
     sort_source
         The last tie-break, an integer: which text of one table or column comes first. `None`
         (``0``) for a main-language row, which so comes before every translation.
+    by_term
+        Whether the row is a table or column found by a term, which a row of the item's own
+        text at the same rank, translated or not, comes before.
 
     Returns
     -------
     Select
         A select with the columns of the union.
     """
-    payload = [*fields, *(cast(null(), Text) for _ in range(6 - len(fields)))]
+    payload = [*fields, *(cast(null(), Text) for _ in range(7 - len(fields)))]
     columns = [
         literal_column(str(_KIND_ORDER[kind])).label("kind_order"),
         rank.label("rank"),
         sort_name.label("sort_name"),
         sort_id.label("sort_id"),
         (literal_column("0") if sort_source is None else sort_source).label("sort_source"),
+        literal_column("1" if by_term else "0").label("by_term"),
         matched.label("matched"),
         *(cast(f, Text).label(f"f{i}") for i, f in enumerate(payload, start=1)),
     ]
@@ -481,11 +502,13 @@ class CatalogSearch:
         offset: int = 0,
         languages: Sequence[str] = (),
     ) -> SearchPage:
-        """Find tables, columns, labels, descriptions, runs and principals that match a text.
+        """Find tables, columns, labels, descriptions, runs, principals and terms that match a text.
 
         Rights are those of the listings. A table or column appears only where `READ_TABLE` is
         permitted for its table, a run needs `READ_ENVIRONMENT`, a principal needs the right to
-        list principals. Where the caller lacks a right, those hits are left out, not refused.
+        list principals. Glossary terms need `READ_ENVIRONMENT`. A table or column found by a
+        term's name or synonym (`matched: term`) needs `READ_ENVIRONMENT` and the table's
+        `READ_TABLE`. Where the caller lacks a right, those hits are left out, not refused.
 
         Parameters
         ----------
@@ -499,7 +522,8 @@ class CatalogSearch:
             Only this kind of hit.
         model_kind
             Only tables whose asset header declares this ``kind``: ``fact``, ``dimension``,
-            ``wide`` or ``staging``. Columns, runs and principals have none, so they are left out.
+            ``wide`` or ``staging``. Columns, runs, principals and terms have none, so they are
+            left out.
         limit
             The page size, 1 to 100.
         offset
@@ -557,6 +581,8 @@ class CatalogSearch:
                 selects.append(_column_translations(match, environment_id, chain, main))
         if SearchKind.RUN in wanted and may_read_environment:
             selects.append(_runs(match, needle, environment_id))
+        if may_read_environment:
+            selects.extend(_glossary_arms(match, environment_id, wanted, model_kind, chain, main))
         if SearchKind.PRINCIPAL in wanted and self._authz.permits(
             p, Action.MANAGE_PRINCIPAL, Securable.instance_scope()
         ):
@@ -603,7 +629,15 @@ class CatalogSearch:
             union.c.kind_order,
             union.c.sort_name,
             union.c.sort_id,
+            # An item's own text, translated or not, comes before a term's at the same rank;
+            # then its main-language row before a translation; then, for rows still tied, the
+            # smallest term key and the matched text (f3 of a term, f4 of a table or column;
+            # f3 of those is fixed per item), so `_hit` shows the same row every time.
+            union.c.by_term,
             union.c.sort_source,
+            union.c.f7,
+            union.c.f3,
+            union.c.f4,
         )
         readable: dict[tuple[str, str], bool] = {}
         seen: set[tuple[object, ...]] = set()
@@ -620,10 +654,14 @@ class CatalogSearch:
                     done = True
                     break
                 scanned += 1
-                if row.kind_order in (0, 1):
-                    # A table or column found by a second text: the first, better ranked row
-                    # stands for it. Skipped before `_may_see`, as a hidden one would be.
-                    identity = (row.kind_order, row.f1, row.f2, row.f3)
+                if row.kind_order in (0, 1, 4):
+                    # A table, column or term found by a second text: the first, better ranked
+                    # row stands for it. Skipped before `_may_see`, as a hidden one would be.
+                    identity = (
+                        (row.kind_order, row.f1)
+                        if row.kind_order == _KIND_ORDER[SearchKind.TERM]
+                        else (row.kind_order, row.f1, row.f2, row.f3)
+                    )
                     if identity in seen:
                         continue
                     seen.add(identity)
@@ -661,8 +699,8 @@ class CatalogSearch:
         -------
         bool
             For a table or column, whether `p` holds `READ_TABLE` on its table, asked as a
-            listing asks it; for a run or a principal `True`, their right having been checked
-            before they were looked for.
+            listing asks it; for a run, a principal or a term `True`, their right having been
+            checked before they were looked for.
         """
         if row.kind_order not in (0, 1):
             return True
@@ -1043,6 +1081,467 @@ def _column_translations(
     )
 
 
+def _glossary_arms(
+    match: _Match,
+    environment_id: uuid.UUID,
+    wanted: set[SearchKind],
+    model_kind: str | None,
+    languages: Sequence[str],
+    main_language: str,
+) -> list[_Candidates]:
+    """Select the glossary's candidates: terms, and the tables and columns found by a term.
+
+    Called only for a caller who may read the environment.
+
+    Parameters
+    ----------
+    match
+        The comparisons.
+    environment_id
+        The environment.
+    wanted
+        The kinds asked for.
+    model_kind
+        Keep only tables that declare this kind, or `None`.
+    languages
+        The reader's languages, truncation included; empty for none.
+    main_language
+        The instance's main language, for a term whose project declares none.
+
+    Returns
+    -------
+    list of Select
+        The candidate selects of the kinds in `wanted`.
+    """
+    selects: list[_Candidates] = []
+    if SearchKind.TERM in wanted:
+        selects.append(_best_per_item(_terms(match, environment_id), "f1"))
+        if languages:
+            translated = _term_translations(match, environment_id, languages, main_language)
+            selects.append(_best_per_item(translated, "f1"))
+    if SearchKind.TABLE in wanted:
+        tables = _tables_by_term(match, environment_id, model_kind, languages, main_language)
+        selects.append(_best_per_item(tables, "f1", "f2", "f3"))
+    if SearchKind.COLUMN in wanted:
+        columns = _columns_by_term(match, environment_id, languages, main_language)
+        selects.append(_best_per_item(columns, "f1", "f2", "f3"))
+    return selects
+
+
+def _best_per_item(arm: _Candidates, *identity: str) -> _Candidates:
+    """Keep only the best row of each item that a glossary arm finds.
+
+    A term is one row per matching synonym, and a table or column found by terms one row per
+    linking term and matching word, so without this a glossary author could fill the bounded
+    scan (`MAX_SCANNED`) with one item and push every result after it out unseen. The row kept
+    is the one the union's order would put first, so the hit is the same as before.
+
+    Parameters
+    ----------
+    arm
+        A candidate select of the union's columns.
+    *identity
+        The payload columns that name one item, as the scan's deduplication names it.
+
+    Returns
+    -------
+    Select
+        The same columns, one row per item.
+    """
+    best = (
+        func.row_number()
+        .over(
+            partition_by=[arm.selected_columns[name] for name in identity],
+            order_by=[
+                arm.selected_columns[name] for name in ("rank", "sort_source", "f7", "f3", "f4")
+            ],
+        )
+        .label("best")
+    )
+    ranked = arm.add_columns(best).subquery()
+    columns = [ranked.c[c.key] for c in arm.selected_columns if c.key is not None]
+    return type_cast("_Candidates", select(*columns).where(ranked.c.best == 1))
+
+
+def _language_place(language: _Expr, languages: Sequence[str]) -> ColumnElement[int]:
+    """Give a language's place in the reader's languages.
+
+    Parameters
+    ----------
+    language
+        A language expression.
+    languages
+        The reader's languages, truncation included; not empty.
+
+    Returns
+    -------
+    ColumnElement
+        Its index in `languages`, or ``len(languages)`` for a language not among them.
+    """
+    return case(
+        *((language == tag, literal_column(str(index))) for index, tag in enumerate(languages)),
+        else_=literal_column(str(len(languages))),
+    )
+
+
+def _shown_term_language(
+    language: _Expr, languages: Sequence[str], main_language: str
+) -> ColumnElement[bool]:
+    """Say whether a term shows its translated texts in a language, as the term view does.
+
+    A term shows the translations of the reader's languages that come before its main language
+    (all of them when the main language is not among them), so search matches over the same set
+    and a hit with `matched: synonym` always shows that synonym on the term.
+
+    Parameters
+    ----------
+    language
+        The text's language.
+    languages
+        The reader's languages, truncation included; not empty.
+    main_language
+        The instance's main language, for a term whose project declares none.
+
+    Returns
+    -------
+    ColumnElement
+        True for a language the term shows.
+    """
+    term_main = func.coalesce(GlossaryTerm.main_language, literal(main_language, String))
+    return and_(
+        language.in_(languages),
+        _language_place(language, languages) < _language_place(term_main, languages),
+    )
+
+
+def _terms(match: _Match, environment_id: uuid.UUID) -> _Candidates:
+    """Select the terms whose key, name, main-language synonym or definition matches.
+
+    Parameters
+    ----------
+    match
+        The comparisons.
+    environment_id
+        The environment.
+
+    Returns
+    -------
+    Select
+        Candidates of the term kind, one row per matching main-language synonym (one row when
+        none matches). A synonym ranks like a name, which wins a tie; a definition ranks after
+        names (3).
+    """
+    synonym = aliased(GlossaryTermText)
+    name_rank = match.rank([GlossaryTerm.name, GlossaryTerm.term_key], otherwise=3)
+    # A missing synonym (the outer join's null) never compares true, so it ranks 3.
+    synonym_rank = match.rank([synonym.text], otherwise=3)
+    by_synonym = synonym_rank < name_rank
+    by_name = and_(name_rank < 3, ~by_synonym)
+    return (
+        _row(
+            SearchKind.TERM,
+            case((by_synonym, synonym_rank), else_=name_rank),
+            func.lower(GlossaryTerm.term_key),
+            cast(GlossaryTerm.id, String),
+            case(
+                (by_synonym, _text("synonym")), (by_name, _text("name")), else_=_text("definition")
+            ),
+            GlossaryTerm.term_key,
+            Repository.name,
+            case(
+                (by_synonym, synonym.text),
+                (by_name, GlossaryTerm.name),
+                else_=GlossaryTerm.definition,
+            ),
+            null(),
+        )
+        .select_from(GlossaryTerm)
+        .join(Repository, Repository.id == GlossaryTerm.repository_id)
+        .outerjoin(
+            synonym,
+            and_(
+                synonym.term_id == GlossaryTerm.id,
+                synonym.language == MAIN_TEXT_LANGUAGE,
+                synonym.field == "synonym",
+                # Only a matching synonym joins, so a term is one row unless several match.
+                match.contains(synonym.text),
+            ),
+        )
+        .where(
+            GlossaryTerm.environment_id == environment_id,
+            or_(
+                name_rank < 3,
+                match.contains(synonym.text),
+                match.contains(GlossaryTerm.definition),
+            ),
+        )
+    )
+
+
+def _term_translations(
+    match: _Match, environment_id: uuid.UUID, languages: Sequence[str], main_language: str
+) -> _Candidates:
+    """Select the terms whose translated name, synonym or definition matches.
+
+    Parameters
+    ----------
+    match
+        The comparisons.
+    environment_id
+        The environment.
+    languages
+        The reader's languages, truncation included; not empty.
+    main_language
+        The instance's main language, for a term whose project declares none.
+
+    Returns
+    -------
+    Select
+        Candidates of the term kind, in the languages the term shows. A name or synonym ranks
+        like a name; a definition after names. Of one term's texts at one rank, the first of the
+        reader's languages comes first, then a name, a synonym, a definition.
+    """
+    text = GlossaryTermText.text
+    field = GlossaryTermText.field
+    is_word = field.in_(("name", "synonym"))
+    order = case(
+        (field == "name", literal_column("0")),
+        (field == "synonym", literal_column("1")),
+        else_=literal_column("2"),
+    )
+    place = (_language_place(GlossaryTermText.language, languages) + 1) * 10
+    return (
+        _row(
+            SearchKind.TERM,
+            case((is_word, match.rank([text], otherwise=3)), else_=literal_column("3")),
+            func.lower(GlossaryTerm.term_key),
+            cast(GlossaryTerm.id, String),
+            field,
+            GlossaryTerm.term_key,
+            Repository.name,
+            text,
+            GlossaryTermText.language,
+            sort_source=place + order,
+        )
+        .select_from(GlossaryTermText)
+        .join(GlossaryTerm, GlossaryTerm.id == GlossaryTermText.term_id)
+        .join(Repository, Repository.id == GlossaryTerm.repository_id)
+        .where(
+            GlossaryTerm.environment_id == environment_id,
+            GlossaryTermText.language != MAIN_TEXT_LANGUAGE,
+            _shown_term_language(GlossaryTermText.language, languages, main_language),
+            match.contains(text),
+        )
+    )
+
+
+@dataclass(frozen=True)
+class _TermWords:
+    """A term's name and synonyms, compared, for the tables and columns its links name.
+
+    Parameters
+    ----------
+    word
+        The alias of the term's texts that count as its words.
+    joined
+        The condition that outer-joins `word`: a matching main-language synonym, or a matching
+        translated name or synonym in a language the term shows; only matching words join, so a
+        link is one row unless several of its term's words match.
+    rank
+        The better of the name's and the word's rank, 3 when neither matches.
+    text
+        The text that decided the rank; the name wins a tie.
+    matches
+        True where either matches.
+    """
+
+    word: type[GlossaryTermText]
+    joined: ColumnElement[bool]
+    rank: ColumnElement[int]
+    text: ColumnElement[str]
+    matches: ColumnElement[bool]
+
+
+def _term_words(match: _Match, languages: Sequence[str], main_language: str) -> _TermWords:
+    """Compare a term's key, name and synonyms, in the languages the term shows them in.
+
+    Parameters
+    ----------
+    match
+        The comparisons.
+    languages
+        The reader's languages, truncation included; empty for none.
+    main_language
+        The instance's main language, for a term whose project declares none.
+
+    Returns
+    -------
+    _TermWords
+        The comparisons.
+    """
+    word = aliased(GlossaryTermText)
+    shown = and_(word.language == MAIN_TEXT_LANGUAGE, word.field == "synonym")
+    if languages:
+        translated = and_(
+            word.field.in_(("name", "synonym")),
+            _shown_term_language(word.language, languages, main_language),
+        )
+        shown = or_(shown, translated)
+    name_rank = match.rank([GlossaryTerm.name, GlossaryTerm.term_key], otherwise=3)
+    word_rank = match.rank([word.text], otherwise=3)
+    by_word = word_rank < name_rank
+    return _TermWords(
+        word,
+        and_(word.term_id == GlossaryTerm.id, shown, match.contains(word.text)),
+        case((by_word, word_rank), else_=name_rank),
+        case((by_word, word.text), else_=GlossaryTerm.name),
+        or_(name_rank < 3, word_rank < 3),
+    )
+
+
+def _linked_by_term(
+    query: _Candidates, words: _TermWords, environment_id: uuid.UUID, *, columns: bool
+) -> _Candidates:
+    """Join the links of the environment's terms to the tables, or columns, they name.
+
+    A link names its table by the dotted name the file gave, so a link to a table or column that
+    does not exist joins nothing.
+
+    Parameters
+    ----------
+    query
+        The candidate select to add the joins to; its columns use `GlossaryTerm`, `Table`,
+        `Namespace`, `words` and, for columns, `TableColumn`.
+    words
+        The term's words compared.
+    environment_id
+        The environment.
+    columns
+        Whether the links to columns are joined (to `TableColumn`), else those to tables.
+
+    Returns
+    -------
+    Select
+        The joined select, keeping the links whose term's words match.
+    """
+    qualified = (
+        func.replace(Namespace.path, NAMESPACE_SEPARATOR, ".").concat(".").concat(Table.name)
+    )
+    query = (
+        query.select_from(GlossaryTermLink)
+        .join(GlossaryTerm, GlossaryTerm.id == GlossaryTermLink.term_id)
+        .join(Namespace, Namespace.environment_id == GlossaryTerm.environment_id)
+        .join(
+            Table,
+            and_(Table.namespace_id == Namespace.id, qualified == GlossaryTermLink.table_name),
+        )
+    )
+    if columns:
+        query = query.join(
+            TableColumn,
+            and_(
+                TableColumn.table_id == Table.id,
+                TableColumn.name == GlossaryTermLink.column_name,
+            ),
+        )
+    linked = GlossaryTermLink.column_name
+    return query.outerjoin(words.word, words.joined).where(
+        GlossaryTerm.environment_id == environment_id,
+        linked.is_not(None) if columns else linked.is_(None),
+        words.matches,
+    )
+
+
+def _tables_by_term(
+    match: _Match,
+    environment_id: uuid.UUID,
+    model_kind: str | None,
+    languages: Sequence[str],
+    main_language: str,
+) -> _Candidates:
+    """Select the tables a term links whose name or synonyms match.
+
+    Parameters
+    ----------
+    match
+        The comparisons.
+    environment_id
+        The environment.
+    model_kind
+        Keep only tables that declare this kind, or `None` for every table.
+    languages
+        The reader's languages, truncation included; empty for none.
+    main_language
+        The instance's main language, for a term whose project declares none.
+
+    Returns
+    -------
+    Select
+        Candidates of the table kind, so `_may_see` checks `READ_TABLE` before anything of the
+        table is read out. The word ranks like a name.
+    """
+    words = _term_words(match, languages, main_language)
+    query = _row(
+        SearchKind.TABLE,
+        words.rank,
+        func.lower(Table.name),
+        cast(Table.id, String),
+        _text("term"),
+        Namespace.path,
+        Table.name,
+        cast(Table.table_type, String),
+        words.text,
+        Table.model_kind,
+        null(),
+        GlossaryTerm.term_key,
+        by_term=True,
+    )
+    query = _linked_by_term(query, words, environment_id, columns=False)
+    return query.where(Table.model_kind == model_kind) if model_kind is not None else query
+
+
+def _columns_by_term(
+    match: _Match, environment_id: uuid.UUID, languages: Sequence[str], main_language: str
+) -> _Candidates:
+    """Select the columns a term links whose name or synonyms match.
+
+    Parameters
+    ----------
+    match
+        The comparisons.
+    environment_id
+        The environment.
+    languages
+        The reader's languages, truncation included; empty for none.
+    main_language
+        The instance's main language, for a term whose project declares none.
+
+    Returns
+    -------
+    Select
+        Candidates of the column kind, so `_may_see` checks `READ_TABLE` before anything of the
+        table is read out. A column the table no longer has is never found. The word ranks like
+        a name.
+    """
+    words = _term_words(match, languages, main_language)
+    query = _row(
+        SearchKind.COLUMN,
+        words.rank,
+        func.lower(TableColumn.name),
+        cast(TableColumn.table_id, String),
+        _text("term"),
+        Namespace.path,
+        Table.name,
+        TableColumn.name,
+        words.text,
+        TableColumn.type,
+        null(),
+        GlossaryTerm.term_key,
+        by_term=True,
+    )
+    return _linked_by_term(query, words, environment_id, columns=True)
+
+
 def _runs(match: _Match, needle: str, environment_id: uuid.UUID) -> _Candidates:
     """Select the runs whose id starts with the text, or whose job or repository matches.
 
@@ -1135,14 +1634,21 @@ def _hit(row: _Candidate, needle: str) -> SearchHit:
         The hit.
     """
     kind = next(k for k, order in _KIND_ORDER.items() if order == row.kind_order)
+    if kind is SearchKind.TERM:
+        return SearchHit(
+            kind=kind,
+            name=row.f1,
+            matched=row.matched,
+            snippet=_snippet(row.f3, needle),
+            term=row.f1,
+            repository=row.f2,
+            language=row.f4,
+            translated=row.sort_source > 0,
+        )
     snippet = (
         _snippet(row.f4, needle)
-        if row.matched in ("label", "description", "grain", "measure")
-        and kind
-        in (
-            SearchKind.TABLE,
-            SearchKind.COLUMN,
-        )
+        if row.matched in ("label", "description", "grain", "measure", "term")
+        and kind in (SearchKind.TABLE, SearchKind.COLUMN)
         else None
     )
     if kind is SearchKind.TABLE:
@@ -1158,6 +1664,7 @@ def _hit(row: _Candidate, needle: str) -> SearchHit:
             model_kind=row.f5,
             language=row.f6,
             translated=row.sort_source > 0,
+            term=row.f7,
         )
     if kind is SearchKind.COLUMN:
         namespace = str(NamespacePath.parse(row.f1))
@@ -1172,6 +1679,7 @@ def _hit(row: _Candidate, needle: str) -> SearchHit:
             column_type=row.f5,
             language=row.f6,
             translated=row.sort_source > 0,
+            term=row.f7,
         )
     if kind is SearchKind.RUN:
         run_id = uuid.UUID(row.f1)

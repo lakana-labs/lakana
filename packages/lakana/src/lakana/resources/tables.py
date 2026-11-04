@@ -47,6 +47,7 @@ from lakana._models import (
     TableReference,
     TableReferences,
     TableRetention,
+    TermRef,
     TranslationCoverage,
     WriteResult,
 )
@@ -380,6 +381,7 @@ def _table_from_json(data: dict[str, Any]) -> Table:
                 label_source=c.get("label_source"),
                 label_language=c.get("label_language"),
                 description_language=c.get("description_language"),
+                terms=_terms_from_json(c.get("terms")),
             )
             for c in data.get("schema", [])
         ],
@@ -411,7 +413,24 @@ def _table_from_json(data: dict[str, Any]) -> Table:
             TranslationCoverage(c["language"], c["translated"], c["total"])
             for c in data.get("translations", [])
         ),
+        terms=_terms_from_json(data.get("terms")),
     )
+
+
+def _terms_from_json(items: list[dict[str, str]] | None) -> tuple[TermRef, ...]:
+    """Build the term references of a table or a column from the response body.
+
+    Parameters
+    ----------
+    items
+        The decoded ``terms`` list; `None` from a server older than the glossary.
+
+    Returns
+    -------
+    tuple of TermRef
+        The references.
+    """
+    return tuple(TermRef(t["key"], t["name"]) for t in items or [])
 
 
 def _retention_from_json(data: dict[str, Any]) -> TableRetention:

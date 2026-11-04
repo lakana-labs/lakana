@@ -249,5 +249,7 @@ ROUTES: dict[str, Route] = {
     "whoami": Route("GET", "/api/v1/whoami"),
     "whoami.update": Route("PATCH", "/api/v1/whoami"),
     "search": Route("GET", "/api/v1/environments/{env}/search"),
+    "terms.list": Route("GET", "/api/v1/environments/{env}/terms"),
+    "terms.get": Route("GET", "/api/v1/environments/{env}/terms/{key}"),
     "info": Route("GET", "/api/v1/info"),
 }

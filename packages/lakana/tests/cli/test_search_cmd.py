@@ -321,3 +321,43 @@ def test_search_shows_the_language_of_a_translated_text(tmp_path: Path) -> None:
     plain = _plain(result.stdout)
     assert plain.count("label [fr]") == 1
     assert "label [en]" not in plain
+
+
+def test_search_shows_a_term_hit_with_its_repository(tmp_path: Path) -> None:
+    term = _hit(
+        "term",
+        "order_state",
+        "synonym",
+        snippet="fulfilment",
+        term="order_state",
+        repository="shop",
+    )
+    found = _hit(
+        "column",
+        "silver.orders.status",
+        "term",
+        snippet="fulfilment",
+        column_type="string",
+        term="order_state",
+    )
+
+    _, result = _search(tmp_path, _page(found, term), "fulfilment")
+    api = FakeApi()
+    api.on("GET", _ROUTE, json=_page(found, term))
+    as_json = invoke(
+        make_state(tmp_path, api), "--output", "json", "search", "fulfilment", "--env", "dev"
+    )
+
+    assert result.exit_code == 0, result.stderr
+    plain = _plain(result.stdout)
+    assert "term order_state synonym shop fulfilment" in plain
+    assert "column silver.orders.status term (order_state) string fulfilment" in plain
+    assert [h["term"] for h in json.loads(as_json.stdout)["results"]] == ["order_state"] * 2
+
+
+def test_search_kind_term_is_sent(tmp_path: Path) -> None:
+    api, result = _search(tmp_path, _page(), "x", "--kind", "term")
+
+    assert result.exit_code == 0, result.stderr
+    assert api.requests[-1].url.params["kind"] == "term"
+    assert "glossary terms and their synonyms" in _plain(result.stdout)

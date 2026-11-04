@@ -1,10 +1,13 @@
-"""What the lists that page newest first share: the cursor, the page, filters and a name search.
+"""What the paged lists share: the cursor, the page, filters and a name search.
 
 The lists are checks, runs, queries, deploys, grants, principals and groups. A cursor is the
 position of the last item of a page: its time and its id, and the list it belongs to. A list
 resumes strictly after that position, so an item that arrives while a client pages is never
 repeated and none is skipped. The kind of the list is part of the cursor, so a cursor of one list
 is refused by another instead of being misread.
+
+A list ordered by a unique key instead (the glossary's terms) has a cursor of that key and the
+list's kind, with the same refusal of another list's cursor.
 """
 
 from __future__ import annotations
@@ -13,6 +16,7 @@ import base64
 import binascii
 import enum
 import json
+import unicodedata
 import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -232,6 +236,112 @@ def newest_first(
     next_cursor = None
     if len(rows) > limit:
         next_cursor = encode_cursor(kind, at_of(page[-1]), page[-1].id)
+    return Page(page, next_cursor)
+
+
+def encode_key_cursor(kind: str, key: str) -> str:
+    """Encode the key of a page's last item, for a list ordered by a unique key.
+
+    Parameters
+    ----------
+    kind
+        The list the cursor belongs to (``terms``).
+    key
+        The last item's key.
+
+    Returns
+    -------
+    str
+        Unpadded base64url of ``{"k": kind, "n": key}``.
+    """
+    body = json.dumps({"k": kind, "n": key})
+    return base64.urlsafe_b64encode(body.encode()).rstrip(b"=").decode()
+
+
+def decode_key_cursor(kind: str, cursor: str) -> str:
+    """Decode a cursor produced by `encode_key_cursor` for the list `kind`.
+
+    Parameters
+    ----------
+    kind
+        The list being read.
+    cursor
+        The value a client sent back.
+
+    Returns
+    -------
+    str
+        The key to resume after.
+
+    Raises
+    ------
+    ValidationError
+        If `cursor` is not one this server could have issued, or belongs to another list.
+    """
+    try:
+        data = json.loads(base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4)))
+    except (binascii.Error, ValueError) as exc:
+        raise ValidationError(_BAD_CURSOR) from exc
+    if not isinstance(data, dict) or not isinstance(data.get("k"), str):
+        raise ValidationError(_BAD_CURSOR)
+    if data["k"] != kind:
+        raise ValidationError(_OTHER_LIST.format(expected=kind, actual=data["k"]))
+    key = data.get("n")
+    # A cursor this server issued holds a stored key, never a NUL or a lone surrogate, which
+    # the database driver could not take.
+    if not isinstance(key, str) or any(unicodedata.category(c) in ("Cc", "Cs") for c in key):
+        raise ValidationError(_BAD_CURSOR)
+    return key
+
+
+def by_key(
+    session: Session,
+    query: Select[Any],
+    *,
+    kind: str,
+    key: InstrumentedAttribute[str],
+    key_of: Callable[[Any], str],
+    limit: int,
+    cursor: str | None,
+) -> Page[Any]:
+    """Read one page of a list ordered by a unique key, ascending.
+
+    Unlike `newest_first`, no tie can occur, so the cursor holds the key alone.
+
+    Parameters
+    ----------
+    session
+        The session the query runs in.
+    query
+        What to page through, filters applied, selecting one entity.
+    kind
+        The list's name in the cursor (``terms``).
+    key
+        The unique column that orders the list.
+    key_of
+        Gives an entity's key, which the next cursor holds.
+    limit
+        The page size; at least 1.
+    cursor
+        Where the previous page ended, as it returned it; `None` starts at the first key.
+
+    Returns
+    -------
+    Page
+        This page's entities and, unless it is the last, the cursor that continues it.
+
+    Raises
+    ------
+    ValidationError
+        If `limit` is under 1, or `cursor` is malformed or was issued for another list.
+    """
+    if limit < 1:
+        raise ValidationError(f"limit must be at least 1, got {limit}.")
+    if cursor is not None:
+        query = query.where(key > decode_key_cursor(kind, cursor))
+    rows = list(session.execute(query.order_by(key).limit(limit + 1)).scalars())
+    page = rows[:limit]
+    next_cursor = encode_key_cursor(kind, key_of(page[-1])) if len(rows) > limit else None
     return Page(page, next_cursor)
 
 

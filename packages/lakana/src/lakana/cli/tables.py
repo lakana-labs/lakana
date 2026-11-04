@@ -436,6 +436,24 @@ def _emit_texts(state: CliState, table: Table) -> None:
         _output.emit(state, f"Translations: {counts}")
 
 
+def _emit_terms(state: CliState, table: Table) -> None:
+    """Print the Terms section: the terms of the table, then of each column; nothing without any.
+
+    Parameters
+    ----------
+    state
+        The CLI state.
+    table
+        The table.
+    """
+    lines = [f"  {t.key} — {t.name}" for t in table.terms]
+    lines += [f"  {c.name}: {t.key} — {t.name}" for c in table.columns for t in c.terms]
+    if lines:
+        _output.emit(state, "Terms:")
+        for line in lines:
+            _output.emit(state, _output.inline(line, 500))
+
+
 def _emit_columns(state: CliState, table: Table) -> None:
     """Print a table's columns, with their labels and descriptions when any has one.
 
@@ -509,6 +527,7 @@ def get(ctx: typer.Context, name: str, lang: _LANG = None, env: _ENV = None) -> 
         _output.emit(state, table.references)
         _emit_texts(state, table)
         _emit_columns(state, table)
+        _emit_terms(state, table)
         return
     if table.kind == "ARTIFACT":
         _output.emit(state, table, columns=_GET_COLUMNS, derived=_DERIVED)
@@ -531,6 +550,7 @@ def get(ctx: typer.Context, name: str, lang: _LANG = None, env: _ENV = None) -> 
         )
     _emit_texts(state, table)
     _emit_columns(state, table)
+    _emit_terms(state, table)
     if table.model is not None:
         _emit_model(state, table)
 

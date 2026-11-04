@@ -836,6 +836,21 @@ class ReplaceOut(BaseModel):
     schema_diff: dict[str, list[dict[str, str]]] | None = None
 
 
+class TermRefOut(BaseModel):
+    """A short reference to a term, as a table or column shows it.
+
+    Parameters
+    ----------
+    key
+        The term's id.
+    name
+        The term's name in the reader's language.
+    """
+
+    key: str
+    name: str
+
+
 class ColumnOut(BaseModel):
     """One column of a table's schema, in the JSON column form.
 
@@ -862,6 +877,9 @@ class ColumnOut(BaseModel):
         The language of `label`; `None` exactly when `label` is.
     description_language
         The language of `description`; `None` exactly when `description` is.
+    terms
+        The glossary terms that link the column, in the reader's language; empty without
+        ``READ_ENVIRONMENT``.
     """
 
     name: str
@@ -873,6 +891,7 @@ class ColumnOut(BaseModel):
     label_source: Literal["project", "edited"] | None = None
     label_language: str | None = None
     description_language: str | None = None
+    terms: list[TermRefOut] = []
 
 
 class TranslationCoverageOut(BaseModel):
@@ -982,6 +1001,9 @@ class TableOut(BaseModel):
         with no translation is shown in it.
     translations
         Per language that has texts for the table, how many of its main-language texts it has.
+    terms
+        The glossary terms that link the table itself, in the reader's language; empty without
+        ``READ_ENVIRONMENT`` on the environment.
     """
 
     name: str
@@ -1012,6 +1034,7 @@ class TableOut(BaseModel):
     language: str = "en"
     main_language: str = "en"
     translations: list[TranslationCoverageOut] = Field(default_factory=list)
+    terms: list[TermRefOut] = []
 
 
 class LastMaintenanceOut(BaseModel):
@@ -2583,6 +2606,107 @@ class ConnectionPage(BaseModel):
     next_cursor: str | None
 
 
+class TermLinkOut(BaseModel):
+    """One table, column or measure a glossary term points to.
+
+    Parameters
+    ----------
+    table
+        The dotted table name, such as `silver.orders`.
+    column
+        The column or measure name; `null` for a link to the whole table.
+    kind
+        `table`, `column` or `measure`.
+    missing
+        `true` when the table does not exist in the environment (yet), or when the table no
+        longer has the linked column.
+    """
+
+    table: str
+    column: str | None
+    kind: Literal["table", "column", "measure"]
+    missing: bool
+
+
+class RelatedTermOut(BaseModel):
+    """A term another term names as related.
+
+    Parameters
+    ----------
+    key
+        The related term's id.
+    name
+        Its name in the reader's language; `null` when no such term exists.
+    missing
+        `true` when no term of that id exists in the environment.
+    """
+
+    key: str
+    name: str | None
+    missing: bool
+
+
+class TermOut(BaseModel):
+    """A business glossary term, with its texts in the reader's language.
+
+    A link appears only when the caller holds `READ_TABLE` on its table, except a link to a
+    table that does not exist, which shows as `missing` (as does a link to a column a readable
+    table no longer has).
+
+    Parameters
+    ----------
+    key
+        The term's id in the glossary.
+    id
+        The term's UUID, stable across deploys.
+    name
+        The term's name in `language`.
+    definition
+        What the term means, in `language`.
+    synonyms
+        Other names for the term.
+    owner
+        Who answers for the definition.
+    repository
+        The repository whose glossary defines the term.
+    language
+        The language of `name` and `definition`.
+    links
+        What the term points to that the caller may read.
+    related
+        The terms this term names as related.
+    related_by
+        The ids of the terms that name this term as related.
+    """
+
+    key: str
+    id: str
+    name: str
+    definition: str
+    synonyms: list[str]
+    owner: str
+    repository: str
+    language: str
+    links: list[TermLinkOut]
+    related: list[RelatedTermOut]
+    related_by: list[str]
+
+
+class TermPage(BaseModel):
+    """One page of an environment's glossary terms, sorted by key.
+
+    Parameters
+    ----------
+    items
+        The terms of this page.
+    next_cursor
+        Pass back as `?cursor=` to fetch the next page; `null` on the last page.
+    """
+
+    items: list[TermOut]
+    next_cursor: str | None
+
+
 class ConnectionTestOut(BaseModel):
     """Response body for a connection test.
 
@@ -4007,16 +4131,17 @@ class SearchHitOut(BaseModel):
     Parameters
     ----------
     kind
-        What was found: ``table``, ``column``, ``run`` or ``principal``.
+        What was found: ``table``, ``column``, ``run``, ``principal`` or ``term``.
     name
-        A display name: ``namespace.table``, ``namespace.table.column``, the run id or the
-        principal's name.
+        A display name: ``namespace.table``, ``namespace.table.column``, the run id, the
+        principal's name or the term's key.
     matched
         The field that matched: ``name``, ``label``, ``description``, ``grain``, ``measure`` (a
-        column's measure label or description), ``id``, ``job`` or ``repository``.
+        column's measure label or description), ``id``, ``job``, ``repository``, ``synonym`` or
+        ``definition`` (a term's) or ``term`` (a table or column found by a term's name or synonym).
     snippet
-        For a label, description, grain or measure match, at most 160 characters of the text
-        around the hit.
+        For a label, description, grain, measure or term match, and for every term hit, at most
+        160 characters of the text around the hit.
     namespace
         For a table or column, its namespace, dotted.
     table
@@ -4035,7 +4160,7 @@ class SearchHitOut(BaseModel):
     job
         For a run, its job, if it has one.
     repository
-        For a run, its repository.
+        For a run or a term, its repository.
     status
         For a run, its status.
     principal
@@ -4044,18 +4169,34 @@ class SearchHitOut(BaseModel):
         For a principal, ``USER`` or ``SERVICE_ACCOUNT``.
     language
         For a table or column that a text matched, the language of that text (a translation in
-        one of your languages, or the table's main language); ``null`` for a name match and for
-        runs and principals.
+        one of your languages, or the table's main language); for a term that a translated text
+        matched, its language; ``null`` for a name match, a term match, a term's main-language
+        text, and for runs and principals.
     translated
-        Whether the text that matched is a translation, in a language other than the table's main
-        one; ``false`` for a header text, a name, a run and a principal.
+        Whether the text that matched is a translation, in a language other than the table's or
+        term's main one; ``false`` for a header text, a name, a run and a principal.
+    term
+        For a term, its key; for a table or column with `matched` ``term``, the key of the term
+        whose name or synonym matched.
     """
 
     model_config = ConfigDict(from_attributes=True)
 
-    kind: Literal["table", "column", "run", "principal"]
+    kind: Literal["table", "column", "run", "principal", "term"]
     name: str
-    matched: Literal["name", "label", "description", "grain", "measure", "id", "job", "repository"]
+    matched: Literal[
+        "name",
+        "label",
+        "description",
+        "grain",
+        "measure",
+        "id",
+        "job",
+        "repository",
+        "synonym",
+        "definition",
+        "term",
+    ]
     snippet: str | None
     namespace: str | None
     table: str | None
@@ -4071,6 +4212,7 @@ class SearchHitOut(BaseModel):
     principal_type: str | None
     language: str | None = None
     translated: bool = False
+    term: str | None = None
 
 
 class SearchOut(BaseModel):
@@ -4081,7 +4223,8 @@ class SearchOut(BaseModel):
     results
         The hits, best first: exact matches of a name or label, then prefix, then substring,
         then description matches; within each, tables before columns before runs before
-        principals. A table or column appears once, however many of its texts match.
+        principals before terms. A table, column or term appears once, however many of its
+        texts match.
     limit
         The page size asked for.
     offset

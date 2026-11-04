@@ -75,6 +75,7 @@ from lakana_server.api.platform.schemas import (
     TableReferencesOut,
     TableRetentionIn,
     TableRetentionOut,
+    TermRefOut,
     TranslationCoverageOut,
     UndropIn,
 )
@@ -609,6 +610,10 @@ def _column_out(column: ColumnSpec, description: TableDescription) -> ColumnOut:
         label=None if label is None else label.text,
         label_source=None if label is None else label.source,
         label_language=None if label is None else label.language,
+        terms=[
+            TermRefOut(key=t.key, name=t.name)
+            for t in description.column_terms.get(column.name, ())
+        ],
     )
 
 
@@ -663,6 +668,7 @@ def _describe_out(namespace: str, description: TableDescription) -> TableOut:
         model=None
         if description.model is None
         else TableModelOut.model_validate(description.model, from_attributes=True),
+        terms=[TermRefOut(key=t.key, name=t.name) for t in description.terms],
     )
 
 

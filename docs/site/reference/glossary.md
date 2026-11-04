@@ -5,8 +5,9 @@ A business glossary says what the words your team uses mean, and where the data 
 to the column `gold.fact_sales.net_amount`. The glossary is kept as code in the project's
 repository, next to the assets, and every deploy checks it and deploys it with the project.
 
-How the glossary is read (REST, the SDK, the CLI, `table get` and search) is described in a later
-section of this page.
+How the glossary is read (REST, the SDK, the CLI, `table get` and search) is described under
+[Reading](#reading), and who sees which part under [Who sees what](#who-sees-what). For the steps,
+see [Keep a glossary](../how-to/keep-a-glossary.md).
 
 ## Files
 
@@ -121,3 +122,61 @@ A project version with a `glossary/` folder, even an empty one, has manifest ver
 workers of the release that introduced it or later: a worker of an earlier release refuses its
 manifest, so upgrade the server and every worker before you deploy a glossary. Every other project
 keeps its manifest version.
+
+## Reading
+
+All routes are `GET` and need `READ_ENVIRONMENT` on the environment.
+
+| Route | Answer |
+|---|---|
+| `/api/v1/environments/{env}/terms` | One page of terms, sorted by key: `{"items": [...], "next_cursor": ...}`. |
+| `/api/v1/environments/{env}/terms/{key}` | One term; `404` for a key the environment does not have, `422` for one no term can have (over 63 characters, or with a control, format or surrogate character or a line separator, such as NUL). |
+
+| Parameter | Meaning |
+|---|---|
+| `owner` | List only. Only terms with exactly this owner, of any length. One with a control, format or surrogate character or a line separator (such as NUL) is `422`. |
+| `repository` | List only. Only terms this repository defines. Over 255 characters, or with a control, format or surrogate character or a line separator, is `422`. |
+| `lang` | The language of the texts, such as `de` or `fr-CH`. Without it, your profile's language, then `Accept-Language`, then the instance's main language. A value that is not a language tag is `422`. |
+| `limit` | List only. Terms per page, 1 to 200 (100). |
+| `cursor` | List only. The `next_cursor` of the previous page; one the list did not issue is `422`. |
+
+A term (`TermOut`) has `key`, `id` (stable across deploys), `name`, `definition`, `synonyms`,
+`owner`, `repository`, `language` (the language `name` and `definition` are shown in), `links`,
+`related` and `related_by`:
+
+- A link is `{table, column, kind, missing}`. `kind` is `table`, `column` or `measure`; `column` is
+  `null` for a link to the table itself; `missing` is `true` for a table that does not exist, and
+  for a column the table no longer has.
+- A related term is `{key, name, missing}`; `missing` is `true` when no repository defines the id.
+  `related_by` holds the keys of the terms that name this one.
+- The texts are shown in your language where a translation exists, else in the term's main
+  language. The synonyms are the main language's, then those of your languages that come before
+  the term's main language in your list ([Translations](translations.md)).
+
+**SDK:** `client.terms.list(environment, owner=None, repository=None, lang=None, limit=None,
+cursor=None)` returns one page; `client.terms.iter(environment, ...)` yields every term; and
+`client.terms.get(environment, key, lang=None)` returns one `Term`.
+
+**CLI:** `lakana term list [--owner] [--repository] [--lang] [--env]` and
+`lakana term get KEY [--lang] [--env]`; `--output json` prints every field.
+
+**`table get`:** the table and each column carry `terms` (`{key, name}` in your language): the terms
+linked to the table itself and to that column. `lakana table get` shows them in a `Terms:` section.
+
+**Search:** `kind=term` finds terms by key, name, synonym or definition (`matched` is `name`,
+`synonym` or `definition`); a table or column a term links is also found by the term's name and
+synonyms, with `matched: term` and the term's key in `term`. See [Search](search.md).
+
+## Who sees what
+
+| Result | Needs |
+|---|---|
+| a term (name, definition, synonyms, owner, repository, related) | `READ_ENVIRONMENT` |
+| a link of a term to an existing table, and its column | `READ_TABLE` on that table; otherwise the link is left out, never refused |
+| a link whose table does not exist | shown as missing to anyone who sees the term, with the name the file gave |
+| a table or column found by a term's words in search | `READ_TABLE` on the table, as for every table and column result |
+| the terms in `table get` | the table's own `READ_TABLE` (as `table get`) plus `READ_ENVIRONMENT` |
+
+A link whose table exists but which the caller may not read stays hidden even when its column is
+missing. A term whose links are all hidden still shows its definition. An environment the caller may
+not read answers as search does: an empty page for the list, and `404` for one term.

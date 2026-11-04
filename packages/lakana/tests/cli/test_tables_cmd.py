@@ -211,7 +211,56 @@ def test_table_get_shows_the_columns(tmp_path: Path) -> None:
         "label_source": None,
         "label_language": None,
         "description_language": None,
+        "terms": [],
     }
+
+
+def test_table_get_prints_a_terms_section(tmp_path: Path) -> None:
+    """The terms of the table come first, then those of each column."""
+    api = FakeApi()
+    api.on(
+        "GET",
+        f"{_BASE}/sales",
+        json={
+            **_TABLE,
+            "terms": [{"key": "orders", "name": "Orders"}],
+            "schema": [
+                {
+                    "name": "order_id",
+                    "type": "long",
+                    "nullable": False,
+                    "terms": [{"key": "order_number", "name": "Order number"}],
+                }
+            ],
+        },
+    )
+    result = invoke(make_state(tmp_path, api), "table", "get", "bronze.sales", "--env", "dev")
+    assert result.exit_code == 0, result.stderr
+    lines = [line.strip() for line in result.stdout.splitlines()]
+    at = lines.index("Terms:")
+    assert lines[at + 1 : at + 3] == ["orders — Orders", "order_id: order_number — Order number"]
+
+
+def test_table_get_without_terms_prints_no_terms_section(tmp_path: Path) -> None:
+    """An older server's answer has no `terms`: no `Terms:` line."""
+    api = FakeApi()
+    api.on("GET", f"{_BASE}/sales", json=_TABLE)
+    result = invoke(make_state(tmp_path, api), "table", "get", "bronze.sales", "--env", "dev")
+    assert result.exit_code == 0, result.stderr
+    assert "Terms:" not in result.stdout
+
+
+def test_table_get_on_a_view_prints_its_terms(tmp_path: Path) -> None:
+    """A view shows its terms like a table."""
+    api = FakeApi()
+    api.on(
+        "GET",
+        f"{_BASE}/v",
+        json={**_TABLE, "kind": "VIEW", "terms": [{"key": "orders", "name": "Orders"}]},
+    )
+    result = invoke(make_state(tmp_path, api), "table", "get", "bronze.v", "--env", "dev")
+    assert result.exit_code == 0, result.stderr
+    assert "orders — Orders" in result.stdout
 
 
 def test_table_get_shows_the_description_and_the_columns_descriptions(tmp_path: Path) -> None:
