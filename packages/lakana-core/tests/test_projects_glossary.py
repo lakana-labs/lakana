@@ -563,13 +563,19 @@ def test_an_unreadable_root_a_linked_glossary_and_an_unreadable_folder(
     )
 
 
-def test_a_file_over_the_key_cap_and_a_term_that_is_not_a_mapping_are_refused() -> None:
-    from lakana_core.projects.glossary import MAX_GLOSSARY_ENTRIES
+def test_a_file_over_the_key_cap_and_a_term_that_is_not_a_mapping_are_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from lakana_core.projects import glossary as glossary_module
 
-    big = "a:\n  synonyms: [" + ", ".join("s" for _ in range(MAX_GLOSSARY_ENTRIES)) + "]\n"
+    monkeypatch.setattr(glossary_module, "MAX_GLOSSARY_ENTRIES", 20)
+    big = "a:\n  synonyms: [" + ", ".join("s" for _ in range(20)) + "]\n"
     _, too_many = _parse(("glossary/big.yaml", big))
     glossary, scalar = _parse(("glossary/a.yaml", "net_revenue: 5\n"))
-    assert len(too_many) == 1 and "has more than 50000 keys and list items" in too_many[0]
+    assert too_many == [
+        "glossary/big.yaml:2: has more than 20 keys and list items, and a glossary file has at "
+        "most 20; split it into several files under glossary/"
+    ]
     assert scalar == [
         "glossary/a.yaml:1: `net_revenue` must be a mapping of its fields, such as "
         "`net_revenue: {name: …, definition: …, owner: …}`"
