@@ -541,11 +541,16 @@ class EnvironmentGraph:
     def add_reference(self, record: ReferenceRecord) -> None:
         """Add a reference and its edges; tables first.
 
+        A reference from a table the load did not read (created while the graph loaded) is
+        left out, as if it had been created after.
+
         Parameters
         ----------
         record
             The reference.
         """
+        if record.source_table_id not in self.tables:
+            return
         self.records[record.id] = record
         self._references_by_source[record.source_table_id, record.source_column] = record.id
         self._link(
@@ -561,11 +566,15 @@ class EnvironmentGraph:
     def add_measure(self, record: MeasureRecord) -> None:
         """Add a measure and its edge.
 
+        A measure of a table the load did not read is left out, as a reference is.
+
         Parameters
         ----------
         record
             The measure.
         """
+        if record.table_id not in self.tables:
+            return
         self.records[record.id] = record
         self._link(EdgeKind.MEASURES, record.id, column_node(record.table_id, record.column))
 
@@ -590,11 +599,15 @@ class EnvironmentGraph:
     def add_policy(self, record: PolicyNode) -> None:
         """Add a row filter or column mask and its edge.
 
+        A policy on a table the load did not read is left out, as a reference is.
+
         Parameters
         ----------
         record
             The policy.
         """
+        if record.table_id not in self.tables:
+            return
         self.records[record.id] = record
         if record.column is None:
             self._link(EdgeKind.FILTERS, record.id, table_node(record.table_id))

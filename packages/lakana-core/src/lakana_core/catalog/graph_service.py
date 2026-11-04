@@ -24,14 +24,14 @@ import bisect
 import time
 import uuid
 from collections import defaultdict, deque
-from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable
+from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable, permits_each
 from lakana_core.catalog.glossary_read import term_names
 from lakana_core.catalog.graph_load import (
     AssetRecord,
@@ -58,6 +58,7 @@ from lakana_core.catalog.graph_model import (
     MAX_GRAPH_DEPTH,
     MAX_GRAPH_PAGE,
     MAX_GRAPH_STEPS,
+    MAX_NODE_ID,
     NO_ENVIRONMENT,
     NO_NODE,
     TOO_LARGE,
@@ -82,7 +83,7 @@ from lakana_core.models.environment import LIVE_ENVIRONMENT
 from lakana_core.pagination import decode_key_cursor, encode_key_cursor
 
 _CHECK_EVERY = 256
-"""How many steps pass between two looks at the clock."""
+"""How many edges examined, visible or hidden, pass between two looks at the clock."""
 
 _LINEAGE_STARTS = frozenset({NodeKind.TABLE, NodeKind.COLUMN, NodeKind.ASSET})
 
@@ -116,8 +117,35 @@ class _Found:
     may_use: bool = False
 
 
+def _pointed_at(graph: EnvironmentGraph) -> Iterator[str]:
+    """List the table names the graph's records point at by name.
+
+    Parameters
+    ----------
+    graph
+        The environment's graph.
+
+    Yields
+    ------
+    str
+        An asset's output, a reference's target, a ``references`` check's target; each may
+        name a table that does not exist.
+    """
+    for record in graph.records.values():
+        if isinstance(record, AssetRecord):
+            yield record.name
+        elif isinstance(record, ReferenceRecord):
+            yield record.target_name
+        elif isinstance(record, CheckRecord) and record.target is not None:
+            yield record.target
+
+
 class _Visibility:
-    """Whether one reader may see a node, each right asked once.
+    """Whether one reader may see a node, every right decided in one batch.
+
+    Built once per request: every table of the graph, every table name its records point at,
+    `READ_ENVIRONMENT` and `MANAGE_POLICY` are asked in one `permits_each`, so what deciding
+    visibility costs does not grow with the tables a walk reaches or hides (R8).
 
     Parameters
     ----------
@@ -132,34 +160,34 @@ class _Visibility:
     def __init__(
         self, authz: AuthorizationService, p: PrincipalRef, graph: EnvironmentGraph
     ) -> None:
-        self._authz = authz
-        self._p = p
         self._graph = graph
-        self._tables: dict[uuid.UUID, bool] = {}
-        self._names: dict[str, bool] = {}
-        self._rights: dict[Action, bool] = {}
-
-    def _reads(self, ref: TableRef) -> bool:
-        """Ask `READ_TABLE` on a table's scope.
-
-        Parameters
-        ----------
-        ref
-            The table.
-
-        Returns
-        -------
-        bool
-            The answer.
-        """
-        return self._authz.permits(
-            self._p,
-            Action.READ_TABLE,
-            Securable.table_scope(ref.environment, ref.namespace, ref.name),
-        )
+        environment = graph.environment
+        tables = list(graph.tables.values())
+        names: dict[str, TableRef] = {}
+        for dotted in _pointed_at(graph):
+            if dotted not in graph.table_ids and dotted not in names:
+                try:
+                    names[dotted] = TableRef.from_dotted(environment, dotted)
+                except ValidationError:
+                    continue
+        questions = [
+            (Action.READ_ENVIRONMENT, Securable.environment_scope(environment)),
+            (Action.MANAGE_POLICY, Securable.instance_scope()),
+            *(
+                (
+                    Action.READ_TABLE,
+                    Securable.table_scope(ref.environment, ref.namespace, ref.name),
+                )
+                for ref in (*(t.ref for t in tables), *names.values())
+            ),
+        ]
+        answers = permits_each(authz, p, questions)
+        self._environment, self._policies = answers[0], answers[1]
+        self._tables = {t.id: a for t, a in zip(tables, answers[2 : 2 + len(tables)], strict=True)}
+        self._names = dict(zip(names, answers[2 + len(tables) :], strict=True))
 
     def table(self, table_id: uuid.UUID) -> bool:
-        """Say whether the reader may read an existing table.
+        """Say whether the reader may read a table of the graph.
 
         Parameters
         ----------
@@ -169,11 +197,9 @@ class _Visibility:
         Returns
         -------
         bool
-            `READ_TABLE` on its scope.
+            `READ_TABLE` on its scope; `False` for a table the graph did not load.
         """
-        if table_id not in self._tables:
-            self._tables[table_id] = self._reads(self._graph.tables[table_id].ref)
-        return self._tables[table_id]
+        return self._tables.get(table_id, False)
 
     def name(self, dotted: str) -> bool:
         """Say whether the reader may read a table by its name, whether or not it exists.
@@ -186,38 +212,13 @@ class _Visibility:
         Returns
         -------
         bool
-            `READ_TABLE` on its scope; `False` for a name that is not a table name.
+            `READ_TABLE` on its scope; `False` for a name that is not a table name, or one no
+            record of the graph points at.
         """
         table_id = self._graph.table_ids.get(dotted)
         if table_id is not None:
             return self.table(table_id)
-        if dotted not in self._names:
-            try:
-                ref = TableRef.from_dotted(self._graph.environment, dotted)
-            except ValidationError:
-                self._names[dotted] = False
-            else:
-                self._names[dotted] = self._reads(ref)
-        return self._names[dotted]
-
-    def _holds(self, action: Action, securable: Securable) -> bool:
-        """Ask a right that does not depend on the node, once per request.
-
-        Parameters
-        ----------
-        action
-            The action.
-        securable
-            Its scope; the same for every node of the request.
-
-        Returns
-        -------
-        bool
-            The answer.
-        """
-        if action not in self._rights:
-            self._rights[action] = self._authz.permits(self._p, action, securable)
-        return self._rights[action]
+        return self._names.get(dotted, False)
 
     def environment(self) -> bool:
         """Say whether the reader holds `READ_ENVIRONMENT`.
@@ -227,9 +228,7 @@ class _Visibility:
         bool
             The answer.
         """
-        return self._holds(
-            Action.READ_ENVIRONMENT, Securable.environment_scope(self._graph.environment)
-        )
+        return self._environment
 
     def policies(self) -> bool:
         """Say whether the reader may see policies at all (`MANAGE_POLICY`, R2).
@@ -239,7 +238,7 @@ class _Visibility:
         bool
             The answer.
         """
-        return self._holds(Action.MANAGE_POLICY, Securable.instance_scope())
+        return self._policies
 
     def node(self, node_id: str) -> bool:
         """Say whether the reader may see an existing node.
@@ -291,6 +290,22 @@ class _Budget:
         self._deadline = clock() + seconds
         self._max_steps = max_steps
         self.steps = 0
+        self._looks = 0
+
+    def look(self) -> None:
+        """Count one edge examined, to a visible node or a hidden one, and now and then the time.
+
+        Every edge counts here, so a walk that sees little and hides much is timed as any
+        other; only `step` counts against the step budget.
+
+        Raises
+        ------
+        GraphBusyError
+            Past the time budget (`BUSY`).
+        """
+        self._looks += 1
+        if self._looks % _CHECK_EVERY == 0:
+            self.check()
 
     def step(self) -> None:
         """Count one edge to a visible node.
@@ -299,14 +314,10 @@ class _Budget:
         ------
         ValidationError
             Past the step budget (`TOO_LARGE`).
-        GraphBusyError
-            Past the time budget (`BUSY`).
         """
         self.steps += 1
         if self.steps > self._max_steps:
             raise ValidationError(TOO_LARGE.format(steps=self._max_steps))
-        if self.steps % _CHECK_EVERY == 0:
-            self.check()
 
     def check(self) -> None:
         """Look at the clock.
@@ -355,6 +366,7 @@ class _Context:
         """
         found: list[tuple[GraphEdge, str]] = []
         for edge in self.graph.edges(node_id, kinds):
+            self.budget.look()
             if kinds and edge.kind not in kinds:
                 continue
             other = edge.target if edge.source == node_id else edge.source
@@ -425,6 +437,38 @@ def _key(distance: int, node_id: str) -> str:
         A key whose text order is the answer's order.
     """
     return f"{distance:06d}|{node_id}"
+
+
+_LINEAGE = "graph-lineage"
+_NEIGHBOURS = "graph-neighbours"
+
+
+def _after(list_kind: str, cursor: str | None) -> str | None:
+    """Read a cursor before any work is done, so that a bad one costs nothing.
+
+    Parameters
+    ----------
+    list_kind
+        The list asked: `_LINEAGE` or `_NEIGHBOURS`.
+    cursor
+        The previous page's `next_cursor`, or `None`.
+
+    Returns
+    -------
+    str or None
+        The key to resume after; `None` for the first page.
+
+    Raises
+    ------
+    ValidationError
+        For a cursor this list did not issue.
+    """
+    return None if cursor is None else decode_key_cursor(list_kind, cursor)
+
+
+MAX_GRAPH_CURSOR = len(encode_key_cursor(_NEIGHBOURS, _key(10**6 - 1, "\U0010ffff" * MAX_NODE_ID)))
+"""The longest `next_cursor` an answer can carry: a node id of `MAX_NODE_ID` characters of
+four bytes each, past which no node can be named at all."""
 
 
 def _translation_rows(
@@ -575,7 +619,7 @@ class GraphService:
             If the environment does not exist: `NO_ENVIRONMENT` for a caller who may read
             environments, the start's `NO_NODE` for anyone else (as search answers).
         GraphBusyError
-            If loading ran past the time budget.
+            If loading the graph or deciding what the reader may see ran past the time budget.
         """
         budget = _Budget(self._clock, self._budget_seconds, self._max_steps)
         environment_id = self._session.scalar(
@@ -589,7 +633,9 @@ class GraphService:
             raise NotFoundError(NO_NODE.format(node=shown(node), env=shown(environment)))
         graph = load_graph(self._session, environment_id, environment, part=self._part)
         budget.check()
-        return _Context(graph, _Visibility(self._authz, p, graph), budget)
+        visible = _Visibility(self._authz, p, graph)
+        budget.check()
+        return _Context(graph, visible, budget)
 
     def _root(self, ctx: _Context, node: str, ref: NodeRef) -> str:
         """Find the start node, as the reader may see it.
@@ -678,6 +724,7 @@ class GraphService:
                     node=shown(node), word=KIND_WORDS[ref.kind], env=shown(environment)
                 )
             )
+        after = _after(_LINEAGE, cursor)
         ctx = self._open(p, environment, node)
         root = self._root(ctx, node, ref)
         found: dict[str, _Found] = {root: _Found(0)}
@@ -688,7 +735,7 @@ class GraphService:
         ways = (LineageWay.UP, LineageWay.DOWN) if direction is LineageWay.BOTH else (direction,)
         for way in ways:
             self._walk_lineage(ctx, starts, way, depth, found, edges)
-        return self._page(ctx, "graph-lineage", found, edges, languages, limit, cursor)
+        return self._page(ctx, _LINEAGE, found, edges, languages, limit, after)
 
     @staticmethod
     def _column_starts(
@@ -824,6 +871,7 @@ class GraphService:
         wanted = _edge_kinds(kinds)
         _check_limit(limit)
         ref = parse_node(node)
+        after = _after(_NEIGHBOURS, cursor)
         ctx = self._open(p, environment, node)
         root = self._root(ctx, node, ref)
         found: dict[str, _Found] = {root: _Found(0)}
@@ -831,7 +879,7 @@ class GraphService:
         for edge, other in ctx.around(root, wanted):
             edges.add(edge)
             found.setdefault(other, _Found(1))
-        return self._page(ctx, "graph-neighbours", found, edges, languages, limit, cursor)
+        return self._page(ctx, _NEIGHBOURS, found, edges, languages, limit, after)
 
     def _page(
         self,
@@ -841,7 +889,7 @@ class GraphService:
         edges: Iterable[GraphEdge],
         languages: Sequence[str],
         limit: int,
-        cursor: str | None,
+        after: str | None,
     ) -> GraphPage:
         """Cut one page out of an answer (R7).
 
@@ -859,24 +907,17 @@ class GraphService:
             The reader's languages.
         limit
             Nodes per page.
-        cursor
-            The previous page's cursor.
+        after
+            The key the previous page's cursor holds (`_after`); `None` for the first page.
 
         Returns
         -------
         GraphPage
             The page.
-
-        Raises
-        ------
-        ValidationError
-            For a cursor this list did not issue.
         """
         order = sorted(found, key=lambda n: (found[n].distance, n))
         keys = [_key(found[n].distance, n) for n in order]
-        start = (
-            0 if cursor is None else bisect.bisect_right(keys, decode_key_cursor(list_kind, cursor))
-        )
+        start = 0 if after is None else bisect.bisect_right(keys, after)
         end = min(start + limit, len(order))
         position = {n: i for i, n in enumerate(order)}
         shown_edges = sorted(

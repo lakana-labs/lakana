@@ -227,7 +227,8 @@ def test_lineage_starts_only_at_a_table_column_or_asset(
         ),
         (
             lambda s, p: s.neighbours(p, "dev", "gold.dim_store", limit=501),
-            "limit must be between 1 and 500; got 501.",
+            "The page size must be between 1 and 500 (`limit` in the REST API, `page_size` "
+            "in the SDK); got 501.",
         ),
         (
             lambda s, p: s.neighbours(p, "dev", "gold.dim_store", kinds=["nope"]),
@@ -661,7 +662,33 @@ def test_the_time_budget_refuses_with_busy_while_walking(
     star: StarWorld, principal: PrincipalRef, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(graph_service, "_CHECK_EVERY", 1)
-    clock = itertools.chain([0.0, 0.0], itertools.repeat(100.0))
+    # Started, loaded, the visibility batch answered in time; then the walk runs out.
+    clock = itertools.chain([0.0, 0.0, 0.0], itertools.repeat(100.0))
     with pytest.raises(GraphBusyError) as caught:
         _service(star, clock=lambda: next(clock)).lineage(principal, "dev", "gold.dim_store")
     assert str(caught.value) == _BUSY
+
+
+@pytest.mark.parametrize("question", ["lineage", "neighbours"])
+@pytest.mark.parametrize("cursor", ["%%%", "eyJrIjogMX0", "eyJrIjogInRlcm1zIiwgIm4iOiAieCJ9"])
+def test_a_cursor_it_could_not_have_issued_is_refused_before_the_graph_is_read(
+    star: StarWorld, principal: PrincipalRef, question: str, cursor: str
+) -> None:
+    ask = getattr(_service(star), question)
+    refusals: list[str] = []
+
+    def refused() -> None:
+        """Ask with the cursor and note the refusal."""
+        with pytest.raises(ValidationError) as caught:
+            ask(principal, "dev", "gold.dim_store", cursor=cursor)
+        refusals.append(str(caught.value))
+
+    assert _statements(star, refused) == 0
+    assert "cursor" in refusals[0]
+
+
+def test_the_longest_cursor_fits_a_request_line() -> None:
+    longest = graph_service.encode_key_cursor(
+        "graph-lineage", f"000010|{chr(0x10FFFF) * graph_service.MAX_NODE_ID}"
+    )
+    assert len(longest) <= graph_service.MAX_GRAPH_CURSOR < 11_000

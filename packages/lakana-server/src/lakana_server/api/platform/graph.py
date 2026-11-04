@@ -14,7 +14,7 @@ from lakana_core.catalog.graph_model import (
     GraphPage,
     LineageWay,
 )
-from lakana_core.catalog.graph_service import GraphService
+from lakana_core.catalog.graph_service import MAX_GRAPH_CURSOR, GraphService
 from lakana_server.api.platform.languages import LANG_DESCRIPTION, reader_languages
 from lakana_server.api.platform.schemas import GraphEdgeOut, GraphNodeOut, GraphOut
 from lakana_server.api.responses import errors
@@ -37,7 +37,7 @@ CURSOR_DESCRIPTION = "The `next_cursor` of the previous page, sent with the same
 
 _LANG = Query(default=None, description=LANG_DESCRIPTION)
 _LIMIT = Query(default=MAX_GRAPH_PAGE, description=LIMIT_DESCRIPTION)
-_CURSOR = Query(default=None, max_length=512, description=CURSOR_DESCRIPTION)
+_CURSOR = Query(default=None, max_length=MAX_GRAPH_CURSOR, description=CURSOR_DESCRIPTION)
 _PRINCIPAL = Depends(get_principal)
 _SERVICE = Depends(get_graph_service)
 _MAIN_LANGUAGE = Depends(get_main_language)

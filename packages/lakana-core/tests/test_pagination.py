@@ -143,3 +143,17 @@ def test_a_key_cursor_round_trips_and_refuses_another_list() -> None:
         with pytest.raises(ValidationError) as caught:
             decode_key_cursor("terms", bad)
         assert str(caught.value) == _BAD_CURSOR
+
+
+def test_a_key_of_non_ascii_names_is_encoded_compactly_and_reads_back() -> None:
+    key = "\u00e9\U0001f600" * 100
+    cursor = encode_key_cursor("terms", key)
+    assert decode_key_cursor("terms", cursor) == key
+    # UTF-8: two and four bytes a pair of characters, not the 6 + 12 of JSON escapes.
+    assert len(cursor) < 4 * (len('{"k": "terms", "n": ""}') + 600) / 3 + 4
+
+
+def test_a_key_with_a_lone_surrogate_encodes_and_is_refused_on_the_way_back() -> None:
+    cursor = encode_key_cursor("terms", "a\ud800")
+    with pytest.raises(ValidationError):
+        decode_key_cursor("terms", cursor)

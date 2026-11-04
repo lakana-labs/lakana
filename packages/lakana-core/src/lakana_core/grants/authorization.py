@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import uuid
+from collections import defaultdict
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
 from sqlalchemy import or_, select
@@ -18,7 +20,11 @@ from lakana_core.auth import (
     SecurableKind,
     TaskScope,
 )
-from lakana_core.catalog.identity import resolve_environment_id, resolve_table_id
+from lakana_core.catalog.identity import (
+    resolve_environment_id,
+    resolve_table_id,
+    table_ids_in,
+)
 from lakana_core.errors import PermissionDenied, ValidationError
 from lakana_core.grants.roles import ROLE_ACTIONS
 from lakana_core.identifiers import NAMESPACE_SEPARATOR, validate_path_component
@@ -275,6 +281,94 @@ class GrantAuthorization:
             (when present) does not cover `securable`, or no grant (direct or via group
             membership) covers `action` at `securable` or an ancestor of it.
         """
+        narrowed = self._narrowed(principal, action, securable)
+        if narrowed is not None:
+            return narrowed
+        env_id, table_id = self._ids(securable)
+        return self._decide(
+            principal, action, securable, env_id, table_id, self._grants_of(principal)
+        )
+
+    def permits_each(
+        self, principal: PrincipalRef, questions: Sequence[tuple[Action, Securable]]
+    ) -> list[bool]:
+        """Answer many questions as `permits` would, at a cost that does not grow with them.
+
+        The same decision as `explain`, question by question, from one read of the principal's
+        group memberships and grants, one read of each environment's tables (`table_ids_in`)
+        and each environment's id: four statements for questions about one environment,
+        however many tables they name.
+
+        Parameters
+        ----------
+        principal
+            The actor the questions are about; a task or CI scope narrows each answer as it
+            narrows `explain`'s.
+        questions
+            ``(action, securable)`` pairs.
+
+        Returns
+        -------
+        list of bool
+            One answer per question, in order: exactly `permits(principal, action, securable)`.
+        """
+        if not questions:
+            return []
+        self._preload_table_ids(
+            securable for _, securable in questions if securable.kind == SecurableKind.TABLE
+        )
+        grants = self._grants_of(principal)
+        answers: list[bool] = []
+        for action, securable in questions:
+            decision = self._narrowed(principal, action, securable)
+            if decision is None:
+                env_id, table_id = self._ids(securable)
+                decision = self._decide(principal, action, securable, env_id, table_id, grants)
+            answers.append(decision.allowed)
+        return answers
+
+    def _preload_table_ids(self, securables: Iterable[Securable]) -> None:
+        """Resolve the ids of many tables, one statement per environment not yet read.
+
+        Parameters
+        ----------
+        securables
+            `TABLE`-kind securables.
+        """
+        wanted: defaultdict[str, set[tuple[str, str]]] = defaultdict(set)
+        for securable in securables:
+            # `Securable.table_scope` guarantees these for a TABLE-kind securable.
+            assert securable.environment is not None  # nosec B101
+            assert securable.namespace is not None  # nosec B101
+            assert securable.table is not None  # nosec B101
+            names = (securable.namespace.joined(), securable.table)
+            if (securable.environment, *names) not in self._table_id_cache:
+                wanted[securable.environment].add(names)
+        for environment, names in wanted.items():
+            found = table_ids_in(self._session, environment)
+            for namespace_joined, table in names:
+                key = (environment, namespace_joined, table)
+                self._table_id_cache[key] = found.get((namespace_joined, table))
+
+    def _narrowed(
+        self, principal: PrincipalRef, action: Action, securable: Securable
+    ) -> Decision | None:
+        """Decide what a task or CI scope decides before any grant is consulted.
+
+        Parameters
+        ----------
+        principal
+            The actor.
+        action
+            The action.
+        securable
+            The object.
+
+        Returns
+        -------
+        Decision or None
+            The scope's refusal, or the CI scope's one widening; `None` when the grants decide.
+        """
         if principal.task_scope is not None:
             try:
                 self._check_task_scope(principal, principal.task_scope, action, securable)
@@ -286,6 +380,22 @@ class GrantAuthorization:
             reason = self._ci_scope_refusal(principal, principal.ci_scope, action, securable)
             if reason is not None:
                 return Decision(allowed=False, grants=(), reason=reason)
+        return None
+
+    def _ids(self, securable: Securable) -> tuple[uuid.UUID | None, uuid.UUID | None]:
+        """Resolve a securable's environment and table ids, through this instance's caches.
+
+        Parameters
+        ----------
+        securable
+            The object.
+
+        Returns
+        -------
+        tuple
+            The environment's id (`None` without an environment or for a missing one) and the
+            table's (`None` unless a `TABLE`-kind securable names an existing table).
+        """
         env_id = (
             self._resolve_environment_id(securable.environment)
             if securable.environment is not None
@@ -302,6 +412,21 @@ class GrantAuthorization:
             table_id = self._resolve_table_id(
                 securable.environment, securable.namespace.joined(), securable.table
             )
+        return env_id, table_id
+
+    def _grants_of(self, principal: PrincipalRef) -> Sequence[Grant]:
+        """Read the principal's active grants, direct and through its groups, oldest first.
+
+        Parameters
+        ----------
+        principal
+            The actor.
+
+        Returns
+        -------
+        Sequence of Grant
+            Its grants.
+        """
         group_ids = list(
             self._session.execute(
                 select(GroupMembership.group_id).where(GroupMembership.principal_id == principal.id)
@@ -312,7 +437,7 @@ class GrantAuthorization:
         subject_filter = Grant.principal_id == principal.id
         if group_ids:
             subject_filter = or_(subject_filter, Grant.group_id.in_(group_ids))
-        grants = (
+        return (
             self._session.execute(
                 select(Grant)
                 .where(Grant.revoked_at.is_(None), subject_filter)
@@ -321,6 +446,38 @@ class GrantAuthorization:
             .scalars()
             .all()
         )
+
+    def _decide(
+        self,
+        principal: PrincipalRef,
+        action: Action,
+        securable: Securable,
+        env_id: uuid.UUID | None,
+        table_id: uuid.UUID | None,
+        grants: Sequence[Grant],
+    ) -> Decision:
+        """Decide from the principal's grants, once its scopes have not decided.
+
+        Parameters
+        ----------
+        principal
+            The actor, for the refusal's text.
+        action
+            The action.
+        securable
+            The object.
+        env_id
+            Its environment's id (`_ids`).
+        table_id
+            Its table's id (`_ids`).
+        grants
+            The principal's grants (`_grants_of`).
+
+        Returns
+        -------
+        Decision
+            Permitted with the covering grants, or refused.
+        """
         covering = tuple(
             grant
             for grant in grants

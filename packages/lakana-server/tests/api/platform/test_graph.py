@@ -19,6 +19,8 @@ from lakana_core.models import (
     JobVersion,
     Repository,
     RepositoryKind,
+    Table,
+    TableColumn,
 )
 from lakana_server.deps import get_graph_service
 from tests.conftest import AUTH_HEADER
@@ -347,7 +349,7 @@ def test_bad_parameters_are_422_with_the_next_step(client: TestClient) -> None:
         (
             "lineage",
             {"node": "gold.dim_store", "limit": 501},
-            "limit must be between 1 and 500; got 501.",
+            "The page size must be between 1 and 500 (`limit` in the REST API, `page_size` in",
         ),
         ("neighbours", {"node": "gold.dim_store", "kinds": "nope"}, "`nope` is not an edge kind."),
         ("lineage", {"node": "term:x"}, "Lineage starts at a table, a column or an asset"),
@@ -400,3 +402,30 @@ def test_a_walk_past_its_time_is_503_with_retry_after(client: TestClient) -> Non
     assert answer.json()["detail"].startswith(
         "The graph walk took longer than 10 s and was stopped."
     )
+
+
+def test_the_next_cursor_after_a_long_column_name_is_accepted(client: TestClient) -> None:
+    _star(client)
+    long_name = "a" * 300
+    _table(client, "gold", "wide", "b")
+    # Longer than the REST API takes for a new column; an older or engine-written schema has it.
+    with Session(client.app.state.engine) as session:
+        wide = session.scalars(select(Table.id).where(Table.name == "wide")).one()
+        session.add(
+            TableColumn(id=uuid.uuid4(), table_id=wide, name=long_name, type="long", position=1)
+        )
+        session.commit()
+    first = client.get(
+        f"{_GRAPH}/neighbours", headers=AUTH_HEADER, params={"node": "gold.wide", "limit": 2}
+    )
+    assert first.status_code == 200, first.text
+    assert first.json()["nodes"][-1]["name"] == f"gold.wide.{long_name}"
+    cursor = first.json()["next_cursor"]
+    assert len(cursor) > 512
+    second = client.get(
+        f"{_GRAPH}/neighbours",
+        headers=AUTH_HEADER,
+        params={"node": "gold.wide", "limit": 2, "cursor": cursor},
+    )
+    assert second.status_code == 200, second.text
+    assert [n["name"] for n in second.json()["nodes"]] == ["gold.wide.b"]

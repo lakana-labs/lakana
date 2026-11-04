@@ -103,7 +103,10 @@ NO_NODE = (
 NO_ENVIRONMENT = "Environment {env!r} does not exist. List them with 'lakana env list'."
 """Search's text, for a caller who may read environments."""
 BAD_DEPTH = "depth must be between 1 and 10; got {depth}. Ask for fewer steps, such as --depth 3."
-BAD_LIMIT = "limit must be between 1 and 500; got {limit}."
+BAD_LIMIT = (
+    "The page size must be between 1 and 500 (`limit` in the REST API, `page_size` in the SDK); "
+    "got {limit}."
+)
 BAD_EDGE_KIND = (
     "`{kind}` is not an edge kind. Use one of: builds, checks, filters, has_column, links, "
     "masks, measures, reads, references, runs."

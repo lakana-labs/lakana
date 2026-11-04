@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import enum
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from lakana_core.identifiers import NamespacePath
 
@@ -526,6 +527,59 @@ class AuthorizationService(Protocol):
             Whether `authorize` would permit this.
         """
         ...
+
+
+@runtime_checkable
+class BatchAuthorization(Protocol):
+    """An authorization service that answers many `permits` questions at once."""
+
+    def permits_each(
+        self, principal: PrincipalRef, questions: Sequence[tuple[Action, Securable]]
+    ) -> list[bool]:
+        """Answer each question exactly as `permits` would.
+
+        Parameters
+        ----------
+        principal
+            The actor the questions are about.
+        questions
+            ``(action, securable)`` pairs.
+
+        Returns
+        -------
+        list of bool
+            One answer per question, in order.
+        """
+        ...
+
+
+def permits_each(
+    authz: AuthorizationService,
+    principal: PrincipalRef,
+    questions: Sequence[tuple[Action, Securable]],
+) -> list[bool]:
+    """Answer many `permits` questions: in one go where the service can, else one by one.
+
+    A visibility filter over many objects (the metadata graph) asks this, so that the work a
+    request does to decide what its reader may see does not grow with the objects it looks at.
+
+    Parameters
+    ----------
+    authz
+        The authorization service.
+    principal
+        The actor the questions are about.
+    questions
+        ``(action, securable)`` pairs.
+
+    Returns
+    -------
+    list of bool
+        One answer per question, in order, each what `authz.permits` answers.
+    """
+    if isinstance(authz, BatchAuthorization):
+        return authz.permits_each(principal, questions)
+    return [authz.permits(principal, action, securable) for action, securable in questions]
 
 
 class AllowAllAuthorization:

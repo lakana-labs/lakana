@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import enum
+from collections import defaultdict, deque
+from collections.abc import Callable, Iterable, Mapping
 from typing import Annotated
 
 import typer
 
-from lakana._models import Graph
+from lakana._models import Graph, GraphNode
 from lakana.cli import _output
 from lakana.cli._state import CliState, resolve_environment, state_of
 
@@ -24,7 +26,12 @@ _COLUMN = Annotated[str | None, typer.Option("--column", help="A column of the t
 _NODE = Annotated[
     str, typer.Argument(help="A table's dotted name, such as gold.dim_store, or a node id.")
 ]
-_COLUMNS = ["distance", "kind", "name", "repository"]
+_COLUMNS = ["distance", "kind", "name", "label", "repository"]
+_LINEAGE_COLUMNS = ["distance", "side", "kind", "name", "label", "repository"]
+_SIDE_NOTE = (
+    "side: up feeds the start, down is fed by it, both is on a loop through it, join is "
+    "joined to a column start by a reference."
+)
 
 
 class _Direction(enum.StrEnum):
@@ -55,7 +62,80 @@ def _node(node: str, column: str | None) -> str:
     return f"column:{node.removeprefix('table:')}/{column}"
 
 
-def _show(state: CliState, graph: Graph, columns: list[str]) -> None:
+def _reached(starts: Iterable[str], ahead: Mapping[str, list[str]]) -> set[str]:
+    """Find every node reachable from the starts, the starts left out.
+
+    Parameters
+    ----------
+    starts
+        Where to begin.
+    ahead
+        Node → the nodes one step on.
+
+    Returns
+    -------
+    set of str
+        The nodes reached.
+    """
+    queue = deque(starts)
+    seen = set(queue)
+    while queue:
+        for nxt in ahead.get(queue.popleft(), ()):
+            if nxt not in seen:
+                seen.add(nxt)
+                queue.append(nxt)
+    return seen
+
+
+def _sides(graph: Graph) -> dict[str, str]:
+    """Say on which side of the start each node of a lineage answer is.
+
+    Data flows from a table into the asset that reads it (`reads`) and from an asset into the
+    table it builds (`builds`): what reaches the start along that flow is upstream, what the
+    start reaches is downstream.
+
+    Parameters
+    ----------
+    graph
+        A lineage answer, every page read.
+
+    Returns
+    -------
+    dict
+        Node id → ``start``, ``up``, ``down``, ``both`` or ``join`` (reached through a
+        reference from a column start).
+    """
+    downstream: defaultdict[str, list[str]] = defaultdict(list)
+    upstream: defaultdict[str, list[str]] = defaultdict(list)
+    for edge in graph.edges:
+        if edge.kind == "builds":
+            downstream[edge.source].append(edge.target)
+            upstream[edge.target].append(edge.source)
+        elif edge.kind == "reads":
+            downstream[edge.target].append(edge.source)
+            upstream[edge.source].append(edge.target)
+    starts = {n.id for n in graph.nodes if n.distance == 0}
+    up, down = _reached(starts, upstream), _reached(starts, downstream)
+    sides: dict[str, str] = {}
+    for node in graph.nodes:
+        if node.id in starts:
+            sides[node.id] = "start"
+        elif node.id in up and node.id in down:
+            sides[node.id] = "both"
+        elif node.id in up or node.id in down:
+            sides[node.id] = "up" if node.id in up else "down"
+        else:
+            sides[node.id] = "join"
+    return sides
+
+
+def _show(
+    state: CliState,
+    graph: Graph,
+    columns: list[str],
+    derived: Mapping[str, Callable[[GraphNode], str]] | None = None,
+    footnotes: Mapping[str, str] | None = None,
+) -> None:
     """Print a graph: its nodes as a table, or nodes and edges as JSON.
 
     Parameters
@@ -66,11 +146,22 @@ def _show(state: CliState, graph: Graph, columns: list[str]) -> None:
         The answer.
     columns
         The node fields the table shows.
+    derived
+        Columns that are not node fields, and how to read each from a node.
+    footnotes
+        A line under the table per column, explaining it.
     """
     if state.output == "json":
         _output.print_json(graph)
         return
-    _output.emit(state, list(graph.nodes), columns=columns, droppable=["repository"])
+    _output.emit(
+        state,
+        list(graph.nodes),
+        columns=columns,
+        droppable=["label", "repository"],
+        derived=derived,
+        footnotes=footnotes,
+    )
 
 
 @graph_app.command("lineage")
@@ -116,7 +207,14 @@ def lineage(
         depth=depth,
         lang=lang,
     )
-    _show(state, graph, _COLUMNS)
+    sides = _sides(graph)
+    _show(
+        state,
+        graph,
+        _LINEAGE_COLUMNS,
+        derived={"side": lambda n: sides[n.id]},
+        footnotes={"side": _SIDE_NOTE},
+    )
 
 
 @graph_app.command("neighbours")

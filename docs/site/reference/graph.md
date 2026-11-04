@@ -52,6 +52,11 @@ feeds) or both (the default). `depth` counts the assets crossed, from 1 to 10, a
 given. An asset at the start counts as 0, with the tables it reads or builds. A column starts at
 its table, plus the references that name the column and what they join it to.
 
+In the CLI's table, the `side` column says where each node lies: `up` feeds the start, `down` is
+fed by it, `both` is on a loop through it, `start` is where the walk began, and `join` is joined to
+a column start by a reference. With `-o json`, the edges say the same. Both commands show a table's
+label in the language `--lang` asks for.
+
 **Neighbours** lists what is one edge away, in either direction, optionally only edges of the
 kinds you name.
 
@@ -95,8 +100,11 @@ A job shows its edge to an asset only when you may see the asset.
 
 ## Limits and refusals
 
-- `depth` is 1 to 10 and `limit` is 1 to 500; outside them, the answer is `422` with the range.
+- `depth` is 1 to 10 and the page size (`limit` in REST, `page_size` in the SDK) is 1 to 500;
+  outside them, the answer is `422` with the range. A cursor the server did not issue for the same
+  question is refused with `422` before any work is done.
 - A question that would follow more than 200,000 edges is refused with `422`. Ask a narrower one:
   a smaller depth, one direction, or neighbours of some kinds.
-- A walk that runs longer than 10 seconds is stopped with `503` and `Retry-After`. Try again, or
-  ask a narrower question.
+- A walk that runs longer than 10 seconds is stopped with `503` and `Retry-After`. The time counts
+  everything the question does, including what it looks at and you may not see. Try again, or ask
+  a narrower question.

@@ -465,3 +465,13 @@ def test_record_denial_writes_the_reason_and_respects_the_limiter(session: Sessi
     assert [event.detail for event in events] == [
         {"action": "MANAGE_TOKEN", "reason": "not_instance_admin"}
     ]
+
+
+def test_permits_each_is_delegated_and_records_nothing(session: Session) -> None:
+    alice = _add_principal(session, "alice")
+    questions = [(Action.READ_TABLE, Securable.instance_scope())] * 2
+    allowing = AuditingAuthorization(_AllowAll(), session, DenialAuditLimiter(10_000))
+    refusing = AuditingAuthorization(_DenyAll(), session, DenialAuditLimiter(10_000))
+    assert allowing.permits_each(alice, questions) == [True, True]
+    assert refusing.permits_each(alice, questions) == [False, False]
+    assert session.scalars(select(AuditEvent)).all() == []

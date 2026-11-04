@@ -252,10 +252,13 @@ def encode_key_cursor(kind: str, key: str) -> str:
     Returns
     -------
     str
-        Unpadded base64url of ``{"k": kind, "n": key}``.
+        Unpadded base64url of the UTF-8 JSON ``{"k": kind, "n": key}``.
     """
-    body = json.dumps({"k": kind, "n": key})
-    return base64.urlsafe_b64encode(body.encode()).rstrip(b"=").decode()
+    body = json.dumps({"k": kind, "n": key}, ensure_ascii=False)
+    # UTF-8 rather than JSON escapes: a key of non-ASCII names is at most four bytes a character,
+    # not twelve. A lone surrogate, which no stored key holds, encodes as itself and reads back
+    # as a cursor that is not valid.
+    return base64.urlsafe_b64encode(body.encode("utf-8", "surrogatepass")).rstrip(b"=").decode()
 
 
 def decode_key_cursor(kind: str, cursor: str) -> str:
