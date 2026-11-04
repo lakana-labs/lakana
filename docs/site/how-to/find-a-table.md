@@ -43,7 +43,7 @@ columns before runs, runs before people and people before terms.
 
 ## Look for one kind of thing
 
-`--kind` takes `table`, `column`, `run` or `principal`:
+`--kind` takes `table`, `column`, `run`, `principal` or `term`:
 
 <!-- source: docs/examples/find-a-table/run.sh#kind -->
 ```bash
@@ -57,7 +57,7 @@ description.
 
 A table whose asset header declares a `kind` shows it in brackets after its name, as in
 `gold.dim_store [dimension]`. `--model-kind` keeps only the tables of one kind (`fact`,
-`dimension`, `wide` or `staging`) and leaves out columns, runs and people:
+`dimension`, `wide` or `staging`) and leaves out columns, runs, people and terms:
 
 <!-- source: docs/examples/find-a-table/run.sh#model-kind -->
 ```bash

@@ -71,7 +71,7 @@ text is trimmed and must be 1 to 200 characters.
 ## Ranking and paging
 
 Results are ordered by: how well the name or a label matched (0 exact, 1 starts with, 2 contains,
-3 only a description, grain or measure text matched), then the kind (tables, columns, runs, principals, terms), then the name. A match in a grain ranks as a match in the description. A synonym of a term ranks like a name, and a term's key like its name (when both match equally, `name` is reported); the term's definition ranks like a description. At one rank, an item found by its own text comes before the same kind of match through a term, and rows still tied go by the smallest term key. A table or column found by its own text and by a term is one result: the own text decides `matched`. A page has
+3 only a description, grain or measure text matched), then the kind (tables, columns, runs, principals, terms), then the name. A match in a grain ranks as a match in the description. A synonym of a term ranks like a name, and a term's key like its name (when both match equally, `name` is reported); the term's definition ranks like a description. This does not reorder different items. When the same table or column is found both by its own text and through one or more terms, it is one result, and its report is decided by the own text first, then by the smallest term key. A page has
 `limit` results (1 to 100, 20 by default) after `offset` (0 or more). Both count only what you may
 read.
 
