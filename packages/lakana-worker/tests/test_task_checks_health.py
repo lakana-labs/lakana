@@ -14,7 +14,7 @@ from check_run_helpers import (
     _results,
 )
 from sqlalchemy import select
-from task_run_helpers import World, _start, _task
+from task_run_helpers import World, _engine, _start, _task
 
 import lakana_worker.task_checks as task_checks_module
 from lakana_core.catalog.health_read import Visibility, current_signals
@@ -31,6 +31,7 @@ from lakana_core.models import (
 from lakana_core.projects.checks import CheckSpec, GeneratedFrom
 from lakana_core.projects.health_checks import health_specs
 from lakana_core.runs.checks import health_blocked
+from lakana_core.runs.tasks import Written
 
 
 def _signal(
@@ -166,21 +167,25 @@ def test_a_fired_block_signal_fails_the_task_and_sets_the_table_back(world: Worl
 
 
 def test_a_block_signal_that_did_not_fire_passes(world: World) -> None:
-    """Without a firing the check passes and names the snapshot it judged.
+    """Without a firing each check passes and names the snapshot it judged; the chain is read once.
 
     Parameters
     ----------
     world
         The world.
     """
-    _built_once_then_redeployed(world, health={"volume": "block"})
+    _built_once_then_redeployed(world, health={"volume": "block", "schema": "block"})
     _start(world)
     _drain(world)
     task = _task(world, "silver.orders")
     assert task.status is TaskStatus.SUCCEEDED
-    (result,) = _results(world, task.id)
-    assert (result.outcome, result.error) == (CheckOutcome.PASSED, None)
-    assert result.checked_snapshot_id is not None
+    results = _results(world, task.id)
+    assert sorted((r.check_name, r.outcome, r.error) for r in results) == [
+        ("silver.orders/health_schema", CheckOutcome.PASSED, None),
+        ("silver.orders/health_volume", CheckOutcome.PASSED, None),
+    ]
+    assert len({r.checked_snapshot_id for r in results}) == 1
+    assert results[0].checked_snapshot_id is not None
 
 
 def test_a_warn_signal_that_fired_does_not_stop_the_run(world: World) -> None:
@@ -224,8 +229,8 @@ def _health_spec(*columns: str) -> CheckSpec:
     return spec
 
 
-def test_the_health_result_reads_the_firings_of_the_snapshot(world: World) -> None:
-    """Every branch of `_health_result`, on seeded rows (F16).
+def test_the_health_result_reads_the_firings_of_the_own_chain(world: World) -> None:
+    """Every branch of `_health_result`, on seeded rows (F16), over the task's own chain (I-1).
 
     Parameters
     ----------
@@ -234,6 +239,7 @@ def test_the_health_result_reads_the_firings_of_the_snapshot(world: World) -> No
     """
     _outside_table(world, "bronze.events", [1])
     _signal(world, "bronze.events", "volume", snapshot=5, state="fired")
+    _signal(world, "bronze.events", "volume", snapshot=8, state="fired")
     _signal(world, "bronze.events", "range", snapshot=5, state="fired", column="price")
     _signal(
         world, "bronze.events", "range", snapshot=6, state="fired", column="qty", effect="block"
@@ -241,17 +247,21 @@ def test_the_health_result_reads_the_firings_of_the_snapshot(world: World) -> No
     _signal(world, "bronze.events", "range", snapshot=7, state="fired", column="qty")
     _signal(world, "bronze.events", "null_rate", snapshot=5, state="ok", column="price")
 
-    def judge(spec: CheckSpec, snapshot: int | None, *, table: bool = True) -> tuple:
-        """Judge one check at one snapshot.
+    def judge(
+        spec: CheckSpec, *chain: int, table: bool = True, kept: bool = True
+    ) -> tuple[CheckOutcome, str | None, int | None]:
+        """Judge one check over a chain of snapshots, the tip first.
 
         Parameters
         ----------
         spec
             The check.
-        snapshot
-            The task's own snapshot.
+        *chain
+            The task's own snapshots, the tip first.
         table
             Whether the task has a table.
+        kept
+            Whether a set-back would keep the table's signals.
 
         Returns
         -------
@@ -260,7 +270,9 @@ def test_the_health_result_reads_the_firings_of_the_snapshot(world: World) -> No
         """
         with world.session() as session:
             table_id = resolve_table_id(session, "dev", "bronze", "events") if table else None
-            return task_checks_module._health_result(session, spec, table_id, snapshot, "dev")
+            return task_checks_module._health_result(
+                session, spec, table_id, list(chain), "dev", kept=kept
+            )
 
     volume = _health_spec("volume")
     assert judge(volume, 5) == (
@@ -269,6 +281,15 @@ def test_the_health_result_reads_the_firings_of_the_snapshot(world: World) -> No
         5,
     )
     assert judge(volume, 6) == (CheckOutcome.PASSED, None, 6)  # fired at another snapshot
+    # An earlier commit of the chain fired: the check fails, naming the first that fired.
+    assert judge(volume, 9, 8, 6, 5) == (
+        CheckOutcome.FAILED,
+        health_blocked("volume", None, 5, "bronze.events", "dev"),
+        9,
+    )
+    assert judge(volume, 5, kept=False)[1] == health_blocked(
+        "volume", None, 5, "bronze.events", "dev", kept=False
+    )
     price = _health_spec("range", "price")
     assert judge(price, 5)[:2] == (
         CheckOutcome.FAILED,
@@ -277,15 +298,15 @@ def test_the_health_result_reads_the_firings_of_the_snapshot(world: World) -> No
     assert judge(_health_spec("range", "qty"), 5)[0] is CheckOutcome.PASSED
     # The whole signal: any column whose firing was recorded as blocking.
     whole = _health_spec("range")
-    assert judge(whole, 6) == (
+    assert judge(whole, 7, 6) == (
         CheckOutcome.FAILED,
         health_blocked("range", None, 6, "bronze.events", "dev"),
-        6,
+        7,
     )
     assert judge(whole, 7) == (CheckOutcome.PASSED, None, 7)  # only a warning column fired
     assert judge(_health_spec("null_rate"), 5) == (CheckOutcome.PASSED, None, 5)
     # Nothing to judge: no snapshot, no table, or a check that names no signal.
-    assert judge(volume, None) == (CheckOutcome.PASSED, None, None)
+    assert judge(volume) == (CheckOutcome.PASSED, None, None)
     assert judge(volume, 5, table=False) == (CheckOutcome.PASSED, None, 5)
     unnamed = CheckSpec(
         name="bronze.events/health_x",
@@ -298,6 +319,28 @@ def test_the_health_result_reads_the_firings_of_the_snapshot(world: World) -> No
         generated=GeneratedFrom("health", ()),
     )
     assert judge(unnamed, 5) == (CheckOutcome.PASSED, None, 5)
+
+
+def test_the_own_chain_falls_back_to_the_tip(world: World) -> None:
+    """Without a tip nothing is judged; without its metadata or the tip in it, the tip alone.
+
+    Parameters
+    ----------
+    world
+        The world.
+    """
+    _outside_table(world, "bronze.events", [1])
+    engine = _engine(world)
+    with world.session() as session:
+        table_id = resolve_table_id(session, "dev", "bronze", "events")
+        assert table_id is not None
+        own = task_checks_module._own_chain
+        assert own(session, engine, "dev", None) == []
+        assert own(session, engine, "dev", Written(table_id, None, None, publishes=False)) == []
+        gone = Written(uuid.uuid4(), None, 7, publishes=False)
+        assert own(session, engine, "dev", gone) == [7]  # no such table
+        expired = Written(table_id, None, 4711, publishes=False)
+        assert own(session, engine, "dev", expired) == [4711]  # not in the metadata
 
 
 def test_the_log_line_of_a_failed_health_check_is_its_text() -> None:

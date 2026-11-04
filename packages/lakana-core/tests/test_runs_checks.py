@@ -1787,6 +1787,13 @@ def test_the_text_of_a_fired_health_check_names_no_value_and_the_way_out() -> No
     column = health_blocked("range", "price", 7, "silver.station_temperatures", "dev")
     assert column.startswith("health signal range of price fired at snapshot 7; ")
     assert column.endswith("health: {range: {price: warn}} in the asset header")
+    first = health_blocked("volume", None, 7, "silver.station_temperatures", "dev", kept=False)
+    assert first == (
+        "health signal volume fired at snapshot 7; this first build is not published, so its "
+        "health signals are not kept; fix the data the asset reads, or let such data through "
+        "with health: {volume: warn} in the asset header"
+    )
+    assert "--signals" not in first
     odd = health_blocked("range", "pr\u00efce", 7, "silver.station_temperatures", "dev")
     assert "range of pr\\xefce fired" in odd and "{range: {pr\\xefce: warn}}" in odd
 

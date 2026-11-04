@@ -486,6 +486,37 @@ def _storable(*values: object) -> bool:
     return True
 
 
+def own_chain(metadata: TableMetadata, after: int | None, until: int | None) -> list[int]:
+    """List the snapshots from a tip back to, not including, the one before them.
+
+    The chain a task run wrote: what a set-back takes out of ``main`` (`forget_set_back`), and
+    what a blocking health check judges (`lakana_worker.task_checks._health_result`).
+
+    Parameters
+    ----------
+    metadata
+        The table's metadata, holding the tip.
+    after
+        The tip; `None` gives nothing.
+    until
+        The snapshot before the chain, which is not part of it; `None` walks every ancestor.
+
+    Returns
+    -------
+    list of int
+        The tip first, then each parent; empty when the tip is not in the metadata.
+    """
+    chain: list[int] = []
+    snapshot = None if after is None else metadata.snapshot_by_id(after)
+    while (
+        snapshot is not None and snapshot.snapshot_id != until and snapshot.snapshot_id not in chain
+    ):
+        chain.append(snapshot.snapshot_id)
+        parent = snapshot.parent_snapshot_id
+        snapshot = None if parent is None else metadata.snapshot_by_id(parent)
+    return chain
+
+
 def forget_set_back(
     session: Session,
     table_id: uuid.UUID,
@@ -518,14 +549,7 @@ def forget_set_back(
         The snapshot ``main`` goes back to, whose rows stay; `None` when ``main`` is removed and
         every ancestor of `after` goes.
     """
-    gone: list[int] = []
-    snapshot = None if after is None else metadata.snapshot_by_id(after)
-    while (
-        snapshot is not None and snapshot.snapshot_id != until and snapshot.snapshot_id not in gone
-    ):
-        gone.append(snapshot.snapshot_id)
-        parent = snapshot.parent_snapshot_id
-        snapshot = None if parent is None else metadata.snapshot_by_id(parent)
+    gone = own_chain(metadata, after, until)
     rows = (TableHealthSignal.table_id == table_id, TableHealthSignal.snapshot_id.in_(gone))
     if until is None:
         statement = delete(TableHealthSignal).where(*rows)

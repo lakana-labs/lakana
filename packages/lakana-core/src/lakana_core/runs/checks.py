@@ -166,7 +166,8 @@ HEALTH_BLOCKED = (
     "fix the data the asset reads, or let such data through with health: {setting} in the asset "
     "header"
 )
-"""The `error` of a blocking health check whose signal fired (`health_blocked`).
+"""The `error` of a blocking health check whose signal fired (`health_blocked`), when the
+set-back keeps the table's signals in the history, marked.
 
 It names no value: every reader of the run reads it, in the task's message and its log, and a
 reader of the run need not be one the health route shows the values to (a column mask or a row
@@ -657,8 +658,23 @@ def _rows(count: int | None) -> str:
     return "1 row" if count == 1 else f"{count or 0} rows"
 
 
+HEALTH_BLOCKED_FIRST_BUILD = (
+    "health signal {what} fired at snapshot {snapshot}; this first build is not published, so "
+    "its health signals are not kept; fix the data the asset reads, or let such data through "
+    "with health: {setting} in the asset header"
+)
+"""The `error` of a fired blocking health check whose set-back leaves the table not published:
+its rows are deleted (`health_record.forget_set_back`), so no command shows them."""
+
+
 def health_blocked(
-    signal: str, column: str | None, snapshot: int, table: str, environment: str
+    signal: str,
+    column: str | None,
+    snapshot: int,
+    table: str,
+    environment: str,
+    *,
+    kept: bool = True,
 ) -> str:
     """Word the `error` of a blocking health check whose signal fired.
 
@@ -674,18 +690,22 @@ def health_blocked(
         The checked table.
     environment
         The environment's name.
+    kept
+        Whether the set-back keeps the table's signals; `False` for a build that leaves the
+        table not published, whose signals are deleted.
 
     Returns
     -------
     str
-        `HEALTH_BLOCKED`, names escaped; the setting that lets such data through is the check's
-        own: ``{volume: warn}``, or ``{range: {price: warn}}`` for one column.
+        `HEALTH_BLOCKED` (`HEALTH_BLOCKED_FIRST_BUILD` when not `kept`), names escaped; the
+        setting that lets such data through is the check's own: ``{volume: warn}``, or
+        ``{range: {price: warn}}`` for one column.
     """
     what = signal if column is None else f"{signal} of {shown(column)}"
     setting = (
         f"{{{signal}: warn}}" if column is None else f"{{{signal}: {{{shown(column)}: warn}}}}"
     )
-    return HEALTH_BLOCKED.format(
+    return (HEALTH_BLOCKED if kept else HEALTH_BLOCKED_FIRST_BUILD).format(
         what=what,
         snapshot=snapshot,
         table=shown(table),

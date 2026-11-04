@@ -1543,6 +1543,33 @@ def test_runs_show_group_states(tmp_path: Path) -> None:
     assert _words(kept)[0] == "silver.orders FAILED 0 of 1 checks passed, kept after a failed check"
 
 
+def test_runs_show_gives_a_failed_health_checks_text_in_place_of_rows(tmp_path: Path) -> None:
+    """A health check counts no rows: its text says what fired.
+
+    Parameters
+    ----------
+    tmp_path
+        Pytest's per-test directory.
+    """
+    lines = _show(
+        tmp_path,
+        _checked(
+            "silver.t",
+            result_body(
+                "health_volume",
+                table="silver.t",
+                outcome="failed",
+                failing_rows=None,
+                error="health signal volume fired at snapshot 7",
+            ),
+        ),
+    )
+    assert _words(lines) == [
+        "silver.t FAILED 0 of 1 checks passed",
+        "health_volume FAILED health signal volume fired at snapshot 7",
+    ]
+
+
 def test_runs_show_names_a_check_task_plainly_when_the_server_cannot_tell_its_kind(
     tmp_path: Path,
 ) -> None:

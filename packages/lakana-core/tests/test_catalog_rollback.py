@@ -33,6 +33,7 @@ from sqlalchemy.orm import Session
 from lakana_core.audit.service import AuditService
 from lakana_core.auth import Action, AllowAllAuthorization, PrincipalRef, RunContext, Securable
 from lakana_core.catalog import service as service_module
+from lakana_core.catalog.health_record import own_chain
 from lakana_core.catalog.json_schema import ColumnSpec
 from lakana_core.catalog.service import CatalogService, Rollback, failed_snapshot_tag
 from lakana_core.catalog.writes import WriteResult
@@ -497,6 +498,31 @@ def test_a_set_back_marks_the_health_signals_of_the_snapshots_it_sets_back(
     assert _roll_back(catalog, principal, task, written).outcome is RollbackOutcome.ROLLED_BACK
     assert _health_snapshots(session) == {before}
     assert _health_snapshots(session, set_back=True) == {middle, after}
+
+
+def test_the_own_chain_walks_from_the_tip_to_the_snapshot_before(
+    session: Session, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    """`own_chain` is the walk both the set-back and the blocking health check use.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    principal
+        The writer.
+    tmp_path
+        Storage root.
+    """
+    catalog = _catalog(session, principal, tmp_path)
+    before = _write(catalog, principal, _orders([1], ["eu"]), WriteMode.CREATE).snapshot_id
+    middle = _write(catalog, principal, _orders([2], ["eu"]), WriteMode.APPEND).snapshot_id
+    after = _write(catalog, principal, _orders([3], ["us"]), WriteMode.APPEND).snapshot_id
+    metadata = _stored_metadata(session)
+    assert own_chain(metadata, after, before) == [after, middle]
+    assert own_chain(metadata, after, None) == [after, middle, before]
+    assert own_chain(metadata, None, before) == []
+    assert own_chain(metadata, 4711, None) == []
 
 
 def test_a_first_build_that_is_set_back_keeps_no_health_signals(

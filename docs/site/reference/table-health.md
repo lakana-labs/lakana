@@ -179,20 +179,27 @@ effects:
 
 **When a signal blocks.** Each `block` entry of a table adds one check to the table's task, named
 `health_<signal>` (`health_range__price` for one column), marked generated like the checks of the
-asset's header. It reads no rows: after the write, it looks at whether the signal fired at the
-snapshot the run wrote. `null_rate: block` or `range: block` fails when any column whose effect is
-`block` fired. When the signal fired, the check fails, the table is set back, and nothing
-downstream is built, as for any failed blocking check. The task's message, its log and
-`lakana check list` give the check's text, which names no value, because everyone who may read the
-run reads it:
+asset's header. It reads no rows: after the write, it looks at whether the signal fired at any
+snapshot the run wrote (a Python asset that commits several times has every commit judged, not only
+the last). `null_rate: block` or `range: block` fails when any column whose effect is `block`
+fired. When the signal fired, the check fails, the table is set back, and nothing downstream is
+built, as for any failed blocking check. The run's failure message, the check's line in
+`lakana runs show` and the task's log (`lakana runs logs`) give the check's text, which names no
+value, because everyone who may read the run reads it:
 
 > Check `gold.orders/health_volume` failed: health signal volume fired at snapshot 4711; `lakana table health gold.orders --env prod --signals` shows its usual band and new value to readers who may see them; fix the data the asset reads, or let such data through with health: {volume: warn} in the asset header (assets/gold/orders.sql).
 
 The history shows the band and the value to those a mask or filter does not hide them from (see
 [Who sees what](#who-sees-what)). `lakana check rows` of such a check says that it reads no rows and
-names the same command. A signal that fired without `block` never stops a run, and a signal that
-was not computed (`no_history`, `no_metrics`) never blocks. A view or an artifact never gets such a
-check.
+names the same command. A first build that is set back is not published and keeps no signals, so
+its text says so instead of naming the history:
+`… fired at snapshot 4711; this first build is not published, so its health signals are not kept;
+fix the data the asset reads, or let such data through with health: {volume: warn} in the asset
+header`. A signal that fired without `block` never stops a run, and a signal that was not computed
+(`no_history`, `no_metrics`) never blocks. A view or an artifact never gets such a check. Which
+signals block comes from the deployment the run started with; for `null_rate: block` and
+`range: block`, which columns block comes from the effects of the current deployment, so a deploy
+that lands while the run is going decides those.
 
 Write `health:` in the asset's `/* lakana … */` block, or as `health=` in `@asset(...)`: `off` for
 every signal, or a mapping of signals to an effect. `null_rate` and `range` may instead name single

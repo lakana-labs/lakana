@@ -36,7 +36,7 @@ after the write on its last attempt, or in a run that is cancelled, is followed 
 that only sets the table back (`set_back_only`): it builds and checks nothing.
 
 A check of family `health` (`projects.health_checks`, from `health: {signal: block}`) counts
-nothing: `_health_result` reads whether the signal fired at the snapshot of the task's write, and
+nothing: `_health_result` reads whether the signal fired at any snapshot the task run wrote, and
 a firing fails the check with a text that names no value, since every reader of the run reads it.
 
 What such a rollback undoes is the task run's own chain of writes and nothing else. The
@@ -61,6 +61,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from lakana_core.auth import PrincipalRef, RunContext
+from lakana_core.catalog.health_record import own_chain
 from lakana_core.catalog.health_signals import COLUMN_SIGNALS
 from lakana_core.catalog.identity import resolve_table_id, resolve_table_with_note
 from lakana_core.catalog.metadata import read_metadata
@@ -399,17 +400,74 @@ def _counted_outcome(spec: CheckSpec, rows: int) -> CheckOutcome:
     return CheckOutcome.WARNED if spec.on_failure == "warn" else CheckOutcome.FAILED
 
 
+def _own_chain(
+    session: Session, engine: RunEngine, environment: str, written: Written | None
+) -> list[int]:
+    """List the snapshots the task run wrote, its tip first.
+
+    A Python asset can commit several times; each commit records the signals of its own
+    snapshot, so a blocking health check judges every one, not only the tip.
+
+    Parameters
+    ----------
+    session
+        Database session; rolled back afterwards.
+    engine
+        The run engine, for the storage.
+    environment
+        The run's environment.
+    written
+        The task run's written record; `None` when it wrote nothing.
+
+    Returns
+    -------
+    list of int
+        `health_record.own_chain` from `Written.snapshot_after` back to `Written.snapshot_before`;
+        the tip alone when the table's metadata no longer holds it (expired) or the table is not
+        a managed one; empty without a tip.
+
+    Raises
+    ------
+    Exception
+        Whatever reading the metadata raises: the check phase then runs again
+        (`check_phase`), it never passes a check it could not judge.
+    """
+    if written is None or written.snapshot_after is None:
+        return []
+    try:
+        row = session.get(Table, written.table_id)
+        if row is None or row.table_type is not TableType.ICEBERG or row.metadata_location is None:
+            return [written.snapshot_after]
+        resolved = StorageResolver(session, engine.key_provider).for_environment(environment)
+        metadata = read_metadata(resolved.file_io, row.metadata_location)
+    finally:
+        session.rollback()
+    return own_chain(metadata, written.snapshot_after, written.snapshot_before) or [
+        written.snapshot_after
+    ]
+
+
 def _health_result(
     session: Session,
     spec: CheckSpec,
     table_id: uuid.UUID | None,
-    snapshot: int | None,
+    chain: Sequence[int],
     environment: str,
+    *,
+    kept: bool,
 ) -> tuple[CheckOutcome, str | None, int | None]:
-    """Judge a blocking health check by the signals recorded for the task's own snapshot.
+    """Judge a blocking health check by the signals recorded for the task's own snapshots.
 
-    The commit that wrote the snapshot recorded its signals in the same transaction, so they
-    are there when the check phase runs.
+    Each commit recorded the signals of its snapshot in its own transaction, so they are there
+    when the check phase runs.
+
+    The whole of a column signal (`range: block`) asks for a firing recorded as ``block``, so a
+    column with its own ``warn`` (`range: {qty: warn}`) does not stop the run; a table signal
+    or a single column's check asks only that it fired, since the spec already says ``block``.
+    The effect a row records comes from the table's effects (`tables.health_effects`), written
+    from the current deployment, while the spec comes from the run's project version; the two
+    differ only when a deploy lands during the run, and then the current deployment decides
+    for the whole of a column signal.
 
     Parameters
     ----------
@@ -419,44 +477,48 @@ def _health_result(
         The health check (`projects.health_checks.health_specs`).
     table_id
         The task's table, or `None` when it has none.
-    snapshot
-        The snapshot of the task's write (`Written.snapshot_after`), or `None` without one.
+    chain
+        The snapshots the task run wrote, the tip first (`_own_chain`); empty without any.
     environment
         The environment's name, for the text.
+    kept
+        Whether a set-back keeps the table's signals, marked; `False` for a write that a
+        set-back leaves not published, whose signals are deleted.
 
     Returns
     -------
     tuple
-        The outcome, the error and the snapshot judged: ``failed`` with `health_blocked` when
-        the signal fired there (for a check of a whole column signal, in any column whose
-        firing was recorded as blocking); else ``passed``, no text, and the snapshot. A signal
-        that was not computed (no row, ``no_metrics``) passes: only a firing blocks.
+        The outcome, the error and the snapshot judged (the tip): ``failed`` with
+        `health_blocked`, naming the first snapshot of the chain where the signal fired;
+        else ``passed`` and no text. A signal that was not computed (no row, ``no_metrics``)
+        passes: only a firing blocks.
     """
+    tip = chain[0] if chain else None
     names = () if spec.generated is None else spec.generated.columns
-    if snapshot is None or table_id is None or not names:
-        return CheckOutcome.PASSED, None, snapshot
+    if tip is None or table_id is None or not names:
+        return CheckOutcome.PASSED, None, tip
     signal, column = names[0], (names[1] if len(names) > 1 else None)
-    query = select(TableHealthSignal.id).where(
+    query = select(TableHealthSignal.snapshot_id).where(
         TableHealthSignal.table_id == table_id,
-        TableHealthSignal.snapshot_id == snapshot,
+        TableHealthSignal.snapshot_id.in_(list(chain)),
         TableHealthSignal.signal == signal,
         TableHealthSignal.state == "fired",
     )
     if column is not None:
         query = query.where(TableHealthSignal.column_name == column)
     elif signal in COLUMN_SIGNALS:
-        # Columns of their own effect (`range: {qty: warn}`) only warn.
         query = query.where(TableHealthSignal.effect == "block")
     else:
         query = query.where(TableHealthSignal.column_name.is_(None))
-    fired = session.scalars(query.limit(1)).first()
+    fired = set(session.scalars(query))
     session.rollback()
-    if fired is None:
-        return CheckOutcome.PASSED, None, snapshot
+    first = next((snapshot for snapshot in reversed(chain) if snapshot in fired), None)
+    if first is None:
+        return CheckOutcome.PASSED, None, tip
     return (
         CheckOutcome.FAILED,
-        health_blocked(signal, column, snapshot, spec.table, environment),
-        snapshot,
+        health_blocked(signal, column, first, spec.table, environment, kept=kept),
+        tip,
     )
 
 
@@ -1563,6 +1625,8 @@ def _checks_under(
             )
         )
         specs.append(stand_in)
+    # The snapshots the task run wrote, read once for its health checks.
+    chain: list[int] | None = None
     for spec in specs:
         started = db_now(session)
         session.rollback()
@@ -1571,12 +1635,18 @@ def _checks_under(
             counted, outcome, error = None, CheckOutcome.ERRORED, refusals[spec.name]
         elif spec.generated is not None and spec.generated.family == HEALTH_FAMILY:
             counted = None
+            if chain is None:
+                chain = _own_chain(session, engine, phase.environment, written)
             outcome, error, health_snapshot = _health_result(
                 session,
                 spec,
                 table_id,
-                None if written is None else written.snapshot_after,
+                chain,
                 phase.environment,
+                # A set-back that leaves the table not published deletes its signals.
+                kept=written is not None
+                and not written.publishes
+                and written.snapshot_before is not None,
             )
         elif phase.active:
             counted, outcome, error = _count_one(

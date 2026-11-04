@@ -118,6 +118,7 @@ from lakana_core.models import (
     Secret,
     SecretUseKind,
     Table,
+    TableHealthSignal,
     TableType,
     TaskRun,
     TaskStatus,
@@ -5142,6 +5143,114 @@ def test_a_python_asset_that_replaced_a_table_is_set_back_when_its_check_fails(
         assert loaded.metadata.current_snapshot_id == written.snapshot_before
     assert _task(py.world, "gold.scores").status is TaskStatus.FAILED
     assert _marked_by(py) is None
+
+
+def _blocks_on_volume(py: PyWorld) -> None:
+    """Give `gold.scores` `health: {volume: block}`, and eight past volumes of 1,000 rows.
+
+    Parameters
+    ----------
+    py
+        The world; the table exists.
+    """
+    with py.world.session() as session:
+        version = session.get(JobVersion, py.world.version_id)
+        assert version is not None
+        version.manifest_json = {
+            **version.manifest_json,
+            "assets": [
+                {**entry, "health": {"volume": "block"}}
+                if entry["table"] == "gold.scores"
+                else entry
+                for entry in version.manifest_json["assets"]
+            ],
+        }
+        table = session.scalars(select(Table).where(Table.name == "scores")).one()
+        environment_id = session.scalars(
+            select(Environment.id).where(Environment.name == "dev")
+        ).one()
+        for day in range(8):
+            session.add(
+                TableHealthSignal(
+                    id=uuid.uuid4(),
+                    environment_id=environment_id,
+                    table_id=table.id,
+                    signal="volume",
+                    column_name=None,
+                    snapshot_id=day + 1,
+                    observed={"added": 1_000, "total": 1_000},
+                    band=None,
+                    state="ok",
+                    effect="warn",
+                    observed_at=datetime(2026, 10, 1, tzinfo=UTC) + timedelta(days=day),
+                )
+            )
+        session.commit()
+
+
+def test_a_fired_block_signal_of_an_earlier_commit_sets_the_python_asset_back(
+    py: PyWorld,
+) -> None:
+    """Every snapshot of the task's own chain is judged, not only its tip (I-1).
+
+    The first commit replaces the table with 3 rows, far below the usual 1,000, and fires
+    `volume`; the second appends 1,000 rows, a usual volume, and does not. The task fails, and
+    the table is set back to the rows of the run before.
+
+    Parameters
+    ----------
+    py
+        The world.
+    """
+    engine = py.engine(_writer(py.world, rows=1))
+    run_claimed(engine, py.claim_python(engine))
+    with py.world.session() as session:
+        scheduler_tick(session, datetime.now(UTC), lambda: 0.5)
+    _blocks_on_volume(py)
+    world = py.world
+
+    def script(task: PythonTask, on_log: Callable[[bytes], None], stop: StopSignal) -> RunOutcome:
+        first = _upload(world, task, rows=3)
+        parsed = parse_token(task.token, "lakana_task")
+        assert parsed is not None
+        with world.session() as session:
+            principal = TaskTokenService(session, AllowAllAuthorization()).verify(*parsed).principal
+            tip = CatalogService(session, StorageResolver(session), AllowAllAuthorization()).append(
+                principal,
+                TableRef.from_dotted("dev", task.table),
+                pa.table({"id": pa.array(list(range(1_000)), pa.int64())}),
+                expected_snapshot_id=first.snapshot_id,
+            )
+        return RunOutcome(succeeded=True, snapshot_id=tip.snapshot_id, rows=1_003)
+
+    engine = py.engine(script)
+    claimed = py.claim_python(engine)
+    assert claimed.has_checks
+
+    run_claimed(engine, claimed)
+
+    task = _task(py.world, "gold.scores")
+    assert task.status is TaskStatus.FAILED
+    with py.world.session() as session:
+        (result,) = results_of_task(session, claimed.task_run_id)
+        assert (result.check_name, result.outcome, result.rollback_outcome) == (
+            "gold.scores/health_volume",
+            CheckOutcome.FAILED,
+            RollbackOutcome.ROLLED_BACK,
+        )
+        fired = session.scalars(
+            select(TableHealthSignal).where(TableHealthSignal.state == "fired")
+        ).one()
+        assert result.error is not None
+        assert f"fired at snapshot {fired.snapshot_id};" in result.error
+        assert fired.snapshot_id != result.checked_snapshot_id  # not the tip
+        assert fired.set_back_at is not None
+        loaded = CatalogService(
+            session, StorageResolver(session), AllowAllAuthorization()
+        ).load_table(py.world.admin, TableRef.from_dotted("dev", "gold.scores"))
+        current = loaded.metadata.current_snapshot()
+        assert current is not None and current.summary is not None
+        assert current.summary["total-records"] == "1"
 
 
 @pytest.mark.parametrize("passes", [True, False])
