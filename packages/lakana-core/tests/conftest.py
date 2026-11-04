@@ -7,12 +7,14 @@ Plain helper functions and classes live in `core_test_helpers.py`, not here
 import datetime
 import uuid
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
+from graph_test_helpers import StarWorld, build_star
 from sqlalchemy.orm import Session
 
 from lakana_core.auth import AllowAllAuthorization, PrincipalRef
@@ -115,3 +117,24 @@ def test_ca_pem() -> str:
         .sign(key, hashes.SHA256())
     )
     return certificate.public_bytes(serialization.Encoding.PEM).decode("ascii")
+
+
+@pytest.fixture
+def star(session: Session, tmp_path: Path, principal: PrincipalRef) -> StarWorld:
+    """Provide the star schema of `graph_test_helpers`.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    tmp_path
+        Storage root.
+    principal
+        The creating principal.
+
+    Returns
+    -------
+    StarWorld
+        The world.
+    """
+    return build_star(session, tmp_path, principal)
