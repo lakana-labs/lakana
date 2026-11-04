@@ -357,10 +357,7 @@ def join_path(
         _output.print_json(answer)
         return
     inline = _output.inline
-    if not answer.paths:
-        _output.emit(state, inline(answer.reason or "", 500))
-        return
-    lines: list[str] = []
+    lines: list[str] = [] if answer.paths else [inline(answer.reason or "", 500)]
     for number, path in enumerate(answer.paths, start=1):
         lines.append(f"Path {number}:")
         for s in path.steps:

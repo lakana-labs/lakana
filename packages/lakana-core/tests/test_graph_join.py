@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Callable
 
 import pytest
 from graph_test_helpers import Grants, StarWorld, asset_entry, point
 from graph_test_helpers import graph_service_for as _service
-from sqlalchemy import select
+from sqlalchemy import delete, event, select
 
 from lakana_core.auth import PrincipalRef
 from lakana_core.catalog.descriptions import sync_project_descriptions
@@ -317,3 +318,70 @@ def test_the_same_table_by_id_and_by_name_is_refused(
     hidden = _service(star, Grants({"gold.dim_date"}))
     with pytest.raises(NotFoundError):  # a hidden table twice reads as missing, not the same
         hidden.join_path(principal, "dev", "gold.dim_store", "gold.dim_store")
+
+
+def _statements(star: StarWorld, ask: Callable[[], object]) -> int:
+    """Count the SQL statements a question issues.
+
+    Parameters
+    ----------
+    star
+        The world.
+    ask
+        The question.
+
+    Returns
+    -------
+    int
+        How many statements reached the database.
+    """
+    seen: list[object] = []
+
+    def count(*args: object) -> None:
+        """Note one statement.
+
+        Parameters
+        ----------
+        *args
+            What SQLAlchemy passes.
+        """
+        seen.append(args)
+
+    engine = star.session.get_bind()
+    event.listen(engine, "before_cursor_execute", count)
+    try:
+        ask()
+    finally:
+        event.remove(engine, "before_cursor_execute", count)
+    return len(seen)
+
+
+def test_columns_are_read_per_level_not_per_table(star: StarWorld, principal: PrincipalRef) -> None:
+    def no_path() -> object:
+        answer = _service(star).join_path(principal, "dev", "gold.hub", "bronze.stores_raw")
+        assert answer.paths == ()
+        return answer
+
+    _chain(star, "few", {f"gold.f{i:02d}": [("h", "gold.hub", "id")] for i in range(3)})
+    few = _statements(star, no_path)
+    _chain(star, "more", {f"gold.f{i:02d}": [("h", "gold.hub", "id")] for i in range(3, 30)})
+    assert _statements(star, no_path) == few
+
+
+def test_a_reference_whose_column_is_gone_is_followed_neither_way(
+    star: StarWorld, principal: PrincipalRef
+) -> None:
+    _chain(star, "gone", {"gold.p": [("q_id", "gold.q", "id")]})
+    there = _service(star).join_path(principal, "dev", "gold.p", "gold.q")
+    assert len(there.paths) == 1
+    star.session.execute(
+        delete(TableColumn).where(
+            TableColumn.table_id == star.table_id("gold.p"), TableColumn.name == "q_id"
+        )
+    )
+    star.session.commit()
+    ways = [
+        _service(star).join_path(principal, "dev", a, b)
+        for a, b in (("gold.p", "gold.q"), ("gold.q", "gold.p"))
+    ]
+    assert [(w.paths, w.reason is not None) for w in ways] == [((), True), ((), True)]

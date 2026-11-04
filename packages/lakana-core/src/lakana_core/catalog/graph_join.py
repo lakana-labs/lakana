@@ -1,10 +1,11 @@
 """How two tables join over declared references: the metadata graph's `join-path` (#374, Q3).
 
 A step follows a reference in either direction. From the table that declares it to its target it
-is `many_to_one`; back the other way it is `one_to_many` and fans out. A self-reference, and a
-reference to a table that does not exist, is never a step. Every path of minimal length, at most
-`MAX_JOIN_HOPS` steps, is found, in the order of its references' ids, and at most
-`MAX_JOIN_PATHS` are returned, with a flag when more exist.
+is `many_to_one`; back the other way it is `one_to_many` and fans out. A self-reference, a
+reference to a table that does not exist, and a reference whose own column is gone are never a
+step. Every path of minimal length, at most `MAX_JOIN_HOPS` steps, is found, in the order of its
+references' ids, and at most `MAX_JOIN_PATHS` are returned, with a flag when more exist. Columns
+are read in one batch per level of the search, never one table at a time.
 
 References come only from `_Context.around`, so a path never runs through a table or a
 reference the reader may not see (a reference needs both its table and its target readable, R3),
@@ -17,7 +18,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from lakana_core.catalog.graph_load import ReferenceRecord
 from lakana_core.catalog.graph_model import (
@@ -73,7 +74,7 @@ class JoinStep:
     to_name: str
     from_columns: tuple[str, ...]
     to_columns: tuple[str, ...]
-    direction: str
+    direction: Literal["many_to_one", "one_to_many"]
     fans_out: bool
     from_model_kind: str | None
     from_grain: str | None
@@ -152,40 +153,54 @@ def _record(ctx: _Context, node_id: str) -> ReferenceRecord:
     return record
 
 
-def _hops(ctx: _Context, table_id: uuid.UUID) -> list[Hop]:
-    """List the visible references a step may follow from a table.
+def _level_hops(ctx: _Context, tables: list[uuid.UUID]) -> dict[uuid.UUID, list[Hop]]:
+    """List the visible references a step may follow from each table of one level.
 
     Back along a reference, the table is its target (the `references` edge to the table). Along
     one, a column of the table declares it (the `references` edge to the column), and its target
-    table exists.
+    table exists. Either way the reference's own column must exist, as impact requires, so a
+    reference whose column is gone is followed in neither direction. The columns of the level's
+    tables and of the tables the references back come from are read in one batch first, so a
+    level costs one statement (per 500 tables) however wide it is.
 
     Parameters
     ----------
     ctx
         The request's context.
-    table_id
-        The table; visible to the reader.
+    tables
+        The level's tables; visible to the reader.
 
     Returns
     -------
-    list of Hop
-        The hops, in reference-id order.
+    dict
+        Table → its hops, in reference-id order.
     """
-    table = table_node(table_id)
-    hops: list[Hop] = []
-    for _, node in ctx.around(table, (EdgeKind.REFERENCES,)):
-        record = _record(ctx, node)
-        if record.source_table_id != table_id:
-            hops.append(Hop(record, record.source_table_id, False))
-    for _, column in ctx.around(table, (EdgeKind.HAS_COLUMN,)):
-        for _, node in ctx.around(column, (EdgeKind.REFERENCES,)):
-            record = _record(ctx, node)
-            if column != column_node(record.source_table_id, record.source_column):
-                continue  # the column is this reference's target, not its source
-            target = ctx.graph.table_ids.get(record.target_name)
-            if target is not None and target != table_id:
-                hops.append(Hop(record, target, True))
-    return sorted(hops, key=lambda h: h.reference.id)
+    back = {
+        table_id: [
+            _record(ctx, n) for _, n in ctx.around(table_node(table_id), (EdgeKind.REFERENCES,))
+        ]
+        for table_id in tables
+    }
+    sources = {r.source_table_id for records in back.values() for r in records}
+    ctx.graph.preload_columns({*tables, *sources})
+    hops: dict[uuid.UUID, list[Hop]] = {}
+    for table_id in tables:
+        found = [
+            Hop(record, record.source_table_id, False)
+            for record in back[table_id]
+            if record.source_table_id != table_id
+            and ctx.graph.exists(column_node(record.source_table_id, record.source_column))
+        ]
+        for _, column in ctx.around(table_node(table_id), (EdgeKind.HAS_COLUMN,)):
+            for _, node in ctx.around(column, (EdgeKind.REFERENCES,)):
+                record = _record(ctx, node)
+                if column != column_node(record.source_table_id, record.source_column):
+                    continue  # the column is this reference's target, not its source
+                target = ctx.graph.table_ids.get(record.target_name)
+                if target is not None and target != table_id:
+                    found.append(Hop(record, target, True))
+        hops[table_id] = sorted(found, key=lambda h: h.reference.id)
+    return hops
 
 
 def shortest_paths(
@@ -218,8 +233,8 @@ def shortest_paths(
     hops: dict[uuid.UUID, list[Hop]] = {}
     while levels[-1] and len(levels) <= MAX_JOIN_HOPS and goal not in distance:
         reached: set[uuid.UUID] = set()
+        hops.update(_level_hops(ctx, levels[-1]))
         for table in levels[-1]:
-            hops[table] = _hops(ctx, table)
             for hop in hops[table]:
                 if hop.to_table not in distance:
                     distance[hop.to_table] = len(levels)
