@@ -95,7 +95,9 @@ found by then is the answer, and `has_more` says only whether a further result w
 candidate is one matching row, not one result: a table found by its name or header texts is one
 candidate, and each matching translation of it one more, so a table found by its name and two
 translations is three candidates, and the two repeats count against the 5,000 like a result you
-may not read. So a short, common text can miss results, also for a caller who
+may not read. A term is at most two candidates (its main-language texts and its translations), and
+a table or column found through terms one more, however many terms link it and however many of
+their words match. So a short, common text can miss results, also for a caller who
 may read everything; a longer or more exact text finds them.
 
 ## REST

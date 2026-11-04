@@ -1115,14 +1115,52 @@ def _glossary_arms(
     """
     selects: list[_Candidates] = []
     if SearchKind.TERM in wanted:
-        selects.append(_terms(match, environment_id))
+        selects.append(_best_per_item(_terms(match, environment_id), "f1"))
         if languages:
-            selects.append(_term_translations(match, environment_id, languages, main_language))
+            translated = _term_translations(match, environment_id, languages, main_language)
+            selects.append(_best_per_item(translated, "f1"))
     if SearchKind.TABLE in wanted:
-        selects.append(_tables_by_term(match, environment_id, model_kind, languages, main_language))
+        tables = _tables_by_term(match, environment_id, model_kind, languages, main_language)
+        selects.append(_best_per_item(tables, "f1", "f2", "f3"))
     if SearchKind.COLUMN in wanted:
-        selects.append(_columns_by_term(match, environment_id, languages, main_language))
+        columns = _columns_by_term(match, environment_id, languages, main_language)
+        selects.append(_best_per_item(columns, "f1", "f2", "f3"))
     return selects
+
+
+def _best_per_item(arm: _Candidates, *identity: str) -> _Candidates:
+    """Keep only the best row of each item that a glossary arm finds.
+
+    A term is one row per matching synonym, and a table or column found by terms one row per
+    linking term and matching word, so without this a glossary author could fill the bounded
+    scan (`MAX_SCANNED`) with one item and push every result after it out unseen. The row kept
+    is the one the union's order would put first, so the hit is the same as before.
+
+    Parameters
+    ----------
+    arm
+        A candidate select of the union's columns.
+    *identity
+        The payload columns that name one item, as the scan's deduplication names it.
+
+    Returns
+    -------
+    Select
+        The same columns, one row per item.
+    """
+    best = (
+        func.row_number()
+        .over(
+            partition_by=[arm.selected_columns[name] for name in identity],
+            order_by=[
+                arm.selected_columns[name] for name in ("rank", "sort_source", "f7", "f3", "f4")
+            ],
+        )
+        .label("best")
+    )
+    ranked = arm.add_columns(best).subquery()
+    columns = [ranked.c[c.key] for c in arm.selected_columns if c.key is not None]
+    return type_cast("_Candidates", select(*columns).where(ranked.c.best == 1))
 
 
 def _language_place(language: _Expr, languages: Sequence[str]) -> ColumnElement[int]:

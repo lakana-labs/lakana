@@ -1485,7 +1485,7 @@ def test_rows_that_tie_on_rank_and_item_are_ordered_by_the_tie_breaks(world: Wor
     finally:
         event.remove(engine, "before_cursor_execute", _keep)
     ranked = next(s for s in statements if "ORDER BY hits.rank" in s)
-    order = " ".join(ranked.split("ORDER BY", 1)[1].split()).split(" LIMIT")[0]
+    order = " ".join(ranked.rsplit("ORDER BY", 1)[1].split()).split(" LIMIT")[0]
     assert order.startswith("hits.rank, hits.kind_order, hits.sort_name, hits.sort_id, ")
     assert order.endswith("hits.by_term, hits.sort_source, hits.f7, hits.f3, hits.f4"), order
 
@@ -1502,3 +1502,25 @@ def test_a_columns_translated_label_wins_over_a_term_at_the_same_rank(world: Wor
         "fr",
         None,
     )
+
+
+def test_many_terms_on_one_column_do_not_crowd_another_column_out_of_the_scan(
+    world: World,
+) -> None:
+    """Each item is one candidate of the bounded scan, however many terms and words find it."""
+    order_id = {"silver.orders": ["order_id"]}
+    _deploy(
+        world,
+        {
+            f"k{i:03d}": _linked(f"Kz {i}", [f"sal {j}" for j in range(20)], order_id)
+            for i in range(250)
+        },
+    )
+
+    found = world.search(world.bob, "sal", kind=SearchKind.COLUMN, limit=10)
+
+    assert [(h.name, h.matched, h.term) for h in found.results] == [
+        ("silver.orders.order_id", "term", "k000"),
+        ("silver.payroll.salary", "name", None),
+    ]
+    assert found.has_more is False
