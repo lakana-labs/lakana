@@ -149,6 +149,7 @@ def test_a_view_is_listed_with_its_kind_sql_and_references(client: TestClient) -
             "label_source": None,
             "label_language": None,
             "description_language": None,
+            "terms": [],
         }
     ]
     assert {(t["name"], t["kind"]) for t in listed.json()} == {("daily", "TABLE"), ("v", "VIEW")}
