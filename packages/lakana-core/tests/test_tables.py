@@ -1395,7 +1395,7 @@ def test_commit_refuses_a_snapshot_number_outside_the_iceberg_range(
 def test_commit_refuses_a_sequence_number_not_above_the_tables_last(
     catalog: CatalogService, principal: PrincipalRef, tmp_path: Path
 ) -> None:
-    """On a format v2 table a new snapshot must take a sequence number above the last one.
+    """On a format v2 or later table a new snapshot must take a sequence number above the last one.
 
     Parameters
     ----------

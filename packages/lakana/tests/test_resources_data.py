@@ -3341,3 +3341,45 @@ def test_tables_get_reads_no_markers_from_an_older_server() -> None:
     )
     assert (table.label, table.label_language, table.translations) == (None, None, ())
     assert table.language == table.main_language == "en"
+
+
+def test_tables_get_carries_the_health_effects_and_the_keys_naming_no_column() -> None:
+    """`Table.health` and `Table.health_missing` parse; an older server's body has neither."""
+    bodies: list[dict[str, Any]] = [
+        {"health": {"range.pricee": "off", "volume": "block"}, "health_missing": ["range.pricee"]},
+        {},
+        {"health": ["volume"], "health_missing": "range.pricee"},
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        """Answer with the next body.
+
+        Parameters
+        ----------
+        request
+            The request.
+
+        Returns
+        -------
+        httpx.Response
+            A `TableOut` body.
+        """
+        return httpx.Response(
+            200,
+            json={
+                "name": "sales",
+                "namespace": "bronze",
+                "uuid": "u1",
+                "metadata_location": None,
+                "schema": [],
+                **bodies.pop(0),
+            },
+        )
+
+    tables = Tables(_transport(handler))
+    full, bare, odd = (tables.get("dev", "bronze.sales") for _ in range(3))
+
+    assert full.health == {"range.pricee": "off", "volume": "block"}
+    assert full.health_missing == ("range.pricee",)
+    assert (bare.health, bare.health_missing) == ({}, ())
+    assert (odd.health, odd.health_missing) == ({}, ())

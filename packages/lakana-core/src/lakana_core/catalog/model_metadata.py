@@ -293,8 +293,8 @@ def clear_removed_models(
 
     Called by a deploy and a rollback, in their transaction, next to
     `sync_project_descriptions`. A table in `previous` but not in `current` that has a row in
-    the environment loses its model columns, its reference rows and its measure rows; its
-    descriptions stay.
+    the environment loses its model columns, its health effects, its reference rows and its
+    measure rows; its descriptions stay.
     Nothing is committed.
 
     Parameters
@@ -314,6 +314,7 @@ def clear_removed_models(
             continue
         had_measures = row.model_kind in MEASURED_KINDS
         row.model_kind = row.model_grain = row.model_key = None
+        row.health_effects = None
         for found in session.scalars(
             select(DeclaredReference).where(DeclaredReference.source_table_id == row.id)
         ):

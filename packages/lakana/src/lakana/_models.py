@@ -601,6 +601,12 @@ class Table:
     terms
         The glossary terms that link the table itself; ``()`` from a server older than the
         glossary, and without ``READ_ENVIRONMENT``.
+    health
+        The effects of the asset's `health:` that differ from `warn`, by ``signal`` or
+        ``signal.column``; empty when every signal warns, and from a server older than health
+        effects.
+    health_missing
+        The keys of `health` whose column the table does not have; such an entry has no effect.
     """
 
     name: str
@@ -632,6 +638,8 @@ class Table:
     main_language: str = "en"
     translations: tuple[TranslationCoverage, ...] = ()
     terms: tuple[TermRef, ...] = ()
+    health: dict[str, str] = field(default_factory=dict)
+    health_missing: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

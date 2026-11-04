@@ -555,3 +555,25 @@ def test_metadata_that_cannot_be_read_hides_a_masked_readers_values(
     assert (note["observed"], note["values_hidden"]) == (None, True)
     volume = next(s for s in signals if s["signal"] == "volume")
     assert volume["observed"] == {"added": 3, "total": 3}
+
+
+def test_a_table_shows_its_effects_that_differ_from_warn(client: TestClient) -> None:
+    """`health` holds the stored effects, `health_missing` the keys naming no column of it.
+
+    Parameters
+    ----------
+    client
+        The test client.
+    """
+    _table(client)
+    _table(client, "plain")
+    with Session(client.app.state.engine) as session:
+        row = session.get(Table, _table_id(client))
+        assert row is not None
+        row.health_effects = {"null_rate.notes": "off", "volume": "block"}
+        session.commit()
+    detail = client.get(f"{_TABLES}/t", headers=AUTH_HEADER).json()
+    assert detail["health"] == {"null_rate.notes": "off", "volume": "block"}
+    assert detail["health_missing"] == ["null_rate.notes"]
+    plain = client.get(f"{_TABLES}/plain", headers=AUTH_HEADER).json()
+    assert (plain["health"], plain["health_missing"]) == ({}, [])

@@ -8,6 +8,7 @@ import sys
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import cast
 
 import pyarrow as pa
 import pytest
@@ -863,4 +864,77 @@ def test_a_value_json_cannot_store_becomes_no_metrics(observed: dict, band: dict
     )
     assert [(r.signal, r.column_name, r.state, r.effect, r.observed, r.band) for r in rows] == [
         ("range", "price", "no_metrics", "block", None, None)
+    ]
+
+
+def test_the_tables_effects_switch_signals_off_and_mark_block(
+    catalog: CatalogService, session: Session, principal: PrincipalRef
+) -> None:
+    """The row's stored effects decide what each recorded signal does.
+
+    Parameters
+    ----------
+    catalog
+        The catalog.
+    session
+        Database session.
+    principal
+        The writer.
+    """
+    table = session.get(Table, _table_id(session))
+    assert table is not None
+    table.health_effects = {"range": "off", "volume": "block", "null_rate.status": "off"}
+    session.commit()
+    catalog.append(principal, _ORDERS, _rows([1, 2]))
+    assert _signals(session) == [
+        ("null_rate", "id", "no_history", "warn"),
+        ("null_rate", "status", "off", "off"),
+        ("range", None, "off", "off"),
+        ("schema", None, "ok", "warn"),
+        ("volume", None, "no_history", "block"),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("stored", "volume"),
+    [
+        ({"volume": "loud", "range": "off"}, ("volume", None, "no_history", "warn")),
+        (["volume"], ("volume", None, "no_history", "warn")),
+    ],
+)
+def test_garbled_stored_effects_read_as_warn_and_are_logged(
+    catalog: CatalogService,
+    session: Session,
+    principal: PrincipalRef,
+    caplog: pytest.LogCaptureFixture,
+    stored: object,
+    volume: tuple[str, None, str, str],
+) -> None:
+    """Effects the code does not understand never fail the commit: they warn, and say so.
+
+    Parameters
+    ----------
+    catalog
+        The catalog.
+    session
+        Database session.
+    principal
+        The writer.
+    caplog
+        Captures the log.
+    stored
+        What the row holds: a map with an unknown effect, or not a map at all.
+    volume
+        The volume signal recorded.
+    """
+    table = session.get(Table, _table_id(session))
+    assert table is not None
+    table.health_effects = cast("dict[str, str]", stored)
+    session.commit()
+    with caplog.at_level(logging.WARNING, logger="lakana_core.catalog.service"):
+        catalog.append(principal, _ORDERS, _rows([1, 2]))
+    assert volume in _signals(session)
+    assert [r.getMessage() for r in caplog.records if "health" in r.getMessage()] == [
+        "silver.orders: its stored health effects are not all understood; "
+        "the ones that are not read as warn"
     ]

@@ -729,6 +729,12 @@ class TableDescription:
         without ``READ_ENVIRONMENT``.
     column_terms
         Column name → the terms that link it.
+    health
+        The effects of `health:` that differ from `warn`, by ``signal`` or ``signal.column``,
+        sorted by key; empty for the defaults and for every kind but a managed table.
+    health_missing
+        The keys of `health` whose column the table does not have (a ``SELECT *`` or Python
+        asset, whose columns the deploy cannot check); such an entry has no effect.
     """
 
     ref: TableRef
@@ -764,6 +770,34 @@ class TableDescription:
     translations: tuple[LanguageCoverage, ...] = ()
     terms: tuple[TermRef, ...] = ()
     column_terms: Mapping[str, tuple[TermRef, ...]] = dataclass_field(default_factory=dict)
+    health: dict[str, str] = dataclass_field(default_factory=dict)
+    health_missing: tuple[str, ...] = ()
+
+
+def _stored_effects(row: Table, dotted: str) -> HealthEffects:
+    """Read a table's stored health effects, never failing on what the code does not understand.
+
+    Parameters
+    ----------
+    row
+        The table.
+    dotted
+        Its dotted name, for the log.
+
+    Returns
+    -------
+    HealthEffects
+        The valid entries; anything else reads as `warn`, and is logged.
+    """
+    raw = row.health_effects
+    effects = HealthEffects.from_flat(raw)
+    if raw is not None and (not isinstance(raw, Mapping) or len(effects.entries) != len(raw)):
+        logger.warning(
+            "%s: its stored health effects are not all understood; the ones that are not "
+            "read as warn",
+            dotted,
+        )
+    return effects
 
 
 _NO_UNPUBLISHING = (
@@ -2760,21 +2794,6 @@ class CatalogService:
         # learn about them first.
         target = prepared.resolved.confine_to_root(target)
         written = write_metadata(prepared.resolved.file_io, metadata, target)
-        health = (
-            self._health_rows(
-                ref,
-                table_id=prepared.table_id,
-                environment_id=prepared.environment_id,
-                before=None,
-                after=metadata,
-                snapshots=metadata.snapshots,
-                file_io=prepared.resolved.file_io,
-                effects=HealthEffects.default(),
-                new_table=True,
-            )
-            if metadata.current_snapshot_id is not None
-            else []
-        )
         row = Table(
             id=prepared.table_id,
             namespace_id=prepared.namespace_id,
@@ -2788,6 +2807,21 @@ class CatalogService:
         sync_created_table(self._session, prepared.environment_id, row, ref.dotted())
         # Read now: after the commit the row is expired, and reading it would cost a statement.
         text_language = row.text_language
+        health = (
+            self._health_rows(
+                ref,
+                table_id=prepared.table_id,
+                environment_id=prepared.environment_id,
+                before=None,
+                after=metadata,
+                snapshots=metadata.snapshots,
+                file_io=prepared.resolved.file_io,
+                effects=_stored_effects(row, ref.dotted()),
+                new_table=True,
+            )
+            if metadata.current_snapshot_id is not None
+            else []
+        )
         sync_table_columns(self._session, row.id, from_iceberg_schema(metadata.schema()))
         try:
             self._session.flush()  # a name collision raises here, and SQLite's write lock is held
@@ -4069,12 +4103,18 @@ class CatalogService:
         elif row.kept_run_id is not None:
             state, message = "kept", kept_message(row, shown_kept_check(self._session, row, hides))
         stats = snapshot_stats(loaded.metadata)
+        health = _stored_effects(row, ref.dotted()).flat()
+        names = {f.name for f in loaded.metadata.schema().fields}
         return TableDescription(
             ref=ref,
             id=row.id,
             kind=row.kind,
             metadata_location=loaded.metadata_location,
             columns=from_iceberg_schema(loaded.metadata.schema()),
+            health=health,
+            health_missing=tuple(
+                key for key in health if "." in key and key.partition(".")[2] not in names
+            ),
             snapshot_id=loaded.metadata.current_snapshot_id,
             state=state,
             state_message=message,
@@ -4771,8 +4811,8 @@ class CatalogService:
             refuses; if `updates` includes an `AddSnapshotUpdate` whose
             `snapshot.manifest_list` does not lie under the table's own
             location, whose snapshot id or sequence number lies outside 0 to 2^63-1, or
-            whose sequence number on a format v2 table is not above the table's last or is above
-            it by more than one per snapshot the commit adds; if a
+            whose sequence number on a format v2 or later table is not above the table's
+            last or is above it by more than one per snapshot the commit adds; if a
             snapshot the commit adds names a data file that is not Parquet, cannot be read, or
             has no Iceberg field ids
             (`field_ids.check_added_files_have_field_ids`; also if there are more than 2,000 such
@@ -4845,6 +4885,7 @@ class CatalogService:
         table_id = row.id
         environment_id = namespace.environment_id
         unpublished = row.unpublished_run_id is not None
+        effects = _stored_effects(row, ref.dotted())
         expected = row.metadata_location
         if expected_metadata_location is not None and expected != expected_metadata_location:
             raise ConflictError(f"{ref.dotted()} changed since the update was prepared.")
@@ -5003,7 +5044,7 @@ class CatalogService:
                 after=updated,
                 snapshots=[u.snapshot for u in updates if isinstance(u, AddSnapshotUpdate)],
                 file_io=resolved.file_io,
-                effects=HealthEffects.default(),
+                effects=effects,
                 files=checked_files,
             )
             if not maintenance

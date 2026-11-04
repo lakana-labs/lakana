@@ -1004,6 +1004,13 @@ class TableOut(BaseModel):
     terms
         The glossary terms that link the table itself, in the reader's language; empty without
         ``READ_ENVIRONMENT`` on the environment.
+    health
+        The effects of the asset's `health:` that differ from `warn`, by ``signal`` or
+        ``signal.column`` (``range.price``), sorted by key; empty when every signal warns, and
+        for every kind but a managed table.
+    health_missing
+        The keys of `health` whose column the table does not have: the deploy cannot check the
+        columns of a ``SELECT *`` or Python asset. Such an entry has no effect.
     """
 
     name: str
@@ -1035,6 +1042,8 @@ class TableOut(BaseModel):
     main_language: str = "en"
     translations: list[TranslationCoverageOut] = Field(default_factory=list)
     terms: list[TermRefOut] = []
+    health: dict[str, str] = {}
+    health_missing: list[str] = []
 
 
 class LastMaintenanceOut(BaseModel):

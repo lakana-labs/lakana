@@ -197,6 +197,17 @@ Write `off` unquoted or quoted; `on`, `yes` and `true` are not effects. A deploy
 | ``health: range names column price, which gold.orders does not have (columns: order_id); fix the name or remove it`` | A column the table's `SELECT` does not return. |
 | ``health: does not apply to a view, which has no snapshots to watch; remove it, or materialize the asset as a table`` | `health:` on a view. |
 
+The deploy checks a column only when it knows the asset's columns: from a SQL asset's column
+list. For a `SELECT *` and for a Python asset it cannot; an entry for a column the table does not
+have then has no effect, and `lakana table get` marks it, as in
+`range of pricee off (no such column)`.
+
+The effects apply to a managed table from the next deploy on, or from its creation when a run
+creates it after the deploy. A table that no asset builds, or whose asset the deploy removed, uses
+the defaults: every signal warns. `lakana table get NAME` lists every effect that is not the
+default `warn`, in the order of its keys, as in
+`Health (not the default warn): range of price off, volume block`.
+
 A project in which a table declares `health:` (in the asset or as a default in `lakana.yaml`)
 deploys manifest version 14. Upgrade the workers before you deploy it: a worker of an earlier
 release refuses that manifest. A project without `health:` keeps its version.
@@ -276,7 +287,8 @@ The answer is `{"items": [...], "next_cursor": ...}`; `next_cursor` is `null` on
 | `lakana table health NAME --days N` | The same with the readers of the last N days. |
 | `lakana table health NAME --signals` | Lists the history of the health signals, newest first. Narrow it with `--signal S`, `--column C` and `--days N`; page with `--limit N` and `--cursor X`. |
 | `lakana table health NAME --output json` | Every field of the answer as JSON. |
-| `lakana table get NAME --output json` | Includes `last_write_at`, `row_count`, `size_bytes` and `file_count`. |
+| `lakana table get NAME` | Lists the effects of `health:` that are not the default `warn`, and marks one that names a column the table does not have. |
+| `lakana table get NAME --output json` | Includes `last_write_at`, `row_count`, `size_bytes`, `file_count`, `health` (the effects that are not `warn`, by `signal` or `signal.column`) and `health_missing` (the keys of `health` that name a column the table does not have). |
 
 Without a right to see the grants the command says that the readers are not shown, and why.
 
@@ -286,7 +298,9 @@ Without a right to see the grants the command says that the readers are not show
 `days`, `last_maintenance` (a `LastMaintenance` or `None`), `checks` (a list of `CheckHealth`) and
 `readers` (a list of `Reader`, or `None`). `Table.last_write_at`, `Table.row_count`,
 `Table.size_bytes` and `Table.file_count` hold the numbers of the snapshot; they are `None` for a
-server that is older than table health.
+server that is older than table health. `Table.health` holds the effects that are not `warn` (empty when
+every signal warns, and from an older server), `Table.health_missing` the keys of it that name a
+column the table does not have.
 
 `client.tables.health(...).signals` is a list of `HealthSignal`, or `None` from a server older
 than signals. `client.tables.health_signals(environment, "namespace.table", days=None, signal=None,

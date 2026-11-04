@@ -389,6 +389,7 @@ def _table_from_json(data: dict[str, Any]) -> Table:
     Table
         The parsed table.
     """
+    missing = data.get("health_missing")
     return Table(
         name=data["name"],
         namespace=data["namespace"],
@@ -438,7 +439,29 @@ def _table_from_json(data: dict[str, Any]) -> Table:
             for c in data.get("translations", [])
         ),
         terms=_terms_from_json(data.get("terms")),
+        health=_effects_from_json(data.get("health")),
+        health_missing=tuple(k for k in missing if isinstance(k, str))
+        if isinstance(missing, list)
+        else (),
     )
+
+
+def _effects_from_json(value: object) -> dict[str, str]:
+    """Read a table's non-default health effects from the response body.
+
+    Parameters
+    ----------
+    value
+        The body's `health`; absent from an older server.
+
+    Returns
+    -------
+    dict
+        The entries whose key and effect are text; empty for anything else.
+    """
+    if not isinstance(value, dict):
+        return {}
+    return {k: v for k, v in value.items() if isinstance(k, str) and isinstance(v, str)}
 
 
 def _terms_from_json(items: list[dict[str, str]] | None) -> tuple[TermRef, ...]:

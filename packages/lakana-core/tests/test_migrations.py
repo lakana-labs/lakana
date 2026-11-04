@@ -5029,3 +5029,59 @@ def test_0063_adds_the_health_signals_table_and_downgrades_cleanly(
         assert "table_health_signals" not in inspect(engine).get_table_names()
     finally:
         engine.dispose()
+
+
+_REVISION_0064 = "d6f0a2b4c8e9"
+
+
+@pytest.mark.usefixtures("_without_fsync")
+def test_0064_adds_the_health_effects_and_the_signal_of_a_delivery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Revision `0064`: `tables.health_effects`, `notification_deliveries.health_signal_id`.
+
+    The delivery's column has a foreign key to `table_health_signals` and is unique together
+    with `job`; the downgrade removes both columns.
+
+    Parameters
+    ----------
+    tmp_path
+        Holds the throwaway SQLite file.
+    monkeypatch
+        Points `lakana_core.config.Settings` at that file.
+    """
+    db_path = tmp_path / "migrated.db"
+    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    config = Config(str(ALEMBIC_INI))
+    command.upgrade(config, _REVISION_0064)
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        inspector = inspect(engine)
+        assert "health_effects" in {c["name"] for c in inspector.get_columns("tables")}
+        assert "health_signal_id" in {
+            c["name"] for c in inspector.get_columns("notification_deliveries")
+        }
+        assert {
+            (f["referred_table"], f["options"].get("ondelete"))
+            for f in inspector.get_foreign_keys("notification_deliveries")
+            if f["constrained_columns"] == ["health_signal_id"]
+        } == {("table_health_signals", "CASCADE")}
+        assert {
+            u["name"]: u["column_names"]
+            for u in inspector.get_unique_constraints("notification_deliveries")
+        }["uq_notification_deliveries_health_signal_id_job"] == ["health_signal_id", "job"]
+    finally:
+        engine.dispose()
+    command.downgrade(config, _REVISION_0063)
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        inspector = inspect(engine)
+        assert "health_effects" not in {c["name"] for c in inspector.get_columns("tables")}
+        assert "health_signal_id" not in {
+            c["name"] for c in inspector.get_columns("notification_deliveries")
+        }
+        assert "uq_notification_deliveries_health_signal_id_job" not in {
+            u["name"] for u in inspector.get_unique_constraints("notification_deliveries")
+        }
+    finally:
+        engine.dispose()

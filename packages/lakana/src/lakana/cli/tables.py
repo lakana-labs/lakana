@@ -498,7 +498,9 @@ def get(ctx: typer.Context, name: str, lang: _LANG = None, env: _ENV = None) -> 
 
     A table whose first build did not finish, or failed a check, is shown as `not published`;
     one that keeps the data that failed a check (`on_failure: keep`), as `kept`. A table that
-    its retention lets expire within the server's warning window says when.
+    its retention lets expire within the server's warning window says when. A table whose
+    `health:` differs from the default `warn` lists those effects, and marks one that names a
+    column the table does not have.
     An artifact is shown with its name and a pointer to `lakana artifact versions list`.
 
     Parameters
@@ -555,6 +557,13 @@ def get(ctx: typer.Context, name: str, lang: _LANG = None, env: _ENV = None) -> 
     _emit_terms(state, table)
     if table.model is not None:
         _emit_model(state, table)
+    if table.health:
+        listed = ", ".join(
+            f"{key.replace('.', ' of ', 1)} {effect}"
+            + (" (no such column)" if key in table.health_missing else "")
+            for key, effect in table.health.items()
+        )
+        _output.emit(state, _output.inline(f"Health (not the default warn): {listed}"))
 
 
 def _hidden_outgoing(count: int) -> str:

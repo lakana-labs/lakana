@@ -2694,3 +2694,66 @@ def test_table_list_passes_lang(tmp_path: Path) -> None:
     )
     assert result.exit_code == 0, result.stderr
     assert dict(api.requests[-1].url.params) == {"lang": "de"}
+
+
+def _get_with_health(tmp_path: Path, health: dict[str, str], missing: list[str]) -> str:
+    """Run `lakana table get` on a table with the given effects.
+
+    Parameters
+    ----------
+    tmp_path
+        The CLI's home.
+    health
+        The body's `health`.
+    missing
+        The body's `health_missing`.
+
+    Returns
+    -------
+    str
+        The plain output.
+    """
+    api = FakeApi()
+    api.on(
+        "GET",
+        f"{_BASE}/sales",
+        json={**_TABLE, "health": health, "health_missing": missing},
+    )
+    result = invoke(make_state(tmp_path, api), "table", "get", "bronze.sales", "--env", "dev")
+    assert result.exit_code == 0, result.stderr
+    return _plain(result.stdout)
+
+
+def test_table_get_lists_the_effects_that_differ_from_warn(tmp_path: Path) -> None:
+    """The non-default effects in stored order, `signal.column` as `signal of column`.
+
+    Parameters
+    ----------
+    tmp_path
+        The CLI's home.
+    """
+    shown = _get_with_health(tmp_path, {"range.price": "off", "volume": "block"}, [])
+    assert "Health (not the default warn): range of price off, volume block" in shown
+
+
+def test_table_get_marks_an_effect_on_a_column_the_table_does_not_have(tmp_path: Path) -> None:
+    """An entry naming no column of the table says so.
+
+    Parameters
+    ----------
+    tmp_path
+        The CLI's home.
+    """
+    shown = _get_with_health(tmp_path, {"range.pricee": "off"}, ["range.pricee"])
+    assert "Health (not the default warn): range of pricee off (no such column)" in shown
+
+
+def test_table_get_without_effects_prints_no_health_line(tmp_path: Path) -> None:
+    """Every signal warns: no `Health` line.
+
+    Parameters
+    ----------
+    tmp_path
+        The CLI's home.
+    """
+    assert "Health (not the default warn)" not in _get_with_health(tmp_path, {}, [])
