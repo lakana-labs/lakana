@@ -56,12 +56,48 @@ def _repository(star: StarWorld, name: str) -> Repository:
     return repo
 
 
+def _reference(star: StarWorld, source: str, column: str, target_column: str) -> None:
+    """Declare a reference from a column of the star to a column of `gold.dim_store`.
+
+    Parameters
+    ----------
+    star
+        The world.
+    source
+        The referencing table.
+    column
+        Its referencing column.
+    target_column
+        The column of `gold.dim_store` it points at.
+    """
+    star.session.add(
+        DeclaredReference(
+            id=uuid.uuid4(),
+            environment_id=star.env_id,
+            source_table_id=star.table_id(source),
+            source_column=column,
+            target_name="gold.dim_store",
+            target_column=target_column,
+        )
+    )
+    star.session.flush()
+
+
 def test_impact_of_a_dimension_key_lists_every_dependent_with_its_reason(
     star: StarWorld, principal: PrincipalRef
 ) -> None:
     star.add_row_filter(principal, "gold.dim_store")
     page = _service(star).impact(principal, "dev", "gold.dim_store", key=True)
     assert _listed(page) == KEY_IMPACT
+    # A table that references the key without reading the dimension is listed by its reference.
+    _reference(star, "gold.dim_date", "year", "store_id")
+    via = "references gold.dim_store.store_id"
+    page = _service(star).impact(principal, "dev", "gold.dim_store", key=True)
+    assert _listed(page) == KEY_IMPACT | {
+        (NodeKind.REFERENCE, "gold.dim_date.year → gold.dim_store.store_id", via, False),
+        (NodeKind.COLUMN, "gold.dim_date.year", via, False),
+        (_T, "gold.dim_date", via, False),
+    }
     ids = {n.id for n in page.nodes}
     assert all(e.source in ids and e.target in ids for e in page.edges)
     distances = {n.name: n.distance for n in page.nodes if n.kind is not _A}
@@ -91,7 +127,10 @@ def test_impact_of_a_fact_table_lists_its_measure_policy_checks_terms_and_job(
     } <= _listed(page)
     # The generated check hangs on the table as well as on its reference: the shorter way counts.
     assert next(n for n in page.nodes if n.name == "gold.fact_sales/ref_date").distance == 1
-    mask = _listed(_service(star).impact(principal, "dev", "gold.dim_store"))
+    whole = _service(star).impact(principal, "dev", "gold.dim_store").nodes
+    # The reference hangs on the table too (distance 1), so its check is one further, not three.
+    assert next(n for n in whole if n.name == "gold.fact_sales/ref_store_id").distance == 2
+    mask = {(n.kind, n.name, n.reason, n.may_use) for n in whole}
     assert (
         NodeKind.COLUMN_MASK,
         "column mask on gold.dim_store.store_name",
@@ -119,17 +158,7 @@ def test_impact_of_a_table_lists_a_term_on_it_and_a_reference_to_a_missing_colum
         shops.id,
         {"version": 13, "main_language": "en", "glossary": glossary},
     )
-    star.session.add(
-        DeclaredReference(
-            id=uuid.uuid4(),
-            environment_id=star.env_id,
-            source_table_id=star.table_id("silver.sales"),
-            source_column="store_id",
-            target_name="gold.dim_store",
-            target_column="nope",
-        )
-    )
-    star.session.flush()
+    _reference(star, "silver.sales", "store_id", "nope")
     nope = (
         NodeKind.REFERENCE,
         "silver.sales.store_id → gold.dim_store.nope",
@@ -138,7 +167,13 @@ def test_impact_of_a_table_lists_a_term_on_it_and_a_reference_to_a_missing_colum
     )
     shop = (NodeKind.TERM, "shop", "links gold.dim_store", False)
     whole = _listed(_service(star).impact(principal, "dev", "gold.dim_store"))
-    assert {nope, shop} <= whole
+    via = "references gold.dim_store.nope"
+    assert {
+        nope,
+        shop,
+        (NodeKind.COLUMN, "silver.sales.store_id", via, False),
+        (_T, "silver.sales", via, False),
+    } <= whole
     key = _listed(_service(star).impact(principal, "dev", "gold.dim_store", key=True))
     assert not {n for n in key if n[1] in (nope[1], shop[1])}
 

@@ -87,7 +87,13 @@ KEY_IMPACT: frozenset[tuple[NodeKind, str, str | None, bool]] = frozenset(
         ),
         (NodeKind.ASSET, "gold.dim_store", "builds gold.dim_store", False),
         (NodeKind.ASSET, "gold.fact_sales", "downstream of gold.dim_store", True),
-        (NodeKind.TABLE, "gold.fact_sales", "downstream of gold.dim_store", True),
+        (
+            NodeKind.COLUMN,
+            "gold.fact_sales.store_id",
+            "references gold.dim_store.store_id",
+            False,
+        ),
+        (NodeKind.TABLE, "gold.fact_sales", "references gold.dim_store.store_id", False),
         (NodeKind.JOB, "sales/nightly", "runs gold.fact_sales", True),
     }
 )

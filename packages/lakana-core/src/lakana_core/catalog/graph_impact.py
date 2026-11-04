@@ -2,7 +2,7 @@
 
 Everything declared that depends on the start is listed, each with a reason:
 
-- references to it, and their generated `ref_` checks;
+- references to it, their generated `ref_` checks, and the columns and tables that declare them;
 - measures, masks and glossary terms on its columns;
 - its checks and row filters, and glossary terms on the table;
 - the asset that builds it;
@@ -17,13 +17,19 @@ The walk goes only through `_Context.around`, so it is cut at every node the rea
 and the budget counts it as it counts lineage. A reason names only the start, a table the walk
 reached, or the other end of a visible reference or asset; never a hidden node.
 
-Only the start table's columns are read (one statement, `has_column`): every other edge the walk
-follows leads to a record, an asset or a table, none of which reads columns.
+Columns are read for the start table (`has_column`) and, in one batch, for the tables that declare
+the references found (to tell their columns exist); every other edge leads to a record, an asset
+or a table, none of which reads columns. So a question costs the same statements however many
+tables it reaches.
+
+Distances are settled last, breadth first over the answer's own edges, so a node met again by a
+shorter way passes the shorter distance on to what lies beyond it.
 """
 
 from __future__ import annotations
 
-from collections import deque
+import uuid
+from collections import defaultdict, deque
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -32,6 +38,7 @@ from lakana_core.catalog.graph_model import (
     EdgeKind,
     GraphEdge,
     NodeKind,
+    column_node,
     node_kind,
     table_node,
     table_part,
@@ -171,9 +178,72 @@ def impact_of(ctx: _Context, root: str, *, key: bool) -> tuple[dict[str, Hit], s
     for column in columns:
         _on_column(ctx, answer, column, dotted, base)
     _on_table(ctx, answer, table, dotted, subject)
+    _referencing_tables(ctx, answer, table_id)
     _downstream(ctx, answer, table, may_use=subject is not None)
     _jobs(ctx, answer)
+    _settle(answer, [table, root])
     return answer.hits, answer.edges
+
+
+def _referencing_tables(ctx: _Context, answer: _Answer, table_id: uuid.UUID) -> None:
+    """Add the column and the table that declare each reference listed, other than the start's.
+
+    The columns of those tables are read in one batch first, so that this costs one statement
+    (per 500 tables) however many references there are. A reference is visible only with its
+    source table readable, and its source column and table only through `_Context.around`.
+
+    Parameters
+    ----------
+    ctx
+        The request's context.
+    answer
+        The answer; filled.
+    table_id
+        The start table.
+    """
+    references = [
+        (node, record)
+        for node in sorted(answer.hits)
+        if isinstance(record := ctx.graph.records.get(node), ReferenceRecord)
+        and record.source_table_id != table_id
+    ]
+    ctx.graph.preload_columns({record.source_table_id for _, record in references})
+    for node, record in references:
+        hit = answer.hits[node]
+        reason = f"references {record.target_name}.{record.target_column}"
+        source = column_node(record.source_table_id, record.source_column)
+        for edge, column in ctx.around(node, (EdgeKind.REFERENCES,)):
+            if column != source:
+                continue
+            answer.add(column, hit.distance + 1, reason, False, edge)
+            for has, owner in ctx.around(column, (EdgeKind.HAS_COLUMN,)):
+                answer.add(owner, hit.distance + 2, reason, False, has)
+
+
+def _settle(answer: _Answer, starts: list[str]) -> None:
+    """Give every node its shortest distance over the answer's edges.
+
+    Parameters
+    ----------
+    answer
+        The answer; its distances are rewritten.
+    starts
+        The nodes at distance 0: the start, and a column start's table.
+    """
+    near: defaultdict[str, list[str]] = defaultdict(list)
+    for edge in answer.edges:
+        near[edge.source].append(edge.target)
+        near[edge.target].append(edge.source)
+    distance = dict.fromkeys(starts, 0)
+    queue = deque(distance)
+    while queue:
+        node = queue.popleft()
+        for other in near[node]:
+            if other not in distance:
+                distance[other] = distance[node] + 1
+                queue.append(other)
+    for node, hit in answer.hits.items():
+        answer.hits[node] = Hit(distance[node], hit.reason, hit.may_use)
 
 
 def _on_column(ctx: _Context, answer: _Answer, column: str, dotted: str, base: int) -> None:
