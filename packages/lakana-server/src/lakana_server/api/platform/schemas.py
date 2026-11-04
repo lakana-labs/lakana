@@ -2618,7 +2618,8 @@ class TermLinkOut(BaseModel):
     kind
         `table`, `column` or `measure`.
     missing
-        `true` when the table does not exist in the environment (yet).
+        `true` when the table does not exist in the environment (yet), or when the table no
+        longer has the linked column.
     """
 
     table: str
@@ -2649,7 +2650,8 @@ class TermOut(BaseModel):
     """A business glossary term, with its texts in the reader's language.
 
     A link appears only when the caller holds `READ_TABLE` on its table, except a link to a
-    table that does not exist, which shows as `missing`.
+    table that does not exist, which shows as `missing` (as does a link to a column a readable
+    table no longer has).
 
     Parameters
     ----------

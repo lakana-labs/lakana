@@ -145,7 +145,8 @@ A term (`TermOut`) has `key`, `id` (stable across deploys), `name`, `definition`
 `related` and `related_by`:
 
 - A link is `{table, column, kind, missing}`. `kind` is `table`, `column` or `measure`; `column` is
-  `null` for a link to the table itself; `missing` is `true` for a table that does not exist.
+  `null` for a link to the table itself; `missing` is `true` for a table that does not exist, and
+  for a column the table no longer has.
 - A related term is `{key, name, missing}`; `missing` is `true` when no repository defines the id.
   `related_by` holds the keys of the terms that name this one.
 - The texts are shown in your language where a translation exists, else in the term's main

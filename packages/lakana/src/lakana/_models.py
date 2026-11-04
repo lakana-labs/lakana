@@ -1945,7 +1945,7 @@ class TermLink:
     kind
         ``table``, ``column`` or ``measure``.
     missing
-        Whether the table does not exist in the environment.
+        Whether the table does not exist in the environment, or no longer has the column.
     """
 
     table: str
