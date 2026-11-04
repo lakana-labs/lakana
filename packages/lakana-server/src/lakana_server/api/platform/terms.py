@@ -82,8 +82,8 @@ def list_terms(
     does not exist. A link appears only when you may read its table, or when its table does not
     exist (`missing: true`). Answers 404 when the environment does not exist and you may read
     environments, and 422 for a `lang` that is not a language tag, a cursor this list did
-    not issue, or an `owner` (over 1,000 characters) or `repository` (over 255) no term can
-    have, or one with a control character such as NUL.
+    not issue, a `repository` over 255 characters, or an `owner` or `repository` with a
+    control, format or surrogate character or a line separator (such as NUL).
 
     Parameters
     ----------
@@ -145,8 +145,8 @@ def get_term(
     the main language. Without `READ_ENVIRONMENT` the answer is the 404 of a missing term. A link
     appears only when you may read its table, or when its table does not exist (`missing: true`).
     Answers 404 when the environment or the term does not exist, and 422 for a `lang` that
-    is not a language tag or a `key` no term can have: over 63 characters, or with a control
-    character such as NUL.
+    is not a language tag or a `key` no term can have: over 63 characters, or with a control,
+    format or surrogate character or a line separator (such as NUL).
 
     Parameters
     ----------

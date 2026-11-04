@@ -429,7 +429,10 @@ def test_synonyms_come_from_every_reader_language_also_one_without_a_translated_
 
 
 _NEXT = "; list the terms with: lakana term list --env dev"
-_UNSAFE = "contains a control, format or surrogate character (such as NUL), which no term has"
+_UNSAFE = (
+    "contains a control, format or surrogate character or a line separator (such as NUL), "
+    "which no term has"
+)
 
 
 @pytest.mark.parametrize(
@@ -446,10 +449,6 @@ _UNSAFE = "contains a control, format or surrogate character (such as NUL), whic
         (
             lambda s, p: s.list(p, "dev", repository="r" * 256),
             f"The repository filter has 256 characters, more than the 255 allowed. Check it{_NEXT}",
-        ),
-        (
-            lambda s, p: s.list(p, "dev", owner="o" * 1001),
-            f"The owner filter has 1001 characters, more than the 1000 allowed. Check it{_NEXT}",
         ),
         (
             lambda s, p: s.list(p, "dev", owner="fin\u202e"),
@@ -555,3 +554,13 @@ def test_a_link_name_matched_only_in_parts_or_not_a_table_name_is_missing(world:
     assert resolver.view(GlossaryTermLink(table_name="not a name", column_name=None)) == (
         TermLinkView("not a name", None, "table", True)
     )
+
+
+def test_an_owner_of_any_length_that_deploys_is_found_by_the_filter(world: World) -> None:
+    owner = "o" * 1500
+    term = {"name": "T", "definition": "D.", "owner": owner}
+    shop = world.session.scalars(select(Repository.id).where(Repository.name == "shop")).one()
+    write_glossary(world.session, world.env_id, shop, {**_GLOSSARY, "glossary": {"t": term}})
+    world.session.commit()
+
+    assert [t.key for t in world.service.list(world.bob, "dev", owner=owner).items] == ["t"]

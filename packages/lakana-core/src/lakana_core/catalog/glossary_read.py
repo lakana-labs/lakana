@@ -44,10 +44,10 @@ from lakana_core.projects.lookups import environment_by_name
 from lakana_core.projects.project_config import unsafe_identifier
 
 _TERM_LIST = "terms"
+"""The kind the terms' cursor names."""
 
 _LOOKUP_CHUNK = 500
 """The most names or ids one statement of `_Links.load` looks up, well under any driver's limit."""
-"""The kind the terms' cursor names."""
 
 LinkKind = Literal["table", "column", "measure"]
 """What a link points at: the table itself, a column, or a column declared as a measure."""
@@ -438,11 +438,8 @@ _MAX_TERM_KEY = 63
 _MAX_REPOSITORY = 255
 """The longest repository name, the size of its column."""
 
-_MAX_OWNER_FILTER = 1000
-"""The longest owner filter: an owner is stored as text, so this only bounds the request."""
 
-
-def _check_lookup(what: str, value: str | None, limit: int, environment: str) -> None:
+def _check_lookup(what: str, value: str | None, limit: int | None, environment: str) -> None:
     """Refuse a key or filter that no stored term can match, before it reaches the database.
 
     A NUL would otherwise be a driver error on Postgres, and a lone surrogate cannot be encoded.
@@ -454,27 +451,29 @@ def _check_lookup(what: str, value: str | None, limit: int, environment: str) ->
     value
         The value as sent; `None` when not given.
     limit
-        The most characters it may have.
+        The most characters it may have, the size of its column; `None` for a value stored as
+        text of any length.
     environment
         The environment's name, for the next step.
 
     Raises
     ------
     ValidationError
-        If `value` is longer than `limit` or has a control, format or surrogate character.
+        If `value` is longer than `limit`, or has a control, format or surrogate character or a
+        line separator.
     """
     if value is None:
         return
     after = f"; list the terms with: lakana term list --env {environment}"
-    if len(value) > limit:
+    if limit is not None and len(value) > limit:
         raise ValidationError(
             f"The {what} has {len(value)} characters, more than the {limit} allowed. "
             f"Check it{after}"
         )
     if unsafe_identifier(value):
         raise ValidationError(
-            f"The {what} contains a control, format or surrogate character (such as NUL), "
-            f"which no term has. Send it without one{after}"
+            f"The {what} contains a control, format or surrogate character or a line separator "
+            f"(such as NUL), which no term has. Send it without one{after}"
         )
 
 
@@ -582,7 +581,7 @@ class GlossaryService:
             If `limit` is below 1, `cursor` is not one of this list, or a filter is longer than
             any stored value or has a control character.
         """
-        _check_lookup("owner filter", owner, _MAX_OWNER_FILTER, environment)
+        _check_lookup("owner filter", owner, None, environment)
         _check_lookup("repository filter", repository, _MAX_REPOSITORY, environment)
         env = self._read_environment(p, environment)
         query = select(GlossaryTerm).where(GlossaryTerm.environment_id == env.id)
