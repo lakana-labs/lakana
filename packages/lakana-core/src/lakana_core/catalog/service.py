@@ -1084,6 +1084,7 @@ def _snapshot_numbers_checked(
     snapshot_id: int,
     sequence_number: int | None,
     last: int,
+    at_most: int,
     parented: bool = False,
 ) -> int:
     """Refuse a snapshot whose id or sequence number the Iceberg spec does not allow.
@@ -1098,6 +1099,11 @@ def _snapshot_numbers_checked(
         Its sequence number; `None` (format v1) counts as 0.
     last
         The table's last sequence number before this snapshot.
+    at_most
+        The highest it may take: the table's last sequence number before the commit plus this
+        snapshot's place among the snapshots the commit adds (1 for the first), as Iceberg's
+        clients number them. It also keeps the number away from the 2^63-1 ceiling, after
+        which no snapshot could be added.
     parented
         Whether the snapshot names a parent: on a format v2 table pyiceberg then refuses a
         sequence number not above `last` itself, with the text the commit already withholds
@@ -1112,9 +1118,11 @@ def _snapshot_numbers_checked(
     ------
     ValidationError
         If the id or the sequence number lies outside 0 to 2^63-1, or if, on a format v2 or
-        later table, the sequence number is not above `last`, which the Iceberg specification
-        forbids (the client built its commit on metadata that is out of date). The message
-        leaves `last` out, which a writer without READ on the table may not see.
+        later table, the sequence number is not above `last` or is above `at_most` (the
+        client built its commit on metadata that is out of date, or does not number snapshots
+        as the Iceberg specification does). The messages leave the table's numbers out, which
+        a writer without READ on the table may not see. Format v1 has no sequence numbers to
+        compare.
     """
     sequence = sequence_number or 0
     if not (0 <= snapshot_id <= _MAX_LONG and 0 <= sequence <= _MAX_LONG):
@@ -1128,6 +1136,12 @@ def _snapshot_numbers_checked(
         raise ValidationError(
             f"A new snapshot's sequence number ({sequence}) must be above the table's last "
             "sequence number; load the table again and commit again."
+        )
+    if format_version >= 2 and sequence > at_most:
+        raise ValidationError(
+            f"A new snapshot's sequence number ({sequence}) must be at most the table's last "
+            "sequence number plus one per snapshot the commit adds; load the table again and "
+            "commit again."
         )
     return max(last, sequence)
 
@@ -4750,7 +4764,8 @@ class CatalogService:
             refuses; if `updates` includes an `AddSnapshotUpdate` whose
             `snapshot.manifest_list` does not lie under the table's own
             location, whose snapshot id or sequence number lies outside 0 to 2^63-1, or
-            whose sequence number is not above the table's last on a format v2 table; if a
+            whose sequence number on a format v2 table is not above the table's last or is above
+            it by more than one per snapshot the commit adds; if a
             snapshot the commit adds names a data file that is not Parquet, cannot be read, or
             has no Iceberg field ids
             (`field_ids.check_added_files_have_field_ids`; also if there are more than 2,000 such
@@ -4856,6 +4871,7 @@ class CatalogService:
         known_orders = {order.order_id for order in current.sort_orders}
         added_layouts: set[tuple[str, int]] = set()
         last_sequence = getattr(current, "last_sequence_number", 0)  # format v1 has none: 0
+        ceiling, added_count = last_sequence, 0
         for table_update in updates:
             if isinstance(table_update, SetLocationUpdate):
                 raise ValidationError("A table's location cannot change.")
@@ -4892,11 +4908,13 @@ class CatalogService:
                         "A committed snapshot's manifest list must lie under the table's own "
                         "location."
                     )
+                added_count += 1
                 last_sequence = _snapshot_numbers_checked(
                     current.format_version,
                     snapshot_id=table_update.snapshot.snapshot_id,
                     sequence_number=table_update.snapshot.sequence_number,
                     last=last_sequence,
+                    at_most=ceiling + added_count,
                     parented=table_update.snapshot.parent_snapshot_id is not None,
                 )
         checked_files: list[DataFile] | None = None
@@ -5107,8 +5125,13 @@ class CatalogService:
             environment_id=environment_id,
             table_id=table_id,
             snapshot_id=after.current_snapshot_id,
-            # A format v1 table has no sequence numbers: Iceberg reads them as 0.
-            sequence_number=None if snapshot is None else snapshot.sequence_number or 0,
+            # A format v1 table has no sequence numbers: Iceberg reads them as 0, whatever a
+            # client wrote into the snapshot.
+            sequence_number=None
+            if snapshot is None
+            else 0
+            if after.format_version == 1
+            else snapshot.sequence_number or 0,
             now=now,
         )
 

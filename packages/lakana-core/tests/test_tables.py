@@ -3,6 +3,7 @@
 import ast
 import time
 import uuid
+from datetime import timedelta
 from pathlib import Path
 from unittest import mock
 
@@ -35,6 +36,7 @@ from sqlalchemy.orm import Session
 
 from lakana_core.auth import Action, AllowAllAuthorization, PrincipalRef, Securable, SecurableKind
 from lakana_core.catalog import service as service_module
+from lakana_core.catalog.health_read import Visibility, current_signals
 from lakana_core.catalog.service import CatalogService, LoadedTable
 from lakana_core.errors import (
     AlreadyExistsError,
@@ -51,6 +53,7 @@ from lakana_core.models import (
     Principal,
     PrincipalType,
     Table,
+    TableHealthSignal,
     TableLocation,
     TableLocationState,
     TableType,
@@ -1414,27 +1417,184 @@ def test_commit_refuses_a_sequence_number_not_above_the_tables_last(
     assert catalog.load_table(principal, ref).metadata.current_snapshot_id is None
 
 
+def _rows(ids: list[int]) -> pa.Table:
+    """Build rows of the two-column schema.
+
+    Parameters
+    ----------
+    ids
+        The ids.
+
+    Returns
+    -------
+    pa.Table
+        The rows, with no names.
+    """
+    return pa.table(
+        {"id": pa.array(ids, pa.int64()), "name": pa.array([None] * len(ids), pa.string())},
+        schema=pa.schema(
+            [pa.field("id", pa.int64(), nullable=False), pa.field("name", pa.string())]
+        ),
+    )
+
+
+def _readd_current(
+    catalog: CatalogService, principal: PrincipalRef, ref: TableRef, *sequences: int
+) -> None:
+    """Commit copies of the current snapshot with the given sequence numbers, one per snapshot.
+
+    Each copy reuses the current manifest list, so its files are real and have field ids.
+
+    Parameters
+    ----------
+    catalog
+        The catalog.
+    principal
+        The writer.
+    ref
+        The table.
+    *sequences
+        The sequence number of each added snapshot, in commit order.
+    """
+    current = catalog.load_table(principal, ref).metadata.current_snapshot()
+    assert current is not None
+    parent, updates = current.snapshot_id, []
+    for n, sequence in enumerate(sequences, start=1):
+        snapshot_id = 900_000 + n
+        updates.append(
+            AddSnapshotUpdate(
+                snapshot=current.model_copy(
+                    update={
+                        "snapshot_id": snapshot_id,
+                        "parent_snapshot_id": parent,
+                        "sequence_number": sequence,
+                    }
+                )
+            )
+        )
+        parent = snapshot_id
+    updates.append(
+        SetSnapshotRefUpdate(ref_name="main", type=SnapshotRefType.BRANCH, snapshot_id=parent)
+    )
+    catalog.commit_table(principal, ref, requirements=[], updates=updates)
+
+
+@pytest.mark.parametrize("jump", [2, 2**63 - 1], ids=["by-two", "to-the-ceiling"])
+def test_commit_refuses_a_sequence_number_beyond_one_per_added_snapshot(
+    catalog: CatalogService, principal: PrincipalRef, tmp_path: Path, jump: int
+) -> None:
+    """A v2 snapshot takes the last sequence number plus its place in the commit, no more (N5).
+
+    Parameters
+    ----------
+    catalog
+        The catalog.
+    principal
+        The writer.
+    tmp_path
+        Storage root.
+    jump
+        How far above the last sequence number the snapshot claims to be (or the ceiling).
+    """
+    ref = _prepared_ref(catalog, principal, tmp_path)
+    catalog.create_table(principal, ref, schema=_schema())
+    catalog.append(principal, ref, _rows([1]))
+    last = catalog.load_table(principal, ref).metadata.last_sequence_number  # ty: ignore[unresolved-attribute]
+    claimed = jump if jump > 2 else last + jump
+    with pytest.raises(ValidationError, match=r"must be at most .*; load the table again"):
+        _readd_current(catalog, principal, ref, claimed)
+    assert catalog.load_table(principal, ref).metadata.last_sequence_number == last  # ty: ignore[unresolved-attribute]
+
+
+def test_a_commit_of_two_snapshots_takes_the_next_two_sequence_numbers(
+    catalog: CatalogService, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    """Last + 1 and last + 2 in one commit are accepted, and a later write still lands.
+
+    Parameters
+    ----------
+    catalog
+        The catalog.
+    principal
+        The writer.
+    tmp_path
+        Storage root.
+    """
+    ref = _prepared_ref(catalog, principal, tmp_path)
+    catalog.create_table(principal, ref, schema=_schema())
+    catalog.append(principal, ref, _rows([1]))
+    last = catalog.load_table(principal, ref).metadata.last_sequence_number  # ty: ignore[unresolved-attribute]
+    _readd_current(catalog, principal, ref, last + 1, last + 2)
+    catalog.append(principal, ref, _rows([2]))
+    assert catalog.load_table(principal, ref).metadata.last_sequence_number == last + 3  # ty: ignore[unresolved-attribute]
+
+
+def test_a_format_v1_table_records_health_at_sequence_zero_whatever_the_client_says(
+    catalog: CatalogService, principal: PrincipalRef, tmp_path: Path, session: Session
+) -> None:
+    """A v1 snapshot claiming sequence 2^62 is recorded at 0, so later commits stay current (N4).
+
+    Parameters
+    ----------
+    catalog
+        The catalog.
+    principal
+        The writer.
+    tmp_path
+        Storage root.
+    session
+        Database session.
+    """
+    ref = _prepared_ref(catalog, principal, tmp_path)
+    created = catalog.create_table(
+        principal, ref, schema=_schema(), properties={"format-version": "1"}
+    )
+    assert created.metadata.format_version == 1
+    catalog.append(principal, ref, _rows([1]))
+    _readd_current(catalog, principal, ref, 2**62)
+    # v1 commits all share sequence number 0 and are ordered by time; SQLite's clock has
+    # whole seconds, so the earlier commits are moved a minute back.
+    for row in session.scalars(select(TableHealthSignal)):
+        row.observed_at -= timedelta(minutes=1)
+    session.commit()
+    catalog.append(principal, ref, _rows([2, 3]))
+    newest = catalog.load_table(principal, ref).metadata.current_snapshot_id
+    assert set(session.scalars(select(TableHealthSignal.sequence_number))) == {0}
+    shown = current_signals(session, created.uuid, "gold.sales", Visibility())
+    assert {s.snapshot_id for s in shown} == {newest}
+
+
 def test_a_format_v1_snapshot_without_sequence_numbers_passes_the_check() -> None:
     """Format v1 has no sequence numbers (all 0), so only the range applies to it.
 
     On format v2 a snapshot with a parent is left to pyiceberg's own check; format v3 is not.
     """
     assert (
-        service_module._snapshot_numbers_checked(1, snapshot_id=7, sequence_number=0, last=0) == 0
+        service_module._snapshot_numbers_checked(
+            1, snapshot_id=7, sequence_number=0, last=0, at_most=1
+        )
+        == 0
     )
     with pytest.raises(ValidationError):
-        service_module._snapshot_numbers_checked(1, snapshot_id=2**63, sequence_number=0, last=0)
+        service_module._snapshot_numbers_checked(
+            1, snapshot_id=2**63, sequence_number=0, last=0, at_most=1
+        )
     assert (
-        service_module._snapshot_numbers_checked(2, snapshot_id=7, sequence_number=5, last=4) == 5
+        service_module._snapshot_numbers_checked(
+            2, snapshot_id=7, sequence_number=5, last=4, at_most=5
+        )
+        == 5
     )
     assert (
         service_module._snapshot_numbers_checked(
-            2, snapshot_id=7, sequence_number=3, last=4, parented=True
+            2, snapshot_id=7, sequence_number=3, last=4, at_most=5, parented=True
         )
         == 4
     )
     with pytest.raises(ValidationError):
-        service_module._snapshot_numbers_checked(3, snapshot_id=7, sequence_number=3, last=4)
+        service_module._snapshot_numbers_checked(
+            3, snapshot_id=7, sequence_number=3, last=4, at_most=5
+        )
 
 
 def test_commit_rejects_an_arbitrary_location_provider_class(
