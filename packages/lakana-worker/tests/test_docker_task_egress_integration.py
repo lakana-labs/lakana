@@ -47,6 +47,7 @@ from docker_stack import (
     stack,
     start_egress,
 )
+from e2e_report import last_report
 from tls_fixture import Authority, issue_leaf, make_authority
 
 from lakana_core.connections.endpoints import endpoints
@@ -1391,9 +1392,8 @@ def test_an_ingestion_asset_reaches_its_declared_connections_and_nothing_else(
     outcome = runner.run(task, output.extend, StopSignal())
 
     text = output.decode(errors="replace")
-    reports = [line for line in text.splitlines() if line.startswith("E2E ")]
-    assert reports, text
-    seen = json.loads(reports[-1].removeprefix("E2E "))
+    seen = last_report(text)
+    assert seen is not None, text
     assert seen["declared"] == "hello, source"
     assert seen["proxied"] is True
     assert "403" in seen["undeclared"], seen
@@ -1479,9 +1479,8 @@ def test_files_read_reads_a_mounted_root_and_never_follows_a_link(
         outcome = runner.run(task, output.extend, StopSignal())
 
     text = output.decode(errors="replace")
-    reports = [line for line in text.splitlines() if line.startswith("E2E ")]
-    assert reports, text
-    seen = json.loads(reports[-1].removeprefix("E2E "))
+    seen = last_report(text)
+    assert seen is not None, text
     assert sorted(seen["ids"]) == [1, 2]
     assert seen["link_refused"] is True
     assert seen["write_refused"] is True
@@ -1665,9 +1664,8 @@ def test_sql_read_reaches_postgresql_through_the_relay_with_verify_full(
             outcome = runner.run(task, output.extend, StopSignal())
 
         text = output.decode(errors="replace")
-        reports = [line for line in text.splitlines() if line.startswith("E2E ")]
-        assert reports, text
-        seen = json.loads(reports[-1].removeprefix("E2E "))
+        seen = last_report(text)
+        assert seen is not None, text
         assert seen == [{"ssl": True, "read_only": "on", "n": 7}], text
         assert _READER not in text
         assert outcome.succeeded is False
@@ -1769,9 +1767,8 @@ def test_rest_read_reaches_an_api_through_the_egress_proxy(
     outcome = runner.run(task, output.extend, StopSignal())
 
     text = output.decode(errors="replace")
-    reports = [line for line in text.splitlines() if line.startswith("E2E ")]
-    assert reports, text
-    seen = json.loads(reports[-1].removeprefix("E2E "))
+    seen = last_report(text)
+    assert seen is not None, text
     assert seen["ids"] == [1, 2, 3], text
     assert seen["leak"].startswith("SourceRefused: "), seen["leak"]
     assert f"points to {_NEIGHBOUR_HOST}" in seen["leak"], seen["leak"]
