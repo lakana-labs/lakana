@@ -525,6 +525,45 @@ def test_the_own_chain_walks_from_the_tip_to_the_snapshot_before(
     assert own_chain(metadata, 4711, None) == []
 
 
+def test_the_own_chain_stops_at_the_snapshot_before_even_off_its_line(
+    session: Session, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    """A foreign rollback between a run's commits never pulls older snapshots into its chain.
+
+    The run's later commit then has a parent older than the snapshot before the run; the walk
+    stops at the first snapshot that is no newer than that one (by sequence number).
+
+    Parameters
+    ----------
+    session
+        Database session.
+    principal
+        The writer.
+    tmp_path
+        Storage root.
+    """
+    catalog = _catalog(session, principal, tmp_path)
+    old = _write(catalog, principal, _orders([1], ["eu"]), WriteMode.CREATE).snapshot_id
+    before = _write(catalog, principal, _orders([2], ["eu"]), WriteMode.APPEND).snapshot_id
+    after = _write(catalog, principal, _orders([3], ["us"]), WriteMode.APPEND).snapshot_id
+    assert after is not None
+    metadata = _stored_metadata(session)
+    tip = metadata.snapshot_by_id(after)
+    assert tip is not None
+    # As if another writer had set `main` back to `old` before the run's commit `after`.
+    moved = tip.model_copy(update={"parent_snapshot_id": old})
+    rolled = metadata.model_copy(
+        update={"snapshots": [s for s in metadata.snapshots if s.snapshot_id != after] + [moved]}
+    )
+    assert own_chain(rolled, after, before) == [after]
+    assert own_chain(rolled, after, None) == [after, old]
+    assert own_chain(rolled, after, 4711) == [after, old]  # the snapshot before has expired
+    # A format v1 table numbers every snapshot 0: only the snapshot before stops the walk.
+    zeroed = [s.model_copy(update={"sequence_number": 0}) for s in rolled.snapshots]
+    unnumbered = rolled.model_copy(update={"snapshots": zeroed})
+    assert own_chain(unnumbered, after, before) == [after, old]
+
+
 def test_a_first_build_that_is_set_back_keeps_no_health_signals(
     session: Session, principal: PrincipalRef, tmp_path: Path
 ) -> None:

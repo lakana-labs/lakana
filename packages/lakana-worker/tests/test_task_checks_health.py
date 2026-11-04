@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import sys
 import uuid
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from check_run_helpers import (
     _built_once_then_redeployed,
     _drain,
@@ -12,6 +14,7 @@ from check_run_helpers import (
     _ids,
     _outside_table,
     _results,
+    _run_until,
 )
 from sqlalchemy import select
 from task_run_helpers import World, _engine, _start, _task
@@ -32,6 +35,7 @@ from lakana_core.projects.checks import CheckSpec, GeneratedFrom
 from lakana_core.projects.health_checks import health_specs
 from lakana_core.runs.checks import health_blocked
 from lakana_core.runs.tasks import Written
+from lakana_worker.tasks import run_claimed
 
 
 def _signal(
@@ -358,3 +362,33 @@ def test_the_log_line_of_a_failed_health_check_is_its_text() -> None:
     assert task_checks_module._check_lines([result], uuid.uuid4(), "dev") == (
         "  check health_volume: failed: health signal volume fired at snapshot 7",
     )
+
+
+def test_a_health_check_whose_metadata_cannot_be_read_is_retried_and_never_passes(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Storage that does not answer while the chain is read retries the check phase.
+
+    Parameters
+    ----------
+    world
+        The world.
+    monkeypatch
+        Breaks the metadata read of the chain.
+    """
+    _built_once_then_redeployed(world, health={"volume": "block"})
+    _start(world)
+    claimed = _run_until(world, "silver.orders")
+    callers: list[str] = []
+
+    def unreadable(*args: object, **kwargs: object) -> object:
+        callers.append(sys._getframe(1).f_code.co_name)
+        raise OSError("the storage did not answer")
+
+    monkeypatch.setattr(task_checks_module, "read_metadata", unreadable)
+    run_claimed(_engine(world), claimed)
+
+    task = _task(world, "silver.orders")
+    assert "_own_chain" in callers
+    assert (task.status, task.failure_code) == (TaskStatus.PENDING, "internal")
+    assert _results(world, task.id) == []  # nothing judged, nothing passed

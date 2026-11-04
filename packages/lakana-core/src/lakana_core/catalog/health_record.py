@@ -492,6 +492,12 @@ def own_chain(metadata: TableMetadata, after: int | None, until: int | None) -> 
     The chain a task run wrote: what a set-back takes out of ``main`` (`forget_set_back`), and
     what a blocking health check judges (`lakana_worker.task_checks._health_result`).
 
+    The walk also stops at the first snapshot whose sequence number is no newer than that of
+    `until`: when another writer set ``main`` back between two of the run's commits, the later
+    commit's parents are older than the run, and their signals are not the run's. A format v1
+    table numbers every snapshot 0, and an `until` the metadata no longer holds has no number;
+    then only `until` itself stops the walk.
+
     Parameters
     ----------
     metadata
@@ -507,9 +513,14 @@ def own_chain(metadata: TableMetadata, after: int | None, until: int | None) -> 
         The tip first, then each parent; empty when the tip is not in the metadata.
     """
     chain: list[int] = []
+    before = None if until is None else metadata.snapshot_by_id(until)
+    floor = before.sequence_number if before is not None and before.sequence_number else None
     snapshot = None if after is None else metadata.snapshot_by_id(after)
     while (
-        snapshot is not None and snapshot.snapshot_id != until and snapshot.snapshot_id not in chain
+        snapshot is not None
+        and snapshot.snapshot_id != until
+        and snapshot.snapshot_id not in chain
+        and (floor is None or (snapshot.sequence_number or 0) > floor)
     ):
         chain.append(snapshot.snapshot_id)
         parent = snapshot.parent_snapshot_id
