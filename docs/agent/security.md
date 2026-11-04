@@ -558,6 +558,12 @@ reader is shown a term with its repository. Residuals:
 - Columns that the deploy cannot see (`SELECT *`, a Python asset) are not checked, for project
   tables as well as for others, so no message tells anything of them.
 
+## The metadata graph (#374)
+
+| Read | Needs | Notes |
+|---|---|---|
+| `GET .../graph/lineage`, `.../graph/neighbours` (`client.graph`, `lakana graph`) | per node: `READ_TABLE` (table, column, measure, check); `READ_TABLE` on source and target (reference, generated `ref_` check; the target by name when it does not exist); `MANAGE_POLICY` + `READ_TABLE` (row filter, column mask); `READ_ENVIRONMENT` + `READ_TABLE` on the output (asset); `READ_ENVIRONMENT` (job, term) | `graph_service._Visibility`, asked through `permits` before a node is added. A hidden node is never added, walked through or counted: there is no `hidden` field, and the step budget (200,000) counts only edges to visible nodes, so neither an answer nor a 422 reveals one. The 10 s time budget is the one channel in which hidden work can show (timing); accepted, because it tells at most that something large exists (R8). A hidden or missing start, and a missing environment for a caller without `READ_ENVIRONMENT`, all answer one `NO_NODE` 404 text. A refusal for a wrong start kind is decided from the id's prefix alone, before any lookup. Jobs: a job needs `READ_ENVIRONMENT`, and its `runs` edge to an asset the reader may not see is cut with that asset (a job is never a way round a hidden asset). Policies: `table get` shows none, so the rule is the policy listing's (`MANAGE_POLICY` at instance scope) plus the table's `READ_TABLE`. Node attributes never include SQL, expressions or a policy's subject. Pins: the tests in `test_graph_walk.py` (`test_a_hidden_table_cuts_the_walk_and_leaves_no_trace`, `test_the_step_budget_refuses_and_counts_only_what_the_reader_sees`) and `test_graph.py` (server). |
+
 ## Table health: who sees the readers
 
 | Action | Needs | Notes |

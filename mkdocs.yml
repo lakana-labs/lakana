@@ -79,6 +79,7 @@ nav:
       - reference/descriptions.md
       - reference/translations.md
       - reference/glossary.md
+      - reference/graph.md
       - reference/merge.md
       - reference/history.md
       - reference/load.md

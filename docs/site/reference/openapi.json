@@ -5883,6 +5883,360 @@
         }
       }
     },
+    "/api/v1/environments/{env}/graph/lineage": {
+      "get": {
+        "tags": [
+          "graph"
+        ],
+        "summary": "Walk the tables and assets upstream and downstream of a table, a column or an asset",
+        "description": "The answer comes from what the projects declare (their assets' inputs and outputs, in every repository), not from runs. `depth` counts the assets crossed. A column starts at its table, plus the references that name it. You see a node only when you may: a table and its columns need `READ_TABLE`, an asset `READ_ENVIRONMENT` and its table. The walk stops at a node you may not see, and nothing in the answer counts or marks it. Answers 404 when the start or the environment does not exist or you may not see it (one answer for both), 422 for a node, depth, limit or cursor out of bounds or a question too large to walk, and 503 with `Retry-After` when the walk ran past its time.",
+        "operationId": "graph_lineage_api_v1_environments__env__graph_lineage_get",
+        "parameters": [
+          {
+            "name": "env",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Env"
+            },
+            "description": "Environment name."
+          },
+          {
+            "name": "node",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "A node id from an answer, or a table's dotted name such as gold.dim_store; a column as column:gold.dim_store/store_id.",
+              "title": "Node"
+            },
+            "description": "A node id from an answer, or a table's dotted name such as gold.dim_store; a column as column:gold.dim_store/store_id."
+          },
+          {
+            "name": "direction",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "up",
+                "down",
+                "both"
+              ],
+              "type": "string",
+              "description": "Upstream (what feeds it), downstream (what it feeds), or both.",
+              "default": "both",
+              "title": "Direction"
+            },
+            "description": "Upstream (what feeds it), downstream (what it feeds), or both."
+          },
+          {
+            "name": "depth",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "description": "Assets to cross from the start, 1 to 10.",
+              "default": 3,
+              "title": "Depth"
+            },
+            "description": "Assets to cross from the start, 1 to 10."
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The language of the texts, such as de or fr-CH; without it, your profile's language, then Accept-Language, then the instance's main language.",
+              "title": "Lang"
+            },
+            "description": "The language of the texts, such as de or fr-CH; without it, your profile's language, then Accept-Language, then the instance's main language."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "description": "Most nodes per page, 1 to 500.",
+              "default": 500,
+              "title": "Limit"
+            },
+            "description": "Most nodes per page, 1 to 500."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 512
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The `next_cursor` of the previous page, sent with the same question.",
+              "title": "Cursor"
+            },
+            "description": "The `next_cursor` of the previous page, sent with the same question."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GraphOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token is missing, wrong, expired or revoked.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The server cannot do this right now; ask again after the time in `Retry-After`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/environments/{env}/graph/neighbours": {
+      "get": {
+        "tags": [
+          "graph"
+        ],
+        "summary": "List the nodes one edge away from a node, in either direction",
+        "description": "The node comes first (distance 0), then its neighbours (distance 1). A row filter or column mask shows only to a caller who may manage policies and read its table. The other rules, and the 404, 422 and 503 answers, are lineage's.",
+        "operationId": "graph_neighbours_api_v1_environments__env__graph_neighbours_get",
+        "parameters": [
+          {
+            "name": "env",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Env"
+            },
+            "description": "Environment name."
+          },
+          {
+            "name": "node",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "A node id from an answer, or a table's dotted name such as gold.dim_store; a column as column:gold.dim_store/store_id.",
+              "title": "Node"
+            },
+            "description": "A node id from an answer, or a table's dotted name such as gold.dim_store; a column as column:gold.dim_store/store_id."
+          },
+          {
+            "name": "kinds",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only edges of these kinds; repeat the parameter (kinds=reads&kinds=builds).",
+              "title": "Kinds"
+            },
+            "description": "Only edges of these kinds; repeat the parameter (kinds=reads&kinds=builds)."
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The language of the texts, such as de or fr-CH; without it, your profile's language, then Accept-Language, then the instance's main language.",
+              "title": "Lang"
+            },
+            "description": "The language of the texts, such as de or fr-CH; without it, your profile's language, then Accept-Language, then the instance's main language."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "description": "Most nodes per page, 1 to 500.",
+              "default": 500,
+              "title": "Limit"
+            },
+            "description": "Most nodes per page, 1 to 500."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 512
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The `next_cursor` of the previous page, sent with the same question.",
+              "title": "Cursor"
+            },
+            "description": "The `next_cursor` of the previous page, sent with the same question."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GraphOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token is missing, wrong, expired or revoked.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The server cannot do this right now; ask again after the time in `Retry-After`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/environments/{env}/namespaces/{path}/artifacts/{name}/uploads": {
       "post": {
         "tags": [
@@ -20256,6 +20610,203 @@
         ],
         "title": "GrantOut",
         "description": "Response body for a grant.\n\nParameters\n----------\nid\n    The grant's id.\nprincipal_id\n    The principal this grant applies to, or `None` if it applies to a\n    group.\ngroup_id\n    The group this grant applies to, or `None` if it applies to a\n    principal.\nrole\n    The role template granted, or `None` if a raw action was granted.\naction\n    The raw action granted, or `None` if a role was granted.\nkind\n    Which tier of the securable hierarchy this grant applies to.\nenvironment\n    The environment this grant applies to, if any.\nnamespace\n    The dot-joined namespace path this grant applies to, if any.\ntable\n    The table this grant applies to, if any.\ngranted_by\n    The principal who created this grant.\ngranted_at\n    When this grant was created.\nnote\n    ``no effect: <ACTION> needs the ADMIN role`` for a single-action grant\n    of `MANAGE_GRANT`, `MANAGE_GROUP` or `MANAGE_TOKEN`, which work only\n    with the `ADMIN` role on the instance; `None` otherwise."
+      },
+      "GraphEdgeOut": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "target": {
+            "type": "string",
+            "title": "Target"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "source",
+          "target"
+        ],
+        "title": "GraphEdgeOut",
+        "description": "An edge of the metadata graph, from `source` to `target` (both node ids).\n\nParameters\n----------\nkind\n    `reads`, `builds`, `references`, `measures`, `checks`, `filters`, `masks`, `links`,\n    `runs` or `has_column`.\nsource\n    The node it leaves.\ntarget\n    The node it reaches."
+      },
+      "GraphNodeOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "distance": {
+            "type": "integer",
+            "title": "Distance"
+          },
+          "table_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Table Type"
+          },
+          "model_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Kind"
+          },
+          "grain": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Grain"
+          },
+          "key": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key"
+          },
+          "owner": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner"
+          },
+          "repository": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repository"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "column_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Column Type"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "may_use": {
+            "type": "boolean",
+            "title": "May Use",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "name",
+          "distance"
+        ],
+        "title": "GraphNodeOut",
+        "description": "A node of the metadata graph, with the attributes the caller may see.\n\nParameters\n----------\nid\n    Its stable id (`table:<uuid>`, `column:<uuid>/<name>`, `asset:<repository>/<name>`,\n    `reference:<uuid>`, `measure:<uuid>`, `term:<uuid>`, `check:<uuid>/<name>`,\n    `row_filter:<uuid>`, `column_mask:<uuid>`, `job:<repository>/<name>`); store it and pass\n    it back as `node`.\nkind\n    `table`, `column`, `asset`, `reference`, `measure`, `term`, `check`, `row_filter`,\n    `column_mask` or `job`.\nname\n    A name to read: a dotted table, `<table>.<column>`, a term's key.\ndistance\n    Steps from the start: assets crossed for lineage, 1 for a neighbour, hops for impact.\ntable_type\n    A table's `managed`, `external`, `view` or `artifact`.\nmodel_kind\n    A table's declared kind.\ngrain\n    A table's grain, in your language.\nkey\n    A table's declared key columns.\nowner\n    The owner of a table's asset, an asset or a term.\nrepository\n    The repository that declares it (or builds its table).\nlabel\n    A table's label, or a term's name, in your language.\ncolumn_type\n    A column's type.\nreason\n    Why `impact` lists it.\nmay_use\n    `true` when `impact` lists it because it may use the column (its SQL is not parsed)."
+      },
+      "GraphOut": {
+        "properties": {
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/GraphNodeOut"
+            },
+            "type": "array",
+            "title": "Nodes"
+          },
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/GraphEdgeOut"
+            },
+            "type": "array",
+            "title": "Edges"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "type": "object",
+        "required": [
+          "nodes",
+          "edges",
+          "next_cursor"
+        ],
+        "title": "GraphOut",
+        "description": "One page of a metadata graph answer: at most 500 nodes, sorted by distance, then id.\n\nParameters\n----------\nnodes\n    The nodes of this page; the start is the first node of the first page.\nedges\n    The edges whose later endpoint is on this page; all pages together carry each edge once.\nnext_cursor\n    Pass back as `?cursor=` with the same question for the next page; `null` on the last."
       },
       "GroupCreate": {
         "properties": {

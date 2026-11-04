@@ -14,6 +14,7 @@ from lakana_core.errors import (
     AlreadyExistsError,
     AuthenticationError,
     ConflictError,
+    GraphBusyError,
     KeptAfterCheckError,
     LakanaError,
     NotFoundError,
@@ -58,6 +59,7 @@ def _client_raising(exc: LakanaError) -> TestClient:
         (ValidationError("bad input"), 422),
         (PermissionDenied("no"), 403),
         (StorageRefusedError("refused"), 502),
+        (GraphBusyError("busy"), 503),
     ],
 )
 def test_each_lakana_error_maps_to_its_documented_status_code(

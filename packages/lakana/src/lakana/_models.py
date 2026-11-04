@@ -2048,6 +2048,99 @@ class TermRef:
     name: str
 
 
+# jscpd:ignore-start
+# The fields mirror the REST `GraphNodeOut` and core's `GraphNode`; the SDK depends on neither.
+@dataclass(frozen=True)
+class GraphNode:
+    """A node of the metadata graph (`client.graph`).
+
+    Parameters
+    ----------
+    id
+        Its stable id, such as ``table:<uuid>``; store it and pass it back as a node.
+    kind
+        ``table``, ``column``, ``asset``, ``reference``, ``measure``, ``term``, ``check``,
+        ``row_filter``, ``column_mask`` or ``job``.
+    name
+        A name to read: a dotted table, ``<table>.<column>``, a term's key.
+    distance
+        Steps from the start.
+    table_type
+        A table's ``managed``, ``external``, ``view`` or ``artifact``.
+    model_kind
+        A table's declared kind.
+    grain
+        A table's grain, in your language.
+    key
+        A table's declared key columns.
+    owner
+        The owner of a table's asset, an asset or a term.
+    repository
+        The repository that declares it (or builds its table); `None` for a node without one
+        or for a reader without ``READ_ENVIRONMENT``.
+    label
+        A table's label, or a term's name, in your language.
+    column_type
+        A column's type.
+    reason
+        Why an impact answer lists it.
+    may_use
+        Whether an impact answer lists it because it may use the column.
+    """
+
+    id: str
+    kind: str
+    name: str
+    distance: int
+    table_type: str | None = None
+    model_kind: str | None = None
+    grain: str | None = None
+    key: tuple[str, ...] | None = None
+    owner: str | None = None
+    repository: str | None = None
+    label: str | None = None
+    column_type: str | None = None
+    reason: str | None = None
+    may_use: bool = False
+
+
+# jscpd:ignore-end
+@dataclass(frozen=True)
+class GraphEdge:
+    """An edge of the metadata graph, from `source` to `target` (node ids).
+
+    Parameters
+    ----------
+    kind
+        ``reads``, ``builds``, ``references``, ``measures``, ``checks``, ``filters``,
+        ``masks``, ``links``, ``runs`` or ``has_column``.
+    source
+        The node it leaves.
+    target
+        The node it reaches.
+    """
+
+    kind: str
+    source: str
+    target: str
+
+
+@dataclass(frozen=True)
+class Graph:
+    """A whole metadata graph answer, every page read.
+
+    Parameters
+    ----------
+    nodes
+        Its nodes, sorted by distance, then id.
+    edges
+        Its edges.
+    """
+
+    nodes: tuple[GraphNode, ...]
+    edges: tuple[GraphEdge, ...]
+
+
 @dataclass(frozen=True)
 class DeployAccepted:
     """A queued deploy run.

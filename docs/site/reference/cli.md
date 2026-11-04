@@ -1968,6 +1968,41 @@ A link shows only when you may read its table; one whose table does not exist, o
 | `--lang` | text | none | Show the texts in this language, such as de or fr-CH. |
 | `--env` | text | none | Environment (default: the profile's). |
 
+## `lakana graph`
+
+Usage: `lakana graph [OPTIONS] COMMAND [ARGS]...`
+
+Ask the metadata graph: lineage and neighbours.
+
+### `lakana graph lineage`
+
+Usage: `lakana graph lineage [OPTIONS] {node}`
+
+Show the tables and assets upstream and downstream of NODE, as the projects declare them.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `NODE` | text | required | A table's dotted name, such as gold.dim_store, or a node id. |
+| `--column` | text | none | A column of the table NODE names. |
+| `--direction` | one of `up`, `down`, `both` | `both` | up (what feeds it), down (what it feeds), or both. |
+| `--depth` | whole number | `3` | Assets to cross, 1 to 10. |
+| `--lang` | text | none | Show labels in this language, such as de. |
+| `--env` | text | none | Environment (default: the profile's). |
+
+### `lakana graph neighbours`
+
+Usage: `lakana graph neighbours [OPTIONS] {node}`
+
+Show what is one edge away from NODE: columns, assets, references, checks, terms, jobs.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `NODE` | text | required | A table's dotted name, such as gold.dim_store, or a node id. |
+| `--column` | text | none | A column of the table NODE names. |
+| `--kind` | text, repeatable | none | Only edges of this kind; repeat for several. |
+| `--lang` | text | none | Show labels in this language, such as de. |
+| `--env` | text | none | Environment (default: the profile's). |
+
 ## `lakana job`
 
 Usage: `lakana job [OPTIONS] COMMAND [ARGS]...`

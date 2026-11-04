@@ -74,13 +74,17 @@ def _page_from_json(data: dict[str, Any]) -> TermPage:
     return TermPage(items=[_term_from_json(item) for item in items], next_cursor=cursor)
 
 
-def _no_routes(error: NotFound) -> NotFound:
-    """Tell a server without the glossary routes from a missing term.
+def _no_routes(error: NotFound, what: str, issue: int) -> NotFound:
+    """Tell a server without a feature's routes from a missing object.
 
     Parameters
     ----------
     error
-        A 404 from a terms route.
+        A 404 from one of the feature's routes.
+    what
+        The feature, as the message names it, such as ``glossary``.
+    issue
+        The number of the issue that added the feature, for the message to point at.
 
     Returns
     -------
@@ -91,8 +95,8 @@ def _no_routes(error: NotFound) -> NotFound:
     if error.detail != "Not Found":
         return error
     return NotFound(
-        "This server has no glossary routes. Upgrade the server to a release with the "
-        "business glossary (lakana-labs/lakana#375), or use an SDK that matches the server.",
+        f"This server has no {what} routes. Upgrade the server to a release with the "
+        f"{what} (lakana-labs/lakana#{issue}), or use an SDK that matches the server.",
         status=error.status,
         error_type=error.error_type,
     )
@@ -157,7 +161,7 @@ class Terms:
                 ),
             )
         except NotFound as error:
-            translated = _no_routes(error)
+            translated = _no_routes(error, "glossary", 375)
             raise translated from None
         return _page_from_json(_object(response, "the terms"))
 
@@ -230,6 +234,6 @@ class Terms:
                 params=query_params(lang=lang),
             )
         except NotFound as error:
-            translated = _no_routes(error)
+            translated = _no_routes(error, "glossary", 375)
             raise translated from None
         return _term_from_json(_object(response, "a term"))
