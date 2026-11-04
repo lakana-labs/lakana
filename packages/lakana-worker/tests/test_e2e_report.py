@@ -29,3 +29,11 @@ def test_no_report_is_none() -> None:
     """Output without a report, or with a broken one, yields None."""
     assert last_report("nothing\n") is None
     assert last_report("E2E {broken\n") is None
+
+
+def test_the_proprietary_db_probe_is_valid_python() -> None:
+    """The probe's embedded source compiles once formatted, so a bad escape fails without Docker."""
+    from test_docker_proprietary_db_integration import _PROBE
+
+    source = _PROBE.format(file="recipe.py", function="load", with_context=False)
+    compile(source, "probe.py", "exec")

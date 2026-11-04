@@ -134,7 +134,7 @@ def probe(ctx):
         {{"schema": [[f.name, str(f.type)] for f in table.schema], "rows": table.to_pylist()}},
         default=str,
     )
-    sys.stdout.write(report + "\n")
+    sys.stdout.write(report + "\\n")
     sys.stdout.flush()
     raise RuntimeError("the probe is done")
 """
