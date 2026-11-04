@@ -113,7 +113,7 @@ from lakana_core.catalog.health_read import (
     signal_history,
     visibility_for,
 )
-from lakana_core.catalog.health_record import commit_observations, signal_rows
+from lakana_core.catalog.health_record import commit_observations, forget_set_back, signal_rows
 from lakana_core.catalog.health_signals import SIGNALS, HealthEffects
 from lakana_core.catalog.history import (
     EARLIEST_START,
@@ -5473,7 +5473,8 @@ class CatalogService:
         def settle() -> None:
             """Mark, clear the stamp, restore the note and record: the statements after the swap.
 
-            A set-back that makes the schema before current again also drops the task run's
+            The health signals of the snapshots set back are deleted with them (#340). A
+            set-back that makes the schema before current again also drops the task run's
             column change (`TaskRun.schema_change_json`): the columns and their field ids are
             the old ones again, so neither the note, the warnings nor the notification line may
             say otherwise.
@@ -5492,6 +5493,13 @@ class CatalogService:
                     .values(unpublished_run_id=run_id)
                     .execution_options(synchronize_session=False)
                 )
+            forget_set_back(
+                self._session,
+                table_id,
+                current,
+                after=after,
+                until=None if written.publishes or before is None else before,
+            )
             self._clear_stamp(task_run_id)
             restored = restore_kept(
                 self._session,

@@ -23,7 +23,7 @@ from pyiceberg.io import FileIO
 from pyiceberg.manifest import DataFile
 from pyiceberg.table.metadata import TableMetadata
 from pyiceberg.table.snapshots import Operation, Snapshot
-from sqlalchemy import ColumnElement, Subquery, and_, func, not_, select
+from sqlalchemy import ColumnElement, Subquery, and_, delete, func, not_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import InstrumentedAttribute, Session
 
@@ -442,3 +442,45 @@ def _storable(*values: object) -> bool:
     except (ValueError, TypeError):
         return False
     return True
+
+
+def forget_set_back(
+    session: Session,
+    table_id: uuid.UUID,
+    metadata: TableMetadata,
+    *,
+    after: int | None,
+    until: int | None,
+) -> None:
+    """Delete the signals of the snapshots a set-back takes out of ``main``, uncommitted.
+
+    A check that sets a table back (`CatalogService.roll_back`) makes them no longer the table's
+    data: their rows must neither show as its current state nor feed a later baseline.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    table_id
+        The table.
+    metadata
+        The table's metadata before the set-back.
+    after
+        The snapshot that is set back; `None` sets nothing back.
+    until
+        The snapshot ``main`` goes back to, whose rows stay; `None` when ``main`` is removed and
+        every ancestor of `after` goes.
+    """
+    gone: list[int] = []
+    snapshot = None if after is None else metadata.snapshot_by_id(after)
+    while (
+        snapshot is not None and snapshot.snapshot_id != until and snapshot.snapshot_id not in gone
+    ):
+        gone.append(snapshot.snapshot_id)
+        parent = snapshot.parent_snapshot_id
+        snapshot = None if parent is None else metadata.snapshot_by_id(parent)
+    session.execute(
+        delete(TableHealthSignal)
+        .where(TableHealthSignal.table_id == table_id, TableHealthSignal.snapshot_id.in_(gone))
+        .execution_options(synchronize_session=False)
+    )
