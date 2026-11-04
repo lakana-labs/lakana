@@ -136,6 +136,37 @@ def _no_metadata() -> TableMetadata | None:
     return None
 
 
+def _schemas(*schemas: dict[int, str]) -> TableMetadata:
+    """Build the metadata of a table with an `id` column and these other columns.
+
+    Parameters
+    ----------
+    *schemas
+        Each schema's columns beyond `id`, field id to name; the last is current.
+
+    Returns
+    -------
+    TableMetadata
+        The metadata, schema ids counted from 0.
+    """
+    built = [
+        Schema(
+            NestedField(1, "id", LongType()),
+            *(NestedField(i, name, DoubleType()) for i, name in columns.items()),
+            schema_id=n,
+        )
+        for n, columns in enumerate(schemas)
+    ]
+    return TableMetadataV2(
+        location="file:///orders",
+        last_column_id=max(i for columns in schemas for i in columns),
+        schemas=built,
+        current_schema_id=len(built) - 1,
+        partition_specs=[PartitionSpec()],
+        sort_orders=[SortOrder()],
+    )
+
+
 def _renamed_price() -> TableMetadata:
     """Build the metadata of a table whose `price` column was renamed to `amount`.
 
@@ -144,17 +175,38 @@ def _renamed_price() -> TableMetadata:
     TableMetadata
         Schema 0 has `price` as field 2, the current schema 1 has `amount` as field 2.
     """
-    before = Schema(NestedField(1, "id", LongType()), NestedField(2, "price", DoubleType()))
-    after = Schema(
-        NestedField(1, "id", LongType()), NestedField(2, "amount", DoubleType()), schema_id=1
-    )
-    return TableMetadataV2(
-        location="file:///orders",
-        last_column_id=2,
-        schemas=[before, after],
-        current_schema_id=1,
-        partition_specs=[PartitionSpec()],
-        sort_orders=[SortOrder()],
+    return _schemas({2: "price"}, {2: "amount"})
+
+
+def _salary_to_pay() -> TableMetadata:
+    """Build the metadata of a table whose `salary` was renamed to `pay`, then given a new `salary`.
+
+    Returns
+    -------
+    TableMetadata
+        Field 2 is `salary`, then `pay`; field 3, the new `salary`, is current only.
+    """
+    return _schemas({2: "salary"}, {2: "pay"}, {2: "pay", 3: "salary"})
+
+
+def _mask_on(column: str, schema_id: int) -> ResolvedPolicy:
+    """Build the policy of a reader masked on one column.
+
+    Parameters
+    ----------
+    column
+        The masked column.
+    schema_id
+        The schema the mask was written against.
+
+    Returns
+    -------
+    ResolvedPolicy
+        The policy.
+    """
+    return ResolvedPolicy(
+        column_masks={column: "NULL"},
+        policies=[PolicyColumns(columns=frozenset({column}), schema_id=schema_id)],
     )
 
 
@@ -345,6 +397,29 @@ def test_a_compaction_keeps_the_column_signals_of_the_commit_before(
     ]
 
 
+def test_a_commit_without_column_rows_keeps_the_column_signals_before(
+    session: Session, tmp_path: Path
+) -> None:
+    """Keep the column signals of the commit before one that wrote none, as a delete does (M1).
+
+    Parameters
+    ----------
+    session
+        Database session.
+    tmp_path
+        Storage root.
+    """
+    _catalog(session, tmp_path)
+    first = _add(session, "volume", "ok", observed={"added": 3, "total": 3})
+    _add(session, "range", "ok", column="id", observed={"lower": 1, "upper": 3, "kind": "integer"})
+    _add(session, "volume", "ok", observed={"added": 0, "total": 2}, minutes=5)
+    shown = current_signals(session, first.table_id, "silver.orders", Visibility())
+    assert [(s.signal, s.column, s.observed_at) for s in shown] == [
+        ("volume", None, _NOW + timedelta(minutes=5)),
+        ("range", "id", _NOW),
+    ]
+
+
 def test_a_damaged_stored_value_gives_no_alert(session: Session, tmp_path: Path) -> None:
     """Give no alert when a stored value no longer fits its text.
 
@@ -492,10 +567,10 @@ def test_a_mask_on_a_renamed_column_hides_every_value(
     assert seen.hides("null_rate", "amount") and seen.hides("range", "amount")
 
 
-def test_a_mask_without_a_rename_hides_only_its_column(
+def test_a_mask_without_a_rename_hides_its_columns_every_name(
     session: Session, tmp_path: Path, principal: PrincipalRef, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Hide only the masked column when its name still belongs to its column.
+    """Hide a masked column under every name its field had, and names the table no longer has.
 
     Parameters
     ----------
@@ -508,19 +583,84 @@ def test_a_mask_without_a_rename_hides_only_its_column(
     monkeypatch
         Pytest's monkeypatch.
     """
-    _answer_with(
-        monkeypatch,
-        ResolvedPolicy(
-            column_masks={"amount": "NULL"},
-            policies=[PolicyColumns(columns=frozenset({"amount"}), schema_id=1)],
-        ),
+    _answer_with(monkeypatch, _mask_on("Amount", 1))
+    seen = _visibility(session, tmp_path, principal, _renamed_price)
+    assert seen == Visibility(
+        masked=frozenset({"amount", "price"}), columns=frozenset({"id", "amount"})
     )
-    assert _visibility(session, tmp_path, principal, _renamed_price) == Visibility(
-        masked=frozenset({"amount"})
-    )
-    assert _visibility(session, tmp_path, principal, _no_metadata) == Visibility(
-        masked=frozenset({"amount"})
-    )
+    assert seen.hides("range", "price") and seen.hides("null_rate", "AMOUNT")
+    assert seen.hides("null_rate", "ghost") and not seen.hides("null_rate", "id")
+    assert not seen.hides("range", None)
+
+
+def test_a_mask_keeps_to_its_own_field(
+    session: Session, tmp_path: Path, principal: PrincipalRef, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Widen a mask only by its own field's names: a newer field, or a name the table lacks.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    tmp_path
+        Storage root.
+    principal
+        The reader.
+    monkeypatch
+        Pytest's monkeypatch.
+    """
+    _answer_with(monkeypatch, _mask_on("salary", 2))
+    seen = _visibility(session, tmp_path, principal, _salary_to_pay)
+    assert (seen.filtered, seen.masked) == (False, frozenset({"salary"}))
+    assert not seen.hides("null_rate", "pay")
+    _answer_with(monkeypatch, _mask_on("ghost", 1))
+    seen = _visibility(session, tmp_path, principal, _renamed_price)
+    assert (seen.filtered, seen.masked) == (False, frozenset({"ghost"}))
+
+
+def test_a_mask_on_a_table_without_metadata_hides_every_value(
+    session: Session, tmp_path: Path, principal: PrincipalRef, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Hide every value when a mask applies and no schema says which names are its column's.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    tmp_path
+        Storage root.
+    principal
+        The reader.
+    monkeypatch
+        Pytest's monkeypatch.
+    """
+    _answer_with(monkeypatch, _mask_on("amount", 1))
+    assert _visibility(session, tmp_path, principal, _no_metadata).filtered
+
+
+def test_a_mask_written_after_a_rename_hides_the_old_name(
+    session: Session, tmp_path: Path, principal: PrincipalRef, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Hide `salary`'s rows from a reader masked on `pay`, the same field under its new name.
+
+    The new column that reuses the name `salary` is hidden too, as its rows cannot be told apart.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    tmp_path
+        Storage root.
+    principal
+        The reader.
+    monkeypatch
+        Pytest's monkeypatch.
+    """
+    _answer_with(monkeypatch, _mask_on("pay", 2))
+    seen = _visibility(session, tmp_path, principal, _salary_to_pay)
+    assert not seen.filtered
+    assert seen.hides("null_rate", "salary") and seen.hides("range", "pay")
+    assert not seen.hides("range", "id")
 
 
 def test_unreachable_metadata_hides_every_value(
@@ -814,10 +954,48 @@ def test_table_health_hides_a_renamed_masked_columns_values(
     assert [s.band for s in page.items] == [None]
 
 
-def test_table_health_reads_no_metadata_of_a_table_without_any(
+def test_table_health_hides_a_column_renamed_before_its_mask(
     session: Session, tmp_path: Path, principal: PrincipalRef, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Hide only the masked column of a table that has no metadata to rename a column in.
+    """Leave out the rows stored as `salary` for a reader masked on `pay`, its new name (C1).
+
+    Parameters
+    ----------
+    session
+        Database session.
+    tmp_path
+        Storage root.
+    principal
+        The reader.
+    monkeypatch
+        Pytest's monkeypatch.
+    """
+    catalog = _catalog(session, tmp_path, Action.READ_TABLE)
+    _add(session, "volume", "ok", observed={"added": 3, "total": 3})
+    _add(session, "range", "fired", column="salary", observed=_NULLS, band=_RATE_BAND)
+    monkeypatch.setattr(
+        service, "read_metadata", lambda file_io, location: _schemas({2: "salary"}, {2: "pay"})
+    )
+    shown = catalog.table_health(principal, _ORDERS, days=30, now=_NOW).signals
+    assert [(s.column, s.observed is None) for s in shown] == [(None, False), ("salary", False)]
+    _answer_with(monkeypatch, _mask_on("pay", 1))
+    (_, salary) = catalog.table_health(principal, _ORDERS, days=30, now=_NOW).signals
+    assert (salary.observed, salary.band, salary.alert, salary.values_hidden) == (
+        None,
+        None,
+        None,
+        True,
+    )
+    page = catalog.table_health_signals(
+        principal, _ORDERS, days=30, signal=None, column="salary", limit=10, cursor=None, now=_NOW
+    )
+    assert [(s.observed, s.band, s.values_hidden) for s in page.items] == [(None, None, True)]
+
+
+def test_table_health_hides_masked_values_of_a_table_without_metadata(
+    session: Session, tmp_path: Path, principal: PrincipalRef, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Hide the values of a masked reader when the table has no metadata to judge names by.
 
     Parameters
     ----------
@@ -836,4 +1014,4 @@ def test_table_health_reads_no_metadata_of_a_table_without_any(
     session.execute(update(Table).values(metadata_location=None))
     _answer_with(monkeypatch, _PRICE_MASK)
     (_, shown) = catalog.table_health(principal, _ORDERS, days=30, now=_NOW).signals
-    assert shown.observed == _NULLS and not shown.values_hidden
+    assert shown.observed is None and shown.values_hidden

@@ -7,10 +7,12 @@ engine reads names that way), or when the reader's policies cannot be read (fail
 `volume`, `freshness` and `schema` are never hidden: row counts are already in `table get`, and
 the column list is the table's schema.
 
-The rows compare column names only, so a mask whose column was renamed since it was written would
-sit on a name the rows no longer use. The query path refuses such a read
+Rows keep the name a column had when they were recorded, and a mask names the column as it is
+now, so a masked column is hidden under every name its field has had in the table's schemas, and
+under any name the current schema does not have (history whose column cannot be told). A mask
+whose column was renamed since it was written is refused by the query path
 (`policy.renames.renamed_policy_column`); here every value of the table is hidden instead, as
-for a row filter, and so it is when the table's metadata cannot be read to rule a rename out.
+for a row filter, and so it is when the table's metadata cannot be read, or the table has none.
 """
 
 from __future__ import annotations
@@ -41,9 +43,6 @@ HISTORY_KIND = "health_signals"
 UNKNOWN_SIGNAL_MESSAGE = (
     "There is no health signal `{signal}`; use freshness, volume, null_rate, range or schema."
 )
-
-_COUNTED = ("volume", "null_rate", "range")
-"""The signals a commit records only when it adds rows; a compaction records just the schema."""
 
 
 @dataclass(frozen=True)
@@ -102,10 +101,14 @@ class Visibility:
         The columns a mask applies to for the reader, case-folded.
     filtered
         Whether a row filter applies to the reader, or the policies could not be read.
+    columns
+        The current schema's column names, case-folded, when a mask applies: a column row of
+        another name is hidden too. `None` hides by `masked` alone.
     """
 
     masked: frozenset[str] = frozenset()
     filtered: bool = False
+    columns: frozenset[str] | None = None
 
     def hides(self, signal: str, column: str | None) -> bool:
         """Say whether a row's values are left out for this reader.
@@ -120,11 +123,17 @@ class Visibility:
         Returns
         -------
         bool
-            True for a ``null_rate`` or ``range`` row under a row filter, or of a masked column.
+            True for a ``null_rate`` or ``range`` row under a row filter, of a masked column, or
+            of a column `columns` does not list.
         """
         if signal not in COLUMN_SIGNALS:
             return False
-        return self.filtered or (column is not None and column.casefold() in self.masked)
+        if self.filtered:
+            return True
+        if column is None:
+            return False
+        name = column.casefold()
+        return name in self.masked or (self.columns is not None and name not in self.columns)
 
 
 def visibility_for(
@@ -149,14 +158,14 @@ def visibility_for(
         Its id.
     metadata
         Reads the table's current metadata, `None` for a table without any; called only when a
-        mask applies and no row filter does, to rule out a renamed masked column.
+        mask applies and no row filter does, to find every name of a masked column.
 
     Returns
     -------
     Visibility
         Everything value-revealing hidden when the policies cannot be read, when a column a
-        mask uses was renamed since the mask was written, or when the metadata that would show
-        it could not be read.
+        mask uses was renamed since the mask was written, or when no metadata says which names
+        a masked column has had (none, or unreadable).
     """
     try:
         policy = PolicyResolver(session).resolve(p, ref, table_id=table_id)
@@ -165,14 +174,49 @@ def visibility_for(
     masked = frozenset(column.casefold() for column in policy.column_masks)
     if policy.row_filters:
         return Visibility(masked=masked, filtered=True)
-    if masked:
+    if not masked:
+        return Visibility()
+    try:
+        current = metadata()
+    except StorageUnavailableError:
+        return Visibility(masked=masked, filtered=True)
+    if current is None or renamed_policy_column(current, policy.policies) is not None:
+        return Visibility(masked=masked, filtered=True)
+    return Visibility(
+        masked=_every_name(current, masked),
+        columns=frozenset(name.casefold() for name in current.schema().column_names),
+    )
+
+
+def _every_name(metadata: TableMetadata, masked: frozenset[str]) -> frozenset[str]:
+    """Add every name the masked columns' fields have had in the table's schemas.
+
+    Parameters
+    ----------
+    metadata
+        The table's metadata.
+    masked
+        The masked columns, case-folded, as the current schema names them.
+
+    Returns
+    -------
+    frozenset of str
+        `masked` and each earlier name of the same field ids, case-folded.
+    """
+    schema = metadata.schema()
+    ids = set()
+    for name in masked:
         try:
-            current = metadata()
-        except StorageUnavailableError:
-            return Visibility(masked=masked, filtered=True)
-        if current is not None and renamed_policy_column(current, policy.policies) is not None:
-            return Visibility(masked=masked, filtered=True)
-    return Visibility(masked=masked)
+            ids.add(schema.find_field(name, case_sensitive=False).field_id)
+        except ValueError:
+            continue  # a mask on a column the table no longer has hides that name only
+    names = set(masked)
+    for each in metadata.schemas:
+        for field_id in ids:
+            name = each.find_column_name(field_id)
+            if name is not None:
+                names.add(name.casefold())
+    return frozenset(names)
 
 
 def _alert(table: str, row: TableHealthSignal) -> str | None:
@@ -286,11 +330,11 @@ def current_signals(
 ) -> list[SignalView]:
     """Show the current state of each signal of a table, with the last time each fired.
 
-    The schema is the newest commit's and freshness the newest sweep's. Volume, null rate and
-    range are the newest commit's that recorded them, which every commit adding rows does: a
-    signal switched off there shows as its off row, and a column it no longer observed (a
-    dropped one, say) is left out. A compaction records only the schema, so the commit before it
-    is shown.
+    Schema, volume and freshness are each their newest row. Null rate and range are the rows
+    of the newest commit that wrote any of them, which a commit reading the added files does for
+    every column it observed: a signal switched off there shows as its off row, and a column it
+    no longer observed (a dropped one, say) is left out. A compaction or a commit that adds no
+    data files (a delete) writes none, so the commit before it is shown.
 
     Parameters
     ----------
@@ -310,12 +354,14 @@ def current_signals(
     """
     newest = _newest(session, table_id)
     fired = _newest(session, table_id, TableHealthSignal.state == "fired")
-    volume = newest.get(("volume", None))
-    counted_at = None if volume is None else volume.observed_at
+    column_at = max(
+        (row.observed_at for row in newest.values() if row.signal in COLUMN_SIGNALS),
+        default=None,
+    )
     shown = [
         row
         for row in newest.values()
-        if row.signal not in _COUNTED or row.observed_at == counted_at
+        if row.signal not in COLUMN_SIGNALS or row.observed_at == column_at
     ]
     shown.sort(key=lambda row: (SIGNALS.index(row.signal), row.column_name or ""))
     return [

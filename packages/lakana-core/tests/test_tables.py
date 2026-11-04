@@ -1495,6 +1495,9 @@ def test_no_new_catalog_method_builds_a_loaded_table_without_a_decision() -> Non
     assert callers == [
         # `describe_table` reads through it, then adds the descriptions.
         "_describe_row",
+        # Reads only the schemas' column names, to know which health values a masked reader may
+        # see; returns no metadata.
+        "_health_visibility",
         # A writer's: it reads only the snapshot id, to refuse a create pin on a table that has one.
         "_refuse_create_pin_on_snapshot",
         "append",
