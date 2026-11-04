@@ -98,11 +98,15 @@ route you may see reaches it. A start you may not see is answered like one that 
 
 A job shows its edge to an asset only when you may see the asset.
 
+A node's `repository`, and a table's `owner` (the owner of the asset that builds it), come from
+what is deployed to the environment: you see them only with `READ_ENVIRONMENT`. Without it they
+are `null`.
+
 ## Limits and refusals
 
 - `depth` is 1 to 10 and the page size (`limit` in REST, `page_size` in the SDK) is 1 to 500;
-  outside them, the answer is `422` with the range. A cursor the server did not issue for the same
-  question is refused with `422` before any work is done.
+  outside them, the answer is `422` with the range. A cursor the server did not issue for this list
+  (lineage or neighbours), or a malformed one, is refused with `422` before any work is done.
 - A question that would follow more than 200,000 edges is refused with `422`. Ask a narrower one:
   a smaller depth, one direction, or neighbours of some kinds.
 - A walk that runs longer than 10 seconds is stopped with `503` and `Retry-After`. The time counts

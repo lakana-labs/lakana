@@ -338,7 +338,7 @@ class GraphNode:
     key
         A table's declared key columns.
     owner
-        A table's (its asset's), asset's or term's owner.
+        A table's (its asset's; `None` without ``READ_ENVIRONMENT``), asset's or term's owner.
     repository
         The repository that declares an asset, job, check or term, or builds a reference's or
         measure's table.

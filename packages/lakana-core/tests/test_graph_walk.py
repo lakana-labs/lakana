@@ -305,7 +305,10 @@ def test_assets_and_jobs_need_read_environment(star: StarWorld, principal: Princ
     reader = _service(star, Grants(environment=False))
     page = reader.lineage(principal, "dev", "gold.dim_store")
     assert [n.name for n in page.nodes] == ["gold.dim_store"]
-    assert (page.nodes[0].owner, page.nodes[0].repository) == ("stores-team", None)
+    # The owner is the building asset's: without READ_ENVIRONMENT, neither it nor the repository.
+    assert (page.nodes[0].owner, page.nodes[0].repository) == (None, None)
+    seen = _service(star).lineage(principal, "dev", "gold.dim_store").nodes[0]
+    assert (seen.owner, seen.repository) == ("stores-team", "stores")
     with pytest.raises(NotFoundError) as hidden:
         reader.neighbours(principal, "dev", "asset:sales/gold.fact_sales")
     with pytest.raises(NotFoundError) as missing:

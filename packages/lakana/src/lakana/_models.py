@@ -2074,7 +2074,8 @@ class GraphNode:
     key
         A table's declared key columns.
     owner
-        The owner of a table's asset, an asset or a term.
+        The owner of a table's asset (`None` for a reader without ``READ_ENVIRONMENT``), an
+        asset or a term.
     repository
         The repository that declares it (or builds its table); `None` for a node without one
         or for a reader without ``READ_ENVIRONMENT``.

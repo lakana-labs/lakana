@@ -8,9 +8,9 @@ Every node goes through `_Visibility` before a walk reaches it (spec §4):
 - an asset needs `READ_ENVIRONMENT` and its output table readable;
 - a job or glossary term needs `READ_ENVIRONMENT`.
 
-Which repository builds a table, or declares a check, is a fact about the environment's
-deployments, so a table, reference, measure or check names its repository only for a reader who
-holds `READ_ENVIRONMENT`.
+Which repository builds a table, or declares a check, and who owns the asset that builds a
+table, are facts about the environment's deployments: a table, reference, measure or check names
+its repository, and a table its builder's owner, only for a reader who holds `READ_ENVIRONMENT`.
 
 A hidden node is never added, never walked through and never counted: the step budget counts
 only edges to visible nodes, so neither an answer nor a refusal tells that one is there. The one
@@ -1002,7 +1002,7 @@ class GraphService:
                 model_kind=table.model_kind,
                 grain=_chosen(table, rows, languages, self._main_language, "grain"),
                 key=table.key or None,
-                owner=builder.owner if builder else None,
+                owner=builder.owner if builder and deployed else None,
                 repository=_repository(graph, table.id) if deployed else None,
                 label=_chosen(table, rows, languages, self._main_language, "label"),
                 **base,
