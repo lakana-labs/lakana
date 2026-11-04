@@ -130,12 +130,12 @@ All routes are `GET` and need `READ_ENVIRONMENT` on the environment.
 | Route | Answer |
 |---|---|
 | `/api/v1/environments/{env}/terms` | One page of terms, sorted by key: `{"items": [...], "next_cursor": ...}`. |
-| `/api/v1/environments/{env}/terms/{key}` | One term; `404` for a key the environment does not have. |
+| `/api/v1/environments/{env}/terms/{key}` | One term; `404` for a key the environment does not have, `422` for one no term can have (over 63 characters, or with a control character such as NUL). |
 
 | Parameter | Meaning |
 |---|---|
-| `owner` | List only. Only terms with exactly this owner. |
-| `repository` | List only. Only terms this repository defines. |
+| `owner` | List only. Only terms with exactly this owner. Over 1,000 characters, or with a control character such as NUL, is `422`. |
+| `repository` | List only. Only terms this repository defines. Over 255 characters, or with a control character, is `422`. |
 | `lang` | The language of the texts, such as `de` or `fr-CH`. Without it, your profile's language, then `Accept-Language`, then the instance's main language. A value that is not a language tag is `422`. |
 | `limit` | List only. Terms per page, 1 to 200 (100). |
 | `cursor` | List only. The `next_cursor` of the previous page; one the list did not issue is `422`. |

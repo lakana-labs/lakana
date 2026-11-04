@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import uuid
 
 from fastapi.testclient import TestClient
@@ -238,3 +239,22 @@ def test_the_owner_and_repository_filters_narrow_the_list(client: TestClient) ->
     assert keys(owner="hr") == []
     assert keys(repository="shop") == ["gross_revenue", "net_revenue"]
     assert keys(repository="other") == []
+
+
+def test_a_key_filter_or_cursor_no_term_can_have_is_422_with_the_next_step(
+    client: TestClient,
+) -> None:
+    _setup(client)
+    nul_cursor = base64.urlsafe_b64encode(b'{"k": "terms", "n": "a\\u0000"}').decode()
+
+    answers = [
+        client.get(f"{_TERMS}/net%00revenue", headers=AUTH_HEADER),
+        client.get(f"{_TERMS}/{'k' * 64}", headers=AUTH_HEADER),
+        client.get(_TERMS, headers=AUTH_HEADER, params={"owner": "fin\x00"}),
+        client.get(_TERMS, headers=AUTH_HEADER, params={"repository": "r" * 256}),
+        client.get(_TERMS, headers=AUTH_HEADER, params={"cursor": nul_cursor}),
+    ]
+
+    assert [a.status_code for a in answers] == [422] * 5, [a.text for a in answers]
+    assert all("lakana term list --env dev" in a.text for a in answers[:4])
+    assert "cursor" in answers[4].text

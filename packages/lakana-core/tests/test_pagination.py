@@ -127,7 +127,19 @@ def test_a_key_cursor_round_trips_and_refuses_another_list() -> None:
     with pytest.raises(ValidationError) as other:
         decode_key_cursor("terms", encode_cursor("runs", _AT, uuid.uuid4()))
     assert str(other.value) == _OTHER_LIST.format(expected="terms", actual="runs")
-    for bad in ("%%%", _raw(b"[1]"), _raw(b'{"k": 1}'), _raw(b'{"k": "terms"}'), _raw(b"{")):
+    nul, surrogate = (
+        _raw(b'{"k": "terms", "n": "a\\u0000"}'),
+        _raw(b'{"k": "terms", "n": "\\ud800"}'),
+    )
+    for bad in (
+        "%%%",
+        _raw(b"[1]"),
+        _raw(b'{"k": 1}'),
+        _raw(b'{"k": "terms"}'),
+        _raw(b"{"),
+        nul,
+        surrogate,
+    ):
         with pytest.raises(ValidationError) as caught:
             decode_key_cursor("terms", bad)
         assert str(caught.value) == _BAD_CURSOR

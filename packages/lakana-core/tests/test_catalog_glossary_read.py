@@ -418,3 +418,40 @@ def test_synonyms_come_from_every_reader_language_also_one_without_a_translated_
     assert both.synonyms == ("nómina", "Umsatz", "Pay", "masse salariale")
     main_first = world.service.get(world.bob, "dev", "salary_cost", languages=("en", "de"))
     assert main_first.synonyms == ()
+
+
+_NEXT = "; list the terms with: lakana term list --env dev"
+_UNSAFE = "contains a control, format or surrogate character (such as NUL), which no term has"
+
+
+@pytest.mark.parametrize(
+    ("call", "message"),
+    [
+        (
+            lambda s, p: s.get(p, "dev", "k" * 64),
+            f"The term key has 64 characters, more than the 63 allowed. Check it{_NEXT}",
+        ),
+        (
+            lambda s, p: s.get(p, "dev", "net\x00revenue"),
+            f"The term key {_UNSAFE}. Send it without one{_NEXT}",
+        ),
+        (
+            lambda s, p: s.list(p, "dev", repository="r" * 256),
+            f"The repository filter has 256 characters, more than the 255 allowed. Check it{_NEXT}",
+        ),
+        (
+            lambda s, p: s.list(p, "dev", owner="o" * 1001),
+            f"The owner filter has 1001 characters, more than the 1000 allowed. Check it{_NEXT}",
+        ),
+        (
+            lambda s, p: s.list(p, "dev", owner="fin\u202e"),
+            f"The owner filter {_UNSAFE}. Send it without one{_NEXT}",
+        ),
+    ],
+)
+def test_a_key_or_filter_no_term_can_have_is_refused_before_the_database(
+    world: World, call: Any, message: str
+) -> None:
+    with pytest.raises(ValidationError) as caught:
+        call(world.service, world.bob)
+    assert str(caught.value) == message

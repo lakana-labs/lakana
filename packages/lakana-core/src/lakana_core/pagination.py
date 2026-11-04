@@ -16,6 +16,7 @@ import base64
 import binascii
 import enum
 import json
+import unicodedata
 import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -285,9 +286,12 @@ def decode_key_cursor(kind: str, cursor: str) -> str:
         raise ValidationError(_BAD_CURSOR)
     if data["k"] != kind:
         raise ValidationError(_OTHER_LIST.format(expected=kind, actual=data["k"]))
-    if not isinstance(data.get("n"), str):
+    key = data.get("n")
+    # A cursor this server issued holds a stored key, never a NUL or a lone surrogate, which
+    # the database driver could not take.
+    if not isinstance(key, str) or any(unicodedata.category(c) in ("Cc", "Cs") for c in key):
         raise ValidationError(_BAD_CURSOR)
-    return data["n"]
+    return key
 
 
 def by_key(
