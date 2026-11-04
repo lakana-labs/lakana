@@ -1074,6 +1074,64 @@ def _refusal_before_lookup(update: TableUpdate) -> str | None:
     return None
 
 
+_MAX_LONG = 2**63 - 1
+"""The largest snapshot id or sequence number: Iceberg stores both as a signed 64-bit long."""
+
+
+def _snapshot_numbers_checked(
+    format_version: int,
+    *,
+    snapshot_id: int,
+    sequence_number: int | None,
+    last: int,
+    parented: bool = False,
+) -> int:
+    """Refuse a snapshot whose id or sequence number the Iceberg spec does not allow.
+
+    Parameters
+    ----------
+    format_version
+        The table's format version; from 2 on, sequence numbers must grow.
+    snapshot_id
+        The new snapshot's id.
+    sequence_number
+        Its sequence number; `None` (format v1) counts as 0.
+    last
+        The table's last sequence number before this snapshot.
+    parented
+        Whether the snapshot names a parent: on a format v2 table pyiceberg then refuses a
+        sequence number not above `last` itself, with the text the commit already withholds
+        from a writer without READ, so it is left to pyiceberg.
+
+    Returns
+    -------
+    int
+        The table's last sequence number after it.
+
+    Raises
+    ------
+    ValidationError
+        If the id or the sequence number lies outside 0 to 2^63-1, or if, on a format v2 or
+        later table, the sequence number is not above `last`, which the Iceberg specification
+        forbids (the client built its commit on metadata that is out of date). The message
+        leaves `last` out, which a writer without READ on the table may not see.
+    """
+    sequence = sequence_number or 0
+    if not (0 <= snapshot_id <= _MAX_LONG and 0 <= sequence <= _MAX_LONG):
+        raise ValidationError(
+            "A snapshot's id and sequence number must be between 0 and 2^63-1 (got id "
+            f"{snapshot_id}, sequence number {sequence}); the Iceberg client that sent this "
+            "commit does not follow the Iceberg spec. Commit again with a client that does."
+        )
+    pyiceberg_checks = format_version == 2 and parented
+    if format_version >= 2 and not pyiceberg_checks and sequence <= last:
+        raise ValidationError(
+            f"A new snapshot's sequence number ({sequence}) must be above the table's last "
+            "sequence number; load the table again and commit again."
+        )
+    return max(last, sequence)
+
+
 def _layouts_added(update: TableUpdate) -> set[tuple[str, int]]:
     """Name the schema, partition spec or sort order that an update adds.
 
@@ -4691,8 +4749,10 @@ class CatalogService:
             table property that `ResolvedStorage.validate_table_properties`
             refuses; if `updates` includes an `AddSnapshotUpdate` whose
             `snapshot.manifest_list` does not lie under the table's own
-            location; if a snapshot the commit adds names a data file that is not Parquet,
-            cannot be read, or has no Iceberg field ids
+            location, whose snapshot id or sequence number lies outside 0 to 2^63-1, or
+            whose sequence number is not above the table's last on a format v2 table; if a
+            snapshot the commit adds names a data file that is not Parquet, cannot be read, or
+            has no Iceberg field ids
             (`field_ids.check_added_files_have_field_ids`; also if there are more than 2,000 such
             files or the check takes over a minute), unless `own_data_files`; if the
             metadata location computed from the table's
@@ -4795,6 +4855,7 @@ class CatalogService:
         known_specs = {spec.spec_id for spec in current.partition_specs}
         known_orders = {order.order_id for order in current.sort_orders}
         added_layouts: set[tuple[str, int]] = set()
+        last_sequence = getattr(current, "last_sequence_number", 0)  # format v1 has none: 0
         for table_update in updates:
             if isinstance(table_update, SetLocationUpdate):
                 raise ValidationError("A table's location cannot change.")
@@ -4825,11 +4886,18 @@ class CatalogService:
                 and not self._may_see_state(p, ref)
             ):
                 raise ValidationError(_EARLIER_SCHEMA_NEEDS_READ)
-            if isinstance(table_update, AddSnapshotUpdate) and not is_within_location(
-                current.location, table_update.snapshot.manifest_list
-            ):
-                raise ValidationError(
-                    "A committed snapshot's manifest list must lie under the table's own location."
+            if isinstance(table_update, AddSnapshotUpdate):
+                if not is_within_location(current.location, table_update.snapshot.manifest_list):
+                    raise ValidationError(
+                        "A committed snapshot's manifest list must lie under the table's own "
+                        "location."
+                    )
+                last_sequence = _snapshot_numbers_checked(
+                    current.format_version,
+                    snapshot_id=table_update.snapshot.snapshot_id,
+                    sequence_number=table_update.snapshot.sequence_number,
+                    last=last_sequence,
+                    parented=table_update.snapshot.parent_snapshot_id is not None,
                 )
         checked_files: list[DataFile] | None = None
         if not maintenance and not internal_rollback and not own_data_files:

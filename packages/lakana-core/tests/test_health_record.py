@@ -594,6 +594,35 @@ def test_the_history_reaches_back_only_twice_history_commits(
     assert len(found["range", "id"]) == 3
 
 
+@pytest.mark.parametrize(
+    ("snapshot_id", "sequence_number"), [(2**63, 1), (1, 2**63), (-1, 1)], ids=["id", "seq", "neg"]
+)
+def test_numbers_outside_bigint_record_no_rows(
+    snapshot_id: int, sequence_number: int, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A snapshot id or sequence number a `BigInteger` cannot hold records nothing, and logs.
+
+    Parameters
+    ----------
+    snapshot_id
+        The snapshot's id.
+    sequence_number
+        Its sequence number.
+    caplog
+        Pytest's log capture.
+    """
+    rows = signal_rows(
+        [(Observation("volume", None, "ok", {"added": 1, "total": 1}, None), "warn")],
+        environment_id=uuid.uuid4(),
+        table_id=uuid.uuid4(),
+        snapshot_id=snapshot_id,
+        sequence_number=sequence_number,
+        now=_T0,
+    )
+    assert rows == []
+    assert "out of range" in caplog.text
+
+
 def test_the_history_is_ordered_by_sequence_number(
     catalog: CatalogService, session: Session
 ) -> None:

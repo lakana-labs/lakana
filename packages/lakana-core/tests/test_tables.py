@@ -1300,6 +1300,143 @@ def test_commit_refuses_a_foreign_manifest_list(
     assert reloaded.metadata.current_snapshot_id is None
 
 
+def _commit_snapshot(
+    catalog: CatalogService,
+    principal: PrincipalRef,
+    ref: TableRef,
+    created: LoadedTable,
+    *,
+    snapshot_id: int,
+    sequence_number: int,
+) -> None:
+    """Commit one snapshot under the table's own location, as an Iceberg REST client would.
+
+    Parameters
+    ----------
+    catalog
+        The catalog.
+    principal
+        The writer.
+    ref
+        The table.
+    created
+        The table as created.
+    snapshot_id
+        The snapshot's id.
+    sequence_number
+        Its sequence number.
+    """
+    snapshot = Snapshot(
+        snapshot_id=snapshot_id,
+        parent_snapshot_id=None,
+        sequence_number=sequence_number,
+        timestamp_ms=int(time.time() * 1000),
+        manifest_list=f"{created.metadata.location}/metadata/snap-{snapshot_id}.avro",
+        summary=Summary(operation=Operation.APPEND),
+        schema_id=created.metadata.current_schema_id,
+    )
+    catalog.commit_table(
+        principal,
+        ref,
+        requirements=[],
+        updates=[
+            AddSnapshotUpdate(snapshot=snapshot),
+            SetSnapshotRefUpdate(
+                ref_name="main", type=SnapshotRefType.BRANCH, snapshot_id=snapshot_id
+            ),
+        ],
+    )
+
+
+@pytest.mark.parametrize(
+    ("snapshot_id", "sequence_number"),
+    [(1, 10**30), (1, 2**63), (2**63, 1), (-1, 1)],
+    ids=["sequence-10e30", "sequence-2e63", "id-2e63", "id-negative"],
+)
+def test_commit_refuses_a_snapshot_number_outside_the_iceberg_range(
+    catalog: CatalogService,
+    principal: PrincipalRef,
+    tmp_path: Path,
+    snapshot_id: int,
+    sequence_number: int,
+) -> None:
+    """A snapshot id or sequence number outside 0 to 2^63-1 is refused, naming the next step.
+
+    Parameters
+    ----------
+    catalog
+        The catalog.
+    principal
+        The writer.
+    tmp_path
+        Storage root.
+    snapshot_id
+        The snapshot's id.
+    sequence_number
+        Its sequence number.
+    """
+    ref = _prepared_ref(catalog, principal, tmp_path)
+    created = catalog.create_table(principal, ref, schema=_schema())
+    with pytest.raises(ValidationError, match=r"between 0 and 2\^63-1.*Iceberg client"):
+        _commit_snapshot(
+            catalog,
+            principal,
+            ref,
+            created,
+            snapshot_id=snapshot_id,
+            sequence_number=sequence_number,
+        )
+    assert catalog.load_table(principal, ref).metadata.current_snapshot_id is None
+
+
+def test_commit_refuses_a_sequence_number_not_above_the_tables_last(
+    catalog: CatalogService, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    """On a format v2 table a new snapshot must take a sequence number above the last one.
+
+    Parameters
+    ----------
+    catalog
+        The catalog.
+    principal
+        The writer.
+    tmp_path
+        Storage root.
+    """
+    ref = _prepared_ref(catalog, principal, tmp_path)
+    created = catalog.create_table(principal, ref, schema=_schema())
+    assert created.metadata.format_version >= 2
+    with pytest.raises(
+        ValidationError,
+        match=r"\(0\) must be above the table's last sequence number; load the table again",
+    ):
+        _commit_snapshot(catalog, principal, ref, created, snapshot_id=1, sequence_number=0)
+    assert catalog.load_table(principal, ref).metadata.current_snapshot_id is None
+
+
+def test_a_format_v1_snapshot_without_sequence_numbers_passes_the_check() -> None:
+    """Format v1 has no sequence numbers (all 0), so only the range applies to it.
+
+    On format v2 a snapshot with a parent is left to pyiceberg's own check; format v3 is not.
+    """
+    assert (
+        service_module._snapshot_numbers_checked(1, snapshot_id=7, sequence_number=0, last=0) == 0
+    )
+    with pytest.raises(ValidationError):
+        service_module._snapshot_numbers_checked(1, snapshot_id=2**63, sequence_number=0, last=0)
+    assert (
+        service_module._snapshot_numbers_checked(2, snapshot_id=7, sequence_number=5, last=4) == 5
+    )
+    assert (
+        service_module._snapshot_numbers_checked(
+            2, snapshot_id=7, sequence_number=3, last=4, parented=True
+        )
+        == 4
+    )
+    with pytest.raises(ValidationError):
+        service_module._snapshot_numbers_checked(3, snapshot_id=7, sequence_number=3, last=4)
+
+
 def test_commit_rejects_an_arbitrary_location_provider_class(
     catalog: CatalogService, principal: PrincipalRef, tmp_path: Path
 ) -> None:

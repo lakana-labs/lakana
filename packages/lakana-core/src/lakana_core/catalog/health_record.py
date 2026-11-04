@@ -49,6 +49,9 @@ from lakana_core.models import TableHealthSignal
 
 logger = logging.getLogger(__name__)
 
+_MAX_BIGINT = 2**63 - 1
+"""The largest number a `BigInteger` column holds."""
+
 HEALTH_DEADLINE_SECONDS = 5.0
 """How long one commit may spend reading the manifests of its new snapshots for the metrics."""
 
@@ -420,10 +423,19 @@ def signal_rows(
     Returns
     -------
     list of TableHealthSignal
-        Not yet added to a session. An observation whose values JSON cannot store (an infinity,
+        Not yet added to a session; none when the snapshot id or sequence number does not fit
+        a 64-bit column, logged. An observation whose values JSON cannot store (an infinity,
         say, which Postgres `json` refuses at the flush and so fails the commit) is kept as
         ``no_metrics`` without values.
     """
+    if any(n is not None and not 0 <= n <= _MAX_BIGINT for n in (snapshot_id, sequence_number)):
+        # The commit refuses such numbers (`CatalogService.commit_table`); should one get past,
+        # its rows could not be stored and would fail the commit, so it records none.
+        logger.warning(
+            "The health signals of a commit were not recorded: its snapshot id or sequence "
+            "number is out of range for the database."
+        )
+        return []
     rows = []
     for o, effect in pairs:
         stored = _storable(o.observed, o.band)
