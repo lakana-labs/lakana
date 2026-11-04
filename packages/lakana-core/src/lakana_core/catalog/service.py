@@ -1096,7 +1096,8 @@ def _snapshot_numbers_checked(
     snapshot_id
         The new snapshot's id.
     sequence_number
-        Its sequence number; `None` (format v1) counts as 0.
+        Its sequence number; `None` counts as 0 on format v1 and is refused from v2 on, where
+        pyiceberg would set the table's last sequence number back to 0.
     last
         The table's last sequence number before this snapshot.
     at_most
@@ -1118,7 +1119,7 @@ def _snapshot_numbers_checked(
     ------
     ValidationError
         If the id or the sequence number lies outside 0 to 2^63-1, or if, on a format v2 or
-        later table, the sequence number is not above `last` or is above `at_most` (the
+        later table, the sequence number is missing, is not above `last` or is above `at_most` (the
         client built its commit on metadata that is out of date, or does not number snapshots
         as the Iceberg specification does). The messages leave the table's numbers out, which
         a writer without READ on the table may not see. Format v1 has no sequence numbers to
@@ -1130,6 +1131,12 @@ def _snapshot_numbers_checked(
             "A snapshot's id and sequence number must be between 0 and 2^63-1 (got id "
             f"{snapshot_id}, sequence number {sequence}); the Iceberg client that sent this "
             "commit does not follow the Iceberg spec. Commit again with a client that does."
+        )
+    if format_version >= 2 and sequence_number is None:
+        raise ValidationError(
+            "A snapshot on a format v2 table needs a sequence number: the table's last plus one "
+            "per snapshot the commit adds; load the table again and commit again with a client "
+            "that sets it."
         )
     pyiceberg_checks = format_version == 2 and parented
     if format_version >= 2 and not pyiceberg_checks and sequence <= last:

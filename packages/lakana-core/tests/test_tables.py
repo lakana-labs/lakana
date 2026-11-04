@@ -1439,7 +1439,7 @@ def _rows(ids: list[int]) -> pa.Table:
 
 
 def _readd_current(
-    catalog: CatalogService, principal: PrincipalRef, ref: TableRef, *sequences: int
+    catalog: CatalogService, principal: PrincipalRef, ref: TableRef, *sequences: int | None
 ) -> None:
     """Commit copies of the current snapshot with the given sequence numbers, one per snapshot.
 
@@ -1504,6 +1504,33 @@ def test_commit_refuses_a_sequence_number_beyond_one_per_added_snapshot(
     with pytest.raises(ValidationError, match=r"must be at most .*; load the table again"):
         _readd_current(catalog, principal, ref, claimed)
     assert catalog.load_table(principal, ref).metadata.last_sequence_number == last  # ty: ignore[unresolved-attribute]
+
+
+def test_commit_refuses_a_v2_snapshot_without_a_sequence_number(
+    catalog: CatalogService, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    """A v2 snapshot with a parent and no sequence number is refused, so the numbers never fall.
+
+    pyiceberg skips its own check for such a snapshot; accepted, it would set the table's last
+    sequence number back to 0, and the next write would reuse 1.
+
+    Parameters
+    ----------
+    catalog
+        The catalog.
+    principal
+        The writer.
+    tmp_path
+        Storage root.
+    """
+    ref = _prepared_ref(catalog, principal, tmp_path)
+    catalog.create_table(principal, ref, schema=_schema())
+    catalog.append(principal, ref, _rows([1]))
+    last = catalog.load_table(principal, ref).metadata.last_sequence_number  # ty: ignore[unresolved-attribute]
+    with pytest.raises(ValidationError, match=r"format v2 table needs a sequence number"):
+        _readd_current(catalog, principal, ref, None)
+    catalog.append(principal, ref, _rows([2]))
+    assert catalog.load_table(principal, ref).metadata.last_sequence_number == last + 1  # ty: ignore[unresolved-attribute]
 
 
 def test_a_commit_of_two_snapshots_takes_the_next_two_sequence_numbers(
