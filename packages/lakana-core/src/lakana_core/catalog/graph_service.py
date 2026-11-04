@@ -354,7 +354,7 @@ class _Context:
             ``(edge, other end)`` per edge, in the graph's order.
         """
         found: list[tuple[GraphEdge, str]] = []
-        for edge in self.graph.edges(node_id):
+        for edge in self.graph.edges(node_id, kinds):
             if kinds and edge.kind not in kinds:
                 continue
             other = edge.target if edge.source == node_id else edge.source
@@ -962,7 +962,7 @@ class GraphService:
                 grain=_chosen(table, rows, languages, self._main_language, "grain"),
                 key=table.key or None,
                 owner=builder.owner if builder else None,
-                repository=builder.repository if builder and deployed else None,
+                repository=_repository(graph, table.id) if deployed else None,
                 label=_chosen(table, rows, languages, self._main_language, "label"),
                 **base,
             )

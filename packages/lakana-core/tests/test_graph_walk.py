@@ -9,6 +9,7 @@ from collections.abc import Callable
 
 import pytest
 from graph_test_helpers import Grants, StarWorld, asset_entry, point
+from sqlalchemy import event
 
 from lakana_core.auth import PrincipalRef
 from lakana_core.catalog import graph_service
@@ -466,6 +467,56 @@ def test_a_table_label_and_grain_show_in_the_reader_language(
     assert (french.label, french.grain) == ("Magasins", "Une ligne par magasin.")
     english = service.neighbours(principal, "dev", "gold.dim_store").nodes[0]
     assert (english.label, english.grain) == (None, "One row per store.")
+
+
+def _statements(star: StarWorld, ask: Callable[[], object]) -> int:
+    """Count the SQL statements a question issues.
+
+    Parameters
+    ----------
+    star
+        The world.
+    ask
+        The question.
+
+    Returns
+    -------
+    int
+        How many statements reached the database.
+    """
+    seen: list[str] = []
+
+    def count(*args: object) -> None:
+        """Note one statement.
+
+        Parameters
+        ----------
+        *args
+            What SQLAlchemy passes.
+        """
+        seen.append(str(args[2]))
+
+    engine = star.session.get_bind()
+    event.listen(engine, "before_cursor_execute", count)
+    try:
+        ask()
+    finally:
+        event.remove(engine, "before_cursor_execute", count)
+    return len(seen)
+
+
+def test_a_lineage_walk_reads_no_columns_however_far_it_goes(
+    star: StarWorld, principal: PrincipalRef
+) -> None:
+    service = _service(star)
+
+    def walk(depth: int) -> Callable[[], object]:
+        return lambda: service.lineage(
+            principal, "dev", "bronze.sales_raw", direction=LineageWay.DOWN, depth=depth, limit=1
+        )
+
+    # One page of one table either way; depth 10 visits four tables, depth 1 two.
+    assert _statements(star, walk(10)) == _statements(star, walk(1))
 
 
 def test_pages_carry_every_node_and_each_edge_once(

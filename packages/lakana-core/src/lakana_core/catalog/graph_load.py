@@ -688,13 +688,17 @@ class EnvironmentGraph:
         self.preload_columns([table_id])
         return self._columns.get(table_id, {})
 
-    def edges(self, node_id: str) -> list[GraphEdge]:
-        """List every edge touching a node, in both directions, unfiltered.
+    def edges(self, node_id: str, kinds: Collection[EdgeKind] = ()) -> list[GraphEdge]:
+        """List the edges touching a node, in both directions, unfiltered by visibility.
 
         Parameters
         ----------
         node_id
             A canonical node id.
+        kinds
+            The edge kinds the caller wants; every kind when empty. Only the table's
+            `has_column` edges, which read its columns, are left out by it: the caller filters
+            the rest.
 
         Returns
         -------
@@ -703,7 +707,7 @@ class EnvironmentGraph:
         """
         found = list(self._adjacent.get(node_id, ()))
         kind = node_kind(node_id)
-        if kind is NodeKind.TABLE:
+        if kind is NodeKind.TABLE and (not kinds or EdgeKind.HAS_COLUMN in kinds):
             table_id = table_part(node_id)
             found += [
                 GraphEdge(EdgeKind.HAS_COLUMN, node_id, column_node(table_id, column))
