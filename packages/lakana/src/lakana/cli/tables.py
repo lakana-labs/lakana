@@ -29,7 +29,7 @@ from lakana.cli._paging import CURSOR, LIMIT, more_results
 from lakana.cli._state import CliError, CliState, confirm, resolve_environment, state_of
 from lakana.cli.artifacts import human_size
 from lakana.cli.checks import check_shown, withheld_line
-from lakana.errors import ValidationError
+from lakana.errors import LakanaError, ValidationError
 
 if TYPE_CHECKING:
     import pyarrow as pa
@@ -805,9 +805,13 @@ def _no_signals_line(state: CliState, environment: str, name: str) -> str:
     -------
     str
         For a managed table, that its next write records them; for a view, an external table
-        or an artifact, that it never has any.
+        or an artifact, that it never has any; when the table cannot be looked up again
+        (storage down, dropped meanwhile), only that none are recorded.
     """
-    kind = state.client().tables.get(environment, name).kind
+    try:
+        kind = state.client().tables.get(environment, name).kind
+    except LakanaError:
+        return "Signals: none recorded."
     if kind == "VIEW":
         return "Signals: none. A view has no health signals; the tables it reads have them."
     if kind in _WITHOUT_SIGNALS:

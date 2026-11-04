@@ -1968,6 +1968,29 @@ def test_table_health_of_what_has_no_signals_does_not_promise_them(
     assert "next write" not in plain
 
 
+@pytest.mark.parametrize("status", [404, 503])
+def test_table_health_says_none_recorded_when_the_table_cannot_be_read_again(
+    tmp_path: Path, status: int
+) -> None:
+    """A failing lookup of the table's kind gives the neutral line and keeps exit 0 (N3).
+
+    Parameters
+    ----------
+    tmp_path
+        Pytest's per-test directory.
+    status
+        What the table's own route answers.
+    """
+    api = FakeApi()
+    api.on("GET", f"{_BASE}/sales/health", json={**_HEALTH, "signals": []})
+    api.on("GET", f"{_BASE}/sales", status=status, json={"detail": "storage unreachable"})
+    result = invoke(make_state(tmp_path, api), "table", "health", "bronze.sales", "--env", "dev")
+    assert result.exit_code == 0, result.stderr
+    plain = _plain(result.stdout)
+    assert "Signals: none recorded." in plain
+    assert "next write" not in plain
+
+
 def test_table_health_from_a_server_without_signals_says_to_upgrade_it(tmp_path: Path) -> None:
     """An answer without a `signals` field comes from a server older than health signals.
 
