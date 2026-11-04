@@ -390,7 +390,7 @@ def _row(
         (``0``) for a main-language row, which so comes before every translation.
     by_term
         Whether the row is a table or column found by a term, which a row of the item's own
-        text at the same rank and source comes before.
+        text at the same rank, translated or not, comes before.
 
     Returns
     -------
@@ -629,11 +629,12 @@ class CatalogSearch:
             union.c.kind_order,
             union.c.sort_name,
             union.c.sort_id,
-            union.c.sort_source,
-            # Rows of one item that tie so far differ in what `_hit` shows of the first: its own
-            # text comes before a term's, then the smallest term key, then the matched text
-            # (f3 of a term, f4 of a table or column; f3 of those is fixed per item).
+            # An item's own text, translated or not, comes before a term's at the same rank;
+            # then its main-language row before a translation; then, for rows still tied, the
+            # smallest term key and the matched text (f3 of a term, f4 of a table or column;
+            # f3 of those is fixed per item), so `_hit` shows the same row every time.
             union.c.by_term,
+            union.c.sort_source,
             union.c.f7,
             union.c.f3,
             union.c.f4,

@@ -1487,4 +1487,18 @@ def test_rows_that_tie_on_rank_and_item_are_ordered_by_the_tie_breaks(world: Wor
     ranked = next(s for s in statements if "ORDER BY hits.rank" in s)
     order = " ".join(ranked.split("ORDER BY", 1)[1].split()).split(" LIMIT")[0]
     assert order.startswith("hits.rank, hits.kind_order, hits.sort_name, hits.sort_id, ")
-    assert order.endswith("hits.sort_source, hits.by_term, hits.f7, hits.f3, hits.f4"), order
+    assert order.endswith("hits.by_term, hits.sort_source, hits.f7, hits.f3, hits.f4"), order
+
+
+def test_a_columns_translated_label_wins_over_a_term_at_the_same_rank(world: World) -> None:
+    _deploy(world, {"state": _linked("State", ["etat"], {"silver.orders": ["status"]})})
+    _translate(world, "orders", "fr", "label", "Etat", subject="column", column="status")
+    (column,) = [
+        h for h in _search(world, world.bob, "etat", ("fr",)).results if h.kind == "column"
+    ]
+    assert (column.name, column.matched, column.language, column.term) == (
+        "silver.orders.status",
+        "label",
+        "fr",
+        None,
+    )
