@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from lakana_core.projects import glossary
 from lakana_core.projects.glossary import (
     MAX_GLOSSARY_FILES,
     DiscoveredGlossaryFile,
@@ -258,12 +259,16 @@ def test_a_file_that_is_not_a_mapping_and_yaml_aliases_are_refused() -> None:
     assert len(aliased) == 1 and "alias" in aliased[0]
 
 
-def test_a_term_over_the_column_cap_is_refused_before_its_columns_are_walked() -> None:
-    columns = ", ".join(f"c{n}" for n in range(40_000))
+def test_a_term_over_the_column_cap_is_refused_before_its_columns_are_walked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(glossary, "MAX_LINKED_COLUMNS", 5)
+    # Far over the cap, and led by a blank column: walked, it would be refused for that instead.
+    columns = ", ".join(["'  '", *(f"c{n}" for n in range(2_000))])
     text = f"a:\n  name: A\n  definition: B\n  owner: c\n  links: {{gold.t: [{columns}]}}\n"
     _, issues = _parse(("glossary/a.yaml", text))
     assert [i.split(": ", 1)[1] for i in issues] == [
-        "a.links: links 40000 columns, and a term links at most 200; link the columns people "
+        "a.links: links 2001 columns, and a term links at most 5; link the columns people "
         "should use for the term"
     ]
 
