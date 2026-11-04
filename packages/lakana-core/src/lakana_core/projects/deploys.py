@@ -33,6 +33,8 @@ from lakana_core.catalog.glossary import (
     terms_elsewhere,
     write_glossary,
 )
+from lakana_core.catalog.graph_model import NodeKind
+from lakana_core.catalog.graph_service import GraphService
 from lakana_core.catalog.identity import resolve_table_id
 from lakana_core.catalog.model_metadata import clear_removed_models
 from lakana_core.ci_oidc.exchange import ci_scope_for_run
@@ -46,7 +48,7 @@ from lakana_core.ci_oidc.scope import (
 )
 from lakana_core.connections.service import missing_connections
 from lakana_core.db import db_now
-from lakana_core.errors import ConflictError, NotFoundError, ValidationError
+from lakana_core.errors import ConflictError, GraphBusyError, NotFoundError, ValidationError
 from lakana_core.identifiers import TableRef, shown
 from lakana_core.jobs.audit import start_detail
 from lakana_core.jobs.cron import next_fire_after
@@ -144,6 +146,88 @@ UNKNOWN_CONNECTION_MESSAGE = (
     "(see `lakana connection create --help`)."
 )
 """Why a deploy or rollback stops: an asset declares a connection its environment lacks."""
+
+_MAX_IMPACT_WARNINGS = 20
+"""The most removed tables and columns a deploy checks against other repositories (R13)."""
+
+_IMPACT_BUDGET_SECONDS = 2.0
+"""The time budget of that check: it runs while the deploy holds its locks, so it stays short."""
+
+IMPACT_WARNING = (
+    "this deploy {what}, which other repositories' declarations use; tell their owners, or keep "
+    "it, and see everything it affects with: lakana graph impact {command} --env {env} — the "
+    "declarations: {items}"
+)
+"""A removed table or column that other repositories declare something on.
+
+The next step comes before the list, which has no bound: the CLI cuts a long warning, and the
+cut must not take the next step with it."""
+
+IMPACT_MORE = (
+    "this deploy also removes {count} more tables or columns that were not checked against other "
+    "repositories; see each with: lakana graph impact TABLE --env {env}"
+)
+"""The removals past `_MAX_IMPACT_WARNINGS`, which were not checked."""
+
+IMPACT_UNCHECKED = (
+    "this deploy removes or stops building {count} tables or columns, and Lakana could not check "
+    "in time what other repositories declare on them; see it with: lakana graph impact {command} "
+    "--env {env}"
+)
+"""The check ran past its budget: the deploy goes on, and says so."""
+
+_BREAKING = {
+    NodeKind.REFERENCE: "reference",
+    NodeKind.MEASURE: "measure",
+    NodeKind.CHECK: "check",
+    NodeKind.TERM: "glossary term",
+}
+"""The kinds of node an impact warning lists, with the word it names each by."""
+
+
+def _removed_items(previous: object, manifest: object) -> list[tuple[str, str, str, str]]:
+    """List the tables a new manifest stops building and the columns it removes (R12).
+
+    A column counts as removed only when both the current and the new entry list their columns
+    (an explicit SELECT); a retype cannot be told from a manifest, which records no types.
+
+    Parameters
+    ----------
+    previous
+        The current manifest; `None` for a first deploy.
+    manifest
+        The manifest the deploy makes current.
+
+    Returns
+    -------
+    list of tuple
+        ``(node, what, table, command)`` per item: the named node for `GraphService.breakage`,
+        the phrase for the warning, the dotted table, and the arguments of the
+        `lakana graph impact` hint. The tables come first, in name order; then the removed
+        columns, by table name and, within a table, in the current entry's column order.
+    """
+    old, new = manifest_assets(previous), manifest_assets(manifest)
+    items: list[tuple[str, str, str, str]] = [
+        (table, f"no longer builds `{table}`", table, table)
+        for table in sorted(old)
+        if table not in new
+    ]
+    for table in sorted(set(old) & set(new)):
+        before, after = old[table].get("columns"), new[table].get("columns")
+        if not (isinstance(before, list) and isinstance(after, list)):
+            continue
+        kept = {c for c in after if isinstance(c, str)}
+        items.extend(
+            (
+                f"column:{table}/{column}",
+                f"removes the column `{column}` of `{table}`",
+                table,
+                f"{table} --column {column}",
+            )
+            for column in before
+            if isinstance(column, str) and column not in kept
+        )
+    return items
 
 
 @dataclass(frozen=True)
@@ -396,7 +480,9 @@ class DeployRunView:
     warnings
         Things the deploy leaves for its owner to act on, as sentences: today, a removed asset
         whose table is kept after a failed check, read at the time of the request; then the
-        ones the deploy stored when it changed the job schedules.
+        ones the deploy stored: what it changed in the job schedules, and what a removed table
+        or column breaks in other repositories (shown only to the deployer, and to a reader who
+        holds `READ_ENVIRONMENT` and may read every table they name).
     waiting_for
         Why a `QUEUED` run has not started (`DeployService.get` only; `None` for any other
         status and in a listing).
@@ -671,7 +757,7 @@ class DeployService:
             checks=run.checks_json,
             warnings=[
                 *self._kept_removed_warnings(run, env_name, reader, diff, reads or _WarningReads()),
-                *(run.warnings_json or []),
+                *self._stored_warnings(run, env_name, reader),
             ],
             job_starts=job_starts_view(
                 run.job_starts_json,
@@ -766,6 +852,127 @@ class DeployService:
             for table in sorted(removed)
             if table in kept and table not in built and self._may_read(reader, env_name, table)
         ]
+
+    def _impact_warnings(
+        self, p: PrincipalRef, env_name: str, repo_name: str, previous: object, manifest: object
+    ) -> list[dict[str, object]]:
+        """Warn about each removed table or column that another repository declares something on.
+
+        Computed with `p`'s visibility: what `p` may not see is left out and not counted. At most
+        `_MAX_IMPACT_WARNINGS` items are checked, and one more line counts the rest. The deploy
+        never fails for this: a walk past its budget leaves one line instead.
+
+        Parameters
+        ----------
+        p
+            The deployer.
+        env_name
+            The environment's name.
+        repo_name
+            The deployed repository's name; its own declarations are not listed.
+        previous
+            The current manifest; `None` for a first deploy.
+        manifest
+            The manifest the deploy makes current.
+
+        Returns
+        -------
+        list of dict
+            ``{"warning": text, "tables": [dotted, ...]}`` per warning; `_stored_warnings` shows
+            one to the deployer, and to a reader who may read every table it names.
+        """
+        items = _removed_items(previous, manifest)
+        if not items:
+            return []
+        checked = items[:_MAX_IMPACT_WARNINGS]
+        graph = GraphService(self._session, self._authz, budget_seconds=_IMPACT_BUDGET_SECONDS)
+        try:
+            answers = graph.breakage(p, env_name, [item[0] for item in checked])
+        except (ValidationError, GraphBusyError):
+            return [
+                {
+                    "warning": IMPACT_UNCHECKED.format(
+                        count=len(items), command=items[0][3], env=env_name
+                    ),
+                    "tables": sorted({item[2] for item in items}),
+                }
+            ]
+        warnings: list[dict[str, object]] = []
+        for node, what, table, command in checked:
+            broken = sorted(
+                (_BREAKING[g.kind], g.name, g.repository, named)
+                for g, named in answers.get(node, ())
+                if g.kind in _BREAKING and not g.may_use and g.repository not in (None, repo_name)
+            )
+            if not broken:
+                continue
+            listed = ", ".join(f"{word} `{name}` ({repo})" for word, name, repo, _ in broken)
+            warnings.append(
+                {
+                    "warning": IMPACT_WARNING.format(
+                        what=what, items=listed, command=command, env=env_name
+                    ),
+                    "tables": sorted({table, *(t for *_, named in broken for t in named)}),
+                }
+            )
+        if len(items) > _MAX_IMPACT_WARNINGS:
+            warnings.append(
+                {
+                    "warning": IMPACT_MORE.format(
+                        count=len(items) - _MAX_IMPACT_WARNINGS, env=env_name
+                    ),
+                    "tables": sorted({item[2] for item in items}),
+                }
+            )
+        return warnings
+
+    def _stored_warnings(
+        self, run: DeployRun, env_name: str, reader: PrincipalRef | None
+    ) -> list[str]:
+        """Show a run's stored warnings to a reader.
+
+        A sentence is shown to everyone who may read the run. A ``{"warning", "tables"}`` object
+        (an impact warning, computed with the deployer's visibility) is shown to the deployer,
+        and to a reader who holds `READ_ENVIRONMENT` (it names glossary terms and repositories)
+        and may read every table it names. Anything else is skipped, and so is every object for
+        a view without a reader.
+
+        Parameters
+        ----------
+        run
+            The row.
+        env_name
+            Its environment's name.
+        reader
+            The principal reading; `None` for a view that shows no reader-dependent part.
+
+        Returns
+        -------
+        list of str
+            The warnings shown, in the stored order.
+        """
+        shown_warnings: list[str] = []
+        environment: bool | None = None
+        for entry in run.warnings_json or []:
+            if isinstance(entry, str):
+                shown_warnings.append(entry)
+                continue
+            if reader is None or not isinstance(entry, dict):
+                continue
+            text, tables = entry.get("warning"), entry.get("tables")
+            if not (isinstance(text, str) and isinstance(tables, list)):
+                continue
+            if reader.id != run.principal_id:
+                if environment is None:
+                    environment = self._authz.permits(
+                        reader, Action.READ_ENVIRONMENT, Securable.environment_scope(env_name)
+                    )
+                if not environment or not all(
+                    isinstance(t, str) and self._may_read(reader, env_name, t) for t in tables
+                ):
+                    continue
+            shown_warnings.append(text)
+        return shown_warnings
 
     def current_job_version(
         self, environment_id: uuid.UUID, repository_id: uuid.UUID
@@ -3525,7 +3732,7 @@ class DeployService:
             else None
         )
         finished = datetime.now(UTC)
-        run.warnings_json = self._sync_job_schedules(
+        schedules = self._sync_job_schedules(
             environment_id,
             repository_id,
             names[0],
@@ -3533,6 +3740,16 @@ class DeployService:
             manifest,
             db_now(self._session),
         )
+        run.warnings_json = [
+            *schedules,
+            *self._impact_warnings(
+                p,
+                names[0],
+                names[1],
+                previous.manifest_json if previous is not None else None,
+                manifest,
+            ),
+        ]
         sync_project_descriptions(self._session, environment_id, manifest)
         clear_removed_models(
             self._session,
@@ -3589,9 +3806,20 @@ class DeployService:
         self._require_kind(run, DeployKind.DRY_RUN)
         self._hold(run, worker_id)
         if manifest is not None:
-            run.warnings_json = self.job_schedule_warnings(
+            schedules = self.job_schedule_warnings(
                 run.environment_id, run.repository_id, names[0], manifest, dry_run=True
             )
+            current = self.current_job_version(run.environment_id, run.repository_id)
+            run.warnings_json = [
+                *schedules,
+                *self._impact_warnings(
+                    p,
+                    names[0],
+                    names[1],
+                    current.manifest_json if current is not None else None,
+                    manifest,
+                ),
+            ]
         run.diff_json = diff.to_json()
         run.checks_json = dict(checks) if checks else None
         run.status = DeployStatus.SUCCEEDED
@@ -3676,7 +3904,7 @@ class DeployService:
             environment_id, repository_id, current.id if current is not None else None, target.id
         )
         finished = datetime.now(UTC)
-        run.warnings_json = self._sync_job_schedules(
+        schedules = self._sync_job_schedules(
             environment_id,
             repository_id,
             names[0],
@@ -3684,6 +3912,16 @@ class DeployService:
             target.manifest_json,
             db_now(self._session),
         )
+        run.warnings_json = [
+            *schedules,
+            *self._impact_warnings(
+                p,
+                names[0],
+                names[1],
+                current.manifest_json if current is not None else None,
+                target.manifest_json,
+            ),
+        ]
         sync_project_descriptions(self._session, environment_id, target.manifest_json)
         clear_removed_models(
             self._session,

@@ -400,6 +400,9 @@ class Grants:
         Whether the reader holds `READ_ENVIRONMENT`.
     policies
         Whether the reader holds `MANAGE_POLICY`.
+    others
+        The answer for every other action, so that a test can let a principal deploy while
+        limiting what it may read.
     """
 
     def __init__(
@@ -408,10 +411,12 @@ class Grants:
         *,
         environment: bool = True,
         policies: bool = False,
+        others: bool = False,
     ) -> None:
         self.tables = None if tables is None else frozenset(tables)
         self.environment = environment
         self.policies = policies
+        self.others = others
 
     def permits(self, principal: PrincipalRef, action: Action, securable: Securable) -> bool:
         """Answer from the lists.
@@ -438,7 +443,7 @@ class Grants:
             return self.environment
         if action is Action.MANAGE_POLICY:
             return self.policies
-        return False
+        return self.others
 
     def authorize(self, principal: PrincipalRef, action: Action, securable: Securable) -> None:
         """Refuse what `permits` refuses.

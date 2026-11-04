@@ -1053,6 +1053,54 @@ class GraphService:
             paths.append(JoinPath(tuple(steps)))
         return JoinPaths(tuple(paths), None, more)
 
+    def breakage(
+        self, p: PrincipalRef, environment: str, nodes: Sequence[str]
+    ) -> dict[str, tuple[tuple[GraphNode, tuple[str, ...]], ...]]:
+        """Compute `impact` for several tables and columns at once, for a deploy's warning.
+
+        One load serves every node, and one budget covers them all. A node that does not exist,
+        or that `p` may not see, gets nothing.
+
+        Parameters
+        ----------
+        p
+            The deployer, whose visibility applies.
+        environment
+            The environment's name.
+        nodes
+            Named forms: a dotted table, or ``column:<table>/<column>``.
+
+        Returns
+        -------
+        dict
+            Node → each listed node (not the start) with the dotted tables it names
+            (`_named_tables`).
+
+        Raises
+        ------
+        ValidationError
+            For a node out of bounds, or past the step budget.
+        GraphBusyError
+            Past the time budget.
+        NotFoundError
+            If the environment does not exist.
+        """
+        ctx = self._open(p, environment, nodes[0] if nodes else "")
+        answers: dict[str, tuple[tuple[GraphNode, tuple[str, ...]], ...]] = {}
+        for node in nodes:
+            found = ctx.graph.resolve(parse_node(node))
+            if found is None or not ctx.visible.node(found):
+                continue
+            hits, _ = impact_of(ctx, found, key=False)
+            entries = [
+                (n, _Found(h.distance, h.reason, h.may_use))
+                for n, h in sorted(hits.items())
+                if n != found
+            ]
+            built = self._nodes(ctx, entries, ())
+            answers[node] = tuple((g, _named_tables(ctx.graph, g.id)) for g in built)
+        return answers
+
     def _page(
         self,
         ctx: _Context,
@@ -1250,3 +1298,30 @@ def _repository(graph: EnvironmentGraph, table_id: uuid.UUID) -> str | None:
     """
     builder = graph.builder_of.get(table_id)
     return builder.repository if builder else None
+
+
+def _named_tables(graph: EnvironmentGraph, node_id: str) -> tuple[str, ...]:
+    """Name the tables a warning about a node names, so a reader sees it only if it may read them.
+
+    Parameters
+    ----------
+    graph
+        The environment's graph.
+    node_id
+        The node.
+
+    Returns
+    -------
+    tuple of str
+        Dotted tables: a reference its own and its target; a measure its table; a check its
+        table, and a generated ``ref_`` check its target too (R3); any other node none.
+    """
+    record = graph.records.get(node_id)
+    if isinstance(record, ReferenceRecord):
+        return (graph.tables[record.source_table_id].ref.dotted(), record.target_name)
+    if isinstance(record, CheckRecord):
+        table = graph.tables[record.table_id].ref.dotted()
+        return (table, record.target) if record.target else (table,)
+    if isinstance(record, MeasureRecord):
+        return (graph.tables[record.table_id].ref.dotted(),)
+    return ()

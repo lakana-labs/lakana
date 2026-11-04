@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Iterator
 from typing import Any
 
 from fastapi.testclient import TestClient
@@ -379,17 +380,19 @@ def test_a_walk_past_its_time_is_503_with_retry_after(client: TestClient) -> Non
     _star(client)
     ticks = iter([0.0, 100.0, 200.0, 300.0])
 
-    def slow() -> GraphService:
-        """Build a service whose clock runs out at once.
+    def slow() -> Iterator[GraphService]:
+        """Build a service whose clock runs out at once, and close its session after the request.
 
-        Returns
-        -------
+        Yields
+        ------
         GraphService
             The service.
         """
-        return GraphService(
-            Session(client.app.state.engine), AllowAllAuthorization(), clock=lambda: next(ticks)
-        )
+        session = Session(client.app.state.engine)
+        try:
+            yield GraphService(session, AllowAllAuthorization(), clock=lambda: next(ticks))
+        finally:
+            session.close()
 
     client.app.dependency_overrides[get_graph_service] = slow
     try:
