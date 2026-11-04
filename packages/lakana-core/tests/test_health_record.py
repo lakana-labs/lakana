@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import sys
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -23,8 +24,8 @@ from sqlalchemy.orm import Session
 
 from lakana_core.auth import AllowAllAuthorization, PrincipalRef
 from lakana_core.catalog import field_ids, health_record
-from lakana_core.catalog.health_record import commit_observations, recent_observations
-from lakana_core.catalog.health_signals import HealthEffects
+from lakana_core.catalog.health_record import commit_observations, recent_observations, signal_rows
+from lakana_core.catalog.health_signals import HealthEffects, Observation
 from lakana_core.catalog.service import CatalogService
 from lakana_core.errors import ValidationError
 from lakana_core.identifiers import NamespacePath, TableRef
@@ -735,3 +736,60 @@ def test_a_compaction_records_only_the_schema(
     )
     assert [(o.signal, o.state) for o, _ in pairs] == [("schema", "ok")]
     assert calls == []
+
+
+def test_a_history_of_extreme_bounds_keeps_the_writes_landing(
+    catalog: CatalogService, session: Session, principal: PrincipalRef
+) -> None:
+    """Eight snapshots holding `-DBL_MAX` make the range band overflow: `no_metrics`, not -inf.
+
+    Parameters
+    ----------
+    catalog
+        The catalog.
+    session
+        Database session.
+    principal
+        The writer.
+    """
+    prices = TableRef("dev", _SILVER, "prices")
+    catalog.create_table(principal, prices, schema=Schema(NestedField(1, "price", DoubleType())))
+    for _ in range(9):
+        catalog.append(principal, prices, pa.table({"price": pa.array([-sys.float_info.max, 5.0])}))
+    rows = session.scalars(
+        select(TableHealthSignal).order_by(TableHealthSignal.observed_at, TableHealthSignal.id)
+    ).all()
+    for row in rows:
+        json.dumps([row.observed, row.band], allow_nan=False)
+    ranges = [r for r in rows if r.signal == "range"]
+    assert ("no_metrics", {"reason": "not_finite"}) in [(r.state, r.observed) for r in ranges]
+
+
+@pytest.mark.parametrize(
+    ("observed", "band"),
+    [
+        ({"lower": float("inf")}, None),
+        ({"lower": 1.0}, {"low": float("nan")}),
+        ({"at": object()}, None),
+    ],
+)
+def test_a_value_json_cannot_store_becomes_no_metrics(observed: dict, band: dict | None) -> None:
+    """An observation whose values JSON cannot store is kept as `no_metrics` without values.
+
+    Parameters
+    ----------
+    observed
+        The observed values.
+    band
+        The band.
+    """
+    rows = signal_rows(
+        [(Observation("range", "price", "fired", observed, band), "block")],
+        environment_id=uuid.uuid4(),
+        table_id=uuid.uuid4(),
+        snapshot_id=1,
+        now=_T0,
+    )
+    assert [(r.signal, r.column_name, r.state, r.effect, r.observed, r.band) for r in rows] == [
+        ("range", "price", "no_metrics", "block", None, None)
+    ]

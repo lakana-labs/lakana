@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import sys
 from datetime import UTC, datetime
 from decimal import Decimal
 
@@ -285,6 +286,49 @@ def test_a_bound_that_is_not_finite_counts_as_no_bound(bad: float) -> None:
     history = [{"lower": 0, "upper": 5, "kind": "number"}] * 7 + [{"lower": bad, "upper": bad}]
     short = range_signal("score", ColumnMetrics(0, 3, 1, 5, "number"), history)
     assert short is not None and short.state == "no_history"
+
+
+_DBL_MAX = sys.float_info.max
+
+
+@pytest.mark.parametrize(
+    ("lower", "upper"),
+    [(-_DBL_MAX, 5.0), (-1e308, 1e308), (1.0, _DBL_MAX)],
+)
+def test_a_range_band_that_overflows_has_no_metrics(lower: float, upper: float) -> None:
+    """Finite but extreme bounds whose band overflows record `no_metrics`, never infinity.
+
+    Postgres `json` refuses Infinity, which would fail the commit (#340).
+
+    Parameters
+    ----------
+    lower
+        The lower bound of every snapshot.
+    upper
+        The upper bound of every snapshot.
+    """
+    history = [{"lower": lower, "upper": upper, "kind": "number"}] * MIN_HISTORY
+    found = range_signal("score", ColumnMetrics(0, 1, lower, upper, "number"), history)
+    assert found is not None
+    assert (found.state, found.observed, found.band) == (
+        "no_metrics",
+        {"reason": "not_finite"},
+        None,
+    )
+
+
+def test_volume_and_null_rate_bands_that_overflow_have_no_metrics() -> None:
+    """A history whose band overflows gives `no_metrics` for volume and null rate as well."""
+    volumes = [{"added": _DBL_MAX}, {"added": -_DBL_MAX}] * 4
+    volume = volume_signal({"added-records": "3"}, volumes)
+    assert (volume.state, volume.observed, volume.band) == (
+        "no_metrics",
+        {"reason": "not_finite"},
+        None,
+    )
+    rates = [{"rate": _DBL_MAX}, {"rate": -_DBL_MAX}] * 4
+    rate = null_rate_signal("note", ColumnMetrics(1, 2, None, None, None), rates)
+    assert (rate.state, rate.observed, rate.band) == ("no_metrics", {"reason": "not_finite"}, None)
 
 
 def test_schema_fires_on_added_dropped_and_retyped_columns() -> None:

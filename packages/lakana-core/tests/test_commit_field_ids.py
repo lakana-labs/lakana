@@ -803,6 +803,101 @@ def test_the_health_signals_read_every_snapshot_of_the_commit_in_order(
     assert reads == [([900_000_124, 900_000_125], ["f.parquet", "s.parquet"])]
 
 
+def _as(snapshot: Snapshot, operation: Operation, added: int | None = None) -> Snapshot:
+    """Copy a snapshot with another operation, and optionally an added-records count.
+
+    Parameters
+    ----------
+    snapshot
+        The snapshot.
+    operation
+        Its operation.
+    added
+        Its ``added-records``; `None` records none.
+
+    Returns
+    -------
+    Snapshot
+        The copy.
+    """
+    counts = {} if added is None else {"added-records": str(added)}
+    return snapshot.model_copy(update={"summary": Summary(operation, **counts)})
+
+
+@pytest.mark.parametrize("compaction_first", [True, False])
+def test_the_files_of_a_compaction_in_the_commit_are_not_counted(
+    catalog: CatalogService,
+    principal: PrincipalRef,
+    session: Session,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    compaction_first: bool,
+) -> None:
+    """In a commit of a compaction and an append, only the append feeds the signals (#340).
+
+    Its files feed null rate and range, its count feeds volume, whichever comes last.
+
+    Parameters
+    ----------
+    catalog
+        The catalog under test.
+    principal
+        The acting principal.
+    session
+        Database session.
+    tmp_path
+        The storage root.
+    monkeypatch
+        Records the health signals' manifest reads.
+    compaction_first
+        Whether the compaction comes before the append in the commit.
+    """
+    ref, created = _created(catalog, principal, tmp_path)
+    names = ["r.parquet", "a.parquet"] if compaction_first else ["a.parquet", "r.parquet"]
+    first = _snapshot(
+        created.metadata, None, [_parquet(created, names[0], field_ids=True)], 900_000_126
+    )
+    second = _snapshot(
+        created.metadata, first, [_parquet(created, names[1], field_ids=True)], 900_000_127
+    )
+    snapshots = (
+        [_as(first, Operation.REPLACE), _as(second, Operation.APPEND, 7)]
+        if compaction_first
+        else [_as(first, Operation.APPEND, 7), _as(second, Operation.REPLACE)]
+    )
+    reads: list[list[str]] = []
+    real = health_record.added_data_files
+
+    def recording(*args: object, **kwargs: object) -> list[DataFile]:
+        """Note what the health read returns.
+
+        Parameters
+        ----------
+        *args
+            The read's arguments.
+        **kwargs
+            The read's keyword arguments.
+
+        Returns
+        -------
+        list of DataFile
+            What the real read returns.
+        """
+        files = real(*args, **kwargs)  # ty: ignore[invalid-argument-type]
+        reads.append([Path(f.file_path).name for f in files])
+        return files
+
+    monkeypatch.setattr(health_record, "added_data_files", recording)
+
+    _commit_snapshots(catalog, principal, ref, snapshots)
+
+    assert reads == [["a.parquet"]]
+    volume = session.scalars(
+        select(TableHealthSignal).where(TableHealthSignal.signal == "volume")
+    ).one()
+    assert volume.observed == {"added": 7, "total": None}
+
+
 def _forged_parent(snapshot: Snapshot, parent_id: int) -> Snapshot:
     """Copy a snapshot with another parent id, as a client may commit one.
 

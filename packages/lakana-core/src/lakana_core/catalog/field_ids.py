@@ -17,7 +17,7 @@ from __future__ import annotations
 import io
 import logging
 import time
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Collection, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeout
 from typing import TypeVar, cast
@@ -706,6 +706,7 @@ def added_data_files(
     file_io: FileIO,
     table: str,
     deadline: float,
+    skip: Collection[int] = frozenset(),
 ) -> list[DataFile]:
     """List the data files the snapshots of one commit add, from manifests their parents lack.
 
@@ -726,6 +727,9 @@ def added_data_files(
         The table's dotted name, for the message.
     deadline
         When the check's time is up, on the clock `_clock` reads.
+    skip
+        Ids of snapshots whose files are left out (a compaction's, for the health signals);
+        they still count as parents of the snapshots after them.
 
     Returns
     -------
@@ -755,6 +759,8 @@ def added_data_files(
             else earlier.get(parent_id) or metadata.snapshot_by_id(parent_id)
         )
         earlier[snapshot.snapshot_id] = snapshot
+        if snapshot.snapshot_id in skip:
+            continue
         try:
             known: set[str] = set()
             if parent is not None:

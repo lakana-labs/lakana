@@ -11,10 +11,11 @@ database's, is recorded as ``no_metrics``. Nothing here fails a write.
 
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from datetime import datetime
 from typing import Any
 
@@ -101,9 +102,11 @@ def recent_observations(
 ) -> dict[tuple[str, str | None], list[dict[str, Any]]]:
     """Read the newest observed values of each commit signal and column of a table.
 
-    Only rows observed since the (2 x `HISTORY`)-th newest ``schema`` row are ranked: every
-    commit records one ``schema`` row, so that reaches back far enough for `HISTORY` values
-    of each signal while a table's whole retention is never ranked on a commit.
+    Only rows observed since the (2 x `HISTORY`)-th newest ``schema`` row are ranked, so a
+    table's whole retention is never ranked on a commit. Every commit records one ``schema``
+    row, but compactions and commits whose signals failed record no other: on a table compacted
+    more often than appended to, the window can hold fewer than `HISTORY` values of a signal
+    (fewer than `MIN_HISTORY` leaves it at ``no_history``). The rows it misses are the oldest.
 
     Parameters
     ----------
@@ -168,8 +171,28 @@ def _previous_columns(before: TableMetadata | None) -> list[list[str]] | None:
     return columns_of(schema if schema is not None else before.schema())
 
 
+def _is_compaction(snapshot: Snapshot) -> bool:
+    """Say whether a snapshot is a compaction, which rewrites rows without changing them.
+
+    Parameters
+    ----------
+    snapshot
+        The snapshot.
+
+    Returns
+    -------
+    bool
+        Whether its summary's operation is ``replace``.
+    """
+    return snapshot.summary is not None and snapshot.summary.operation == Operation.REPLACE
+
+
 def _read_added_files(
-    snapshots: Sequence[Snapshot], metadata: TableMetadata, file_io: FileIO, table: str
+    snapshots: Sequence[Snapshot],
+    metadata: TableMetadata,
+    file_io: FileIO,
+    table: str,
+    skip: Collection[int],
 ) -> list[DataFile] | None:
     """Read the data files the snapshots of a commit add, within the health bounds.
 
@@ -183,6 +206,8 @@ def _read_added_files(
         Reads the table's storage.
     table
         The dotted name.
+    skip
+        The compactions among `snapshots`, whose files are left out.
 
     Returns
     -------
@@ -191,7 +216,7 @@ def _read_added_files(
     """
     deadline = field_ids._clock() + HEALTH_DEADLINE_SECONDS
     try:
-        return added_data_files(snapshots, metadata, file_io, table, deadline)
+        return added_data_files(snapshots, metadata, file_io, table, deadline, skip)
     except (ValidationError, StorageUnavailableError):
         return None
 
@@ -226,7 +251,7 @@ def _observe(
     after
         The metadata the commit makes current.
     snapshot
-        Its current snapshot.
+        Its current snapshot, standing for the commit's snapshots when `snapshots` is empty.
     snapshots
         Every snapshot the commit adds, in commit order.
     file_io
@@ -237,16 +262,23 @@ def _observe(
     Returns
     -------
     list of Observation
-        Volume, schema, then each column's null rate and range; only schema for a compaction
-        (a ``replace`` snapshot rewrites rows without changing them).
+        Volume, schema, then each column's null rate and range. A compaction (a ``replace``
+        snapshot rewrites rows without changing them) is decided per snapshot: its files and
+        counts are left out, and a commit of compactions only records the schema. Volume is the
+        newest other snapshot's count.
     """
     found_schema = schema_signal(_previous_columns(before), columns_of(after.schema()))
-    if snapshot.summary is not None and snapshot.summary.operation == Operation.REPLACE:
+    added = list(snapshots) or [snapshot]
+    compactions = {s.snapshot_id for s in added if _is_compaction(s)}
+    counted = [s for s in added if s.snapshot_id not in compactions]
+    if not counted:
         return [found_schema]
-    if files is None:
-        files = _read_added_files(snapshots, before or after, file_io, table)
+    if files is None or compactions:
+        # The field-id check's files include the compactions'; they are read again without.
+        files = _read_added_files(added, before or after, file_io, table, compactions)
     history = {} if table_id is None else recent_observations(session, table_id)
-    found = [volume_signal(snapshot.summary, history.get(("volume", None), [])), found_schema]
+    newest = counted[-1].summary
+    found = [volume_signal(newest, history.get(("volume", None), [])), found_schema]
     if files is None:
         found += [
             Observation(signal, None, "no_metrics", {"reason": "unreadable"}, None)
@@ -367,21 +399,46 @@ def signal_rows(
     Returns
     -------
     list of TableHealthSignal
-        Not yet added to a session.
+        Not yet added to a session. An observation whose values JSON cannot store (an infinity,
+        say, which Postgres `json` refuses at the flush and so fails the commit) is kept as
+        ``no_metrics`` without values.
     """
-    return [
-        TableHealthSignal(
-            id=uuid.uuid4(),
-            environment_id=environment_id,
-            table_id=table_id,
-            signal=o.signal,
-            column_name=o.column,
-            snapshot_id=snapshot_id,
-            observed=o.observed,
-            band=o.band,
-            state=o.state,
-            effect=effect,
-            observed_at=now,
+    rows = []
+    for o, effect in pairs:
+        stored = _storable(o.observed, o.band)
+        rows.append(
+            TableHealthSignal(
+                id=uuid.uuid4(),
+                environment_id=environment_id,
+                table_id=table_id,
+                signal=o.signal,
+                column_name=o.column,
+                snapshot_id=snapshot_id,
+                observed=o.observed if stored else None,
+                band=o.band if stored else None,
+                state=o.state if stored else "no_metrics",
+                effect=effect,
+                observed_at=now,
+            )
         )
-        for o, effect in pairs
-    ]
+    return rows
+
+
+def _storable(*values: object) -> bool:
+    """Say whether strict JSON can hold the values.
+
+    Parameters
+    ----------
+    *values
+        An observation's observed values and band.
+
+    Returns
+    -------
+    bool
+        `False` for an infinity, a NaN or anything JSON has no type for.
+    """
+    try:
+        json.dumps(values, allow_nan=False)
+    except (ValueError, TypeError):
+        return False
+    return True

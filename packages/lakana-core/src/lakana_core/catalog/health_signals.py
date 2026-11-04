@@ -118,6 +118,40 @@ class Band:
         return {"low": self.low, "high": self.high, "median": self.median}
 
 
+def _finite(*values: float) -> bool:
+    """Say whether every value is finite, as JSON can store it.
+
+    Parameters
+    ----------
+    *values
+        The values.
+
+    Returns
+    -------
+    bool
+        `False` for an infinity or NaN: extreme but finite inputs can overflow to one.
+    """
+    return all(math.isfinite(value) for value in values)
+
+
+def _not_finite(signal: str, column: str | None) -> Observation:
+    """Record a signal whose band overflowed: Postgres `json` refuses Infinity and NaN.
+
+    Parameters
+    ----------
+    signal
+        The signal.
+    column
+        Its column, for a column signal.
+
+    Returns
+    -------
+    Observation
+        `no_metrics` with reason ``not_finite``.
+    """
+    return Observation(signal, column, "no_metrics", {"reason": "not_finite"}, None)
+
+
 def learn_band(history: Sequence[float], *, floor: float, share: float) -> Band | None:
     """Learn the band of a history.
 
@@ -133,7 +167,8 @@ def learn_band(history: Sequence[float], *, floor: float, share: float) -> Band 
     Returns
     -------
     Band or None
-        `None` with fewer than `MIN_HISTORY` values.
+        `None` with fewer than `MIN_HISTORY` values. Its values may be infinite when the
+        history is extreme; the signals check them (`_finite`).
     """
     values = list(history)[:HISTORY]
     if len(values) < MIN_HISTORY:
@@ -286,12 +321,15 @@ def volume_signal(
     Returns
     -------
     Observation
-        `no_metrics` without an added-records count, `no_history` without a band.
+        `no_metrics` without an added-records count or when the band overflows (reason
+        ``not_finite``), `no_history` without a band.
     """
     added = _whole((summary or {}).get("added-records"))
     if added is None:
         return Observation("volume", None, "no_metrics", {"reason": "not_recorded"}, None)
     band = learn_band(_numbers(history, "added"), floor=VOLUME_FLOOR_ROWS, share=VOLUME_FLOOR_SHARE)
+    if band is not None and not _finite(band.low, band.high, band.median):
+        return _not_finite("volume", None)
     state = "no_history" if band is None else "ok" if band.holds(added) else "fired"
     observed = {"added": added, "total": _whole((summary or {}).get("total-records"))}
     return Observation("volume", None, state, observed, band.to_json() if band else None)
@@ -459,7 +497,8 @@ def null_rate_signal(
     Returns
     -------
     Observation
-        `no_metrics` when the counts were not recorded or the files hold no rows.
+        `no_metrics` when the counts were not recorded, the files hold no rows or the band
+        overflows (reason ``not_finite``).
     """
     if metrics.nulls is None or metrics.values is None:
         return Observation("null_rate", column, "no_metrics", {"reason": "not_recorded"}, None)
@@ -467,6 +506,8 @@ def null_rate_signal(
         return Observation("null_rate", column, "no_metrics", {"reason": "no_rows"}, None)
     rate = round(metrics.nulls / metrics.values, 6)
     band = learn_band(_numbers(history, "rate"), floor=NULL_RATE_FLOOR, share=0)
+    if band is not None and not _finite(band.low, band.high, band.median):
+        return _not_finite("null_rate", column)
     state = "no_history" if band is None else "ok" if band.holds(rate) else "fired"
     observed = {"nulls": metrics.nulls, "values": metrics.values, "rate": rate}
     return Observation("null_rate", column, state, observed, band.to_json() if band else None)
@@ -490,7 +531,8 @@ def range_signal(
     -------
     Observation or None
         `None` for a column with no range signal (a string, say). `no_metrics` when a bound is
-        unknown or not finite.
+        unknown or not finite, or when extreme bounds make the band overflow (reason
+        ``not_finite``).
     """
     if metrics.kind is None:
         return None
@@ -521,6 +563,8 @@ def range_signal(
         "low": low_min - tol_low,
         "high": high_max + tol_high,
     }
+    if not _finite(*band.values()):
+        return _not_finite("range", column)
     fired = lower < band["low"] or upper > band["high"]
     return Observation("range", column, "fired" if fired else "ok", observed, band)
 
