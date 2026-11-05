@@ -511,7 +511,7 @@ def describe(entry: Entry) -> str:
     Returns
     -------
     str
-        For example ``grant role ANALYST on prod to group:finance``.
+        For example ``grant role ANALYST on environment prod to group:finance``.
     """
     match entry:
         case GroupEntry(name):

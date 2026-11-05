@@ -16,25 +16,29 @@ _PLAN: dict[str, Any] = {
         {
             "op": "create",
             "entry": "grants[0]",
-            "text": "grant role VIEWER on prod to group:finance",
+            "text": "grant role VIEWER on environment prod to group:finance",
         }
     ],
     "changed": [{"op": "change", "entry": "ci_trust[0]", "text": "change rule deploy-prod"}],
     "removals": [
-        {"op": "remove", "entry": None, "text": "grant role ANALYST on prod to group:finance"}
+        {
+            "op": "remove",
+            "entry": None,
+            "text": "grant role ANALYST on environment prod to group:finance",
+        }
     ],
     "releases": ["staging"],
     "drift": [
         {
             "scope": "prod",
-            "text": "grant role VIEWER on prod to user:bob",
+            "text": "grant role VIEWER on environment prod to user:bob",
             "by": "carol",
             "reason": "incident",
             "at": "2026-11-01T10:00:00+00:00",
         },
         {
             "scope": "prod",
-            "text": "grant role VIEWER on prod to user:dan",
+            "text": "grant role VIEWER on environment prod to user:dan",
             "by": None,
             "reason": None,
             "at": None,
@@ -89,14 +93,14 @@ def test_plan_prints_each_change_and_the_fingerprint(tmp_path: Path) -> None:
     result = invoke(make_state(tmp_path, api), "access", "plan", str(_file(tmp_path)))
     assert result.exit_code == 0, result.stderr
     lines = result.stdout.splitlines()
-    assert "+ grant role VIEWER on prod to group:finance  (grants[0])" in lines
+    assert "+ grant role VIEWER on environment prod to group:finance  (grants[0])" in lines
     assert "~ change rule deploy-prod  (ci_trust[0])" in lines
-    assert "- grant role ANALYST on prod to group:finance" in lines
+    assert "- grant role ANALYST on environment prod to group:finance" in lines
     assert (
-        "! drift in prod: grant role VIEWER on prod to user:bob "
+        "! drift in prod: grant role VIEWER on environment prod to user:bob "
         "— carol, 2026-11-01T10:00:00+00:00: incident"
     ) in lines
-    assert "! drift in prod: grant role VIEWER on prod to user:dan" in lines
+    assert "! drift in prod: grant role VIEWER on environment prod to user:dan" in lines
     assert "stops managing staging" in lines
     assert lines[-1] == "Fingerprint: " + "f" * 64
     assert "No changes." not in lines
