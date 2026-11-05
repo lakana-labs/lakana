@@ -16,6 +16,7 @@ from test_arrow_writes import _ids, _task
 from lakana_core.auth import AllowAllAuthorization, PrincipalRef
 from lakana_core.catalog import files_read
 from lakana_core.catalog.files_read import (
+    FilesReadReport,
     files_read_for_task,
     forget_files_read,
     parse_files_read,
@@ -326,10 +327,46 @@ def test_the_byte_cap_fits_the_most_files_with_long_names() -> None:
     assert one * files_read.MAX_FILES_READ < files_read.MAX_RECORD_BYTES
 
 
-def test_the_longest_entry_fits_a_line() -> None:
-    """A file at every bound (path, ETag, connection, size) still fits one line."""
-    entry = {**_file("n" * 1024, etag="e" * 512, connection="c" * 63), "size": 2**63 - 1}
-    assert len(json.dumps(entry).encode()) < files_read.MAX_LINE_BYTES
+_ASTRAL = "\U0001f600"
+"""An emoji: twelve bytes as `json.dumps` escapes it by default, the most of any character."""
+
+
+def test_the_worst_legal_entry_fits_a_line(principal: PrincipalRef) -> None:
+    """Every field at its cap, in emoji, escaped by default `json.dumps`, fits and is accepted.
+
+    Parameters
+    ----------
+    principal
+        The run principal.
+    """
+    connection = _ASTRAL * 63
+    entry = {
+        **_file(
+            _ASTRAL * 1024, _T0.replace(tzinfo=dt.timezone(dt.timedelta(hours=-14))), connection
+        ),
+        "etag": _ASTRAL * 512,
+        "size": 2**63 - 1,
+    }
+    line = json.dumps(entry).encode()
+    assert len(line) < files_read.MAX_LINE_BYTES
+    report = parse_files_read(_HEADER + line, _task(principal, connection))
+    assert [len(f.name) for f in report.files] == [1024]
+    control = json.dumps({**_file("\x01" * 1024), "etag": "\x01" * 512}).encode()
+    assert len(control) < len(line)
+
+
+def test_a_line_one_byte_over_the_cap_is_refused(principal: PrincipalRef) -> None:
+    """A line of 32 KiB + 1 is refused by its length, naming the line.
+
+    Parameters
+    ----------
+    principal
+        The run principal.
+    """
+    raw = _HEADER + b" " * (32 * 1024 + 1)
+    with pytest.raises(ValidationError) as caught:
+        parse_files_read(raw, _task(principal, "exports"))
+    assert str(caught.value) == _malformed("line 2 is 32769 bytes, more than 32768")
 
 
 def test_more_lines_than_the_cap_are_refused_before_they_are_parsed(
@@ -355,7 +392,7 @@ def test_more_lines_than_the_cap_are_refused_before_they_are_parsed(
     )
 
 
-def test_a_line_over_4_kib_is_refused_before_it_is_parsed(principal: PrincipalRef) -> None:
+def test_a_hostile_line_is_refused_before_it_is_parsed(principal: PrincipalRef) -> None:
     """A hostile single line of 64 MiB is refused by its length, without `json.loads`.
 
     Parameters
@@ -369,11 +406,7 @@ def test_a_line_over_4_kib_is_refused_before_it_is_parsed(principal: PrincipalRe
         patch.setattr(files_read, "json", SimpleNamespace())
         with pytest.raises(ValidationError) as caught:
             parse_files_read(raw, _task(principal, "exports"))
-    assert str(caught.value) == (
-        f"The record of the files read has a line of {len(raw)} bytes (line 1), more than 4096; "
-        "move the file it lists to a shorter path, or narrow the pattern the asset passes to "
-        "files.read."
-    )
+    assert str(caught.value) == _malformed(f"line 1 is {len(raw)} bytes, more than 32768")
 
 
 def test_a_long_line_after_the_header_names_its_number(principal: PrincipalRef) -> None:
@@ -384,10 +417,10 @@ def test_a_long_line_after_the_header_names_its_number(principal: PrincipalRef) 
     principal
         The run principal.
     """
-    raw = _report(_file("a.csv"), _file("n" * 5000))
+    raw = _report(_file("a.csv"), _file("n" * 40_000))
     with pytest.raises(ValidationError) as caught:
         parse_files_read(raw, _task(principal, "exports"))
-    assert "(line 3), more than 4096" in str(caught.value)
+    assert "line 3 is 40" in str(caught.value)
 
 
 def test_more_files_than_the_cap_are_refused(
@@ -626,3 +659,164 @@ def test_more_rows_than_the_cap_fail_the_task_naming_the_count(
         "run can check; narrow the pattern of files.read, or split the asset so that each reads "
         "a part. The record shrinks as files age past 30 days."
     )
+
+
+@pytest.mark.parametrize(
+    "modified",
+    [
+        "0001-01-01T00:00:00+01:00",
+        "9999-12-31T23:59:59-01:00",
+        "0001-01-30T23:59:59+00:00",
+        "9999-12-02T00:00:00+00:00",
+    ],
+)
+def test_a_file_time_near_the_limits_is_refused(principal: PrincipalRef, modified: str) -> None:
+    """A time within 30 days of year 1 or 9999, after its offset, is refused, not overflowed.
+
+    Parameters
+    ----------
+    principal
+        The run principal.
+    modified
+        The file's time as sent.
+    """
+    with pytest.raises(ValidationError) as caught:
+        parse_files_read(_entry(modified=modified), _task(principal, "exports"))
+    assert str(caught.value) == (
+        f"The record of the files read gives file 1 the time {modified}, within 30 days of the "
+        "earliest or latest time Lakana can store (years 1 and 9999); correct the file's "
+        "modification time (or the date in its name), or narrow the pattern the asset passes "
+        "to files.read so that it does not match."
+    )
+
+
+@pytest.mark.parametrize(
+    "watermark", ["0001-01-01T00:00:00+01:00", "9999-12-31T23:59:59-01:00", "0001-01-05T00:00:00Z"]
+)
+def test_a_watermark_near_the_limits_is_refused(principal: PrincipalRef, watermark: str) -> None:
+    """A header watermark within 30 days of the limits is refused, not overflowed.
+
+    Parameters
+    ----------
+    principal
+        The run principal.
+    watermark
+        The watermark as sent.
+    """
+    with pytest.raises(ValidationError) as caught:
+        parse_files_read(_report(watermark=watermark), _task(principal, "exports"))
+    assert str(caught.value) == (
+        f"The record of the files read has the watermark {watermark}, within 30 days of the "
+        "earliest or latest time Lakana can store (years 1 and 9999); correct that time in the "
+        "target table's watermark column, then run the asset again."
+    )
+
+
+def test_the_times_just_inside_the_limits_are_accepted(principal: PrincipalRef) -> None:
+    """Exactly 30 days from either limit is inside.
+
+    Parameters
+    ----------
+    principal
+        The run principal.
+    """
+    early, late = "0001-01-31T00:00:00+00:00", "9999-12-01T23:59:59.999999+00:00"
+    report = parse_files_read(
+        _report(_file("a.csv", dt.datetime.fromisoformat(late)), watermark=early),
+        _task(principal, "exports"),
+    )
+    assert (report.watermark, report.files[0].modified.year) == (
+        dt.datetime.fromisoformat(early),
+        9999,
+    )
+
+
+def test_a_watermark_in_year_1_neither_prunes_nor_bounds_the_load(
+    session: Session, principal: PrincipalRef, catalog: CatalogService
+) -> None:
+    """At commit and at load, a mark less than 30 days after year 1 does not overflow.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    principal
+        The run principal.
+    catalog
+        Holds `gold.t`.
+    """
+    table_id = _table_id(catalog, principal)
+    early = dt.datetime(1, 1, 5, tzinfo=dt.UTC)
+    record_files_read(session, table_id, 1, parse_files_read(_entry(), _task(principal, "exports")))
+    record_files_read(session, table_id, 2, FilesReadReport(early, ()))
+    for mark in ("timestamptz:0001-01-05T00:00:00+00:00", "timestamp:0001-01-05T00:00:00"):
+        assert [
+            f["name"] for f in files_read_for_task(session, table_id, mark, "gold.t") or []
+        ] == ["a.csv"]
+
+
+@pytest.mark.parametrize("name", ["a\x00b", "\ud800.csv", "\udcff"])
+def test_a_name_lakana_cannot_store_is_refused(principal: PrincipalRef, name: str) -> None:
+    """A NUL or a lone surrogate in a name is refused, the name shown escaped.
+
+    Parameters
+    ----------
+    principal
+        The run principal.
+    name
+        The file's name as sent.
+    """
+    with pytest.raises(ValidationError) as caught:
+        parse_files_read(_report(_file(name)), _task(principal, "exports"))
+    assert str(caught.value) == (
+        f"The record of the files read names a file Lakana cannot store (file 1, {name!r}): its "
+        "name holds a NUL character or is not valid UTF-8; rename the file; Lakana stores file "
+        "names as UTF-8 text."
+    )
+
+
+@pytest.mark.parametrize(
+    ("changes", "what"),
+    [
+        ({"connection": "ex\x00ports"}, _NOT_A_FILE),
+        ({"connection": "\ud800"}, _NOT_A_FILE),
+        ({"etag": "\x00"}, "file 1 has an ETag that is not UTF-8 text without NUL characters"),
+        ({"etag": "\udcff"}, "file 1 has an ETag that is not UTF-8 text without NUL characters"),
+    ],
+)
+def test_a_connection_or_etag_lakana_cannot_store_is_malformed(
+    principal: PrincipalRef, changes: dict[str, object], what: str
+) -> None:
+    """A NUL or a lone surrogate in the connection or the ETag is a malformed record.
+
+    Parameters
+    ----------
+    principal
+        The run principal.
+    changes
+        The fields replaced.
+    what
+        The part the refusal names.
+    """
+    with pytest.raises(ValidationError) as caught:
+        parse_files_read(_entry(**changes), _task(principal, "exports", "ex\x00ports", "\ud800"))
+    assert str(caught.value) == _malformed(what)
+
+
+@pytest.mark.parametrize("version", ["true", "1.0"])
+def test_a_version_that_is_not_the_integer_1_is_refused(
+    principal: PrincipalRef, version: str
+) -> None:
+    """`true` and `1.0` equal 1 in Python, but are not the version.
+
+    Parameters
+    ----------
+    principal
+        The run principal.
+    version
+        The JSON value of the header's version.
+    """
+    raw = f'{{"version": {version}, "watermark": null}}'.encode()
+    with pytest.raises(ValidationError) as caught:
+        parse_files_read(raw, _task(principal, "exports"))
+    assert str(caught.value) == _malformed("the first line must be a header with version 1")

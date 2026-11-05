@@ -54,8 +54,13 @@ An entry is about 120 bytes plus its path and ETag, so 64 MiB holds `MAX_FILES_R
 whose paths and ETags average about 550 characters together: real paths with room to spare.
 It is a quarter of the largest upload.
 """
-MAX_LINE_BYTES = 4096
-"""The longest line, checked before it is parsed: a file at every bound is about 1,700 bytes."""
+MAX_LINE_BYTES = 32 * 1024
+"""The longest line, checked before it is parsed.
+
+Above every legal entry: a file with every field at its cap in emoji, escaped as `json.dumps`
+does by default (twelve bytes a character), is about 19 KB. So the cap refuses only a malformed
+line, and keeps each `json.loads` to one small object.
+"""
 MAX_NAME_LENGTH = 1024
 """The longest path of a file, in characters, as the artifact manifest bounds its paths."""
 RECORD_WINDOW = dt.timedelta(days=30)
@@ -68,6 +73,11 @@ _NOT_A_TASK = (
     "metadata `lakana.files_read`); remove it from the upload."
 )
 _NARROW = "narrow the pattern the asset passes to files.read"
+_EARLIEST = dt.datetime.min.replace(tzinfo=dt.UTC) + RECORD_WINDOW
+_LATEST = dt.datetime.max.replace(tzinfo=dt.UTC) - RECORD_WINDOW
+_NEAR_THE_LIMITS = (
+    "within 30 days of the earliest or latest time Lakana can store (years 1 and 9999)"
+)
 
 
 @dataclass(frozen=True)
@@ -168,6 +178,65 @@ def _time(value: object) -> dt.datetime | None:
         return None
 
 
+def _in_range(value: dt.datetime) -> dt.datetime | None:
+    """Convert an aware time to UTC, if it is far enough from the limits to subtract 30 days.
+
+    Parameters
+    ----------
+    value
+        An aware time.
+
+    Returns
+    -------
+    datetime.datetime or None
+        The time in UTC; ``None`` if it is within `RECORD_WINDOW` of year 1 or 9999.
+    """
+    try:
+        utc = value.astimezone(dt.UTC)
+    except OverflowError:
+        return None
+    return utc if _EARLIEST <= utc <= _LATEST else None
+
+
+def _storable(text: str) -> bool:
+    """Tell whether Postgres can store a text: no NUL, and valid UTF-8 (no lone surrogate).
+
+    Parameters
+    ----------
+    text
+        The text.
+
+    Returns
+    -------
+    bool
+        Whether it can be stored.
+    """
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return "\x00" not in text
+
+
+def _window_start(mark: dt.datetime) -> dt.datetime | None:
+    """Find the start of the record's window before a mark.
+
+    Parameters
+    ----------
+    mark
+        The watermark, aware.
+
+    Returns
+    -------
+    datetime.datetime or None
+        `mark` less `RECORD_WINDOW`; ``None`` if that is before year 1, where nothing is older.
+    """
+    try:
+        return mark - RECORD_WINDOW
+    except OverflowError:
+        return None
+
+
 def _file(item: object, number: int) -> FileRead:
     """Check one entry of the record.
 
@@ -186,7 +255,7 @@ def _file(item: object, number: int) -> FileRead:
     Raises
     ------
     ValidationError
-        If a field is missing, of the wrong type, or out of its bounds.
+        If a field is missing, of the wrong type, out of its bounds, or not storable text.
     """
     wrong = _malformed(f"file {number} is not a connection, name, size, modified time and ETag")
     if not isinstance(item, dict):
@@ -196,6 +265,7 @@ def _file(item: object, number: int) -> FileRead:
     if (
         not isinstance(connection, str)
         or not 0 < len(connection) <= _MAX_CONNECTION
+        or not _storable(connection)
         or not isinstance(name, str)
         or not name
         or not isinstance(size, int)
@@ -211,6 +281,12 @@ def _file(item: object, number: int) -> FileRead:
             f"{MAX_NAME_LENGTH} characters (file {number}, beginning {name[:64]!r}); move it to "
             f"a shorter path, or {_NARROW} so that it does not match."
         )
+    if not _storable(name):
+        raise ValidationError(
+            f"The record of the files read names a file Lakana cannot store (file {number}, "
+            f"{name[:64]!r}): its name holds a NUL character or is not valid UTF-8; rename the "
+            "file; Lakana stores file names as UTF-8 text."
+        )
     if not 0 <= size <= _MAX_SIZE:
         raise ValidationError(
             _malformed(f"file {number} has the size {size}, outside 0 to {_MAX_SIZE} bytes")
@@ -219,7 +295,18 @@ def _file(item: object, number: int) -> FileRead:
         raise ValidationError(
             _malformed(f"file {number} has an ETag longer than {_MAX_ETAG} characters")
         )
-    return FileRead(connection, name, size, modified.astimezone(dt.UTC), etag)
+    if etag is not None and not _storable(etag):
+        raise ValidationError(
+            _malformed(f"file {number} has an ETag that is not UTF-8 text without NUL characters")
+        )
+    utc = _in_range(modified)
+    if utc is None:
+        raise ValidationError(
+            f"The record of the files read gives file {number} the time {item['modified']}, "
+            f"{_NEAR_THE_LIMITS}; correct the file's modification time (or the date in its name), "
+            f"or {_NARROW} so that it does not match."
+        )
+    return FileRead(connection, name, size, utc, etag)
 
 
 def _watermark(value: object) -> dt.datetime | None:
@@ -238,7 +325,7 @@ def _watermark(value: object) -> dt.datetime | None:
     Raises
     ------
     ValidationError
-        If it is no time, or a time without a zone.
+        If it is no time, a time without a zone, or within `RECORD_WINDOW` of the limits.
     """
     if value is None:
         return None
@@ -247,7 +334,13 @@ def _watermark(value: object) -> dt.datetime | None:
         raise ValidationError(_malformed("watermark must be null or a time with a zone"))
     if parsed.tzinfo is None:
         raise ValidationError(_malformed(f"watermark {value} has no time zone; it must be UTC"))
-    return parsed.astimezone(dt.UTC)
+    utc = _in_range(parsed)
+    if utc is None:
+        raise ValidationError(
+            f"The record of the files read has the watermark {value}, {_NEAR_THE_LIMITS}; correct "
+            "that time in the target table's watermark column, then run the asset again."
+        )
+    return utc
 
 
 def split_files_read(data: pa.Table) -> tuple[pa.Table, bytes | None]:
@@ -301,9 +394,7 @@ def _lines(raw: bytes) -> list[bytes]:
     for number, line in enumerate(lines, 1):
         if len(line) > MAX_LINE_BYTES:
             raise ValidationError(
-                f"The record of the files read has a line of {len(line)} bytes (line {number}), "
-                f"more than {MAX_LINE_BYTES}; move the file it lists to a shorter path, or "
-                f"{_NARROW}."
+                _malformed(f"line {number} is {len(line)} bytes, more than {MAX_LINE_BYTES}")
             )
     return lines
 
@@ -367,7 +458,12 @@ def parse_files_read(raw: bytes, p: PrincipalRef) -> FilesReadReport:
         )
     lines = _lines(raw)
     header = _load(lines[0], 1)
-    if not isinstance(header, dict) or header.get("version") != 1:
+    # `type(...) is int`: `true` and `1.0` equal 1 in Python, but are not the version.
+    if (
+        not isinstance(header, dict)
+        or type(header.get("version")) is not int
+        or header["version"] != 1
+    ):
         raise ValidationError(_malformed("the first line must be a header with version 1"))
     watermark = _watermark(header.get("watermark"))
     # Each line is parsed and checked in turn, so a line's objects are gone before the next.
@@ -421,12 +517,13 @@ def record_files_read(
                 for f in report.files
             ],
         )
-    if report.watermark is not None:
+    start = None if report.watermark is None else _window_start(report.watermark)
+    if start is not None:
         session.execute(
             delete(IncrementalFileRead)
             .where(
                 IncrementalFileRead.table_id == table_id,
-                IncrementalFileRead.modified < report.watermark - RECORD_WINDOW,
+                IncrementalFileRead.modified < start,
             )
             .execution_options(synchronize_session=False)
         )
@@ -492,7 +589,9 @@ def files_read_for_task(
         if not isinstance(value, dt.datetime):
             return None
         mark = value.replace(tzinfo=dt.UTC) if value.tzinfo is None else value.astimezone(dt.UTC)
-        where.append(IncrementalFileRead.modified > mark - RECORD_WINDOW)
+        start = _window_start(mark)
+        if start is not None:
+            where.append(IncrementalFileRead.modified > start)
     count = session.scalar(select(func.count()).select_from(IncrementalFileRead).where(*where))
     if count and count > MAX_FILES_READ:
         raise ValidationError(
