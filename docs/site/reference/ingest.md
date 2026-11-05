@@ -122,7 +122,7 @@ rows into one table.
 | `lookback` | 24 hours | How far before `since` a late file is still read once; `timedelta(0)` turns it off; at most 30 days. Only with `since`. See [Reading only new files](#reading-only-new-files). |
 | `max_file_bytes` | 256 MiB | The largest file read. A workbook (`xlsx`, `xlsm`, `xlsb`, `ods`) counts what it really unpacks to: its entries are inflated in chunks before it is parsed, and the read stops as soon as the cap is passed. |
 | `max_total_bytes` | 256 MiB | The most bytes read in all (file bytes; a workbook counts its unpacked size). |
-| `max_files` | `10_000` | The most files read. With `since`, every file inside the lookback window counts, also those already read, so a busy folder reaches it a little sooner. |
+| `max_files` | `10_000` | The most files read. With `since`, it counts the new and the late files a call reads, not those already read; the files inside the lookback window, read or not, may number ten times as many (at least 100,000). |
 | `max_rows` | `10_000_000` | The most rows read in all. Each reader stops after it, so it also bounds what a compressed file is decoded to (see [Memory](#memory)). The default is about the most rows of a narrow table the server takes in one write of 256 MiB. |
 
 Each cap must be a positive whole number; zero, a negative number or anything else is refused.
@@ -176,10 +176,14 @@ minus `lookback=` (24 hours by default) that the asset's table has not recorded 
 window never starts more than 30 days before the table's watermark, as far back as the record
 reaches. Lakana records each file it hands to the asset (its connection, name, size, time and,
 where the source sends one, its ETag) with the write of the run, and a check that sets the run
-back forgets them, so those files are read again. The same name with a new time or size is a new
+back forgets them, so those files are read again. Only a set-back or a replace of the table makes
+recorded files count as unread again. To read every file once more, replace the table with no
+rows (`lakana table replace` with an empty file): the next run has no watermark and reads every
+file. A replace with rows clears the record too, and the next run seeds again at the new
+watermark. The same name with a new time or size is a new
 file. From S3, GCS and Azure, a new ETag also makes a new file, when both runs saw one; an HTTPS
 server's ETag is not used, since servers may change it for a file that did not change. A run
-that writes no rows records nothing; its files give no rows the next time either. So a file that
+that writes no rows records nothing, so its files are read again next time. So a file that
 shares the watermark's time, a file moved in with `mv`, or an S3 upload dated by its start is
 still read, once, as long as its time is inside the window. `since=None` reads every file,
 recorded or not.
@@ -189,7 +193,16 @@ file at or before the table's watermark (or at or before `since`, if that is ear
 so nothing is read twice. In an asset with several connections, a connection is taken as new
 again on every run while no file read from it is dated within 30 days before the watermark: the
 runs read only its files after `since`, without the lookback, until one of them reads a file of
-that connection.
+that connection. Seeding records only the files inside the run's own window (after `since` minus
+`lookback=`), not 30 days of them, so a busy source seeds quickly. If you later raise `lookback=`,
+the files in the newly covered part of the window that were never recorded are read once: raise
+`lookback` before late files arrive, or expect one re-read of the extra window.
+
+**A busy table.** The worker hands a run at most the 100,000 newest files recorded within 30 days
+of the watermark. When more are recorded (a source above about 3,300 files a day), every file at
+or before the oldest one handed over counts as read: the asset keeps running and nothing is read
+twice, but a late file older than that is not caught. At 10,000 files a day that point is about
+10 days back, still well outside the default 24 h lookback.
 
 Each call with `since` prints a line to the task's log, such as
 ``files.read: `exports`: 3 new files, 2 late files inside the 24 h lookback, 41 already read``.
@@ -311,7 +324,9 @@ could end differently (the task is retried only when it could):
 | `... has no column ..., which schema= names` | A file lacks a column `schema=` names. | Fix the name in `schema=`, or the file. |
 | `... column ... is ..., which does not fit ... in the files before it` | A column has types that do not fit across files. | Pass `schema=` with one type for it, or narrow the pattern. |
 | `... check the file, or pass schema= with the column's type` | A file has a value its column cannot hold. The message names file, column, value and problem. | Fix the file, or pass `schema=` with a type that holds it. |
-| `the pattern ... matches more than max_files (...) files to read` | Too many files would be read (with `since`, too many inside the lookback window, already read or not). | Narrow the pattern, pass `since=` if you did not, or raise `max_files`. |
+| `the pattern ... matches more than max_files (...) files to read` | Too many files would be read, without `since`. | Narrow the pattern, pass `since=`, or raise `max_files`. |
+| `N files matching ... are new or late inside the 24 h lookback window, more than max_files (...)` | With `since`, too many files are new or late. | Raise `max_files=`, or narrow the pattern. |
+| `N files match ... inside the 24 h lookback window (already read or not), more than the ... a call checks` | With `since`, the window holds too many files, read or not: ten times `max_files`, at least 100,000. | Pass a shorter `lookback=`, or narrow the pattern. |
 | `... is N bytes, more than max_file_bytes (...)` | One file is too large. | Split the file, or raise `max_file_bytes`. |
 | `the files matching ... hold more than max_total_bytes (...)` | The files together are too large. | Narrow the pattern or pass `since=` to read fewer files, or raise `max_total_bytes`. |
 | `does not say when ... was modified; pass modified_from=` | The source gives no file time. | Pass `modified_from=` with the date pattern of the name. |
@@ -328,8 +343,7 @@ could end differently (the task is retried only when it could):
 | `lookback= takes a datetime.timedelta` | `lookback` has another type, such as a number of hours. | Pass `timedelta(hours=...)`. |
 | `lookback= cannot be negative` | `lookback` is less than zero. | Pass `timedelta(0)` to turn it off. |
 | `lookback= is at most 30 days` | `lookback` is longer than the record of files read reaches. | Lower it; copy a file older than that into the folder again. |
-| `this run has read more than 100000 files with since=` | The run's `files.read` calls read or took as read more files than Lakana records. | Narrow the pattern. |
-| `... files recorded as read within 30 days of its watermark, more than the 100000 a run can check` | The worker refuses to start the run: the table's record is too large. | Narrow the pattern of `files.read`, or split the asset so that each reads a part. |
+| `this run has read more than 100000 files with since=` | The run's `files.read` calls read or took as read more files than Lakana records. | Pass a shorter `lookback=` or a smaller `max_files=`, or narrow the pattern. |
 | `names a file whose path is longer than 1024 characters` | A file `files.read` would record has a path Lakana cannot store. | Move it to a shorter path, or narrow the pattern so that it does not match. |
 | `names a file Lakana cannot store` | A file's name holds a NUL character or is not valid UTF-8. | Rename the file. |
 | `gives ... the time ..., within 30 days of the earliest or latest time Lakana can store` | A file is dated near year 1 or year 9999. | Correct the file's time (or the date in its name), or narrow the pattern. |

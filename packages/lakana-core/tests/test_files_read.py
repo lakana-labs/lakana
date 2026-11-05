@@ -17,6 +17,7 @@ from lakana_core.auth import AllowAllAuthorization, PrincipalRef
 from lakana_core.catalog import files_read
 from lakana_core.catalog.files_read import (
     FilesReadReport,
+    TaskRecord,
     files_read_for_task,
     forget_files_read,
     parse_files_read,
@@ -31,6 +32,22 @@ from lakana_core.models import IncrementalFileRead, WriteMode
 from lakana_core.storage.resolver import StorageResolver
 
 _T0 = dt.datetime(2026, 11, 1, 12, tzinfo=dt.UTC)
+
+
+def _files(record: TaskRecord | None) -> list[dict[str, object]]:
+    """Take the files of a loaded record.
+
+    Parameters
+    ----------
+    record
+        What `files_read_for_task` returned.
+
+    Returns
+    -------
+    list of dict
+        Its files; none for `None`.
+    """
+    return [] if record is None else record.files
 
 
 def _report(*files: dict[str, object], watermark: str | None = None) -> bytes:
@@ -574,11 +591,11 @@ def test_the_task_gets_the_rows_inside_30_days_of_its_watermark(
         _task(principal, "exports"),
     )
     record_files_read(session, table_id, 1, report)
-    found = files_read_for_task(session, table_id, f"timestamptz:{_T0.isoformat()}", "gold.t")
-    assert found == [report.files[0].to_json()]
+    found = files_read_for_task(session, table_id, f"timestamptz:{_T0.isoformat()}")
+    assert found == TaskRecord([report.files[0].to_json()])
     naive = _T0.replace(tzinfo=None).isoformat()
-    assert files_read_for_task(session, table_id, f"timestamp:{naive}", "gold.t") == found
-    assert len(files_read_for_task(session, table_id, None, "gold.t") or []) == 2
+    assert files_read_for_task(session, table_id, f"timestamp:{naive}") == found
+    assert len(_files(files_read_for_task(session, table_id, None))) == 2
 
 
 def test_two_connections_of_one_asset_are_kept_apart(
@@ -601,7 +618,7 @@ def test_two_connections_of_one_asset_are_kept_apart(
         _task(principal, "exports", "landing"),
     )
     record_files_read(session, table_id, 1, report)
-    found = files_read_for_task(session, table_id, None, "gold.t") or []
+    found = _files(files_read_for_task(session, table_id, None))
     assert [(f["connection"], f["name"]) for f in found] == [
         ("exports", "a.csv"),
         ("landing", "a.csv"),
@@ -623,17 +640,17 @@ def test_a_watermark_that_is_no_time_gets_no_record(
         Holds `gold.t`.
     """
     table_id = _table_id(catalog, principal)
-    assert files_read_for_task(session, table_id, "long:41", "gold.t") is None
-    assert files_read_for_task(session, table_id, "date:2026-11-01", "gold.t") is None
+    assert files_read_for_task(session, table_id, "long:41") is None
+    assert files_read_for_task(session, table_id, "date:2026-11-01") is None
 
 
-def test_more_rows_than_the_cap_fail_the_task_naming_the_count(
+def test_more_rows_than_the_cap_load_the_newest_with_a_horizon(
     session: Session,
     principal: PrincipalRef,
     catalog: CatalogService,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """More recorded rows than a run can check fail the task with the count and the remedy.
+    """A busy table never stops its asset: the newest rows load, the oldest one's is the horizon.
 
     Parameters
     ----------
@@ -647,18 +664,21 @@ def test_more_rows_than_the_cap_fail_the_task_naming_the_count(
         Lowers the cap.
     """
     table_id = _table_id(catalog, principal)
+    hour = dt.timedelta(hours=1)
     report = parse_files_read(
-        _report(_file("a.csv"), _file("b.csv"), _file("c.csv")), _task(principal, "exports")
+        _report(_file("c.csv", _T0 - 3 * hour), _file("a.csv", _T0 - hour), _file("b.csv", _T0)),
+        _task(principal, "exports"),
     )
     record_files_read(session, table_id, 1, report)
-    monkeypatch.setattr(files_read, "MAX_FILES_READ", 2)
-    with pytest.raises(ValidationError) as caught:
-        files_read_for_task(session, table_id, f"timestamptz:{_T0.isoformat()}", "gold.t")
-    assert str(caught.value) == (
-        "gold.t has 3 files recorded as read within 30 days of its watermark, more than the 2 a "
-        "run can check; narrow the pattern of files.read, or split the asset so that each reads "
-        "a part. The record shrinks as files age past 30 days."
+    mark = f"timestamptz:{_T0.isoformat()}"
+    assert files_read_for_task(session, table_id, mark) == TaskRecord(
+        [f.to_json() for f in sorted(report.files, key=lambda f: f.name)]
     )
+    monkeypatch.setattr(files_read, "MAX_FILES_READ", 2)
+    loaded = files_read_for_task(session, table_id, mark)
+    assert loaded is not None
+    assert [f["name"] for f in loaded.files] == ["a.csv", "b.csv"]
+    assert loaded.horizon == _T0 - hour
 
 
 @pytest.mark.parametrize(
@@ -750,9 +770,9 @@ def test_a_watermark_in_year_1_neither_prunes_nor_bounds_the_load(
     record_files_read(session, table_id, 1, parse_files_read(_entry(), _task(principal, "exports")))
     record_files_read(session, table_id, 2, FilesReadReport(early, ()))
     for mark in ("timestamptz:0001-01-05T00:00:00+00:00", "timestamp:0001-01-05T00:00:00"):
-        assert [
-            f["name"] for f in files_read_for_task(session, table_id, mark, "gold.t") or []
-        ] == ["a.csv"]
+        assert [f["name"] for f in _files(files_read_for_task(session, table_id, mark))] == [
+            "a.csv"
+        ]
 
 
 @pytest.mark.parametrize("name", ["a\x00b", "\ud800.csv", "\udcff"])

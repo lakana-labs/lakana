@@ -3,7 +3,11 @@
 A run reads the files modified after ``since`` less ``lookback`` that the target has not recorded as
 read. A connection the target has no record for, while the target has a time watermark, is
 seeded: its files at or before the watermark (or ``since``, if earlier) count as read, and
-those within 30 days of the watermark are reported as read, so that later runs know them too.
+those inside the call's own window (after ``since`` less ``lookback``, and within 30 days of the
+watermark) are reported as read, so that later runs know them too. A longer ``lookback`` later
+reads the files of the extra window once if they were never recorded. When the worker loaded
+only the newest files of a busy record it sends a horizon (`_TaskState.record_horizon`), and
+every file at or before it counts as read.
 A file is the same file when its connection, name, size and time match; an object store's
 ETag tells an overwritten object apart when both runs saw one. With ``since=None`` nothing is
 filtered: every file is read and reported.
@@ -295,7 +299,11 @@ def choose(
     if recorded is not None and mark is not None:
         # Before the record's start a file read earlier is no longer known: never look there.
         start = max(start, min(after, _minus(mark, RECORD_WINDOW)))
+    if recorded is not None and state.record_horizon is not None:
+        # The worker loaded only the newest files of a busy record: older ones count as read.
+        start = max(start, min(after, _utc(state.record_horizon)))
     seed = None
+    seed_report = after
     if (
         recorded is not None
         and mark is not None
@@ -303,14 +311,15 @@ def choose(
     ):
         # Up to `since` only: a file after it is read today, so it must not be taken as read.
         seed = min(mark, after)
+        # Seeding records only the files this call's window holds: the next runs look no further.
+        seed_report = max(_minus(after, lookback), _minus(mark, RECORD_WINDOW))
     index = _index(recorded or ())
     for entry, modified in timed:
         file = ReadFile(connection, entry.path, entry.size, modified, entry.etag)
         seeded = False
-        if seed is not None and mark is not None and modified <= seed:
+        if seed is not None and modified <= seed:
             seeded = True
-            # Seeding reports what the record keeps (30 days), so later runs know them too.
-            if _minus(mark, RECORD_WINDOW) < modified:
+            if seed_report < modified:
                 choice.reported.append(file)
         if modified <= start:
             continue
@@ -364,6 +373,24 @@ def _span(lookback: dt.timedelta) -> str:
     if seconds % 60 == 0:
         return f"{int(seconds // 60)} min"
     return f"{seconds:g} s"
+
+
+def window_words(lookback: dt.timedelta | None) -> str:
+    """Name the window a call looks at, for its messages.
+
+    Parameters
+    ----------
+    lookback
+        The lookback; `None` or zero when no window applied.
+
+    Returns
+    -------
+    str
+        Such as ``inside the 24 h lookback window``, or ``after since=``.
+    """
+    if not lookback:
+        return "after since="
+    return f"inside the {_span(lookback)} lookback window"
 
 
 def summary(connection: str, choice: Choice, lookback: dt.timedelta | None) -> str:

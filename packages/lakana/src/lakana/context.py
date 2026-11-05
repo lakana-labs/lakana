@@ -217,6 +217,9 @@ class _TaskState:
         without records and lets the server prune.
     files_read
         What the `files.read` calls with ``since=`` read or took as read, in order.
+    record_horizon
+        Set by the worker when it loaded only the newest `MAX_FILES_READ` files of the record:
+        the oldest one's time. `files.read` takes every file at or before it as read.
     """
 
     client: Client
@@ -228,6 +231,7 @@ class _TaskState:
     recorded: frozenset[ReadFile] | None = None
     target_watermark: dt.datetime | None = None
     files_read: list[ReadFile] = field(default_factory=list)
+    record_horizon: dt.datetime | None = None
 
 
 _state: _TaskState | None = None

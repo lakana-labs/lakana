@@ -54,6 +54,7 @@ from lakana.errors import (
     ServerError,
     ValidationError,
 )
+from lakana.resources import tables as tables_module
 from lakana.runner import (
     DESCRIPTION_VERSIONS,
     MAX_ERROR_MESSAGE_CHARS,
@@ -202,15 +203,16 @@ class _Tables:
         object
             The scripted result.
         """
-        self.calls.append(
-            {
-                "method": method,
-                "environment": environment,
-                "table": qualified_name,
-                "data": data,
-                **options,
-            }
-        )
+        call = {
+            "method": method,
+            "environment": environment,
+            "table": qualified_name,
+            "data": data,
+            **options,
+        }
+        if (record := tables_module._FILES_READ.get()) is not None:
+            call["files_read"] = record
+        self.calls.append(call)
         if isinstance(outcome, Exception):
             raise outcome
         return outcome
@@ -4189,7 +4191,15 @@ def test_a_watermark_that_is_no_time_gives_no_target_watermark(world: _World) ->
 
 @pytest.mark.parametrize(
     "content",
-    ["not json", '{"files": {}}', '{"files": [{"name": "a.csv"}]}', "[]", None],
+    [
+        "not json",
+        '{"files": {}}',
+        '{"files": [{"name": "a.csv"}]}',
+        "[]",
+        None,
+        '{"files": [], "horizon": "2026-11-01T00:00:00"}',
+        '{"files": [], "horizon": 7}',
+    ],
 )
 def test_a_bad_record_is_refused_naming_the_field(world: _World, content: str | None) -> None:
     path = world.result_path.parent / "files-read.json"
@@ -4211,6 +4221,38 @@ def test_a_record_path_that_is_not_absolute_is_refused(world: _World, path: obje
         parse_description(world.description(**fields))
 
 
+def test_a_horizon_reaches_the_state(world: _World) -> None:
+    """A record the worker loaded only in part: its horizon reaches `files.read`."""
+    _write_asset(
+        world,
+        "from lakana import context\n"
+        "assert context.current().record_horizon == datetime.datetime(2026, 10, 30, "
+        "tzinfo=datetime.UTC)\n"
+        "return pl.DataFrame({'id': [1], '_source_modified': [datetime.datetime(2026, 11, 2)]})",
+        signature="ctx",
+        inputs="write='append', watermark='_source_modified'",
+    )
+    path = world.result_path.parent / "files-read.json"
+    path.parent.mkdir(exist_ok=True)
+    path.write_text(json.dumps({"files": [_A_FILE], "horizon": "2026-10-30T00:00:00+00:00"}))
+    overrides = _v3(watermark=_TIME_WATERMARK)
+    assert world.run(inputs={}, input_kinds={}, files_read_path=str(path), **overrides) == 0
+
+
+def test_an_append_whose_watermark_is_no_time_sends_no_record(world: _World) -> None:
+    """The server prunes the record by the watermark's time: under any other it never shrinks."""
+    _write_asset(
+        world,
+        "from lakana import context\n"
+        f"context.current().files_read.append(context.ReadFile.from_json({_A_FILE!r}))\n"
+        "return pl.DataFrame({'id': [1]})",
+        signature="ctx",
+        inputs="write='append', watermark='id'",
+    )
+    assert world.run(inputs={}, input_kinds={}, **_v3(watermark=_WATERMARK_ID)) == 0
+    assert "files_read" not in world.client.tables.calls[0]
+
+
 def test_a_record_larger_than_the_bound_or_the_cap_is_refused(
     world: _World, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -4222,7 +4264,9 @@ def test_a_record_larger_than_the_bound_or_the_cap_is_refused(
         parse_description(world.description(**fields))
     monkeypatch.setattr(runner, "MAX_FILES_READ", 2)
     monkeypatch.setattr(runner, "_RECORD_MAX_BYTES", 10)
-    with pytest.raises(ValueError, match="files_read_path must name"):
+    with pytest.raises(
+        ValueError, match=r"record of files read \(files_read_path\) is larger than"
+    ):
         parse_description(world.description(**fields))
 
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import inspect
 import json
 from collections.abc import Callable, Iterator, Mapping
 from datetime import UTC, datetime
@@ -58,6 +60,7 @@ from lakana.resources.tables import (
     Tables,
     _model_from_json,
     _model_reference_from_json,
+    _sending_files_read,
     _split_namespace_table,
 )
 
@@ -768,7 +771,7 @@ def test_tables_append_sends_the_arrow_stream_content_type_and_body() -> None:
 _RECORD = b'{"version":1,"watermark":null}\n'
 
 
-def _sent(write: str, data: pa.Table, **options: object) -> pa.Table:
+def _sent(write: str, data: pa.Table, record: bytes | None = None) -> pa.Table:
     """Send `data` with `tables.<write>` and decode the body the server would get.
 
     Parameters
@@ -777,8 +780,8 @@ def _sent(write: str, data: pa.Table, **options: object) -> pa.Table:
         ``append``, ``replace`` or ``merge``.
     data
         The rows.
-    **options
-        Passed on to the write.
+    record
+        The record of files read the harness sends with it, if any.
 
     Returns
     -------
@@ -795,7 +798,8 @@ def _sent(write: str, data: pa.Table, **options: object) -> pa.Table:
 
     tables = Tables(_transport(handler))
     keyed = {"key": "id"} if write == "merge" else {}
-    getattr(tables, write)("dev", "bronze.sales", data, **keyed, **options)
+    with _sending_files_read(record):
+        getattr(tables, write)("dev", "bronze.sales", data, **keyed)
     return seen["table"]
 
 
@@ -803,9 +807,30 @@ def _sent(write: str, data: pa.Table, **options: object) -> pa.Table:
 def test_a_write_sends_the_record_of_files_read_as_schema_metadata(write: str) -> None:
     """The harness's record rides under ``lakana.files_read``, unchanged; the rows do not change."""
     data = pa.table({"id": [1]})
-    sent = _sent(write, data, files_read=_RECORD)
+    sent = _sent(write, data, _RECORD)
     assert sent.schema.metadata == {b"lakana.files_read": _RECORD}
     assert sent.replace_schema_metadata(None).equals(data)
+
+
+def test_a_history_or_a_load_never_carries_a_record() -> None:
+    """Only an append, a replace or a merge records the files read; the server refuses others."""
+    bodies: list[pa.Table] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        with pyarrow.ipc.open_stream(pa.BufferReader(request.content)) as reader:
+            bodies.append(reader.read_all())
+        return httpx.Response(200, json={})
+
+    tables = Tables(_transport(handler))
+    with _sending_files_read(_RECORD), contextlib.suppress(Exception):
+        tables.history("dev", "bronze.sales", pa.table({"id": [1]}), key="id")
+    assert bodies[0].schema.metadata is None
+
+
+def test_the_record_is_not_in_the_public_signatures() -> None:
+    """The harness sends it through `_sending_files_read`; nobody passes one by accident."""
+    for write in (Tables.append, Tables.replace, Tables.merge):
+        assert "files_read" not in inspect.signature(write).parameters
 
 
 @pytest.mark.parametrize("write", ["append", "replace", "merge"])

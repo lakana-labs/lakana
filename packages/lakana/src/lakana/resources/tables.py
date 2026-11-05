@@ -9,9 +9,11 @@ distinct path parameters.
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import enum
 import io
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Generator, Iterator, Mapping, Sequence
 from datetime import date, datetime
 from typing import Any, Protocol
 
@@ -706,6 +708,38 @@ _POLARS_SCHEMA_TOO_OLD = (
 )
 
 
+_FILES_READ: contextvars.ContextVar[bytes | None] = contextvars.ContextVar(
+    "lakana_files_read", default=None
+)
+"""The record of files read the task harness sends with its upload (`_sending_files_read`)."""
+_RECORDING_ROUTES = frozenset({"tables.append", "tables.replace", "tables.merge"})
+
+
+@contextlib.contextmanager
+def _sending_files_read(record: bytes | None) -> Generator[None]:
+    """Have the writes made inside the block carry the task's record of the files it read.
+
+    For the task harness only: the record rides as the schema metadata `FILES_READ_KEY` of an
+    append, a replace or a merge, and the server accepts it only from a run of a deployed asset.
+    A context variable keeps it out of the public signatures and away from any other thread.
+
+    Parameters
+    ----------
+    record
+        The encoded record (`lakana.context.files_read_payload`), or `None` for none.
+
+    Yields
+    ------
+    None
+        While the writes run.
+    """
+    token = _FILES_READ.set(record)
+    try:
+        yield
+    finally:
+        _FILES_READ.reset(token)
+
+
 class Tables:
     """The `tables` resource of the platform API.
 
@@ -1371,7 +1405,6 @@ class Tables:
         source_versions: Mapping[str, int] | None = None,
         break_glass_reason: str | None = None,
         expected_snapshot_id: int | str | None = None,
-        files_read: bytes | None = None,
     ) -> AppendResult:
         """Append rows to a managed table.
 
@@ -1416,10 +1449,6 @@ class Tables:
             that still holds; otherwise `Conflict` is raised and nothing is
             retried.
 
-        files_read
-            The record of the files `lakana.ingest.files.read` read, which the task harness
-            sends with an incremental asset's write; the server accepts it only from a run of
-            a deployed asset. Leave it out.
 
         Returns
         -------
@@ -1454,7 +1483,6 @@ class Tables:
             data,
             params,
             retry_conflict=expected_snapshot_id is None,
-            files_read=files_read,
         )
         return _append_result_from_json(response.json())
 
@@ -1469,7 +1497,6 @@ class Tables:
         source_versions: Mapping[str, int] | None = None,
         break_glass_reason: str | None = None,
         expected_snapshot_id: int | str | None = None,
-        files_read: bytes | None = None,
     ) -> WriteResult:
         """Replace every row of a managed table.
 
@@ -1505,10 +1532,6 @@ class Tables:
             retried. On `replace`, ``"none"`` also creates a missing
             table from `data`.
 
-        files_read
-            The record of the files `lakana.ingest.files.read` read, which the task harness
-            sends with an incremental asset's write; the server accepts it only from a run of
-            a deployed asset. Leave it out.
 
         Returns
         -------
@@ -1542,7 +1565,6 @@ class Tables:
             data,
             params,
             retry_conflict=expected_snapshot_id is None,
-            files_read=files_read,
         )
         return _write_result_from_json(response.json())
 
@@ -1662,7 +1684,6 @@ class Tables:
         source_versions: Mapping[str, int] | None = None,
         break_glass_reason: str | None = None,
         expected_snapshot_id: int | str | None = None,
-        files_read: bytes | None = None,
     ) -> MergeResult:
         """Merge rows into a managed table on a key.
 
@@ -1702,10 +1723,6 @@ class Tables:
             `Conflict` is raised and nothing is retried. ``"none"`` also creates a missing
             table from `data`.
 
-        files_read
-            The record of the files `lakana.ingest.files.read` read, which the task harness
-            sends with an incremental asset's write; the server accepts it only from a run of
-            a deployed asset. Leave it out.
 
         Returns
         -------
@@ -1740,7 +1757,6 @@ class Tables:
             data,
             params,
             retry_conflict=expected_snapshot_id is None,
-            files_read=files_read,
         )
         body = response.json()
         return MergeResult(
@@ -1996,7 +2012,6 @@ class Tables:
         data: pa.Table | pa.RecordBatch | object,
         params: dict[str, object],
         retry_conflict: bool = True,
-        files_read: bytes | None = None,
     ) -> httpx.Response:
         """Serialise `data` as an Arrow IPC stream and send it, retrying once on a conflict.
 
@@ -2016,10 +2031,6 @@ class Tables:
         retry_conflict
             Retry once on a `Conflict`; off when the caller gave a
             precondition, because the conflict is then the answer.
-        files_read
-            The record of files read, put under the schema metadata `FILES_READ_KEY`
-            unchanged; a key of that name the caller's table carried is dropped either way,
-            so no one sends a record by accident.
 
         Returns
         -------
@@ -2035,8 +2046,11 @@ class Tables:
         table = normalize_view_columns(
             cast_timestamp_ns_columns_to_us(_coerce_to_table(data))
         ).combine_chunks()
+        # A key of the record's name the caller's table carried is dropped, so no one sends a
+        # record by accident; only the harness's append, replace or merge carries one.
         metadata = dict(table.schema.metadata or {})
         metadata.pop(FILES_READ_KEY.encode(), None)
+        files_read = _FILES_READ.get() if route in _RECORDING_ROUTES else None
         if files_read is not None:
             metadata[FILES_READ_KEY.encode()] = files_read
         table = table.replace_schema_metadata(metadata or None)

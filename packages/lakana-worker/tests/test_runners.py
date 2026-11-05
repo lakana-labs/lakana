@@ -1032,6 +1032,20 @@ def test_the_record_file_is_written_private_and_replaces_a_stale_one(
     write_files_read(directory, harness.task())  # nothing to remove
 
 
+def test_the_record_file_keeps_names_unescaped_and_carries_a_horizon(
+    harness: Harness, tmp_path: Path
+) -> None:
+    """Unescaped UTF-8, so a record of long non-ASCII names stays within the harness's bound."""
+    directory = tmp_path / "work"
+    directory.mkdir()
+    named = {**_RECORDED, "name": "日本.csv"}
+    horizon = "2026-10-30T00:00:00+00:00"
+    write_files_read(directory, harness.task(files_read=(named,), files_read_horizon=horizon))
+    raw = (directory / "files-read.json").read_bytes()
+    assert "日本".encode() in raw
+    assert json.loads(raw) == {"files": [named], "horizon": horizon}
+
+
 def test_the_record_file_is_not_written_through_a_planted_link(
     harness: Harness, tmp_path: Path
 ) -> None:

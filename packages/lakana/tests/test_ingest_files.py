@@ -1435,7 +1435,8 @@ def test_a_connection_without_records_is_seeded_and_reports_its_window(root: Pat
     table = files.read("exports", "*.csv", since=_MARK)
 
     assert table.column("id").to_pylist() == [4]
-    assert {f.name for f in context.current().files_read} == {"before.csv", "month.csv", "new.csv"}
+    # month.csv is taken as read but not recorded: only the call's 24 h window is.
+    assert {f.name for f in context.current().files_read} == {"before.csv", "new.csv"}
 
 
 def test_seeding_stops_at_an_earlier_since_so_a_late_file_is_still_read(root: Path) -> None:
@@ -1523,15 +1524,56 @@ def test_a_seeded_call_without_a_file_to_read_still_reports_them(root: Path) -> 
     assert [f.name for f in context.current().files_read] == ["before.csv"]
 
 
-def test_max_files_counts_the_already_read_files_inside_the_window(root: Path) -> None:
+def test_an_hourly_asset_is_not_refused_for_the_files_it_already_read(root: Path) -> None:
+    """500 files an hour, a 24 h lookback: max_files counts the 500 to read, not the 12,500."""
+    hour = dt.timedelta(hours=1)
+    recorded = []
+    for n in range(25 * 500):
+        modified = _MARK - (n // 500) * hour - dt.timedelta(seconds=n % 500)
+        _write(root / f"{n}.csv", b"id\n1\n", modified)
+        recorded.append(_read(root / f"{n}.csv", modified))
+    for n in range(500):
+        _write(root / f"new{n}.csv", b"id\n2\n", _MARK + dt.timedelta(seconds=n + 1))
+    _record(*recorded)
+    table = files.read("exports", "*.csv", since=_MARK, max_files=10_000)
+    assert table.num_rows == 500
+
+
+def test_more_files_to_read_than_max_files_names_the_window_and_the_cap(root: Path) -> None:
     for n in range(3):
         _write(root / f"{n}.csv", b"id\n1\n", _MARK - dt.timedelta(hours=1))
-    _record(*(_read(root / f"{n}.csv", _MARK - dt.timedelta(hours=1)) for n in range(2)))
+    _record(_read(root / "0.csv", _MARK - dt.timedelta(hours=1)))
+    files.read("exports", "*.csv", since=_MARK, max_files=2)  # 2 to read, 1 already read
+    _record(context.ReadFile("exports", "x.csv", 1, _MARK))
     with pytest.raises(CapExceeded) as caught:
         files.read("exports", "*.csv", since=_MARK, max_files=2)
     assert str(caught.value) == (
-        "`exports`: the pattern '*.csv' matches more than max_files (2) files to read; narrow "
-        "the pattern"
+        "`exports`: 3 files matching '*.csv' are new or late inside the 24 h lookback window, "
+        "more than max_files (2); raise max_files= or narrow the pattern"
+    )
+
+
+@pytest.mark.parametrize(
+    ("lookback", "window"),
+    [(dt.timedelta(hours=2), "inside the 2 h lookback window"), (None, "after since=")],
+)
+def test_more_files_inside_the_window_than_a_call_checks_names_the_lookback(
+    root: Path, monkeypatch: pytest.MonkeyPatch, lookback: dt.timedelta | None, window: str
+) -> None:
+    monkeypatch.setattr(context, "MAX_FILES_READ", 2)
+    monkeypatch.setattr(files, "_INSIDE_FACTOR", 1)
+    for n in range(3):
+        _write(root / f"{n}.csv", b"id\n1\n", _MARK + dt.timedelta(seconds=n + 1))
+    if lookback is not None:
+        _record(*(_read(root / f"{n}.csv", _MARK + dt.timedelta(seconds=n + 1)) for n in range(3)))
+    with pytest.raises(CapExceeded) as caught:
+        if lookback is None:
+            files.read("exports", "*.csv", since=_MARK, max_files=1)
+        else:
+            files.read("exports", "*.csv", since=_MARK, max_files=1, lookback=lookback)
+    assert str(caught.value) == (
+        f"`exports`: 3 files match '*.csv' {window} (already read or not), more than the 2 a "
+        "call checks; pass a shorter lookback= or narrow the pattern"
     )
 
 
@@ -1547,7 +1589,8 @@ def test_more_files_read_in_a_run_than_the_record_takes_is_refused(
         files.read("exports", "1.csv", since=None)
     assert str(caught.value) == (
         "`exports`: this run has read more than 1 files with since=; Lakana records each one to "
-        "find late files and keeps at most that many per run: narrow the pattern"
+        "find late files and keeps at most that many per run: pass a shorter lookback= or a "
+        "smaller max_files=, or narrow the pattern"
     )
     assert [f.name for f in context.current().files_read] == ["0.csv", "0.csv"]
 

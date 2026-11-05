@@ -4613,17 +4613,23 @@ the cause and the next step, never a 500, and nothing is written.
   for the harness's append, replace or merge.
 
 **The worker's half.** Before an append or merge task with a time watermark starts, the worker
-loads the target's record within 30 days of that watermark (`files_read_for_task`, at most
-`MAX_FILES_READ` rows; more fails the task naming the count) and writes it as
+loads the target's record within 30 days of that watermark (`files_read_for_task`: at most the
+newest `MAX_FILES_READ` rows; past that it adds the oldest loaded time as a `horizon`, at or
+before which `files.read` takes every file as read, so a busy table never stops its asset) and
+writes it, unescaped UTF-8, as
 `files-read.json` into the task's private work directory (`write_files_read` in
 `lakana_worker/runners.py`): the attempt directory under the local runner, `<attempt>/task`
 (`/work` in the container) under Docker. A stale file is removed first and the new one is
 created `O_CREAT | O_EXCL | O_NOFOLLOW`, mode 0600, so nothing planted at the name is written
 through. The description names it in `files_read_path`; no record is sent for a replace or
 history asset, a table without rows (no watermark: `files.read` then reads every file) or a
-watermark that is no time. The harness reads at most 128 MiB from an absolute path and refuses
-anything but `{"files": [...]}` of at most `MAX_FILES_READ` well-formed entries, naming the
-field and never a value. The record is the task's own table's metadata, which its token can
+watermark that is no time. The harness reads from an absolute path at most the bytes
+`MAX_FILES_READ` entries of the longest legal fields can take, every character escaped
+(`_RECORD_MAX_BYTES`, with its own message), and refuses anything but `{"files": [...],
+"horizon"?: ...}` of at most `MAX_FILES_READ` well-formed entries, naming the field and never a
+value. The harness sends what was read only for an append or merge whose watermark column is a
+timestamp, the time the server prunes by, so no record grows unpruned; it passes it to the
+client through a context variable (`_sending_files_read`), not a public parameter. The record is the task's own table's metadata, which its token can
 already read; it carries file names and sizes, never contents or credentials. A task that edits
 the file can only make its own `files.read` skip or re-read files, which its write right
 already allows.

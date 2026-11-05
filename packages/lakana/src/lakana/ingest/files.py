@@ -54,6 +54,9 @@ DEFAULT_MAX_BYTES = 256 * 1024 * 1024
 DEFAULT_MAX_ROWS = 10_000_000
 """The default of `max_rows`: about the most rows of a narrow table the server's 256 MiB append
 takes, and the bound on what a compressed file (Parquet, a workbook) is decoded to."""
+_INSIDE_FACTOR = 10
+"""With ``since=``, a call checks at most this many times `max_files` files inside its window
+(at least `lakana.context.MAX_FILES_READ`): a bound on the walk, apart from what is read."""
 SOURCE_MODIFIED = "_source_modified"
 """The column `read` adds with ``since=``: each row's file's modification time, UTC."""
 KINDS = ("http", "s3", "gcs", "azure", "directory")
@@ -1034,8 +1037,9 @@ def read(
     max_total_bytes
         The most bytes read in all.
     max_files
-        The most files read. With ``since``, every file inside the lookback window counts,
-        also those already read.
+        The most files read. With ``since``, it counts the new and the late files, not those
+        already read; the files inside the lookback window, read or not, may number at most
+        ten times as many, and never fewer than 100,000.
     max_rows
         The most rows read in all; each reader stops after it, so it also bounds what a
         compressed file (Parquet, a workbook) is decoded to.
@@ -1084,7 +1088,8 @@ def read(
     source = _source(conn)
     try:
         with _naming(conn):
-            # With since=, the cap counts the files inside the window, already read or not.
+            # With since=, max_files counts the files to read; the files inside the window,
+            # already read or not, have their own bound (_INSIDE_FACTOR).
             listing = source.list(pattern, _directory.MAX_ENTRIES)
         for skipped in listing.skipped:
             print(
@@ -1133,12 +1138,21 @@ def read(
                 state=state,
                 use_etag=conn.kind in ("s3", "gcs", "azure"),
             )
-            if choice.inside > max_files:
-                raise CapExceeded(
-                    f"`{connection}`: the pattern {pattern!r} matches more than max_files "
-                    f"({max_files}) files to read; narrow the pattern"
-                )
             applied = state.recorded is not None and after is not None
+            span = _read_set.window_words(window if applied else None)
+            bound = max(_INSIDE_FACTOR * max_files, context.MAX_FILES_READ)
+            if choice.inside > bound:
+                raise CapExceeded(
+                    f"`{connection}`: {choice.inside} files match {pattern!r} {span} (already "
+                    f"read or not), more than the {bound} a call checks; pass a shorter "
+                    "lookback= or narrow the pattern"
+                )
+            if len(choice.chosen) > max_files:
+                raise CapExceeded(
+                    f"`{connection}`: {len(choice.chosen)} files matching {pattern!r} are new or "
+                    f"late {span}, more than max_files ({max_files}); raise max_files= or "
+                    "narrow the pattern"
+                )
             print(
                 _read_set.summary(connection, choice, window if applied else None),
                 file=sys.stderr,
@@ -1148,7 +1162,8 @@ def read(
                 raise CapExceeded(
                     f"`{connection}`: this run has read more than {context.MAX_FILES_READ} files "
                     "with since=; Lakana records each one to find late files and keeps at most "
-                    "that many per run: narrow the pattern"
+                    "that many per run: pass a shorter lookback= or a smaller max_files=, or "
+                    "narrow the pattern"
                 )
             reported = choice.reported
             chosen = choice.chosen

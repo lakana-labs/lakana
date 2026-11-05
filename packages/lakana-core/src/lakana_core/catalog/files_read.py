@@ -10,7 +10,8 @@ deletes the table's earlier rows, since none of the old files' rows remain, and 
 snapshots back deletes their rows.
 
 Before the next run of the asset, the worker loads the files recorded within 30 days of its
-watermark and hands them to the task, so that `files.read` skips a file it already read and
+watermark (at most the newest `MAX_FILES_READ`, with a horizon past that: `TaskRecord`) and hands
+them to the task, so that `files.read` skips a file it already read and
 still reads one that arrived late with an older time. The record is internal: no route lists it.
 
 Only a task's bound token may send a record, naming only connections its asset declares. The
@@ -31,7 +32,7 @@ from collections.abc import Collection
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from sqlalchemy import delete, func, insert, select
+from sqlalchemy import delete, insert, select
 
 from lakana_core.catalog.watermark import Watermark
 from lakana_core.db import db_now
@@ -574,10 +575,32 @@ def forget_table_files_read(session: Session, table_id: uuid.UUID) -> None:
     )
 
 
+@dataclass(frozen=True)
+class TaskRecord:
+    """The record a task gets: what its `files.read` must not read again.
+
+    Attributes
+    ----------
+    files : list[dict[str, object]]
+        The files, as `FileRead.to_json` renders them, ordered by connection, name and time.
+    horizon : datetime.datetime or None
+        Set when more than `MAX_FILES_READ` files are recorded within the window: the time of
+        the oldest file loaded. Every recorded file after it is in `files`; `files.read` takes
+        every file at or before it as read, so nothing is read twice and the asset keeps
+        running, but a late file at or before it is not caught. ``None`` otherwise.
+    """
+
+    files: list[dict[str, object]]
+    horizon: dt.datetime | None = None
+
+
 def files_read_for_task(
-    session: Session, table_id: uuid.UUID, watermark: str | None, table: str
-) -> list[dict[str, object]] | None:
+    session: Session, table_id: uuid.UUID, watermark: str | None
+) -> TaskRecord | None:
     """Load the files a task's `files.read` must not read again.
+
+    At most the newest `MAX_FILES_READ` are loaded, so a busy table never stops its asset; past
+    that the record carries a horizon (`TaskRecord.horizon`).
 
     Parameters
     ----------
@@ -588,20 +611,17 @@ def files_read_for_task(
     watermark
         The task's starting watermark as the run stores it (``"timestamptz:..."``), or
         ``None`` for every recorded row. A naive ``timestamp`` watermark is UTC.
-    table
-        The table's dotted name, for the error.
 
     Returns
     -------
-    list[dict[str, object]] or None
-        The files recorded within `RECORD_WINDOW` of the watermark, as `FileRead.to_json`
-        renders them, ordered by connection, name and time; ``None`` if the watermark is no
-        time (an integer, decimal or date key), which has no record.
+    TaskRecord or None
+        The files recorded within `RECORD_WINDOW` of the watermark; ``None`` if the watermark
+        is no time (an integer, decimal or date key), which has no record.
 
     Raises
     ------
     ValidationError
-        If `watermark` is no watermark, or more than `MAX_FILES_READ` rows are recorded.
+        If `watermark` is no watermark.
     """
     where = [IncrementalFileRead.table_id == table_id]
     if watermark is not None:
@@ -612,21 +632,18 @@ def files_read_for_task(
         start = _window_start(mark)
         if start is not None:
             where.append(IncrementalFileRead.modified > start)
-    count = session.scalar(select(func.count()).select_from(IncrementalFileRead).where(*where))
-    if count and count > MAX_FILES_READ:
-        raise ValidationError(
-            f"{table} has {count} files recorded as read within 30 days of its watermark, more "
-            f"than the {MAX_FILES_READ} a run can check; narrow the pattern of files.read, or "
-            "split the asset so that each reads a part. The record shrinks as files age past "
-            "30 days."
-        )
-    rows = session.scalars(
-        select(IncrementalFileRead)
-        .where(*where)
-        .order_by(
-            IncrementalFileRead.connection,
-            IncrementalFileRead.name,
-            IncrementalFileRead.modified,
+    rows = list(
+        session.scalars(
+            select(IncrementalFileRead)
+            .where(*where)
+            .order_by(IncrementalFileRead.modified.desc())
+            .limit(MAX_FILES_READ + 1)
         )
     )
-    return [FileRead(r.connection, r.name, r.size, r.modified, r.etag).to_json() for r in rows]
+    horizon = None
+    if len(rows) > MAX_FILES_READ:
+        rows = rows[:MAX_FILES_READ]
+        horizon = rows[-1].modified
+    rows.sort(key=lambda r: (r.connection, r.name, r.modified))
+    files = [FileRead(r.connection, r.name, r.size, r.modified, r.etag).to_json() for r in rows]
+    return TaskRecord(files, horizon)

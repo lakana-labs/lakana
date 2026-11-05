@@ -252,6 +252,9 @@ class PythonTask:
         The files the target recorded as read within 30 days of its watermark
         (`files_read_for_task`), for an append or merge asset with a time watermark; `None`
         otherwise.
+    files_read_horizon
+        When the worker loaded only the newest `MAX_FILES_READ` files of the record: the oldest
+        one's time (ISO 8601), at or before which `files.read` takes every file as read.
     """
 
     code_dir: Path
@@ -286,6 +289,7 @@ class PythonTask:
     evolve_schema: bool = False
     history: HistorySpec | None = None
     files_read: tuple[Mapping[str, object], ...] | None = None
+    files_read_horizon: str | None = None
 
 
 @dataclass(frozen=True)
@@ -771,8 +775,12 @@ def write_files_read(directory: Path, task: PythonTask) -> None:
     if task.files_read is None:
         return
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    document: dict[str, object] = {"files": [dict(f) for f in task.files_read]}
+    if task.files_read_horizon is not None:
+        document["horizon"] = task.files_read_horizon
     with os.fdopen(descriptor, "w", encoding="utf-8") as out:
-        json.dump({"files": [dict(f) for f in task.files_read]}, out)
+        # Unescaped, so a record of long non-ASCII names stays well inside the harness's bound.
+        json.dump(document, out, ensure_ascii=False)
 
 
 def task_description(

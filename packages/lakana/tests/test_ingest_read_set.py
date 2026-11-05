@@ -104,3 +104,68 @@ def test_a_window_reaching_before_year_one_does_not_overflow() -> None:
     )
     assert (choice.chosen, choice.already, choice.inside) == ([], 1, 1)
     assert choice.reported == [context.ReadFile("exports", "a.csv", 1, early)]
+
+
+def _busy(days: int, per_day: int) -> list[tuple[FileEntry, dt.datetime]]:
+    """List a busy source's files before `_MARK`, newest first.
+
+    Parameters
+    ----------
+    days
+        How many days back.
+    per_day
+        Files a day.
+
+    Returns
+    -------
+    list of tuple
+        Each file with its time.
+    """
+    step = dt.timedelta(days=1) / per_day
+    timed = []
+    for n in range(days * per_day):
+        modified = _MARK - n * step
+        timed.append((FileEntry(f"f{n}.csv", 10, modified), modified))
+    return timed
+
+
+def test_seeding_without_a_lookback_records_no_old_file() -> None:
+    """Seeding takes every old file as read, but records only the call's own window."""
+    state = _state(recorded=frozenset(), target_watermark=_MARK)
+    choice = _read_set.choose(
+        "exports", _busy(40, 4000), after=_MARK, lookback=dt.timedelta(0), state=state
+    )
+    assert (len(choice.chosen), len(choice.reported), choice.inside) == (0, 0, 0)
+
+
+def test_seeding_a_busy_source_records_only_the_last_day() -> None:
+    """4,000 files a day for 30 days: the default 24 h lookback records one day of them."""
+    state = _state(recorded=frozenset(), target_watermark=_MARK)
+    choice = _read_set.choose(
+        "exports", _busy(30, 4000), after=_MARK, lookback=_read_set.DEFAULT_LOOKBACK, state=state
+    )
+    assert choice.chosen == []
+    assert len(choice.reported) == 4000
+    assert min(f.modified for f in choice.reported) > _MARK - dt.timedelta(hours=24)
+
+
+def test_a_horizon_takes_every_older_file_as_read() -> None:
+    """A busy record loaded only in part: files at or before its horizon are not read again."""
+    horizon = _MARK - dt.timedelta(hours=2)
+    late, older, new = (
+        FileEntry("late.csv", 1, _MARK - dt.timedelta(hours=1)),
+        FileEntry("older.csv", 1, _MARK - dt.timedelta(hours=3)),
+        FileEntry("new.csv", 1, _MARK + dt.timedelta(hours=1)),
+    )
+    state = _state(
+        recorded=frozenset({_file("x.csv")}), target_watermark=_MARK, record_horizon=horizon
+    )
+    choice = _read_set.choose(
+        "exports",
+        [(f, f.modified) for f in (late, older, new) if f.modified is not None],
+        after=_MARK,
+        lookback=_read_set.DEFAULT_LOOKBACK,
+        state=state,
+    )
+    assert [entry.path for entry, _ in choice.chosen] == ["late.csv", "new.csv"]
+    assert (choice.late, choice.new, choice.inside) == (1, 1, 2)

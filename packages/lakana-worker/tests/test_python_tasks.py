@@ -8761,6 +8761,9 @@ def _reads_exports(world: World) -> Script:
                 if task.files_read is None
                 else frozenset(context.ReadFile.from_json(dict(f)) for f in task.files_read),
                 target_watermark=mark if isinstance(mark, datetime) else None,
+                record_horizon=None
+                if task.files_read_horizon is None
+                else datetime.fromisoformat(task.files_read_horizon),
             )
         )
         try:
@@ -8905,17 +8908,35 @@ def test_an_append_without_a_watermark_value_gets_no_record(py: PyWorld) -> None
     assert [first.files_read, second.files_read] == [None, None]
 
 
-def test_more_recorded_files_than_the_cap_fail_the_task_naming_the_count(
+def test_an_append_with_a_watermark_that_is_no_time_gets_no_record(py: PyWorld) -> None:
+    """Nothing is loaded for an integer watermark: the record is pruned by a time only."""
+    py.deploy(write="append", watermark="id", write_mode="append")
+    engine = py.engine(_harness_writes(py.world, [1], [2]))
+    run_claimed(engine, py.claim_python(engine))
+    _rerun(py, engine)
+    first, second = py.runner.tasks
+    assert second.watermark == "long:1"
+    assert [first.files_read, second.files_read] == [None, None]
+
+
+def test_a_record_past_the_cap_loads_its_newest_files_and_the_asset_keeps_running(
     py: PyWorld, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Past the cap the worker sends a horizon: nothing is read twice, nothing stops the asset.
+
+    A late file at or before the horizon is not caught: the documented price.
+    """
     folder, engine = _exports(py, tmp_path)
     for n in range(3):
-        _touch(folder / f"{n}.csv", b"id\n1\n", _T)
+        _touch(folder / f"{n}.csv", f"id\n{n}\n".encode(), _T - timedelta(hours=2 - n))
     run_claimed(engine, py.claim_python(engine))
     monkeypatch.setattr(files_read, "MAX_FILES_READ", 2)
-    with py.world.session() as session:
-        scheduler_tick(session, datetime.now(UTC), lambda: 0.5)
-    task, message = _fails(py, engine)
+    _touch(folder / "late.csv", b"id\n3\n", _T - timedelta(hours=3))
+    _touch(folder / "new.csv", b"id\n4\n", _T + timedelta(hours=1))
+    _rerun(py, engine)
 
-    assert task.status is TaskStatus.FAILED
-    assert "gold.scores has 3 files recorded as read within 30 days of its watermark" in message
+    assert _task(py.world, "gold.scores").status is TaskStatus.SUCCEEDED
+    assert _ids(py.world, "gold.scores") == [0, 1, 2, 4]
+    second = py.runner.tasks[1]
+    assert [f["name"] for f in second.files_read or ()] == ["1.csv", "2.csv"]
+    assert second.files_read_horizon == (_T - timedelta(hours=1)).isoformat()
