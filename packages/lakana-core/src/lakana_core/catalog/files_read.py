@@ -1,0 +1,449 @@
+"""The record of the files an incremental `files.read` handed to an asset (#344).
+
+A run of a deployed asset that reads files incrementally sends, with its upload, the list of
+files `files.read` gave it: the Arrow schema metadata key `lakana.files_read`, a small JSON
+document. The commit of an append, replace or merge carrying one records its files in
+`incremental_files_read`, in the transaction that moves the table, so the record and the
+snapshot land together or not at all. A check that sets snapshots back deletes their rows.
+
+Before the next run of the asset, the worker loads the files recorded within 30 days of its
+watermark and hands them to the task, so that `files.read` skips a file it already read and
+still reads one that arrived late with an older time. The record is internal: no route lists it.
+
+Only a task's bound token may send a record, naming only connections its asset declares. The
+document is bounded before it is parsed (`MAX_RECORD_BYTES`), and every field after: at most
+`MAX_FILES_READ` files, a connection name of at most 63 characters, a path of at most
+`MAX_NAME_LENGTH`, a size that fits a signed 64-bit integer, and an ETag of at most 512.
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+import json
+import uuid
+from collections.abc import Collection
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+from sqlalchemy import delete, func, insert, select
+
+from lakana_core.catalog.watermark import Watermark
+from lakana_core.db import db_now
+from lakana_core.errors import ValidationError
+from lakana_core.models import IncrementalFileRead
+
+if TYPE_CHECKING:
+    import pyarrow as pa
+    from sqlalchemy.orm import Session
+
+    from lakana_core.auth import PrincipalRef
+
+FILES_READ_METADATA_KEY = b"lakana.files_read"
+"""The Arrow schema metadata key of the record; `lakana.resources.tables` writes the same."""
+MAX_FILES_READ = 100_000
+"""The most files a report may list, and the most rows a task gets; the SDK has the same cap."""
+MAX_RECORD_BYTES = 64 * 1024 * 1024
+"""The largest record accepted, checked before it is parsed.
+
+An entry is about 120 bytes plus its path and ETag, so 64 MiB holds `MAX_FILES_READ` entries
+whose paths and ETags average about 550 characters together: real paths with room to spare.
+It is a quarter of the largest upload, and keeps a hostile record's parse to a bounded size.
+"""
+MAX_NAME_LENGTH = 1024
+"""The longest path of a file, in characters, as the artifact manifest bounds its paths."""
+RECORD_WINDOW = dt.timedelta(days=30)
+"""How far before the watermark the record is kept: the largest `lookback=`."""
+_MAX_CONNECTION = 63
+_MAX_ETAG = 512
+_MAX_SIZE = 2**63 - 1
+_NOT_A_TASK = (
+    "Only a run of a deployed asset may send a record of the files it read (the Arrow schema "
+    "metadata `lakana.files_read`); remove it from the upload."
+)
+_NARROW = "narrow the pattern the asset passes to files.read"
+
+
+@dataclass(frozen=True)
+class FileRead:
+    """One file `files.read` handed to an asset.
+
+    Attributes
+    ----------
+    connection : str
+        The connection it was read from.
+    name : str
+        Its path relative to the connection.
+    size : int
+        Its size in bytes, as listed.
+    modified : datetime.datetime
+        The aware UTC time `files.read` used for it.
+    etag : str or None
+        Its ETag, where the store reports one.
+    """
+
+    connection: str
+    name: str
+    size: int
+    modified: dt.datetime
+    etag: str | None
+
+    def to_json(self) -> dict[str, object]:
+        """Render the file as the record's JSON carries it.
+
+        Returns
+        -------
+        dict[str, object]
+            The five fields, the time in ISO 8601.
+        """
+        return {
+            "connection": self.connection,
+            "name": self.name,
+            "size": self.size,
+            "modified": self.modified.isoformat(),
+            "etag": self.etag,
+        }
+
+
+@dataclass(frozen=True)
+class FilesReadReport:
+    """The record a run sent with its upload.
+
+    Attributes
+    ----------
+    watermark : datetime.datetime or None
+        The run's starting watermark, aware UTC; the rows older than it less
+        `RECORD_WINDOW` are pruned. ``None`` on a first run.
+    files : tuple[FileRead, ...]
+        The files read, each once.
+    """
+
+    watermark: dt.datetime | None
+    files: tuple[FileRead, ...]
+
+
+def _malformed(what: str) -> str:
+    """Spell the refusal of a record that the SDK of this release would not send.
+
+    Parameters
+    ----------
+    what
+        The part that is wrong.
+
+    Returns
+    -------
+    str
+        The refusal, with the next step.
+    """
+    return (
+        "The record of the files read (Arrow schema metadata `lakana.files_read`) is malformed: "
+        f"{what}. Use the same release of `lakana` in the project as on the server."
+    )
+
+
+def _time(value: object) -> dt.datetime | None:
+    """Read an ISO 8601 time.
+
+    Parameters
+    ----------
+    value
+        The JSON value.
+
+    Returns
+    -------
+    datetime.datetime or None
+        The time as written, naive or aware; ``None`` if `value` is no time.
+    """
+    if not isinstance(value, str):
+        return None
+    try:
+        return dt.datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def _file(item: object, number: int) -> FileRead:
+    """Check one entry of the record.
+
+    Parameters
+    ----------
+    item
+        The JSON value.
+    number
+        Its position, from 1, for the error.
+
+    Returns
+    -------
+    FileRead
+        The file, its time in UTC.
+
+    Raises
+    ------
+    ValidationError
+        If a field is missing, of the wrong type, or out of its bounds.
+    """
+    wrong = _malformed(f"file {number} is not a connection, name, size, modified time and ETag")
+    if not isinstance(item, dict):
+        raise ValidationError(wrong)
+    connection, name, size = item.get("connection"), item.get("name"), item.get("size")
+    modified, etag = _time(item.get("modified")), item.get("etag")
+    if (
+        not isinstance(connection, str)
+        or not 0 < len(connection) <= _MAX_CONNECTION
+        or not isinstance(name, str)
+        or not name
+        or not isinstance(size, int)
+        or isinstance(size, bool)
+        or modified is None
+        or modified.tzinfo is None
+        or not (etag is None or isinstance(etag, str))
+    ):
+        raise ValidationError(wrong)
+    if len(name) > MAX_NAME_LENGTH:
+        raise ValidationError(
+            "The record of the files read names a file whose path is longer than "
+            f"{MAX_NAME_LENGTH} characters (file {number}, beginning {name[:64]!r}); move it to "
+            f"a shorter path, or {_NARROW} so that it does not match."
+        )
+    if not 0 <= size <= _MAX_SIZE:
+        raise ValidationError(
+            _malformed(f"file {number} has the size {size}, outside 0 to {_MAX_SIZE} bytes")
+        )
+    if etag is not None and len(etag) > _MAX_ETAG:
+        raise ValidationError(
+            _malformed(f"file {number} has an ETag longer than {_MAX_ETAG} characters")
+        )
+    return FileRead(connection, name, size, modified.astimezone(dt.UTC), etag)
+
+
+def _watermark(value: object) -> dt.datetime | None:
+    """Check the record's watermark.
+
+    Parameters
+    ----------
+    value
+        The JSON value.
+
+    Returns
+    -------
+    datetime.datetime or None
+        The watermark in UTC, or ``None`` if the run had none.
+
+    Raises
+    ------
+    ValidationError
+        If it is no time, or a time without a zone.
+    """
+    if value is None:
+        return None
+    parsed = _time(value)
+    if parsed is None:
+        raise ValidationError(_malformed("watermark must be null or a time with a zone"))
+    if parsed.tzinfo is None:
+        raise ValidationError(_malformed(f"watermark {value} has no time zone; it must be UTC"))
+    return parsed.astimezone(dt.UTC)
+
+
+def split_files_read(data: pa.Table) -> tuple[pa.Table, bytes | None]:
+    """Take the record off an upload, so the rows are written without it.
+
+    Parameters
+    ----------
+    data
+        The upload.
+
+    Returns
+    -------
+    tuple[pa.Table, bytes or None]
+        The upload without the key, its other metadata kept; and the raw record, or ``None``
+        if it carries none (then the upload is returned unchanged).
+    """
+    metadata = dict(data.schema.metadata or {})
+    raw = metadata.pop(FILES_READ_METADATA_KEY, None)
+    if raw is None:
+        return data, None
+    return data.replace_schema_metadata(metadata or None), raw
+
+
+def parse_files_read(raw: bytes, p: PrincipalRef) -> FilesReadReport:
+    """Check the record a task sent, and who sent it.
+
+    Parameters
+    ----------
+    raw
+        The JSON document: ``{"version": 1, "watermark": ..., "files": [...]}``.
+    p
+        The uploading principal; only a task's bound token may send a record.
+
+    Returns
+    -------
+    FilesReadReport
+        The record, each file once.
+
+    Raises
+    ------
+    ValidationError
+        If `p` is not a bound task, the record is larger than `MAX_RECORD_BYTES` or lists more
+        than `MAX_FILES_READ` files, any part is malformed, or it names a connection the asset
+        does not declare.
+    """
+    bound = p.task_scope.bound if p.task_scope is not None else None
+    if bound is None:
+        raise ValidationError(_NOT_A_TASK)
+    if len(raw) > MAX_RECORD_BYTES:
+        raise ValidationError(
+            f"The record of the files read is {len(raw)} bytes, more than {MAX_RECORD_BYTES}; "
+            f"{_NARROW}."
+        )
+    try:
+        document = json.loads(raw)
+    except ValueError:  # UnicodeDecodeError is a ValueError
+        raise ValidationError(_malformed("not JSON")) from None
+    if not isinstance(document, dict) or document.get("version") != 1:
+        raise ValidationError(_malformed("version must be 1"))
+    watermark = _watermark(document.get("watermark"))
+    files = document.get("files")
+    if not isinstance(files, list):
+        raise ValidationError(_malformed("files must be a list"))
+    if len(files) > MAX_FILES_READ:
+        raise ValidationError(
+            f"The record of the files read lists {len(files)} files, more than "
+            f"{MAX_FILES_READ}; {_NARROW}."
+        )
+    found = dict.fromkeys(_file(item, number) for number, item in enumerate(files, 1))
+    for file in found:
+        if file.connection not in bound.connections:
+            raise ValidationError(
+                f"The record of the files read names the connection {file.connection!r}, which "
+                "the asset does not declare; add it to @asset(connections=[...]) and deploy again."
+            )
+    return FilesReadReport(watermark, tuple(found))
+
+
+def record_files_read(
+    session: Session, table_id: uuid.UUID, snapshot_id: int, report: FilesReadReport
+) -> None:
+    """Record a run's files with the snapshot it committed, and prune the old rows.
+
+    Uncommitted: the caller's transaction commits them, with the snapshot.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    table_id
+        The target table.
+    snapshot_id
+        The snapshot the commit adds.
+    report
+        The run's record. Its watermark, if any, prunes the table's rows older than it less
+        `RECORD_WINDOW`.
+    """
+    if report.files:
+        read_at = db_now(session)
+        session.execute(
+            insert(IncrementalFileRead),
+            [
+                {
+                    "id": uuid.uuid4(),
+                    "table_id": table_id,
+                    "connection": f.connection,
+                    "name": f.name,
+                    "size": f.size,
+                    "modified": f.modified,
+                    "etag": f.etag,
+                    "snapshot_id": snapshot_id,
+                    "read_at": read_at,
+                }
+                for f in report.files
+            ],
+        )
+    if report.watermark is not None:
+        session.execute(
+            delete(IncrementalFileRead)
+            .where(
+                IncrementalFileRead.table_id == table_id,
+                IncrementalFileRead.modified < report.watermark - RECORD_WINDOW,
+            )
+            .execution_options(synchronize_session=False)
+        )
+
+
+def forget_files_read(session: Session, table_id: uuid.UUID, snapshot_ids: Collection[int]) -> None:
+    """Delete the rows of snapshots a check set back, so their files are read again.
+
+    Uncommitted: the caller's transaction commits them.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    table_id
+        The table.
+    snapshot_ids
+        The snapshots set back; none deletes nothing.
+    """
+    if snapshot_ids:
+        session.execute(
+            delete(IncrementalFileRead)
+            .where(
+                IncrementalFileRead.table_id == table_id,
+                IncrementalFileRead.snapshot_id.in_(list(snapshot_ids)),
+            )
+            .execution_options(synchronize_session=False)
+        )
+
+
+def files_read_for_task(
+    session: Session, table_id: uuid.UUID, watermark: str | None, table: str
+) -> list[dict[str, object]] | None:
+    """Load the files a task's `files.read` must not read again.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    table_id
+        The asset's target table.
+    watermark
+        The task's starting watermark as the run stores it (``"timestamptz:..."``), or
+        ``None`` for every recorded row. A naive ``timestamp`` watermark is UTC.
+    table
+        The table's dotted name, for the error.
+
+    Returns
+    -------
+    list[dict[str, object]] or None
+        The files recorded within `RECORD_WINDOW` of the watermark, as `FileRead.to_json`
+        renders them, ordered by connection, name and time; ``None`` if the watermark is no
+        time (an integer, decimal or date key), which has no record.
+
+    Raises
+    ------
+    ValidationError
+        If `watermark` is no watermark, or more than `MAX_FILES_READ` rows are recorded.
+    """
+    where = [IncrementalFileRead.table_id == table_id]
+    if watermark is not None:
+        value = Watermark.decode(watermark).value
+        if not isinstance(value, dt.datetime):
+            return None
+        mark = value.replace(tzinfo=dt.UTC) if value.tzinfo is None else value.astimezone(dt.UTC)
+        where.append(IncrementalFileRead.modified > mark - RECORD_WINDOW)
+    count = session.scalar(select(func.count()).select_from(IncrementalFileRead).where(*where))
+    if count and count > MAX_FILES_READ:
+        raise ValidationError(
+            f"{table} has {count} files recorded as read within 30 days of its watermark, more "
+            f"than the {MAX_FILES_READ} a run can check; narrow the pattern of files.read, or "
+            "split the asset so that each reads a part. The record shrinks as files age past "
+            "30 days."
+        )
+    rows = session.scalars(
+        select(IncrementalFileRead)
+        .where(*where)
+        .order_by(
+            IncrementalFileRead.connection,
+            IncrementalFileRead.name,
+            IncrementalFileRead.modified,
+        )
+    )
+    return [FileRead(r.connection, r.name, r.size, r.modified, r.etag).to_json() for r in rows]

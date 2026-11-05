@@ -5099,3 +5099,53 @@ def test_0064_adds_the_health_effects_and_the_signal_of_a_delivery(
         }
     finally:
         engine.dispose()
+
+
+_REVISION_0065 = "e7a1b3c5d9f0"
+
+
+@pytest.mark.usefixtures("_without_fsync")
+def test_0065_adds_the_files_read_table_and_downgrades_cleanly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Revision `0065`: `incremental_files_read` with its index; the downgrade drops it.
+
+    Parameters
+    ----------
+    tmp_path
+        Holds the throwaway SQLite file.
+    monkeypatch
+        Points `lakana_core.config.Settings` at that file.
+    """
+    db_path = tmp_path / "migrated.db"
+    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    config = Config(str(ALEMBIC_INI))
+    command.upgrade(config, _REVISION_0065)
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        inspector = inspect(engine)
+        assert {c["name"] for c in inspector.get_columns("incremental_files_read")} == {
+            "id",
+            "table_id",
+            "connection",
+            "name",
+            "size",
+            "modified",
+            "etag",
+            "snapshot_id",
+            "read_at",
+        }
+        assert "ix_incremental_files_read_table_id_connection_modified" in {
+            i["name"] for i in inspector.get_indexes("incremental_files_read")
+        }
+        assert [
+            f["referred_table"] for f in inspector.get_foreign_keys("incremental_files_read")
+        ] == ["tables"]
+    finally:
+        engine.dispose()
+    command.downgrade(config, _REVISION_0064)
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        assert "incremental_files_read" not in inspect(engine).get_table_names()
+    finally:
+        engine.dispose()

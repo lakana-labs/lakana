@@ -3103,3 +3103,23 @@ def test_0064_on_postgres() -> None:
             c["name"] for c in inspector.get_columns("table_health_signals")
         }
         engine.dispose()
+
+
+def test_0065_on_postgres() -> None:
+    """0065 creates `incremental_files_read`, whose rows go with their table; downgrade drops it."""
+    revision_0064 = "d6f0a2b4c8e9"
+    revision_0065 = "e7a1b3c5d9f0"
+    with PostgresContainer("postgres:16", driver="pg8000") as pg:
+        url = pg.get_connection_url()
+        migrate.upgrade(url, revision_0065)
+        engine = sqlalchemy.create_engine(url)
+        assert _alembic_version(engine) == revision_0065
+        inspector = sqlalchemy.inspect(engine)
+        assert "ix_incremental_files_read_table_id_connection_modified" in {
+            i["name"] for i in inspector.get_indexes("incremental_files_read")
+        }
+        [key] = inspector.get_foreign_keys("incremental_files_read")
+        assert (key["referred_table"], key["options"].get("ondelete")) == ("tables", "CASCADE")
+        migrate.downgrade(url, revision_0064)
+        assert "incremental_files_read" not in sqlalchemy.inspect(engine).get_table_names()
+        engine.dispose()
