@@ -830,6 +830,51 @@ def _taking_record(
     return run
 
 
+_RECORD_NOT_TAKEN = (
+    "This route takes no record of the files read (the schema metadata `lakana.files_read`): "
+    "only an append, a replace or a merge records one. Send the rows without it."
+)
+
+
+def _refusing_record(write: Callable[[pa.Table], _T]) -> Callable[[pa.Table], _T]:
+    """Refuse an upload that carries a record of files read, on a route that keeps none (#344).
+
+    Parameters
+    ----------
+    write
+        The catalog write.
+
+    Returns
+    -------
+    Callable
+        The write `_governed_arrow_write` runs on the decoded upload.
+    """
+
+    def run(data: pa.Table) -> _T:
+        """Refuse a record, else write.
+
+        Parameters
+        ----------
+        data
+            The decoded upload.
+
+        Returns
+        -------
+        object
+            Whatever `write` returns.
+
+        Raises
+        ------
+        lakana_core.errors.ValidationError
+            Mapped to 422 when the upload carries a record; nothing is written.
+        """
+        if split_files_read(data)[1] is not None:
+            raise ValidationError(_RECORD_NOT_TAKEN)
+        return write(data)
+
+    return run
+
+
 async def _governed_arrow_write(
     request: Request,
     principal: PrincipalRef,
@@ -2469,6 +2514,9 @@ async def write_table_history(
     the merge, and 422 for what the history write refuses (counts, never values), including more
     open versions than `LAKANA_RUN__MAX_HISTORY_OPEN_VERSIONS` allows.
 
+    An upload that carries a record of files read (the schema metadata `lakana.files_read`)
+    is a 422: only an append, a replace or a merge records one.
+
     Parameters
     ----------
     env
@@ -2567,7 +2615,7 @@ async def write_table_history(
         catalog,
         session,
         ref,
-        write,
+        _refusing_record(write),
         precheck=lambda: catalog.check_can_history(principal, ref, expected_snapshot_id=expected),
         history=True,
     )
@@ -2609,6 +2657,9 @@ async def load_table_data(
     the snapshot moved,
     413 for a body over the server's limit, 408 when it arrives too slowly and 503 when the
     server is busy with other uploads.
+
+    An upload that carries a record of files read (the schema metadata `lakana.files_read`)
+    is a 422: only an append, a replace or a merge records one.
 
     Parameters
     ----------
@@ -2689,5 +2740,5 @@ async def load_table_data(
         )
 
     return await _governed_arrow_write(
-        request, principal, catalog, session, ref, load, precheck=precheck
+        request, principal, catalog, session, ref, _refusing_record(load), precheck=precheck
     )

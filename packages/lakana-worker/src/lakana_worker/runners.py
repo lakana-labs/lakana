@@ -77,6 +77,8 @@ both to the venv build and to the runner, so one cap covers everything.
 """
 
 RESULT_FILE = "result.json"
+FILES_READ_FILE = "files-read.json"
+"""The record of files read, written into the task's work directory beside its description."""
 
 _MAX_RESULT_BYTES = 64 * 1024
 _MAX_ERROR_TYPE_CHARS = 100
@@ -246,6 +248,10 @@ class PythonTask:
         artifact.
     history
         How a history asset writes (``write: history``); `None` for every other asset.
+    files_read
+        The files the target recorded as read within 30 days of its watermark
+        (`files_read_for_task`), for an append or merge asset with a time watermark; `None`
+        otherwise.
     """
 
     code_dir: Path
@@ -279,6 +285,7 @@ class PythonTask:
     root_users: Mapping[str, str] = field(default_factory=dict)
     evolve_schema: bool = False
     history: HistorySpec | None = None
+    files_read: tuple[Mapping[str, object], ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -740,6 +747,34 @@ _LAUNCHER_STOPPED = (
 )
 
 
+def write_files_read(directory: Path, task: PythonTask) -> None:
+    """Write the task's record of files read into its private work directory, or remove a stale one.
+
+    Created exclusively without following a link (``O_EXCL | O_NOFOLLOW``), mode 0600, so
+    nothing planted at the name is written through.
+
+    Parameters
+    ----------
+    directory
+        The work directory: the attempt directory, or the Docker task's ``task`` directory.
+    task
+        The task.
+
+    Raises
+    ------
+    OSError
+        If the file cannot be written.
+    """
+    path = directory / FILES_READ_FILE
+    with contextlib.suppress(FileNotFoundError):
+        path.unlink()
+    if task.files_read is None:
+        return
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(descriptor, "w", encoding="utf-8") as out:
+        json.dump({"files": [dict(f) for f in task.files_read]}, out)
+
+
 def task_description(
     task: PythonTask, *, result_path: str, work_dir: str, parent_pid: int | None
 ) -> bytes:
@@ -766,7 +801,8 @@ def task_description(
         release still runs every other asset. ``evolve_schema`` is
         sent only when it is on, in either version. A harness without the option never gets
         it: its `asset()` lacks the argument, so the asset fails at import, and before 1.0 a
-        deploy refuses a lock with another minor version anyway.
+        deploy refuses a lock with another minor version anyway. A task with a record of files
+        read gets ``files_read_path``, the record's path in `work_dir` (`write_files_read`).
     """
     document: dict[str, object] = {
         "version": _DESCRIPTION_VERSION,
@@ -803,6 +839,8 @@ def task_description(
         document["connections"] = {
             name: dict(routing) for name, routing in task.connections.items()
         }
+        if task.files_read is not None:
+            document["files_read_path"] = f"{work_dir}/{FILES_READ_FILE}"
     if task.history is not None:
         document["version"] = _HISTORY_DESCRIPTION_VERSION
         document["history"] = {
@@ -1060,6 +1098,7 @@ class LocalProcessRunner:
             (tmp / POLARS_SPILL_DIRECTORY).mkdir(mode=0o700, exist_ok=True)
             with contextlib.suppress(FileNotFoundError):
                 result_path.unlink()
+            write_files_read(task.attempt_dir, task)
         except OSError as exc:
             return RunOutcome(
                 succeeded=False,
@@ -1520,6 +1559,7 @@ class DockerRunner:
                 directory.mkdir(mode=0o700, exist_ok=True)
             with contextlib.suppress(FileNotFoundError):
                 (work / RESULT_FILE).unlink()
+            write_files_read(work, task)
             if self._trust is not None:
                 install_trust(self._trust, task.attempt_dir)
         except OSError as exc:

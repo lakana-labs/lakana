@@ -95,6 +95,24 @@ def test_the_first_write_creates_and_later_ones_answer_the_counts(client: TestCl
     assert [d["mode"] for d in modes] == ["create", "history"]
 
 
+def test_an_upload_with_a_record_of_files_read_is_422_and_writes_nothing(
+    client: TestClient,
+) -> None:
+    """#344: only an append, a replace or a merge records the files a task read."""
+    create_environment(client)
+    rows = pa.table({"customer_id": ["A"], "region": ["north"]})
+    record = rows.replace_schema_metadata({b"lakana.files_read": b'{"version":1}\n'})
+    response = client.post(
+        f"{_TABLES}/dim_customer/history",
+        headers=_HEADERS,
+        params={"key": "customer_id", "expected_snapshot_id": "none"},
+        content=_ipc(record),
+    )
+    assert response.status_code == 422, response.text
+    assert "takes no record of the files read" in response.text
+    assert client.get(f"{_TABLES}/dim_customer", headers=_HEADERS).status_code == 404
+
+
 def test_a_missing_key_is_422_before_the_body_is_read(client: TestClient) -> None:
     create_environment(client)
     response = client.post(

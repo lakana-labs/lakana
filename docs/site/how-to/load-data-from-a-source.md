@@ -90,6 +90,12 @@ cd sources
 | `ingest-sql` | `assets/bronze/orders.py` | a table of a PostgreSQL, MariaDB or SQLite database, with `sql.read` | `merge` on `id`, the ids from 1,000 before the largest one loaded |
 | `ingest-rest` | `assets/bronze/items.py` | a JSON REST API, with `rest.read` | `merge` on `id`, the items updated since an hour before the newest one loaded |
 
+**Late files.** A file that arrives with an older time, such as one moved in with `mv` or a large
+S3 upload, is still read once if it is at most 24 hours older than the newest file already
+loaded. Pass `lookback=` to `files.read` to change that window, up to 30 days; see
+[Reading only new files](../reference/ingest.md#reading-only-new-files). A SQL or REST source has
+no lookback: give its `WHERE` clause or its `params` a margin and use `write="merge"` with a key.
+
 Each project also gets `lakana.yaml`, the CI files, a `pyproject.toml` that depends on
 `lakana[assets]` at the version that wrote it, a test that checks every Python asset parses, and a
 `README.md` with the next steps for its connection. The command prints the same steps.

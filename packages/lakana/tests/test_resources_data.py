@@ -765,6 +765,59 @@ def test_tables_append_sends_the_arrow_stream_content_type_and_body() -> None:
     assert result == AppendResult(rows=2, files=1, snapshot_id=42)
 
 
+_RECORD = b'{"version":1,"watermark":null}\n'
+
+
+def _sent(write: str, data: pa.Table, **options: object) -> pa.Table:
+    """Send `data` with `tables.<write>` and decode the body the server would get.
+
+    Parameters
+    ----------
+    write
+        ``append``, ``replace`` or ``merge``.
+    data
+        The rows.
+    **options
+        Passed on to the write.
+
+    Returns
+    -------
+    pa.Table
+        The decoded body, its schema metadata included.
+    """
+    seen: dict[str, pa.Table] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        with pyarrow.ipc.open_stream(pa.BufferReader(request.content)) as reader:
+            seen["table"] = reader.read_all()
+        body = {"rows": 1, "files": 1, "snapshot_id": 1, "rows_inserted": 1, "rows_updated": 0}
+        return httpx.Response(200, json=body)
+
+    tables = Tables(_transport(handler))
+    keyed = {"key": "id"} if write == "merge" else {}
+    getattr(tables, write)("dev", "bronze.sales", data, **keyed, **options)
+    return seen["table"]
+
+
+@pytest.mark.parametrize("write", ["append", "replace", "merge"])
+def test_a_write_sends_the_record_of_files_read_as_schema_metadata(write: str) -> None:
+    """The harness's record rides under ``lakana.files_read``, unchanged; the rows do not change."""
+    data = pa.table({"id": [1]})
+    sent = _sent(write, data, files_read=_RECORD)
+    assert sent.schema.metadata == {b"lakana.files_read": _RECORD}
+    assert sent.replace_schema_metadata(None).equals(data)
+
+
+@pytest.mark.parametrize("write", ["append", "replace", "merge"])
+def test_a_write_without_a_record_drops_a_stray_key(write: str) -> None:
+    """A caller's table that carries the key by accident sends no record; its other keys stay."""
+    data = pa.table({"id": [1]}).replace_schema_metadata(
+        {b"lakana.files_read": _RECORD, b"other": b"kept"}
+    )
+    assert _sent(write, data).schema.metadata == {b"other": b"kept"}
+    assert _sent(write, pa.table({"id": [1]})).schema.metadata is None
+
+
 def test_tables_append_accepts_a_record_batch() -> None:
     """`tables.append` accepts a bare `pa.RecordBatch`, not just a `pa.Table`."""
     batch = pa.record_batch({"id": [1]})

@@ -179,15 +179,17 @@ where the source sends one, its ETag) with the write of the run, and a check tha
 back forgets them, so those files are read again. The same name with a new time or size is a new
 file. From S3, GCS and Azure, a new ETag also makes a new file, when both runs saw one; an HTTPS
 server's ETag is not used, since servers may change it for a file that did not change. A run
-that writes no rows records nothing; its files give no rows the next time either. So a file that shares the watermark's time, a file moved in with `mv`, or
-an S3 upload dated by its start is still read, once, as long as its time is inside the window.
-`since=None` reads every file, recorded or not.
+that writes no rows records nothing; its files give no rows the next time either. So a file that
+shares the watermark's time, a file moved in with `mv`, or an S3 upload dated by its start is
+still read, once, as long as its time is inside the window. `since=None` reads every file,
+recorded or not.
 
 **The first run after an upgrade, or of a connection newly added to the asset,** takes every
 file at or before the table's watermark (or at or before `since`, if that is earlier) as read,
-so nothing is read twice. In an asset with several connections, a connection none of whose files
-was read in the 30 days before the watermark is taken as new again on every run: it reads only
-the files after `since`, without the lookback, until one of its files is read.
+so nothing is read twice. In an asset with several connections, a connection is taken as new
+again on every run while no file read from it is dated within 30 days before the watermark: the
+runs read only its files after `since`, without the lookback, until one of them reads a file of
+that connection.
 
 Each call with `since` prints a line to the task's log, such as
 ``files.read: `exports`: 3 new files, 2 late files inside the 24 h lookback, 41 already read``.

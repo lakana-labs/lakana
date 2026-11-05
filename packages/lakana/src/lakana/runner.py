@@ -26,6 +26,11 @@ form) and ``connections`` (each declared connection's name to an object with at 
 document replaces. Version 4 is version 3 with ``write`` ``"history"``, a ``key`` (the
 natural key) and ``history`` (``{"valid_from": str | null, "close_missing": bool}``); the
 worker sends it only to a history asset.
+A version 3 or 4 document may carry ``files_read_path``: the absolute path of a JSON file
+``{"files": [...]}`` the worker wrote, the files the asset's table recorded as read within
+30 days of its watermark (`lakana.ingest.files.read` reads late files against it). An append
+or a merge sends what its `files.read` calls read with the upload, as the schema metadata
+``lakana.files_read``.
 Every version may carry ``evolve_schema`` (``true`` when the asset says
 ``@asset(evolve_schema=True)``; the worker sends it only then): a replace then lets the table
 take the result's schema.
@@ -63,6 +68,7 @@ from __future__ import annotations
 import ast
 import contextlib
 import ctypes
+import datetime as dt
 import errno
 import importlib.util
 import inspect
@@ -101,7 +107,14 @@ from lakana._artifact_manifest import (
 from lakana._models import ArtifactVersion
 from lakana.assets import ASSET_ATTRIBUTE, DECIMALS_MODES, WRITE_CHOICES, AssetSpec, _unsafe
 from lakana.client import Client
-from lakana.context import WATERMARK_TAGS, AssetContext, WatermarkValue, decode_watermark
+from lakana.context import (
+    MAX_FILES_READ,
+    WATERMARK_TAGS,
+    AssetContext,
+    ReadFile,
+    WatermarkValue,
+    decode_watermark,
+)
 from lakana.errors import (
     AuthenticationError,
     Conflict,
@@ -398,6 +411,9 @@ class TaskDescription:
         A history asset's `valid_from` column, or `None`.
     close_missing
         Whether a history asset closes the keys it no longer returns.
+    recorded
+        The files the target recorded as read within 30 days of its watermark, from the
+        worker's ``files_read_path``; `None` when the worker sent none.
     """
 
     server_url: str
@@ -424,6 +440,7 @@ class TaskDescription:
     evolve_schema: bool = False
     valid_from: str | None = None
     close_missing: bool = False
+    recorded: frozenset[ReadFile] | None = None
 
 
 def _text(document: dict[str, object], key: str) -> str:
@@ -606,6 +623,8 @@ class _Writes:
         A history asset's `valid_from` column, or `None`.
     close_missing
         Whether a history asset closes the keys it no longer returns.
+    recorded
+        The files the target recorded as read, from ``files_read_path``; `None` without one.
     """
 
     write: str = "replace"
@@ -616,6 +635,46 @@ class _Writes:
     table_exists: bool = False
     valid_from: str | None = None
     close_missing: bool = False
+    recorded: frozenset[ReadFile] | None = None
+
+
+_RECORD_MAX_BYTES = 128 * 1024 * 1024
+_RECORD_REFUSED = "task description: files_read_path must name the worker's record of files read"
+
+
+def _recorded_files(path: object) -> frozenset[ReadFile]:
+    """Read the worker's record of the files the target has read (`files-read.json`).
+
+    Parameters
+    ----------
+    path
+        The description's ``files_read_path``.
+
+    Returns
+    -------
+    frozenset of ReadFile
+        The files.
+
+    Raises
+    ------
+    ValueError
+        If the path is not absolute, the file is missing, larger than 128 MiB or not the
+        record's JSON, or lists more than `MAX_FILES_READ` files; the message names the field
+        and never a value.
+    """
+    try:
+        if not isinstance(path, str) or not os.path.isabs(path):
+            raise ValueError
+        with open(path, "rb") as source:
+            data = source.read(_RECORD_MAX_BYTES + 1)
+        if len(data) > _RECORD_MAX_BYTES:
+            raise ValueError
+        files = json.loads(data).get("files")
+        if not isinstance(files, list) or len(files) > MAX_FILES_READ:
+            raise ValueError
+        return frozenset(ReadFile.from_json(item) for item in files)
+    except (OSError, ValueError, AttributeError):
+        raise ValueError(_RECORD_REFUSED) from None
 
 
 def _write_fields(document: dict[str, object]) -> _Writes:
@@ -707,7 +766,12 @@ def _write_fields(document: dict[str, object]) -> _Writes:
         valid_from, close_missing = named, closing
     elif history is not None:
         raise ValueError("task description: history is for a history write only")
+    raw_path = document.get("files_read_path")
+    recorded: frozenset[ReadFile] | None = None
+    if raw_path is not None:
+        recorded = _recorded_files(raw_path)
     return _Writes(
+        recorded=recorded,
         table_exists=table_exists,
         write=write,
         key=tuple(key),
@@ -807,6 +871,7 @@ def parse_description(text: str) -> TaskDescription:
         evolve_schema=evolve_schema,
         valid_from=writes.valid_from,
         close_missing=writes.close_missing,
+        recorded=writes.recorded,
     )
 
 
@@ -2111,6 +2176,9 @@ def _upload(client: Client, description: TaskDescription, arrow: pa.Table) -> di
         "source_versions": {n: v for n, v in sources.items() if v is not None},
     }
     expected = description.expected_snapshot_id
+    # What this attempt's files.read calls read goes with an append's or a merge's upload only.
+    payload = context.files_read_payload() if description.write in ("append", "merge") else None
+    recorded: dict[str, Any] = {} if payload is None else {"files_read": payload}
     try:
         if description.write == "history":
             kept = client.tables.history(
@@ -2133,6 +2201,7 @@ def _upload(client: Client, description: TaskDescription, arrow: pa.Table) -> di
                 key=list(description.key),
                 expected_snapshot_id=expected,
                 **lineage,
+                **recorded,
             )
             rows = merged.rows_inserted + merged.rows_updated
             return {"status": "succeeded", "snapshot_id": merged.snapshot_id, "rows": rows}
@@ -2143,6 +2212,7 @@ def _upload(client: Client, description: TaskDescription, arrow: pa.Table) -> di
                 arrow,
                 expected_snapshot_id=expected,
                 **lineage,
+                **recorded,
             )
             return {
                 "status": "succeeded",
@@ -2158,6 +2228,7 @@ def _upload(client: Client, description: TaskDescription, arrow: pa.Table) -> di
             evolve_schema=description.evolve_schema and description.write == "replace",
             expected_snapshot_id=expected,
             **lineage,
+            **recorded,
         )
     except ValidationError as exc:
         raise UploadRefused(_upload_message(exc, description.table, description.write)) from exc
@@ -2418,6 +2489,10 @@ def _run_described(
                 asset=description.table,
                 declared=frozenset(description.connections),
                 connections=description.connections,
+                recorded=description.recorded,
+                target_watermark=description.watermark
+                if isinstance(description.watermark, dt.datetime)
+                else None,
             )
         )
         try:

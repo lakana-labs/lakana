@@ -4607,8 +4607,26 @@ the cause and the next step, never a 500, and nothing is written.
   (`forget_files_read` over `own_chain` in `roll_back`'s `settle()`), so their files are read
   again.
 - **Internal.** No route lists the record. Core strips all schema metadata before a write
-  (`strip_field_metadata`), so the key never reaches a data file; history and load routes ignore
-  it.
+  (`strip_field_metadata`), so the key never reaches a data file. The history and load routes
+  refuse an upload that carries one with a 422 (`_refusing_record`), so it is never dropped
+  silently; the SDK's `_send_arrow` drops a stray key from a caller's own table and sets it only
+  for the harness's append, replace or merge.
+
+**The worker's half.** Before an append or merge task with a time watermark starts, the worker
+loads the target's record within 30 days of that watermark (`files_read_for_task`, at most
+`MAX_FILES_READ` rows; more fails the task naming the count) and writes it as
+`files-read.json` into the task's private work directory (`write_files_read` in
+`lakana_worker/runners.py`): the attempt directory under the local runner, `<attempt>/task`
+(`/work` in the container) under Docker. A stale file is removed first and the new one is
+created `O_CREAT | O_EXCL | O_NOFOLLOW`, mode 0600, so nothing planted at the name is written
+through. The description names it in `files_read_path`; no record is sent for a replace or
+history asset, a table without rows (no watermark: `files.read` then reads every file) or a
+watermark that is no time. The harness reads at most 128 MiB from an absolute path and refuses
+anything but `{"files": [...]}` of at most `MAX_FILES_READ` well-formed entries, naming the
+field and never a value. The record is the task's own table's metadata, which its token can
+already read; it carries file names and sizes, never contents or credentials. A task that edits
+the file can only make its own `files.read` skip or re-read files, which its write right
+already allows.
 
 ## Audit log (M3e — shipped)
 

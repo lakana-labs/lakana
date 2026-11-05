@@ -4080,6 +4080,152 @@ def test_ctx_gives_the_default_on_a_first_run(world: _World) -> None:
     assert _uploaded(world).to_pydict() == {"d": [datetime.date(2020, 1, 1)]}
 
 
+def _record_file(world: _World, files: list[dict[str, object]]) -> str:
+    """Write the worker's record of files read beside the description and return its path.
+
+    Parameters
+    ----------
+    world
+        The world.
+    files
+        The record's files.
+
+    Returns
+    -------
+    str
+        The file's absolute path, as the worker sends it in ``files_read_path``.
+    """
+    path = world.result_path.parent / "files-read.json"
+    path.parent.mkdir(exist_ok=True)
+    path.write_text(json.dumps({"files": files}))
+    return str(path)
+
+
+_A_FILE: dict[str, object] = {
+    "connection": "exports",
+    "name": "a.csv",
+    "size": 4,
+    "modified": "2026-11-01T00:00:00+00:00",
+    "etag": None,
+}
+_TIME_WATERMARK = {"column": "_source_modified", "value": "timestamptz:2026-11-01T00:00:00+00:00"}
+_READS_A_FILE = (
+    "from lakana import context\n"
+    "state = context.current()\n"
+    f"assert state.recorded == frozenset({{context.ReadFile.from_json({_A_FILE!r})}})\n"
+    "assert state.target_watermark == datetime.datetime(2026, 11, 1, tzinfo=datetime.UTC)\n"
+    f"state.files_read.append(context.ReadFile.from_json({_A_FILE!r}))\n"
+    "return pl.DataFrame({'id': [1], '_source_modified': [datetime.datetime(2026, 11, 2)]})"
+)
+
+
+@pytest.mark.parametrize(
+    ("write", "expected", "method"),
+    [("append", 17, "append"), ("append", "none", "replace"), ("merge", 17, "merge")],
+)
+def test_the_record_reaches_the_state_and_the_reads_go_with_the_upload(
+    world: _World, write: str, expected: int | str, method: str
+) -> None:
+    """The worker's record is the state's; an append or merge sends what `files.read` read."""
+    _write_asset(
+        world,
+        _READS_A_FILE,
+        signature="ctx",
+        inputs=f"write={write!r}, watermark='_source_modified'"
+        + (", key='id'" if write == "merge" else ""),
+    )
+    path = _record_file(world, [_A_FILE])
+    overrides = _v3(
+        write,
+        key=["id"] if write == "merge" else None,
+        watermark=_TIME_WATERMARK,
+        expected=expected,
+    )
+    assert world.run(inputs={}, input_kinds={}, files_read_path=path, **overrides) == 0
+    (call,) = world.client.tables.calls
+    assert call["method"] == method
+    header = {"version": 1, "watermark": "2026-11-01T00:00:00+00:00"}
+    assert call["files_read"] == b"".join(json.dumps(x).encode() + b"\n" for x in (header, _A_FILE))
+
+
+def test_a_replace_asset_sends_no_record(world: _World) -> None:
+    """Only an append or a merge sends what `files.read` read."""
+    _write_asset(
+        world,
+        "from lakana import context\n"
+        f"context.current().files_read.append(context.ReadFile.from_json({_A_FILE!r}))\n"
+        "return pl.DataFrame({'id': [1]})",
+        signature="ctx",
+    )
+    assert world.run(inputs={}, input_kinds={}, **_v3("replace")) == 0
+    assert "files_read" not in world.client.tables.calls[0]
+
+
+def test_without_a_record_path_the_state_has_none(world: _World) -> None:
+    """An older worker sends no ``files_read_path``: `files.read` reads as before."""
+    _write_asset(
+        world,
+        "from lakana import context\n"
+        "assert context.current().recorded is None\n"
+        "return pl.DataFrame({'id': [1], '_source_modified': [datetime.datetime(2026, 11, 2)]})",
+        signature="ctx",
+        inputs="write='append', watermark='_source_modified'",
+    )
+    assert world.run(inputs={}, input_kinds={}, **_v3(watermark=_TIME_WATERMARK)) == 0
+    assert "files_read" not in world.client.tables.calls[0]
+
+
+def test_a_watermark_that_is_no_time_gives_no_target_watermark(world: _World) -> None:
+    _write_asset(
+        world,
+        "from lakana import context\n"
+        "assert context.current().target_watermark is None\n"
+        "return pl.DataFrame({'id': [1]})",
+        signature="ctx",
+        inputs="write='append', watermark='id'",
+    )
+    assert world.run(inputs={}, input_kinds={}, **_v3(watermark=_WATERMARK_ID)) == 0
+
+
+@pytest.mark.parametrize(
+    "content",
+    ["not json", '{"files": {}}', '{"files": [{"name": "a.csv"}]}', "[]", None],
+)
+def test_a_bad_record_is_refused_naming_the_field(world: _World, content: str | None) -> None:
+    path = world.result_path.parent / "files-read.json"
+    path.parent.mkdir(exist_ok=True)
+    if content is not None:
+        path.write_text(content)
+    fields = {**_v3(watermark=_TIME_WATERMARK), "files_read_path": str(path)}
+    with pytest.raises(ValueError) as refused:
+        parse_description(world.description(**fields))
+    assert str(refused.value) == (
+        "task description: files_read_path must name the worker's record of files read"
+    )
+
+
+@pytest.mark.parametrize("path", ["files-read.json", 7])
+def test_a_record_path_that_is_not_absolute_is_refused(world: _World, path: object) -> None:
+    fields = {**_v3(watermark=_TIME_WATERMARK), "files_read_path": path}
+    with pytest.raises(ValueError, match="files_read_path must name"):
+        parse_description(world.description(**fields))
+
+
+def test_a_record_larger_than_the_bound_or_the_cap_is_refused(
+    world: _World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = _record_file(world, [_A_FILE, {**_A_FILE, "name": "b.csv"}])
+    fields = {**_v3(watermark=_TIME_WATERMARK), "files_read_path": path}
+    assert len(parse_description(world.description(**fields)).recorded or ()) == 2
+    monkeypatch.setattr(runner, "MAX_FILES_READ", 1)
+    with pytest.raises(ValueError, match="files_read_path must name"):
+        parse_description(world.description(**fields))
+    monkeypatch.setattr(runner, "MAX_FILES_READ", 2)
+    monkeypatch.setattr(runner, "_RECORD_MAX_BYTES", 10)
+    with pytest.raises(ValueError, match="files_read_path must name"):
+        parse_description(world.description(**fields))
+
+
 def test_a_replace_asset_gets_a_ctx_without_a_watermark(world: _World) -> None:
     """A version 2 description still passes `ctx`; its watermark is the default."""
     _write_asset(

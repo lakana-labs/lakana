@@ -55,6 +55,7 @@ from lakana._models import (
     known_fields,
 )
 from lakana._routes import ROUTES
+from lakana.context import FILES_READ_KEY
 from lakana.errors import Conflict, LakanaConnectionError, LakanaError, ValidationError
 from lakana.resources.queries import QueryRun
 
@@ -1370,6 +1371,7 @@ class Tables:
         source_versions: Mapping[str, int] | None = None,
         break_glass_reason: str | None = None,
         expected_snapshot_id: int | str | None = None,
+        files_read: bytes | None = None,
     ) -> AppendResult:
         """Append rows to a managed table.
 
@@ -1414,6 +1416,11 @@ class Tables:
             that still holds; otherwise `Conflict` is raised and nothing is
             retried.
 
+        files_read
+            The record of the files `lakana.ingest.files.read` read, which the task harness
+            sends with an incremental asset's write; the server accepts it only from a run of
+            a deployed asset. Leave it out.
+
         Returns
         -------
         AppendResult
@@ -1447,6 +1454,7 @@ class Tables:
             data,
             params,
             retry_conflict=expected_snapshot_id is None,
+            files_read=files_read,
         )
         return _append_result_from_json(response.json())
 
@@ -1461,6 +1469,7 @@ class Tables:
         source_versions: Mapping[str, int] | None = None,
         break_glass_reason: str | None = None,
         expected_snapshot_id: int | str | None = None,
+        files_read: bytes | None = None,
     ) -> WriteResult:
         """Replace every row of a managed table.
 
@@ -1496,6 +1505,11 @@ class Tables:
             retried. On `replace`, ``"none"`` also creates a missing
             table from `data`.
 
+        files_read
+            The record of the files `lakana.ingest.files.read` read, which the task harness
+            sends with an incremental asset's write; the server accepts it only from a run of
+            a deployed asset. Leave it out.
+
         Returns
         -------
         WriteResult
@@ -1528,6 +1542,7 @@ class Tables:
             data,
             params,
             retry_conflict=expected_snapshot_id is None,
+            files_read=files_read,
         )
         return _write_result_from_json(response.json())
 
@@ -1647,6 +1662,7 @@ class Tables:
         source_versions: Mapping[str, int] | None = None,
         break_glass_reason: str | None = None,
         expected_snapshot_id: int | str | None = None,
+        files_read: bytes | None = None,
     ) -> MergeResult:
         """Merge rows into a managed table on a key.
 
@@ -1686,6 +1702,11 @@ class Tables:
             `Conflict` is raised and nothing is retried. ``"none"`` also creates a missing
             table from `data`.
 
+        files_read
+            The record of the files `lakana.ingest.files.read` read, which the task harness
+            sends with an incremental asset's write; the server accepts it only from a run of
+            a deployed asset. Leave it out.
+
         Returns
         -------
         MergeResult
@@ -1719,6 +1740,7 @@ class Tables:
             data,
             params,
             retry_conflict=expected_snapshot_id is None,
+            files_read=files_read,
         )
         body = response.json()
         return MergeResult(
@@ -1974,6 +1996,7 @@ class Tables:
         data: pa.Table | pa.RecordBatch | object,
         params: dict[str, object],
         retry_conflict: bool = True,
+        files_read: bytes | None = None,
     ) -> httpx.Response:
         """Serialise `data` as an Arrow IPC stream and send it, retrying once on a conflict.
 
@@ -1993,6 +2016,10 @@ class Tables:
         retry_conflict
             Retry once on a `Conflict`; off when the caller gave a
             precondition, because the conflict is then the answer.
+        files_read
+            The record of files read, put under the schema metadata `FILES_READ_KEY`
+            unchanged; a key of that name the caller's table carried is dropped either way,
+            so no one sends a record by accident.
 
         Returns
         -------
@@ -2008,6 +2035,11 @@ class Tables:
         table = normalize_view_columns(
             cast_timestamp_ns_columns_to_us(_coerce_to_table(data))
         ).combine_chunks()
+        metadata = dict(table.schema.metadata or {})
+        metadata.pop(FILES_READ_KEY.encode(), None)
+        if files_read is not None:
+            metadata[FILES_READ_KEY.encode()] = files_read
+        table = table.replace_schema_metadata(metadata or None)
         body = _serialize_ipc_stream(table)
         path_params = {"env": environment, "path": namespace, "name": name}
         headers = {"Content-Type": _APPEND_CONTENT_TYPE}
