@@ -872,6 +872,108 @@ def test_a_task_of_a_reading_and_writing_principal_merges(bound: Bound) -> None:
     assert status == 200, body
 
 
+def _make_history(bound: Bound) -> None:
+    """Make `gold.scores` a history table on `id`, as the admin.
+
+    A history write refuses a table it did not create, so the table is dropped and created again
+    by one.
+
+    Parameters
+    ----------
+    bound
+        The attempt.
+    """
+    route = "/api/v1/environments/dev/namespaces/gold/tables/scores"
+    dropped = bound.client.delete(route, headers=AUTH_HEADER)
+    assert dropped.status_code == 204, dropped.text
+    made = bound.client.post(
+        f"{route}/history?key=id&expected_snapshot_id=none",
+        headers={**AUTH_HEADER, "Content-Type": _ARROW},
+        content=_ipc([1]),
+    )
+    assert made.status_code == 200, made.text
+
+
+def _history(bound: Bound, dotted: str) -> tuple[int, dict[str, object]]:
+    """Write id 7 into a history table on `id` with the bound token.
+
+    Parameters
+    ----------
+    bound
+        The attempt.
+    dotted
+        ``namespace.table``.
+
+    Returns
+    -------
+    tuple
+        The status code and the JSON answer.
+    """
+    namespace, name = dotted.rsplit(".", 1)
+    response = bound.client.post(
+        f"/api/v1/environments/dev/namespaces/{namespace}/tables/{name}/history?key=id",
+        headers={**bound.headers, "Content-Type": _ARROW},
+        content=_ipc([7]),
+    )
+    return response.status_code, response.json()
+
+
+def test_it_writes_history_into_its_own_asset_which_it_may_not_read(bound: Bound) -> None:
+    """A history write reads the open versions of the own asset; only there may the token."""
+    _make_history(bound)
+    status, body = _history(bound, "gold.scores")
+    assert status == 200, body
+    assert (body["versions_opened"], body["versions_closed"]) == (1, 0)
+    assert bound.get("dev", "gold.scores") == 403
+    assert _history(bound, "gold.other")[0] == 403
+    assert _history(bound, "silver.weather")[0] == 403
+
+
+def test_a_task_of_a_filtered_principal_may_not_write_history_into_its_own_asset(
+    bound: Bound,
+) -> None:
+    """The row filter of the principal the task acts for refuses the history write."""
+    _make_history(bound)
+    created = bound.client.post(
+        "/api/v1/row-filters",
+        headers=AUTH_HEADER,
+        json={
+            "principal": "etl",
+            "environment": "dev",
+            "namespace": "gold",
+            "table": "scores",
+            "expression": "id < 3",
+        },
+    )
+    assert created.status_code < 300, created.text
+
+    status, body = _history(bound, "gold.scores")
+
+    assert status == 422, body
+    assert "row filter or column mask applies to you" in str(body["detail"])
+
+
+def test_a_task_of_a_write_only_principal_may_not_write_history(bound: Bound) -> None:
+    """Only the token's narrowing is waived on the own asset; the principal still needs READ."""
+    _make_history(bound)
+    _only_actions(bound, ["WRITE_TABLE"])
+
+    status, body = _history(bound, "gold.scores")
+
+    assert status == 403, body
+    assert "READ_TABLE" in str(body["detail"])
+
+
+def test_a_task_of_a_reading_and_writing_principal_writes_history(bound: Bound) -> None:
+    """READ_TABLE and WRITE_TABLE alone are enough for the task's history write."""
+    _make_history(bound)
+    _only_actions(bound, ["WRITE_TABLE", "READ_TABLE"])
+
+    status, body = _history(bound, "gold.scores")
+
+    assert status == 200, body
+
+
 _RECORD: list[dict[str, object]] = [
     {"version": 1, "watermark": None},
     {

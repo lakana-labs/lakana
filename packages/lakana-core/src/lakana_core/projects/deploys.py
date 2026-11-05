@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import dataclasses
 import difflib
+import functools
 import re
 import shlex
 import time
@@ -185,6 +186,18 @@ IMPACT_UNCHECKED = (
     "{command}"
 )
 """The check ran past its budget: the deploy goes on, and says so."""
+
+HISTORY_WITHOUT_AT = (
+    "this deploy makes `{table}` keep the history of its rows (`write: history`), and other "
+    "repositories reference it without `at:`, so their reference checks fail until each says "
+    "which version a row means; tell their owners to add `at: <time column>` to each reference "
+    "— the references: {items}"
+)
+"""A table switched to `write: history` that another repository references without `at:` (#431).
+
+Within one project the deploy refuses such a reference; another repository's is refused only at
+its own next deploy, and its reference check fails until then (`model_precheck`). The next step
+comes before the list, which has no bound (`IMPACT_WARNING`)."""
 
 IMPACT_UNREADABLE = (
     "this deploy {what}, whose name holds a control or format character or is too long to look "
@@ -835,7 +848,8 @@ class DeployService:
             READ_ENVIRONMENT reader is not entitled to learn. A reader who is not
             the deployer (`_is_deployer`: a CI or task token of the deployer is not)
             gets each line of the error that tells of a reference target it may not
-            read as the line of a missing target (`error_for_reader`).
+            read as the line of a missing target (`error_for_reader`). Every reader's error
+            is capped there, after that, to `MAX_LISTED_ISSUES` issues and a count.
         reads
             What earlier calls of a listing already read for the warnings; a new one when
             `None`.
@@ -869,11 +883,14 @@ class DeployService:
             hidden_adopted = len(adopted) - len(visible)
             diff = {**diff, "adopted": visible}
         error = run.error_message
-        if reader is not None and error is not None and not _is_deployer(reader, run):
+        if error is not None:
+            outside = reader if reader is not None and not _is_deployer(reader, run) else None
             error = error_for_reader(
                 error,
                 run.error_withheld_json,
-                lambda target: self._may_read(reader, env_name, target),
+                (lambda _target: True)
+                if outside is None
+                else functools.partial(self._may_read, outside, env_name),
             )
         return DeployRunView(
             id=run.id,
@@ -1084,6 +1101,68 @@ class DeployService:
                         **_counted(len(items) - _MAX_IMPACT_WARNINGS), env=env_name
                     ),
                     "tables": sorted({item[2] for item in items}),
+                }
+            )
+        return warnings
+
+    def _history_warnings(
+        self, p: PrincipalRef, run: DeployRun, env_name: str, previous: object, manifest: object
+    ) -> list[dict[str, object]]:
+        """Warn of each table switched to history that others reference without `at:`.
+
+        Computed with `p`'s visibility, as `_impact_warnings` is: a reference from a table `p`
+        may not read is left out. The deploy never fails for it (#374): the reference check of
+        the other repository fails instead, naming the missing `at:` (`model_precheck`).
+
+        Parameters
+        ----------
+        p
+            The deployer.
+        run
+            The run; its environment and repository.
+        env_name
+            The environment's name.
+        previous
+            The current manifest; `None` for a first deploy.
+        manifest
+            The manifest the deploy makes current.
+
+        Returns
+        -------
+        list of dict
+            ``{"warning": text, "tables": [dotted, ...]}`` per switched table, by table name;
+            `_stored_warnings` shows one as it shows an impact warning.
+        """
+        old = manifest_assets(previous)
+        switched = sorted(
+            table
+            for table, entry in manifest_assets(manifest).items()
+            if entry_write(entry)[0] == "history"
+            and (table not in old or entry_write(old[table])[0] != "history")
+        )
+        if not switched:
+            return []
+        found: dict[str, list[tuple[str, str, str, str]]] = {table: [] for table in switched}
+        for repo, other in self._current_manifests(run.environment_id, run.repository_id):
+            for table, entry in manifest_assets(other).items():
+                model = entry_model(entry)
+                path = entry.get("path")
+                for ref in model.references if model is not None else ():
+                    if ref.target in found and ref.at is None:
+                        found[ref.target].append((table, ref.column, str(path), repo))
+        warnings: list[dict[str, object]] = []
+        for table in switched:
+            shown_refs = sorted(ref for ref in found[table] if self._may_read(p, env_name, ref[0]))
+            if not shown_refs:
+                continue
+            items = ", ".join(
+                f"`{_named(source)}.{_named(column)}` in {_named(path)} ({repo})"
+                for source, column, path, repo in shown_refs
+            )
+            warnings.append(
+                {
+                    "warning": HISTORY_WITHOUT_AT.format(table=_named(table), items=items),
+                    "tables": sorted({table, *(ref[0] for ref in shown_refs)}),
                 }
             )
         return warnings
@@ -3964,6 +4043,9 @@ class DeployService:
                 previous.manifest_json if previous is not None else None,
                 manifest,
             ),
+            *self._history_warnings(
+                p, run, names[0], previous.manifest_json if previous is not None else None, manifest
+            ),
         ]
         sync_project_descriptions(self._session, environment_id, manifest)
         clear_removed_models(
@@ -4031,6 +4113,13 @@ class DeployService:
                     p,
                     names[0],
                     names[1],
+                    current.manifest_json if current is not None else None,
+                    manifest,
+                ),
+                *self._history_warnings(
+                    p,
+                    run,
+                    names[0],
                     current.manifest_json if current is not None else None,
                     manifest,
                 ),
@@ -4133,6 +4222,13 @@ class DeployService:
                 p,
                 names[0],
                 names[1],
+                current.manifest_json if current is not None else None,
+                target.manifest_json,
+            ),
+            *self._history_warnings(
+                p,
+                run,
+                names[0],
                 current.manifest_json if current is not None else None,
                 target.manifest_json,
             ),

@@ -147,7 +147,7 @@ The messages give counts, never values. Nothing is written.
 
 | When | Message |
 |---|---|
-| An empty result with `close_missing: true` | ``The asset's result is empty, and `close_missing: true` would close every open version of gold.dim_customer; nothing was written. If the source really is empty, remove `close_missing:` for this run.`` |
+| An empty result with `close_missing: true` | ``The asset's result is empty, and `close_missing: true` would close every open version of gold.dim_customer; nothing was written. If the source really is empty, remove `close_missing:` for this run.`` A Python asset with `close_missing=True` (or another SDK or REST write) is told ``The batch is empty, and `close_missing` would close every open version of gold.dim_customer; nothing was written. If the source really is empty, send this batch without `close_missing`.`` |
 | A column named like an added one (a `SELECT *` is checked when it runs) | ``Column `is_current` of `gold.dim_customer`'s SELECT has a name `write: history` adds itself (valid_from, valid_to, is_current, dim_customer_key); rename it in the SELECT, for example `AS source_is_current`.`` |
 | A key column of another type | ``key column `price` has type double; a history key must be a string, an integer, a decimal, a date, a timestamp, a boolean or binary. Cast it in the SELECT, for example `CAST(price AS DECIMAL(18, 2))` (with the scale its values need) or `CAST(price AS VARCHAR)`.`` For a type other than a `float` or `double`, the example is `CAST(… AS VARCHAR)` alone. |
 | A nested column | ``Column `tags` has type list<string>; a history write compares every column and cannot compare this type. Turn it into a string in the SELECT, for example with `to_json(tags)`.`` |
@@ -288,6 +288,16 @@ lakana deploy --env dev --dry-run
 
 and the message names what to write: ``` `gold.fact_orders` references `gold.dim_customer` (`customer_id`), which keeps the history of its rows (`write: history`); say which version each row means with the row's time: `customer_id: {to: gold.dim_customer, at: <column>}` ```. The other texts are in [References](asset-front-matter.md#references).
 
+A reference from **another repository** is not refused when its target becomes a history
+dimension: a deploy never fails because of another repository. The deploy that turns the table
+into one warns instead, naming each reference elsewhere without `at:`: ``this deploy makes
+`gold.dim_customer` keep the history of its rows (`write: history`), and other repositories
+reference it without `at:`, so their reference checks fail until each says which version a row
+means; tell their owners to add `at: <time column>` to each reference — the references:
+`gold.fact_orders.customer_id` in assets/gold/fact_orders.sql (sales)``. Until the other project
+adds `at:` and deploys again, its reference check fails with a text that says what to add (see
+[Checks](checks.md)).
+
 `lakana table get` shows the time next to the reference (`(exists, valid at ordered_at)`), and
 `lakana table references` has an `at` column in its "References" and its "Referenced by" lists;
 REST and the SDK carry it as `at`.
@@ -342,9 +352,13 @@ time. The first run, which creates the table, records the event of a create.
   holds. Both apply to SQL assets (in the worker) and Python assets (in the server). A key that
   comes back after it was closed makes the run read the key's closed versions too (all of them
   with an old `valid_from:`); only each key's latest end is kept while they are read, so that
-  read holds about one row per returning key, and the byte cap applies to it as well (the
-  message then starts ``Reading the closed versions of the keys that return to
-  gold.dim_customer passed …``).
+  read holds about one row per returning key, and the byte cap applies to it as well. Only the
+  key columns and the end are read, so the refusal then says ``Reading the closed versions of
+  the keys that return to gold.dim_customer passed … allows, so the read stopped and nothing was
+  written. A history write holds the key and the latest end of each key that returns in the
+  worker's memory. Ask an operator to raise LAKANA_RUN__MAX_HISTORY_OPEN_BYTES if the worker's
+  memory limit (LAKANA_WORKER__MEMORY_LIMIT) allows it, or write fewer returning keys at
+  once.``
 - On the REST path (a Python asset) the server holds the open versions, and
   `LAKANA_APPEND__MAX_CONCURRENT_HISTORY` (1 by default) bounds how many such writes run at once.
   A request takes the slot once its authorization is checked, before its body is read; one past

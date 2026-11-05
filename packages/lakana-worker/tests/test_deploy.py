@@ -1016,10 +1016,12 @@ def test_a_failing_fail_never_escapes(
     run_deploy(session, view.id, AllowAllAuthorization(), _KEY, world.settings)
 
 
-def test_long_issue_lists_are_capped() -> None:
-    """Fifty issues are listed, the rest counted."""
+def test_long_issue_lists_are_capped_when_read() -> None:
+    """Fifty issues are listed, the rest counted, as each reader is shown them (#442)."""
     issues = [ProjectIssue(f"assets/a{i}.sql", 1, "bad") for i in range(60)]
-    message = deploy_module._describe(ProjectValidationError(issues))
+    failure = ProjectValidationError(issues)
+    stored = deploy_module._describe(failure)
+    message = error_for_reader(stored, deploy_module._withheld(failure), lambda _t: True)
     assert message.count("\n") == 50
     assert message.endswith("…and 10 more issues")
     assert "assets/a49.sql:1: bad" in message and "assets/a50.sql" not in message
@@ -3619,6 +3621,35 @@ def _missing(key: str, table: str, hint: str = "") -> str:
         f"{key} links {table}, which does not exist in environment dev, or you may not read it; "
         f"fix the table name{hint}, build the table first, or ask for READ_TABLE on it."
     )
+
+
+def test_a_long_error_counts_an_unreadable_linked_table_as_a_missing_one(
+    session: Session, principal: PrincipalRef, world: World
+) -> None:
+    """Over 50 issues, a reader sees the same lines and count for both tables (#442)."""
+    unknown = [", ".join(f"n{k}{i:02}" for i in range(11)) for k in range(5)]
+    text = (
+        "a:\n"
+        + _HEAD
+        + "    gold.x: [c0, c1, c2, c3, c4]\n"
+        + "".join(
+            f"r{k}:\n  name: R\n  definition: D\n  owner: o\n  related: [{ids}]\n"
+            for k, ids in enumerate(unknown)
+        )
+    )
+    commit(world.repo_path, {"assets/silver/clean.sql": _GLOSSARY_SQL, "glossary/a.yaml": text})
+    missing = _submit_and_run(session, principal, world)
+    _build_table(session, principal, "gold.x")
+    unreadable = _submit_and_run(session, principal, world)
+    assert unreadable.error_message != missing.error_message
+    shown = _shown_to_others(unreadable)
+    assert shown == _shown_to_others(missing)
+    assert shown.startswith(f"glossary/a.yaml:6: {_missing('a', 'gold.x')}\n")
+    assert shown.endswith("\n…and 6 more issues") and shown.count("\n") == 50
+    deployer = DeployService(session, AllowAllAuthorization()).get(principal, "dev", unreadable.id)
+    assert deployer.error_message is not None
+    assert deployer.error_message.endswith("\n…and 10 more issues")
+    assert deployer.error_message.count("\n") == 50
 
 
 @pytest.mark.parametrize("listed", ["[idd, idx]", "\n      - idd\n      - idx"])

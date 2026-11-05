@@ -60,7 +60,12 @@ from lakana_core.projects.discovery import discover
 from lakana_core.projects.glossary import glossary_entries, parse_glossary
 from lakana_core.projects.health import health_issues
 from lakana_core.projects.health_checks import project_health_specs
-from lakana_core.projects.issues import ProjectIssue, ProjectValidationError, withheld_lines
+from lakana_core.projects.issues import (
+    ProjectIssue,
+    ProjectValidationError,
+    stored_error,
+    withheld_lines,
+)
 from lakana_core.projects.jobs import job_issues
 from lakana_core.projects.layer_rules import layer_hints, layer_issues
 from lakana_core.projects.limits import DeployLimits
@@ -102,7 +107,6 @@ logger = logging.getLogger(__name__)
 INTERNAL_ERROR_MESSAGE = "internal error during deploy; see the worker log"
 _INACTIVE_MESSAGE = "the principal that queued this deploy no longer exists or is inactive"
 _TIME_LIMIT_MESSAGE = "the deploy exceeded its time limit"
-_MAX_ISSUES = 50
 
 
 @dataclass(frozen=True)
@@ -381,7 +385,7 @@ def _connection_issues(
 
 
 def _describe(exc: LakanaError | GitError) -> str:
-    """Render a failure for `error_message`, capping a long issue list.
+    """Render a failure for `error_message`.
 
     Parameters
     ----------
@@ -391,16 +395,16 @@ def _describe(exc: LakanaError | GitError) -> str:
     Returns
     -------
     str
-        The message; at most `_MAX_ISSUES` project issues, then a count.
+        The message; for a long issue list, the issues `stored_error` keeps, which each reader
+        is shown capped to `MAX_LISTED_ISSUES` after withholding (#442).
     """
-    if isinstance(exc, ProjectValidationError) and len(exc.issues) > _MAX_ISSUES:
-        listed = "\n".join(issue.render() for issue in exc.issues[:_MAX_ISSUES])
-        return f"{listed}\n…and {len(exc.issues) - _MAX_ISSUES} more issues"
+    if isinstance(exc, ProjectValidationError):
+        return stored_error(exc.issues)[0]
     return str(exc)
 
 
 def _withheld(exc: LakanaError | GitError) -> list[dict[str, Any]]:
-    """List the lines of a failure's text that other readers of the deploy are shown otherwise.
+    """List what is stored beside a failure's text for other readers of the deploy.
 
     Parameters
     ----------
@@ -414,7 +418,7 @@ def _withheld(exc: LakanaError | GitError) -> list[dict[str, Any]]:
     """
     if not isinstance(exc, ProjectValidationError):
         return []
-    return withheld_lines(exc.issues[:_MAX_ISSUES])
+    return withheld_lines(exc.issues)
 
 
 def _fail(

@@ -443,7 +443,17 @@ own CI and task tokens get the outside reader's text, #452; pin
 a line whose targets the reader may not all read is replaced **by position**, never by text (two
 references to one target can make the same line), or left out when its replacement is empty;
 with nothing left, the reader gets `WITHHELD_DEPLOY_MESSAGE`. The deployer and readers of the
-targets see it whole. Pins: `test_two_references_to_one_hidden_target_read_like_two_missing_targets`,
+targets see it whole. The 50-issue cap is applied per reader, **after** withholding (#442;
+`issues.stored_error`, `_capped`): the worker stores the issues up to the 50th one that every
+reader gets a line for (a `withheld` of `""` gets none), and for the rest only how many every
+reader gets and the targets of the others, so a reader is listed its first 50 issues and
+`…and N more issues` counts only those it would be shown: the same lines and N for an unreadable
+target as for a missing one, wherever its lines fall. The stored prefix keeps every
+withheld-for-someone issue before the 50th issue all readers see, so its size grows with the
+project's own files (for example a glossary link listing many missing columns); every reader still
+sees at most 50 issues. The deployer reads through the same cap with every target readable. Pins:
+`test_a_long_error_lists_and_counts_an_unreadable_target_as_a_missing_one` (references),
+`test_a_long_error_counts_an_unreadable_linked_table_as_a_missing_one` (glossary links), `test_two_references_to_one_hidden_target_read_like_two_missing_targets`,
 `test_a_run_principal_refusal_reads_like_a_missing_target_in_its_place`, the artifact and clash
 tests in `test_projects_deploys.py`. Residuals:
 
@@ -458,19 +468,28 @@ tests in `test_projects_deploys.py`. Residuals:
 - An error stored before this release has no lines and is shown whole. In practice nothing is
   exposed by it: the reference issues come from #384/#386/#387, which no release contains
   (the last tag is v0.21.0); the artifact and clash lines are older and were shown whole before.
-- When a run lists more than 50 issues, the `…and N more issues` tail still counts the lines a
-  reader sees left out.
 
 The rows are written only by a deploy, a rollback and a run's table creation
 (`catalog/model_metadata.py`); REST, the SDK and the CLI only read them. References are held by
 name, as the header names its target: a table renamed through the Iceberg REST catalog is no longer
 the target of references to its old name, and a later table of that name is, as the reference's
-generated check reads it. A generated reference check's `error` never names the target either:
-the pre-check texts (`runs/model_precheck.py`) name only the asset's path and column, the count's
+generated check reads it. A generated reference check's `error` never names the target either
+(one exception below): the pre-check texts (`runs/model_precheck.py`) name only the asset's path
+and column, the count's
 refused and missing cases are `ERROR_UNREADABLE`, other failures are the engine's error type or the
 cause in words, and the one fixed text that names a table, the row filter or column mask failure,
 is replaced by its variant that names none unless it names the checked table (`error_text(...,
 checked_table=)`, which the worker passes for a reference check; `test_policy_read_errors.py`).
+The exception is `AT_NEEDED` (#431): a reference without `at:` whose target another repository
+has since switched to `write: history` errors naming the target and the missing `at:`. It is
+written only after the run's principal is found to be allowed to read the target (the same
+`permits` call that guards the column read) and only when the target's builder's current
+manifest says `write: history` (not merely `valid_from`/`valid_to` columns), and the result is
+withheld whole from a reader who may not read the target (`runs/hidden_checks.py`; every
+reference check from a task reader). The deploy that switches the table warns with the
+deployer's visibility (`DeployService._history_warnings`, a `{"warning", "tables"}` object shown
+as an impact warning is). Pins: `test_a_reference_without_at_to_a_history_table_of_another_repository_fails`,
+`test_switching_a_table_to_history_warns_of_references_without_at_elsewhere`.
 The renamed table keeps its model rows (keyed by its id) under its new
 name until it is dropped. Pins: `test_describe_table.py`
 (`test_a_missing_target_and_an_unreadable_target_look_the_same_to_a_reader`,
@@ -554,10 +573,6 @@ A term id another repository owns is refused naming that repository (`owned_else
 term id and its repository are not secret within an environment: every `READ_ENVIRONMENT`
 reader is shown a term with its repository. Residuals:
 
-- Count (#442): a stored deploy error keeps the first 50 issues and ends with "…and N more
-  issues". N counts the lines withheld as `""`, so past 50 issues a reader who may not read the
-  table is shown fewer lines and a different N for an existing table than for a missing one. The
-  reference path behaves the same. The fix is to apply the cap per reader, after withholding.
 - Columns that the deploy cannot see (`SELECT *`, a Python asset) are not checked, for project
   tables as well as for others, so no message tells anything of them.
 
@@ -2596,6 +2611,26 @@ such refusal. A history write never removes
 a row it did not plan to: its staged snapshot must add exactly `versions_opened` rows net, so a
 table whose open versions share a surrogate key (only a commit outside `CatalogService.history`
 can make one) is refused after staging, with every staged file deleted (`stage_history`).
+
+A Python asset's history write reaches the catalog over REST (`POST …/tables/{name}/history`,
+`write_table_history`): the same `_governed_arrow_write` body controls as an append (size,
+decode, the record of files read), then `CatalogService.history` with the server's
+`max_write_rows`, `max_history_open_versions` and `max_history_open_bytes`, so the server holds
+the open versions a SQL asset's write holds in the worker. Three bounds keep that from exhausting
+the server (threat model, "Exhausting the API server's memory through history writes"):
+`LAKANA_RUN__MAX_HISTORY_OPEN_VERSIONS` refuses from the manifests' counts before a version is
+read; `LAKANA_RUN__MAX_HISTORY_OPEN_BYTES` counts the Arrow bytes batch by batch while they are
+read, one data file after another (`_stream_batches`, never pyiceberg's parallel reader), and
+refuses as soon as they pass it, writing nothing, so at most the cap plus one data file is held;
+and the history slot, `LAKANA_APPEND__MAX_CONCURRENT_HISTORY` (1), bounds the writes that hold
+versions at once (503 past it), taken after the request's authorization is checked and before its
+body is read, so a refused request never holds it. The returning keys' ends (`read_last_ends`)
+are folded to one row per key while read, with the byte cap as a backstop. A bound task token
+writes history only into its own asset, and only as a reader of it would: pins
+`test_it_writes_history_into_its_own_asset_which_it_may_not_read`,
+`test_a_task_of_a_filtered_principal_may_not_write_history_into_its_own_asset`,
+`test_a_task_of_a_write_only_principal_may_not_write_history`,
+`test_a_task_of_a_reading_and_writing_principal_writes_history` (server).
 
 **Limit: `lakana.history-key` is an ordinary table property.** An Iceberg REST commit with
 `WRITE_TABLE` can set or remove it (`SetPropertiesUpdate`, `RemovePropertiesUpdate`):

@@ -13,7 +13,10 @@ makes that check ``errored`` (so `block` sets the table back) without counting i
   header line, which the reader sees already. A valid-at reference's time column (`at:`) must
   exist and be a date or a timestamp (its text names the checked table's own type), and its
   target must have `valid_from` and `valid_to` (else `REFERENCE_UNCHECKABLE`, which names
-  nothing of the target).
+  nothing of the target). The one exception is `AT_NEEDED`: a reference without `at:` whose
+  target another repository has since made a history dimension (#431) is refused naming the
+  target, after the run's principal is found to be allowed to read it; a reader who may not read
+  the target is not shown the result (`runs.hidden_checks`).
 - A `measures` check's pre-check reads only the checked table's columns: each measure column
   exists and has a type its aggregation allows (a number for `sum` and `avg`, a number, a date or
   a timestamp for `min` and `max`, any type otherwise), and each `not_over` column exists.
@@ -26,14 +29,18 @@ from __future__ import annotations
 
 import re
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable
 from lakana_core.catalog.columns import stored_columns
 from lakana_core.errors import ValidationError
 from lakana_core.identifiers import TableRef
+from lakana_core.models import LIVE_ENVIRONMENT, Environment
 from lakana_core.projects.checks import CheckSpec, GeneratedFrom
 from lakana_core.projects.history_columns import VALID_FROM, VALID_TO, added_columns
+from lakana_core.projects.lookups import current_manifests
+from lakana_core.projects.manifest import entry_write, manifest_assets
 from lakana_core.projects.measures import NUMERIC_AGGREGATIONS, ORDERED_AGGREGATIONS
 
 FLOAT_TYPES = frozenset({"float", "double"})
@@ -124,6 +131,18 @@ AT_NOT_TIME = (
     "history compares a date or a timestamp; cast it in the SELECT."
 )
 """A valid-at reference whose time column is neither a date nor a timestamp."""
+
+AT_NEEDED = (
+    "The reference `{column}: {target}` at `{path}` declares no `at:`, but `{target}` now keeps "
+    "the history of its rows (`write: history`), so the check cannot tell which version a row "
+    "means; add `at: <time column>` to the reference (`{column}: {{to: {target}, at: "
+    "<column>}}`) in `{path}` and deploy again."
+)
+"""A reference without `at:` to a table that became a history dimension after its deploy (#431).
+
+It names the target, which the other texts never do: it is written only once the run's
+principal may read the target, and a reader who may not read it is not shown the check's result
+at all (`runs.hidden_checks`)."""
 
 CASE_HINT = " Column names match exactly; the table has `{actual}`."
 """Added to `KEY_MISSING`, `REFERENCE_MISSING`, `AT_MISSING`, `MEASURE_MISSING` or
@@ -377,6 +396,13 @@ def _reference_problem(
         return gone
     if at is not None and theirs and (VALID_FROM not in theirs or VALID_TO not in theirs):
         return gone
+    if (
+        at is None
+        and VALID_FROM in theirs
+        and VALID_TO in theirs
+        and _keeps_history(session, environment, target)
+    ):
+        return AT_NEEDED.format(column=column, target=target, path=spec.path)
     if target_column not in theirs:
         if not theirs:
             return None
@@ -384,6 +410,37 @@ def _reference_problem(
     if not types_match(own[column], theirs[target_column]):
         return TYPE_MISMATCH.format(column=column, path=spec.path)
     return None
+
+
+def _keeps_history(session: Session, environment: str, table: str) -> bool:
+    """Say whether the current project version that builds a table writes it with history.
+
+    A reference made before its target became a history dimension in another repository keeps
+    no `at:` until its own project deploys again; the deploy refuses it then (#431).
+
+    Parameters
+    ----------
+    session
+        Database session.
+    environment
+        The environment's name.
+    table
+        The dotted table.
+
+    Returns
+    -------
+    bool
+        True when the first repository by name whose current manifest builds it writes it with
+        ``write: history``.
+    """
+    env = session.scalar(
+        select(Environment.id).where(Environment.name == environment, LIVE_ENVIRONMENT)
+    )
+    for _, _, manifest in current_manifests(session, env) if env is not None else ():
+        entry = manifest_assets(manifest).get(table)
+        if entry is not None:
+            return entry_write(entry)[0] == "history"
+    return False
 
 
 def _case_hint(own: dict[str, str], column: str) -> str:

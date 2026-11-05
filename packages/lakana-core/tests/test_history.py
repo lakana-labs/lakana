@@ -33,7 +33,7 @@ from lakana_core.catalog.history import (
     unchanged_rows,
     version_starts,
 )
-from lakana_core.catalog.merge import SQL_ADVICE, check_merge_batch
+from lakana_core.catalog.merge import SDK_ADVICE, SQL_ADVICE, MergeAdvice, check_merge_batch
 from lakana_core.errors import ValidationError
 from lakana_core.models import Run, RunKind, RunStatus, TaskRun, TaskStatus
 
@@ -594,16 +594,36 @@ def test_a_nested_column_is_refused_with_the_cast_to_write() -> None:
     assert shown_type(pa.list_(pa.string())) == "list<string>"
 
 
-def test_an_empty_result_with_close_missing_is_refused() -> None:
+@pytest.mark.parametrize(
+    ("advice", "text"),
+    [
+        (
+            SQL_ADVICE,
+            "The asset's result is empty, and `close_missing: true` would close every open "
+            "version of gold.dim_customer; nothing was written. If the source really is empty, "
+            "remove `close_missing:` for this run.",
+        ),
+        (
+            SDK_ADVICE,
+            "The batch is empty, and `close_missing` would close every open version of "
+            "gold.dim_customer; nothing was written. If the source really is empty, send this "
+            "batch without `close_missing`.",
+        ),
+    ],
+    ids=["sql", "python"],
+)
+def test_an_empty_result_with_close_missing_is_refused(advice: MergeAdvice, text: str) -> None:
+    """SQL says `close_missing:` in its header; the SDK and REST say `close_missing` (#434)."""
     with pytest.raises(ValidationError) as info:
         check_history_batch(
-            _batch([]), ["customer_id"], table=TABLE, valid_from=None, close_missing=True
+            _batch([]),
+            ["customer_id"],
+            table=TABLE,
+            valid_from=None,
+            close_missing=True,
+            advice=advice,
         )
-    assert str(info.value) == (
-        "The asset's result is empty, and `close_missing: true` would close every open version "
-        "of gold.dim_customer; nothing was written. If the source really is empty, remove "
-        "`close_missing:` for this run."
-    )
+    assert str(info.value) == text
 
 
 def test_null_and_repeated_keys_use_the_merge_texts_without_the_composite_cap() -> None:

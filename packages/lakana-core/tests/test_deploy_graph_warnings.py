@@ -11,7 +11,15 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from graph_test_helpers import Grants, StarWorld, asset_entry, build_star, point, stores_manifest
+from graph_test_helpers import (
+    Grants,
+    StarWorld,
+    asset_entry,
+    build_star,
+    point,
+    sales_manifest,
+    stores_manifest,
+)
 from sqlalchemy import insert, select
 from sqlalchemy.orm import Session
 from test_graph_real_grants import _statements
@@ -819,3 +827,54 @@ def test_a_removed_item_the_graph_cannot_read_escapes_its_tables_name(star: Star
     assert "`gold.a b\\x1b[2J`" in text
     assert text.endswith("lakana graph impact --env dev gold.a b\\x1b[2J")
     assert entry["tables"] == [table]
+
+
+_HISTORY = (
+    "this deploy makes `gold.dim_store` keep the history of its rows (`write: history`), and "
+    "other repositories reference it without `at:`, so their reference checks fail until each "
+    "says which version a row means; tell their owners to add `at: <time column>` to each "
+    "reference — the references: `gold.fact_sales.store_id` in assets/gold/fact_sales.sql (sales)"
+)
+
+
+def _stores_keeping_history() -> dict[str, Any]:
+    """Build `stores`' next manifest, in which `gold.dim_store` keeps history.
+
+    Returns
+    -------
+    dict
+        The manifest.
+    """
+    manifest = stores_manifest()
+    manifest["assets"][0]["write"] = "history"
+    manifest["assets"][0]["history"] = {"valid_from": None, "close_missing": False}
+    return manifest
+
+
+@pytest.mark.parametrize("kind", [DeployKind.DEPLOY, DeployKind.DRY_RUN])
+def test_switching_a_table_to_history_warns_of_references_without_at_elsewhere(
+    star: StarWorld, kind: DeployKind
+) -> None:
+    """A deploy never fails because of another repository (#374), so it warns (#431)."""
+    p = _principal(star.session, "deployer")
+    limited = Grants({"gold.dim_store", "bronze.stores_raw"}, others=True)
+    hidden = _deploy(star, p, limited, _stores_keeping_history(), DeployKind.DRY_RUN)
+    assert hidden.warnings_json == []  # the deployer's visibility, as for the impact warnings
+    run = _deploy(star, p, _everything(), _stores_keeping_history(), kind)
+    assert run.warnings_json == [
+        {"warning": _HISTORY, "tables": ["gold.dim_store", "gold.fact_sales"]}
+    ]
+
+
+def test_a_table_that_kept_history_already_or_references_with_at_warn_of_nothing(
+    star: StarWorld,
+) -> None:
+    p = _principal(star.session, "deployer")
+    sales = sales_manifest()
+    sales["assets"][2]["model"]["references"][0]["at"] = "date"
+    point(star.session, star.env_id, star.repos["sales"], sales)
+    star.session.commit()
+    assert _deploy(star, p, _everything(), _stores_keeping_history()).warnings_json == []
+    point(star.session, star.env_id, star.repos["sales"], sales_manifest())
+    star.session.commit()
+    assert _deploy(star, p, _everything(), _stores_keeping_history()).warnings_json == []
