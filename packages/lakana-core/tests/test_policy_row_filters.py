@@ -992,9 +992,9 @@ def _page_quotes() -> list[str]:
     ]
 
 
-def test_the_page_quotes_seventeen_refusals() -> None:
+def test_the_page_quotes_nineteen_refusals() -> None:
     """The table the next tests read has the rows they expect."""
-    assert len(_page_quotes()) == 17
+    assert len(_page_quotes()) == 19
 
 
 def _create_error(session: Session, expression: str = "id > 1", **override: str) -> Exception:

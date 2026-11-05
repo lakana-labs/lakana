@@ -109,8 +109,9 @@ lakana column-mask revoke 49fa89ee-275a-4b86-a6fc-76b2b5b32b7e --yes
 which `revoke` needs. The `column` and the `expression` are shown with the column names the table
 has now: after a column was renamed, a mask on it is listed under the new name. The `bound` column
 says whether the mask follows its column through such a rename: `yes` for every mask you create
-now. `no` marks a mask of an earlier release that Lakana could not bind exactly; it keeps refusing
-reads after a rename until you create it again and revoke the old one ([Row filters and column
+now. `no` marks a mask of an earlier release that is not bound yet: right after an upgrade the worker
+binds them over the next passes, and only a mask that stays `no` after that, which Lakana could not
+bind exactly, keeps refusing reads after a rename until you create it again and revoke the old one ([Row filters and column
 masks follow renamed
 columns](../explanation/upgrades.md#row-filters-and-column-masks-follow-renamed-columns)):
 

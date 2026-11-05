@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import Sequence
 from datetime import UTC, datetime
-from functools import partial
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -31,7 +29,7 @@ from lakana_core.policy.columns import (
 from lakana_core.policy.expression_types import check_expression_types
 from lakana_core.policy.expressions import columns_of
 from lakana_core.policy.field_binding import FIELD_IDS, PolicyBinding
-from lakana_core.policy.shown import ShownPolicy, shown_policies
+from lakana_core.policy.shown import PolicyShowing
 
 
 def _check_columns_exist(
@@ -98,7 +96,7 @@ def _check_columns_exist(
     return description.schema_id, binding_for(description, wanted)
 
 
-class RowFilterService:
+class RowFilterService(PolicyShowing):
     """Create, list, and revoke row filters.
 
     Parameters
@@ -301,29 +299,6 @@ class RowFilterService:
         )
         self._session.commit()
         return row
-
-    def shown(self, p: PrincipalRef, rows: Sequence[RowFilter]) -> dict[uuid.UUID, ShownPolicy]:
-        """Show row filters in the current column names of their tables.
-
-        Parameters
-        ----------
-        p
-            The acting principal, who listed the rows; reading the columns checks `MANAGE_POLICY`
-            again.
-        rows
-            The row filters to show.
-
-        Returns
-        -------
-        dict
-            Each row's id to how a listing shows it (`ShownPolicy`).
-
-        Raises
-        ------
-        PermissionDenied
-            If `p` may not manage policies.
-        """
-        return shown_policies(rows, partial(self._catalog.policy_fields, p))
 
     def list_for_principal(self, p: PrincipalRef, principal_name: str) -> list[RowFilter]:
         """List a principal's own active, direct row filters.

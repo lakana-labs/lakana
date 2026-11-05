@@ -74,8 +74,8 @@ def _to_out(row: ColumnMask, shown: ShownPolicy) -> ColumnMaskOut:
     row
         The row to convert.
     shown
-        How a listing shows it: its expression (and a mask's column) in the table's current
-        column names, and whether it is bound.
+        How a listing shows the mask: its column and its expression in the table's current
+        column names, and whether the mask is bound.
 
     Returns
     -------

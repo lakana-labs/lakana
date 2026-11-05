@@ -11,11 +11,14 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from functools import partial
 
 from pyiceberg.types import NestedField
 
+from lakana_core.auth import PrincipalRef
 from lakana_core.errors import ValidationError
 from lakana_core.models import ColumnMask, RowFilter
+from lakana_core.policy.columns import ColumnSource
 from lakana_core.policy.field_binding import (
     BOUND_STATES,
     FIELD_IDS,
@@ -115,3 +118,34 @@ def shown_policies(
             fields = read[row.table_id]
         found[row.id] = _shown(row, fields)
     return found
+
+
+class PolicyShowing:
+    """The `shown` method of the row filter and column mask services, written once."""
+
+    _catalog: ColumnSource
+
+    def shown(
+        self, p: PrincipalRef, rows: Sequence[RowFilter] | Sequence[ColumnMask]
+    ) -> dict[uuid.UUID, ShownPolicy]:
+        """Show policies in the current column names of their tables.
+
+        Parameters
+        ----------
+        p
+            The acting principal, who listed the rows; reading the columns checks `MANAGE_POLICY`
+            again.
+        rows
+            The row filters or the column masks to show.
+
+        Returns
+        -------
+        dict
+            Each row's id to how a listing shows it (`ShownPolicy`).
+
+        Raises
+        ------
+        PermissionDenied
+            If `p` may not manage policies.
+        """
+        return shown_policies(rows, partial(self._catalog.policy_fields, p))

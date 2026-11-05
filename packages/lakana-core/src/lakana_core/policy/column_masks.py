@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import Sequence
 from datetime import UTC, datetime
-from functools import partial
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -31,7 +29,7 @@ from lakana_core.policy.columns import (
 from lakana_core.policy.expression_types import check_expression_types
 from lakana_core.policy.expressions import columns_of
 from lakana_core.policy.field_binding import PolicyBinding
-from lakana_core.policy.shown import ShownPolicy, shown_policies
+from lakana_core.policy.shown import PolicyShowing
 
 
 def _check_column_exists(
@@ -107,7 +105,7 @@ def _check_column_exists(
     raise ValidationError(message)
 
 
-class ColumnMaskService:
+class ColumnMaskService(PolicyShowing):
     """Create, list, and revoke column masks.
 
     Parameters
@@ -319,29 +317,6 @@ class ColumnMaskService:
         )
         self._session.commit()
         return row
-
-    def shown(self, p: PrincipalRef, rows: Sequence[ColumnMask]) -> dict[uuid.UUID, ShownPolicy]:
-        """Show column masks in the current column names of their tables.
-
-        Parameters
-        ----------
-        p
-            The acting principal, who listed the rows; reading the columns checks `MANAGE_POLICY`
-            again.
-        rows
-            The column masks to show.
-
-        Returns
-        -------
-        dict
-            Each row's id to how a listing shows it (`ShownPolicy`).
-
-        Raises
-        ------
-        PermissionDenied
-            If `p` may not manage policies.
-        """
-        return shown_policies(rows, partial(self._catalog.policy_fields, p))
 
     def list_for_principal(self, p: PrincipalRef, principal_name: str) -> list[ColumnMask]:
         """List a principal's own active, direct column masks.

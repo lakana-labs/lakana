@@ -72,8 +72,9 @@ lakana row-filter list --principal alice
 which `revoke` needs. The `expression` is shown with the column names the table has now:
 after a column was renamed, a filter on it is listed under the new name. The `bound` column says whether the
 filter follows its columns through such a rename: `yes` for every filter you create now. `no` marks
-a filter of an earlier release that Lakana could not bind exactly; it keeps refusing reads after a
-rename until you create it again and revoke the old one ([Row filters and column masks follow
+a filter of an earlier release that is not bound yet: right after an upgrade the worker binds them over
+the next passes, and only a filter that stays `no` after that, which Lakana could not bind exactly,
+keeps refusing reads after a rename until you create it again and revoke the old one ([Row filters and column masks follow
 renamed columns](../explanation/upgrades.md#row-filters-and-column-masks-follow-renamed-columns)).
 
 `$ROW_FILTER_ID` is the id that `list` printed:

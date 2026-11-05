@@ -1669,9 +1669,10 @@ class RowFilter:
     created_at
         When this filter was created.
     bound
-        Whether the policy follows its columns by field id (a raw table's, by name); `False` for
-        one of an earlier release that keeps refusing reads after a rename until it is created
-        again; `None` from a server before this release.
+        `True` when the policy follows its columns by field id (a raw table's, by name). `False`
+        right after an upgrade, while the worker binds earlier policies over the next passes (see
+        the upgrade notes); only a policy that stays `False` after that needs to be created again.
+        `None` from a server before this release.
     """
 
     id: str
@@ -1715,9 +1716,7 @@ class ColumnMask:
     created_at
         When this mask was created.
     bound
-        Whether the policy follows its columns by field id (a raw table's, by name); `False` for
-        one of an earlier release that keeps refusing reads after a rename until it is created
-        again; `None` from a server before this release.
+        As `RowFilter.bound`.
     """
 
     id: str

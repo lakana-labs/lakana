@@ -1988,9 +1988,9 @@ class RowFilterOut(BaseModel):
     created_at
         When this filter was created.
     bound
-        Whether the policy follows its columns by field id (a raw table's, by name); `false` for
-        one of an earlier release that keeps refusing reads after a rename until it is created
-        again.
+        `true` when the policy follows its columns by field id (a raw table's, by name). `false`
+        right after an upgrade, while the worker binds earlier policies over the next passes (see
+        the upgrade notes); only a policy that stays `false` after that needs creating again.
     """
 
     id: uuid.UUID
@@ -2070,9 +2070,7 @@ class ColumnMaskOut(BaseModel):
     created_at
         When this mask was created.
     bound
-        Whether the policy follows its columns by field id (a raw table's, by name); `false` for
-        one of an earlier release that keeps refusing reads after a rename until it is created
-        again.
+        As `RowFilterOut.bound`.
     """
 
     id: uuid.UUID

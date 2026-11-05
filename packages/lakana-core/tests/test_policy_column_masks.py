@@ -909,9 +909,9 @@ def _page_quotes() -> list[str]:
     ]
 
 
-def test_the_page_quotes_fifteen_refusals() -> None:
+def test_the_page_quotes_seventeen_refusals() -> None:
     """The table the next tests read has the rows they expect."""
-    assert len(_page_quotes()) == 15
+    assert len(_page_quotes()) == 17
 
 
 def test_a_qualified_mask_expression_is_refused_as_the_page_says(session: Session) -> None:
