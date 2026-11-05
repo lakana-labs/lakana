@@ -23,7 +23,7 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 import lakana_core.catalog.service as service_module
-from lakana_core.auth import PrincipalRef
+from lakana_core.auth import PrincipalRef, RunContext
 from lakana_core.catalog.health_jobs import (
     building_jobs,
     deployed_manifests,
@@ -290,6 +290,50 @@ def test_what_a_run_judges_comes_from_its_own_manifest(
     assert judged_by_run(session, task, "silver.other") == frozenset()
     older = _task_run(session, blocking, has_checks=False, asset="silver.orders", repository="b")
     assert judged_by_run(session, older, "silver.orders") == frozenset()
+
+
+def test_a_judged_block_signal_of_a_task_run_is_not_also_sent(
+    catalog: CatalogService, session: Session
+) -> None:
+    """The run context reaches the filter: the run's own check reports the block, not a message."""
+    manifest = {
+        **_MANIFEST,
+        "assets": [
+            {
+                "table": "silver.orders",
+                "path": "assets/silver/orders.sql",
+                "health": {"volume": "block", "null_rate": "warn"},
+            },
+            {"table": "gold.report", "path": "assets/gold/report.sql"},
+        ],
+    }
+    task = _task_run(session, manifest, has_checks=True, asset="silver.orders", repository="a")
+    blocked, warned = (
+        TableHealthSignal(
+            id=uuid.uuid4(),
+            environment_id=_environment_id(session),
+            table_id=_table_id(session),
+            signal=signal,
+            column_name=column,
+            snapshot_id=7,
+            sequence_number=7,
+            observed={},
+            band={},
+            state="fired",
+            effect=effect,
+            observed_at=_FIRED_AT,
+        )
+        for signal, column, effect in (("volume", None, "block"), ("null_rate", "status", "warn"))
+    )
+    rows = [blocked, warned]
+
+    def told(run: RunContext | None) -> list[uuid.UUID]:
+        queued = catalog._queue_health(_ORDERS, _environment_id(session), rows, run)
+        return sorted((d.health_signal_id for d in queued if d.health_signal_id), key=str)
+
+    run = RunContext(task_run_id=task, query_run_id=uuid.uuid4())
+    assert told(run) == [warned.id]  # the judged block is left to the run's `failed` message
+    assert sorted(told(None), key=str) == sorted([blocked.id, warned.id], key=str)  # no run: both
 
 
 def test_a_table_no_job_builds_is_only_shown(

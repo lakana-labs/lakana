@@ -246,8 +246,8 @@ would never send.
 
 ### Notify a webhook
 
-`notify:` names where a job reports a run that failed or recovered, or that removed or retyped a
-column ([the events](../how-to/get-told-when-a-job-fails.md#when-a-message-is-sent)).
+`notify:` names where a job reports a run that failed or recovered, that removed or retyped a
+column, or a table it builds whose health signal fired ([the events](../how-to/get-told-when-a-job-fails.md#when-a-message-is-sent)).
 It is optional; a job without it tells nobody.
 
 - `webhook:` is the **name of a secret** of the environment, never the URL: the URL is a
@@ -300,7 +300,7 @@ through the order in which to turn checks on.
 
 ## Health
 
-`health:` sets what each [table health signal](table-health.md#what-a-signal-does-health) does for
+`health:` sets what each [table health signal](table-health.md#effects-warn-block-off) does for
 every table the project builds: `warn` (the default), `block` or `off`. Write `off` alone to turn
 every signal off, or a mapping:
 

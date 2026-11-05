@@ -369,7 +369,7 @@ links to the tables and columns they are about, checked and deployed with the pr
 ### Choose what a table health signal does
 
 A table's header, an `@asset(health=...)` argument or `lakana.yaml` can set each health signal to
-`warn`, `block` or `off`. See [Table health](../reference/table-health.md#what-a-signal-does-health).
+`warn`, `block` or `off`. See [Table health](../reference/table-health.md#effects-warn-block-off).
 
 - **Upgrade the workers before deploying a project that declares `health:`.** Such a project deploys
   manifest version 14, which a worker of an earlier release refuses. Every other project keeps its

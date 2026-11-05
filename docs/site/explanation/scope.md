@@ -80,9 +80,10 @@ How the larger pieces are meant to work:
   `warn` only reports. `keep` leaves the data, marks the table as kept and stops what reads it.
   A project default in `lakana.yaml`, `block` or `warn`, sets the mode of a check that names none, and the results
   are kept as a history. Checks stay at these three modes until v1.0.0; the checks generated from
-  model metadata use them too. Table-health signals only warn, through the notifications: they
-  never fail a run, set a table back or mark it kept. See
-  [Check your data](../how-to/check-your-data.md).
+  model metadata use them too. Table-health signals warn by default, through the notifications; a
+  table can make one `block`, which fails the run and sets the table back like a blocking check; a signal never marks
+  it kept. See [Check your data](../how-to/check-your-data.md) and
+  [Notice a broken pipeline](../how-to/notice-a-broken-pipeline.md).
 - **Model artifacts.** A Python asset can store a file or a directory, such as a trained model, as
   numbered versions tied to the commit of the run, and another asset reads it. Access follows the
   grants of tables: a grant on a namespace covers its models, and a row filter or column mask

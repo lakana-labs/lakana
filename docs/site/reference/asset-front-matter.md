@@ -495,28 +495,25 @@ A project version in which an asset declares a model field (`key:` alone counts,
 with a `write: merge` asset) has manifest version 9, one in which an asset declares `measures:`
 version 10, and one that declares `main_language`, a label or a
 [translation](translations.md) version 11, one that uses `write: history` or a reference with `at:` version 12, one with a
-[`glossary/`](glossary.md) folder version 13, and one in which a table declares [`health:`](table-health.md#what-a-signal-does-health) version 14. Each needs workers of the release that introduced it or later: a worker of an earlier
+[`glossary/`](glossary.md) folder version 13, and one in which a table declares [`health:`](table-health.md#effects-warn-block-off) version 14. Each needs workers of the release that introduced it or later: a worker of an earlier
 one refuses its manifest. A deploy's changes list a table whose `kind`, `grain`, `references`,
 `checks`, or the `key` of an asset that does not merge, changed as `model_changed`; the key of a
 merge stays a change of how the table is written.
 
 ## Health: what the table's signals do
 
-`health:` chooses, per [table health signal](table-health.md#what-a-signal-does-health), whether a
+`health:` chooses, per [table health signal](table-health.md#effects-warn-block-off), whether a
 firing signal warns (the default), blocks the write or is off. The decorator takes the same as
 `health=`.
 
-<!-- not tested: SQL is not parsed by the block checker; a test in `scripts/tests/test_docs_site.py` parses this header with the front-matter reader -->
+<!-- source: docs/examples/notice-a-broken-pipeline/project/assets/silver/orders.sql -->
 ```sql
 /* lakana
-health:
-  volume: block        # a table that suddenly gains or loses rows is not published
-  range:
-    price: off         # price is allowed to swing
+health: {schema: block}
 */
-SELECT order_id, price FROM silver.orders
+SELECT id, region FROM bronze.orders
 ```
 
-`health: off` turns every signal off. `null_rate` and `range` may name single columns, which must be
-columns the `SELECT` returns. A view takes no `health:`. The texts of a refusal are in
-[Table health](table-health.md#what-a-signal-does-health).
+`health: off` turns every signal off, and `health: {volume: block, range: off}` mixes effects.
+`null_rate` and `range` may name single columns, which must be columns the `SELECT` returns. A view takes no `health:`. The texts of a refusal are in
+[Table health](table-health.md#effects-warn-block-off); [Notice a broken pipeline](../how-to/notice-a-broken-pipeline.md) walks through the header above, the failed run and the way out.

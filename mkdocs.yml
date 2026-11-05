@@ -37,6 +37,7 @@ nav:
       - how-to/deploy-from-github-actions.md
       - how-to/deploy-from-gitlab-ci.md
       - how-to/check-your-data.md
+      - how-to/notice-a-broken-pipeline.md
       - how-to/run-a-job-on-a-schedule.md
       - how-to/get-told-when-a-job-fails.md
       - how-to/deploy-with-compose.md

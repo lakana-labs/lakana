@@ -2,7 +2,7 @@
 
 What Lakana tells you about the state of a table without reading its rows: when it was last
 written, how big it is, when it was last maintained, how its checks stand, who reads it, and what
-its recent snapshots say. The numbers of the current snapshot are in `lakana table get`; the rest
+its recent snapshots say, and what to do when they say something is wrong. The numbers of the current snapshot are in `lakana table get`; the rest
 is in `lakana table health`.
 
 ## The numbers of the current snapshot
@@ -155,16 +155,6 @@ each side, 1 % of the learned span (for integers and other numbers, of the large
 magnitude) and at least one unit: 1 for integers, 1 day for dates, 1 hour for timestamps, none for
 other numbers. No signal but `schema` fires before the table has 8 snapshots.
 
-**Freshness.** The workers check it hourly, with the other sweeps (`LAKANA_RUN__SWEEP_INTERVAL`),
-and record a new observation only when its state or the last snapshot changes. It counts only
-snapshots that added data: a compaction does not make a stale table fresh. A table built by a
-scheduled job is late after twice the interval of that schedule, and never before the second run
-after its last snapshot has passed, so a weekday job is not late over the weekend. With several
-such jobs, the shortest limit counts. A table without one is late after 3 times the median gap
-between its last 31 snapshots, and at least 1 hour; a schedule that cannot be read counts as none.
-A table whose scheduled jobs are all paused shows `off` with `observed.reason` `paused`: it is not
-expected to change, and nothing is sent. `freshness` cannot `block`.
-
 **States.** `ok`: inside the band. `fired`: outside it (`alert` says how). `no_history`: fewer than
 8 snapshots, so there is no band yet. `no_metrics`: nothing can be said, and the observation never
 guesses; `observed.reason` tells why (`not_recorded`: Iceberg did not record the column's metrics,
@@ -176,112 +166,6 @@ that are damaged count as `not_recorded`.
 2,000 added files, within 5 seconds. Columns past the 200th record nothing. A commit over the file
 or time limit records `no_metrics` with reason `unreadable` for `null_rate` and `range`; it never
 fails the write.
-
-### What a signal does: `health:`
-
-A fired signal warns by default: it is recorded, shown, and sent to the jobs that build the table
-(see [Messages to the jobs that build the table](#messages-to-the-jobs-that-build-the-table)). You
-choose, per signal, between three effects:
-
-| Effect | What it does |
-|---|---|
-| `warn` | The default. The signal is recorded, shown and sent to the building jobs' `notify:` when it fires. |
-| `block` | A firing signal fails the run and sets the table back, as a blocking check does. |
-| `off` | The signal is not evaluated for the table or column, and shows as `off`. |
-
-**When a signal blocks.** Each `block` entry of a table adds one check to the table's task, named
-`health_<signal>` (`health_range__price` for one column), marked generated like the checks of the
-asset's header. It reads no rows: after the write, it looks at whether the signal fired at any
-snapshot the run wrote (a Python asset that commits several times has every commit judged, not only
-the last). `null_rate: block` or `range: block` fails when any column whose effect is `block`
-fired. When the signal fired, the check fails, the table is set back, and nothing downstream is
-built, as for any failed blocking check. The run's failure message, the check's line in
-`lakana runs show` and the task's log (`lakana runs logs`) give the check's text, which names no
-value, because everyone who may read the run reads it:
-
-> Check `gold.orders/health_volume` failed: health signal volume fired at snapshot 4711; `lakana table health gold.orders --env prod --signals` shows its usual band and new value to readers who may see them; fix the data the asset reads, or let such data through with health: {volume: warn} in the asset header (assets/gold/orders.sql).
-
-The history shows the band and the value to those a mask or filter does not hide them from (see
-[Who sees what](#who-sees-what)). `lakana check rows` of such a check says that it reads no rows and
-names the same command. A first build that is set back is not published and keeps no signals, so
-its text says so instead of naming the history:
-`… fired at snapshot 4711; this first build is not published, so its health signals are not kept;
-fix the data the asset reads, or let such data through with health: {volume: warn} in the asset
-header`. A signal that fired without `block` never stops a run, and a signal that was not computed
-(`no_history`, `no_metrics`) never blocks. A view or an artifact never gets such a check. Which
-signals block comes from the deployment the run started with; for `null_rate: block` and
-`range: block`, which columns block comes from the effects of the current deployment, so a deploy
-that lands while the run is going decides those.
-
-Write `health:` in the asset's `/* lakana … */` block, or as `health=` in `@asset(...)`: `off` for
-every signal, or a mapping of signals to an effect. `null_rate` and `range` may instead name single
-columns.
-
-The header example, a table that is not published when its row count jumps and whose `price` may
-swing, is in [Asset front-matter](asset-front-matter.md#health-what-the-tables-signals-do).
-
-A project default goes in [`lakana.yaml`](lakana-yaml.md#health) under `health:`; the asset's own
-entries win over it. `freshness` cannot `block`: it fires between runs, when there is no write to
-stop. A view, an external table and an artifact have no snapshots, so they take no `health:`.
-Write `off` unquoted or quoted; `on`, `yes` and `true` are not effects. A deploy refuses a bad
-`health:` with the file, the cause and the next step:
-
-| Text | Cause |
-|---|---|
-| ``health: rows is not a health signal; use freshness, volume, null_rate, range or schema`` | A signal that does not exist. |
-| ``health: volume must be warn, block or off, not loud`` | Any other effect. |
-| ``health: freshness cannot block: it fires between runs, when there is no write to stop; use warn or off`` | `block` on `freshness`. |
-| ``health: volume is about the whole table; give it warn, block or off, not columns`` | Columns under a signal that is not per column. |
-| ``health: null_rate takes warn, block or off in lakana.yaml; name single columns in an asset's header`` | Columns in `lakana.yaml`. |
-| ``health: range names column price, which gold.orders does not have (columns: order_id); fix the name or remove it`` | A column the table's `SELECT` does not return. |
-| ``health: does not apply to a view, which has no snapshots to watch; remove it, or materialize the asset as a table`` | `health:` on a view. |
-
-The deploy checks a column only when it knows the asset's columns: from a SQL asset's column
-list. For a `SELECT *` and for a Python asset it cannot; an entry for a column the table does not
-have then has no effect, and `lakana table get` marks it, as in
-`range of pricee off (no such column)`.
-
-The effects apply to a managed table from the next deploy on, or from its creation when a run
-creates it after the deploy. A table that no asset builds, whose asset a deploy removed, or whose
-repository was undeployed uses the defaults: every signal warns. `lakana table get NAME` lists
-every effect that is not the default `warn`, in the order of its keys, as in
-`Health (not the default warn): range of price off, volume block`.
-
-A project in which a table declares `health:` (in the asset or as a default in `lakana.yaml`)
-deploys manifest version 14. Upgrade the workers before you deploy it: a worker of an earlier
-release refuses that manifest. A project without `health:` keeps its version.
-
-### Messages to the jobs that build the table
-
-A fired signal whose effect is `warn` is sent to the jobs that build the table: every job of the
-environment's current deployments whose selection holds it and that declares `notify:` (see
-[Get told when a job fails](../how-to/get-told-when-a-job-fails.md)). Each job gets one message
-with the event `health`, through its own webhook and format. A table that no job with `notify:`
-builds is only shown.
-
-- **Once per firing.** A signal that keeps firing commit after commit sends one message, not one
-  per run; it sends again only after an observation of the same signal and column that did not
-  fire. A firing whose snapshot a check set back does not count.
-- **`block`.** A firing that a run's own `health_<signal>` check judges fails the run, and the
-  run's `failed` message names the check, so no `health` message is sent for it. A `block` signal
-  that fires without such a check, in a write outside a run or in a run that started before the
-  deploy that set `block`, is sent like a `warn` one.
-- **What it says.** The title reads ``Lakana: table `gold.orders` needs a look in `prod` ``, then
-  the signal's alert, the job and repository, the command `lakana table health TABLE --env ENV`
-  and the delivery id. In `json` the event is `health`, `run_id`, `status`, `commit` and `trigger`
-  are empty, and two keys are added: `table` and `alert`.
-- **Values.** Whoever reads the channel is outside Lakana: nobody can ask whether a policy applies
-  to them. For a table with any row filter, and for a `null_rate` or `range` signal of a table
-  with any column mask, the alert names only the table, the signal, the column, the snapshot, the
-  time and the next step, never the usual band or the new value. The message does not say why.
-  Without a policy it is the signal's `alert` (see [Fields of a signal](#fields-of-a-signal)),
-  with the band and the value.
-- **Set back later.** A message already queued is still sent when a later check sets the
-  firing's snapshot back: it tells of a firing that happened.
-
-The alert of a `null_rate` signal of a table with a column mask reads:
-
-> gold.orders: health signal null_rate of email fired at snapshot 4711 (03 Nov 06:00 UTC); `lakana table health gold.orders --env prod --signals` shows its usual band and new value to readers who may see them; check what fills email upstream, or set health: {null_rate: {email: off}} if this is expected
 
 ### What `observed` and `band` hold
 
@@ -358,6 +242,141 @@ they were. Each sweep handles at most
 500 tables and the next sweep the next 500, so with more tables the deletion takes several hours
 to come round. A message still waiting to be delivered when its signal is deleted is dropped with
 it.
+
+## Effects: warn, block, off
+
+A fired signal warns by default: it is recorded, shown, and sent to the jobs that build the table
+(see [Messages to the jobs that build the table](#notifications)). You
+choose, per signal, between three effects:
+
+| Effect | What it does |
+|---|---|
+| `warn` | The default. The signal is recorded, shown and sent to the building jobs' `notify:` when it fires. |
+| `block` | A firing signal fails the run and sets the table back, as a blocking check does. |
+| `off` | The signal is not evaluated for the table or column, and shows as `off`. |
+
+**When a signal blocks.** Each `block` entry of a table adds one check to the table's task, named
+`health_<signal>` (`health_range__price` for one column), marked generated like the checks of the
+asset's header. It reads no rows: after the write, it looks at whether the signal fired at any
+snapshot the run wrote (a Python asset that commits several times has every commit judged, not only
+the last). `null_rate: block` or `range: block` fails when any column whose effect is `block`
+fired. When the signal fired, the check fails, the table is set back, and nothing downstream is
+built, as for any failed blocking check. The run's failure message, the check's line in
+`lakana runs show` and the task's log (`lakana runs logs`) give the check's text, which names no
+value, because everyone who may read the run reads it:
+
+> Check `gold.orders/health_volume` failed: health signal volume fired at snapshot 4711; `lakana table health gold.orders --env prod --signals` shows its usual band and new value to readers who may see them; fix the data the asset reads, or let such data through with health: {volume: warn} in the asset header (assets/gold/orders.sql).
+
+The history shows the band and the value to those a mask or filter does not hide them from (see
+[Who sees what](#who-sees-what)). `lakana check rows` of such a check says that it reads no rows and
+names the same command. A first build that is set back is not published and keeps no signals, so
+its text says so instead of naming the history:
+`… fired at snapshot 4711; this first build is not published, so its health signals are not kept;
+fix the data the asset reads, or let such data through with health: {volume: warn} in the asset
+header`. A signal that fired without `block` never stops a run, and a signal that was not computed
+(`no_history`, `no_metrics`) never blocks. A view or an artifact never gets such a check. Which
+signals block comes from the deployment the run started with; for `null_rate: block` and
+`range: block`, which columns block comes from the effects of the current deployment, so a deploy
+that lands while the run is going decides those.
+
+Write `health:` in the asset's `/* lakana … */` block, or as `health=` in `@asset(...)`: `off` for
+every signal, or a mapping of signals to an effect. `null_rate` and `range` may instead name single
+columns.
+
+The header, with an example, is in [Asset front-matter](asset-front-matter.md#health-what-the-tables-signals-do);
+[Notice a broken pipeline](../how-to/notice-a-broken-pipeline.md) walks through a blocked run.
+
+A project default goes in [`lakana.yaml`](lakana-yaml.md#health) under `health:`; the asset's own
+entries win over it. `freshness` cannot `block`: it fires between runs, when there is no write to
+stop. A view, an external table and an artifact have no snapshots, so they take no `health:`.
+Write `off` unquoted or quoted; `on`, `yes` and `true` are not effects. A deploy refuses a bad
+`health:` with the file, the cause and the next step:
+
+| Text | Cause |
+|---|---|
+| ``health: rows is not a health signal; use freshness, volume, null_rate, range or schema`` | A signal that does not exist. |
+| ``health: volume must be warn, block or off, not loud`` | Any other effect. |
+| ``health: freshness cannot block: it fires between runs, when there is no write to stop; use warn or off`` | `block` on `freshness`. |
+| ``health: volume is about the whole table; give it warn, block or off, not columns`` | Columns under a signal that is not per column. |
+| ``health: null_rate takes warn, block or off in lakana.yaml; name single columns in an asset's header`` | Columns in `lakana.yaml`. |
+| ``health: range names column price, which gold.orders does not have (columns: order_id); fix the name or remove it`` | A column the table's `SELECT` does not return. |
+| ``health: does not apply to a view, which has no snapshots to watch; remove it, or materialize the asset as a table`` | `health:` on a view. |
+
+The deploy checks a column only when it knows the asset's columns: from a SQL asset's column
+list. For a `SELECT *` and for a Python asset it cannot; an entry for a column the table does not
+have then has no effect, and `lakana table get` marks it, as in
+`range of pricee off (no such column)`.
+
+The effects apply to a managed table from the next deploy on, or from its creation when a run
+creates it after the deploy. A table that no asset builds, whose asset a deploy removed, or whose
+repository was undeployed uses the defaults: every signal warns. `lakana table get NAME` lists
+every effect that is not the default `warn`, in the order of its keys, as in
+`Health (not the default warn): range of price off, volume block`.
+
+A project in which a table declares `health:` (in the asset or as a default in `lakana.yaml`)
+deploys manifest version 14. Upgrade the workers before you deploy it: a worker of an earlier
+release refuses that manifest. A project without `health:` keeps its version.
+
+## Freshness
+
+Freshness is judged between writes, so there is no commit to do it at: the workers check it hourly, with the other sweeps (`LAKANA_RUN__SWEEP_INTERVAL`),
+and record a new observation only when its state or the last snapshot changes. It counts only
+snapshots that added data: a compaction does not make a stale table fresh. A table built by a
+scheduled job is late after twice the interval of that schedule, and never before the second run
+after its last snapshot has passed, so a weekday job is not late over the weekend. With several
+such jobs, the shortest limit counts. A table without one is late after 3 times the median gap
+between its last 31 snapshots, and at least 1 hour; a schedule that cannot be read counts as none.
+A table whose scheduled jobs are all paused shows `off` with `observed.reason` `paused`: it is not
+expected to change, and nothing is sent.
+
+The sweep handles at most 500 tables per run and the next run the next 500, so with more
+tables a table's freshness is judged every few hours. A table that has not been written since the
+upgrade to the release that introduced signals has no freshness until its next write. `freshness: off`
+switches it off, and it cannot `block`: it fires between runs, when there is no write to stop.
+
+## Notifications
+
+A fired signal whose effect is `warn` is sent to the jobs that build the table: every job of the
+environment's current deployments whose selection holds it and that declares `notify:` (see
+[Get told when a job fails](../how-to/get-told-when-a-job-fails.md)). Each job gets one message
+with the event `health`, through its own webhook and format. A table that no job with `notify:`
+builds is only shown.
+
+- **Once per firing.** A signal that keeps firing commit after commit sends one message, not one
+  per run; it sends again only after an observation of the same signal and column that did not
+  fire. A firing whose snapshot a check set back does not count. A firing that no job is told of,
+  because no job with `notify:` builds the table at that moment, still counts as the last one: a job
+  that gets `notify:` later hears of the signal only after it has been `ok` once.
+- **`block`.** A firing that a run's own `health_<signal>` check judges fails the run, and the
+  run's `failed` message names the check, so no `health` message is sent for it. A `block` signal
+  that fires without such a check, in a write outside a run or in a run that started before the
+  deploy that set `block`, is sent like a `warn` one.
+- **What it says.** The title reads ``Lakana: table `gold.orders` needs a look in `prod` ``, then
+  the signal's alert, the job and repository, the command `lakana table health TABLE --env ENV`
+  and the delivery id. In `json` the event is `health`, `run_id`, `status`, `commit` and `trigger`
+  are empty, and two keys are added: `table` and `alert`.
+- **Values.** Whoever reads the channel is outside Lakana: nobody can ask whether a policy applies
+  to them. For a table with any row filter, and for a `null_rate` or `range` signal of a table
+  with any column mask, the alert names only the table, the signal, the column, the snapshot, the
+  time and the next step, never the usual band or the new value. The message does not say why.
+  Without a policy it is the signal's `alert` (see [Fields of a signal](#fields-of-a-signal)),
+  with the band and the value.
+- **Set back later.** A message already queued is still sent when a later check sets the
+  firing's snapshot back: it tells of a firing that happened.
+
+The alert of a `null_rate` signal of a table with a column mask reads:
+
+> gold.orders: health signal null_rate of email fired at snapshot 4711 (03 Nov 06:00 UTC); `lakana table health gold.orders --env prod --signals` shows its usual band and new value to readers who may see them; check what fills email upstream, or set health: {null_rate: {email: off}} if this is expected
+
+## How long signals are kept
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `LAKANA_HEALTH__RETENTION_DAYS` | `90` | How many days of observations are kept (7 or more); `days` of the history may reach this far. |
+
+The workers' hourly sweep (`LAKANA_RUN__SWEEP_INTERVAL`) deletes older observations, but keeps the
+newest of each signal and column, so the current state never goes. How the sweep treats freshness
+history and what happens to a message still waiting is in [The history](#the-history).
 
 ## Commands
 

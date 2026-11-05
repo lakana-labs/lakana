@@ -7,7 +7,15 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from health_test_helpers import _seed, _table_id, health_catalog
+from health_test_helpers import (
+    _MANIFEST,
+    _ORDERS,
+    _deployed,
+    _rows,
+    _seed,
+    _table_id,
+    health_catalog,
+)
 from sqlalchemy import select, update
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
@@ -18,7 +26,7 @@ from lakana_core.catalog import health_sweep
 from lakana_core.catalog.health_sweep import sweep_health
 from lakana_core.config import DatabaseConfig
 from lakana_core.db import create_engine
-from lakana_core.models import Base, TableHealthSignal
+from lakana_core.models import Base, NotificationDelivery, TableHealthSignal
 
 pytestmark = pytest.mark.integration
 
@@ -110,3 +118,17 @@ def test_a_table_another_sweep_holds_is_skipped_on_postgres(
         select(TableHealthSignal).where(TableHealthSignal.signal == "freshness")
     ).all()
     assert (held.evaluated, free.evaluated, len(rows)) == (0, 1, 1)
+
+
+def test_a_pipeline_that_stays_broken_sends_one_health_message_on_postgres(
+    session: Session, tmp_path: Path, principal: PrincipalRef
+) -> None:
+    """Fired, fired, ok, fired: two messages, the second only after the signal was ok."""
+    catalog = health_catalog(session, tmp_path, principal)
+    _deployed(session, _MANIFEST)
+    _seed(session, "volume", {"added": 1_000, "total": 1_000}, first_day=-10)
+    catalog.append(principal, _ORDERS, _rows([1, 2, 3]))
+    catalog.append(principal, _ORDERS, _rows([4, 5, 6]))
+    catalog.append(principal, _ORDERS, _rows(list(range(10, 1_010))))
+    catalog.append(principal, _ORDERS, _rows([7, 8, 9]))
+    assert len(session.scalars(select(NotificationDelivery)).all()) == 2

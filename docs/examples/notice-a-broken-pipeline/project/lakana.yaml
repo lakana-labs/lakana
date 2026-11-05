@@ -1,0 +1,8 @@
+# Lakana project. Reference: https://lakana-labs.github.io/lakana/how-to/projects/
+repo: readings
+defaults:
+  materialize: table
+jobs:
+  nightly:
+    select: ["silver.*"]
+    upstream: true
