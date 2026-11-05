@@ -6,6 +6,8 @@ import uuid
 
 import pytest
 from core_test_helpers import ensure_table
+from graph_test_helpers import asset_entry, point
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from lakana_core.auth import (
@@ -15,7 +17,7 @@ from lakana_core.auth import (
     PrincipalRef,
     Securable,
 )
-from lakana_core.models import TableColumn
+from lakana_core.models import Environment, Repository, RepositoryKind, TableColumn
 from lakana_core.projects.checks import CheckSpec, GeneratedFrom
 from lakana_core.runs.model_precheck import is_numeric, model_problem, type_family, types_match
 
@@ -551,4 +553,52 @@ def test_a_valid_at_reference_to_a_history_target_passes_the_precheck(
             session, AllowAllAuthorization(), env_with_tables.principal, "dev", _spec(generated)
         )
         is None
+    )
+
+
+def _builds_d(session: Session, write: str | None) -> None:
+    """Deploy repository `stores`, whose current project version builds `gold.d` with `write`.
+
+    Parameters
+    ----------
+    session
+        Database session; committed.
+    write
+        The write mode of `gold.d`'s entry; `None` to build another table only.
+    """
+    env_id = session.scalars(select(Environment.id).where(Environment.name == "dev")).one()
+    repo = Repository(id=uuid.uuid4(), name="stores", kind=RepositoryKind.HTTPS, url="https://h/s")
+    session.add(repo)
+    session.flush()
+    entry = asset_entry("gold.dim_store", (), "x", key=("store_id",))
+    entry.update({"table": "gold.d" if write else "gold.other", "write": write or "replace"})
+    point(session, env_id, repo, {"version": 13, "main_language": "en", "assets": [entry]})
+    session.commit()
+
+
+@pytest.mark.parametrize("write", ["history", "replace", None])
+def test_a_reference_without_at_to_a_history_table_of_another_repository_fails(
+    session: Session, env_with_tables: _Tables, write: str | None
+) -> None:
+    """The check cannot pick a version without `at:`, so it says so instead of passing (#431)."""
+    env_with_tables(
+        own={"store_id": "long"},
+        target={"store_id": "long", "valid_from": "timestamptz", "valid_to": "timestamptz"},
+    )
+    _builds_d(session, write)
+    text = model_problem(
+        session,
+        AllowAllAuthorization(),
+        env_with_tables.principal,
+        "dev",
+        _spec(GeneratedFrom("references", ("store_id",), "gold.d", "store_id")),
+    )
+    if write != "history":  # columns named like history's are not history
+        assert text is None
+        return
+    assert text == (
+        "The reference `store_id: gold.d` at `assets/gold/f.sql:1` declares no `at:`, but "
+        "`gold.d` now keeps the history of its rows (`write: history`), so the check cannot tell "
+        "which version a row means; add `at: <time column>` to the reference (`store_id: {to: "
+        "gold.d, at: <column>}`) in `assets/gold/f.sql:1` and deploy again."
     )

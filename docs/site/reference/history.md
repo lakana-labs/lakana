@@ -288,6 +288,16 @@ lakana deploy --env dev --dry-run
 
 and the message names what to write: ``` `gold.fact_orders` references `gold.dim_customer` (`customer_id`), which keeps the history of its rows (`write: history`); say which version each row means with the row's time: `customer_id: {to: gold.dim_customer, at: <column>}` ```. The other texts are in [References](asset-front-matter.md#references).
 
+A reference from **another repository** is not refused when its target becomes a history
+dimension: a deploy never fails because of another repository. The deploy that turns the table
+into one warns instead, naming each reference elsewhere without `at:`: ``this deploy makes
+`gold.dim_customer` keep the history of its rows (`write: history`), and other repositories
+reference it without `at:`, so their reference checks fail until each says which version a row
+means; tell their owners to add `at: <time column>` to each reference — the references:
+`gold.fact_orders.customer_id` in assets/gold/fact_orders.sql (sales)``. Until the other project
+adds `at:` and deploys again, its reference check fails with a text that says what to add (see
+[Checks](checks.md)).
+
 `lakana table get` shows the time next to the reference (`(exists, valid at ordered_at)`), and
 `lakana table references` has an `at` column in its "References" and its "Referenced by" lists;
 REST and the SDK carry it as `at`.

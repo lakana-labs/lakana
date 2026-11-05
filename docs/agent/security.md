@@ -471,12 +471,23 @@ The rows are written only by a deploy, a rollback and a run's table creation
 (`catalog/model_metadata.py`); REST, the SDK and the CLI only read them. References are held by
 name, as the header names its target: a table renamed through the Iceberg REST catalog is no longer
 the target of references to its old name, and a later table of that name is, as the reference's
-generated check reads it. A generated reference check's `error` never names the target either:
-the pre-check texts (`runs/model_precheck.py`) name only the asset's path and column, the count's
+generated check reads it. A generated reference check's `error` never names the target either
+(one exception below): the pre-check texts (`runs/model_precheck.py`) name only the asset's path
+and column, the count's
 refused and missing cases are `ERROR_UNREADABLE`, other failures are the engine's error type or the
 cause in words, and the one fixed text that names a table, the row filter or column mask failure,
 is replaced by its variant that names none unless it names the checked table (`error_text(...,
 checked_table=)`, which the worker passes for a reference check; `test_policy_read_errors.py`).
+The exception is `AT_NEEDED` (#431): a reference without `at:` whose target another repository
+has since switched to `write: history` errors naming the target and the missing `at:`. It is
+written only after the run's principal is found to be allowed to read the target (the same
+`permits` call that guards the column read) and only when the target's builder's current
+manifest says `write: history` (not merely `valid_from`/`valid_to` columns), and the result is
+withheld whole from a reader who may not read the target (`runs/hidden_checks.py`; every
+reference check from a task reader). The deploy that switches the table warns with the
+deployer's visibility (`DeployService._history_warnings`, a `{"warning", "tables"}` object shown
+as an impact warning is). Pins: `test_a_reference_without_at_to_a_history_table_of_another_repository_fails`,
+`test_switching_a_table_to_history_warns_of_references_without_at_elsewhere`.
 The renamed table keeps its model rows (keyed by its id) under its new
 name until it is dropped. Pins: `test_describe_table.py`
 (`test_a_missing_target_and_an_unreadable_target_look_the_same_to_a_reader`,
