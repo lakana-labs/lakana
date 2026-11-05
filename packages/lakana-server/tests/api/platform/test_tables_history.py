@@ -126,7 +126,7 @@ def test_a_refused_batch_is_422_with_the_text(client: TestClient) -> None:
     create_environment(client)
     response = _history(client, [], expected_snapshot_id="none", close_missing="true")
     assert response.status_code == 422, response.text
-    assert "The batch is empty, and `close_missing=True` would close" in response.text
+    assert "The batch is empty, and `close_missing` would close" in response.text
 
 
 def test_a_missing_table_without_none_is_404_and_a_stale_snapshot_409(client: TestClient) -> None:

@@ -448,10 +448,12 @@ targets see it whole. The 50-issue cap is applied per reader, **after** withhold
 reader gets a line for (a `withheld` of `""` gets none), and for the rest only how many every
 reader gets and the targets of the others, so a reader is listed its first 50 issues and
 `…and N more issues` counts only those it would be shown: the same lines and N for an unreadable
-target as for a missing one, wherever its lines fall. The deployer reads through the same cap with
-every target readable. Pins:
+target as for a missing one, wherever its lines fall. The stored prefix keeps every
+withheld-for-someone issue before the 50th issue all readers see, so its size grows with the
+project's own files (for example a glossary link listing many missing columns); every reader still
+sees at most 50 issues. The deployer reads through the same cap with every target readable. Pins:
 `test_a_long_error_lists_and_counts_an_unreadable_target_as_a_missing_one` (references),
-`test_a_long_error_counts_an_unreadable_linked_table_as_a_missing_one` (glossary links). Pins: `test_two_references_to_one_hidden_target_read_like_two_missing_targets`,
+`test_a_long_error_counts_an_unreadable_linked_table_as_a_missing_one` (glossary links), `test_two_references_to_one_hidden_target_read_like_two_missing_targets`,
 `test_a_run_principal_refusal_reads_like_a_missing_target_in_its_place`, the artifact and clash
 tests in `test_projects_deploys.py`. Residuals:
 

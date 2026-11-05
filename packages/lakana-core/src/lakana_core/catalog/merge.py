@@ -85,9 +85,9 @@ SDK_ADVICE = MergeAdvice(
     ),
     holder="server",
     empty_close=(
-        "The batch is empty, and `close_missing=True` would close every open version of {table}; "
-        "nothing was written. If the source really is empty, write it without "
-        "`close_missing=True` (a Python asset: for this run)."
+        "The batch is empty, and `close_missing` would close every open version of {table}; "
+        "nothing was written. If the source really is empty, send this batch without "
+        "`close_missing`."
     ),
 )
 """For a caller of the SDK, the CLI or the REST API: it builds and sends the batches. A Python

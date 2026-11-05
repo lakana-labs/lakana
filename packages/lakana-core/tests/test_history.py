@@ -605,9 +605,9 @@ def test_a_nested_column_is_refused_with_the_cast_to_write() -> None:
         ),
         (
             SDK_ADVICE,
-            "The batch is empty, and `close_missing=True` would close every open version of "
-            "gold.dim_customer; nothing was written. If the source really is empty, write it "
-            "without `close_missing=True` (a Python asset: for this run).",
+            "The batch is empty, and `close_missing` would close every open version of "
+            "gold.dim_customer; nothing was written. If the source really is empty, send this "
+            "batch without `close_missing`.",
         ),
     ],
     ids=["sql", "python"],

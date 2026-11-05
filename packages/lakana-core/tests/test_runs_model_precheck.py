@@ -602,3 +602,27 @@ def test_a_reference_without_at_to_a_history_table_of_another_repository_fails(
         "which version a row means; add `at: <time column>` to the reference (`store_id: {to: "
         "gold.d, at: <column>}`) in `assets/gold/f.sql:1` and deploy again."
     )
+
+
+def test_a_history_target_the_principal_may_not_read_reads_like_a_missing_one(
+    session: Session, env_with_tables: _Tables, deny_target: AuthorizationService
+) -> None:
+    """Without READ_TABLE the combined text comes, not the one naming the target."""
+    env_with_tables(
+        own={"store_id": "long"},
+        target={"store_id": "long", "valid_from": "timestamptz", "valid_to": "timestamptz"},
+    )
+    _builds_d(session, "history")
+    text = model_problem(
+        session,
+        deny_target,
+        env_with_tables.principal,
+        "dev",
+        _spec(GeneratedFrom("references", ("store_id",), "gold.d", "store_id")),
+    )
+    assert text == (
+        "The reference `store_id` at `assets/gold/f.sql:1` cannot be checked: its target is "
+        "missing, not readable by the run's principal, or no longer has the key column; fix the "
+        "reference or the grant and deploy again."
+    )
+    assert "gold.d" not in text
