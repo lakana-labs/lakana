@@ -36,9 +36,10 @@ after the write on its last attempt, or in a run that is cancelled, is followed 
 that only sets the table back (`set_back_only`): it builds and checks nothing.
 
 A check of family `health` (`projects.health_checks`, from `health: {signal: block}`) counts
-nothing: `_health_result` reads whether the signal fired at any snapshot the task run's last
-attempt wrote (an earlier attempt's partial commit is not judged; it is still set back), and a
-firing fails the check with a text that names no value, since every reader of the run reads it.
+nothing: `_health_result` reads whether the signal fired at any snapshot the task run wrote; for
+a write that replaces the table, only the last attempt's (an earlier attempt's partial commit,
+which the retry replaced, is not judged; it is still set back). A firing fails the check with
+a text that names no value, since every reader of the run reads it.
 
 What such a rollback undoes is the task run's own chain of writes and nothing else. The
 write guard records the tip of that chain in each write's own commit
@@ -90,7 +91,7 @@ from lakana_core.models import (
 from lakana_core.projects.checks import CheckSpec, read_manifest_checks
 from lakana_core.projects.discovery import _fold
 from lakana_core.projects.health_checks import HEALTH_FAMILY, health_specs
-from lakana_core.projects.manifest import manifest_assets
+from lakana_core.projects.manifest import entry_write, manifest_assets
 from lakana_core.runs.check_message import (
     BLOCKING,
     KEPT,
@@ -405,14 +406,21 @@ def _counted_outcome(spec: CheckSpec, rows: int) -> CheckOutcome:
 
 
 def _own_chain(
-    session: Session, engine: RunEngine, environment: str, written: Written | None
+    session: Session,
+    engine: RunEngine,
+    environment: str,
+    written: Written | None,
+    *,
+    replaces: bool,
 ) -> list[int]:
     """List the snapshots the task run's last attempt wrote, its tip first.
 
     A Python asset can commit several times; each commit records the signals of its own
-    snapshot, so a blocking health check judges every one, not only the tip. Only the commits of
-    the attempt that wrote the tip count (`attempt_stamp.last_attempts_snapshots`): a partial
-    commit an earlier, failed attempt left is what the retry replaced.
+    snapshot, so a blocking health check judges every one, not only the tip. For a write that
+    replaces the table, only the commits of the attempt that wrote the tip count
+    (`attempt_stamp.last_attempts_snapshots`): a partial commit an earlier, failed attempt left
+    is what the retry replaced. An append, merge or history write keeps an earlier attempt's
+    commits published, so they are judged too.
 
     Parameters
     ----------
@@ -424,13 +432,16 @@ def _own_chain(
         The run's environment.
     written
         The task run's written record; `None` when it wrote nothing.
+    replaces
+        Whether the task's write replaces the table.
 
     Returns
     -------
     list of int
         `health_record.own_chain` from `Written.snapshot_after` back to `Written.snapshot_before`,
-        without the snapshots of earlier attempts; the tip alone when the table's metadata no
-        longer holds it (expired) or the table is not a managed one; empty without a tip.
+        without the snapshots of earlier attempts when `replaces`; the tip alone when the table's
+        metadata no longer holds it (expired) or the table is not a managed one; empty without a
+        tip.
 
     Raises
     ------
@@ -448,9 +459,10 @@ def _own_chain(
         metadata = read_metadata(resolved.file_io, row.metadata_location)
     finally:
         session.rollback()
-    return last_attempts_snapshots(
-        metadata, own_chain(metadata, written.snapshot_after, written.snapshot_before)
-    ) or [written.snapshot_after]
+    chain = own_chain(metadata, written.snapshot_after, written.snapshot_before)
+    if replaces:
+        chain = last_attempts_snapshots(metadata, chain)
+    return chain or [written.snapshot_after]
 
 
 def _health_result(
@@ -994,6 +1006,9 @@ class _Phase:
     is_asset
         Whether the project version builds the task's table. A ``source_check`` task of such a
         table is the check task of a table that was kept after a failed check.
+    replaces
+        Whether the task's write replaces the table (`entry_write` ``replace``): a retried
+        attempt then supersedes what an earlier one committed (`_own_chain`).
     """
 
     environment_id: uuid.UUID
@@ -1004,6 +1019,7 @@ class _Phase:
     specs: tuple[CheckSpec, ...]
     unreadable: bool
     is_asset: bool
+    replaces: bool = False
 
 
 def _without_clashes(specs: Sequence[CheckSpec]) -> tuple[list[CheckSpec], dict[str, str]]:
@@ -1113,6 +1129,8 @@ def _read_phase(session: Session, claimed: ClaimedTask, *, set_back: bool = Fals
         ),
         unreadable=read.unreadable_for(claimed.asset),
         is_asset=claimed.asset in manifest_assets(version.manifest_json),
+        replaces=entry_write(manifest_assets(version.manifest_json).get(claimed.asset))[0]
+        == "replace",
     )
     session.rollback()
     return phase
@@ -1822,7 +1840,9 @@ def _checks_under(
         elif spec.generated is not None and spec.generated.family == HEALTH_FAMILY:
             counted = None
             if chain is None:
-                chain = _own_chain(session, engine, phase.environment, written)
+                chain = _own_chain(
+                    session, engine, phase.environment, written, replaces=phase.replaces
+                )
             outcome, error, health_snapshot = _health_result(
                 session,
                 spec,

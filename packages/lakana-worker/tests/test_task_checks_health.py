@@ -355,12 +355,21 @@ def test_the_own_chain_falls_back_to_the_tip(world: World) -> None:
         table_id = resolve_table_id(session, "dev", "bronze", "events")
         assert table_id is not None
         own = task_checks_module._own_chain
-        assert own(session, engine, "dev", None) == []
-        assert own(session, engine, "dev", Written(table_id, None, None, publishes=False)) == []
+        assert own(session, engine, "dev", None, replaces=False) == []
+        assert (
+            own(
+                session,
+                engine,
+                "dev",
+                Written(table_id, None, None, publishes=False),
+                replaces=False,
+            )
+            == []
+        )
         gone = Written(uuid.uuid4(), None, 7, publishes=False)
-        assert own(session, engine, "dev", gone) == [7]  # no such table
+        assert own(session, engine, "dev", gone, replaces=False) == [7]  # no such table
         expired = Written(table_id, None, 4711, publishes=False)
-        assert own(session, engine, "dev", expired) == [4711]  # not in the metadata
+        assert own(session, engine, "dev", expired, replaces=False) == [4711]  # not in the metadata
 
 
 def test_the_log_line_of_a_failed_health_check_is_its_text() -> None:
@@ -452,10 +461,11 @@ def test_a_hand_written_check_that_takes_a_health_check_name_fails_the_task(worl
 def test_a_retried_attempt_is_judged_on_its_own_commits(
     world: World, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The chain judged leaves out what an earlier, failed attempt of the task run committed.
+    """A replacing retry is judged on its own commits; an appending one on the whole chain (R3).
 
     Attempt 1 committed snapshot 2 (half the rows, its volume fired) and failed; attempt 2
-    committed 3. Only 3 is judged.
+    committed 3. A write that replaces the table superseded 2, so only 3 is judged. An append or
+    merge keeps 2 published, so it is judged and blocks.
 
     Parameters
     ----------
@@ -516,11 +526,21 @@ def test_a_retried_attempt_is_judged_on_its_own_commits(
         table_id = resolve_table_id(session, "dev", "bronze", "events")
         assert table_id is not None
         written = Written(table_id, 1, 3, publishes=False)
-        chain = task_checks_module._own_chain(session, _engine(world), "dev", written)
-        assert chain == [3]
+        own = task_checks_module._own_chain
+        replaced = own(session, _engine(world), "dev", written, replaces=True)
+        assert replaced == [3]
         assert task_checks_module._health_result(
-            session, _health_spec("volume"), table_id, chain, "dev", kept=True
+            session, _health_spec("volume"), table_id, replaced, "dev", kept=True
         ) == (CheckOutcome.PASSED, None, 3)
+        # An append keeps attempt 1's commit published: it is judged, and it fired.
+        appended = own(session, _engine(world), "dev", written, replaces=False)
+        assert appended == [3, 2]
+        assert (
+            task_checks_module._health_result(
+                session, _health_spec("volume"), table_id, appended, "dev", kept=True
+            )[0]
+            is CheckOutcome.FAILED
+        )
 
 
 def test_a_block_signal_that_could_not_be_judged_warns(world: World) -> None:
