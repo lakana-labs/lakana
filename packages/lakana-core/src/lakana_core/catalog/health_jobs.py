@@ -14,7 +14,7 @@ from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import ScalarSelect, func, select
+from sqlalchemy import ColumnElement, ScalarSelect, and_, case, func, select
 from sqlalchemy.orm import Session
 
 from lakana_core.catalog.health_record import NEWEST_COMMIT, NOT_SET_BACK
@@ -233,7 +233,11 @@ def _still_fired(
     own = [row.id for row in rows]
     keys = sorted({(row.signal, row.column_name) for row in rows}, key=repr)
 
-    def newest(signal: str, column: str | None, *, numbered: bool) -> ScalarSelect[str]:
+    told = {(row.signal, row.column_name): row.state for row in rows}
+
+    def newest(
+        signal: str, column: str | None, *, numbered: bool, unjudged: bool
+    ) -> ScalarSelect[str]:
         """Select the state of a key's newest earlier row, with or without a sequence number.
 
         Parameters
@@ -244,6 +248,11 @@ def _still_fired(
             The column; `None` for the whole table.
         numbered
             Whether the rows have a sequence number (a commit's) or not (the sweep's).
+        unjudged
+            For a ``no_metrics`` row its commit could not judge: the newest earlier row of the
+            signal in any column, which counts as the same state only when it is again such a
+            table-level row. A judged commit writes per-column rows only, so the previous
+            table-level row alone would be the last unjudged one, however old.
 
         Returns
         -------
@@ -251,34 +260,45 @@ def _still_fired(
             The state, or NULL without such a row.
         """
         number = TableHealthSignal.sequence_number
-        return (
-            select(TableHealthSignal.state)
-            .where(
-                TableHealthSignal.table_id == table_id,
-                TableHealthSignal.signal == signal,
+        state: ColumnElement[str] = TableHealthSignal.state.expression
+        if unjudged:
+            state = case(
+                (
+                    and_(
+                        TableHealthSignal.column_name.is_(None),
+                        TableHealthSignal.state == "no_metrics",
+                    ),
+                    "no_metrics",
+                ),
+                else_="judged",
+            )
+        where = [
+            TableHealthSignal.table_id == table_id,
+            TableHealthSignal.signal == signal,
+            number.is_not(None) if numbered else number.is_(None),
+            TableHealthSignal.id.not_in(own),
+            NOT_SET_BACK,
+        ]
+        if not unjudged:
+            where.append(
                 TableHealthSignal.column_name.is_(None)
                 if column is None
-                else TableHealthSignal.column_name == column,
-                number.is_not(None) if numbered else number.is_(None),
-                TableHealthSignal.id.not_in(own),
-                NOT_SET_BACK,
+                else TableHealthSignal.column_name == column
             )
-            .order_by(*NEWEST_COMMIT)
-            .limit(1)
-            .scalar_subquery()
-        )
+        return select(state).where(*where).order_by(*NEWEST_COMMIT).limit(1).scalar_subquery()
 
     states = session.execute(
         select(
             *(
                 func.coalesce(
-                    newest(signal, column, numbered=True), newest(signal, column, numbered=False)
+                    newest(signal, column, numbered=True, unjudged=unjudged),
+                    newest(signal, column, numbered=False, unjudged=unjudged),
                 )
                 for signal, column in keys
+                for unjudged in (told[signal, column] == "no_metrics",)
             )
         )
     ).one()
-    told = {(row.signal, row.column_name): row.state for row in rows}
     return {key for key, state in zip(keys, states, strict=True) if state == told[key]}
 
 

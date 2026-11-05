@@ -782,3 +782,63 @@ def test_a_signal_its_commit_could_not_judge_is_told_without_values(
         )
         == []
     )
+
+
+def test_an_unjudged_signal_is_told_again_once_it_was_judged_in_between(
+    catalog: CatalogService, session: Session
+) -> None:
+    """The previous observation of an unjudged row is the previous commit's, any column (R1).
+
+    Unjudged, judged, unjudged: told twice. Unjudged twice in a row: told once.
+
+    Parameters
+    ----------
+    catalog
+        The catalog, which creates `silver.orders`.
+    session
+        Database session.
+    """
+    environment_id, table_id = _environment_id(session), _table_id(session)
+
+    def row(sequence: int, column: str | None, state: str) -> TableHealthSignal:
+        """Store one `range` row of `silver.orders`, a day per sequence number.
+
+        Parameters
+        ----------
+        sequence
+            Its sequence number and snapshot.
+        column
+            Its column; `None` for the table-level row of an unjudged commit.
+        state
+            Its state.
+
+        Returns
+        -------
+        TableHealthSignal
+            The row, flushed.
+        """
+        stored = TableHealthSignal(
+            id=uuid.uuid4(),
+            environment_id=environment_id,
+            table_id=table_id,
+            signal="range",
+            column_name=column,
+            snapshot_id=sequence,
+            sequence_number=sequence,
+            observed={"reason": "unreadable"} if state == "no_metrics" else None,
+            band=None,
+            state=state,
+            effect="block",
+            observed_at=_FIRED_AT + timedelta(days=sequence),
+        )
+        session.add(stored)
+        session.flush()
+        return stored
+
+    row(1, None, "no_metrics")  # told
+    for sequence in range(2, 10):
+        row(sequence, "price", "ok")  # judged commits write per-column rows only
+    again = row(10, None, "no_metrics")
+    assert _still_fired(session, [again]) == set()  # told again
+    twice = row(11, None, "no_metrics")
+    assert _still_fired(session, [twice]) == {("range", None)}  # not told twice
