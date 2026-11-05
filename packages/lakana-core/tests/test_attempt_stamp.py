@@ -22,6 +22,7 @@ from lakana_core.catalog import attempt_stamp
 from lakana_core.catalog.attempt_stamp import (
     CLAIM_PROPERTY,
     TASK_RUN_PROPERTY,
+    last_attempts_snapshots,
     stamp_snapshots,
     written_by_attempt,
 )
@@ -260,3 +261,23 @@ def test_the_walk_gives_up_after_its_limit(monkeypatch: pytest.MonkeyPatch) -> N
     assert not written_by_attempt(metadata, since=1, task_run_id=_TASK_RUN, claim=2)
     monkeypatch.setattr(attempt_stamp, "MAX_ANCESTORS", 3)
     assert written_by_attempt(metadata, since=1, task_run_id=_TASK_RUN, claim=2)
+
+
+def test_a_retried_attempt_is_judged_on_its_own_snapshots() -> None:
+    """Of a task run's chain, only what the attempt that wrote the tip committed counts (M4).
+
+    Attempt 1 committed 2 and failed; attempt 2 committed 3 and 5, with somebody else's 4 between.
+    A chain without an attempt's stamp at its tip (a SQL task's) is kept whole.
+    """
+    metadata = _table(
+        _snapshot(1, None),
+        _snapshot(2, 1, **_stamp(claim=1)),
+        _snapshot(3, 2, **_stamp(claim=2)),
+        _snapshot(4, 3),
+        _snapshot(5, 4, **_stamp(claim=2)),
+        _snapshot(6, 5, **{TASK_RUN_PROPERTY: str(_TASK_RUN)}),
+    )
+    assert last_attempts_snapshots(metadata, [5, 4, 3, 2]) == [5, 3]
+    assert last_attempts_snapshots(metadata, [6, 5]) == [6, 5]
+    assert last_attempts_snapshots(metadata, [7]) == [7]  # not in the metadata
+    assert last_attempts_snapshots(metadata, []) == []

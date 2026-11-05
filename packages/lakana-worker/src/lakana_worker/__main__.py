@@ -23,6 +23,7 @@ from lakana_core.audit.denial_limiter import DenialAuditLimiter
 from lakana_core.auth import AuthorizationService
 from lakana_core.catalog.columns import backfill_table_columns
 from lakana_core.catalog.health import sweep_table_reads
+from lakana_core.catalog.health_sweep import HEALTH_SWEEP_MAX_SECONDS, sweep_health
 from lakana_core.catalog.location_sweep import (
     DEFAULT_MAX_SECONDS as LOCATION_SWEEP_MAX_SECONDS,
 )
@@ -606,6 +607,8 @@ def main() -> None:
     def housekeeping(now: datetime, stop: threading.Event) -> None:
         """Sweep artifacts, table locations (and expire tables), code archives, job fires and reads.
 
+        Also checks the freshness of tables and deletes their health signals past the kept period.
+
         Also stores the columns of up to 50 tables that have none stored yet, so search finds them,
         and the sizes of up to 200 managed tables never measured or changed since, for
         `lakana env usage`.
@@ -694,6 +697,22 @@ def main() -> None:
             )
         try:
             with session_factory() as session:
+                sweep_health(
+                    session,
+                    now=now,
+                    retention_days=settings.health.retention_days,
+                    rotation=rotation,
+                    should_stop=stop.is_set,
+                )
+        except Exception as exc:
+            logger.warning(
+                "The table health sweep failed (%s).",
+                type(exc).__name__,
+                exc_info=True,
+                extra=log_event(LogEvent.SWEEP_FAILED),
+            )
+        try:
+            with session_factory() as session:
                 measure_table_sizes(
                     session, StorageResolver(session, key_provider), should_stop=stop.is_set
                 )
@@ -722,7 +741,9 @@ def main() -> None:
             "dropped tables and of tables whose create never finished, "
             "code archives of failed deploys, table read counts past "
             "their kept period and attempt directories and deploy checkouts of dead workers are "
-            "not removed, the columns of tables that existed before search are not stored "
+            "not removed, table health signals are neither checked for freshness nor deleted "
+            "after their kept period, the columns of tables that existed before search are not "
+            "stored "
             "for it, the sizes of tables and of the worker's caches are not measured, and uv's "
             "package cache is not trimmed. Set it to a number "
             "of seconds (3600 is the default) to turn them on."
@@ -736,7 +757,8 @@ def main() -> None:
         housekeeping_limit=DEFAULT_MAX_SECONDS
         + LOCATION_SWEEP_MAX_SECONDS
         + CODE_SWEEP_MAX_SECONDS
-        + SIZE_MEASURE_MAX_SECONDS,
+        + SIZE_MEASURE_MAX_SECONDS
+        + HEALTH_SWEEP_MAX_SECONDS,
         lease_seconds=settings.run.lease_seconds,
         renew_seconds=settings.run.renew_seconds,
         caps=RunCaps.from_config(settings.query_limits, settings.run),

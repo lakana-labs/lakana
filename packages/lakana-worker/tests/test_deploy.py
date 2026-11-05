@@ -3929,3 +3929,202 @@ def test_a_project_without_layers_keeps_its_manifest_and_hints(
     version = session.get(JobVersion, run.job_version_id)
     assert version is not None
     assert "layers" not in version.manifest_json
+
+
+def test_a_deploy_refuses_a_health_column_the_table_lacks(
+    session: Session, principal: PrincipalRef, world: World
+) -> None:
+    """A per-column `health:` entry names a column of the SELECT, at the header's line."""
+    commit(
+        world.repo_path,
+        {
+            "assets/gold/t.sql": ("/* lakana\nhealth: {range: {price: off}}\n*/\nSELECT 1 AS id\n"),
+        },
+    )
+    run = _submit_and_run(session, principal, world)
+    assert run.status is DeployStatus.FAILED
+    assert run.error_message is not None
+    assert (
+        "assets/gold/t.sql:1: health: range names column price, which gold.t does not have "
+        "(columns: id); fix the name or remove it" in run.error_message
+    )
+
+
+def test_a_deploy_refuses_health_on_a_view(
+    session: Session, principal: PrincipalRef, world: World
+) -> None:
+    """A view has no snapshots, so `health:` on it is refused with the way out."""
+    commit(
+        world.repo_path,
+        {
+            "assets/gold/v.sql": (
+                "/* lakana\nmaterialize: view\nhealth: off\n*/\nSELECT 1 AS id\n"
+            ),
+        },
+    )
+    run = _submit_and_run(session, principal, world)
+    assert run.status is DeployStatus.FAILED
+    assert run.error_message is not None
+    assert (
+        "assets/gold/v.sql:1: health: does not apply to a view, which has no snapshots to "
+        "watch; remove it, or materialize the asset as a table" in run.error_message
+    )
+
+
+@pytest.mark.parametrize(
+    ("health", "message"),
+    [
+        ("{rows: warn}", "health: rows is not a health signal; use freshness, volume"),
+        ("{freshness: block}", "health: freshness cannot block: it fires between runs"),
+        ("{volume: loud}", "health: volume must be warn, block or off, not loud"),
+    ],
+)
+def test_a_deploy_refuses_a_bad_health_value_with_the_file(
+    session: Session, principal: PrincipalRef, world: World, health: str, message: str
+) -> None:
+    """An unknown signal and `block` on freshness name the file, the cause and the next step."""
+    commit(
+        world.repo_path,
+        {"assets/gold/t.sql": f"/* lakana\nhealth: {health}\n*/\nSELECT 1 AS id\n"},
+    )
+    run = _submit_and_run(session, principal, world)
+    assert run.status is DeployStatus.FAILED
+    assert run.error_message is not None
+    assert run.error_message.startswith("assets/gold/t.sql:")
+    assert message in run.error_message
+
+
+def test_a_deploy_refuses_a_hand_written_check_that_takes_a_health_check_name(
+    session: Session, principal: PrincipalRef, world: World
+) -> None:
+    """`health: {volume: block}` generates `health_volume`; a file of that name is refused.
+
+    Both results would be recorded under one name and the later would replace the earlier, so a
+    failing hand-written check could pass. A `health_volume` file is fine while `volume` does not
+    block.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    principal
+        The deploying principal.
+    world
+        The world.
+    """
+    files = {
+        "assets/silver/orders.sql": "/* lakana\nhealth: {volume: block}\n*/\nSELECT 1 AS id\n",
+        "checks/silver/orders/health_volume.sql": "SELECT id FROM silver.orders\n",
+    }
+    commit(world.repo_path, files)
+    run = _submit_and_run(session, principal, world)
+    assert run.status is DeployStatus.FAILED
+    assert run.error_message is not None
+    assert (
+        "A check named `health_volume` is generated for `silver.orders`; rename "
+        "`checks/silver/orders/health_volume.sql`." in run.error_message
+    )
+
+
+def test_a_deploy_counts_the_judged_columns_in_the_existing_tables_order(
+    session: Session, principal: PrincipalRef, world: World
+) -> None:
+    """An append into an existing table keeps its schema, so its order decides the 200 (R4).
+
+    Parameters
+    ----------
+    session
+        Database session.
+    principal
+        The deploying principal.
+    world
+        The world.
+    """
+    catalog = CatalogService(session, StorageResolver(session), AllowAllAuthorization())
+    catalog.create_table(
+        principal,
+        TableRef("dev", NamespacePath.from_parts(["bronze"]), "wide"),
+        schema=Schema(
+            *(NestedField(i + 1, f"f{i}", LongType(), required=False) for i in range(200)),
+            NestedField(201, "x", LongType(), required=False),
+        ),
+    )
+    commit(
+        world.repo_path,
+        {
+            "assets/bronze/wide.sql": (
+                "/* lakana\nwrite: append\nwatermark: x\nhealth: {range: {x: block}}\n*/\n"
+                "SELECT 1 AS x\n"
+            ),
+        },
+    )
+    run = _submit_and_run(session, principal, world)
+    assert run.status is DeployStatus.FAILED
+    assert run.error_message is not None
+    assert (
+        "health: range of x can never block: only the first 200 columns of a table are judged, "
+        "and x is column 201;" in run.error_message
+    )
+
+
+def test_a_table_whose_columns_cannot_be_read_is_counted_in_its_assets_order(
+    session: Session,
+    principal: PrincipalRef,
+    world: World,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """No table yet, or storage that does not answer: the `SELECT`'s order, and the deploy goes on.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    principal
+        The deploying principal.
+    world
+        The world.
+    monkeypatch
+        Breaks the metadata read.
+    caplog
+        The log.
+    """
+    files = {
+        "assets/bronze/wide.sql": (
+            "/* lakana\nwrite: append\nwatermark: x\nhealth: {range: {x: block}}\n*/\n"
+            "SELECT 1 AS x\n"
+        ),
+    }
+    commit(world.repo_path, files)
+    assert _submit_and_run(session, principal, world).status is DeployStatus.SUCCEEDED
+
+    catalog = CatalogService(session, StorageResolver(session), AllowAllAuthorization())
+    catalog.create_table(
+        principal,
+        TableRef("dev", NamespacePath.from_parts(["bronze"]), "wide"),
+        schema=Schema(NestedField(1, "x", LongType(), required=False)),
+    )
+
+    def unreadable(*args: object, **kwargs: object) -> object:
+        """Fail as storage that does not answer.
+
+        Parameters
+        ----------
+        *args
+            Ignored.
+        **kwargs
+            Ignored.
+
+        Raises
+        ------
+        OSError
+            Always.
+        """
+        raise OSError("the storage did not answer")
+
+    monkeypatch.setattr(deploy_module, "current_columns", unreadable)
+    files["assets/bronze/wide.sql"] += "-- again\n"
+    commit(world.repo_path, files)
+    with caplog.at_level(logging.WARNING, logger="lakana_worker.deploy"):
+        assert _submit_and_run(session, principal, world).status is DeployStatus.SUCCEEDED
+    assert any("Could not read the columns of bronze.wide" in r.message for r in caplog.records)

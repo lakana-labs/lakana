@@ -23,7 +23,7 @@ from pyiceberg.io import FileIO
 from pyiceberg.manifest import DataFile
 from pyiceberg.table.metadata import TableMetadata
 from pyiceberg.table.snapshots import Operation, Snapshot
-from sqlalchemy import ColumnElement, Subquery, and_, delete, func, not_, select
+from sqlalchemy import ColumnElement, Subquery, and_, delete, func, not_, select, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import InstrumentedAttribute, Session
 from sqlalchemy.sql.elements import UnaryExpression
@@ -43,9 +43,11 @@ from lakana_core.catalog.health_signals import (
     schema_signal,
     volume_signal,
 )
+from lakana_core.db import db_now
 from lakana_core.errors import StorageUnavailableError, ValidationError
 from lakana_core.identifiers import shown
 from lakana_core.models import TableHealthSignal
+from lakana_core.secrets.keys import KeyProvider
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +64,10 @@ _BY_COLUMN: tuple[InstrumentedAttribute[Any], ...] = (
     TableHealthSignal.signal,
     TableHealthSignal.column_name,
 )
+
+NOT_SET_BACK: ColumnElement[bool] = TableHealthSignal.set_back_at.is_(None)
+"""The rows that are still the table's data: a set-back (`forget_set_back`) marks the others,
+which only the history shows."""
 
 NEWEST_COMMIT: tuple[UnaryExpression[Any], ...] = (
     TableHealthSignal.sequence_number.desc(),
@@ -136,8 +142,9 @@ def recent_observations(
     -------
     dict
         (signal, column) → observed values, newest first, at most `HISTORY` each, from rows in
-        state ``ok``, ``fired`` or ``no_history``; a fired row whose effect was ``block`` is left
-        out, because its data was set back.
+        state ``ok``, ``fired`` or ``no_history``. A row whose snapshot was set back is left out,
+        and does not count towards the window either; so is a fired row whose effect was
+        ``block``, whose data is set back unless the set-back failed.
     """
     since = session.scalar(
         select(TableHealthSignal.observed_at)
@@ -145,6 +152,7 @@ def recent_observations(
             TableHealthSignal.table_id == table_id,
             TableHealthSignal.signal == "schema",
             TableHealthSignal.sequence_number.is_not(None),
+            NOT_SET_BACK,
         )
         .order_by(*NEWEST_COMMIT)
         .offset(2 * HISTORY - 1)
@@ -155,6 +163,7 @@ def recent_observations(
         TableHealthSignal.signal.in_(("volume", "null_rate", "range")),
         TableHealthSignal.state.in_(_LEARNED_STATES),
         not_(and_(TableHealthSignal.state == "fired", TableHealthSignal.effect == "block")),
+        NOT_SET_BACK,
     ]
     if since is not None:
         conditions.append(TableHealthSignal.observed_at >= since)
@@ -299,7 +308,10 @@ def _observe(
         files = _read_added_files(added, before or after, file_io, table, compactions)
     history = {} if table_id is None else recent_observations(session, table_id)
     newest = counted[-1].summary
-    found = [volume_signal(newest, history.get(("volume", None), [])), found_schema]
+    found = [
+        volume_signal(newest, history.get(("volume", None), []), no_data_files=files == []),
+        found_schema,
+    ]
     if files is None:
         found += [
             Observation(signal, None, "no_metrics", {"reason": "unreadable"}, None)
@@ -478,6 +490,48 @@ def _storable(*values: object) -> bool:
     return True
 
 
+def own_chain(metadata: TableMetadata, after: int | None, until: int | None) -> list[int]:
+    """List the snapshots from a tip back to, not including, the one before them.
+
+    The chain a task run wrote: what a set-back takes out of ``main`` (`forget_set_back`), and
+    what a blocking health check judges (`lakana_worker.task_checks._health_result`).
+
+    The walk also stops at the first snapshot whose sequence number is no newer than that of
+    `until`: when another writer set ``main`` back between two of the run's commits, the later
+    commit's parents are older than the run, and their signals are not the run's. A format v1
+    table numbers every snapshot 0, and an `until` the metadata no longer holds has no number;
+    then only `until` itself stops the walk.
+
+    Parameters
+    ----------
+    metadata
+        The table's metadata, holding the tip.
+    after
+        The tip; `None` gives nothing.
+    until
+        The snapshot before the chain, which is not part of it; `None` walks every ancestor.
+
+    Returns
+    -------
+    list of int
+        The tip first, then each parent; empty when the tip is not in the metadata.
+    """
+    chain: list[int] = []
+    before = None if until is None else metadata.snapshot_by_id(until)
+    floor = before.sequence_number if before is not None and before.sequence_number else None
+    snapshot = None if after is None else metadata.snapshot_by_id(after)
+    while (
+        snapshot is not None
+        and snapshot.snapshot_id != until
+        and snapshot.snapshot_id not in chain
+        and (floor is None or (snapshot.sequence_number or 0) > floor)
+    ):
+        chain.append(snapshot.snapshot_id)
+        parent = snapshot.parent_snapshot_id
+        snapshot = None if parent is None else metadata.snapshot_by_id(parent)
+    return chain
+
+
 def forget_set_back(
     session: Session,
     table_id: uuid.UUID,
@@ -486,10 +540,15 @@ def forget_set_back(
     after: int | None,
     until: int | None,
 ) -> None:
-    """Delete the signals of the snapshots a set-back takes out of ``main``, uncommitted.
+    """Mark the signals of the snapshots a set-back takes out of ``main``, uncommitted.
 
     A check that sets a table back (`CatalogService.roll_back`) makes them no longer the table's
-    data: their rows must neither show as its current state nor feed a later baseline.
+    data: they must neither show as its current state nor feed a later baseline (`NOT_SET_BACK`).
+    The history keeps them, marked with the time: a fired one is why a blocking health check
+    set the table back, and a notification names it. Retention deletes them like any row.
+
+    A first build that is left not published (`until` is `None`) has its rows deleted instead:
+    its data is refused to every reader until a build publishes it, so its numbers are not kept.
 
     Parameters
     ----------
@@ -505,16 +564,56 @@ def forget_set_back(
         The snapshot ``main`` goes back to, whose rows stay; `None` when ``main`` is removed and
         every ancestor of `after` goes.
     """
-    gone: list[int] = []
-    snapshot = None if after is None else metadata.snapshot_by_id(after)
-    while (
-        snapshot is not None and snapshot.snapshot_id != until and snapshot.snapshot_id not in gone
-    ):
-        gone.append(snapshot.snapshot_id)
-        parent = snapshot.parent_snapshot_id
-        snapshot = None if parent is None else metadata.snapshot_by_id(parent)
-    session.execute(
-        delete(TableHealthSignal)
-        .where(TableHealthSignal.table_id == table_id, TableHealthSignal.snapshot_id.in_(gone))
-        .execution_options(synchronize_session=False)
-    )
+    gone = own_chain(metadata, after, until)
+    rows = (TableHealthSignal.table_id == table_id, TableHealthSignal.snapshot_id.in_(gone))
+    if until is None:
+        statement = delete(TableHealthSignal).where(*rows)
+    else:
+        statement = (
+            update(TableHealthSignal).where(*rows, NOT_SET_BACK).values(set_back_at=db_now(session))
+        )
+    session.execute(statement.execution_options(synchronize_session=False))
+
+
+def current_columns(
+    session: Session, key_provider: KeyProvider | None, environment: str, table: str
+) -> list[str] | None:
+    """Read the names of a managed table's columns, in its current schema's order.
+
+    A deploy counts the columns a commit judges (`MAX_HEALTH_COLUMNS`) in this order for a
+    write that keeps the table's schema. Names only: no rows, no files, no statistics.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    key_provider
+        Decrypts the storage secret.
+    environment
+        The environment's name.
+    table
+        The dotted table name.
+
+    Returns
+    -------
+    list of str or None
+        The names; `None` for a table that does not exist, is not a managed table, or has no
+        metadata yet.
+
+    Raises
+    ------
+    Exception
+        Whatever reading the storage raises; the caller decides.
+    """
+    from lakana_core.catalog.identity import resolve_table_id
+    from lakana_core.catalog.metadata import read_metadata
+    from lakana_core.models import Table, TableType
+    from lakana_core.storage.resolver import StorageResolver
+
+    table_id = resolve_table_id(session, environment, *table.split("."))
+    row = None if table_id is None else session.get(Table, table_id)
+    if row is None or row.table_type is not TableType.ICEBERG or not row.metadata_location:
+        return None
+    resolved = StorageResolver(session, key_provider).for_environment(environment)
+    metadata = read_metadata(resolved.file_io, row.metadata_location)
+    return [field.name for field in metadata.schema().fields]

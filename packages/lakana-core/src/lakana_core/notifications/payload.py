@@ -1,8 +1,11 @@
 """The messages a webhook receives, in `json`, `slack` and `teams`, and their signature.
 
-The builders are pure: facts in, bytes out. `facts_for_run` is the one function here that reads the
-database. A message carries names and metadata only: never table data, secrets, or the error text of
-a task, an attempt or a check, because those can quote row values.
+The builders are pure: facts in, bytes out. `facts_for_run` and `facts_for_health` are the
+functions here that read the database. A message carries names and metadata only: never table data,
+secrets, or the error text of a task, an attempt or a check, because those can quote row values. The
+one exception is a ``health`` message's alert, which says a signal's usual band and new value; for a
+table with any row filter, and for a column signal of a table with any column mask, it says neither
+(`_values_withheld`).
 """
 
 from __future__ import annotations
@@ -19,14 +22,26 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from lakana_core.identifiers import NOTIFY_FORMATS
+from lakana_core.catalog.health_signals import (
+    COLUMN_SIGNALS,
+    alert_text,
+    unjudged_text,
+    value_free_alert,
+)
+from lakana_core.identifiers import NOTIFY_FORMATS, NamespacePath
 from lakana_core.models import (
     CheckOutcome,
     CheckResult,
+    ColumnMask,
     Environment,
     JobVersion,
+    Namespace,
+    NotificationDelivery,
     Repository,
+    RowFilter,
     Run,
+    Table,
+    TableHealthSignal,
     TaskRun,
     TaskStatus,
 )
@@ -52,6 +67,7 @@ _TITLES = {
     "recovered": "Lakana: job {job} succeeded again in {environment}",
     "columns_changed": "Lakana: job {job} changed table columns in {environment}",
     "test": "Lakana: test message for job {job} in {environment}",
+    "health": "Lakana: table {table} needs a look in {environment}",
 }
 
 
@@ -95,6 +111,10 @@ class Facts:
     checks_unfinished
         The failed tasks whose checks never finished (`FailureCode.CHECKS_UNFINISHED`): the
         platform stopped trying them and set their tables back where it could.
+    table
+        For the ``health`` event: the table whose signal fired; empty otherwise.
+    alert
+        For the ``health`` event: the alert text; empty otherwise.
     """
 
     job: str
@@ -111,16 +131,21 @@ class Facts:
     reference_check_failed: bool = False
     columns_changed: tuple[str, ...] = ()
     checks_unfinished: tuple[str, ...] = ()
+    table: str = ""
+    alert: str = ""
 
     @property
     def command(self) -> str:
-        """The command that shows the run.
+        """The command that shows the run, or the table's health.
 
         Returns
         -------
         str
-            ``lakana runs show RUN --env ENV``.
+            ``lakana runs show RUN --env ENV``; ``lakana table health TABLE --env ENV`` when
+            `table` is set.
         """
+        if self.table:
+            return f"lakana table health {self.table} --env {self.environment}"
         return f"lakana runs show {self.run_id} --env {self.environment}"
 
     @property
@@ -200,6 +225,174 @@ def facts_for_run(session: Session, run: Run, delivery_id: UUID | str) -> Facts:
     )
 
 
+def _values_withheld(session: Session, row: TableHealthSignal) -> bool:
+    """Say whether a health message must leave a signal's values out.
+
+    A webhook's readers sit outside Lakana's authorization: nobody can ask whether a policy
+    applies to them, so any policy that hides the values from anyone hides them from all. A
+    column signal of a table with any column mask is withheld whatever the column, because a
+    mask written before a rename may name the column differently than the signal does.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    row
+        The fired signal.
+
+    Returns
+    -------
+    bool
+        True when the table has a row filter that is not revoked, or the signal is a column
+        signal and the table has a column mask that is not revoked.
+    """
+    filtered = session.scalar(
+        select(RowFilter.id)
+        .where(RowFilter.table_id == row.table_id, RowFilter.revoked_at.is_(None))
+        .limit(1)
+    )
+    if filtered is not None:
+        return True
+    if row.signal not in COLUMN_SIGNALS:
+        return False
+    masked = session.scalar(
+        select(ColumnMask.id)
+        .where(ColumnMask.table_id == row.table_id, ColumnMask.revoked_at.is_(None))
+        .limit(1)
+    )
+    return masked is not None
+
+
+def _unjudged_siblings(session: Session, signal: TableHealthSignal) -> list[str]:
+    """Name the other blocking columns of a commit's signal that could not be judged either.
+
+    One message is sent per signal (`lakana_worker.task_checks._tell_unjudged`), of one column's
+    row; the others of its commit are named in it.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    signal
+        The told row.
+
+    Returns
+    -------
+    list of str
+        The other columns, sorted, whose row at the same snapshot is ``no_metrics`` for any
+        reason but ``no_rows`` and records ``block``; empty for a table-level row.
+    """
+    if signal.column_name is None:
+        return []
+    found = session.execute(
+        select(TableHealthSignal.column_name, TableHealthSignal.observed).where(
+            TableHealthSignal.table_id == signal.table_id,
+            TableHealthSignal.snapshot_id == signal.snapshot_id,
+            TableHealthSignal.signal == signal.signal,
+            TableHealthSignal.state == "no_metrics",
+            TableHealthSignal.effect == "block",
+            TableHealthSignal.column_name.is_not(None),
+            TableHealthSignal.id != signal.id,
+        )
+    )
+    return sorted(
+        column
+        for column, observed in found
+        if column is not None
+        and not (isinstance(observed, dict) and observed.get("reason") == "no_rows")
+    )
+
+
+def facts_for_health(
+    session: Session, row: NotificationDelivery, environment: str, delivery_id: UUID | str
+) -> Facts:
+    """Read the facts of a fired table health signal's message.
+
+    The signal is read even when a set-back marked it later: the message tells of a firing that
+    happened. Its values are left out where a policy applies (`_values_withheld`), and when the
+    stored values are damaged.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    row
+        The delivery; its `health_signal_id` is set.
+    environment
+        The environment's name.
+    delivery_id
+        The delivery's id.
+
+    Returns
+    -------
+    Facts
+        Facts with `table` and `alert`; no run, commit, trigger or status.
+    """
+    # The delivery is deleted with its signal (ON DELETE CASCADE), so the signal exists.
+    signal = session.scalars(
+        select(TableHealthSignal).where(TableHealthSignal.id == row.health_signal_id)
+    ).one()
+    path, name = session.execute(
+        select(Namespace.path, Table.name)
+        .join(Table, Table.namespace_id == Namespace.id)
+        .where(Table.id == signal.table_id)
+    ).one()
+    table = f"{NamespacePath.parse(path)}.{name}"
+    repository = session.get(Repository, row.repository_id)
+    alert = None
+    if signal.state == "no_metrics":
+        # A blocking signal its commit could not judge: the text names no value. A row without
+        # a reason is one whose number did not fit what is stored.
+        reason = signal.observed.get("reason") if isinstance(signal.observed, dict) else None
+        alert = f"{table}: " + unjudged_text(
+            signal.signal,
+            signal.column_name,
+            signal.snapshot_id or 0,
+            reason if isinstance(reason, str) else "unstorable",
+            table,
+            environment,
+            others=_unjudged_siblings(session, signal),
+        )
+    elif not _values_withheld(session, signal):
+        try:
+            alert = alert_text(
+                table,
+                signal.signal,
+                signal.column_name,
+                signal.state,
+                signal.observed,
+                signal.band,
+                snapshot_id=signal.snapshot_id,
+                observed_at=signal.observed_at,
+            )
+        except (KeyError, TypeError, ValueError):
+            alert = None
+    if alert is None:
+        alert = value_free_alert(
+            table,
+            signal.signal,
+            signal.column_name,
+            snapshot_id=signal.snapshot_id,
+            observed_at=signal.observed_at,
+            environment=environment,
+        )
+    return Facts(
+        job=row.job,
+        environment=environment,
+        repository=repository.name if repository is not None else "",
+        commit="",
+        run_id="",
+        trigger="",
+        finished_at=signal.observed_at,
+        status="",
+        failed_tasks=(),
+        failed_checks=(),
+        delivery_id=str(delivery_id),
+        table=table,
+        alert=alert,
+    )
+
+
 def sample_facts(delivery_id: UUID | str) -> Facts:
     """Build clearly fake facts, for `notify-test`.
 
@@ -261,7 +454,7 @@ def build(fmt: str, event: str, facts: Facts) -> tuple[bytes, dict[str, str]]:
     fmt
         `json`, `slack` or `teams`.
     event
-        `failed`, `recovered`, `columns_changed` or `test`.
+        `failed`, `recovered`, `columns_changed`, `health` or `test`.
     facts
         What the message says.
 
@@ -323,6 +516,7 @@ def _json(event: str, facts: Facts) -> dict[str, Any]:
         ({"reference_check_failed": True} if facts.reference_check_failed else {})
         | ({"columns_changed": list(facts.columns_changed)} if facts.columns_changed else {})
         | ({"checks_unfinished": list(facts.checks_unfinished)} if facts.checks_unfinished else {})
+        | ({"table": facts.table, "alert": facts.alert} if event == "health" else {})
     )
 
 
@@ -341,7 +535,7 @@ def _title(event: str, facts: Facts) -> str:
     str
         The title.
     """
-    return _TITLES[event].format(job=facts.job, environment=facts.environment)
+    return _TITLES[event].format(job=facts.job, environment=facts.environment, table=facts.table)
 
 
 def _slack_escape(text: str) -> str:
@@ -395,7 +589,19 @@ def _slack(event: str, facts: Facts) -> str:
     str
         The text.
     """
-    title = _TITLES[event].format(job=_code(facts.job), environment=_code(facts.environment))
+    title = _TITLES[event].format(
+        job=_code(facts.job), environment=_code(facts.environment), table=_code(facts.table)
+    )
+    if event == "health":
+        return "\n".join(
+            [
+                title,
+                _code(facts.alert),
+                f"Job {_code(facts.job)}, repository {_code(facts.repository)}",
+                f"Details: {_code(facts.command)}",
+                f"Delivery {_code(facts.delivery_id)}",
+            ]
+        )
     lines = [title]
     lines.append(f"Repository {_code(facts.repository)}, commit {_code(facts.commit[:12])}")
     lines.append(
@@ -441,25 +647,18 @@ def _markdown_escape(text: str) -> str:
     return _MARKDOWN.sub(r"\\\1", text)
 
 
-def _teams(event: str, facts: Facts) -> dict[str, Any]:
-    """Build the payload of a Teams webhook created with Workflows.
-
-    The shape follows Microsoft's "Create an Incoming Webhook" page, section "Create Webhooks using
-    Workflows" and its example: a message whose `attachments` hold one Adaptive Card
-    (https://learn.microsoft.com/en-us/microsoftteams/platform/webhooks-and-connectors/how-to/add-incoming-webhook,
-    checked 2026-10-14). The card is version 1.4: a TextBlock title and a FactSet.
+def _run_pairs(facts: Facts) -> list[tuple[str, str]]:
+    """List the facts of a run's Teams card, before its details and delivery.
 
     Parameters
     ----------
-    event
-        The event.
     facts
         The facts.
 
     Returns
     -------
-    dict
-        The payload.
+    list of tuple
+        (title, value) pairs.
     """
     pairs = [
         ("Job", facts.job),
@@ -489,6 +688,40 @@ def _teams(event: str, facts: Facts) -> dict[str, Any]:
         tables = ", ".join(facts.checks_unfinished)
         next_step = _UNFINISHED_NEXT.format(command=facts.command)
         pairs.append(("Checks never finished", f"{tables}. {next_step}"))
+    return pairs
+
+
+def _teams(event: str, facts: Facts) -> dict[str, Any]:
+    """Build the payload of a Teams webhook created with Workflows.
+
+    The shape follows Microsoft's "Create an Incoming Webhook" page, section "Create Webhooks using
+    Workflows" and its example: a message whose `attachments` hold one Adaptive Card
+    (https://learn.microsoft.com/en-us/microsoftteams/platform/webhooks-and-connectors/how-to/add-incoming-webhook,
+    checked 2026-10-14). The card is version 1.4: a TextBlock title and a FactSet.
+
+    Parameters
+    ----------
+    event
+        The event.
+    facts
+        The facts.
+
+    Returns
+    -------
+    dict
+        The payload.
+    """
+    pairs = (
+        [
+            ("Table", facts.table),
+            ("Alert", facts.alert),
+            ("Job", facts.job),
+            ("Environment", facts.environment),
+            ("Repository", facts.repository),
+        ]
+        if event == "health"
+        else _run_pairs(facts)
+    )
     pairs += [("Details", facts.command), ("Delivery", facts.delivery_id)]
     card = {
         "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",

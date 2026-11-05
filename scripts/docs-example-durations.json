@@ -19,6 +19,7 @@
  "layer-rules": 30,
  "let-tables-expire": 13.7,
  "move-a-sql-project": 42,
+ "notice-a-broken-pipeline": 32,
  "projects": 31,
  "python-sample": 26,
  "proprietary-db": 20,

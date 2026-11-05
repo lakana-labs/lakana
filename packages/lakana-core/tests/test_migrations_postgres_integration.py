@@ -2939,6 +2939,54 @@ def test_0062_on_postgres() -> None:
         engine.dispose()
 
 
+def _insert_health_signal(conn: sqlalchemy.Connection) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
+    """Insert an environment, a namespace, a table and one health signal of it.
+
+    Parameters
+    ----------
+    conn
+        A connection in a transaction, on a schema at 0063 or later.
+
+    Returns
+    -------
+    tuple
+        The ids of the environment, the table and the signal.
+    """
+    now = datetime.now(UTC)
+    env_id, namespace_id, table_id, signal_id = (uuid.uuid4() for _ in range(4))
+    conn.execute(
+        sqlalchemy.text(
+            "INSERT INTO environments (id, name, storage_root, storage_options, "
+            "is_protected, properties, created_at, updated_at) "
+            "VALUES (:id, 'dev', 's3://bucket/dev', :options, false, :props, :now, :now)"
+        ),
+        {"id": env_id, "options": json.dumps({}), "props": json.dumps({}), "now": now},
+    )
+    conn.execute(
+        sqlalchemy.text(
+            "INSERT INTO namespaces (id, environment_id, path, properties, owner_id) "
+            "VALUES (:id, :environment_id, 'gold', :props, NULL)"
+        ),
+        {"id": namespace_id, "environment_id": env_id, "props": json.dumps({})},
+    )
+    conn.execute(
+        sqlalchemy.text(
+            "INSERT INTO tables (id, namespace_id, name, table_type, created_at, "
+            "updated_at) VALUES (:id, :namespace_id, 'orders', 'ICEBERG', :now, :now)"
+        ),
+        {"id": table_id, "namespace_id": namespace_id, "now": now},
+    )
+    conn.execute(
+        sqlalchemy.text(
+            "INSERT INTO table_health_signals (id, environment_id, table_id, signal, "
+            "state, effect, observed_at) "
+            "VALUES (:id, :env, :table, 'volume', 'ok', 'warn', :now)"
+        ),
+        {"id": signal_id, "env": env_id, "table": table_id, "now": now},
+    )
+    return env_id, table_id, signal_id
+
+
 def test_0063_on_postgres() -> None:
     """0063 creates the health signals table; a table's delete cascades; a downgrade drops it."""
     revision_0062 = "b4d8e0f2a6c7"
@@ -2958,39 +3006,8 @@ def test_0063_on_postgres() -> None:
         assert "sequence_number" in {
             c["name"] for c in inspector.get_columns("table_health_signals")
         }
-        now = datetime.now(UTC)
-        env_id, namespace_id, table_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
         with engine.begin() as conn:
-            conn.execute(
-                sqlalchemy.text(
-                    "INSERT INTO environments (id, name, storage_root, storage_options, "
-                    "is_protected, properties, created_at, updated_at) "
-                    "VALUES (:id, 'dev', 's3://bucket/dev', :options, false, :props, :now, :now)"
-                ),
-                {"id": env_id, "options": json.dumps({}), "props": json.dumps({}), "now": now},
-            )
-            conn.execute(
-                sqlalchemy.text(
-                    "INSERT INTO namespaces (id, environment_id, path, properties, owner_id) "
-                    "VALUES (:id, :environment_id, 'gold', :props, NULL)"
-                ),
-                {"id": namespace_id, "environment_id": env_id, "props": json.dumps({})},
-            )
-            conn.execute(
-                sqlalchemy.text(
-                    "INSERT INTO tables (id, namespace_id, name, table_type, created_at, "
-                    "updated_at) VALUES (:id, :namespace_id, 'orders', 'ICEBERG', :now, :now)"
-                ),
-                {"id": table_id, "namespace_id": namespace_id, "now": now},
-            )
-            conn.execute(
-                sqlalchemy.text(
-                    "INSERT INTO table_health_signals (id, environment_id, table_id, signal, "
-                    "state, effect, observed_at) "
-                    "VALUES (:id, :env, :table, 'volume', 'ok', 'warn', :now)"
-                ),
-                {"id": uuid.uuid4(), "env": env_id, "table": table_id, "now": now},
-            )
+            _, table_id, _ = _insert_health_signal(conn)
         count = sqlalchemy.text("SELECT count(*) FROM table_health_signals")
         with engine.begin() as conn:
             assert conn.execute(count).scalar_one() == 1
@@ -2999,4 +3016,90 @@ def test_0063_on_postgres() -> None:
         migrate.downgrade(url, revision_0062)
         assert _alembic_version(engine) == revision_0062
         assert "table_health_signals" not in sqlalchemy.inspect(engine).get_table_names()
+        engine.dispose()
+
+
+def test_0064_on_postgres() -> None:
+    """0064 adds the effects, the signal of a delivery and the set-back mark of a signal.
+
+    A signal's delete cascades to its delivery; the mark is a nullable time with a zone, and an
+    index on ``(table_id, snapshot_id)`` finds the rows to mark. The downgrade deletes the
+    deliveries of health signals, which the earlier release cannot send.
+    """
+    revision_0063 = "c5e9f1a3b7d8"
+    revision_0064 = "d6f0a2b4c8e9"
+    with PostgresContainer("postgres:16", driver="pg8000") as pg:
+        url = pg.get_connection_url()
+        migrate.upgrade(url, revision_0063)
+        migrate.upgrade(url, revision_0064)
+        engine = sqlalchemy.create_engine(url)
+        assert _alembic_version(engine) == revision_0064
+        inspector = sqlalchemy.inspect(engine)
+        assert "health_effects" in {c["name"] for c in inspector.get_columns("tables")}
+        set_back = {c["name"]: c for c in inspector.get_columns("table_health_signals")}[
+            "set_back_at"
+        ]
+        assert set_back["nullable"] and getattr(set_back["type"], "timezone", False)
+        assert {
+            u["name"]: u["column_names"]
+            for u in inspector.get_unique_constraints("notification_deliveries")
+        }["uq_notification_deliveries_health_signal_id_job"] == ["health_signal_id", "job"]
+        assert {
+            i["name"]: i["column_names"] for i in inspector.get_indexes("table_health_signals")
+        }["ix_table_health_signals_table_id_snapshot_id"] == ["table_id", "snapshot_id"]
+        repo_id = uuid.uuid4()
+        with engine.begin() as conn:
+            env_id, table_id, signal_id = _insert_health_signal(conn)
+            conn.execute(
+                sqlalchemy.text("UPDATE tables SET health_effects = :effects WHERE id = :id"),
+                {"effects": json.dumps({"volume": "block"}), "id": table_id},
+            )
+            conn.execute(
+                sqlalchemy.text(
+                    "INSERT INTO repositories (id, name, kind, url, created_at, updated_at) "
+                    "VALUES (:id, 'r', 'HTTPS', 'https://g/a.git', now(), now())"
+                ),
+                {"id": repo_id},
+            )
+            conn.execute(
+                sqlalchemy.text(
+                    "INSERT INTO notification_deliveries (id, environment_id, repository_id, "
+                    "health_signal_id, job, event, format, secret_name, state, attempts, "
+                    "created_at) VALUES (:id, :env, :repo, :signal, 'nightly', 'health', "
+                    "'json', 'hook', 'PENDING', 0, now())"
+                ),
+                {"id": uuid.uuid4(), "env": env_id, "repo": repo_id, "signal": signal_id},
+            )
+        count = sqlalchemy.text("SELECT count(*) FROM notification_deliveries")
+        with engine.begin() as conn:
+            assert conn.execute(count).scalar_one() == 1
+            conn.execute(
+                sqlalchemy.text("DELETE FROM table_health_signals WHERE id = :id"),
+                {"id": signal_id},
+            )
+            assert conn.execute(count).scalar_one() == 0
+            # The earlier release has no `health` event: the downgrade deletes its deliveries.
+            for event in ("health", "failed"):
+                conn.execute(
+                    sqlalchemy.text(
+                        "INSERT INTO notification_deliveries (id, environment_id, repository_id, "
+                        "job, event, format, secret_name, state, attempts, created_at) VALUES "
+                        "(:id, :env, :repo, 'nightly', :event, 'json', 'hook', 'PENDING', 0, "
+                        "now())"
+                    ),
+                    {"id": uuid.uuid4(), "env": env_id, "repo": repo_id, "event": event},
+                )
+        migrate.downgrade(url, revision_0063)
+        assert _alembic_version(engine) == revision_0063
+        with engine.begin() as conn:
+            events = sqlalchemy.text("SELECT event FROM notification_deliveries")
+            assert conn.execute(events).scalars().all() == ["failed"]
+        inspector = sqlalchemy.inspect(engine)
+        assert "health_effects" not in {c["name"] for c in inspector.get_columns("tables")}
+        assert "health_signal_id" not in {
+            c["name"] for c in inspector.get_columns("notification_deliveries")
+        }
+        assert "set_back_at" not in {
+            c["name"] for c in inspector.get_columns("table_health_signals")
+        }
         engine.dispose()

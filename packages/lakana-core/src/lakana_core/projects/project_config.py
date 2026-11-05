@@ -24,6 +24,7 @@ from lakana_core.identifiers import NOTIFY_FORMATS, is_secret_name, shown, valid
 from lakana_core.jobs.cron import validate_cron_can_fire, validate_cron_syntax
 from lakana_core.jobs.tz import load_zone
 from lakana_core.languages import language_problem
+from lakana_core.projects.health import normalize_health
 from lakana_core.projects.issues import ProjectIssue, ProjectValidationError
 from lakana_core.projects.layers import LayersConfig, layer_config_issues
 from lakana_core.projects.limits import DeployLimits
@@ -683,6 +684,10 @@ class ProjectSettings(StrictModel):
         Validation requirements.
     checks
         Defaults for the project's data quality checks.
+    health
+        The table health signals' effects for every table: ``off``, or a signal → ``warn``,
+        ``block`` or ``off``; an asset's own `health:` goes over it. Read into the flat map of
+        `lakana_core.projects.health.normalize_health`, with no columns.
     properties
         Free-form string map, stored for M5c/M5d.
     """
@@ -690,7 +695,25 @@ class ProjectSettings(StrictModel):
     defaults: AssetDefaults = AssetDefaults()
     requirements: Requirements = Requirements()
     checks: ChecksDefaults = ChecksDefaults()
+    health: dict[str, str] = {}
     properties: dict[str, str] = {}
+
+    @field_validator("health", mode="before")
+    @classmethod
+    def _health_is_known(cls, value: object) -> dict[str, str]:
+        """Read `health:` into the flat map, refusing what is not a signal or an effect.
+
+        Parameters
+        ----------
+        value
+            The field's value as YAML gave it.
+
+        Returns
+        -------
+        dict
+            The flat map without columns (`projects.health.normalize_health`).
+        """
+        return normalize_health(value, columns=False)
 
 
 class EnvironmentOverride(ProjectSettings):

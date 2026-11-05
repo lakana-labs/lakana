@@ -48,13 +48,13 @@ from pyiceberg.table.update import (
 )
 from pyiceberg.types import NestedField
 from sqlalchemy import delete, event, null, or_, select, text, update
-from sqlalchemy.exc import DBAPIError, IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import ORMExecuteState, Session, SessionTransaction
 
 from lakana_core.artifacts.store import current_version, version_row
 from lakana_core.audit.service import AuditService
 from lakana_core.audit.views import View, ViewDetail, record_view, sessions_like
-from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable
+from lakana_core.auth import Action, AuthorizationService, PrincipalRef, RunContext, Securable
 from lakana_core.catalog.append import (
     AppendResult,
     build_transaction,
@@ -105,6 +105,11 @@ from lakana_core.catalog.health import (
     readers,
     snapshot_stats,
 )
+from lakana_core.catalog.health_jobs import (
+    judged_by_run,
+    queue_health_notifications,
+    rows_to_tell,
+)
 from lakana_core.catalog.health_read import (
     UNKNOWN_SIGNAL_MESSAGE,
     SignalView,
@@ -114,7 +119,7 @@ from lakana_core.catalog.health_read import (
     visibility_for,
 )
 from lakana_core.catalog.health_record import commit_observations, forget_set_back, signal_rows
-from lakana_core.catalog.health_signals import SIGNALS, HealthEffects
+from lakana_core.catalog.health_signals import SIGNALS, HealthEffects, never_judged
 from lakana_core.catalog.history import (
     EARLIEST_START,
     HISTORY_KEY_PROPERTY,
@@ -297,6 +302,7 @@ from lakana_core.models import (
     Grant,
     LineageEdge,
     Namespace,
+    NotificationDelivery,
     QueryRun,
     QueryRunStatus,
     Repository,
@@ -729,6 +735,16 @@ class TableDescription:
         without ``READ_ENVIRONMENT``.
     column_terms
         Column name → the terms that link it.
+    health
+        The effects of `health:` that differ from `warn`, by ``signal`` or ``signal.column``,
+        sorted by key; empty for the defaults and for every kind but a managed table.
+    health_missing
+        The keys of `health` whose column the table does not have (a ``SELECT *`` or Python
+        asset, whose columns the deploy cannot check); such an entry has no effect.
+    health_never_judged
+        The ``block`` column entries of `health` that no commit can judge, with the reason
+        (`health_signals.never_judged`): ``range`` on a type without one, a column past the
+        200th. A run warns on them instead of blocking.
     """
 
     ref: TableRef
@@ -764,6 +780,35 @@ class TableDescription:
     translations: tuple[LanguageCoverage, ...] = ()
     terms: tuple[TermRef, ...] = ()
     column_terms: Mapping[str, tuple[TermRef, ...]] = dataclass_field(default_factory=dict)
+    health: dict[str, str] = dataclass_field(default_factory=dict)
+    health_missing: tuple[str, ...] = ()
+    health_never_judged: Mapping[str, str] = dataclass_field(default_factory=dict)
+
+
+def _stored_effects(row: Table, dotted: str) -> HealthEffects:
+    """Read a table's stored health effects, never failing on what the code does not understand.
+
+    Parameters
+    ----------
+    row
+        The table.
+    dotted
+        Its dotted name, for the log.
+
+    Returns
+    -------
+    HealthEffects
+        The valid entries; anything else reads as `warn`, and is logged.
+    """
+    raw = row.health_effects
+    effects = HealthEffects.from_flat(raw)
+    if raw is not None and (not isinstance(raw, Mapping) or len(effects.entries) != len(raw)):
+        logger.warning(
+            "%s: its stored health effects are not all understood; the ones that are not "
+            "read as warn",
+            dotted,
+        )
+    return effects
 
 
 _NO_UNPUBLISHING = (
@@ -1106,7 +1151,7 @@ def _snapshot_numbers_checked(
         clients number them. It also keeps the number away from the 2^63-1 ceiling, after
         which no snapshot could be added.
     parented
-        Whether the snapshot names a parent: on a format v2 table pyiceberg then refuses a
+        Whether the snapshot names a parent: on a format v2 or later table pyiceberg then refuses a
         sequence number not above `last` itself, with the text the commit already withholds
         from a writer without READ, so it is left to pyiceberg.
 
@@ -1134,9 +1179,9 @@ def _snapshot_numbers_checked(
         )
     if format_version >= 2 and sequence_number is None:
         raise ValidationError(
-            "A snapshot on a format v2 table needs a sequence number: the table's last plus one "
-            "per snapshot the commit adds; load the table again and commit again with a client "
-            "that sets it."
+            "A snapshot on a format v2 or later table needs a sequence number: the table's last "
+            "plus one per snapshot the commit adds; load the table again and commit again with a "
+            "client that sets it."
         )
     pyiceberg_checks = format_version == 2 and parented
     if format_version >= 2 and not pyiceberg_checks and sequence <= last:
@@ -2589,7 +2634,9 @@ class CatalogService:
         )
         self._commit_sent = False
         try:
-            return self._publish_table(prepared, prepared.metadata, owner_id=p.id)
+            return self._publish_table(
+                prepared, prepared.metadata, owner_id=p.id, run=p.run_context
+            )
         except Exception as exc:
             if not self._settle_failed_write(
                 exc,
@@ -2704,7 +2751,12 @@ class CatalogService:
         )
 
     def _publish_table(
-        self, prepared: _PreparedTable, metadata: TableMetadata, *, owner_id: uuid.UUID
+        self,
+        prepared: _PreparedTable,
+        metadata: TableMetadata,
+        *,
+        owner_id: uuid.UUID,
+        run: RunContext | None = None,
     ) -> LoadedTable:
         """Write a prepared table's metadata file and insert its catalog row.
 
@@ -2717,7 +2769,8 @@ class CatalogService:
         claim is no longer `CLAIMED` (the sweep abandoned it), nothing commits.
 
         A commit that makes a new snapshot current records its health signals (`health_record`)
-        in the same transaction; computing them never fails the commit.
+        in the same transaction, and queues the messages of the fired ones (`_queue_health`);
+        computing them never fails the commit.
 
         Parameters
         ----------
@@ -2727,6 +2780,8 @@ class CatalogService:
             The metadata to publish.
         owner_id
             The principal who creates the table, who owns it.
+        run
+            The writing run's context (`PrincipalRef.run_context`); `None` outside a run.
 
         Returns
         -------
@@ -2760,21 +2815,6 @@ class CatalogService:
         # learn about them first.
         target = prepared.resolved.confine_to_root(target)
         written = write_metadata(prepared.resolved.file_io, metadata, target)
-        health = (
-            self._health_rows(
-                ref,
-                table_id=prepared.table_id,
-                environment_id=prepared.environment_id,
-                before=None,
-                after=metadata,
-                snapshots=metadata.snapshots,
-                file_io=prepared.resolved.file_io,
-                effects=HealthEffects.default(),
-                new_table=True,
-            )
-            if metadata.current_snapshot_id is not None
-            else []
-        )
         row = Table(
             id=prepared.table_id,
             namespace_id=prepared.namespace_id,
@@ -2788,10 +2828,26 @@ class CatalogService:
         sync_created_table(self._session, prepared.environment_id, row, ref.dotted())
         # Read now: after the commit the row is expired, and reading it would cost a statement.
         text_language = row.text_language
+        health = (
+            self._health_rows(
+                ref,
+                table_id=prepared.table_id,
+                environment_id=prepared.environment_id,
+                before=None,
+                after=metadata,
+                snapshots=metadata.snapshots,
+                file_io=prepared.resolved.file_io,
+                effects=_stored_effects(row, ref.dotted()),
+                new_table=True,
+            )
+            if metadata.current_snapshot_id is not None
+            else []
+        )
+        messages = self._queue_health(ref, prepared.environment_id, health, run)
         sync_table_columns(self._session, row.id, from_iceberg_schema(metadata.schema()))
         try:
             self._session.flush()  # a name collision raises here, and SQLite's write lock is held
-            self._session.add_all(health)  # after the table row, for their foreign key
+            self._add_health(health, messages)  # after the table row, for their foreign key
             if not lock_live_environment(self._session, prepared.environment_id):
                 self._session.rollback()
                 raise NotFoundError(
@@ -4069,12 +4125,19 @@ class CatalogService:
         elif row.kept_run_id is not None:
             state, message = "kept", kept_message(row, shown_kept_check(self._session, row, hides))
         stats = snapshot_stats(loaded.metadata)
+        health = _stored_effects(row, ref.dotted()).flat()
+        names = {f.name for f in loaded.metadata.schema().fields}
         return TableDescription(
             ref=ref,
             id=row.id,
             kind=row.kind,
             metadata_location=loaded.metadata_location,
             columns=from_iceberg_schema(loaded.metadata.schema()),
+            health=health,
+            health_missing=tuple(
+                key for key in health if "." in key and key.partition(".")[2] not in names
+            ),
+            health_never_judged=never_judged(health, loaded.metadata.schema()),
             snapshot_id=loaded.metadata.current_snapshot_id,
             state=state,
             state_message=message,
@@ -4771,8 +4834,8 @@ class CatalogService:
             refuses; if `updates` includes an `AddSnapshotUpdate` whose
             `snapshot.manifest_list` does not lie under the table's own
             location, whose snapshot id or sequence number lies outside 0 to 2^63-1, or
-            whose sequence number on a format v2 table is not above the table's last or is above
-            it by more than one per snapshot the commit adds; if a
+            whose sequence number on a format v2 or later table is not above the table's
+            last or is above it by more than one per snapshot the commit adds; if a
             snapshot the commit adds names a data file that is not Parquet, cannot be read, or
             has no Iceberg field ids
             (`field_ids.check_added_files_have_field_ids`; also if there are more than 2,000 such
@@ -4845,6 +4908,7 @@ class CatalogService:
         table_id = row.id
         environment_id = namespace.environment_id
         unpublished = row.unpublished_run_id is not None
+        effects = _stored_effects(row, ref.dotted())
         expected = row.metadata_location
         if expected_metadata_location is not None and expected != expected_metadata_location:
             raise ConflictError(f"{ref.dotted()} changed since the update was prepared.")
@@ -5003,7 +5067,7 @@ class CatalogService:
                 after=updated,
                 snapshots=[u.snapshot for u in updates if isinstance(u, AddSnapshotUpdate)],
                 file_io=resolved.file_io,
-                effects=HealthEffects.default(),
+                effects=effects,
                 files=checked_files,
             )
             if not maintenance
@@ -5013,6 +5077,7 @@ class CatalogService:
             and has != had
             else []
         )
+        messages = self._queue_health(ref, environment_id, health, p.run_context)
 
         # Noted after every refusal above, so a commit that is refused leaves no note behind on
         # the guard for a later commit of the same target to take as its own.
@@ -5054,7 +5119,7 @@ class CatalogService:
             new_location=written,
             publish=not maintenance and updated.current_snapshot_id is not None,
         )
-        self._session.add_all(health)
+        self._add_health(health, messages)
         sync_table_columns(self._session, table_id, from_iceberg_schema(updated.schema()))
         if after_swap is not None:
             after_swap()
@@ -5065,6 +5130,88 @@ class CatalogService:
         self._commit_sent = True
         self._session.commit()
         return LoadedTable(ref=ref, uuid=table_id, metadata_location=written, metadata=updated)
+
+    def _add_health(
+        self, rows: Sequence[TableHealthSignal], messages: Sequence[NotificationDelivery]
+    ) -> None:
+        """Add a commit's health signal rows and their messages, after the pointer swap.
+
+        The rows are flushed first when there are messages: nothing tells the session that a
+        delivery's ``health_signal_id`` needs its signal row inserted before it.
+
+        Parameters
+        ----------
+        rows
+            From `_health_rows`.
+        messages
+            From `_queue_health`.
+        """
+        self._session.add_all(rows)
+        if messages:
+            self._session.flush()
+            self._session.add_all(messages)
+
+    def _queue_health(
+        self,
+        ref: TableRef,
+        environment_id: uuid.UUID,
+        rows: Sequence[TableHealthSignal],
+        run: RunContext | None,
+    ) -> list[NotificationDelivery]:
+        """Build the messages of a commit's fired health signals (#340), before the swap.
+
+        Everything they need is read here, without flushing, so the pointer swap that locks the
+        table's row is followed only by adding them. A ``block`` signal that the writing run's
+        own check judges is left to the run's ``failed`` message (`rows_to_tell`). An error that
+        is not the database's (a damaged manifest) is logged and queues nothing: it never fails
+        the write.
+
+        Parameters
+        ----------
+        ref
+            The table.
+        environment_id
+            Its environment.
+        rows
+            The commit's signal rows, not yet added.
+        run
+            The writing run's context; `None` outside a run.
+
+        Returns
+        -------
+        list of NotificationDelivery
+            To add after `rows`.
+
+        Raises
+        ------
+        sqlalchemy.exc.SQLAlchemyError
+            If the database failed: the commit fails, as for the signal rows themselves.
+        """
+        fired = [row for row in rows if row.state == "fired"]
+        if not fired:  # the usual commit: no statement at all
+            return []
+        table = ref.dotted()
+        task_run_id = None if run is None else run.task_run_id
+        try:
+            with self._session.no_autoflush:
+                blocks = any(row.effect == "block" for row in fired)
+                judged = judged_by_run(self._session, task_run_id if blocks else None, table)
+                return queue_health_notifications(
+                    self._session,
+                    environment_id=environment_id,
+                    table=table,
+                    rows=rows_to_tell(fired, judged=judged),
+                    now=fired[0].observed_at,
+                )
+        except SQLAlchemyError:
+            raise
+        except Exception as exc:  # a bad manifest must not fail the write
+            logger.warning(
+                "The health notifications of %s could not be queued (%s).",
+                shown(table),
+                type(exc).__name__,
+            )
+            return []
 
     def _health_rows(
         self,
@@ -5574,11 +5721,12 @@ class CatalogService:
         def settle() -> None:
             """Mark, clear the stamp, restore the note and record: the statements after the swap.
 
-            The health signals of the snapshots set back are deleted with them (#340). A
-            set-back that makes the schema before current again also drops the task run's
-            column change (`TaskRun.schema_change_json`): the columns and their field ids are
-            the old ones again, so neither the note, the warnings nor the notification line may
-            say otherwise.
+            The health signals of the snapshots set back are marked as set back, or deleted
+            for a first build left not published (`forget_set_back`, #340). A set-back that
+            makes the schema before current again also drops the task run's column change
+            (`TaskRun.schema_change_json`): the columns and their field ids are the old ones
+            again, so neither the note, the warnings nor the notification line may say
+            otherwise.
             """
             if restores_schema:
                 self._session.execute(
@@ -8258,7 +8406,7 @@ class CatalogService:
                 snapshot_before=None,
                 publishes=True,
             )
-            self._publish_table(prepared, metadata, owner_id=p.id)
+            self._publish_table(prepared, metadata, owner_id=p.id, run=p.run_context)
         except Exception as exc:
             landed = self._settle_failed_write(
                 exc,

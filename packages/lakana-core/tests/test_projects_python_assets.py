@@ -1332,3 +1332,31 @@ def test_a_python_reference_may_name_the_rows_time() -> None:
     )
     metadata = _parsed(source).metadata
     assert metadata.reference_times() == {"station_id": "observed_at"}
+
+
+def test_the_decorator_takes_health() -> None:
+    """`health=` reaches the metadata as the flat map."""
+    parsed = parse_python_asset(
+        _asset(
+            "from lakana import asset\n\n"
+            '@asset(health={"volume": "block", "range": {"price": "off"}})\n'
+            "def f():\n    return None\n"
+        ),
+        AssetDefaults(),
+    )
+    assert isinstance(parsed, ParsedAsset)
+    assert parsed.metadata.health == {"range.price": "off", "volume": "block"}
+
+
+def test_health_is_refused_on_an_artifact_asset() -> None:
+    """Like the other table-only arguments."""
+    issues = parse_python_asset(
+        _asset(
+            "from lakana import asset\n\n"
+            '@asset(output="artifact", health="off")\n'
+            "def f():\n    return None\n"
+        ),
+        AssetDefaults(),
+    )
+    assert isinstance(issues, list)
+    assert any("argument 'health' does not apply to an artifact asset" in i.message for i in issues)

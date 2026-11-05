@@ -70,6 +70,7 @@ from lakana_core.projects.checks import (
     view_readers,
 )
 from lakana_core.projects.deploys import DeployService
+from lakana_core.projects.health_checks import entry_health_specs
 from lakana_core.projects.lookups import deployment_row, environment_by_name, repository_by_name
 from lakana_core.projects.manifest import job_on_deploy, manifest_assets, manifest_jobs
 from lakana_core.projects.run_policy import RunCaps, policy_from_manifest
@@ -89,6 +90,7 @@ from lakana_core.runs.selection import (
     downstream_closure,
     resolve_selection,
     selected_upstreams,
+    selection_of,
 )
 from lakana_core.runs.store import upstream_names
 from lakana_core.runs.waiting import (
@@ -1316,9 +1318,10 @@ class RunService:
         """Insert a run and its task runs and audit it, without committing.
 
         A task run is inserted per selected asset, marked `has_checks` when the manifest has
-        checks for its table, and one ``source_check`` task run per checked table that the
-        project only reads and a selected asset reads. The latter has no upstream and
-        is an upstream of each of its readers, so the scheduler's existing rules do the rest.
+        checks for its table or its `health` blocks on a signal, and one ``source_check`` task
+        run per checked table that the project only reads and a selected asset reads. The latter
+        has no upstream and is an upstream of each of its readers, so the scheduler's existing
+        rules do the rest.
         A table that keeps data that failed a ``keep`` check (it has a note, `kept_tables`) and
         that a selected asset reads, without the run building it, gets the same kind of task
         (`kept_check_tables`): its readers wait for the table's checks to pass again.
@@ -1458,7 +1461,8 @@ class RunService:
                     conflict_retried=False,
                     kind=ASSET,
                     has_checks=bool(manifest_checks.of(asset))
-                    or manifest_checks.unreadable_for(asset),
+                    or manifest_checks.unreadable_for(asset)
+                    or bool(entry_health_specs(entries.get(asset), asset)),
                 )
             )
         for table in sources:
@@ -1615,14 +1619,7 @@ class RunService:
             raise NotFoundError(
                 job_missing_message(version.manifest_json, job, repo.name, env.name)
             )
-        patterns = entry.get("select")
-        return Selection(
-            patterns=tuple(x for x in patterns if isinstance(x, str))
-            if isinstance(patterns, list)
-            else (),
-            upstream=entry.get("upstream") is True,
-            downstream=entry.get("downstream") is True,
-        )
+        return selection_of(entry)
 
     def prepare_start(
         self,

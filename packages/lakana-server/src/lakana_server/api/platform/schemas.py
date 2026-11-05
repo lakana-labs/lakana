@@ -1004,6 +1004,17 @@ class TableOut(BaseModel):
     terms
         The glossary terms that link the table itself, in the reader's language; empty without
         ``READ_ENVIRONMENT`` on the environment.
+    health
+        The effects of the asset's `health:` that differ from `warn`, by ``signal`` or
+        ``signal.column`` (``range.price``), sorted by key; empty when every signal warns, and
+        for every kind but a managed table.
+    health_missing
+        The keys of `health` whose column the table does not have: the deploy cannot check the
+        columns of a ``SELECT *`` or Python asset. Such an entry has no effect.
+    health_never_judged
+        The ``block`` column entries of `health` that no commit can judge, by key, with the
+        reason (``a string column has no range``, ``only the first 200 columns are judged``): a
+        run warns on such an entry instead of blocking.
     """
 
     name: str
@@ -1035,6 +1046,9 @@ class TableOut(BaseModel):
     main_language: str = "en"
     translations: list[TranslationCoverageOut] = Field(default_factory=list)
     terms: list[TermRefOut] = []
+    health: dict[str, str] = {}
+    health_missing: list[str] = []
+    health_never_judged: dict[str, str] = {}
 
 
 class LastMaintenanceOut(BaseModel):
@@ -1302,8 +1316,14 @@ class HealthSignalOut(BaseModel):
         `band` and `alert`.
     last_fired_at
         When this signal and column last fired; only in the current state.
+    set_back
+        Whether a failed check set the observed snapshot back: the row is no longer the table's
+        data and shows only in the history, kept as the reason a blocking check gave.
     """
 
+    # jscpd:ignore-start
+    # The fields of `lakana_core.catalog.health_read.SignalView`, which this answer is built
+    # from attribute by attribute (`from_attributes`): the REST contract names each one itself.
     id: uuid.UUID
     signal: str
     column: str | None
@@ -1316,6 +1336,8 @@ class HealthSignalOut(BaseModel):
     alert: str | None
     values_hidden: bool
     last_fired_at: datetime | None = None
+    set_back: bool = False
+    # jscpd:ignore-end
 
 
 class HealthSignalPageOut(BaseModel):
@@ -3548,7 +3570,7 @@ class NotificationOut(BaseModel):
         The delivery id: the ``delivery_id`` a receiver sees, and what
         ``GET /environments/{env}/notifications/{id}`` takes.
     event
-        ``failed``, ``recovered``, ``columns_changed`` or ``test``.
+        ``failed``, ``recovered``, ``columns_changed``, ``health`` or ``test``.
     state
         ``pending``, ``delivered`` or ``failed``.
     attempts

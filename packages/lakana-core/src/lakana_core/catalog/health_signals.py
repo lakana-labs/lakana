@@ -8,6 +8,7 @@ signal and column; no signal but `schema` fires with fewer than `MIN_HISTORY`.
 
 from __future__ import annotations
 
+import itertools
 import math
 import statistics
 import struct
@@ -33,6 +34,7 @@ from pyiceberg.types import (
 )
 
 from lakana_core.identifiers import shown
+from lakana_core.jobs.cron import next_fire_after
 
 SIGNALS = ("freshness", "volume", "null_rate", "range", "schema")
 """Every signal, in the order they are shown."""
@@ -54,6 +56,16 @@ NULL_RATE_FLOOR = 0.02
 RANGE_FLOOR_SHARE = 0.01
 MAX_HEALTH_COLUMNS = 200
 """The most top-level columns one commit evaluates, in schema order; the rest record nothing."""
+FRESHNESS_SCHEDULE_FACTOR = 2.0
+"""A scheduled table is late after this many intervals of its schedule."""
+FRESHNESS_HISTORY_FACTOR = 3.0
+"""A table without a schedule is late after this many median intervals of its commits."""
+FRESHNESS_MIN_SECONDS = 3_600.0
+"""The least limit of the history rule, so commits a few minutes apart do not fire at once."""
+FRESHNESS_BURST_SECONDS = 600.0
+"""Data commits less than this after the first of their group are one data point of the history
+rule: one run that commits several times is one, so the median gap is between runs, not
+seconds."""
 
 _RANGE_KINDS: tuple[tuple[tuple[type[PrimitiveType], ...], str], ...] = (
     ((IntegerType, LongType), "integer"),
@@ -307,31 +319,53 @@ def _mad(values: Sequence[float]) -> float:
 
 
 def volume_signal(
-    summary: Mapping[str, Any] | None, history: Sequence[Mapping[str, Any]]
+    summary: Mapping[str, Any] | None,
+    history: Sequence[Mapping[str, Any]],
+    *,
+    no_data_files: bool = False,
 ) -> Observation:
     """Compare the rows a snapshot added with the usual.
+
+    A commit that added no data file (a delete of whole files, a merge-on-read commit that adds
+    only delete files) is not a load: it records ``ok`` with observed ``{"added": 0, "loaded":
+    false}``, never fires and is left out of the band. That needs evidence: the commit's added
+    files read and none found (`no_data_files`), or an ``added-data-files`` of 0. pyiceberg
+    writes both counts only above 0, so without either a summary that lacks ``added-records``
+    records ``not_recorded``.
 
     Parameters
     ----------
     summary
         The snapshot's summary.
     history
-        Past observed values of this signal, newest first.
+        Past observed values of this signal, newest first; a commit that loaded nothing does not
+        count.
+    no_data_files
+        Whether the commit's added files were read and none was a data file.
 
     Returns
     -------
     Observation
-        `no_metrics` without an added-records count or when the band overflows (reason
-        ``not_finite``), `no_history` without a band.
+        `no_metrics` without an added-records count (reason ``not_recorded``) or when the band
+        overflows (``not_finite``); ``ok`` and no band for a commit that loaded nothing;
+        `no_history` without a band.
     """
-    added = _whole((summary or {}).get("added-records"))
+    raw = (summary or {}).get("added-records")
+    total = _whole((summary or {}).get("total-records"))
+    files = (summary or {}).get("added-data-files")
+    if raw is None and (no_data_files or (files is not None and _whole(files) == 0)):
+        return Observation(
+            "volume", None, "ok", {"added": 0, "loaded": False, "total": total}, None
+        )
+    added = _whole(raw)
     if added is None:
         return Observation("volume", None, "no_metrics", {"reason": "not_recorded"}, None)
-    band = learn_band(_numbers(history, "added"), floor=VOLUME_FLOOR_ROWS, share=VOLUME_FLOOR_SHARE)
+    loads = [h for h in history if h.get("loaded") is not False]
+    band = learn_band(_numbers(loads, "added"), floor=VOLUME_FLOOR_ROWS, share=VOLUME_FLOOR_SHARE)
     if band is not None and not _finite(band.low, band.high, band.median):
         return _not_finite("volume", None)
     state = "no_history" if band is None else "ok" if band.holds(added) else "fired"
-    observed = {"added": added, "total": _whole((summary or {}).get("total-records"))}
+    observed = {"added": added, "total": total}
     return Observation("volume", None, state, observed, band.to_json() if band else None)
 
 
@@ -618,6 +652,130 @@ def schema_signal(
     return Observation("schema", None, state, observed, None)
 
 
+def schedule_threshold(cron: str, timezone: str, last_commit_at: datetime) -> float | None:
+    """Say how long after its last commit a scheduled table is late.
+
+    Twice the gap between the first two fires after the commit, but never before the second of
+    them has passed, so a weekday job is not late over the weekend.
+
+    Parameters
+    ----------
+    cron
+        The building job's cron expression.
+    timezone
+        Its zone.
+    last_commit_at
+        The table's last commit.
+
+    Returns
+    -------
+    float or None
+        Seconds; `None` when the expression does not fire twice (or cannot be read).
+    """
+    try:
+        first = next_fire_after(cron, timezone, last_commit_at)
+        second = None if first is None else next_fire_after(cron, timezone, first)
+    except ValueError:
+        return None
+    if first is None or second is None:
+        return None
+    gap = (second - first).total_seconds()
+    return max(FRESHNESS_SCHEDULE_FACTOR * gap, (second - last_commit_at).total_seconds())
+
+
+def data_point_indexes(commit_times: Sequence[datetime]) -> list[int]:
+    """Find the commit that stands for each data point of the history rule.
+
+    A data point is a group of commits within `FRESHNESS_BURST_SECONDS` of the group's first
+    commit: a run that commits three times is one. The group is anchored at its first commit and
+    never chained, so a table written every five minutes has a point every ten. The first commit
+    stands for its group, so after retention keeps only those, the points stay the same: each is
+    at least `FRESHNESS_BURST_SECONDS` after the one before.
+
+    Parameters
+    ----------
+    commit_times
+        When the table's commits happened, newest first.
+
+    Returns
+    -------
+    list of int
+        The index in `commit_times` of the first commit of each group, newest group first.
+    """
+    firsts: list[int] = []
+    anchor: datetime | None = None
+    for index in range(len(commit_times) - 1, -1, -1):  # oldest first
+        at = commit_times[index]
+        if anchor is None or (at - anchor).total_seconds() >= FRESHNESS_BURST_SECONDS:
+            anchor = at
+            firsts.append(index)
+    return firsts[::-1]
+
+
+def freshness_signal(
+    *,
+    now: datetime,
+    commit_times: Sequence[datetime],
+    thresholds: Sequence[tuple[float, str]],
+    paused: bool,
+) -> Observation:
+    """Say whether a table is late: whether its last commit is longer ago than usual.
+
+    The limit is the smallest of `thresholds`, the schedules of the jobs that build the table;
+    without one, `FRESHNESS_HISTORY_FACTOR` times the median gap between the newest `HISTORY` + 1
+    data points, at least `FRESHNESS_MIN_SECONDS`. A data point is a group of commits within
+    `FRESHNESS_BURST_SECONDS` of its first (`data_point_indexes`): a run that commits three times
+    is one.
+    Either way a table with fewer than `MIN_HISTORY` commits (by the history rule, data points)
+    is not judged, and a table whose building jobs are all scheduled and paused is not expected
+    to change.
+
+    Parameters
+    ----------
+    now
+        The time of the sweep.
+    commit_times
+        When the table's commits happened, newest first; at least one.
+    thresholds
+        (seconds, job) for each scheduled job that builds the table, is not paused and has a
+        limit (`schedule_threshold`).
+    paused
+        Whether the table has building jobs and every one of them is scheduled and paused.
+
+    Returns
+    -------
+    Observation
+        ``off`` with observed ``{"reason": "paused"}`` when `paused`. Otherwise observed
+        ``seconds`` since the last commit, ``last_commit_at`` (ISO 8601), ``source``
+        (``schedule``, ``history`` or `None` without enough history) and ``job`` (the job whose
+        schedule set the limit, or `None`); band ``{"high": seconds}``.
+    """
+    if paused:
+        return Observation("freshness", None, "off", {"reason": "paused"}, None)
+    last = commit_times[0]
+    observed: dict[str, Any] = {
+        "seconds": int((now - last).total_seconds()),
+        "last_commit_at": last.isoformat(),
+        "source": None,
+        "job": None,
+    }
+    if len(commit_times) < MIN_HISTORY:
+        return Observation("freshness", None, "no_history", observed, None)
+    if thresholds:
+        limit, job = min(thresholds)
+        observed |= {"source": "schedule", "job": job}
+    else:
+        points = [commit_times[i] for i in data_point_indexes(commit_times)]
+        if len(points) < MIN_HISTORY:
+            return Observation("freshness", None, "no_history", observed, None)
+        recent = points[: HISTORY + 1]
+        gaps = [(newer - older).total_seconds() for newer, older in itertools.pairwise(recent)]
+        limit = max(FRESHNESS_HISTORY_FACTOR * statistics.median(gaps), FRESHNESS_MIN_SECONDS)
+        observed["source"] = "history"
+    state = "fired" if observed["seconds"] > limit else "ok"
+    return Observation("freshness", None, state, observed, {"high": limit})
+
+
 @dataclass(frozen=True)
 class HealthEffects:
     """What each signal does when it fires: warn, block or nothing at all.
@@ -841,6 +999,64 @@ def _schema_changes(observed: Mapping[str, Any]) -> str:
     return ", ".join(label + " and ".join(items) for label, items in groups if items)
 
 
+def _duration(seconds: float) -> str:
+    """Format a duration in the plainest unit, rounded down.
+
+    Parameters
+    ----------
+    seconds
+        The duration.
+
+    Returns
+    -------
+    str
+        Minutes under two hours, hours under two days, else days; ``1 minute`` in the singular.
+    """
+    whole = max(int(seconds), 0)
+    if whole < 7_200:
+        count, unit = whole // 60, "minute"
+    elif whole < 172_800:
+        count, unit = whole // 3_600, "hour"
+    else:
+        count, unit = whole // 86_400, "day"
+    return f"{count} {unit}" if count == 1 else f"{count} {unit}s"
+
+
+def _freshness_text(
+    name: str, observed: Mapping[str, Any], usual: Mapping[str, Any], at: str
+) -> str:
+    """Write the alert of a table that is late.
+
+    Parameters
+    ----------
+    name
+        The table's name, as shown.
+    observed
+        The stored observed values.
+    usual
+        The stored band.
+    at
+        The snapshot, for the text.
+
+    Returns
+    -------
+    str
+        The text, naming the job whose schedule set the limit when there is one.
+    """
+    last = datetime.fromisoformat(observed["last_commit_at"]).astimezone(UTC)
+    job = observed.get("job")
+    step = (
+        f"check that job {shown(job)} still runs (lakana runs list), or set "
+        "health: {freshness: off} if this table is updated rarely"
+        if job
+        else "check what writes this table, or set health: {freshness: off} if it is updated rarely"
+    )
+    return (
+        f"{name}: freshness {_duration(observed['seconds'])} since the last snapshot, usually "
+        f"within {_duration(usual['high'])} (last {at}, {last:%d %b %H:%M} UTC); {step}"
+    )
+
+
 def alert_text(
     table: str,
     signal: str,
@@ -873,7 +1089,8 @@ def alert_text(
     snapshot_id
         The snapshot that fired.
     observed_at
-        When the observation was recorded.
+        When the observation was recorded; a freshness alert gives the time of the last
+        snapshot instead, from `observed`.
 
     Returns
     -------
@@ -884,6 +1101,8 @@ def alert_text(
         return None
     usual: Mapping[str, Any] = band or {}
     name, col = shown(table), shown(column)
+    if signal == "freshness":
+        return _freshness_text(name, observed, usual, f"snapshot {snapshot_id}")
     at = f"snapshot {snapshot_id}, {observed_at.astimezone(UTC):%d %b %H:%M} UTC"
     if signal == "volume":
         direction = "less" if observed["added"] < usual["low"] else "more"
@@ -915,3 +1134,192 @@ def alert_text(
             f"{name} still works, or set health: {{schema: off}} if such changes are expected"
         )
     return None
+
+
+_NEXT_STEP = {
+    "freshness": "check what writes {table}",
+    "volume": "check the source extract",
+    "null_rate": "check what fills {column} upstream",
+    "range": "check the source for wrong units or test rows",
+    "schema": "check that what reads {table} still works",
+}
+"""The first half of a value-free alert's next step, per signal (as `alert_text` words it)."""
+
+
+def value_free_alert(
+    table: str,
+    signal: str,
+    column: str | None,
+    *,
+    snapshot_id: int | None,
+    observed_at: datetime,
+    environment: str,
+) -> str:
+    """Write the alert of a fired signal without any value or band.
+
+    For a reader nobody can ask (a notification's webhook): it names the table, the signal, the
+    column, the snapshot, the time and the next step, like a blocking health check's text
+    (`lakana_core.runs.checks.HEALTH_BLOCKED`), and never says why the values are left out.
+
+    Parameters
+    ----------
+    table
+        The table's name.
+    signal
+        One of `SIGNALS`.
+    column
+        The column, for a column signal.
+    snapshot_id
+        The snapshot that fired.
+    observed_at
+        When the observation was recorded.
+    environment
+        The environment's name, for the command.
+
+    Returns
+    -------
+    str
+        The text.
+    """
+    name, col = shown(table), shown(column)
+    what = signal if column is None else f"{signal} of {col}"
+    setting = f"{{{signal}: off}}" if column is None else f"{{{signal}: {{{col}: off}}}}"
+    step = _NEXT_STEP.get(signal, "check the data the table is built from").format(
+        column=col, table=name
+    )
+    return (
+        f"{name}: health signal {what} fired at snapshot {snapshot_id} "
+        f"({observed_at.astimezone(UTC):%d %b %H:%M} UTC); `lakana table health {name} --env "
+        f"{shown(environment)} --signals` shows its usual band and new value to readers who may "
+        f"see them; {step}, or set health: {setting} if this is expected"
+    )
+
+
+UNJUDGED_REASONS = frozenset({"unreadable", "error"})
+"""The reasons of a ``no_metrics`` row whose commit could not judge the signal: its files could
+not be read within the health limits, or computing failed. A blocking health check that meets one
+warns (`unjudged_text`) instead of passing."""
+
+_UNJUDGED_CAUSE = {
+    "unreadable": (
+        "the files the commit added could not be read within the health limits (at most 2,000 "
+        "files, 5 s)"
+    ),
+    "error": "computing it failed",
+    "missing": "nothing was recorded for it",
+    "not_recorded": "the commit's files carry no counts or bounds for it",
+    "not_finite": "its value is not a finite number",
+    "unstorable": "its value did not fit what is stored",
+}
+
+
+_LISTED_COLUMNS = 10
+"""The most columns an alert of signals that could not be judged names."""
+
+
+def unjudged_text(
+    signal: str,
+    column: str | None,
+    snapshot: int,
+    reason: str,
+    table: str,
+    environment: str,
+    *,
+    others: Sequence[str] = (),
+) -> str:
+    """Word why a blocking health signal could not be judged at a snapshot, and what to do.
+
+    The text of the health check, which warns, and of its ``health`` message; it names no value.
+
+    Parameters
+    ----------
+    signal
+        The signal.
+    column
+        The column of a check about one column; `None` for the whole signal.
+    snapshot
+        The snapshot that could not be judged.
+    reason
+        ``unreadable`` or ``error`` (`UNJUDGED_REASONS`); ``missing`` when nothing was recorded
+        for the signal at that snapshot; or the reason of the check's own ``no_metrics`` row
+        (``not_recorded``, ``not_finite``, ``unstorable`` for a number that did not fit).
+    table
+        The table.
+    environment
+        The environment's name.
+    others
+        The other columns of the signal that the commit could not judge, for one message per
+        signal; the first `_LISTED_COLUMNS` of all are named, then how many more.
+
+    Returns
+    -------
+    str
+        ``health signal WHAT could not be judged: CAUSE (snapshot N); the run went on: STEP``.
+    """
+    col = None if column is None else shown(column)
+    what = signal if col is None else f"{signal} of {col}"
+    warn = f"{{{signal}: warn}}" if col is None else f"{{{signal}: {{{col}: warn}}}}"
+    if col is not None and others:
+        names = [col, *(shown(other) for other in others)]
+        listed = ", ".join(names[:_LISTED_COLUMNS])
+        more = len(names) - _LISTED_COLUMNS
+        what = f"{signal} of {listed}" + (f" and {more} more" if more > 0 else "")
+        warn = f"{{{signal}: warn}}"
+    if reason == "unreadable":
+        step = f"commit fewer, larger files, or set health: {warn} to stop blocking on it"
+    elif reason == "error":
+        step = "the server's log names the error, and the next commit is judged again"
+    elif reason != "missing":
+        step = (
+            "the next commit is judged again, and `lakana table health "
+            f"{shown(table)} --env {shown(environment)} --signals` shows what was recorded"
+        )
+    elif col is not None:
+        step = (
+            "a column without a range (text, boolean) or past the 200th column is never "
+            f"judged; use null_rate for it, or set health: {warn} or off"
+        )
+    else:
+        step = (
+            f"`lakana table health {shown(table)} --env {shown(environment)} --signals` shows "
+            "what was recorded"
+        )
+    cause = _UNJUDGED_CAUSE.get(reason, _UNJUDGED_CAUSE["missing"])
+    return (
+        f"health signal {what} could not be judged: {cause} (snapshot {snapshot}); "
+        f"the run went on: {step}"
+    )
+
+
+def never_judged(effects: Mapping[str, str], schema: Schema) -> dict[str, str]:
+    """Find the blocking column entries that no commit of the table can ever judge.
+
+    Only the first `MAX_HEALTH_COLUMNS` top-level columns are evaluated, and ``range`` only for a
+    column type that has one (numbers, dates, times). An entry on a column the table does not
+    have is left out: it is named as missing instead.
+
+    Parameters
+    ----------
+    effects
+        The table's effects, flat (`HealthEffects.flat`).
+    schema
+        The table's current schema.
+
+    Returns
+    -------
+    dict
+        The reason by key (``range.name``), in the order of `effects`.
+    """
+    position = {f.name: (index, f.field_type) for index, f in enumerate(schema.fields)}
+    found: dict[str, str] = {}
+    for key, effect in effects.items():
+        signal, _, column = key.partition(".")
+        if effect != "block" or column not in position:
+            continue
+        index, field_type = position[column]
+        if index >= MAX_HEALTH_COLUMNS:
+            found[key] = f"only the first {MAX_HEALTH_COLUMNS} columns are judged"
+        elif signal == "range" and _kind(field_type) is None:
+            name = str(field_type) if field_type.is_primitive else "nested"
+            found[key] = f"a {name} column has no range"
+    return found

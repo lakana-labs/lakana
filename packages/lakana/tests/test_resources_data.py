@@ -2800,6 +2800,14 @@ def test_tables_health_signals_sends_only_what_is_given_and_iterates() -> None:
     assert dict(seen[-1].url.params) == {"cursor": "c2"}
 
 
+def test_a_health_signal_reads_its_set_back_mark_and_an_older_server_has_none() -> None:
+    """`set_back` says a check set the observed snapshot back; a body without it reads `False`."""
+    pages = [{"items": [{**_SIGNAL_BODY, "set_back": True}, _SIGNAL_BODY], "next_cursor": None}]
+    tables = Tables(_transport(lambda _: httpx.Response(200, json=pages[0])))
+    page = tables.health_signals("dev", "bronze.sales")
+    assert [s.set_back for s in page.items] == [True, False]
+
+
 def test_tables_health_reads_the_generated_mark_of_a_check() -> None:
     """A check from the asset's header carries `generated`; an older server's body has none."""
     (check,) = cast("list[dict[str, object]]", _HEALTH_BODY["checks"])
@@ -3341,3 +3349,53 @@ def test_tables_get_reads_no_markers_from_an_older_server() -> None:
     )
     assert (table.label, table.label_language, table.translations) == (None, None, ())
     assert table.language == table.main_language == "en"
+
+
+def test_tables_get_carries_the_health_effects_and_the_keys_naming_no_column() -> None:
+    """`Table.health`, `health_missing` and `health_never_judged` parse.
+
+    An older server's body has none of them, and an entry that is not text is left out.
+    """
+    bodies: list[dict[str, Any]] = [
+        {
+            "health": {"range.pricee": "off", "range.note": "block", "volume": "block"},
+            "health_missing": ["range.pricee"],
+            "health_never_judged": {"range.note": "a string column has no range", "x": 1},
+        },
+        {},
+        {"health": ["volume"], "health_missing": "range.pricee", "health_never_judged": ["x"]},
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        """Answer with the next body.
+
+        Parameters
+        ----------
+        request
+            The request.
+
+        Returns
+        -------
+        httpx.Response
+            A `TableOut` body.
+        """
+        return httpx.Response(
+            200,
+            json={
+                "name": "sales",
+                "namespace": "bronze",
+                "uuid": "u1",
+                "metadata_location": None,
+                "schema": [],
+                **bodies.pop(0),
+            },
+        )
+
+    tables = Tables(_transport(handler))
+    full, bare, odd = (tables.get("dev", "bronze.sales") for _ in range(3))
+
+    assert full.health == {"range.pricee": "off", "range.note": "block", "volume": "block"}
+    assert full.health_missing == ("range.pricee",)
+    assert full.health_never_judged == {"range.note": "a string column has no range"}
+    assert (bare.health, bare.health_missing, bare.health_never_judged) == ({}, (), {})
+    assert (odd.health, odd.health_missing, odd.health_never_judged) == ({}, (), {})

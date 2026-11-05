@@ -1395,7 +1395,7 @@ def test_commit_refuses_a_snapshot_number_outside_the_iceberg_range(
 def test_commit_refuses_a_sequence_number_not_above_the_tables_last(
     catalog: CatalogService, principal: PrincipalRef, tmp_path: Path
 ) -> None:
-    """On a format v2 table a new snapshot must take a sequence number above the last one.
+    """On a format v2 or later table a new snapshot must take a sequence number above the last one.
 
     Parameters
     ----------
@@ -1527,7 +1527,7 @@ def test_commit_refuses_a_v2_snapshot_without_a_sequence_number(
     catalog.create_table(principal, ref, schema=_schema())
     catalog.append(principal, ref, _rows([1]))
     last = catalog.load_table(principal, ref).metadata.last_sequence_number  # ty: ignore[unresolved-attribute]
-    with pytest.raises(ValidationError, match=r"format v2 table needs a sequence number"):
+    with pytest.raises(ValidationError, match=r"format v2 or later table needs a sequence number"):
         _readd_current(catalog, principal, ref, None)
     catalog.append(principal, ref, _rows([2]))
     assert catalog.load_table(principal, ref).metadata.last_sequence_number == last + 1  # ty: ignore[unresolved-attribute]

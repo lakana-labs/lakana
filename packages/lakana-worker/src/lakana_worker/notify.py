@@ -436,8 +436,10 @@ def _facts(session: Session, row: NotificationDelivery, environment: Environment
     Returns
     -------
     Facts
-        The facts of the run; invented ones for a test.
+        The facts of the run, or of the fired health signal it names; invented ones for a test.
     """
+    if row.health_signal_id is not None:
+        return payload.facts_for_health(session, row, environment.name, row.id)
     if row.run_id is None:
         return dataclasses.replace(
             payload.sample_facts(row.id), job=row.job, environment=environment.name

@@ -35,6 +35,12 @@ the next attempt replaces the table, which holds unchecked data until then. A wo
 after the write on its last attempt, or in a run that is cancelled, is followed by a claim
 that only sets the table back (`set_back_only`): it builds and checks nothing.
 
+A check of family `health` (`projects.health_checks`, from `health: {signal: block}`) counts
+nothing: `_health_result` reads whether the signal fired at any snapshot the task run wrote; for
+a write that replaces the table, only the last attempt's (an earlier attempt's partial commit,
+which the retry replaced, is not judged; it is still set back). A firing fails the check with
+a text that names no value, since every reader of the run reads it.
+
 What such a rollback undoes is the task run's own chain of writes and nothing else. The
 write guard records the tip of that chain in each write's own commit
 (`task_runs.own_snapshot_id`, `ProtectedWriteGuard._advance_own_tip`), and the rollback names
@@ -50,13 +56,17 @@ import logging
 import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import select
+from sqlalchemy import Row, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from lakana_core.auth import PrincipalRef, RunContext
+from lakana_core.catalog.attempt_stamp import last_attempts_snapshots
+from lakana_core.catalog.health_jobs import queue_health_notifications
+from lakana_core.catalog.health_record import own_chain
+from lakana_core.catalog.health_signals import COLUMN_SIGNALS, UNJUDGED_REASONS, unjudged_text
 from lakana_core.catalog.identity import resolve_table_id, resolve_table_with_note
 from lakana_core.catalog.metadata import read_metadata
 from lakana_core.catalog.service import ROLLBACK_NOT_KNOWN_REASON, CatalogService, Rollback
@@ -73,12 +83,15 @@ from lakana_core.models import (
     RollbackOutcome,
     Run,
     Table,
+    TableHealthSignal,
     TableType,
     TaskRun,
     TaskStatus,
 )
 from lakana_core.projects.checks import CheckSpec, read_manifest_checks
-from lakana_core.projects.manifest import manifest_assets
+from lakana_core.projects.discovery import _fold
+from lakana_core.projects.health_checks import HEALTH_FAMILY, health_specs
+from lakana_core.projects.manifest import entry_write, manifest_assets
 from lakana_core.runs.check_message import (
     BLOCKING,
     KEPT,
@@ -100,6 +113,7 @@ from lakana_core.runs.checks import (
     build_failure_message,
     error_of_exception,
     error_text,
+    health_blocked,
     kept_no_checks_error,
     mark_rollback_failed,
     record_result,
@@ -236,6 +250,8 @@ def _check_lines(
             found = "passed"
         elif result.outcome is CheckOutcome.ERRORED:
             found = f"errored: {result.error}"
+        elif result.failing_rows is None and result.error:
+            found = f"{result.outcome.value}: {result.error}"  # a health check counts no rows
         else:
             rows = "1 row" if result.failing_rows == 1 else f"{result.failing_rows} rows"
             found = f"{result.outcome.value}, {rows}"
@@ -387,6 +403,348 @@ def _counted_outcome(spec: CheckSpec, rows: int) -> CheckOutcome:
     if rows == 0:
         return CheckOutcome.PASSED
     return CheckOutcome.WARNED if spec.on_failure == "warn" else CheckOutcome.FAILED
+
+
+def _own_chain(
+    session: Session,
+    engine: RunEngine,
+    environment: str,
+    written: Written | None,
+    *,
+    replaces: bool,
+) -> list[int]:
+    """List the snapshots the task run's last attempt wrote, its tip first.
+
+    A Python asset can commit several times; each commit records the signals of its own
+    snapshot, so a blocking health check judges every one, not only the tip. For a write that
+    replaces the table, only the commits of the attempt that wrote the tip count
+    (`attempt_stamp.last_attempts_snapshots`): a partial commit an earlier, failed attempt left
+    is what the retry replaced. An append, merge or history write keeps an earlier attempt's
+    commits published, so they are judged too.
+
+    Parameters
+    ----------
+    session
+        Database session; rolled back afterwards.
+    engine
+        The run engine, for the storage.
+    environment
+        The run's environment.
+    written
+        The task run's written record; `None` when it wrote nothing.
+    replaces
+        Whether the task's write replaces the table.
+
+    Returns
+    -------
+    list of int
+        `health_record.own_chain` from `Written.snapshot_after` back to `Written.snapshot_before`,
+        without the snapshots of earlier attempts when `replaces`; the tip alone when the table's
+        metadata no longer holds it (expired) or the table is not a managed one; empty without a
+        tip.
+
+    Raises
+    ------
+    Exception
+        Whatever reading the metadata raises: the check phase then runs again
+        (`check_phase`), it never passes a check it could not judge.
+    """
+    if written is None or written.snapshot_after is None:
+        return []
+    try:
+        row = session.get(Table, written.table_id)
+        if row is None or row.table_type is not TableType.ICEBERG or row.metadata_location is None:
+            return [written.snapshot_after]
+        resolved = StorageResolver(session, engine.key_provider).for_environment(environment)
+        metadata = read_metadata(resolved.file_io, row.metadata_location)
+    finally:
+        session.rollback()
+    chain = own_chain(metadata, written.snapshot_after, written.snapshot_before)
+    if replaces:
+        chain = last_attempts_snapshots(metadata, chain)
+    return chain or [written.snapshot_after]
+
+
+def _health_result(
+    session: Session,
+    spec: CheckSpec,
+    table_id: uuid.UUID | None,
+    chain: Sequence[int],
+    environment: str,
+    *,
+    kept: bool,
+) -> tuple[CheckOutcome, str | None, int | None]:
+    """Judge a blocking health check by the signals recorded for the task's own snapshots.
+
+    Each commit recorded the signals of its snapshot in its own transaction, so they are there
+    when the check phase runs.
+
+    The whole of a column signal (`range: block`) asks for a firing recorded as ``block``, so a
+    column with its own ``warn`` (`range: {qty: warn}`) does not stop the run; a table signal
+    or a single column's check asks only that it fired, since the spec already says ``block``.
+    The effect a row records comes from the table's effects (`tables.health_effects`), written
+    from the current deployment, while the spec comes from the run's project version; the two
+    differ only when a deploy lands during the run, and then the current deployment decides
+    for the whole of a column signal.
+
+    A signal that could not be judged never passes silently (`_unjudged`): the check warns, so
+    the run goes on and its message, `lakana runs show` and the notify targets say why.
+
+    Parameters
+    ----------
+    session
+        Database session; read only, rolled back.
+    spec
+        The health check (`projects.health_checks.health_specs`).
+    table_id
+        The task's table, or `None` when it has none.
+    chain
+        The snapshots the task run wrote, the tip first (`_own_chain`); empty without any.
+    environment
+        The environment's name, for the text.
+    kept
+        Whether a set-back keeps the table's signals, marked; `False` for a write that a
+        set-back leaves not published, whose signals are deleted.
+
+    Returns
+    -------
+    tuple
+        The outcome, the error and the snapshot judged (the tip): ``failed`` with
+        `health_blocked`, naming the first snapshot of the chain where the signal fired;
+        ``warned`` with `unjudged_text` when it fired nowhere but could not be judged at one
+        snapshot; else ``passed`` and no text.
+    """
+    tip = chain[0] if chain else None
+    names = () if spec.generated is None else spec.generated.columns
+    if tip is None or table_id is None or not names:
+        return CheckOutcome.PASSED, None, tip
+    signal, column = names[0], (names[1] if len(names) > 1 else None)
+    rows = session.execute(
+        select(
+            TableHealthSignal.snapshot_id,
+            TableHealthSignal.signal,
+            TableHealthSignal.column_name,
+            TableHealthSignal.state,
+            TableHealthSignal.effect,
+            TableHealthSignal.observed,
+        ).where(
+            TableHealthSignal.table_id == table_id,
+            TableHealthSignal.snapshot_id.in_(list(chain)),
+        )
+    ).all()
+    session.rollback()
+    mine = [row for row in rows if row.signal == signal]
+    if column is not None:
+        fired = {r.snapshot_id for r in mine if r.state == "fired" and r.column_name == column}
+    elif signal in COLUMN_SIGNALS:
+        fired = {r.snapshot_id for r in mine if r.state == "fired" and r.effect == "block"}
+    else:
+        fired = {r.snapshot_id for r in mine if r.state == "fired" and r.column_name is None}
+    first = next((snapshot for snapshot in reversed(chain) if snapshot in fired), None)
+    if first is not None:
+        return (
+            CheckOutcome.FAILED,
+            health_blocked(signal, column, first, spec.table, environment, kept=kept),
+            tip,
+        )
+    unjudged = _unjudged(rows, signal, column, chain)
+    if unjudged is None:
+        return CheckOutcome.PASSED, None, tip
+    snapshot, reason = unjudged
+    return (
+        CheckOutcome.WARNED,
+        unjudged_text(signal, column, snapshot, reason, spec.table, environment),
+        tip,
+    )
+
+
+def _tell_unjudged(
+    session: Session,
+    environment_id: uuid.UUID,
+    table: str,
+    table_id: uuid.UUID,
+    chain: Sequence[int],
+    checks: Sequence[tuple[str, str | None]],
+) -> None:
+    """Queue a ``health`` message for each commit row that left a blocking signal not judged.
+
+    A firing ``warn`` signal is told to the notify targets of the jobs that build the table; a
+    ``block`` signal that could not be judged warns, so it is told the same way, of the
+    ``no_metrics`` row that says so: the commit's table-level row (`UNJUDGED_REASONS`), or the
+    check's own row with any reason but ``no_rows`` (`_judges`). A signal with no row at all has
+    nothing to name and is told only by the run. Queuing never fails the check phase but on a
+    database error.
+
+    Parameters
+    ----------
+    session
+        Database session; committed.
+    environment_id
+        The table's environment.
+    table
+        The dotted table name.
+    table_id
+        The table.
+    chain
+        The snapshots the task run wrote.
+    checks
+        (signal, column) of the checks that warned; the column `None` for the whole signal.
+
+    Raises
+    ------
+    SQLAlchemyError
+        If the database failed; the check phase then runs again.
+    """
+    found = session.scalars(
+        select(TableHealthSignal).where(
+            TableHealthSignal.table_id == table_id,
+            TableHealthSignal.snapshot_id.in_(list(chain)),
+            TableHealthSignal.signal.in_(sorted({signal for signal, _ in checks})),
+            TableHealthSignal.state == "no_metrics",
+        )
+    )
+    rows = []
+    for row in found:
+        reason = row.observed.get("reason") if isinstance(row.observed, dict) else None
+        tells = (row.column_name is None and reason in UNJUDGED_REASONS) or (
+            reason != "no_rows"
+            and any(
+                signal == row.signal and _judges(row, signal, column) for signal, column in checks
+            )
+        )
+        if tells:
+            rows.append(row)
+    # One message per signal: the table-level row, else the first column of the oldest commit;
+    # its alert names the signal's other columns that could not be judged (`facts_for_health`).
+    order = {snapshot: index for index, snapshot in enumerate(reversed(chain))}
+    rows.sort(
+        key=lambda row: (
+            row.signal,
+            row.column_name is not None,
+            order.get(row.snapshot_id or 0, 0),
+            row.column_name or "",
+        )
+    )
+    rows = [
+        row for index, row in enumerate(rows) if index == 0 or rows[index - 1].signal != row.signal
+    ]
+    if not rows:
+        session.rollback()
+        return
+    try:
+        deliveries = queue_health_notifications(
+            session, environment_id=environment_id, table=table, rows=rows, now=db_now(session)
+        )
+    except SQLAlchemyError:
+        raise
+    except Exception as exc:  # a damaged manifest must not stop the checks
+        logger.warning(
+            "The health notifications of %s could not be queued (%s).",
+            shown(table),
+            type(exc).__name__,
+        )
+        session.rollback()
+        return
+    session.add_all(deliveries)
+    session.commit()
+
+
+_SignalRow = Row[int | None, str, str | None, str, str, dict[str, Any] | None]
+"""A row of `_health_result`'s read: snapshot, signal, column, state, effect, observed."""
+
+
+def _judges(row: _SignalRow | TableHealthSignal, signal: str, column: str | None) -> bool:
+    """Say whether a row of the check's signal is one the check judges.
+
+    Parameters
+    ----------
+    row
+        A row of the check's signal.
+    signal
+        The check's signal.
+    column
+        The check's column; `None` for the whole signal.
+
+    Returns
+    -------
+    bool
+        The column's own row for a column check; a column row recorded as ``block`` for the
+        whole of a column signal; the table-level row for a table signal.
+    """
+    if column is not None:
+        return row.column_name == column
+    if signal in COLUMN_SIGNALS:
+        return row.column_name is not None and row.effect == "block"
+    return row.column_name is None
+
+
+def _unjudged(
+    rows: Sequence[_SignalRow], signal: str, column: str | None, chain: Sequence[int]
+) -> tuple[int, str] | None:
+    """Find the first snapshot of a chain at which a blocking signal could not be judged.
+
+    A commit that could not read its files, or failed to compute, recorded a table-level
+    ``no_metrics`` row with that reason (`UNJUDGED_REASONS`). A ``no_metrics`` row the check
+    judges (`_judges`) is not judged either, but for reason ``no_rows``, a column without values:
+    ``not_recorded``, ``not_finite``, and a number that did not fit (stored without a reason,
+    named ``unstorable``). A commit that added data (it has a
+    ``volume`` row) and recorded nothing for the signal, or for the check's column, did not
+    judge it either; a compaction, which records only ``schema``, is not such a commit, and for
+    a column neither is a commit that recorded no ``null_rate`` or ``range`` row at all: it added
+    no files (a delete-only commit), whatever the effect of ``volume``. A chain with no row at
+    all was not judged.
+
+    Parameters
+    ----------
+    rows
+        Every signal row of the chain's snapshots: ``snapshot_id``, ``signal``, ``column_name``,
+        ``state``, ``effect`` and ``observed``.
+    signal
+        The check's signal.
+    column
+        The check's column; `None` for the whole signal.
+    chain
+        The snapshots, the tip first.
+
+    Returns
+    -------
+    tuple or None
+        The snapshot and the reason (``unreadable``, ``error`` or ``missing``); `None` when
+        every snapshot was judged.
+    """
+    if not rows:
+        return chain[0], "missing"
+    for snapshot in reversed(chain):
+        here = [row for row in rows if row.snapshot_id == snapshot]
+        own = [row for row in here if row.signal == signal]
+        for row in own:
+            reason = row.observed.get("reason") if isinstance(row.observed, dict) else None
+            if row.column_name is None and row.state == "no_metrics" and reason in UNJUDGED_REASONS:
+                return snapshot, reason
+        for row in own:
+            if row.state != "no_metrics" or not _judges(row, signal, column):
+                continue
+            reason = row.observed.get("reason") if isinstance(row.observed, dict) else None
+            if reason != "no_rows":  # only a column without values had nothing to judge
+                return snapshot, reason if isinstance(reason, str) else "unstorable"
+        if not any(row.signal == "volume" for row in here):
+            continue  # a compaction, or nothing recorded here: no data to judge
+        if column is not None and not any(row.signal in COLUMN_SIGNALS for row in here):
+            # A commit that added files records a null rate for every column (or a table-level
+            # row when the signal is off), whatever the volume's effect; one with none added no
+            # files, as a delete-only commit does, so it has no column to judge.
+            continue
+        if column is not None:
+            # Only the column's own row judges it: a table-level row (`range: off` beside
+            # `{name: block}`) says nothing of a column that records no value.
+            judged = any(row.column_name == column for row in own)
+        elif signal in COLUMN_SIGNALS:
+            judged = True  # which columns there are is the commit's to say
+        else:
+            judged = any(row.column_name is None for row in own)
+        if not judged:
+            return snapshot, "missing"
+    return None
 
 
 def _stop_if_asked(session: Session, keeper: LeaseKeeper, run_id: uuid.UUID) -> None:
@@ -704,13 +1062,17 @@ class _Phase:
     active
         Whether that principal is active.
     specs
-        The checks of the task's table in the run's project version that can be read.
+        The checks of the task's table in the run's project version that can be read, then its
+        blocking health checks (none for a ``source_check`` task, which wrote nothing).
     unreadable
         Whether the project version holds a check entry that cannot be read and may be this
         table's.
     is_asset
         Whether the project version builds the task's table. A ``source_check`` task of such a
         table is the check task of a table that was kept after a failed check.
+    replaces
+        Whether the task's write replaces the table (`entry_write` ``replace``): a retried
+        attempt then supersedes what an earlier one committed (`_own_chain`).
     """
 
     environment_id: uuid.UUID
@@ -721,6 +1083,42 @@ class _Phase:
     specs: tuple[CheckSpec, ...]
     unreadable: bool
     is_asset: bool
+    replaces: bool = False
+
+
+def _without_clashes(specs: Sequence[CheckSpec]) -> tuple[list[CheckSpec], dict[str, str]]:
+    """Keep one check of each name, refused, when two of a task's checks share it.
+
+    Every result is recorded under its check's name and the later replaces the earlier
+    (`record_result`), so of two checks with one name only one would count: a failing
+    hand-written check could pass under a health check's result. The deploy refuses a
+    hand-written check that takes a generated name (`generated_name_issues`); this guard keeps a
+    manifest stored without that refusal from losing a result. The check kept errors and
+    blocks, whatever its own `on_failure`, so the task fails with a text that names the clash.
+
+    Parameters
+    ----------
+    specs
+        The task's checks, hand-written first, then generated.
+
+    Returns
+    -------
+    tuple
+        The checks without the later of each clash, the first made blocking; and the refusal
+        text by the kept check's name, for `check_phase`'s refusals.
+    """
+    kept: dict[str, CheckSpec] = {}
+    refusals: dict[str, str] = {}
+    for spec in specs:
+        earlier = kept.setdefault(_fold(spec.name), spec)
+        if earlier is not spec:
+            kept[_fold(spec.name)] = dataclasses.replace(earlier, on_failure="block")
+            refusals[earlier.name] = (
+                f"two checks of `{shown(spec.table)}` are named `{shown(spec.check)}` "
+                f"(`{shown(earlier.path)}` and `{shown(spec.path)}`), so only one result would "
+                "count; rename the hand-written check and deploy again."
+            )
+    return list(kept.values()), refusals
 
 
 def _read_phase(session: Session, claimed: ClaimedTask, *, set_back: bool = False) -> _Phase:
@@ -787,9 +1185,16 @@ def _read_phase(session: Session, claimed: ClaimedTask, *, set_back: bool = Fals
         ref=ref,
         principal=principal,
         active=row.is_active,
-        specs=read.of(claimed.asset),
+        specs=read.of(claimed.asset)
+        + (
+            ()
+            if claimed.kind == SOURCE_CHECK
+            else health_specs(version.manifest_json, claimed.asset)
+        ),
         unreadable=read.unreadable_for(claimed.asset),
         is_asset=claimed.asset in manifest_assets(version.manifest_json),
+        replaces=entry_write(manifest_assets(version.manifest_json).get(claimed.asset))[0]
+        == "replace",
     )
     session.rollback()
     return phase
@@ -1442,12 +1847,11 @@ def _checks_under(
     # A task created with checks never succeeds without one: a project version that lists none that
     # can be read gives one blocking result that says so, and so does an entry that cannot be
     # read, beside the checks that can. A stand-in is run in place of a check.
-    refusals: dict[str, str] = {}
     # The checks whose count was refused a kept table, with the refusal's text. Told by the
     # type of what failed the count, in the claim that counted: every check is counted again
     # in every check phase, so this never has to be read back from a stored text.
     kept_refusals: dict[str, str] = {}
-    specs = list(phase.specs)
+    specs, refusals = _without_clashes(phase.specs)
     if phase.unreadable:
         stand_in = _stand_in(claimed.asset, "(unreadable)")
         refusals[stand_in.name] = ERROR_UNREADABLE_CHECK
@@ -1486,11 +1890,39 @@ def _checks_under(
             )
         )
         specs.append(stand_in)
+    # The snapshots the task run wrote, read once for its health checks.
+    chain: list[int] | None = None
+    # The signals of the blocking health checks that could not be judged, to tell of.
+    unjudged: list[tuple[str, str | None]] = []
     for spec in specs:
         started = db_now(session)
         session.rollback()
+        health_snapshot: int | None = None
+        recorded = spec
         if spec.name in refusals:
             counted, outcome, error = None, CheckOutcome.ERRORED, refusals[spec.name]
+        elif spec.generated is not None and spec.generated.family == HEALTH_FAMILY:
+            counted = None
+            if chain is None:
+                chain = _own_chain(
+                    session, engine, phase.environment, written, replaces=phase.replaces
+                )
+            outcome, error, health_snapshot = _health_result(
+                session,
+                spec,
+                table_id,
+                chain,
+                phase.environment,
+                # A set-back that leaves the table not published deletes its signals.
+                kept=written is not None
+                and not written.publishes
+                and written.snapshot_before is not None,
+            )
+            if outcome is CheckOutcome.WARNED:
+                # Not judged: it warns, as a `warn` check does, and the run goes on.
+                recorded = dataclasses.replace(spec, on_failure="warn")
+                names = spec.generated.columns
+                unjudged.append((names[0], names[1] if len(names) > 1 else None))
         elif phase.active:
             counted, outcome, error = _count_one(
                 session,
@@ -1512,17 +1944,19 @@ def _checks_under(
             task_run_id=claimed.task_run_id,
             worker=worker,
             claim=claimed.claim,
-            spec=spec,
+            spec=recorded,
             outcome=outcome,
             failing_rows=None if counted is None else counted.rows,
             error=error,
             table_id=table_id,
-            checked_snapshot_id=None if counted is None else counted.checked_snapshot_id,
+            checked_snapshot_id=health_snapshot if counted is None else counted.checked_snapshot_id,
             policy_applied=counted is not None and counted.policy_applied,
             query_run_id=None if counted is None else counted.query_run_id,
             started_at=started if counted is None else counted.started_at,
         ):
             raise LeaseLost
+    if unjudged and table_id is not None and chain:
+        _tell_unjudged(session, phase.environment_id, claimed.asset, table_id, chain, unjudged)
     results = results_of_task(session, claimed.task_run_id)
     # Detached, so that the rollback's commit does not expire what the message is built from.
     session.expunge_all()

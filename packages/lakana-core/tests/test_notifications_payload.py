@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import hmac
 import json
@@ -376,3 +377,45 @@ def test_checks_that_never_finished_are_named_with_the_next_step(session: Sessio
 
 def test_without_unfinished_checks_the_json_has_no_such_key() -> None:
     assert "checks_unfinished" not in json.loads(build("json", "failed", _facts())[0])
+
+
+def test_a_health_message_names_the_table_the_alert_and_the_command() -> None:
+    facts = dataclasses.replace(
+        sample_facts("d-1"),
+        job="nightly",
+        environment="dev",
+        repository="shop",
+        run_id="",
+        status="",
+        trigger="",
+        commit="",
+        table="silver.orders",
+        alert="silver.orders: volume 3 rows, usually 900\N{EN DASH}1,100 "
+        "(snapshot 7, 03 Nov 06:00 UTC); check the source extract, "
+        "or set health: {volume: off} if this table now loads less",
+    )
+    body, _ = build("json", "health", facts)
+    data = json.loads(body)
+    assert (data["event"], data["table"], data["command"], data["run_id"], data["status"]) == (
+        "health",
+        "silver.orders",
+        "lakana table health silver.orders --env dev",
+        "",
+        "",
+    )
+    assert data["alert"].startswith("silver.orders: volume 3 rows")
+    slack = json.loads(build("slack", "health", facts)[0])["text"].splitlines()
+    assert slack[0] == "Lakana: table `silver.orders` needs a look in `dev`"
+    assert slack[1].startswith("`silver.orders: volume 3 rows")
+    assert slack[2] == "Job `nightly`, repository `shop`"
+    assert slack[3:] == [
+        "Details: `lakana table health silver.orders --env dev`",
+        "Delivery `d-1`",
+    ]
+    teams = json.loads(build("teams", "health", facts)[0])
+    content = teams["attachments"][0]["content"]
+    assert content["body"][0]["text"] == "Lakana: table silver.orders needs a look in dev"
+    titles = [f["title"] for f in content["body"][1]["facts"]]
+    assert titles == ["Table", "Alert", "Job", "Environment", "Repository", "Details", "Delivery"]
+    # Other events keep their keys: no `table` or `alert` in a run's message.
+    assert "table" not in json.loads(build("json", "failed", sample_facts("d-2"))[0])

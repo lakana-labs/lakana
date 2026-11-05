@@ -418,9 +418,12 @@ def _check_tail(result: CheckResult) -> str:
     -------
     str
         ``N rows`` (``1 row``) for a failed or warned check, the error text on one line for an
-        errored one, else empty.
+        errored one and for a failed or warned one that counted no rows (a health check, which
+        says what fired or why it could not be judged), else empty.
     """
-    if result.outcome == "errored":
+    if result.outcome == "errored" or (
+        result.outcome in {"failed", "warned"} and result.failing_rows is None
+    ):
         return _output.inline(result.error or "", _PROGRESS_REASON_LIMIT)
     if result.outcome in {"failed", "warned"} and result.failing_rows is not None:
         return f"{result.failing_rows} row" + ("" if result.failing_rows == 1 else "s")

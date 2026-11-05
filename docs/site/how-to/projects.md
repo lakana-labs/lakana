@@ -503,7 +503,8 @@ lakana undeploy analytics --env dev --yes
 
 Removes the deployment pointer and the identity its runs use (needs `DEPLOY`); refused while a run
 of the repository is queued or running there. Data is untouched: the repository's tables become
-orphans (`lakana orphans`), and its project versions stay as history.
+orphans (`lakana orphans`), and its project versions stay as history. Their `health:` effects go:
+every [health signal](../reference/table-health.md) of an orphan warns.
 
 An environment cannot be deleted while a repository is deployed in it: `lakana env delete ENV`
 answers 409, naming the deployed repositories. Undeploy each one first, then delete.

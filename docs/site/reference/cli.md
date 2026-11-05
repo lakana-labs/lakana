@@ -518,7 +518,7 @@ Usage: `lakana table get [OPTIONS] {name}`
 
 Show table or view NAME, its columns, and a view's SQL and references.
 
-A table whose first build did not finish, or failed a check, is shown as `not published`; one that keeps the data that failed a check (`on_failure: keep`), as `kept`. A table that its retention lets expire within the server's warning window says when. An artifact is shown with its name and a pointer to `lakana artifact versions list`.
+A table whose first build did not finish, or failed a check, is shown as `not published`; one that keeps the data that failed a check (`on_failure: keep`), as `kept`. A table that its retention lets expire within the server's warning window says when. A table whose `health:` differs from the default `warn` lists those effects, and marks one that names a column the table does not have. An artifact is shown with its name and a pointer to `lakana artifact versions list`.
 
 | Name | Type | Default | Description |
 |---|---|---|---|

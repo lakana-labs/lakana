@@ -11,7 +11,7 @@ import pyarrow as pa
 import pyarrow.ipc
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from lakana_core.catalog import service as catalog_service
@@ -24,6 +24,7 @@ from lakana_core.models import (
     QueryRun,
     QueryRunStatus,
     Table,
+    TableHealthSignal,
     TableRead,
     TaskRun,
     WriteMode,
@@ -464,6 +465,28 @@ def test_the_signal_history_pages_and_bounds_days(client: TestClient) -> None:
     assert unknown.status_code == 422 and "There is no health signal `rows`" in unknown.text
 
 
+def test_the_history_marks_a_signal_whose_snapshot_was_set_back(client: TestClient) -> None:
+    """`set_back` is `true` for a row a set-back marked, `false` otherwise; health leaves it out.
+
+    Parameters
+    ----------
+    client
+        The test client.
+    """
+    _table(client, rows=2)
+    with Session(client.app.state.engine) as session:
+        session.execute(
+            update(TableHealthSignal)
+            .where(TableHealthSignal.signal == "volume")
+            .values(set_back_at=datetime.now(UTC))
+        )
+        session.commit()
+    items = client.get(f"{_TABLES}/t/health/signals", headers=AUTH_HEADER).json()["items"]
+    assert [s["set_back"] for s in items] == [s["signal"] == "volume" for s in items]
+    assert any(s["set_back"] for s in items) and not all(s["set_back"] for s in items)
+    assert "volume" not in {s["signal"] for s in _health(client).json()["signals"]}
+
+
 def test_a_mask_leaves_out_the_values_of_its_column(client: TestClient) -> None:
     _table(client, rows=3)
     _mask_note(client)
@@ -555,3 +578,28 @@ def test_metadata_that_cannot_be_read_hides_a_masked_readers_values(
     assert (note["observed"], note["values_hidden"]) == (None, True)
     volume = next(s for s in signals if s["signal"] == "volume")
     assert volume["observed"] == {"added": 3, "total": 3}
+
+
+def test_a_table_shows_its_effects_that_differ_from_warn(client: TestClient) -> None:
+    """`health` holds the stored effects, `health_missing` the keys naming no column of it.
+
+    `health_never_judged` names each blocking column entry no commit can judge, with the reason.
+
+    Parameters
+    ----------
+    client
+        The test client.
+    """
+    _table(client)
+    _table(client, "plain")
+    with Session(client.app.state.engine) as session:
+        row = session.get(Table, _table_id(client))
+        assert row is not None
+        row.health_effects = {"null_rate.notes": "off", "range.note": "block", "volume": "block"}
+        session.commit()
+    detail = client.get(f"{_TABLES}/t", headers=AUTH_HEADER).json()
+    assert detail["health"] == {"null_rate.notes": "off", "range.note": "block", "volume": "block"}
+    assert detail["health_missing"] == ["null_rate.notes"]
+    assert detail["health_never_judged"] == {"range.note": "a string column has no range"}
+    plain = client.get(f"{_TABLES}/plain", headers=AUTH_HEADER).json()
+    assert (plain["health"], plain["health_missing"], plain["health_never_judged"]) == ({}, [], {})

@@ -10,8 +10,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 
+import pyarrow as pa
 import pytest
 from core_test_helpers import _prepared_catalog, ensure_table
+from pyiceberg.schema import Schema
+from pyiceberg.types import LongType, NestedField
 from sqlalchemy import delete, select, update
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Session
@@ -48,6 +51,7 @@ from lakana_core.models import (
     Secret,
     SecretUseKind,
     Table,
+    TableHealthSignal,
     TableType,
 )
 from lakana_core.projects.asset_model import ResolvedReference
@@ -4944,3 +4948,132 @@ def test_another_repositorys_history_target_needs_at(
         "rows (`write: history`); say which version each row means with the row's time: "
         "`customer_id: {to: dim.customer, at: <column>}`"
     ]
+
+
+_CLEAN = TableRef("dev", _SILVER, "clean")
+
+
+@pytest.fixture
+def clean_catalog(session: Session, tmp_path: Path, principal: PrincipalRef) -> CatalogService:
+    """Provide `dev` with `bronze.events` and the empty managed table `silver.clean` (`a`).
+
+    Parameters
+    ----------
+    session
+        Database session.
+    tmp_path
+        Storage root.
+    principal
+        The creator.
+
+    Returns
+    -------
+    CatalogService
+        The catalog.
+    """
+    catalog = _prepared_catalog(
+        session,
+        tmp_path,
+        AllowAllAuthorization(),
+        namespaces=[_BRONZE, _SILVER],
+        tables=[TableRef("dev", _BRONZE, "events")],
+    )
+    catalog.create_table(
+        principal, _CLEAN, schema=Schema(NestedField(1, "a", LongType(), required=False))
+    )
+    return catalog
+
+
+def _healthy(health: dict[str, str]) -> ParsedAsset:
+    """Build the asset of `silver.clean` with a `health:` block.
+
+    Parameters
+    ----------
+    health
+        Its flat effects.
+
+    Returns
+    -------
+    ParsedAsset
+        The asset.
+    """
+    return make_asset(
+        "silver.clean",
+        ("bronze.events",),
+        metadata=AssetMetadata(materialize="table", health=health),
+    )
+
+
+def _clean_effects(session: Session) -> dict[str, str] | None:
+    """Read the stored effects of `silver.clean`.
+
+    Parameters
+    ----------
+    session
+        Database session.
+
+    Returns
+    -------
+    dict or None
+        `Table.health_effects`.
+    """
+    session.expire_all()
+    return session.scalars(select(Table.health_effects).where(Table.name == "clean")).one()
+
+
+def test_undeploy_resets_the_health_effects_of_the_repositorys_tables(
+    session: Session, clean_catalog: CatalogService, principal: PrincipalRef
+) -> None:
+    """After an undeploy no asset builds the table: no effects shown, the next commit warns.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    clean_catalog
+        The catalog with `silver.clean`.
+    principal
+        The deployer and writer.
+    """
+    repo = _repo(session)
+    _deployed(session, principal, repo, "a" * 40, _healthy({"range": "off", "volume": "block"}))
+    assert _clean_effects(session) == {"range": "off", "volume": "block"}
+
+    DeployService(session, AllowAllAuthorization()).undeploy(principal, "dev", "analytics")
+
+    assert _clean_effects(session) is None
+    assert clean_catalog.describe_table(principal, _CLEAN).health == {}
+    clean_catalog.append(principal, _CLEAN, pa.table({"a": pa.array([1, 2], pa.int64())}))
+    effects = {
+        (r.signal, r.column_name): r.effect for r in session.scalars(select(TableHealthSignal))
+    }
+    assert effects["volume", None] == "warn"
+    assert effects["range", "a"] == "warn"
+
+
+def test_a_rollback_restores_the_previous_versions_effects(
+    session: Session, clean_catalog: CatalogService, principal: PrincipalRef
+) -> None:
+    """Rolling back writes the effects of the version it goes back to.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    clean_catalog
+        The catalog with `silver.clean`.
+    principal
+        The deployer.
+    """
+    repo = _repo(session)
+    _deployed(session, principal, repo, "a" * 40, _healthy({"volume": "block"}))
+    _deployed(session, principal, repo, "b" * 40, _healthy({"range": "off"}))
+    assert _clean_effects(session) == {"range": "off"}
+    service = DeployService(session, AllowAllAuthorization())
+    view = service.submit(
+        principal, "dev", repository="analytics", kind=DeployKind.ROLLBACK, to_previous=True
+    )
+    service.execute_rollback(
+        principal, _claimed(session, session.get(DeployRun, view.id)), worker_id="w1"
+    )
+    assert _clean_effects(session) == {"volume": "block"}

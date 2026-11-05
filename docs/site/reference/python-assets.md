@@ -97,6 +97,10 @@ limits lie is in [Python assets: what they are for and how far they are trusted]
   def fact_orders(orders):
       return orders
   ```
+- **Health.** `health="off"`, or a dict such as `{"volume": "block", "range": {"price": "off"}}`,
+  chooses what each [table health signal](table-health.md#effects-warn-block-off) does:
+  `warn`, `block` or `off`, with the rules of SQL front matter. It is refused with
+  `output="artifact"`, and like the other arguments it must be written out as a literal.
 - **Write modes.** `write`, `key` and `watermark` say what a run does to the table, with the
   rules of SQL front-matter (see [Write modes](asset-front-matter.md#write-modes)):
   `write="replace"` (the default) replaces every row with what the function returns;

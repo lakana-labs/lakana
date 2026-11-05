@@ -33,6 +33,7 @@ from sqlalchemy.orm import Session
 from lakana_core.audit.service import AuditService
 from lakana_core.auth import Action, AllowAllAuthorization, PrincipalRef, RunContext, Securable
 from lakana_core.catalog import service as service_module
+from lakana_core.catalog.health_record import own_chain
 from lakana_core.catalog.json_schema import ColumnSpec
 from lakana_core.catalog.service import CatalogService, Rollback, failed_snapshot_tag
 from lakana_core.catalog.writes import WriteResult
@@ -445,28 +446,36 @@ def test_a_replaced_table_goes_back_to_the_snapshot_before(
     assert _row(session).unpublished_run_id is None
 
 
-def _health_snapshots(session: Session) -> set[int | None]:
+def _health_snapshots(session: Session, *, set_back: bool = False) -> set[int | None]:
     """Read the snapshots the recorded health signals observe.
 
     Parameters
     ----------
     session
         Database session.
+    set_back
+        Read the rows a set-back marked instead of the others.
 
     Returns
     -------
     set of int or None
         Each row's ``snapshot_id``.
     """
-    return set(session.scalars(select(TableHealthSignal.snapshot_id)))
+    marked = TableHealthSignal.set_back_at.is_not(None)
+    return set(
+        session.scalars(
+            select(TableHealthSignal.snapshot_id).where(marked if set_back else ~marked)
+        )
+    )
 
 
-def test_a_set_back_deletes_the_health_signals_of_the_snapshots_it_sets_back(
+def test_a_set_back_marks_the_health_signals_of_the_snapshots_it_sets_back(
     session: Session, principal: PrincipalRef, tmp_path: Path
 ) -> None:
-    """Delete the signals of every snapshot between the one set back to and the failed one (M1).
+    """Mark the signals of every snapshot between the one set back to and the failed one (M1).
 
-    They neither show as the table's current state nor feed the baseline.
+    They neither show as the table's current state nor feed the baseline, but the history keeps
+    them: a fired one is why a blocking health check set the table back.
 
     Parameters
     ----------
@@ -488,12 +497,80 @@ def test_a_set_back_deletes_the_health_signals_of_the_snapshots_it_sets_back(
 
     assert _roll_back(catalog, principal, task, written).outcome is RollbackOutcome.ROLLED_BACK
     assert _health_snapshots(session) == {before}
+    assert _health_snapshots(session, set_back=True) == {middle, after}
+
+
+def test_the_own_chain_walks_from_the_tip_to_the_snapshot_before(
+    session: Session, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    """`own_chain` is the walk both the set-back and the blocking health check use.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    principal
+        The writer.
+    tmp_path
+        Storage root.
+    """
+    catalog = _catalog(session, principal, tmp_path)
+    before = _write(catalog, principal, _orders([1], ["eu"]), WriteMode.CREATE).snapshot_id
+    middle = _write(catalog, principal, _orders([2], ["eu"]), WriteMode.APPEND).snapshot_id
+    after = _write(catalog, principal, _orders([3], ["us"]), WriteMode.APPEND).snapshot_id
+    metadata = _stored_metadata(session)
+    assert own_chain(metadata, after, before) == [after, middle]
+    assert own_chain(metadata, after, None) == [after, middle, before]
+    assert own_chain(metadata, None, before) == []
+    assert own_chain(metadata, 4711, None) == []
+
+
+def test_the_own_chain_stops_at_the_snapshot_before_even_off_its_line(
+    session: Session, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    """A foreign rollback between a run's commits never pulls older snapshots into its chain.
+
+    The run's later commit then has a parent older than the snapshot before the run; the walk
+    stops at the first snapshot that is no newer than that one (by sequence number).
+
+    Parameters
+    ----------
+    session
+        Database session.
+    principal
+        The writer.
+    tmp_path
+        Storage root.
+    """
+    catalog = _catalog(session, principal, tmp_path)
+    old = _write(catalog, principal, _orders([1], ["eu"]), WriteMode.CREATE).snapshot_id
+    before = _write(catalog, principal, _orders([2], ["eu"]), WriteMode.APPEND).snapshot_id
+    after = _write(catalog, principal, _orders([3], ["us"]), WriteMode.APPEND).snapshot_id
+    assert after is not None
+    metadata = _stored_metadata(session)
+    tip = metadata.snapshot_by_id(after)
+    assert tip is not None
+    # As if another writer had set `main` back to `old` before the run's commit `after`.
+    moved = tip.model_copy(update={"parent_snapshot_id": old})
+    rolled = metadata.model_copy(
+        update={"snapshots": [s for s in metadata.snapshots if s.snapshot_id != after] + [moved]}
+    )
+    assert own_chain(rolled, after, before) == [after]
+    assert own_chain(rolled, after, None) == [after, old]
+    assert own_chain(rolled, after, 4711) == [after, old]  # the snapshot before has expired
+    # A format v1 table numbers every snapshot 0: only the snapshot before stops the walk.
+    zeroed = [s.model_copy(update={"sequence_number": 0}) for s in rolled.snapshots]
+    unnumbered = rolled.model_copy(update={"snapshots": zeroed})
+    assert own_chain(unnumbered, after, before) == [after, old]
 
 
 def test_a_first_build_that_is_set_back_keeps_no_health_signals(
     session: Session, principal: PrincipalRef, tmp_path: Path
 ) -> None:
     """Delete the signals of a first build that is not published, so no reader sees its values.
+
+    The table's data is refused to every reader until a build publishes it, so its numbers are
+    not kept, marked or not.
 
     Parameters
     ----------
@@ -513,6 +590,7 @@ def test_a_first_build_that_is_set_back_keeps_no_health_signals(
 
     assert _roll_back(catalog, principal, task, written).outcome is RollbackOutcome.UNPUBLISHED
     assert _health_snapshots(session) == set()
+    assert _health_snapshots(session, set_back=True) == set()
 
 
 def test_a_second_writers_commit_is_never_discarded(

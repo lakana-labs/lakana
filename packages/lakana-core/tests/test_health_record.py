@@ -6,19 +6,29 @@ import json
 import logging
 import sys
 import uuid
-from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import cast
 
 import pyarrow as pa
 import pytest
 from core_test_helpers import _prepared_catalog
+from health_test_helpers import (
+    _ORDERS,
+    _SILVER,
+    _T0,
+    _environment_id,
+    _rows,
+    _seed,
+    _table_id,
+    health_catalog,
+)
 from pyiceberg.conversions import to_bytes
 from pyiceberg.manifest import DataFile
 from pyiceberg.schema import Schema
 from pyiceberg.table.snapshots import Operation, Summary
 from pyiceberg.table.update import SetPropertiesUpdate
-from pyiceberg.types import DoubleType, LongType, NestedField, StringType
-from sqlalchemy import select
+from pyiceberg.types import DoubleType, NestedField
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
@@ -28,34 +38,8 @@ from lakana_core.catalog.health_record import commit_observations, recent_observ
 from lakana_core.catalog.health_signals import HealthEffects, Observation
 from lakana_core.catalog.service import CatalogService
 from lakana_core.errors import ValidationError
-from lakana_core.identifiers import NamespacePath, TableRef
-from lakana_core.models import Namespace, Table, TableHealthSignal, WriteMode
-
-_SILVER = NamespacePath.from_parts(["silver"])
-_ORDERS = TableRef("dev", _SILVER, "orders")
-_SCHEMA = Schema(
-    NestedField(1, "id", LongType(), required=True),
-    NestedField(2, "status", StringType(), required=False),
-)
-_ARROW = pa.schema([pa.field("id", pa.int64(), nullable=False), pa.field("status", pa.string())])
-_T0 = datetime(2026, 10, 1, tzinfo=UTC)
-
-
-def _rows(ids: list[int]) -> pa.Table:
-    """Build rows of `silver.orders`, the status of every other row null.
-
-    Parameters
-    ----------
-    ids
-        The ids.
-
-    Returns
-    -------
-    pa.Table
-        The rows.
-    """
-    status = [None if i % 2 else "s" for i in ids]
-    return pa.table({"id": ids, "status": status}, schema=_ARROW)
+from lakana_core.identifiers import TableRef
+from lakana_core.models import Table, TableHealthSignal, WriteMode
 
 
 @pytest.fixture
@@ -76,45 +60,7 @@ def catalog(session: Session, tmp_path: Path, principal: PrincipalRef) -> Catalo
     CatalogService
         The catalog.
     """
-    built = _prepared_catalog(session, tmp_path, AllowAllAuthorization(), namespaces=[_SILVER])
-    built.create_table(principal, _ORDERS, schema=_SCHEMA)
-    return built
-
-
-def _table_id(session: Session) -> uuid.UUID:
-    """Look up the id of `silver.orders`.
-
-    Parameters
-    ----------
-    session
-        Database session.
-
-    Returns
-    -------
-    uuid.UUID
-        The id.
-    """
-    return session.scalars(select(Table.id).where(Table.name == "orders")).one()
-
-
-def _environment_id(session: Session) -> uuid.UUID:
-    """Look up the environment of `silver.orders`.
-
-    Parameters
-    ----------
-    session
-        Database session.
-
-    Returns
-    -------
-    uuid.UUID
-        The id.
-    """
-    return session.scalars(
-        select(Namespace.environment_id)
-        .join(Table, Table.namespace_id == Namespace.id)
-        .where(Table.name == "orders")
-    ).one()
+    return health_catalog(session, tmp_path, principal)
 
 
 def _signals(session: Session) -> list[tuple[str, str | None, str, str]]:
@@ -135,54 +81,6 @@ def _signals(session: Session) -> list[tuple[str, str | None, str, str]]:
         ((r.signal, r.column_name, r.state, r.effect) for r in rows),
         key=lambda row: (row[0], row[1] or "", row[2], row[3]),
     )
-
-
-def _seed(
-    session: Session,
-    signal: str,
-    observed: dict,
-    *,
-    count: int = 8,
-    column: str | None = None,
-    first_day: int = 0,
-) -> None:
-    """Record a history of one signal for `silver.orders`, one day apart, before today.
-
-    Parameters
-    ----------
-    session
-        Database session; commits.
-    signal
-        The signal.
-    observed
-        The observed value of every row.
-    count
-        How many rows.
-    column
-        The column, for a column signal.
-    first_day
-        The day after `_T0` of the oldest row.
-    """
-    table_id = _table_id(session)
-    environment_id = _environment_id(session)
-    for day in range(first_day, first_day + count):
-        session.add(
-            TableHealthSignal(
-                id=uuid.uuid4(),
-                environment_id=environment_id,
-                table_id=table_id,
-                signal=signal,
-                column_name=column,
-                snapshot_id=day + 1,
-                sequence_number=day + 1,
-                observed=observed,
-                band=None,
-                state="ok",
-                effect="warn",
-                observed_at=_T0 + timedelta(days=day),
-            )
-        )
-    session.commit()
 
 
 def _recording(monkeypatch: pytest.MonkeyPatch) -> list[tuple]:
@@ -502,12 +400,14 @@ def test_an_unexpected_error_records_no_metrics_and_the_write_lands(
         Captures the warning.
     """
 
-    def broken(*args: object) -> None:
+    def broken(*args: object, **kwargs: object) -> None:
         """Fail like a bug.
 
         Parameters
         ----------
         *args
+            Ignored.
+        **kwargs
             Ignored.
 
         Raises
@@ -592,6 +492,39 @@ def test_the_history_reaches_back_only_twice_history_commits(
     found = recent_observations(session, _table_id(session))
     assert len(found["volume", None]) == 1
     assert len(found["range", "id"]) == 3
+
+
+def test_set_back_rows_neither_feed_the_band_nor_reach_back_its_window(
+    catalog: CatalogService, session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Rows a set-back marked are not the table's data: no value, and no commit of the window.
+
+    Parameters
+    ----------
+    catalog
+        The catalog, which creates the table.
+    session
+        Database session.
+    monkeypatch
+        Lowers `HISTORY` to three.
+    """
+    monkeypatch.setattr(health_record, "HISTORY", 3)
+    _seed(session, "volume", {"added": 5, "total": 5}, count=3)
+    _seed(session, "schema", {"columns": []}, count=6, first_day=2)
+    _seed(session, "volume", {"added": 999, "total": 999}, count=2, first_day=10)
+    session.execute(
+        update(TableHealthSignal)
+        .where(
+            or_(
+                TableHealthSignal.snapshot_id > 10,
+                and_(TableHealthSignal.signal == "schema", TableHealthSignal.snapshot_id > 5),
+            )
+        )
+        .values(set_back_at=_T0)
+    )
+    session.commit()
+    found = recent_observations(session, _table_id(session))
+    assert found["volume", None] == [{"added": 5, "total": 5}] * 3
 
 
 @pytest.mark.parametrize(
@@ -863,4 +796,77 @@ def test_a_value_json_cannot_store_becomes_no_metrics(observed: dict, band: dict
     )
     assert [(r.signal, r.column_name, r.state, r.effect, r.observed, r.band) for r in rows] == [
         ("range", "price", "no_metrics", "block", None, None)
+    ]
+
+
+def test_the_tables_effects_switch_signals_off_and_mark_block(
+    catalog: CatalogService, session: Session, principal: PrincipalRef
+) -> None:
+    """The row's stored effects decide what each recorded signal does.
+
+    Parameters
+    ----------
+    catalog
+        The catalog.
+    session
+        Database session.
+    principal
+        The writer.
+    """
+    table = session.get(Table, _table_id(session))
+    assert table is not None
+    table.health_effects = {"range": "off", "volume": "block", "null_rate.status": "off"}
+    session.commit()
+    catalog.append(principal, _ORDERS, _rows([1, 2]))
+    assert _signals(session) == [
+        ("null_rate", "id", "no_history", "warn"),
+        ("null_rate", "status", "off", "off"),
+        ("range", None, "off", "off"),
+        ("schema", None, "ok", "warn"),
+        ("volume", None, "no_history", "block"),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("stored", "volume"),
+    [
+        ({"volume": "loud", "range": "off"}, ("volume", None, "no_history", "warn")),
+        (["volume"], ("volume", None, "no_history", "warn")),
+    ],
+)
+def test_garbled_stored_effects_read_as_warn_and_are_logged(
+    catalog: CatalogService,
+    session: Session,
+    principal: PrincipalRef,
+    caplog: pytest.LogCaptureFixture,
+    stored: object,
+    volume: tuple[str, None, str, str],
+) -> None:
+    """Effects the code does not understand never fail the commit: they warn, and say so.
+
+    Parameters
+    ----------
+    catalog
+        The catalog.
+    session
+        Database session.
+    principal
+        The writer.
+    caplog
+        Captures the log.
+    stored
+        What the row holds: a map with an unknown effect, or not a map at all.
+    volume
+        The volume signal recorded.
+    """
+    table = session.get(Table, _table_id(session))
+    assert table is not None
+    table.health_effects = cast("dict[str, str]", stored)
+    session.commit()
+    with caplog.at_level(logging.WARNING, logger="lakana_core.catalog.service"):
+        catalog.append(principal, _ORDERS, _rows([1, 2]))
+    assert volume in _signals(session)
+    assert [r.getMessage() for r in caplog.records if "health" in r.getMessage()] == [
+        "silver.orders: its stored health effects are not all understood; "
+        "the ones that are not read as warn"
     ]

@@ -33,12 +33,17 @@ class NotificationDelivery(Base):
     run queue an event only once. A test notification has no run (`run_id` is null, and null
     values do not collide) and the event ``test``.
 
+    A delivery of a fired health signal has no run (`run_id` is null), the event ``health`` and
+    the signal's id; (`health_signal_id`, `job`) is unique, so a signal is queued once per
+    building job, and null ids never collide.
+
     The row never holds the webhook's URL or a signing key, only the name of the secret.
     """
 
     __tablename__ = "notification_deliveries"
     __table_args__ = (
         UniqueConstraint("run_id", "event"),
+        UniqueConstraint("health_signal_id", "job"),
         Index("ix_notification_deliveries_state_next_attempt_at", "state", "next_attempt_at"),
     )
 
@@ -47,6 +52,10 @@ class NotificationDelivery(Base):
     run_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("runs.id", ondelete="CASCADE"), nullable=True
     )
+    health_signal_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("table_health_signals.id", ondelete="CASCADE"), nullable=True
+    )
+    """The fired health signal this delivery tells of; `None` for a run's event and a test."""
     environment_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("environments.id", ondelete="CASCADE")
     )
@@ -55,7 +64,7 @@ class NotificationDelivery(Base):
     )
     job: Mapped[str] = mapped_column(String(255))
     event: Mapped[str] = mapped_column(String(16))
-    """``failed``, ``recovered``, ``columns_changed`` or ``test``."""
+    """``failed``, ``recovered``, ``columns_changed``, ``health`` or ``test``."""
     format: Mapped[str] = mapped_column(String(8))
     """``json``, ``slack`` or ``teams``, as the project version declared it."""
     secret_name: Mapped[str] = mapped_column(String(255))

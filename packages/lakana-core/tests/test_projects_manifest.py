@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import logging
+from typing import Any
 
 import pytest
 from test_projects_dag import make_asset
@@ -18,6 +19,7 @@ from lakana_core.projects.manifest import (
     CHECKS_VERSION,
     CONNECTIONS_VERSION,
     GLOSSARY_VERSION,
+    HEALTH_VERSION,
     HISTORY_VERSION,
     JOBS_VERSION,
     LISTS_CHECKS,
@@ -177,7 +179,7 @@ def test_manifest_pins_every_field() -> None:
         ],
         "edges": [],
         "external_inputs": ["bronze.raw"],
-        "config": config.model_dump(mode="json", exclude={"jobs"}),
+        "config": config.model_dump(mode="json", exclude={"jobs", "health"}),
     }
 
 
@@ -545,7 +547,7 @@ def test_a_python_entry_records_decimals_and_the_manifest_version_is_unchanged(
     asset = dataclasses.replace(_python_asset(), decimals=decimals)
     manifest = build_manifest([asset], build_graph([asset]), ResolvedProjectConfig())
     assert manifest["version"] == VERSION_WITHOUT_CHECKS == 3
-    assert MANIFEST_VERSION == 13
+    assert MANIFEST_VERSION == HEALTH_VERSION == 14
     assert manifest["assets"][0]["decimals"] == decimals
 
 
@@ -1143,7 +1145,8 @@ def test_texts_raise_the_version_only_when_used() -> None:
         translations={"gold.a": {"fr": {"label": "A"}}},
     )
     assert translated["assets"][0]["metadata"]["translations"] == {"fr": {"label": "A"}}
-    assert MANIFEST_VERSION == GLOSSARY_VERSION == 13
+    assert MANIFEST_VERSION == HEALTH_VERSION == 14
+    assert GLOSSARY_VERSION == 13
     assert HISTORY_VERSION == 12
     assert TEXTS_VERSION == 11
 
@@ -1403,3 +1406,52 @@ def test_a_glossary_raises_the_version_to_13_and_only_then() -> None:
     assert isinstance(with_terms["checks"], list)
     assert empty["version"] == 13 and empty["glossary"] == {}
     assert 13 in LISTS_CHECKS
+
+
+def _health_manifest(asset: ParsedAsset, project: dict[str, str] | None = None) -> dict[str, Any]:
+    """Build the manifest of one asset under a project default for `health:`.
+
+    Parameters
+    ----------
+    asset
+        The asset.
+    project
+        `lakana.yaml`'s `health:`, already normalized.
+
+    Returns
+    -------
+    dict
+        The manifest.
+    """
+    config = ResolvedProjectConfig.model_validate({"health": project or {}})
+    return build_manifest([asset], build_graph([asset]), config)
+
+
+def test_health_raises_the_version_to_14_and_only_then() -> None:
+    """The header over the project default gives the entry; a project without health keeps 3."""
+    asset = make_asset("gold.a", metadata=AssetMetadata(health={"volume": "block"}))
+    manifest = _health_manifest(asset, {"range": "off"})
+    assert manifest["version"] == HEALTH_VERSION == MANIFEST_VERSION == 14
+    assert manifest["assets"][0]["health"] == {"range": "off", "volume": "block"}
+    assert isinstance(manifest["checks"], list)
+    assert "health" not in manifest["config"]
+    plain = _health_manifest(make_asset("gold.a"))
+    assert plain["version"] == VERSION_WITHOUT_CHECKS
+    assert "health" not in plain["assets"][0]
+    assert 14 in LISTS_CHECKS
+
+
+def test_a_default_that_changes_nothing_keeps_the_version() -> None:
+    """`volume: warn` is what every table does anyway."""
+    manifest = _health_manifest(make_asset("gold.a"), {"volume": "warn"})
+    assert manifest["version"] == VERSION_WITHOUT_CHECKS
+
+
+def test_a_view_and_an_artifact_never_get_health() -> None:
+    """Their task runs gain no checks, even from the project default."""
+    view = make_asset("gold.v", metadata=AssetMetadata(materialize="view"))
+    artifact = dataclasses.replace(make_asset("gold.m"), output="artifact", kind="python")
+    for asset in (view, artifact):
+        manifest = _health_manifest(asset, {"volume": "off"})
+        assert manifest["version"] == VERSION_WITHOUT_CHECKS
+        assert "health" not in manifest["assets"][0]

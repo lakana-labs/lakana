@@ -33,6 +33,7 @@ from lakana_core.models import (
     Table,
     TableType,
 )
+from lakana_core.projects.health import entry_effects
 from lakana_core.projects.manifest import entry_translations, manifest_main_language
 from lakana_core.projects.project_config import (
     FREE_TEXT_MESSAGE,
@@ -276,7 +277,9 @@ def _texts(declared: object) -> dict[str, str]:
 def _write_entry(
     session: Session, row: Table, entry: Mapping[str, Any], main_language: str | None
 ) -> None:
-    """Write the project's texts and model of one manifest entry; `_apply_entry` without its guard.
+    """Write the project's texts, model and health effects of one manifest entry.
+
+    `_apply_entry` without its guard.
 
     Parameters
     ----------
@@ -332,6 +335,9 @@ def _write_entry(
             session.delete(found)
     write_translations(session, row, entry_translations(entry), stored=stored)
     write_model_entry(session, row, entry)
+    # Only a managed table has snapshots to watch; a damaged entry on any other kind is ignored.
+    managed = row.table_type is TableType.ICEBERG
+    row.health_effects = (entry_effects(entry).flat() or None) if managed else None
 
 
 def _entries(manifest: object) -> dict[str, Mapping[str, Any]]:
@@ -358,7 +364,7 @@ def _entries(manifest: object) -> dict[str, Mapping[str, Any]]:
 def sync_project_descriptions(
     session: Session, environment_id: uuid.UUID, manifest: object
 ) -> None:
-    """Write a project's descriptions and models onto the tables of an environment that exist.
+    """Write a project's descriptions, models and health effects onto an environment's tables.
 
     Called by a deploy and a rollback, in their transaction, with the manifest that becomes
     current. A table the project produces but no run has created yet is skipped; it gets its
@@ -383,7 +389,7 @@ def sync_project_descriptions(
 def sync_created_table(
     session: Session, environment_id: uuid.UUID, row: Table, dotted: str
 ) -> None:
-    """Give a table that was just created the project text and model of its deployment.
+    """Give a table that was just created the project text, model and effects of its deployment.
 
     Nothing is committed here; the caller's commit carries it.
 

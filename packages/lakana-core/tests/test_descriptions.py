@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import re
 import uuid
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, cast
 from unittest import mock
 
+import pyarrow as pa
 import pytest
 from core_test_helpers import ActionAllowList, _prepared_catalog
 from pyiceberg.schema import Schema
@@ -23,6 +25,7 @@ from lakana_core.catalog.descriptions import (
     MAX_DESCRIPTION_LENGTH,
     sync_project_descriptions,
 )
+from lakana_core.catalog.model_metadata import clear_removed_models
 from lakana_core.catalog.service import MAX_EDIT_LANGUAGES, CatalogService, TableDescription
 from lakana_core.errors import NotFoundError, PermissionDenied, ValidationError
 from lakana_core.identifiers import NamespacePath, TableRef
@@ -38,8 +41,10 @@ from lakana_core.models import (
     Repository,
     RepositoryKind,
     Table,
+    TableHealthSignal,
     TableType,
     TextTranslation,
+    WriteMode,
 )
 from lakana_core.projects.dag import build_graph
 from lakana_core.projects.frontmatter import AssetMetadata
@@ -988,3 +993,161 @@ def test_an_edit_decides_its_main_language_under_the_lock(
     assert session.scalars(select(Table)).one().label_edited is None
     (row,) = session.scalars(select(TextTranslation)).all()
     assert (row.language, row.field, row.text_edited) == ("en", "label", "Orders")
+
+
+def _with_health(health: Mapping[str, object] | None) -> dict:
+    """Build `_manifest()` with the asset's stored `health` effects.
+
+    Parameters
+    ----------
+    health
+        The flat effects the manifest entry stores; `None` for none.
+
+    Returns
+    -------
+    dict
+        The manifest.
+    """
+    manifest = _manifest()
+    if health is not None:
+        manifest["assets"][0]["health"] = health
+    return manifest
+
+
+def test_a_deploy_writes_the_tables_health_effects(
+    session: Session, catalog_with_orders: CatalogService
+) -> None:
+    """The entry's effects land on the table; a redeploy without them resets it to `None`.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    catalog_with_orders
+        The catalog with `silver.orders`.
+    """
+    sync_project_descriptions(session, _env_id(session), _with_health({"volume": "block"}))
+    session.commit()
+    assert session.scalars(select(Table)).one().health_effects == {"volume": "block"}
+    sync_project_descriptions(session, _env_id(session), _with_health(None))
+    session.commit()
+    assert session.scalars(select(Table)).one().health_effects is None
+
+
+def test_a_deploy_keeps_only_valid_effects_and_none_for_an_external_table(
+    session: Session, catalog_with_orders: CatalogService
+) -> None:
+    """A garbled entry keeps its valid effects; an external table never gets effects.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    catalog_with_orders
+        The catalog with `silver.orders`.
+    """
+    garbled = {"volume": "loud", "range.price": "off", "freshness": 3}
+    sync_project_descriptions(session, _env_id(session), _with_health(garbled))
+    session.commit()
+    row = session.scalars(select(Table)).one()
+    assert row.health_effects == {"range.price": "off"}
+    row.table_type = TableType.EXTERNAL
+    session.commit()
+    sync_project_descriptions(session, _env_id(session), _with_health({"volume": "block"}))
+    session.commit()
+    assert session.scalars(select(Table)).one().health_effects is None
+
+
+def test_a_deploy_that_drops_the_asset_clears_its_effects(
+    session: Session, catalog_with_orders: CatalogService
+) -> None:
+    """`clear_removed_models` resets the effects of a table the project no longer produces.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    catalog_with_orders
+        The catalog with `silver.orders`.
+    """
+    previous = _with_health({"volume": "block"})
+    sync_project_descriptions(session, _env_id(session), previous)
+    session.commit()
+    clear_removed_models(session, _env_id(session), previous, {"assets": []})
+    session.commit()
+    assert session.scalars(select(Table)).one().health_effects is None
+
+
+def test_a_table_created_after_the_deploy_gets_its_effects_and_its_first_signals_obey_them(
+    session: Session, tmp_path: Path, principal: PrincipalRef
+) -> None:
+    """A create-mode write records its first snapshot's signals with the deployed effects.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    tmp_path
+        Storage root.
+    principal
+        The deployer, writer and reader.
+    """
+    catalog = _prepared_catalog(session, tmp_path, AllowAllAuthorization(), namespaces=[_SILVER])
+    _deploy(session, principal, _with_health({"null_rate": "off", "volume": "block"}))
+    data = pa.table(
+        {"id": [1, 2], "status": ["a", None]},
+        schema=pa.schema(
+            [pa.field("id", pa.int64(), nullable=False), pa.field("status", pa.string())]
+        ),
+    )
+    catalog.write_batches(
+        principal, _ORDERS, mode=WriteMode.CREATE, schema=data.schema, batches=data.to_batches()
+    )
+    assert session.scalars(select(Table)).one().health_effects == {
+        "null_rate": "off",
+        "volume": "block",
+    }
+    signals = {
+        (r.signal, r.column_name, r.effect) for r in session.scalars(select(TableHealthSignal))
+    }
+    assert ("volume", None, "block") in signals
+    assert ("null_rate", None, "off") in signals
+    assert not any(s == "null_rate" and c is not None for s, c, _ in signals)
+
+
+def test_table_get_shows_the_effects_and_marks_a_column_the_table_does_not_have(
+    session: Session, catalog_with_orders: CatalogService, principal: PrincipalRef
+) -> None:
+    """`health` holds the stored effects; `health_missing` the keys naming no column of it.
+
+    `health_never_judged` names the blocking column entries no commit can judge, with why.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    catalog_with_orders
+        The catalog with `silver.orders`.
+    principal
+        The deployer, writer and reader.
+    """
+    plain = _described(catalog_with_orders, principal)
+    assert (plain.health, plain.health_missing) == ({}, ())
+    assert plain.health_never_judged == {}
+    session.scalars(select(Table)).one().health_effects = {
+        "range.pricee": "off",
+        "range.id": "block",
+        "range.status": "block",
+        "volume": "block",
+    }
+    session.commit()
+    shown = _described(catalog_with_orders, principal)
+    assert shown.health == {
+        "range.id": "block",
+        "range.pricee": "off",
+        "range.status": "block",
+        "volume": "block",
+    }
+    assert shown.health_missing == ("range.pricee",)
+    # A string column has no range: a blocking entry on it is never judged.
+    assert shown.health_never_judged == {"range.status": "a string column has no range"}

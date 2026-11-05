@@ -366,6 +366,32 @@ links to the tables and columns they are about, checked and deployed with the pr
   that are not glossary terms) is refused at deploy. Rename or remove that content, or move it
   out of the root, before you upgrade.
 
+### Choose what a table health signal does
+
+A table's header, an `@asset(health=...)` argument or `lakana.yaml` can set each health signal to
+`warn`, `block` or `off`. See [Table health](../reference/table-health.md#effects-warn-block-off).
+
+- **Upgrade the workers before deploying a project that declares `health:`.** Such a project deploys
+  manifest version 14, which a worker of an earlier release refuses. Every other project keeps its
+  manifest version.
+- A deploy refuses an unknown signal, a column the table does not have, `block` on `freshness` and
+  `health:` on a view, with the file and the next step.
+- **Existing `notify:` targets now also get `health` messages** for the tables their job builds,
+  because every signal warns by default. Such a message has `"event": "health"`, an empty `run_id`
+  and a `table` and an `alert` key ([Get told when a job fails](../how-to/get-told-when-a-job-fails.md)).
+  A receiver that reads `event` or needs a `run_id` must handle it. To stop them, set
+  `health: {SIGNAL: off}` for the signals you do not want, or `health: off` for all of them, in the
+  asset header or in `lakana.yaml`.
+- A deploy refuses a hand-written check named like the `health_<signal>` check that a `block` entry
+  of its table generates, such as `checks/silver/orders/health_volume.sql` with
+  `health: {volume: block}`: ``A check named `health_volume` is generated for `silver.orders`; rename
+  `checks/silver/orders/health_volume.sql`.`` Rename the file.
+- A `block` signal that a commit could not judge (unreadable files, a computing error, nothing
+  recorded) makes its check `warned`, with the reason, instead of passing; the run goes on. A deploy
+  refuses `block` on a column past the 200th of the `SELECT`, and `lakana table get` marks a
+  `block` entry that can never be judged (`health_never_judged` in REST and the SDK). See
+  [When a signal could not be judged](../reference/table-health.md#effects-warn-block-off).
+
 ## Notes for 0.21.0
 
 ### Python tasks: builds that cannot succeed fail at once, and a task proves its write

@@ -601,6 +601,15 @@ class Table:
     terms
         The glossary terms that link the table itself; ``()`` from a server older than the
         glossary, and without ``READ_ENVIRONMENT``.
+    health
+        The effects of the asset's `health:` that differ from `warn`, by ``signal`` or
+        ``signal.column``; empty when every signal warns, and from a server older than health
+        effects.
+    health_missing
+        The keys of `health` whose column the table does not have; such an entry has no effect.
+    health_never_judged
+        The ``block`` column entries of `health` that no commit can judge, with the reason; a
+        run warns on them instead of blocking. Empty from an older server.
     """
 
     name: str
@@ -632,6 +641,9 @@ class Table:
     main_language: str = "en"
     translations: tuple[TranslationCoverage, ...] = ()
     terms: tuple[TermRef, ...] = ()
+    health: dict[str, str] = field(default_factory=dict)
+    health_missing: tuple[str, ...] = ()
+    health_never_judged: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -814,6 +826,9 @@ class HealthSignal:
         and `alert`.
     last_fired_at
         When this signal and column last fired; only in the current state.
+    set_back
+        Whether a failed check set the observed snapshot back: the row is no longer the table's
+        data and shows only in the history, kept as the reason a blocking check gave.
     """
 
     id: str
@@ -828,6 +843,7 @@ class HealthSignal:
     alert: str | None
     values_hidden: bool
     last_fired_at: datetime | None = None
+    set_back: bool = False
 
 
 @dataclass(frozen=True)
@@ -2770,7 +2786,7 @@ class Notification:
     id
         The delivery id, the same as the ``delivery_id`` of the message the receiver got.
     event
-        ``failed``, ``recovered``, ``columns_changed`` or ``test``.
+        ``failed``, ``recovered``, ``columns_changed``, ``health`` or ``test``.
     state
         ``pending`` (waiting for a first or another attempt), ``delivered`` or ``failed``.
     attempts

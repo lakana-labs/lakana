@@ -4,14 +4,16 @@
 
 from __future__ import annotations
 
+import itertools
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
 from pyiceberg.conversions import to_bytes
 from pyiceberg.manifest import DataFile
 from pyiceberg.schema import Schema
+from pyiceberg.table.snapshots import Operation, Summary
 from pyiceberg.types import (
     DateType,
     DecimalType,
@@ -22,6 +24,7 @@ from pyiceberg.types import (
     TimestampType,
 )
 
+from lakana_core.catalog import health_signals
 from lakana_core.catalog.health_signals import (
     MIN_HISTORY,
     Band,
@@ -32,10 +35,14 @@ from lakana_core.catalog.health_signals import (
     apply_effects,
     column_metrics,
     columns_of,
+    freshness_signal,
     learn_band,
+    never_judged,
     null_rate_signal,
     range_signal,
+    schedule_threshold,
     schema_signal,
+    unjudged_text,
     volume_signal,
 )
 
@@ -121,7 +128,8 @@ def test_volume_with_short_rising_and_noisy_histories(history: list, state: str)
 
 
 def test_volume_without_a_count_has_no_metrics() -> None:
-    missing = volume_signal({"total-records": "9"}, _volumes(*[9] * 8))
+    """Data files were added, but the summary does not say how many rows."""
+    missing = volume_signal({"added-data-files": "2", "total-records": "9"}, _volumes(*[9] * 8))
     assert (missing.state, missing.observed) == ("no_metrics", {"reason": "not_recorded"})
     assert volume_signal(None, []).state == "no_metrics"
     assert volume_signal({"added-records": "-3"}, []).state == "no_metrics"
@@ -550,9 +558,7 @@ def test_a_bound_that_is_not_finite_is_not_stored() -> None:
 
 def test_an_unknown_signal_has_no_text() -> None:
     assert (
-        alert_text(
-            "t.t", "freshness", None, "fired", {}, {"low": 0}, snapshot_id=1, observed_at=_AT
-        )
+        alert_text("t.t", "lateness", None, "fired", {}, {"low": 0}, snapshot_id=1, observed_at=_AT)
         is None
     )
 
@@ -610,3 +616,422 @@ def test_a_date_bound_beyond_the_calendar_does_not_raise() -> None:
 def test_freshness_never_blocks() -> None:
     effects = HealthEffects({"freshness": "block", "volume": "block"})
     assert (effects.of("freshness"), effects.of("volume")) == ("warn", "block")
+
+
+_FRIDAY = datetime(2026, 10, 30, 6, 5, tzinfo=UTC)  # a Friday
+
+
+def _commits(count: int, every: timedelta) -> list[datetime]:
+    """Build commit times, newest first, ending at `_FRIDAY`.
+
+    Parameters
+    ----------
+    count
+        How many.
+    every
+        The gap.
+
+    Returns
+    -------
+    list of datetime
+        The times.
+    """
+    return [_FRIDAY - every * i for i in range(count)]
+
+
+def test_a_daily_schedule_allows_two_days() -> None:
+    assert schedule_threshold("0 6 * * *", "UTC", _FRIDAY) == pytest.approx(2 * 86_400)
+
+
+def test_a_weekday_job_is_not_late_on_sunday() -> None:
+    limit = schedule_threshold("0 6 * * 1-5", "UTC", _FRIDAY)
+    assert limit == (datetime(2026, 11, 3, 6, 0, tzinfo=UTC) - _FRIDAY).total_seconds()
+    assert limit is not None
+    sunday = _FRIDAY + timedelta(days=2)
+    seen = freshness_signal(
+        now=sunday,
+        commit_times=_commits(8, timedelta(days=1)),
+        thresholds=[(limit, "nightly")],
+        paused=False,
+    )
+    assert seen.state == "ok"
+
+
+def test_a_schedule_that_cannot_be_read_gives_no_threshold() -> None:
+    assert schedule_threshold("not a cron", "UTC", _FRIDAY) is None
+    assert schedule_threshold("0 6 * * *", "Nowhere/Atlantis", _FRIDAY) is None
+
+
+@pytest.mark.parametrize("fires", [[None], [_FRIDAY + timedelta(days=1), None]])
+def test_a_schedule_that_does_not_fire_twice_gives_no_threshold(
+    monkeypatch: pytest.MonkeyPatch, fires: list[datetime | None]
+) -> None:
+    answers = iter(fires)
+    monkeypatch.setattr(health_signals, "next_fire_after", lambda *args: next(answers))
+    assert schedule_threshold("0 6 * * *", "UTC", _FRIDAY) is None
+
+
+def test_freshness_fires_past_the_schedule_and_names_the_job() -> None:
+    late = freshness_signal(
+        now=_FRIDAY + timedelta(days=3),
+        commit_times=_commits(8, timedelta(days=1)),
+        thresholds=[(2 * 86_400.0, "nightly"), (7 * 86_400.0, "weekly")],
+        paused=False,
+    )
+    assert (late.state, late.observed, late.band) == (
+        "fired",
+        {
+            "seconds": 3 * 86_400,
+            "last_commit_at": _FRIDAY.isoformat(),
+            "source": "schedule",
+            "job": "nightly",
+        },
+        {"high": 172_800.0},
+    )
+    text = alert_text(
+        "gold.t",
+        "freshness",
+        None,
+        "fired",
+        late.observed,
+        late.band,
+        snapshot_id=4711,
+        observed_at=_FRIDAY + timedelta(days=3),
+    )
+    assert text == (
+        "gold.t: freshness 3 days since the last snapshot, usually within 2 days (last snapshot "
+        "4711, 30 Oct 06:05 UTC); check that job nightly still runs (lakana runs list), or set "
+        "health: {freshness: off} if this table is updated rarely"
+    )
+
+
+def test_without_a_schedule_freshness_needs_eight_commits() -> None:
+    hourly = timedelta(hours=1)
+    now = _FRIDAY + timedelta(hours=5)
+    young = freshness_signal(now=now, commit_times=_commits(7, hourly), thresholds=[], paused=False)
+    assert (young.state, young.band, young.observed) == (
+        "no_history",
+        None,
+        {"seconds": 18_000, "last_commit_at": _FRIDAY.isoformat(), "source": None, "job": None},
+    )
+    late = freshness_signal(now=now, commit_times=_commits(8, hourly), thresholds=[], paused=False)
+    assert late.observed is not None
+    assert (late.state, late.band, late.observed["source"], late.observed["job"]) == (
+        "fired",
+        {"high": 10_800.0},
+        "history",
+        None,
+    )
+    text = alert_text(
+        "gold.t",
+        "freshness",
+        None,
+        "fired",
+        late.observed,
+        late.band,
+        snapshot_id=1,
+        observed_at=_FRIDAY,
+    )
+    assert text is not None
+    assert "freshness 5 hours since the last snapshot, usually within 3 hours" in text
+    assert text.endswith(
+        "check what writes this table, or set health: {freshness: off} if it is updated rarely"
+    )
+
+
+def test_the_history_rule_reads_only_the_newest_commits() -> None:
+    """Only the gaps of the newest `HISTORY` + 1 commits count: an old slow period is forgotten."""
+    recent = _commits(health_signals.HISTORY + 1, timedelta(hours=1))
+    slow = [recent[-1] - timedelta(days=d) for d in range(1, 40)]
+    seen = freshness_signal(
+        now=_FRIDAY + timedelta(hours=4), commit_times=recent + slow, thresholds=[], paused=False
+    )
+    assert (seen.state, seen.band) == ("fired", {"high": 10_800.0})
+
+
+def test_a_paused_job_turns_freshness_off() -> None:
+    paused = freshness_signal(
+        now=_FRIDAY + timedelta(days=9),
+        commit_times=_commits(8, timedelta(days=1)),
+        thresholds=[],
+        paused=True,
+    )
+    assert (paused.state, paused.observed, paused.band) == ("off", {"reason": "paused"}, None)
+
+
+def test_the_history_rule_allows_at_least_an_hour() -> None:
+    """Commits every ten minutes give a limit of 30 minutes, which must not fire that soon."""
+    often = _commits(8, timedelta(minutes=10))
+    soon = freshness_signal(
+        now=_FRIDAY + timedelta(minutes=30), commit_times=often, thresholds=[], paused=False
+    )
+    assert (soon.state, soon.band) == ("ok", {"high": 3_600.0})
+    later = freshness_signal(
+        now=_FRIDAY + timedelta(minutes=61), commit_times=often, thresholds=[], paused=False
+    )
+    assert later.state == "fired"
+
+
+def _runs(days: int, commits: int) -> list[datetime]:
+    """Build the commit times of one run a day that commits several times, newest first.
+
+    Parameters
+    ----------
+    days
+        How many daily runs, the newest ending at `_FRIDAY`.
+    commits
+        How many commits each run makes, a few seconds apart.
+
+    Returns
+    -------
+    list of datetime
+        The times.
+    """
+    return [
+        _FRIDAY - timedelta(days=day, seconds=5 * commit)
+        for day in range(days)
+        for commit in range(commits)
+    ]
+
+
+def test_a_run_that_commits_several_times_is_one_data_point() -> None:
+    """Commits less than ten minutes apart count as one write of the history rule.
+
+    A table without a schedule written three times a run does not fire an hour after each run,
+    as it would with a median gap of seconds.
+    """
+    commits = _runs(11, 3)[: health_signals.HISTORY + 1]
+    after = freshness_signal(
+        now=_FRIDAY + timedelta(hours=2), commit_times=commits, thresholds=[], paused=False
+    )
+    assert (after.state, after.band) == ("ok", {"high": 3 * 86_400.0})
+    late = freshness_signal(
+        now=_FRIDAY + timedelta(days=4), commit_times=commits, thresholds=[], paused=False
+    )
+    assert late.state == "fired"
+    # Seven runs are seven data points, fewer than the eight the history rule needs.
+    young = freshness_signal(
+        now=_FRIDAY + timedelta(hours=2), commit_times=_runs(7, 3), thresholds=[], paused=False
+    )
+    assert (young.state, young.band) == ("no_history", None)
+    assert young.observed is not None and young.observed["source"] is None
+    # A burst within the same second is one data point too.
+    burst = freshness_signal(
+        now=_FRIDAY + timedelta(hours=2), commit_times=[_FRIDAY] * 8, thresholds=[], paused=False
+    )
+    assert burst.state == "no_history"
+
+
+@pytest.mark.parametrize(
+    ("seconds", "shown"),
+    [
+        (59, "0 minutes"),
+        (60, "1 minute"),
+        (2_700, "45 minutes"),
+        (3_600, "60 minutes"),
+        (7_200, "2 hours"),
+        (108_000, "30 hours"),
+        (86_400 * 2, "2 days"),
+        (86_400 * 3, "3 days"),
+    ],
+)
+def test_durations_read_in_plain_units(seconds: int, shown: str) -> None:
+    observed = {
+        "seconds": seconds,
+        "last_commit_at": _FRIDAY.isoformat(),
+        "source": "history",
+        "job": None,
+    }
+    text = alert_text(
+        "t.t",
+        "freshness",
+        None,
+        "fired",
+        observed,
+        {"high": 3_600.0},
+        snapshot_id=1,
+        observed_at=_FRIDAY,
+    )
+    assert text is not None and f"freshness {shown} since" in text
+    assert "usually within 60 minutes" in text
+
+
+def test_a_day_reads_in_hours_and_an_hour_and_a_half_in_minutes() -> None:
+    observed = {"seconds": 86_400, "last_commit_at": _FRIDAY.isoformat(), "source": "history"}
+    text = alert_text(
+        "t.t",
+        "freshness",
+        None,
+        "fired",
+        {**observed, "job": None},
+        {"high": 3_600.0 * 1.5},
+        snapshot_id=1,
+        observed_at=_FRIDAY,
+    )
+    assert text is not None and "freshness 24 hours since" in text
+    assert "usually within 90 minutes" in text
+
+
+def test_a_value_free_freshness_alert_names_what_writes_the_table() -> None:
+    text = health_signals.value_free_alert(
+        "gold.t", "freshness", None, snapshot_id=7, observed_at=_FRIDAY, environment="dev"
+    )
+    assert "health signal freshness fired at snapshot 7" in text
+    assert "check what writes gold.t, or set health: {freshness: off} if this is expected" in text
+
+
+def test_a_block_that_could_not_be_judged_says_why_and_what_to_do() -> None:
+    """The text of a warned health check names the cause and the next step, and no value."""
+    assert unjudged_text("range", "price", 42, "unreadable", "gold.t", "prod") == (
+        "health signal range of price could not be judged: the files the commit added could not "
+        "be read within the health limits (at most 2,000 files, 5 s) (snapshot 42); the run went "
+        "on: commit fewer, larger files, or set health: {range: {price: warn}} to stop blocking "
+        "on it"
+    )
+    assert unjudged_text("volume", None, 42, "error", "gold.t", "prod") == (
+        "health signal volume could not be judged: computing it failed (snapshot 42); the run "
+        "went on: the server's log names the error, and the next commit is judged again"
+    )
+    assert unjudged_text("range", "name", 42, "missing", "gold.t", "prod") == (
+        "health signal range of name could not be judged: nothing was recorded for it "
+        "(snapshot 42); the run went on: a column without a range (text, boolean) or past the "
+        "200th column is never judged; use null_rate for it, or set health: "
+        "{range: {name: warn}} or off"
+    )
+    assert unjudged_text("schema", None, 42, "missing", "gold.t", "prod") == (
+        "health signal schema could not be judged: nothing was recorded for it (snapshot 42); "
+        "the run went on: `lakana table health gold.t --env prod --signals` shows what was "
+        "recorded"
+    )
+
+
+def test_a_column_block_that_can_never_be_judged_is_named_with_the_reason() -> None:
+    """`range` on a type without a range and any column past the 200th never record a value."""
+    fields = [
+        NestedField(1, "id", LongType(), required=False),
+        NestedField(2, "name", StringType(), required=False),
+        *(
+            NestedField(3 + i, f"c{i}", LongType(), required=False)
+            for i in range(health_signals.MAX_HEALTH_COLUMNS)
+        ),
+    ]
+    schema = Schema(*fields)
+    late = f"c{health_signals.MAX_HEALTH_COLUMNS - 1}"
+    effects = {
+        "range.id": "block",
+        "range.name": "block",
+        "null_rate.name": "block",
+        f"null_rate.{late}": "block",
+        "range.c0": "warn",
+        "range.gone": "block",
+        "volume": "block",
+    }
+    assert never_judged(effects, schema) == {
+        "range.name": "a string column has no range",
+        f"null_rate.{late}": "only the first 200 columns are judged",
+    }
+
+
+@pytest.mark.parametrize("every", [5, 9])
+def test_a_table_written_every_few_minutes_builds_a_history_and_fires_after_a_stall(
+    every: int,
+) -> None:
+    """A group of commits ends ten minutes after its first, never chained (R2).
+
+    Commits 5 or 9 minutes apart give a data point every 10 or 18 minutes, so the limit is the
+    1 h floor and an hour's stall fires.
+
+    Parameters
+    ----------
+    every
+        Minutes between commits.
+    """
+    commits = _commits(1_000, timedelta(minutes=every))
+    points = health_signals.data_point_indexes(commits)
+    # The first commit of each group stands for it, oldest first in time, so a group spans
+    # less than ten minutes and the next starts at least ten minutes after it.
+    times = [commits[i] for i in points]
+    assert all(
+        (newer - older) >= timedelta(minutes=10) for newer, older in itertools.pairwise(times)
+    )
+    assert len(points) > MIN_HISTORY
+    soon = freshness_signal(
+        now=_FRIDAY + timedelta(minutes=30), commit_times=commits, thresholds=[], paused=False
+    )
+    assert (soon.state, soon.band) == ("ok", {"high": 3_600.0})
+    stalled = freshness_signal(
+        now=_FRIDAY + timedelta(minutes=61), commit_times=commits, thresholds=[], paused=False
+    )
+    assert stalled.state == "fired"
+
+
+@pytest.mark.parametrize(
+    ("reason", "cause"),
+    [
+        ("not_recorded", "the commit's files carry no counts or bounds for it"),
+        ("not_finite", "its value is not a finite number"),
+        ("unstorable", "its value did not fit what is stored"),
+    ],
+)
+def test_a_value_that_could_not_be_judged_says_why(reason: str, cause: str) -> None:
+    """Each reason of an own `no_metrics` row has its cause; the next commit is judged again.
+
+    Parameters
+    ----------
+    reason
+        The row's reason.
+    cause
+        The cause the text gives.
+    """
+    assert unjudged_text("range", "price", 42, reason, "gold.t", "prod") == (
+        f"health signal range of price could not be judged: {cause} (snapshot 42); the run "
+        "went on: the next commit is judged again, and `lakana table health gold.t --env prod "
+        "--signals` shows what was recorded"
+    )
+
+
+@pytest.mark.parametrize(
+    "properties",
+    [
+        # A pyiceberg delete that drops whole files: it omits every count that is 0.
+        {"deleted-records": "5", "deleted-data-files": "1", "total-records": "0"},
+        # A merge-on-read commit that adds only delete files.
+        {
+            "added-delete-files": "1",
+            "added-position-delete-files": "1",
+            "added-position-deletes": "3",
+            "total-records": "10",
+            "total-position-deletes": "3",
+        },
+    ],
+)
+def test_a_commit_that_added_no_data_files_is_no_load(properties: dict[str, str]) -> None:
+    """With evidence of no data file added, the commit is not a load: ok, never fired, no band.
+
+    pyiceberg writes `added-records` and `added-data-files` only above 0, so the evidence is the
+    commit's own files, read and none found, or an `added-data-files` of 0.
+
+    Parameters
+    ----------
+    properties
+        The snapshot summary's properties, as pyiceberg writes them.
+    """
+    summary = Summary(Operation.DELETE, **properties)
+    seen = volume_signal(summary, _volumes(*[9_000] * 8), no_data_files=True)
+    assert (seen.state, seen.band) == ("ok", None)
+    assert seen.observed is not None
+    assert (seen.observed["added"], seen.observed["loaded"]) == (0, False)
+    counted = volume_signal({"added-data-files": "0"}, _volumes(*[9_000] * 8))
+    assert (counted.state, counted.band) == ("ok", None)
+    # Without evidence, a summary without counts records nothing, and never fires (round 4).
+    probe = volume_signal(Summary(Operation.APPEND, **{"total-records": "9000"}), [])
+    assert (probe.state, probe.observed) == ("no_metrics", {"reason": "not_recorded"})
+
+
+def test_the_band_leaves_out_commits_that_loaded_nothing() -> None:
+    """A delete in a run of appends does not pull the band of added rows towards 0."""
+    loads = _volumes(*[1_000] * 8)
+    with_delete = [{"added": 0, "loaded": False, "total": 0}, *loads]
+    assert volume_signal({"added-records": "1000"}, with_delete) == volume_signal(
+        {"added-records": "1000"}, loads
+    )

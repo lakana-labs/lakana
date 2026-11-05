@@ -498,7 +498,9 @@ def get(ctx: typer.Context, name: str, lang: _LANG = None, env: _ENV = None) -> 
 
     A table whose first build did not finish, or failed a check, is shown as `not published`;
     one that keeps the data that failed a check (`on_failure: keep`), as `kept`. A table that
-    its retention lets expire within the server's warning window says when.
+    its retention lets expire within the server's warning window says when. A table whose
+    `health:` differs from the default `warn` lists those effects, and marks one that names a
+    column the table does not have.
     An artifact is shown with its name and a pointer to `lakana artifact versions list`.
 
     Parameters
@@ -555,6 +557,18 @@ def get(ctx: typer.Context, name: str, lang: _LANG = None, env: _ENV = None) -> 
     _emit_terms(state, table)
     if table.model is not None:
         _emit_model(state, table)
+    if table.health:
+        listed = ", ".join(
+            f"{key.replace('.', ' of ', 1)} {effect}"
+            + (" (no such column)" if key in table.health_missing else "")
+            + (
+                f" (never judged: {table.health_never_judged[key]})"
+                if key in table.health_never_judged
+                else ""
+            )
+            for key, effect in table.health.items()
+        )
+        _output.emit(state, _output.inline(f"Health (not the default warn): {listed}"))
 
 
 def _hidden_outgoing(count: int) -> str:
@@ -749,6 +763,22 @@ def _check_state(check: CheckHealth) -> str:
     return check.outcome
 
 
+def _signal_state(signal: HealthSignal) -> str:
+    """Name a signal's state as the history shows it.
+
+    Parameters
+    ----------
+    signal
+        One observation of the history.
+
+    Returns
+    -------
+    str
+        The state, with ``(set back)`` when a failed check set its snapshot back.
+    """
+    return f"{signal.state} (set back)" if signal.set_back else signal.state
+
+
 _SIGNAL_COLUMNS = ["signal", "column", "state", "effect", "observed_at"]
 """The columns of the current signals of `table health`."""
 
@@ -917,7 +947,12 @@ def health(
             )
             _output.emit(state, f"No health signals {window}.")
             return
-        _output.emit(state, page.items, columns=_SIGNAL_HISTORY_COLUMNS)
+        _output.emit(
+            state,
+            page.items,
+            columns=_SIGNAL_HISTORY_COLUMNS,
+            derived={"state": _signal_state},
+        )
         _output_fired(state, page.items)
         _output_hidden(state, page.items)
         more_results(

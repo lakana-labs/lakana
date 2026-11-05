@@ -671,6 +671,9 @@ def _describe_out(namespace: str, description: TableDescription) -> TableOut:
         if description.model is None
         else TableModelOut.model_validate(description.model, from_attributes=True),
         terms=[TermRefOut(key=t.key, name=t.name) for t in description.terms],
+        health=description.health,
+        health_missing=list(description.health_missing),
+        health_never_judged=dict(description.health_never_judged),
     )
 
 

@@ -293,8 +293,8 @@ def clear_removed_models(
 
     Called by a deploy and a rollback, in their transaction, next to
     `sync_project_descriptions`. A table in `previous` but not in `current` that has a row in
-    the environment loses its model columns, its reference rows and its measure rows; its
-    descriptions stay.
+    the environment loses its model columns, its health effects, its reference rows and its
+    measure rows; its descriptions stay.
     Nothing is committed.
 
     Parameters
@@ -314,6 +314,7 @@ def clear_removed_models(
             continue
         had_measures = row.model_kind in MEASURED_KINDS
         row.model_kind = row.model_grain = row.model_key = None
+        row.health_effects = None
         for found in session.scalars(
             select(DeclaredReference).where(DeclaredReference.source_table_id == row.id)
         ):
@@ -323,6 +324,27 @@ def clear_removed_models(
                 select(DeclaredMeasure).where(DeclaredMeasure.table_id == row.id)
             ):
                 session.delete(measure)
+
+
+def clear_health_effects(session: Session, environment_id: uuid.UUID, manifest: object) -> None:
+    """Reset the health effects of every table a manifest produces in an environment.
+
+    Called by an undeploy, in its transaction: no asset builds those tables any more, so every
+    signal warns again. Nothing is committed.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    environment_id
+        The environment.
+    manifest
+        The manifest of the version that was current; untrusted.
+    """
+    for dotted in manifest_assets(manifest):
+        row = find_project_table(session, environment_id, dotted)
+        if row is not None:
+            row.health_effects = None
 
 
 def read_table_model(session: Session, row: Table) -> TableModel | None:

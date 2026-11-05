@@ -2796,3 +2796,40 @@ def test_the_list_shows_the_cache_sizes_a_worker_stored(
     assert views["measured"].caches == sizes
     assert views["measured"].caches_measured_at is not None
     assert (views["new"].caches, views["new"].caches_measured_at) == (None, None)
+
+
+def test_only_a_table_that_blocks_on_a_health_signal_gets_a_task_with_checks(
+    session: Session, version: JobVersion, principal: PrincipalRef
+) -> None:
+    """A `block` entry of a table needs the check phase; `warn`, and any kind of view, do not.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    version
+        The deployed version of `gold.daily`, `gold.weekly` and `silver.clean`.
+    principal
+        The caller.
+    """
+    health = {
+        "silver.clean": {"health": {"volume": "block"}},
+        "gold.daily": {"health": {"volume": "warn"}},
+        "gold.weekly": {"health": {"volume": "block"}, "materialize": "view"},
+    }
+    version.manifest_json = {
+        **version.manifest_json,
+        "assets": [
+            {**entry, **health.get(entry["table"], {})} for entry in version.manifest_json["assets"]
+        ],
+    }
+    session.commit()
+
+    view = _service(session).start(principal, "dev", "analytics", Selection())
+
+    tasks = _tasks_of(session, view.id)
+    assert {name: t.has_checks for name, t in tasks.items()} == {
+        "gold.daily": False,
+        "gold.weekly": False,
+        "silver.clean": True,
+    }

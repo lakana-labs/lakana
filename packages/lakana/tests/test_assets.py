@@ -820,3 +820,44 @@ def test_an_empty_valid_from_is_refused_at_import_as_empty() -> None:
         "valid_from must not be empty; name the column that says when the row's values took "
         "effect, or leave `valid_from:` out to use the run's start time"
     )
+
+
+def test_health_reaches_the_spec_as_the_flat_map() -> None:
+    """`health=` is read like the header's: one sorted map, `off` meaning every signal off."""
+    spec = getattr(
+        lakana.asset(health={"volume": "block", "range": {"price": False}, "schema": "off"})(
+            lambda: None
+        ),
+        ASSET_ATTRIBUTE,
+    )
+    assert spec.health == {"range.price": "off", "schema": "off", "volume": "block"}
+    everything = getattr(lakana.asset(health="off")(lambda: None), ASSET_ATTRIBUTE).health
+    assert everything == dict.fromkeys(
+        ("freshness", "volume", "null_rate", "range", "schema"), "off"
+    )
+    assert getattr(lakana.asset()(lambda: None), ASSET_ATTRIBUTE).health == {}
+
+
+@pytest.mark.parametrize(
+    ("value", "message"),
+    [
+        ("loud", "health takes off, or a mapping of signals to warn, block or off"),
+        (1, "health takes off, or a mapping of signals to warn, block or off"),
+        ({"rows": "warn"}, "health: rows is not a health signal; use freshness, volume, "),
+        ({1: "warn"}, "health: 1 is not a health signal; use freshness, volume, "),
+        ({"volume": "loud"}, "health: volume must be warn, block or off, not loud"),
+        ({"volume": True}, "health: volume must be warn, block or off; on, yes and true are not"),
+        ({"freshness": "block"}, "health: freshness cannot block: it fires between runs"),
+        ({"volume": {"x": "off"}}, "health: volume is about the whole table"),
+        ({"range": {"a.b": "off"}}, "health: column a.b cannot name its check health_range__a.b"),
+    ],
+)
+def test_a_bad_health_is_refused_with_the_next_step(value: object, message: str) -> None:
+    with pytest.raises(ValueError) as caught:
+        lakana.asset(health=value)  # ty: ignore[invalid-argument-type]
+    assert str(caught.value).startswith(message)
+
+
+def test_health_does_not_apply_to_an_artifact_asset() -> None:
+    with pytest.raises(ValueError, match="health does not apply to an artifact asset; remove it"):
+        lakana.asset(output="artifact", health="off")

@@ -444,7 +444,7 @@ Each of these fails the deploy with an issue at the block's line:
 | ``Reference `model_id: models.churn`: `models.churn` is an artifact, not a table, so no column can point at it; point the reference at a table.`` | The target is an artifact, of the project or of the environment. |
 | ``Reference `store_id: gold.dim_store` is too long to store: the column `…` has 1025 bytes, and each of the column, the target table, the target column and the `at:` column may have at most 1024 bytes; shorten that name.`` | A reference column, its target table's dotted name, its target column or its `at:` column is longer than 1024 bytes in UTF-8. Shorten the name the message points at. |
 | ``` cycle: gold.a -> gold.b -> gold.a (a reference in `references:` counts as a dependency: the target is built first); remove one of the references, or check it with a hand-written check under `checks/` ``` | Two assets of the project reference each other, directly or through others. A target the project builds is built before the table that references it, so such references cannot all hold; remove one of them. |
-| ``A check named `key_unique` is generated for `gold.fact_orders`; rename `checks/gold/fact_orders/key_unique.sql`.`` | A hand-written check of a table has the name of a check that table's header generates (`key_unique`, `key_not_null`, `surrogate_key_unique`, `ref_<column>`, `measures`). Rename the file. |
+| ``A check named `key_unique` is generated for `gold.fact_orders`; rename `checks/gold/fact_orders/key_unique.sql`.`` | A hand-written check of a table has the name of a check that table's header generates (`key_unique`, `key_not_null`, `surrogate_key_unique`, `ref_<column>`, `measures`, and `health_<signal>` or `health_<signal>__<column>` for a `block` entry of `health:`). Rename the file. |
 | ``` `checks: key: keep` cannot be used on `gold.fact_orders`: it is written with `write: merge`, … Use `checks: key: block`: … ``` | `keep` for a generated check of a view, an append, a merge or a history table, as for a hand-written check's `on_failure`. |
 | ``checks: takes only key, references and measures``, ``checks: key must be block, keep or warn`` | Another check family or failure mode. |
 | ``` `checks: key` sets how the key checks fail, but the asset declares no `key:`; declare `key:`, or remove `checks: key` ``` | A `checks` family for a field the asset does not declare (`references` likewise). |
@@ -494,8 +494,26 @@ release keeps its text as it was stored.
 A project version in which an asset declares a model field (`key:` alone counts, so every project
 with a `write: merge` asset) has manifest version 9, one in which an asset declares `measures:`
 version 10, and one that declares `main_language`, a label or a
-[translation](translations.md) version 11, one that uses `write: history` or a reference with `at:` version 12, and one with a
-[`glossary/`](glossary.md) folder version 13. Each needs workers of the release that introduced it or later: a worker of an earlier
+[translation](translations.md) version 11, one that uses `write: history` or a reference with `at:` version 12, one with a
+[`glossary/`](glossary.md) folder version 13, and one in which a table declares [`health:`](table-health.md#effects-warn-block-off) version 14. Each needs workers of the release that introduced it or later: a worker of an earlier
 one refuses its manifest. A deploy's changes list a table whose `kind`, `grain`, `references`,
 `checks`, or the `key` of an asset that does not merge, changed as `model_changed`; the key of a
 merge stays a change of how the table is written.
+
+## Health: what the table's signals do
+
+`health:` chooses, per [table health signal](table-health.md#effects-warn-block-off), whether a
+firing signal warns (the default), blocks the write or is off. The decorator takes the same as
+`health=`.
+
+<!-- source: docs/examples/notice-a-broken-pipeline/project/assets/silver/orders.sql -->
+```sql
+/* lakana
+health: {schema: block}
+*/
+SELECT id, region FROM bronze.orders
+```
+
+`health: off` turns every signal off, and `health: {volume: block, range: off}` mixes effects.
+`null_rate` and `range` may name single columns, which must be columns the `SELECT` returns. A view takes no `health:`. The texts of a refusal are in
+[Table health](table-health.md#effects-warn-block-off); [Notice a broken pipeline](../how-to/notice-a-broken-pipeline.md) walks through the header above, the failed run and the way out.

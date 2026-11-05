@@ -81,6 +81,30 @@ class Selection:
         )
 
 
+def selection_of(entry: Mapping[str, object]) -> Selection:
+    """Read the selection of a manifest's job entry.
+
+    Parameters
+    ----------
+    entry
+        The job's entry (`lakana_core.projects.manifest.manifest_jobs`); untrusted.
+
+    Returns
+    -------
+    Selection
+        Its ``select`` patterns that are strings, and ``upstream``/``downstream`` when they
+        are `True`.
+    """
+    patterns = entry.get("select")
+    return Selection(
+        patterns=tuple(x for x in patterns if isinstance(x, str))
+        if isinstance(patterns, list)
+        else (),
+        upstream=entry.get("upstream") is True,
+        downstream=entry.get("downstream") is True,
+    )
+
+
 @dataclass(frozen=True)
 class ManifestGraph:
     """The DAG of one project version, read from its manifest.

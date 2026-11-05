@@ -116,7 +116,19 @@ with the values of a test project:
 {"command":"lakana runs show 11111111-2222-3333-4444-555555555555 --env prod","commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","delivery_id":"99999999-8888-7777-6666-555555555555","environment":"prod","event":"failed","failed_checks":["silver.clean/no_nulls"],"failed_tasks":["silver.clean"],"finished_at":"2026-10-14T06:05:00+00:00","job":"daily","repository":"analytics","run_id":"11111111-2222-3333-4444-555555555555","status":"failed","trigger":"schedule","version":1}
 ```
 
-`event` is `failed`, `recovered`, `columns_changed` or, from `notify-test`, `test`.
+`event` is `failed`, `recovered`, `columns_changed`, `health` or, from `notify-test`, `test`.
+
+A `health` message has no run, so its `run_id`, `commit`, `trigger` and `status` are empty
+(`failed_tasks` and `failed_checks` are empty lists), and its `finished_at` is when the signal was
+observed: the commit that fired it, or the freshness sweep that found the table late. Two keys are
+added: `table`, the
+table whose signal fired, and `alert`, the signal's text. Its `command` is
+``lakana table health TABLE --env ENV``. In **slack** and **teams** the message has these lines:
+the title ``Lakana: table `silver.orders` needs a look in `prod` ``, the alert, the job and
+repository, ``Details: `lakana table health silver.orders --env prod` `` and the delivery id. For a
+table with a row filter, or a `null_rate` or `range` signal of a table with a column mask, the alert
+leaves out the usual band and the new value, because nobody can ask whether a policy applies to
+whoever reads the channel; `lakana table health` shows them to those who may see them.
 
 A failed reference check, the `ref_<column>` check Lakana generates from a `references:` entry in
 an asset's header, is never named in a message: whether it failed, and how many rows it found, says
@@ -171,6 +183,11 @@ webhook request is received"), not the older Office 365 connector.
   changed its type in a way that does not widen. Its title reads
   ``Lakana: job `daily` changed table columns in `prod` ``. A run that fails or recovers sends its
   own event, with the same line in it.
+- **`health`:** a table health signal fired on a table the job builds (its selection holds the
+  table). Its title reads ``Lakana: table `silver.orders` needs a look in `prod` ``, and it names
+  the table, the alert and `lakana table health TABLE --env ENV` instead of a run; a signal that
+  keeps firing sends one message. Which signals, and when an alert leaves its values out:
+  [Table health](../reference/table-health.md#notifications).
 - **Nothing:** an ad-hoc `lakana run` (it has no job), a job whose version had no `notify:`, and a
   scheduled start that never becomes a run (it was dropped, or the environment has no run
   principal bound): a team that relies on `notify:` hears nothing when a job never starts. The

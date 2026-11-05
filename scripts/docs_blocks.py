@@ -615,6 +615,12 @@ MASKS: tuple[tuple[str, re.Pattern[str], str], ...] = tuple(
         ),
         ("hash", rf"(?<![0-9A-Za-z]){_HEX}{{40,64}}(?![0-9A-Za-z])", "<hash>"),
         (
+            "alert time",
+            r"\b\d{2} (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{2}:\d{2} UTC\b",
+            "<alert time>",
+        ),
+        ("snapshot", r"(?<![\w.])\d{16,19}(?![\w.])", "<snapshot>"),
+        (
             "token",
             r"\b(lakana_(?:pat|ci|task)_)[A-Za-z0-9]{6,}_[A-Za-z0-9_-]{8,}",
             r"\1<key id>_<secret>",

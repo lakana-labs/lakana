@@ -29,6 +29,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from lakana_core.auth import AuthorizationService, CiScope, PrincipalRef
+from lakana_core.catalog.health_record import current_columns
 from lakana_core.errors import (
     ConflictError,
     LakanaError,
@@ -50,13 +51,15 @@ from lakana_core.models import (
     RepositoryKind,
     Secret,
 )
-from lakana_core.projects.asset_model import deploy_hints
+from lakana_core.projects.asset_model import deploy_hints, normalized_write
 from lakana_core.projects.checks import check_issues, checks_listing, parse_checks
 from lakana_core.projects.dag import build_graph, validate_project
 from lakana_core.projects.deploys import DeclaredConnections, DeployService, connection_issues
 from lakana_core.projects.diff import diff_manifests
 from lakana_core.projects.discovery import discover
 from lakana_core.projects.glossary import glossary_entries, parse_glossary
+from lakana_core.projects.health import health_issues
+from lakana_core.projects.health_checks import project_health_specs
 from lakana_core.projects.issues import ProjectIssue, ProjectValidationError, withheld_lines
 from lakana_core.projects.jobs import job_issues
 from lakana_core.projects.layer_rules import layer_hints, layer_issues
@@ -519,6 +522,65 @@ def _discard_losing_upload(
         )
 
 
+def _health_column_orders(
+    session: Session,
+    key_provider: KeyProvider | None,
+    environment_name: str,
+    assets: Sequence[ParsedAsset],
+) -> dict[str, list[str]]:
+    """Read the current column order of the tables whose header blocks a column, for `health:`.
+
+    A commit judges the first 200 columns of the table's Iceberg schema. A replacing write
+    gives the table its `SELECT`'s order, but an append, merge or history write keeps the
+    table's own columns first (`health_issues`). Only such an asset with a ``block`` entry on a
+    column, and a table that exists, is read. Best effort: a table that cannot be read is
+    counted in its asset's order, and the failure is logged.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    key_provider
+        Decrypts the storage secret.
+    environment_name
+        The environment.
+    assets
+        The parsed assets.
+
+    Returns
+    -------
+    dict
+        The column names in schema order, by dotted table.
+    """
+    wanted = [
+        asset
+        for asset in assets
+        if asset.columns is not None
+        and normalized_write(asset.metadata)[0] != "replace"
+        and any(
+            effect == "block" and "." in key
+            for key, effect in (asset.metadata.health or {}).items()
+        )
+    ]
+    orders: dict[str, list[str]] = {}
+    for asset in wanted:
+        try:
+            columns = current_columns(session, key_provider, environment_name, asset.table)
+        except Exception:
+            # A database error inside the resolver would leave the session unusable.
+            session.rollback()
+            logger.warning(
+                "Could not read the columns of %s; its health columns are counted in the "
+                "asset's order.",
+                shown(asset.table),
+                exc_info=True,
+            )
+            continue
+        if columns is not None:
+            orders[asset.table] = columns
+    return orders
+
+
 def _restore_if_missing(
     session: Session,
     key_provider: KeyProvider | None,
@@ -874,11 +936,14 @@ def _deploy(
                 principal, environment_name, repository_id, assets, graph
             )
             + check_issues(every_check, assets, graph, limits=limits)
-            + generated_name_issues(checks, generated)
+            + generated_name_issues(checks, [*generated, *project_health_specs(assets, config)])
             + service.validate_checks_against_environment(
                 principal, environment_name, repository_id, checks, assets
             )
             + project_model_issues(assets)
+            + health_issues(
+                assets, _health_column_orders(session, key_provider, environment_name, assets)
+            )
             + translation_problems
             + glossary_problems
             + translation_issues(project, assets, translations, translatable)

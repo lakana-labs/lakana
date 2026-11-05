@@ -127,6 +127,9 @@ _NOT_A_TEXT = (
 
 _CHECK_FAMILIES = ("key", "references", "measures")
 _CHECK_MODES = ("block", "keep", "warn")
+_HEALTH_SIGNALS = ("freshness", "volume", "null_rate", "range", "schema")
+_HEALTH_EFFECTS = ("warn", "block", "off")
+_COLUMN_SIGNALS = ("null_rate", "range")
 _MAX_GRAIN_CHARS = 300
 _KEY_NONE = "none"
 
@@ -260,6 +263,9 @@ class AssetSpec:
         Column → its measure, as given, with ``not_over`` as a list.
     label
         A short name for the table in the project's main language.
+    health
+        Table health signal → ``warn``, ``block`` or ``off``, or ``signal.column`` → effect for
+        one column, as the manifest stores it.
     """
 
     inputs: dict[str, str]
@@ -287,6 +293,7 @@ class AssetSpec:
     checks: dict[str, str] = field(default_factory=dict)
     measures: dict[str, dict[str, object]] = field(default_factory=dict)
     label: str | None = None
+    health: dict[str, str] = field(default_factory=dict)
 
 
 def _unsafe(text: str) -> bool:
@@ -416,6 +423,96 @@ def _check_write(
     if mode != "history" and close_missing is not None:
         raise ValueError("`close_missing:` works with `write: history` only")
     return mode, _KEY_NONE if key_none else tuple(columns), watermark
+
+
+def _health_effect(where: str, value: object) -> str:
+    """Read one effect of `health=`.
+
+    Parameters
+    ----------
+    where
+        The signal, or ``signal: column``, for the message.
+    value
+        The effect.
+
+    Returns
+    -------
+    str
+        ``warn``, ``block`` or ``off``.
+
+    Raises
+    ------
+    ValueError
+        For anything else; ``False`` means ``off`` and ``True`` is not an effect.
+    """
+    if value is False:
+        return "off"
+    if value is True:
+        raise ValueError(
+            f"health: {where} must be warn, block or off; on, yes and true are not effects "
+            "(to turn a signal off, write off)"
+        )
+    if isinstance(value, str) and value in _HEALTH_EFFECTS:
+        return value
+    raise ValueError(f"health: {where} must be warn, block or off, not {_loc(value)}")
+
+
+def _check_health(health: object) -> dict[str, str]:
+    """Read `health=` into the flat map deploy stores, refusing what deploy would.
+
+    Parameters
+    ----------
+    health
+        ``"off"``, ``False``, a dict of signal → effect, or signal → {column: effect}; or `None`.
+
+    Returns
+    -------
+    dict
+        ``signal`` or ``signal.column`` → effect, sorted; every signal ``off`` for ``off``.
+
+    Raises
+    ------
+    ValueError
+        With deploy's text for the same value.
+    """
+    if health is None:
+        return {}
+    if health is False or health == "off":
+        return dict.fromkeys(_HEALTH_SIGNALS, "off")
+    if not isinstance(health, Mapping):
+        raise ValueError(
+            "health takes off, or a mapping of signals to warn, block or off, "
+            'such as {"volume": "block"}'
+        )
+    flat: dict[str, str] = {}
+    for signal, given in health.items():
+        if signal not in _HEALTH_SIGNALS:
+            raise ValueError(
+                f"health: {_loc(signal)} is not a health signal; "
+                "use freshness, volume, null_rate, range or schema"
+            )
+        if not isinstance(given, Mapping):
+            flat[signal] = _health_effect(signal, given)
+        elif signal not in _COLUMN_SIGNALS:
+            raise ValueError(
+                f"health: {signal} is about the whole table; "
+                "give it warn, block or off, not columns"
+            )
+        else:
+            for column, effect in given.items():
+                name = _loc(column)
+                if not _component_ok(f"health_{signal}__{name}"):
+                    raise ValueError(
+                        f"health: column {name} cannot name its check health_{signal}__{name}; "
+                        "a name cannot be blank or hold '.', '/' or a control character"
+                    )
+                flat[f"{signal}.{name}"] = _health_effect(f"{signal}: {name}", effect)
+    if flat.get("freshness") == "block":
+        raise ValueError(
+            "health: freshness cannot block: it fires between runs, when there is no write to "
+            "stop; use warn or off"
+        )
+    return dict(sorted(flat.items()))
 
 
 def _component_ok(part: str) -> bool:
@@ -1112,6 +1209,7 @@ def asset(
     references: Mapping[str, str | Mapping[str, str]] | None = None,
     checks: Mapping[str, str] | None = None,
     measures: Mapping[str, Mapping[str, object]] | None = None,
+    health: str | bool | Mapping[str, object] | None = None,
 ) -> Callable[[F], F]:
     """Declare a Python asset; returns the function unchanged with its metadata attached.
 
@@ -1210,6 +1308,10 @@ def asset(
         Column → its measure: ``aggregation`` (required), ``additivity``, ``not_over``,
         ``unit`` or ``currency``, ``label``, ``description``; only with ``kind`` ``fact`` or
         ``wide``. Not allowed with ``output="artifact"``.
+    health
+        Health signals to warn on, block on or switch off: ``"off"``, or a dict such as
+        ``{"volume": "block", "range": {"price": "off"}}``; see the table health reference. Not
+        allowed with ``output="artifact"``.
 
     Returns
     -------
@@ -1231,8 +1333,8 @@ def asset(
         not a boolean, or is ``True`` on an artifact asset or with an append, a merge or a history
         write, ``write="history"`` without ``kind="dimension"``, a `valid_from` or `close_missing`
         that deploy would refuse, and a
-        `kind`, `grain`, `references`, `checks` or `measures` deploy would refuse (also any of them
-        on an artifact asset).
+        `kind`, `grain`, `references`, `checks`, `measures` or `health` deploy would refuse (also
+        any of them on an artifact asset).
     """
     if function is not None:
         raise TypeError(_PARENTHESES)
@@ -1272,6 +1374,7 @@ def asset(
             ("references", references),
             ("checks", checks),
             ("measures", measures),
+            ("health", health),
         ):
             if given is not None:
                 raise ValueError(f"{name} does not apply to an artifact asset; remove it")
@@ -1295,6 +1398,7 @@ def asset(
     measured = _check_measures(measures, model[0], key_columns, model[3])
     checked_label = None if label is None else _check_label("label", label)
     checked_columns = _check_columns(columns)
+    flat_health = _check_health(health)
     if evolves and mode != "replace":
         raise ValueError(EVOLVE_NEEDS_REPLACE)
     spec = AssetSpec(
@@ -1323,6 +1427,7 @@ def asset(
         checks=model[3],
         measures=measured,
         label=checked_label,
+        health=flat_health,
     )
 
     def decorate(target: F) -> F:

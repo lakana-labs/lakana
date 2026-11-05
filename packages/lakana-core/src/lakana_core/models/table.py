@@ -267,6 +267,17 @@ class Table(Base, TimestampMixin):
     )
     """When the table's retention was last changed; `None` if it never was."""
 
+    health_effects: Mapped[dict[str, str] | None] = mapped_column(
+        JSON(none_as_null=True), nullable=True, default=None
+    )
+    """The effects of its `health:` that differ from `warn`, flat (`volume`, `range.price`).
+
+    Written at each deploy, and at the table's creation by a run, from the manifest entry of the
+    asset that builds it (`lakana_core.catalog.descriptions`), for a managed table only; `NULL`
+    for the defaults and for a table no asset builds. Read at each commit; an entry the code
+    does not understand reads as `warn`.
+    """
+
     @property
     def kind(self) -> str:
         """The API's name for this row's type.
