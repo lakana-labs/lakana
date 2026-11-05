@@ -240,6 +240,8 @@ brackets.
 | `'sha256(ssn)' is not a valid mask expression: SHA2 is outside the restricted subset.` (8) | The expression uses something outside the list above. Use only what the list allows. |
 | `'0' is not a valid mask expression: `ssn` is text, but the mask is a number. Use a value of its own type: '***', NULL, ...` (8) | The mask has another type than its column. Use a value of the column's own type, as the message lists, or see the table above. |
 | `'ssn = 5' is not a valid mask expression: `ssn` is text; compare it with '5', not 5.` (8) | A comparison inside the mask puts a text against a number. Write the value in the column's own type. |
+| `The policy names column 'Mass', and the table has the columns 'MASS' and 'Maß', which Lakana cannot tell apart for a policy. Ask the owner of the table to rename one of them, then create the policy again.` (8) | Two columns of the table differ only in case. Lakana will not guess which one the mask means. Have the owner rename one of them, then create the mask again. |
+| `A row filter or column mask stored on this table could not be read. Ask an administrator to correct or remove it.` | Shown to whoever queries the table. A stored policy row can no longer be read, so the query is refused rather than run without it. An administrator finds it with `lakana column-mask list`, revokes it and creates it again. |
 | `Pass exactly one of --principal or --group` (2) | Name one person or one group, not both and not neither. |
 | `No principal named 'nobody'.` (6) | The principal does not exist. Create it first, or fix the spelling. A group says `No group named '...'.` |
 | `No table 'nope' in 'dev'/gold.` (6) | The table does not exist in that environment. Check the name and `--env`. |

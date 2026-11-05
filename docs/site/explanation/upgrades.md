@@ -441,7 +441,14 @@ the old rule: reads are refused after a rename until the policy is created again
 it is meant for and the old one is revoked. Find them with `lakana row-filter list` and
 `lakana column-mask list`: the `bound` column says `no` for such a policy (`"bound": false` in
 `--output json`, `bound` in the SDK and REST API), `yes` for every other. While the backfill has not
-reached a policy yet it also says `no`; check again after a few minutes.
+reached a policy yet it also says `no`. The worker that holds the scheduler role binds them once
+when it starts and then every `LAKANA_RUN__SWEEP_INTERVAL` seconds (3,600 by default), 50 row
+filters and 50 column masks per pass. With `LAKANA_RUN__SWEEP_INTERVAL=0` it never does. A policy
+that still says `no` after its pass stays so for good. The usual causes: the expression writes a
+qualified column (`t.col`) or does not parse; the schema it was created against is no longer in the
+table's metadata; a column name is missing from that schema or matches two columns that differ
+only in case; or a column was renamed and the policy recorded no schema. Have an administrator
+create the policy again for the column it is meant for, then revoke the old one.
 
 ## Notes for 0.21.0
 
