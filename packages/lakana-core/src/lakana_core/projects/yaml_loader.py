@@ -9,6 +9,7 @@ reads would not be what the platform applies.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 
@@ -203,6 +204,27 @@ class _NoAliasLoader(yaml.SafeLoader):
             self._depth -= 1
 
 
+_BOOL_TAG = "tag:yaml.org,2002:bool"
+
+
+class _Yaml12Loader(_NoAliasLoader):
+    """A `_NoAliasLoader` that reads only ``true`` and ``false`` as booleans, as YAML 1.2 does.
+
+    PyYAML follows YAML 1.1, where ``on``, ``off``, ``yes`` and ``no`` are booleans too: a key
+    ``on:`` would load as ``True`` and a name such as ``no`` as a boolean. Files whose keys and
+    names are plain words read them as the text they show.
+    """
+
+
+_Yaml12Loader.yaml_implicit_resolvers = {
+    first: [(tag, pattern) for tag, pattern in resolvers if tag != _BOOL_TAG]
+    for first, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()
+}
+_Yaml12Loader.add_implicit_resolver(
+    _BOOL_TAG, re.compile(r"^(?:true|True|TRUE|false|False|FALSE)$"), list("tTfF")
+)
+
+
 def _reader_line(text: str, exc: yaml.reader.ReaderError) -> int | None:
     """Find the line of the character PyYAML's reader refused.
 
@@ -223,7 +245,12 @@ def _reader_line(text: str, exc: yaml.reader.ReaderError) -> int | None:
 
 
 def _load(
-    text: str, *, what: str, max_bytes: int, max_entries: int | None = None
+    text: str,
+    *,
+    what: str,
+    max_bytes: int,
+    max_entries: int | None = None,
+    yaml12_booleans: bool = False,
 ) -> tuple[object, Node | None]:
     """Parse one YAML document from untrusted repository content, keeping its node tree.
 
@@ -237,6 +264,9 @@ def _load(
         Largest accepted UTF-8 size.
     max_entries
         The most keys and list items accepted, counted while composing; `None` for no limit.
+    yaml12_booleans
+        Read only ``true`` and ``false`` (any case of the first letter, or all capitals) as
+        booleans, so ``on``, ``off``, ``yes`` and ``no`` stay text.
 
     Returns
     -------
@@ -255,7 +285,8 @@ def _load(
         raise YamlError(f"{what} is larger than {max_bytes // 1024} KiB.")
     try:
         # Built inside the try: the reader refuses a control character in its constructor.
-        loader = _NoAliasLoader(text)  # nosec B506 -- a SafeLoader subclass
+        loader_class = _Yaml12Loader if yaml12_booleans else _NoAliasLoader
+        loader = loader_class(text)  # nosec B506 -- a SafeLoader subclass
     except yaml.reader.ReaderError as exc:
         raise YamlError(
             f"{what} is not valid YAML: it holds the character U+{exc.character:04X}, which "
@@ -389,7 +420,12 @@ def _key_lines(root: Node | None) -> KeyLines:
 
 
 def load_yaml_with_lines(
-    text: str, *, what: str, max_bytes: int, max_entries: int | None = None
+    text: str,
+    *,
+    what: str,
+    max_bytes: int,
+    max_entries: int | None = None,
+    yaml12_booleans: bool = False,
 ) -> tuple[object, KeyLines]:
     """Parse one YAML document once, returning its value and the line of every key.
 
@@ -403,6 +439,8 @@ def load_yaml_with_lines(
         Largest accepted UTF-8 size.
     max_entries
         The most keys and list items accepted, counted while composing; `None` for no limit.
+    yaml12_booleans
+        As `_load`: only ``true`` and ``false`` are booleans.
 
     Returns
     -------
@@ -416,7 +454,13 @@ def load_yaml_with_lines(
     YamlTooManyEntries
         At the first key or list item past `max_entries`, before any value is built.
     """
-    value, node = _load(text, what=what, max_bytes=max_bytes, max_entries=max_entries)
+    value, node = _load(
+        text,
+        what=what,
+        max_bytes=max_bytes,
+        max_entries=max_entries,
+        yaml12_booleans=yaml12_booleans,
+    )
     return value, _key_lines(node)
 
 
