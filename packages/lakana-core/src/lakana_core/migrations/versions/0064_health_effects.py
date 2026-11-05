@@ -1,5 +1,7 @@
 """A table's health effects, the health signal a delivery is about, and a set-back's mark.
 
+Also the index a set-back finds the rows of its snapshots with.
+
 Revision ID: d6f0a2b4c8e9
 Revises: c5e9f1a3b7d8
 Create Date: 2026-11-05 13:00:00.000000
@@ -22,10 +24,16 @@ def upgrade() -> None:
     """Upgrade schema.
 
     Three nullable columns: a table's effects arrive with its next deploy; a delivery of a health
-    signal names it; a signal whose snapshot a check set back is marked with the time.
+    signal names it; a signal whose snapshot a check set back is marked with the time. The index
+    on ``(table_id, snapshot_id)`` serves that mark.
     """
     with op.batch_alter_table("table_health_signals") as batch_op:
         batch_op.add_column(sa.Column("set_back_at", sa.DateTime(timezone=True), nullable=True))
+        batch_op.create_index(
+            op.f("ix_table_health_signals_table_id_snapshot_id"),
+            ["table_id", "snapshot_id"],
+            unique=False,
+        )
     with op.batch_alter_table("tables") as batch_op:
         batch_op.add_column(sa.Column("health_effects", sa.JSON(), nullable=True))
     with op.batch_alter_table("notification_deliveries") as batch_op:
@@ -43,7 +51,12 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Downgrade schema."""
+    """Downgrade schema.
+
+    The deliveries of health signals go first: an earlier release has no ``health`` event and
+    would take one without a run for a test message.
+    """
+    op.execute(sa.text("DELETE FROM notification_deliveries WHERE event = 'health'"))
     with op.batch_alter_table("notification_deliveries") as batch_op:
         batch_op.drop_constraint(
             op.f("uq_notification_deliveries_health_signal_id_job"), type_="unique"
@@ -56,4 +69,5 @@ def downgrade() -> None:
     with op.batch_alter_table("tables") as batch_op:
         batch_op.drop_column("health_effects")
     with op.batch_alter_table("table_health_signals") as batch_op:
+        batch_op.drop_index(op.f("ix_table_health_signals_table_id_snapshot_id"))
         batch_op.drop_column("set_back_at")

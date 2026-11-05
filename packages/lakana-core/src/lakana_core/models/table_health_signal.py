@@ -71,6 +71,8 @@ class TableHealthSignal(Base):
         Index(
             "ix_table_health_signals_table_id_state", "table_id", "state", "signal", "column_name"
         ),
+        # The rows of the snapshots a set-back takes out (`health_record.forget_set_back`).
+        Index("ix_table_health_signals_table_id_snapshot_id", "table_id", "snapshot_id"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)

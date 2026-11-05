@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -18,13 +18,14 @@ from health_test_helpers import (
     _table_id,
     health_catalog,
 )
-from sqlalchemy import select
+from sqlalchemy import event, select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 import lakana_core.catalog.service as service_module
 from lakana_core.auth import PrincipalRef, RunContext
 from lakana_core.catalog.health_jobs import (
+    _still_fired,
     building_jobs,
     deployed_manifests,
     judged_by_run,
@@ -616,3 +617,115 @@ def test_rows_that_did_not_fire_queue_nothing() -> None:
         )
         == []
     )
+
+
+def test_the_previous_observation_is_the_newest_unmarked_row_of_each_key(
+    catalog: CatalogService, session: Session
+) -> None:
+    """Per signal and column, the newest earlier row by sequence number, set-back rows left out.
+
+    Read with one bounded seek per key, never a window over the table's whole history.
+
+    Parameters
+    ----------
+    catalog
+        The catalog, which creates `silver.orders`.
+    session
+        Database session.
+    """
+    environment_id, table_id = _environment_id(session), _table_id(session)
+
+    def row(
+        signal: str,
+        column: str | None,
+        sequence: int | None,
+        state: str,
+        *,
+        hour: int = 0,
+        set_back: bool = False,
+    ) -> TableHealthSignal:
+        """Store one row of `silver.orders`.
+
+        Parameters
+        ----------
+        signal
+            The signal.
+        column
+            Its column.
+        sequence
+            Its sequence number; `None` for a freshness row.
+        state
+            Its state.
+        hour
+            Hours after `_FIRED_AT` it was observed.
+        set_back
+            Whether a set-back marked it.
+
+        Returns
+        -------
+        TableHealthSignal
+            The row, flushed.
+        """
+        stored = TableHealthSignal(
+            id=uuid.uuid4(),
+            environment_id=environment_id,
+            table_id=table_id,
+            signal=signal,
+            column_name=column,
+            snapshot_id=sequence,
+            sequence_number=sequence,
+            observed=None,
+            band=None,
+            state=state,
+            effect="warn",
+            observed_at=_FIRED_AT + timedelta(hours=hour),
+            set_back_at=_FIRED_AT if set_back else None,
+        )
+        session.add(stored)
+        session.flush()
+        return stored
+
+    row("volume", None, 1, "fired", hour=5)  # the higher number counts, not the later time
+    row("volume", None, 2, "ok", hour=1)
+    row("volume", None, 3, "fired")
+    row("null_rate", "a", 1, "fired")
+    row("null_rate", "a", 2, "ok")
+    row("null_rate", "b", 1, "ok")
+    row("null_rate", "b", 2, "fired", set_back=True)
+    row("null_rate", "c", 2, "fired")
+    row("freshness", None, None, "ok")
+    row("freshness", None, None, "fired", hour=1)
+    fired = [
+        row("volume", None, 4, "fired"),
+        row("null_rate", "a", 3, "fired"),
+        row("null_rate", "b", 3, "fired"),
+        row("null_rate", "c", 3, "fired"),
+        row("null_rate", "d", 3, "fired"),
+        row("freshness", None, None, "fired", hour=2),
+    ]
+    statements: list[str] = []
+
+    def seen(conn: object, cursor: object, statement: str, *args: object) -> None:
+        """Keep each statement sent.
+
+        Parameters
+        ----------
+        conn
+            The connection.
+        cursor
+            The cursor.
+        statement
+            The SQL.
+        *args
+            The rest of the event's arguments.
+        """
+        statements.append(statement)
+
+    engine = session.get_bind()
+    event.listen(engine, "before_cursor_execute", seen)
+    try:
+        still = _still_fired(session, fired)
+    finally:
+        event.remove(engine, "before_cursor_execute", seen)
+    assert still == {("volume", None), ("null_rate", "c"), ("freshness", None)}
+    assert statements and not any("row_number" in s.lower() for s in statements)

@@ -3022,7 +3022,9 @@ def test_0063_on_postgres() -> None:
 def test_0064_on_postgres() -> None:
     """0064 adds the effects, the signal of a delivery and the set-back mark of a signal.
 
-    A signal's delete cascades to its delivery; the mark is a nullable time with a zone.
+    A signal's delete cascades to its delivery; the mark is a nullable time with a zone, and an
+    index on ``(table_id, snapshot_id)`` finds the rows to mark. The downgrade deletes the
+    deliveries of health signals, which the earlier release cannot send.
     """
     revision_0063 = "c5e9f1a3b7d8"
     revision_0064 = "d6f0a2b4c8e9"
@@ -3042,6 +3044,9 @@ def test_0064_on_postgres() -> None:
             u["name"]: u["column_names"]
             for u in inspector.get_unique_constraints("notification_deliveries")
         }["uq_notification_deliveries_health_signal_id_job"] == ["health_signal_id", "job"]
+        assert {
+            i["name"]: i["column_names"] for i in inspector.get_indexes("table_health_signals")
+        }["ix_table_health_signals_table_id_snapshot_id"] == ["table_id", "snapshot_id"]
         repo_id = uuid.uuid4()
         with engine.begin() as conn:
             env_id, table_id, signal_id = _insert_health_signal(conn)
@@ -3073,8 +3078,22 @@ def test_0064_on_postgres() -> None:
                 {"id": signal_id},
             )
             assert conn.execute(count).scalar_one() == 0
+            # The earlier release has no `health` event: the downgrade deletes its deliveries.
+            for event in ("health", "failed"):
+                conn.execute(
+                    sqlalchemy.text(
+                        "INSERT INTO notification_deliveries (id, environment_id, repository_id, "
+                        "job, event, format, secret_name, state, attempts, created_at) VALUES "
+                        "(:id, :env, :repo, 'nightly', :event, 'json', 'hook', 'PENDING', 0, "
+                        "now())"
+                    ),
+                    {"id": uuid.uuid4(), "env": env_id, "repo": repo_id, "event": event},
+                )
         migrate.downgrade(url, revision_0063)
         assert _alembic_version(engine) == revision_0063
+        with engine.begin() as conn:
+            events = sqlalchemy.text("SELECT event FROM notification_deliveries")
+            assert conn.execute(events).scalars().all() == ["failed"]
         inspector = sqlalchemy.inspect(engine)
         assert "health_effects" not in {c["name"] for c in inspector.get_columns("tables")}
         assert "health_signal_id" not in {

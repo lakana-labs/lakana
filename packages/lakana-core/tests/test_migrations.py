@@ -5041,8 +5041,9 @@ def test_0064_adds_the_health_effects_and_the_signal_of_a_delivery(
     """Revision `0064`: `tables.health_effects`, `notification_deliveries.health_signal_id`.
 
     Also `table_health_signals.set_back_at`, which marks the rows of a snapshot that was set
-    back. The delivery's column has a foreign key to `table_health_signals` and is unique together
-    with `job`; the downgrade removes both columns.
+    back, and an index on `(table_id, snapshot_id)` that finds them. The delivery's column has a
+    foreign key to `table_health_signals` and is unique together with `job`; the downgrade removes
+    both columns and the index.
 
     Parameters
     ----------
@@ -5074,6 +5075,9 @@ def test_0064_adds_the_health_effects_and_the_signal_of_a_delivery(
             u["name"]: u["column_names"]
             for u in inspector.get_unique_constraints("notification_deliveries")
         }["uq_notification_deliveries_health_signal_id_job"] == ["health_signal_id", "job"]
+        assert {
+            i["name"]: i["column_names"] for i in inspector.get_indexes("table_health_signals")
+        }["ix_table_health_signals_table_id_snapshot_id"] == ["table_id", "snapshot_id"]
     finally:
         engine.dispose()
     command.downgrade(config, _REVISION_0063)
@@ -5089,6 +5093,9 @@ def test_0064_adds_the_health_effects_and_the_signal_of_a_delivery(
         }
         assert "uq_notification_deliveries_health_signal_id_job" not in {
             u["name"] for u in inspector.get_unique_constraints("notification_deliveries")
+        }
+        assert "ix_table_health_signals_table_id_snapshot_id" not in {
+            i["name"] for i in inspector.get_indexes("table_health_signals")
         }
     finally:
         engine.dispose()

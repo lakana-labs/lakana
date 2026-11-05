@@ -14,10 +14,10 @@ from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import ScalarSelect, func, select
 from sqlalchemy.orm import Session
 
-from lakana_core.catalog.health_record import NOT_SET_BACK, ranked
+from lakana_core.catalog.health_record import NEWEST_COMMIT, NOT_SET_BACK
 from lakana_core.errors import ValidationError
 from lakana_core.models import (
     EnvironmentDeployment,
@@ -209,6 +209,11 @@ def _still_fired(
 ) -> set[tuple[str, str | None]]:
     """Find the signals whose previous observation already fired.
 
+    The previous observation of a key is found as `ranked` orders rows (by sequence number, a
+    row without one last), but with one ordered seek per key on the index of
+    ``(table_id, signal, sequence_number, observed_at, id)`` instead of a window over the
+    table's whole history: this runs in the transaction of every commit that fires.
+
     Parameters
     ----------
     session
@@ -222,18 +227,56 @@ def _still_fired(
         (signal, column) whose newest row before these, set-back rows left out (`NOT_SET_BACK`),
         is ``fired``.
     """
-    window = ranked(
-        TableHealthSignal.table_id == rows[0].table_id,
-        TableHealthSignal.signal.in_(sorted({row.signal for row in rows})),
-        TableHealthSignal.id.not_in([row.id for row in rows]),
-        NOT_SET_BACK,
-    )
-    found = session.execute(
-        select(TableHealthSignal.signal, TableHealthSignal.column_name)
-        .join(window, window.c.id == TableHealthSignal.id)
-        .where(window.c.position == 1, TableHealthSignal.state == "fired")
-    )
-    return {(signal, column) for signal, column in found}
+    table_id = rows[0].table_id
+    own = [row.id for row in rows]
+    keys = sorted({(row.signal, row.column_name) for row in rows}, key=repr)
+
+    def newest(signal: str, column: str | None, *, numbered: bool) -> ScalarSelect[str]:
+        """Select the state of a key's newest earlier row, with or without a sequence number.
+
+        Parameters
+        ----------
+        signal
+            The signal.
+        column
+            The column; `None` for the whole table.
+        numbered
+            Whether the rows have a sequence number (a commit's) or not (the sweep's).
+
+        Returns
+        -------
+        ScalarSelect
+            The state, or NULL without such a row.
+        """
+        number = TableHealthSignal.sequence_number
+        return (
+            select(TableHealthSignal.state)
+            .where(
+                TableHealthSignal.table_id == table_id,
+                TableHealthSignal.signal == signal,
+                TableHealthSignal.column_name.is_(None)
+                if column is None
+                else TableHealthSignal.column_name == column,
+                number.is_not(None) if numbered else number.is_(None),
+                TableHealthSignal.id.not_in(own),
+                NOT_SET_BACK,
+            )
+            .order_by(*NEWEST_COMMIT)
+            .limit(1)
+            .scalar_subquery()
+        )
+
+    states = session.execute(
+        select(
+            *(
+                func.coalesce(
+                    newest(signal, column, numbered=True), newest(signal, column, numbered=False)
+                )
+                for signal, column in keys
+            )
+        )
+    ).one()
+    return {key for key, state in zip(keys, states, strict=True) if state == "fired"}
 
 
 def queue_health_notifications(
