@@ -639,10 +639,11 @@ def _unjudged(
 
     A commit that could not read its files, or failed to compute, recorded a table-level
     ``no_metrics`` row with that reason (`UNJUDGED_REASONS`). A commit that added data (it has a
-    ``volume`` row that added rows) and recorded nothing for the signal, or for the check's
-    column, did not judge it either; a compaction, which records only ``schema``, and a
-    delete-only commit, which adds no files and so records no column rows, are not such
-    commits. A chain with no row at all was not judged.
+    ``volume`` row) and recorded nothing for the signal, or for the check's column, did not
+    judge it either; a compaction, which records only ``schema``, is not such a commit, and for
+    a column neither is a commit that recorded no ``null_rate`` or ``range`` row at all: it added
+    no files (a delete-only commit), whatever the effect of ``volume``. A chain with no row at
+    all was not judged.
 
     Parameters
     ----------
@@ -671,11 +672,13 @@ def _unjudged(
             reason = row.observed.get("reason") if isinstance(row.observed, dict) else None
             if row.column_name is None and row.state == "no_metrics" and reason in UNJUDGED_REASONS:
                 return snapshot, reason
-        volume = [row for row in here if row.signal == "volume"]
-        if not volume or any(
-            isinstance(row.observed, dict) and row.observed.get("added") == 0 for row in volume
-        ):
-            continue  # a compaction, a delete-only commit, or nothing recorded: no data to judge
+        if not any(row.signal == "volume" for row in here):
+            continue  # a compaction, or nothing recorded here: no data to judge
+        if column is not None and not any(row.signal in COLUMN_SIGNALS for row in here):
+            # A commit that added files records a null rate for every column (or a table-level
+            # row when the signal is off), whatever the volume's effect; one with none added no
+            # files, as a delete-only commit does, so it has no column to judge.
+            continue
         if column is not None:
             # Only the column's own row judges it: a table-level row (`range: off` beside
             # `{name: block}`) says nothing of a column that records no value.

@@ -1570,6 +1570,33 @@ def test_runs_show_gives_a_failed_health_checks_text_in_place_of_rows(tmp_path: 
     ]
 
 
+def test_runs_show_gives_a_warned_health_checks_reason(tmp_path: Path) -> None:
+    """A block that could not be judged warns with no rows: its line says why.
+
+    Parameters
+    ----------
+    tmp_path
+        Pytest's per-test directory.
+    """
+    lines = _show(
+        tmp_path,
+        _checked(
+            "silver.t",
+            result_body(
+                "health_volume",
+                table="silver.t",
+                outcome="warned",
+                on_failure="warn",
+                failing_rows=None,
+                error="health signal volume could not be judged: computing it failed",
+            ),
+        ),
+    )
+    assert _words(lines)[-1] == (
+        "health_volume warned health signal volume could not be judged: computing it failed"
+    )
+
+
 def test_runs_show_names_a_check_task_plainly_when_the_server_cannot_tell_its_kind(
     tmp_path: Path,
 ) -> None:

@@ -5,6 +5,8 @@ from __future__ import annotations
 import sys
 import uuid
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 from check_run_helpers import (
@@ -651,6 +653,18 @@ def test_a_block_signal_that_could_not_be_judged_warns(world: World) -> None:
     # A delete-only commit adds no files, so it records no column rows: not a gap (F1).
     _signal(world, "bronze.events", "volume", snapshot=16, observed={"added": 0, "total": 5})
     assert judge(_health_spec("range", "price"), 16) == (CheckOutcome.PASSED, None, 16)
+    # The same with volume off: its row stores nothing, and the commit added no files either.
+    _signal(world, "bronze.events", "volume", snapshot=17, state="off", effect="off")
+    _signal(world, "bronze.events", "schema", snapshot=17)
+    assert judge(_health_spec("range", "price"), 17) == (CheckOutcome.PASSED, None, 17)
+    off = SimpleNamespace(
+        snapshot_id=17, signal="volume", column_name=None, state="off", effect="off", observed=None
+    )
+    schema = SimpleNamespace(
+        snapshot_id=17, signal="schema", column_name=None, state="ok", effect="warn", observed={}
+    )
+    rows = cast("list[Any]", [off, schema])
+    assert task_checks_module._unjudged(rows, "range", "price", [17]) is None
 
 
 def test_a_run_whose_block_signal_could_not_be_judged_goes_on_and_says_so(
