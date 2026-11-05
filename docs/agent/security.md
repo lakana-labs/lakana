@@ -3980,31 +3980,48 @@ work.
   guessing which of two independently-authored expressions should win. Policies apply to
   every role including `admin` — there is no bypass *of the rewriter itself* — and layer on
   top of `READ_TABLE` authorization, never replacing it.
-- **A policy binds to column names, so a rename or a replaced column fails the read closed.** The
-  table is read by field id, and a rename through the Iceberg REST catalog can move a name onto
-  another column (`ssn` to `ssn_old`, `email` to `ssn`): a mask on `ssn` would cover the email
-  column and `ssn_old` would show the real values. A column dropped and added again, also by a
-  type change through `evolve_schema` (a non-promotion gets a new field id under the same name),
-  is replaced the same way. Each row filter and column mask records the id of the table's current
-  schema when it is created (`schema_id`; null for a raw table, a view and an artifact, for a
-  filter that reads no column, and for a policy of a release before the column existed). For a
-  read of an Iceberg table, `_resolve_sources` collects, from the reader's applied policies, every
-  column a mask covers or its expression reads and every column a filter reads, and calls
-  `policy.renames.renamed_policy_column` with the table's metadata. Two schemas are compared at a time, never
-  the ones between: the policy's schema and the CURRENT one (a policy with no recorded id, made by
-  an earlier release, is judged against every schema the table has had, since it may have been
-  written at any point of the history, and a name touched since any of them counts),
-  because schema ids are chosen by clients and a set-back makes the current schema an older one: a
-  name whose owning field id differs, or a field id that changed its name with the old or the new
-  name among the policy's, refuses the read before the query runs (`PolicyColumnRenamedError`,
-  cause `invalid_query`, text `POLICY_COLUMN_RENAMED`, which names the first such column and no
-  data). A recorded id the metadata does not have makes every column of the policy suspect. It
-  applies to a read at a checked snapshot too, before the comparison above. A refused read shows
-  nothing and never runs without the policy. The repair order is rename, create the policy for the
-  new name, revoke the old one: the old policy is touched until it is revoked, so reads stay
-  refused, and revoking it first would leave a window without any policy (two masks on one column
-  collapse to `NULL`, filters are ANDed). Binding policies to field ids is not done yet. Pins:
-  `test_pipeline_schema_evolution.py` (the `rename` and set-back tests), `test_policy_renames.py`.
+- **A policy is bound to field ids, so it follows a rename and a dropped or replaced column fails
+  the read closed (#120).** The table is read by field id, and a rename through the Iceberg REST
+  catalog can move a name onto another column (`ssn` to `ssn_old`, `email` to `ssn`). At creation
+  each column name a row filter or column mask uses (and a mask's own column) is bound to the field
+  id of the one top-level field of that name (`policy.field_binding.bind_policy`; `field_ids`,
+  `column_field_id`, `binding = field_ids`). On every read of an Iceberg table, `_resolve_sources`
+  passes the resolver a `PolicySchema`: the fields the read projects (the checked snapshot's shown
+  columns at a check) and the current schema's fields, both from the same loaded metadata, never a
+  second load. `policy.field_binding.resolve_expression` is the one function every reader of a
+  bound policy goes through: it maps each id to the read's name of the field (or, absent there,
+  its current name) and rewrites only the `Column` nodes of the stored text to quoted identifiers;
+  literals and `has_group` arguments keep their text, and a qualified column, a column outside
+  the binding, or text that no longer parses refuses as `UNREADABLE_POLICY_MESSAGE`, never applied
+  as written. A mask is keyed by its column's name in the read; masks are grouped without regard
+  to case, so a bound and a legacy mask on one column collapse to `NULL`. Whether a field is gone
+  is judged against the **current** schema only (G2): a field the table no longer has, also when
+  the checked snapshot still has it, refuses the read before the query runs
+  (`PolicyColumnGoneError`, cause `invalid_query`, text `POLICY_COLUMN_GONE`, which names the
+  table and the first gone column as the policy wrote it, and no data); a field the snapshot lacks
+  but the table has is named by its current name and handled by the at-check rule. A dropped
+  column, one dropped and added again, a non-promoting retype through `evolve_schema` and a
+  set-back to a schema before the column all refuse the same way. A bound row whose ids are missing
+  or not a map of names to integers (a mask without `column_field_id`, an expression key with an
+  id other than the mask's own) is refused as unreadable, with or without a schema, never
+  skipped. Callers that only ask whether a policy applies (incremental append, the write refusal,
+  the health read) pass no schema and get the text as written. Policies of earlier releases
+  (`binding` `pending` or `unbound`) and a raw table's (`names`) keep the rename rule: each records
+  the table's schema id at creation (`schema_id`; null for a raw table, a view and an artifact, for
+  a filter that reads no column, and for a policy of a release before the column existed), and only
+  these are listed in `ResolvedPolicy.policies` for `policy.renames.renamed_policy_column`, which
+  compares two schemas at a time, never the ones between: the policy's and the CURRENT one (a
+  policy with no recorded id is judged against every schema the table has had), because schema
+  ids are chosen by clients and a set-back makes the current schema an older one. A name whose
+  owning field id differs, or a field id that changed its name with the old or the new name among
+  the policy's, refuses the read (`PolicyColumnRenamedError`, text `POLICY_COLUMN_RENAMED`). Both
+  refusals apply to a read at a checked snapshot too, before the at-check comparison. A refused
+  read shows nothing and never runs without the policy. The repair is: create the policy again for
+  the column it is meant for, then revoke the old one; revoking first would leave a window without
+  any policy (two masks on one column collapse to `NULL`, filters are ANDed). Pins:
+  `test_pipeline_schema_evolution.py` (the follow, gone, set-back and legacy tests),
+  `test_pipeline_check_rows.py` (`test_a_check_read_before_a_swap_never_shows_the_masked_field`),
+  `test_policy_field_binding.py`, `test_policy_resolver.py`, `test_policy_renames.py`.
 - **A write that removes or replaces a column says so; only an administrator learns of a policy
   (#376).** `CatalogService.write_batches` compares the current schema with the planned one
   (`policy.schema_change.changed_columns`: a column whose name is gone, or whose name now owns

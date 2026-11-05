@@ -36,6 +36,7 @@ from lakana_core.models import (
     WriteMode,
 )
 from lakana_core.policy.column_masks import ColumnMaskService
+from lakana_core.policy.field_binding import UNBOUND
 from lakana_core.policy.read_errors import policy_read_failure
 from lakana_core.policy.row_filters import RowFilterService
 from lakana_core.storage.resolver import StorageResolver
@@ -135,7 +136,8 @@ def _mask(
 
     The service refuses the expressions these tests need (a cast, a product), so the mask is
     created with ``NULL`` and the stored expression is then replaced, as an edit in the database
-    can do.
+    can do. It is stored as a mask of an earlier release, not bound to field ids: a bound mask
+    whose text names a column outside its binding is refused as unreadable.
 
     Parameters
     ----------
@@ -159,7 +161,11 @@ def _mask(
         column=column,
         expression="NULL",
     )
-    session.execute(update(ColumnMask).values(expression=sql))
+    session.execute(
+        update(ColumnMask).values(
+            expression=sql, binding=UNBOUND, field_ids=None, column_field_id=None
+        )
+    )
     session.commit()
 
 
@@ -188,7 +194,8 @@ def _filter(
         The filter expression.
     stored
         Create the filter with ``id > 0`` and then replace the expression, as `_mask` does, so an
-        expression the service refuses can be stored like an old policy; `False` creates the
+        expression the service refuses can be stored like an old policy (not bound to field
+        ids); `False` creates the
         filter with `sql` itself (the two tests that use it pass ``id > 0``).
     """
     RowFilterService(session, AllowAllAuthorization(), catalog).create(
@@ -200,7 +207,11 @@ def _filter(
         expression="id > 0" if stored else sql,
     )
     if stored:
-        session.execute(update(RowFilter).where(RowFilter.table == table).values(expression=sql))
+        session.execute(
+            update(RowFilter)
+            .where(RowFilter.table == table)
+            .values(expression=sql, binding=UNBOUND, field_ids=None)
+        )
         session.commit()
 
 
