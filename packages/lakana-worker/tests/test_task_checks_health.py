@@ -23,6 +23,7 @@ from pyiceberg.table.snapshots import Operation, Snapshot, Summary
 from pyiceberg.table.update import AddSnapshotUpdate, SetSnapshotRefUpdate
 from pyiceberg.types import LongType, NestedField
 from sqlalchemy import select
+from sqlalchemy.exc import OperationalError
 from task_run_helpers import World, _engine, _start, _task
 
 import lakana_core.catalog.health_record as health_record_module
@@ -735,3 +736,55 @@ def test_a_failure_to_tell_of_an_unjudged_signal_never_stops_the_checks(
     _start(world)
     _drain(world)
     assert _task(world, "silver.orders").status is TaskStatus.SUCCEEDED
+
+
+def test_telling_of_unjudged_signals_needs_a_recorded_reason_and_passes_database_errors(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Without a row that says why there is nothing to tell; a database error is not swallowed.
+
+    Parameters
+    ----------
+    world
+        The world.
+    monkeypatch
+        Breaks the queuing with a database error.
+    """
+    _outside_table(world, "bronze.events", [1])
+    _signal(
+        world,
+        "bronze.events",
+        "volume",
+        snapshot=11,
+        state="no_metrics",
+        observed={"reason": "error"},
+    )
+
+    def lost(*args: object, **kwargs: object) -> object:
+        """Fail as a lost database connection would.
+
+        Parameters
+        ----------
+        *args
+            Ignored.
+        **kwargs
+            Ignored.
+
+        Raises
+        ------
+        OperationalError
+            Always.
+        """
+        raise OperationalError("SELECT 1", {}, Exception("connection lost"))
+
+    monkeypatch.setattr(task_checks_module, "queue_health_notifications", lost)
+    tell = task_checks_module._tell_unjudged
+    with world.session() as session:
+        table_id = resolve_table_id(session, "dev", "bronze", "events")
+        assert table_id is not None
+        environment_id = session.scalars(
+            select(Environment.id).where(Environment.name == "dev")
+        ).one()
+        tell(session, environment_id, "bronze.events", table_id, [12], ["volume"])  # nothing
+        with pytest.raises(OperationalError):
+            tell(session, environment_id, "bronze.events", table_id, [11], ["volume"])
