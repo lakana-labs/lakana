@@ -8,7 +8,13 @@ from test_projects_dag import make_asset
 
 from lakana_core.projects.asset_model import ParsedAsset, ResolvedReference
 from lakana_core.projects.frontmatter import AssetMetadata
-from lakana_core.projects.issues import error_for_reader, withheld_lines
+from lakana_core.projects.issues import (
+    WITHHELD_DEPLOY_MESSAGE,
+    ProjectIssue,
+    error_for_reader,
+    stored_error,
+    withheld_lines,
+)
 from lakana_core.projects.model import (
     TargetInfo,
     project_model_issues,
@@ -323,6 +329,60 @@ def test_two_references_to_one_hidden_target_read_like_two_missing_targets() -> 
     _, missing = resolve_references([fact], _lookup({}), environment="dev")
     shown = error_for_reader(whole, withheld_lines(issues), lambda _t: False)
     assert shown.encode() == "\n".join(issue.render() for issue in missing).encode()
+
+
+def test_a_long_error_lists_and_counts_an_unreadable_target_as_a_missing_one() -> None:
+    """The 50-issue cap is applied after withholding, wherever the reference's lines fall (#442).
+
+    An unreadable staging target with a two-column key makes several lines where a missing one
+    makes one; capped before withholding, a reader would see fewer lines and a larger count.
+    """
+    staging = TargetInfo(kind="staging", key=("a", "b"), key_none=False, columns=("a", "b"))
+    fact = _fact({"store_id": "gold.dim_store"})
+    _, found = resolve_references([fact], _lookup({"gold.dim_store": staging}), environment="dev")
+    _, missing = resolve_references([fact], _lookup({}), environment="dev")
+    assert len(found) > len(missing) == 1
+    fillers = [ProjectIssue(f"assets/a{i:02}.sql", 1, "bad") for i in range(59)]
+    fillers[3] = ProjectIssue("assets/a03.sql", 1, "two\nlines")
+    for before, after in (
+        (found + fillers, missing + fillers),
+        (fillers + found, fillers + missing),
+    ):
+        shown = [error_for_reader(*stored_error(i), lambda _t: False) for i in (before, after)]
+        assert shown[0] == shown[1]
+        assert shown[0].endswith("\n…and 10 more issues")
+        assert shown[0].count("\n") == 51  # 50 issues, one of two lines, and the count
+        whole = error_for_reader(*stored_error(before), lambda _t: True)
+        assert whole.endswith(f"\n…and {len(before) - 50} more issues")
+        assert whole.count("\n") == 51
+
+
+def test_a_short_error_is_stored_whole_and_without_a_count() -> None:
+    issues = [ProjectIssue(f"assets/a{i:02}.sql", 1, "bad") for i in range(50)]
+    message, withheld = stored_error(issues)
+    assert message == "\n".join(i.render() for i in issues)
+    assert withheld == withheld_lines(issues) == []
+    assert error_for_reader(message, withheld, lambda _t: True) == message
+
+
+def test_a_long_error_without_a_count_or_without_lines_and_a_malformed_summary() -> None:
+    plain = [ProjectIssue(f"assets/a{i:02}.sql", 1, "bad") for i in range(50)]
+    later = ProjectIssue("assets/f.sql", 2, "second", targets=("x.y",), withheld="")
+    message, withheld = stored_error([*plain, later])
+    assert message == "\n".join(i.render() for i in plain)
+    assert error_for_reader(message, withheld, lambda _t: False) == message
+    assert error_for_reader(message, withheld, lambda _t: True).endswith("\n…and 1 more issues")
+    hidden = stored_error([later] * 51)
+    assert error_for_reader(*hidden, lambda _t: False) == WITHHELD_DEPLOY_MESSAGE
+    for summary in (
+        {"issues": "0", "more": 0, "more_withheld": []},
+        {"issues": [0], "more": "1", "more_withheld": []},
+        {"issues": [0], "more": 1, "more_withheld": {}},
+        {"issues": [0], "more": 1, "more_withheld": ["x.y"]},
+    ):
+        assert error_for_reader("a\nb", [summary], lambda _t: True) == "a\nb"
+    odd = [{"issues": [0, 1], "more": 0, "more_withheld": [{"targets": ["x.y"], "count": "2"}]}]
+    assert error_for_reader("a\nb", odd, lambda _t: True) == "a\nb"
 
 
 def _history(columns: tuple[str, ...] | None, **fields: object) -> ParsedAsset:

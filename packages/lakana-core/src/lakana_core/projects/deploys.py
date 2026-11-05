@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import dataclasses
 import difflib
+import functools
 import re
 import shlex
 import time
@@ -835,7 +836,8 @@ class DeployService:
             READ_ENVIRONMENT reader is not entitled to learn. A reader who is not
             the deployer (`_is_deployer`: a CI or task token of the deployer is not)
             gets each line of the error that tells of a reference target it may not
-            read as the line of a missing target (`error_for_reader`).
+            read as the line of a missing target (`error_for_reader`). Every reader's error
+            is capped there, after that, to `MAX_LISTED_ISSUES` issues and a count.
         reads
             What earlier calls of a listing already read for the warnings; a new one when
             `None`.
@@ -869,11 +871,14 @@ class DeployService:
             hidden_adopted = len(adopted) - len(visible)
             diff = {**diff, "adopted": visible}
         error = run.error_message
-        if reader is not None and error is not None and not _is_deployer(reader, run):
+        if error is not None:
+            outside = reader if reader is not None and not _is_deployer(reader, run) else None
             error = error_for_reader(
                 error,
                 run.error_withheld_json,
-                lambda target: self._may_read(reader, env_name, target),
+                (lambda _target: True)
+                if outside is None
+                else functools.partial(self._may_read, outside, env_name),
             )
         return DeployRunView(
             id=run.id,
