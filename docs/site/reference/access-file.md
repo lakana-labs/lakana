@@ -194,6 +194,7 @@ changes nothing. It prints:
 | `+ text  (grants[3])` | An entry the apply would create, and where the file lists it. |
 | `~ text  (ci_trust[0])` | A CI trust rule the apply would change in place; the text shows the rule before and after. |
 | `- text` | Access that exists in a managed scope and that the file does not list; the apply would remove it. |
+| `! drift in prod: text` | Access in a scope that no earlier apply of a file has managed yet, made outside any file; the apply would remove it, so look before you apply. The scope is the environment, or `instance`. When known, `— by, at: reason` follows: who made it, when (a timestamp) and why. These are printed only when known; a first apply has none. |
 | `No changes.` | The file and the live access agree. |
 | `Fingerprint: ...` | A hash of the live access of the managed scopes, which an apply checks again. |
 
@@ -202,8 +203,10 @@ stderr, each naming the file, the entry and its line, the cause and the next ste
 code 1. A plan without problems exits with 0. `--output json` prints the plan as an object.
 
 `--allow-lockout` accepts a file that drops your own `ADMIN` role while another active
-administrator remains. A file that leaves no active administrator on the instance is always
-refused.
+administrator remains. That administrator must be an existing active user or service account,
+or a member of a group the file gives `ADMIN`: a service account the same file creates does not
+count, since it has no token yet. A file that leaves no active administrator on the instance is
+always refused.
 
 Route: `POST /api/v1/access/plan` with `{"file_name": "access.yaml", "text": "...",
 "allow_lockout": false}`. A file with problems is a plan with problems, answered with `200`.
