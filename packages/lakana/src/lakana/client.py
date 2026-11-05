@@ -31,6 +31,7 @@ from lakana._models import (
 from lakana._routes import ROUTES
 from lakana._tokens import mask_token
 from lakana.errors import AuthenticationError, ConfigError, InvalidResponse
+from lakana.resources.access import Access
 from lakana.resources.artifacts import Artifacts
 from lakana.resources.audit_events import AuditEvents
 from lakana.resources.checks import Checks
@@ -118,6 +119,7 @@ class Client:
         self.repositories = Repositories(self._transport)
         self.package_indexes = PackageIndexes(self._transport)
         self.ci_trust_rules = CiTrustRules(self._transport)
+        self.access = Access(self._transport)
         self.audit_events = AuditEvents(self._transport)
         self.deploys = Deploys(self._transport)
         self.deployments = Deployments(self._transport)

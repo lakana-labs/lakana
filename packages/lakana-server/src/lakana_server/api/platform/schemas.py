@@ -4744,3 +4744,120 @@ class CiTokenOut(BaseModel):
     kinds: list[str]
     sha: str | None
     rule_id: uuid.UUID
+
+
+class AccessExportOut(BaseModel):
+    """The access file written for some scopes.
+
+    Parameters
+    ----------
+    text
+        The file's YAML text; planning it unedited plans nothing.
+    """
+
+    text: str
+
+
+class AccessFileIn(BaseModel):
+    """Request body for planning an access file.
+
+    The text has no length limit here: the server names the limit in its answer (1 MiB) and
+    the request body limit bounds the request.
+
+    Parameters
+    ----------
+    file_name
+        The file's base name, which the messages use, such as ``access.yaml``.
+    text
+        The file's content.
+    allow_lockout
+        Accept a file that drops the caller's own ``ADMIN`` role while another administrator
+        remains.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    file_name: str = "access.yaml"
+    text: str
+    allow_lockout: bool = False
+
+
+class AccessChangeOut(BaseModel):
+    """One change a plan makes.
+
+    Parameters
+    ----------
+    op
+        ``create``, ``change`` (a CI trust rule's settings) or ``remove``.
+    entry
+        Where the file lists the entry, such as ``grants[3]``; `null` for a removal.
+    text
+        The change in words.
+    """
+
+    op: str
+    entry: str | None
+    text: str
+
+
+class AccessDriftOut(BaseModel):
+    """Access in a managed scope that did not come from the file.
+
+    Parameters
+    ----------
+    scope
+        The scope it lies in.
+    text
+        What it is and what an apply does with it.
+    by
+        Who made it, when known.
+    reason
+        Why, when known.
+    at
+        When, when known.
+    """
+
+    scope: str
+    text: str
+    by: str | None
+    reason: str | None
+    at: datetime | None
+
+
+class AccessPlanOut(BaseModel):
+    """What applying an access file would change, and every problem that stops it.
+
+    Parameters
+    ----------
+    file_name
+        The base name the messages use.
+    file_sha256
+        Hash of the file's text.
+    manages
+        The scopes the file manages; empty when it did not parse.
+    creates
+        Entries the apply creates.
+    changed
+        CI trust rules the apply changes in place.
+    removals
+        Entries the apply removes.
+    releases
+        Managed scopes the file no longer lists.
+    drift
+        Access in the scopes that did not come from the file.
+    problems
+        Every problem; an apply refuses while there is one.
+    fingerprint
+        Hash of the live state of the managed scopes, which an apply checks again.
+    """
+
+    file_name: str
+    file_sha256: str
+    manages: list[str]
+    creates: list[AccessChangeOut]
+    changed: list[AccessChangeOut]
+    removals: list[AccessChangeOut]
+    releases: list[str]
+    drift: list[AccessDriftOut]
+    problems: list[str]
+    fingerprint: str

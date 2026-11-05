@@ -10,6 +10,7 @@ from collections.abc import Iterator
 from fastapi import Depends, Header, Query, Request
 from sqlalchemy.orm import Session
 
+from lakana_core.access.service import AccessService
 from lakana_core.artifacts.service import ArtifactService
 from lakana_core.audit.authorization import AuditingAuthorization
 from lakana_core.audit.service import AuditService
@@ -761,6 +762,35 @@ def get_row_filter_service(
         A service using real authorization that checks every column a filter reads exists.
     """
     return RowFilterService(session, authz, catalog)
+
+
+def get_access_service(
+    request: Request,
+    session: Session = Depends(get_session),
+    authz: AuthorizationService = Depends(get_grant_authorization),
+    catalog: CatalogService = Depends(get_catalog),
+) -> AccessService:
+    """Build an AccessService for the current request.
+
+    Parameters
+    ----------
+    request
+        The current request, for `LAKANA_CI_OIDC__ISSUERS`.
+    session
+        The current request's database session.
+    authz
+        The real, grant-backed authorization service.
+    catalog
+        The catalog service, from which the access service reads a table's current columns.
+
+    Returns
+    -------
+    AccessService
+        A service using real authorization.
+    """
+    return AccessService(
+        session, authz, catalog, issuers=request.app.state.settings.ci_oidc.issuers
+    )
 
 
 def get_column_mask_service(

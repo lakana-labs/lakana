@@ -89,6 +89,7 @@ nav:
       - reference/search.md
       - reference/lists.md
       - reference/access.md
+      - reference/access-file.md
       - reference/jobs.md
       - reference/sql-in-queries.md
       - reference/project-layout.md

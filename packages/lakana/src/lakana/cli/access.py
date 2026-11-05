@@ -7,11 +7,13 @@ from typing import Annotated
 import typer
 
 from lakana._models import Permission, PermissionVia
-from lakana.cli import _output
+from lakana.cli import _output, access_file
 from lakana.cli._state import CliError, state_of
 from lakana.cli.grants import securable_of
 
-access_app = typer.Typer(help="Explain who may do what.", no_args_is_help=True)
+access_app = typer.Typer(
+    help="Explain who may do what, and keep access in a file.", no_args_is_help=True
+)
 
 _SCOPE_FORMAT = "ENV, ENV/NAMESPACE or ENV/NAMESPACE/TABLE"
 
@@ -148,4 +150,5 @@ def register(app: typer.Typer) -> None:
     app
         The root app.
     """
+    access_file.register(access_app)
     app.add_typer(access_app, name="access")

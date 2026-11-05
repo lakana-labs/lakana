@@ -29,6 +29,8 @@ class Route:
 
 
 ROUTES: dict[str, Route] = {
+    "access.export": Route("GET", "/api/v1/access/export"),
+    "access.plan": Route("POST", "/api/v1/access/plan"),
     "ci_oidc.exchange": Route("POST", "/api/v1/auth/oidc/token"),
     "ci_trust_rules.create": Route("POST", "/api/v1/ci-trust-rules"),
     "ci_trust_rules.list": Route("GET", "/api/v1/ci-trust-rules"),

@@ -5959,6 +5959,30 @@ matter for an operator deciding where to run it:
   that joins a worker or server to `seaweed-internal`, or publishes a port of `seaweedfs-core`,
   reopens #14 and fails that test.
 
+## Access as code (#46)
+
+- **Authorization first.** `AccessService.export` and `plan` call `authorize_admin_only` for
+  `MANAGE_GRANT` first (the instance `ADMIN` role, a PAT: a task or CI token is refused because
+  their scopes narrow every check), then `MANAGE_POLICY` and `MANAGE_PRINCIPAL`, before the text
+  is read. `test_admin_only_call_sites` lists both methods. The routes
+  (`api/platform/access_file.py`) add nothing of their own and call only the service.
+- **No side channel.** The CLI and the SDK reach it through `GET /api/v1/access/export` and
+  `POST /api/v1/access/plan`; the CLI reads the file and checks 1 MiB before sending, nothing
+  else. The file is parsed on the server (`parse_access_file`), where the size, entry and
+  problem limits hold whatever client sent it. The REST body field has no `max_length`: core
+  refuses an oversized file naming the limit, and the request-body limit (413) bounds the
+  request.
+- **Plan reads, never writes.** `plan` reads the live access and the tables' current column
+  names (`CatalogService.policy_fields`, authorized as MANAGE_POLICY) and writes nothing, not
+  even an audit event beyond the authorization record every route has.
+- **Untrusted text.** File names and every name in the file are echoed in problems; the CLI
+  prints them through `_output.safe_text`/`inline`, so a control character in a name cannot
+  rewrite the terminal. `file_name` is validated as a base name (no `/`, `\`, control
+  character) before it appears in a message.
+- **Strict YAML.** No anchors, aliases, merge keys, tags or duplicate keys; `on`, `no`, `off`,
+  `yes` are text (YAML 1.2 booleans). Each of the first four would hide what a file grants from
+  its reviewer or expand the file's size beyond what the limit counts.
+
 ## Mutation testing
 
 - **Mutation testing runs weekly.** `.github/workflows/mutation.yml` runs on schedule (Monday 03:00 UTC) and on `workflow_dispatch`. A survivor in the mutation targets (`scripts/check_mutants.py`) must be addressed by either: (1) writing a test that kills it, or (2) recording it as a confirmed equivalent mutation and updating the exit-run totals in `docs/security/mutation-testing.md`. `scripts/check_mutants.py` is the gate; any survivor left unresolved fails CI.
