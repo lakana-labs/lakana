@@ -375,17 +375,24 @@ _GUARDED = {
     "identity/pats.py": ("MANAGE_TOKEN", 3),
     # A CI trust rule lets a CI job act as a service account: issuing it a token, in effect.
     "ci_oidc/rules.py": ("MANAGE_TOKEN", 8),
+    # An access file names every kind of access: only an administrator may export or plan it.
+    "access/service.py": ("MANAGE_GRANT", 2),
 }
 _SERVICES = {
     "grants/service.py": "GrantService",
     "identity/groups.py": "GroupService",
     "identity/pats.py": "PatService",
     "ci_oidc/rules.py": "CiTrustRuleService",
+    "access/service.py": "AccessService",
 }
 _EXEMPT = {
     ("PatService", "verify"): "authenticates a presented token: it reads the token row and "
     "writes `last_used_at`, but it is not an administrative operation and has no caller identity "
     "to check a role of",
+    ("GrantService", "check_target"): "validates without writing; its caller (`grant`/`create`, "
+    "or `AccessService`) has authorized",
+    ("CiTrustRuleService", "check_rule"): "validates without writing; its caller "
+    "(`grant`/`create`, or `AccessService`) has authorized",
 }
 """Public methods of the three services that need no administrator check, and why."""
 _NAMES = {action.name for action in ADMIN_ONLY_ACTIONS}

@@ -558,3 +558,14 @@ def test_whoami_shows_a_ci_tokens_scope_and_whether_it_was_used(ci_client: TestC
     )
     assert accepted.status_code == 202, accepted.text
     assert ci_client.get("/api/v1/whoami", headers=header).json()["ci_token"]["used"] is True
+
+
+def test_a_ci_token_is_refused_on_the_access_routes(ci_client: TestClient) -> None:
+    """R10: a CI token gets 403 on the access export and plan (#46)."""
+    _setup(ci_client)
+    token = _exchange(ci_client).json()["token"]
+    header = {"Authorization": f"Bearer {token}"}
+    assert ci_client.get("/api/v1/access/export", headers=header).status_code == 403
+    assert (
+        ci_client.post("/api/v1/access/plan", headers=header, json={"text": ""}).status_code == 403
+    )

@@ -148,6 +148,68 @@ def validate_path_component(component: str, *, what: str, allow_dots: bool = Fal
         raise ValidationError(f"{what} '{shown(component)}' must not contain a '.'.")
 
 
+ENVIRONMENT_NAME_MAX = 255
+"""The longest environment name the access file can write."""
+
+
+def environment_name_problem(name: str) -> tuple[str, str] | None:
+    """Say why an environment name cannot be written in an access file.
+
+    The access file names a target as ``instance``, ``ENV`` or ``ENV.NAMESPACE``, one name per
+    line of text, so an environment called ``instance`` or containing a ``.`` would read back
+    as something else.
+
+    Parameters
+    ----------
+    name
+        The environment name.
+
+    Returns
+    -------
+    tuple of (str, str) or None
+        The cause and the next step; `None` when the name is fine.
+    """
+    if name.casefold() == "instance":
+        return (
+            "is reserved: the access file uses 'instance' for the whole instance",
+            "Pick another name, such as 'main'.",
+        )
+    if "." in name:
+        return (
+            "contains a '.', which the access file reads as the start of a namespace "
+            f"({name.partition('.')[0]!r} and {name.partition('.')[2]!r})",
+            f"Use a '-' or '_' instead, such as {name.replace('.', '-')!r}.",
+        )
+    if not 1 <= len(name) <= ENVIRONMENT_NAME_MAX:
+        return (
+            f"must be 1 to {ENVIRONMENT_NAME_MAX} characters long",
+            "Pick a shorter name.",
+        )
+    if name != name.strip() or not name.isprintable():
+        return (
+            "must be printable characters without a blank at either end",
+            "Remove the blanks and control characters.",
+        )
+    return None
+
+
+def check_environment_name(name: str) -> None:
+    """Refuse a new environment name the access file cannot write.
+
+    Parameters
+    ----------
+    name
+        The name of the environment being created.
+
+    Raises
+    ------
+    ValidationError
+        If `environment_name_problem` finds one; the message names the cause and the next step.
+    """
+    if (problem := environment_name_problem(name)) is not None:
+        raise ValidationError(f"Environment name '{shown(name)}' {problem[0]}. {problem[1]}")
+
+
 def refuse_percent_in_new_name(component: str, *, what: str) -> None:
     """Refuse a ``%`` in a table or namespace name that is being created.
 

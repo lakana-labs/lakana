@@ -272,3 +272,20 @@ def test_key_lines_find_a_key_by_its_loaded_value() -> None:
     assert lines.line(["a", None]) == 4
     assert lines.line(["a", "2"]) == 5
     assert lines.line(["a", 2]) == 1
+
+
+def test_yaml12_booleans_keep_on_off_yes_no_as_text() -> None:
+    """Access files read only true and false as booleans; project files keep PyYAML's reading."""
+    text = "on: prod\nmembers: [no, off, yes, 'on', true, False]\nflag: TRUE\n"
+    assert load_yaml(text, what="t", max_bytes=1024) == {
+        True: "prod",
+        "members": [False, False, True, "on", True, False],
+        "flag": True,
+    }
+    value, lines = load_yaml_with_lines(text, what="t", max_bytes=1024, yaml12_booleans=True)
+    assert value == {
+        "on": "prod",
+        "members": ["no", "off", "yes", "on", True, False],
+        "flag": True,
+    }
+    assert lines.line(["on"]) == 1

@@ -263,6 +263,8 @@ Usage: `lakana env create [OPTIONS] {name}`
 
 Create environment NAME (with bronze/silver/gold namespaces).
 
+The name must not be `instance` (in any case), contain a `.`, have blanks at either end or be longer than 255 characters: the access file reads `instance` as the whole instance and `prod.eu` as the namespace `eu` of `prod`. Write `prod-eu` instead.
+
 Write the storage root the one way Lakana compares locations: a lower-case scheme (`s3`, not `s3a`), one slash between path segments and none doubled after `file://` (`file:///data`, not `file:////data`), for `file` an absolute path and no host (not `file://data` or `file://localhost/data`), no `.` or `..` segments, no percent escapes and no `*`, `?`, `[` or `]`. One trailing slash is fine. Another spelling is refused, and the message names the one to use. The root of the disk (`file:///`) cannot hold an environment: use a directory, such as `file:///data/lakana`.
 
 Environments may share a root, and one may lie elsewhere in another's (prod at `s3://bucket`, dev at `s3://bucket/dev`). A root at or inside another environment's `managed/`, `raw/`, `artifacts/` or `_artifacts/`, a deleted environment's too, is refused, and so is one whose own such directory would hold another environment's root: the message names that environment and a root to use instead.
@@ -1211,7 +1213,7 @@ Take the id from `grant list`, which keeps it in the table even on a narrow term
 
 Usage: `lakana access [OPTIONS] COMMAND [ARGS]...`
 
-Explain who may do what.
+Explain who may do what, and keep access in a file.
 
 ### `lakana access explain`
 
@@ -1225,6 +1227,36 @@ One row per action that applies to the object: `allowed` is the answer of the sa
 |---|---|---|---|
 | `PRINCIPAL` | text | required |  |
 | `--scope` | text | none | The object: ENV, ENV/NAMESPACE or ENV/NAMESPACE/TABLE. Leave it out for the instance. |
+
+### `lakana access export`
+
+Usage: `lakana access export [OPTIONS]`
+
+Write the live access as an access file.
+
+The file lists the groups, service accounts, grants, row filters, column masks and CI trust rules of the scopes, in the format `lakana access plan` reads; planning it unedited plans nothing. Needs the ADMIN role on the instance.
+
+The file format: https://lakana-labs.github.io/lakana/reference/access-file/.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `--scope` | text, repeatable | none | `instance` (the default) or an environment; repeat it for several environments. |
+| `--output-file`, `-o` | path | none | Write the file here instead of printing it. |
+
+### `lakana access plan`
+
+Usage: `lakana access plan [OPTIONS] {file}`
+
+Show what applying an access file would change, and every problem that stops it.
+
+Nothing is changed. Prints `+` for what would be created, `~` for a CI trust rule changed in place and `-` for what would be removed, then access in the file's scopes that did not come from it (drift). Exits 1, with every problem on stderr, when the file has any. Needs the ADMIN role on the instance.
+
+The file format: https://lakana-labs.github.io/lakana/reference/access-file/.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `FILE` | path | required | The access file, such as access.yaml. |
+| `--allow-lockout` | flag | off | Accept a file that drops your own ADMIN role while another administrator remains. |
 
 ## `lakana row-filter`
 

@@ -10,18 +10,15 @@ from sqlalchemy.orm import Session
 
 from lakana_core.audit.service import AuditService
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable, SecurableKind
-from lakana_core.catalog.identity import (
-    refuse_view_as_policy_target,
-    resolve_environment_id,
-    resolve_table_id,
-)
 from lakana_core.errors import NotFoundError, ValidationError
 from lakana_core.identifiers import NamespacePath, TableRef
 from lakana_core.models import AuditEventType, Group, Principal, RowFilter
 from lakana_core.policy.columns import (
     ColumnSource,
+    PolicyTarget,
     binding_for,
     list_columns,
+    policy_table,
     read_table_description,
     type_checks_apply,
     validate_for_table,
@@ -188,6 +185,57 @@ class RowFilterService(PolicyShowing):
         assert group is not None  # nosec B101 -- FK guarantees the row still exists
         return group.name
 
+    def check_target(
+        self, p: PrincipalRef, *, environment: str, namespace: str, table: str, expression: str
+    ) -> PolicyTarget:
+        """Run every check `create` runs on a filter's table and expression, writing nothing.
+
+        `create` calls it after authorizing; an access file plan (#46) calls it after its own
+        authorization, so a planned filter is refused exactly as its single route would be.
+
+        Parameters
+        ----------
+        p
+            The acting principal, already authorized to manage policies.
+        environment
+            The environment the filtered table lives in.
+        namespace
+            The namespace, in its unit-separator-joined storage form.
+        table
+            The table name.
+        expression
+            The restricted-subset predicate.
+
+        Returns
+        -------
+        PolicyTarget
+            The ids, schema and binding `create` stores.
+
+        Raises
+        ------
+        ValidationError
+            If the target is a view, or `expression` is outside the restricted subset, reads a
+            column the table does not have, or mixes types.
+        ConflictError
+            If the filter reads a column and the table's columns cannot be read.
+        NotFoundError
+            If no such table exists.
+        PermissionDenied
+            If the filter reads a column and `p` lacks READ_TABLE on the table.
+        """
+        validate_for_table(
+            self._catalog,
+            p,
+            environment=environment,
+            namespace=namespace,
+            table=table,
+            expression=expression,
+            kind="filter",
+        )
+        environment_id, table_id, ref = policy_table(self._session, environment, namespace, table)
+        schema_id, binding = _check_columns_exist(self._catalog, p, ref, environment, expression)
+        return PolicyTarget(environment_id, table_id, schema_id, binding)
+
     def create(
         self,
         p: PrincipalRef,
@@ -247,28 +295,11 @@ class RowFilterService(PolicyShowing):
         self._authz.authorize(p, Action.MANAGE_POLICY, Securable.instance_scope())
         if (principal is None) == (group is None):
             raise ValidationError("Exactly one of 'principal' or 'group' must be given.")
-        validate_for_table(
-            self._catalog,
-            p,
-            environment=environment,
-            namespace=namespace,
-            table=table,
-            expression=expression,
-            kind="filter",
-        )
         principal_id = self._get_principal(principal).id if principal is not None else None
         group_id = self._get_group(group).id if group is not None else None
-        environment_id = resolve_environment_id(self._session, environment)
-        table_id = resolve_table_id(self._session, environment, namespace, table)
-        if environment_id is None or table_id is None:
-            raise NotFoundError(
-                f"No table {table!r} in {environment!r}/{NamespacePath.parse(namespace)}."
-            )
-        refuse_view_as_policy_target(self._session, table_id, namespace, table)
-        ref = TableRef(
-            environment=environment, namespace=NamespacePath.parse(namespace), name=table
+        target = self.check_target(
+            p, environment=environment, namespace=namespace, table=table, expression=expression
         )
-        schema_id, binding = _check_columns_exist(self._catalog, p, ref, environment, expression)
         row = RowFilter(
             id=uuid.uuid4(),
             principal_id=principal_id,
@@ -276,12 +307,12 @@ class RowFilterService(PolicyShowing):
             environment=environment,
             namespace=namespace,
             table=table,
-            environment_id=environment_id,
-            table_id=table_id,
+            environment_id=target.environment_id,
+            table_id=target.table_id,
             expression=expression,
-            schema_id=schema_id,
-            field_ids=binding.field_ids,
-            binding=binding.binding,
+            schema_id=target.schema_id,
+            field_ids=target.binding.field_ids,
+            binding=target.binding.binding,
             created_by=p.id,
             created_at=datetime.now(UTC),
         )

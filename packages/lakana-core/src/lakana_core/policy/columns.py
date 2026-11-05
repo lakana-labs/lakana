@@ -5,20 +5,93 @@ from __future__ import annotations
 import logging
 import uuid
 from collections.abc import Iterable
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, Protocol
 
 from pyiceberg.types import NestedField, StringType
 
 from lakana_core.auth import PrincipalRef
+from lakana_core.catalog.identity import (
+    refuse_view_as_policy_target,
+    resolve_environment_id,
+    resolve_table_id,
+)
 from lakana_core.errors import ConflictError, LakanaError, NotFoundError, PermissionDenied
 from lakana_core.identifiers import NamespacePath, TableRef
 from lakana_core.policy.expressions import QualifiedColumnError, validate_restricted_expression
 from lakana_core.policy.field_binding import BY_NAME, PolicyBinding, bind_policy
 
 if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
+
     from lakana_core.catalog.service import TableDescription
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class PolicyTarget:
+    """What a row filter's or column mask's checks found, all `create` stores from them (#46).
+
+    Parameters
+    ----------
+    environment_id
+        The environment's id.
+    table_id
+        The table's id.
+    schema_id
+        The id of the table schema the columns were checked against; `None` without one.
+    binding
+        The binding of the policy's columns to field ids of that schema.
+    type_checked
+        For a column mask: whether its types were checked against the column.
+    """
+
+    environment_id: uuid.UUID
+    table_id: uuid.UUID
+    schema_id: int | None
+    binding: PolicyBinding
+    type_checked: bool = False
+
+
+def policy_table(
+    session: Session, environment: str, namespace: str, table: str
+) -> tuple[uuid.UUID, uuid.UUID, TableRef]:
+    """Find the table a policy is for, refusing a missing table and a view.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    environment
+        The environment.
+    namespace
+        The namespace, in its joined storage form.
+    table
+        The table.
+
+    Returns
+    -------
+    tuple of (uuid.UUID, uuid.UUID, TableRef)
+        The environment's id, the table's id and the table's reference.
+
+    Raises
+    ------
+    NotFoundError
+        If the environment or the table does not exist.
+    ValidationError
+        If the table is a view.
+    """
+    environment_id = resolve_environment_id(session, environment)
+    table_id = resolve_table_id(session, environment, namespace, table)
+    if environment_id is None or table_id is None:
+        raise NotFoundError(
+            f"No table {table!r} in {environment!r}/{NamespacePath.parse(namespace)}."
+        )
+    refuse_view_as_policy_target(session, table_id, namespace, table)
+    path = NamespacePath.parse(namespace)
+    return environment_id, table_id, TableRef(environment=environment, namespace=path, name=table)
+
 
 MAX_LISTED_COLUMNS = 20
 """How many of a table's columns an error message lists before it counts the rest."""

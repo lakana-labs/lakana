@@ -94,6 +94,8 @@ COMMANDS: dict[str, tuple[str, ...]] = {
     "grant list": ("grants.list", "grants.list_page", "grants.iter"),
     "grant revoke": ("grants.revoke",),
     "access explain": ("principals.permissions",),
+    "access export": ("access.export",),
+    "access plan": ("access.plan",),
     "row-filter create": ("row_filters.create",),
     "row-filter list": ("row_filters.list",),
     "row-filter revoke": ("row_filters.revoke",),

@@ -5,6 +5,12 @@ through which grant": who may read each, the filters, the order, the fields, the
 and the routes. For the steps, see [Give a second person access](../how-to/give-a-second-person-access.md)
 and [Why may (or may not) someone do this?](../how-to/why-may-someone-do-this.md).
 
+## Access in a file
+
+To keep who has access in a file in git, write it with `lakana access export` and read what it would
+change with `lakana access plan`. The format, the commands and the errors are on [The access
+file](access-file.md).
+
 ## Who may read what
 
 | What | Command | Route | Needs |

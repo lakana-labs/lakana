@@ -3721,3 +3721,92 @@ class CiToken:
     kinds: list[str]
     sha: str | None
     rule_id: str
+
+
+# The SDK mirrors the server's response models by design (the packages share no code).
+# jscpd:ignore-start
+@dataclass(frozen=True)
+class AccessChange:
+    """One change an access plan makes.
+
+    Parameters
+    ----------
+    op
+        ``create``, ``change`` (a CI trust rule's settings) or ``remove``.
+    entry
+        Where the file lists the entry, such as ``grants[3]``; `None` for a removal.
+    text
+        The change in words.
+    """
+
+    op: str
+    entry: str | None
+    text: str
+
+
+@dataclass(frozen=True)
+class AccessDrift:
+    """Access in a managed scope that did not come from the file.
+
+    Parameters
+    ----------
+    scope
+        The scope it lies in.
+    text
+        What it is and what an apply does with it.
+    by
+        Who made it, when known.
+    reason
+        Why, when known.
+    at
+        When, when known.
+    """
+
+    scope: str
+    text: str
+    by: str | None
+    reason: str | None
+    at: datetime | None
+
+
+@dataclass(frozen=True)
+class AccessPlan:
+    """What applying an access file would change, and every problem that stops it.
+
+    Parameters
+    ----------
+    file_name
+        The base name the messages use.
+    file_sha256
+        Hash of the file's text.
+    manages
+        The scopes the file manages; empty when it did not parse.
+    creates
+        Entries the apply creates.
+    changed
+        CI trust rules the apply changes in place.
+    removals
+        Entries the apply removes.
+    releases
+        Managed scopes the file no longer lists.
+    drift
+        Access in the scopes that did not come from the file.
+    problems
+        Every problem; an apply refuses while there is one.
+    fingerprint
+        Hash of the live state of the managed scopes.
+    """
+
+    file_name: str
+    file_sha256: str
+    manages: list[str]
+    creates: list[AccessChange]
+    changed: list[AccessChange]
+    removals: list[AccessChange]
+    releases: list[str]
+    drift: list[AccessDrift]
+    problems: list[str]
+    fingerprint: str
+
+
+# jscpd:ignore-end

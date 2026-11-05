@@ -17441,6 +17441,187 @@
         }
       }
     },
+    "/api/v1/access/export": {
+      "get": {
+        "tags": [
+          "access"
+        ],
+        "summary": "Write the live access of some scopes as an access file",
+        "description": "Needs the ADMIN role on the instance. Planning the text unedited plans nothing.",
+        "operationId": "export_access_api_v1_access_export_get",
+        "parameters": [
+          {
+            "name": "scope",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 64,
+              "default": [
+                "instance"
+              ],
+              "title": "Scope"
+            },
+            "description": "``instance`` (the default) alone, or one or more environment names; repeat the parameter."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessExportOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token is missing, wrong, expired or revoked.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/access/plan": {
+      "post": {
+        "tags": [
+          "access"
+        ],
+        "summary": "Say what applying an access file would change, and every problem that stops it",
+        "description": "Needs the ADMIN role on the instance. A file with problems is a plan with problems, not an error: the answer is 200 and lists all of them. Nothing is changed.",
+        "operationId": "plan_access_api_v1_access_plan_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccessFileIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessPlanOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token is missing, wrong, expired or revoked.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The request body is larger than the server accepts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/auth/oidc/token": {
       "post": {
         "tags": [
@@ -17732,6 +17913,212 @@
   },
   "components": {
     "schemas": {
+      "AccessChangeOut": {
+        "properties": {
+          "op": {
+            "type": "string",
+            "title": "Op"
+          },
+          "entry": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entry"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          }
+        },
+        "type": "object",
+        "required": [
+          "op",
+          "entry",
+          "text"
+        ],
+        "title": "AccessChangeOut",
+        "description": "One change a plan makes.\n\nParameters\n----------\nop\n    ``create``, ``change`` (a CI trust rule's settings) or ``remove``.\nentry\n    Where the file lists the entry, such as ``grants[3]``; `null` for a removal.\ntext\n    The change in words."
+      },
+      "AccessDriftOut": {
+        "properties": {
+          "scope": {
+            "type": "string",
+            "title": "Scope"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "By"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "scope",
+          "text",
+          "by",
+          "reason",
+          "at"
+        ],
+        "title": "AccessDriftOut",
+        "description": "Access in a managed scope that did not come from the file.\n\nParameters\n----------\nscope\n    The scope it lies in.\ntext\n    What it is and what an apply does with it.\nby\n    Who made it, when known.\nreason\n    Why, when known.\nat\n    When, when known."
+      },
+      "AccessExportOut": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "title": "Text"
+          }
+        },
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "title": "AccessExportOut",
+        "description": "The access file written for some scopes.\n\nParameters\n----------\ntext\n    The file's YAML text; planning it unedited plans nothing."
+      },
+      "AccessFileIn": {
+        "properties": {
+          "file_name": {
+            "type": "string",
+            "title": "File Name",
+            "default": "access.yaml"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "allow_lockout": {
+            "type": "boolean",
+            "title": "Allow Lockout",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "title": "AccessFileIn",
+        "description": "Request body for planning an access file.\n\nThe text has no length limit here: the server names the limit in its answer (1 MiB) and\nthe request body limit bounds the request.\n\nParameters\n----------\nfile_name\n    The file's base name, which the messages use, such as ``access.yaml``.\ntext\n    The file's content.\nallow_lockout\n    Accept a file that drops the caller's own ``ADMIN`` role while another administrator\n    remains."
+      },
+      "AccessPlanOut": {
+        "properties": {
+          "file_name": {
+            "type": "string",
+            "title": "File Name"
+          },
+          "file_sha256": {
+            "type": "string",
+            "title": "File Sha256"
+          },
+          "manages": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Manages"
+          },
+          "creates": {
+            "items": {
+              "$ref": "#/components/schemas/AccessChangeOut"
+            },
+            "type": "array",
+            "title": "Creates"
+          },
+          "changed": {
+            "items": {
+              "$ref": "#/components/schemas/AccessChangeOut"
+            },
+            "type": "array",
+            "title": "Changed"
+          },
+          "removals": {
+            "items": {
+              "$ref": "#/components/schemas/AccessChangeOut"
+            },
+            "type": "array",
+            "title": "Removals"
+          },
+          "releases": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Releases"
+          },
+          "drift": {
+            "items": {
+              "$ref": "#/components/schemas/AccessDriftOut"
+            },
+            "type": "array",
+            "title": "Drift"
+          },
+          "problems": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Problems"
+          },
+          "fingerprint": {
+            "type": "string",
+            "title": "Fingerprint"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file_name",
+          "file_sha256",
+          "manages",
+          "creates",
+          "changed",
+          "removals",
+          "releases",
+          "drift",
+          "problems",
+          "fingerprint"
+        ],
+        "title": "AccessPlanOut",
+        "description": "What applying an access file would change, and every problem that stops it.\n\nParameters\n----------\nfile_name\n    The base name the messages use.\nfile_sha256\n    Hash of the file's text.\nmanages\n    The scopes the file manages; empty when it did not parse.\ncreates\n    Entries the apply creates.\nchanged\n    CI trust rules the apply changes in place.\nremovals\n    Entries the apply removes.\nreleases\n    Managed scopes the file no longer lists.\ndrift\n    Access in the scopes that did not come from the file.\nproblems\n    Every problem; an apply refuses while there is one.\nfingerprint\n    Hash of the live state of the managed scopes, which an apply checks again."
+      },
       "Action": {
         "type": "string",
         "enum": [
@@ -20583,7 +20970,7 @@
           "storage"
         ],
         "title": "EnvironmentCreate",
-        "description": "Request body for creating an environment.\n\nParameters\n----------\nname\n    Unique environment name.\nstorage\n    Where the environment's data lives.\nis_protected\n    Whether deleting this environment and changing its storage are\n    refused (`CatalogService.delete_environment`/\n    `update_environment_storage`) until cleared via\n    `PATCH /api/v1/environments/{name}`.\nproperties\n    Free-form metadata."
+        "description": "Request body for creating an environment.\n\nParameters\n----------\nname\n    Unique environment name. Not ``instance`` in any case, without a ``.``, at most 255\n    characters and without blanks at either end: the access file could not write it.\nstorage\n    Where the environment's data lives.\nis_protected\n    Whether deleting this environment and changing its storage are\n    refused (`CatalogService.delete_environment`/\n    `update_environment_storage`) until cleared via\n    `PATCH /api/v1/environments/{name}`.\nproperties\n    Free-form metadata."
       },
       "EnvironmentOut": {
         "properties": {

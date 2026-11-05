@@ -25,6 +25,7 @@ from lakana_core.readiness import probe_storage, read_database
 from lakana_core.secrets.crypto import ACCEPT_FORMAT_1_WARNING
 from lakana_core.secrets.keys import EnvKeyProvider
 from lakana_server.api.iceberg.router import router as iceberg_router
+from lakana_server.api.platform.access_file import router as access_file_router
 from lakana_server.api.platform.artifacts import MANIFEST_DECODE_SLOTS, MAX_CONCURRENT_DOWNLOADS
 from lakana_server.api.platform.artifacts import environment_router as artifacts_environment_router
 from lakana_server.api.platform.artifacts import router as artifacts_router
@@ -101,6 +102,7 @@ ROUTERS = (
     scheduler_router,
     audit_events_router,
     ci_trust_rules_router,
+    access_file_router,
     ci_oidc_router,
     whoami_router,
     info_router,

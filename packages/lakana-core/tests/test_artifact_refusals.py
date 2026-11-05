@@ -375,6 +375,25 @@ def test_a_policy_cannot_be_attached_to_an_artifact(session: Session, tmp_path: 
     )
 
 
+def test_an_access_file_plan_cannot_attach_a_policy_to_an_artifact(
+    session: Session, tmp_path: Path
+) -> None:
+    """`check_target`, which an access file plan runs (#46), refuses an artifact as `create`."""
+    _, p = _catalog(session, tmp_path)
+    allow = AllowAllAuthorization()
+    where = {"environment": "dev", "namespace": "gold", "table": "churn"}
+    for check in (
+        lambda: RowFilterService(session, allow, FakeColumnCatalog()).check_target(
+            p, **where, expression="TRUE"
+        ),
+        lambda: ColumnMaskService(session, allow, FakeColumnCatalog()).check_target(
+            p, **where, column="id", expression="'*'"
+        ),
+    ):
+        with pytest.raises(ValidationError, match=r"'gold\.churn' is an artifact"):
+            check()
+
+
 def test_a_view_cannot_reference_an_artifact(session: Session, tmp_path: Path) -> None:
     catalog, p = _catalog(session, tmp_path)
     references = catalog.resolve_lineage_sources(p, "dev", ["gold.churn"])
@@ -805,10 +824,12 @@ _ARTIFACT_HANDLING = {
         "submit_maintenance": "refuses",
     },
     "RowFilterService": {
+        "check_target": "refuses",
         "create": "refuses",
         "list_for_table": "describes",
     },
     "ColumnMaskService": {
+        "check_target": "refuses",
         "create": "refuses",
         "list_for_table": "describes",
     },
