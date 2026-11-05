@@ -7,14 +7,16 @@ engine reads names that way), or when the reader's policies cannot be read (fail
 `volume`, `freshness` and `schema` are never hidden: row counts are already in `table get`, and
 the column list is the table's schema.
 
-Rows keep the name a column had when they were recorded, and a mask names the column as it is
-now, so a masked column is hidden under every name its field has had in the table's schemas, and
-under any name the current schema does not have (history whose column cannot be told). A mask
-whose column was renamed since it was written is refused by the query path
-(`policy.renames.renamed_policy_column`); here every value of the table is hidden instead, as
-for a row filter, and so it is when the table's metadata cannot be read, or the table has none.
-A mask bound to field ids follows its column under any name, so for now every value is hidden
-from a reader one applies to, as for a row filter.
+Rows keep the name a column had when they were recorded. A mask bound to field ids
+(`policy.field_binding`) is hidden by its field id, under every name that field has had in the
+table's schemas; a row's name cannot tell which field it was recorded for, so a name the field
+once had stays hidden after another column takes it. A mask of an earlier release (`pending`,
+`unbound`) or of a raw table (`names`) names its column as it is now, and is hidden under every
+name the field of that name has had. Whenever a mask applies, a row under a name the current
+schema does not have is hidden too (history whose column cannot be told). Every value of the
+table is hidden instead, as for a row filter, when a bound mask's field is no longer in the
+current schema or an earlier mask's column was renamed since it was written (both refused by the
+query path), and when the table's metadata cannot be read, or the table has none.
 
 A row whose snapshot a check set back (`health_record.forget_set_back`) is no longer the table's
 data: the current state and its last firings leave it out (`NOT_SET_BACK`), and the history
@@ -172,17 +174,16 @@ def visibility_for(
         Its id.
     metadata
         Reads the table's current metadata, `None` for a table without any; called only when a
-        mask of an earlier release applies and no row filter or bound mask does, to find every
-        name of a masked column.
+        mask applies and no row filter does, to find every name of a masked column.
 
     Returns
     -------
     Visibility
-        Everything value-revealing hidden when the policies cannot be read, when a mask bound
-        to field ids applies, when a column a mask uses was renamed since the mask was written,
-        or when no metadata says which names a masked column has had: none, or a read that
-        failed for any reason but the database's (storage that did not answer, a missing or
-        refused file, a damaged one).
+        Everything value-revealing hidden when the policies cannot be read, when the field a
+        bound mask follows is no longer in the current schema, when a column an earlier mask
+        uses was renamed since the mask was written, or when no metadata says which names a
+        masked column has had: none, or a read that failed for any reason but the database's
+        (storage that did not answer, a missing or refused file, a damaged one).
 
     Raises
     ------
@@ -193,12 +194,11 @@ def visibility_for(
         policy = PolicyResolver(session).resolve(p, ref, table_id=table_id)
     except ValidationError:
         return Visibility(filtered=True)
-    masked = frozenset(column.casefold() for column in policy.column_masks)
-    if policy.row_filters or policy.masked_field_ids:
-        # A mask bound to field ids is not judged by name here: its column may carry another
-        # name now, so every value is hidden rather than one name missed.
-        return Visibility(masked=masked, filtered=True)
-    if not masked:
+    bound = policy.masked_field_ids
+    legacy = policy.legacy_masked
+    if policy.row_filters:
+        return Visibility(masked=legacy, filtered=True)
+    if not bound and not legacy:
         return Visibility()
     try:
         current = metadata()
@@ -211,41 +211,44 @@ def visibility_for(
             shown(ref.dotted()),
             type(exc).__name__,
         )
-        return Visibility(masked=masked, filtered=True)
-    if current is None or renamed_policy_column(current, policy.policies) is not None:
-        return Visibility(masked=masked, filtered=True)
+        return Visibility(masked=legacy, filtered=True)
+    if current is None:
+        return Visibility(masked=legacy, filtered=True)
+    schema = current.schema()
+    if not bound <= {each.field_id for each in schema.fields}:
+        return Visibility(masked=legacy, filtered=True)
+    if renamed_policy_column(current, policy.policies) is not None:
+        return Visibility(masked=legacy, filtered=True)
+    # Compared case-folded on both sides: pyiceberg's case-insensitive lookup lowers instead,
+    # and `"Maß".lower()` is not `"Maß".casefold()`. An earlier mask on a column the table no
+    # longer has finds no field and hides that name only.
+    legacy_ids = frozenset(
+        field_id for name, field_id in index_by_name(schema).items() if name.casefold() in legacy
+    )
     return Visibility(
-        masked=_every_name(current, masked),
-        columns=frozenset(name.casefold() for name in current.schema().column_names),
+        masked=_every_name(current, bound | legacy_ids) | legacy,
+        columns=frozenset(name.casefold() for name in schema.column_names),
     )
 
 
-def _every_name(metadata: TableMetadata, masked: frozenset[str]) -> frozenset[str]:
-    """Add every name the masked columns' fields have had in the table's schemas.
+def _every_name(metadata: TableMetadata, field_ids: frozenset[int]) -> frozenset[str]:
+    """Find every name the fields of these ids have had in the table's schemas.
 
     Parameters
     ----------
     metadata
         The table's metadata.
-    masked
-        The masked columns, case-folded, as the current schema names them.
+    field_ids
+        The masked fields' ids.
 
     Returns
     -------
     frozenset of str
-        `masked` and each earlier name of the same field ids, case-folded.
+        Each name, case-folded, any schema of the table gives one of the fields.
     """
-    # Compared case-folded on both sides: pyiceberg's case-insensitive lookup lowers instead,
-    # and `"Maß".lower()` is not `"Maß".casefold()`. A mask on a column the table no longer has
-    # finds no field and hides that name only.
-    ids = {
-        field_id
-        for name, field_id in index_by_name(metadata.schema()).items()
-        if name.casefold() in masked
-    }
-    names = set(masked)
+    names: set[str] = set()
     for each in metadata.schemas:
-        for field_id in ids:
+        for field_id in field_ids:
             name = each.find_column_name(field_id)
             if name is not None:
                 names.add(name.casefold())

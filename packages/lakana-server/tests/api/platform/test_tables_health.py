@@ -498,6 +498,8 @@ def test_a_mask_leaves_out_the_values_of_its_column(client: TestClient) -> None:
         None,
         True,
     )
+    unmasked = next(s for s in signals if s["signal"] == "null_rate" and s["column"] == "id")
+    assert unmasked["values_hidden"] is False and unmasked["observed"] is not None
     volume = next(s for s in signals if s["signal"] == "volume")
     assert volume["observed"] == {"added": 3, "total": 3}
 

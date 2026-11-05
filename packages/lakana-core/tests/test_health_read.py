@@ -33,7 +33,7 @@ from lakana_core.errors import PermissionDenied, StorageUnavailableError, Valida
 from lakana_core.identifiers import NamespacePath, TableRef
 from lakana_core.models import ColumnMask, Namespace, Table, TableHealthSignal
 from lakana_core.pagination import Page
-from lakana_core.policy.field_binding import FIELD_IDS
+from lakana_core.policy.field_binding import FIELD_IDS, UNBOUND
 from lakana_core.policy.renames import PolicyColumns
 from lakana_core.policy.resolver import ResolvedPolicy
 
@@ -46,6 +46,7 @@ _SCHEMA = {"columns": [], "added": [], "dropped": [], "retyped": []}
 _PRICE_MASK = ResolvedPolicy(
     column_masks={"price": "NULL"},
     policies=[PolicyColumns(columns=frozenset({"price"}), schema_id=0)],
+    legacy_masked=frozenset({"price"}),
 )
 
 
@@ -240,6 +241,7 @@ def _mask_on(column: str, schema_id: int) -> ResolvedPolicy:
     return ResolvedPolicy(
         column_masks={column: "NULL"},
         policies=[PolicyColumns(columns=frozenset({column}), schema_id=schema_id)],
+        legacy_masked=frozenset({column.casefold()}),
     )
 
 
@@ -850,7 +852,12 @@ def test_visibility_reads_the_readers_policies(
         Pytest's monkeypatch.
     """
     _answer_with(
-        monkeypatch, ResolvedPolicy(row_filters=["region = 'eu'"], column_masks={"Price": "NULL"})
+        monkeypatch,
+        ResolvedPolicy(
+            row_filters=["region = 'eu'"],
+            column_masks={"Price": "NULL"},
+            legacy_masked=frozenset({"price"}),
+        ),
     )
     assert _visibility(session, tmp_path, principal, _renamed_price) == Visibility(
         masked=frozenset({"price"}), filtered=True
@@ -919,13 +926,14 @@ def test_a_mask_on_a_renamed_column_hides_every_value(
     assert seen.hides("null_rate", "amount") and seen.hides("range", "amount")
 
 
-def test_a_bound_mask_on_a_renamed_column_hides_every_value(
-    session: Session, tmp_path: Path, principal: PrincipalRef
+def _stored_mask(
+    session: Session,
+    tmp_path: Path,
+    principal: PrincipalRef,
+    column: str,
+    **binding: object,
 ) -> None:
-    """A stored mask bound to field 2 (`price`, now `amount`): every value hidden (I1).
-
-    A real policy row, resolved by the real resolver: a bound mask is not judged by name, so
-    the health read hides everything rather than miss the column's new name.
+    """Store a column mask on `silver.orders` for the reader, to be read by the real resolver.
 
     Parameters
     ----------
@@ -935,6 +943,10 @@ def test_a_bound_mask_on_a_renamed_column_hides_every_value(
         Storage root.
     principal
         The reader.
+    column
+        The masked column, as written.
+    **binding
+        The row's `binding`, `field_ids`, `column_field_id` and `schema_id`.
     """
     _catalog(session, tmp_path)
     table = session.scalars(select(Table)).one()
@@ -949,21 +961,222 @@ def test_a_bound_mask_on_a_renamed_column_hides_every_value(
             table="orders",
             environment_id=namespace.environment_id,
             table_id=table.id,
-            column="price",
+            column=column,
             expression="NULL",
             created_by=principal.id,
             created_at=_NOW,
-            binding=FIELD_IDS,
-            field_ids={"price": 2},
-            column_field_id=2,
+            **binding,
         )
     )
     session.commit()
 
+
+def _bound_mask(
+    session: Session, tmp_path: Path, principal: PrincipalRef, column: str, field_id: int
+) -> None:
+    """Store a mask bound to one field id, as `lakana policy` writes one today.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    tmp_path
+        Storage root.
+    principal
+        The reader.
+    column
+        The masked column, as written.
+    field_id
+        The field id it is bound to.
+    """
+    _stored_mask(
+        session,
+        tmp_path,
+        principal,
+        column,
+        binding=FIELD_IDS,
+        field_ids={column: field_id},
+        column_field_id=field_id,
+        schema_id=0,
+    )
+
+
+def test_a_bound_mask_hides_every_name_its_field_had(
+    session: Session, tmp_path: Path, principal: PrincipalRef
+) -> None:
+    """A stored mask bound to field 2 (`price`, now `amount`) hides that field only (G9, F13).
+
+    Rows under `price` and `amount` are hidden, the unmasked `qty` is shown: no row-filter-style
+    blanket hiding. A name the current schema lacks stays hidden (the unknown-name belt).
+
+    Parameters
+    ----------
+    session
+        Database session.
+    tmp_path
+        Storage root.
+    principal
+        The reader.
+    """
+    _bound_mask(session, tmp_path, principal, "price", 2)
+
+    seen = _visibility(
+        session,
+        tmp_path,
+        principal,
+        lambda: _schemas({2: "price", 3: "qty"}, {2: "amount", 3: "qty"}),
+    )
+
+    assert not seen.filtered
+    assert seen.hides("null_rate", "amount") and seen.hides("range", "AMOUNT")
+    assert seen.hides("range", "price") and seen.hides("null_rate", "ghost")
+    assert not seen.hides("null_rate", "qty") and not seen.hides("range", "id")
+
+
+def test_a_bound_mask_whose_field_is_gone_hides_every_value(
+    session: Session, tmp_path: Path, principal: PrincipalRef
+) -> None:
+    """Field 3 dropped: every value hidden (fail closed, as the query path refuses).
+
+    Parameters
+    ----------
+    session
+        Database session.
+    tmp_path
+        Storage root.
+    principal
+        The reader.
+    """
+    _bound_mask(session, tmp_path, principal, "ssn", 3)
+
+    seen = _visibility(
+        session, tmp_path, principal, lambda: _schemas({2: "price", 3: "ssn"}, {2: "price"})
+    )
+
+    assert seen.filtered and seen.hides("null_rate", "price")
+
+
+def test_a_bound_masks_old_name_stays_hidden_after_a_new_column_takes_it(
+    session: Session, tmp_path: Path, principal: PrincipalRef
+) -> None:
+    """`salary` -> `pay`, then a new `salary` (field 3): every row under `salary` stays hidden.
+
+    Health rows carry only a name, so a row under `salary` cannot be told to be field 2's or
+    field 3's: the name is hidden (fail closed, G9).
+
+    Parameters
+    ----------
+    session
+        Database session.
+    tmp_path
+        Storage root.
+    principal
+        The reader.
+    """
+    _bound_mask(session, tmp_path, principal, "salary", 2)
+
+    seen = _visibility(session, tmp_path, principal, _salary_to_pay)
+
+    assert not seen.filtered
+    assert seen.hides("null_rate", "salary") and seen.hides("range", "pay")
+    assert not seen.hides("range", "id")
+
+
+def test_a_casefold_variant_of_a_masked_fields_name_is_hidden(
+    session: Session, tmp_path: Path, principal: PrincipalRef
+) -> None:
+    """Rows recorded under `MASS` for a field named `Maß` once: hidden (Review Focus 4).
+
+    `"Maß".casefold()` is ``mass``, so the field's old name hides `MASS`, a name another column
+    has now; that column's rows under its own name cannot be told apart.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    tmp_path
+        Storage root.
+    principal
+        The reader.
+    """
+    _bound_mask(session, tmp_path, principal, "Maß", 2)
+
+    seen = _visibility(
+        session, tmp_path, principal, lambda: _schemas({2: "Maß"}, {2: "total", 3: "MASS"})
+    )
+
+    assert not seen.filtered
+    assert seen.hides("range", "MASS") and seen.hides("null_rate", "total")
+    assert not seen.hides("range", "id")
+
+
+def test_an_unbound_mask_keeps_the_rename_rule(
+    session: Session, tmp_path: Path, principal: PrincipalRef
+) -> None:
+    """A stored `unbound` mask on `price`, since renamed `amount`: every value hidden, as before.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    tmp_path
+        Storage root.
+    principal
+        The reader.
+    """
+    _stored_mask(session, tmp_path, principal, "price", binding=UNBOUND, schema_id=0)
+
     seen = _visibility(session, tmp_path, principal, _renamed_price)
 
-    assert seen.filtered
-    assert seen.hides("null_rate", "amount") and seen.hides("range", "amount")
+    assert seen.filtered and seen.hides("null_rate", "id")
+
+
+def test_a_bound_mask_without_its_field_id_hides_every_value(
+    session: Session, tmp_path: Path, principal: PrincipalRef
+) -> None:
+    """A bound row without `column_field_id` is unreadable: every value hidden, never skipped (F4).
+
+    Parameters
+    ----------
+    session
+        Database session.
+    tmp_path
+        Storage root.
+    principal
+        The reader.
+    """
+    _stored_mask(
+        session, tmp_path, principal, "price", binding=FIELD_IDS, field_ids={}, schema_id=0
+    )
+
+    seen = _visibility(session, tmp_path, principal, _renamed_price)
+
+    assert seen.filtered and seen.hides("null_rate", "id")
+
+
+def test_a_row_filter_next_to_a_bound_mask_hides_every_value(
+    session: Session, tmp_path: Path, principal: PrincipalRef, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A row filter still hides every column value when a bound mask applies too.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    tmp_path
+        Storage root.
+    principal
+        The reader.
+    monkeypatch
+        Pytest's monkeypatch.
+    """
+    _answer_with(
+        monkeypatch, ResolvedPolicy(row_filters=["id > 0"], masked_field_ids=frozenset({2}))
+    )
+
+    seen = _visibility(session, tmp_path, principal, _renamed_price)
+
+    assert seen.filtered and seen.hides("null_rate", "id")
 
 
 def test_a_mask_without_a_rename_hides_its_columns_every_name(
