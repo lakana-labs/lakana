@@ -4,19 +4,22 @@ The scheduler's housekeeping (`lakana_worker.__main__`) calls `sweep_health` onc
 interval. It takes a slice of at most `MAX_SWEEP_TABLES` tables that have health signal rows, the
 next slice on each call (`rotation`), and stops when asked or after `HEALTH_SWEEP_MAX_SECONDS`.
 
-For each table it first deletes the rows observed before the kept period
+It first observes the freshness of each table of the slice: the time since the table's last
+commit that added data (one with a ``volume`` row; a compaction records only ``schema``, so
+maintenance cannot hide a stale source), against the schedules of the jobs that build the table,
+or its own history (`health_signals.freshness_signal`). A table whose scheduled building jobs are
+all paused records ``off``. A table with no such commit recorded since signals exist is not
+judged. A row is recorded only when the state, the reason of an ``off`` or the last commit
+changed, so a table that stays late or on time adds nothing; a fired row is told to the notify
+targets of the building jobs once (`health_jobs.queue_health_notifications`). On Postgres each
+table is checked under a transaction-scoped advisory lock (`_lock_table`), skipped when another
+sweep holds it.
+
+Then, with the time left, it deletes the slice's rows observed before the kept period
 (``LAKANA_HEALTH__RETENTION_DAYS``), at most `RETENTION_BATCH` per statement. The newest row of
 each signal and column that no set-back marked is kept however old, so a table's current state
-never goes; a marked row goes once it is older than the kept period.
-
-Then it observes freshness: the time since the table's last commit that added data (one with a
-``volume`` row; a compaction records only ``schema``, so maintenance cannot hide a stale source),
-against the schedules of the jobs that build the table, or its own history
-(`health_signals.freshness_signal`). A table whose scheduled building jobs are all paused records
-``off``. A table with no such commit recorded since signals exist is not judged. A row is
-recorded only when the state or the last commit changed, so a table that stays late or on time
-adds nothing; a fired row is told to the notify targets of the building jobs once
-(`health_jobs.queue_health_notifications`).
+never goes, and so are the ``volume`` rows of the newest `HISTORY` + 1 commits that added data,
+which freshness is judged from; a marked row goes once it is older than the kept period.
 """
 
 from __future__ import annotations
@@ -28,7 +31,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from sqlalchemy import and_, delete, exists, func, or_, select
+from sqlalchemy import Integer, Select, and_, cast, delete, exists, func, literal, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, aliased
 
@@ -50,6 +53,7 @@ from lakana_core.catalog.health_signals import (
 from lakana_core.db import rowcount
 from lakana_core.identifiers import NamespacePath, shown
 from lakana_core.models import JobSchedule, Namespace, Table, TableHealthSignal
+from lakana_core.runs.pools import on_postgres
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +65,9 @@ HEALTH_SWEEP_MAX_SECONDS = 60.0
 
 RETENTION_BATCH = 5_000
 """The most rows one delete statement removes."""
+
+HEALTH_LOCK_KEY = 0x6C6B6873  # "lkhs"; the second key is 32 bits of the table's id
+"""The first of the two keys of a table's freshness lock: a key space apart from other locks."""
 
 
 @dataclass(frozen=True)
@@ -126,13 +133,73 @@ def _candidates(session: Session, rotation: int) -> list[uuid.UUID]:
     return found
 
 
+def _data_commits(table_id: uuid.UUID) -> Select[uuid.UUID, datetime, int | None]:
+    """Select a table's newest commits that added data, which freshness is judged from.
+
+    A commit that adds data records a ``volume`` row; a compaction records only ``schema``.
+
+    Parameters
+    ----------
+    table_id
+        The table.
+
+    Returns
+    -------
+    Select
+        ``id``, ``observed_at`` and ``snapshot_id`` of the newest `HISTORY` + 1 ``volume`` rows
+        that no set-back marked, newest first (`NEWEST_COMMIT`).
+    """
+    return (
+        select(TableHealthSignal.id, TableHealthSignal.observed_at, TableHealthSignal.snapshot_id)
+        .where(
+            TableHealthSignal.table_id == table_id,
+            TableHealthSignal.signal == "volume",
+            TableHealthSignal.sequence_number.is_not(None),
+            NOT_SET_BACK,
+        )
+        .order_by(*NEWEST_COMMIT)
+        .limit(HISTORY + 1)
+    )
+
+
+def _lock_table(session: Session, table_id: uuid.UUID) -> bool:
+    """Try to take a table's freshness lock for the transaction; nothing off Postgres.
+
+    Housekeeping runs on the leader only, but a leader that lost its role finishes its sweep: two
+    sweeps of one table would both find no previous row and both record and tell it. The lock
+    ends with the transaction that records the table's row. Two tables whose ids share 32 bits
+    skip each other for that moment, no more. SQLite has one process.
+
+    Parameters
+    ----------
+    session
+        Database session; the lock is held until its transaction ends.
+    table_id
+        The table.
+
+    Returns
+    -------
+    bool
+        Whether this sweep may check the table (always off Postgres).
+    """
+    if not on_postgres(session):
+        return True
+    key = int.from_bytes(table_id.bytes[:4], "big", signed=True)
+    lock = func.pg_try_advisory_xact_lock(
+        cast(literal(HEALTH_LOCK_KEY), Integer), cast(literal(key), Integer)
+    )
+    return bool(session.scalar(select(lock)))
+
+
 def _delete_old(
     session: Session, table_id: uuid.UUID, cutoff: datetime, stopped: Callable[[], bool]
 ) -> int:
     """Delete a table's rows from before the kept period, but its current state.
 
     A row goes when it is older than `cutoff` and either a set-back marked it, or a newer row of
-    the same signal and column that no set-back marked exists. Commits after each batch.
+    the same signal and column that no set-back marked exists. The newest `HISTORY` + 1 commits
+    that added data (`_data_commits`) keep their ``volume`` rows however old, so the freshness of
+    a table that stopped being written keeps its history. Commits after each batch.
 
     Parameters
     ----------
@@ -164,12 +231,14 @@ def _delete_old(
             and_(newer.observed_at == old.observed_at, newer.id > old.id),
         ),
     )
+    spared = list(session.scalars(select(_data_commits(table_id).subquery().c.id)))
     batch = (
         select(old.id)
         .where(
             old.table_id == table_id,
             old.observed_at < cutoff,
             or_(old.set_back_at.is_not(None), superseded),
+            old.id.not_in(spared),
         )
         .limit(RETENTION_BATCH)
     )
@@ -287,20 +356,12 @@ def _check_freshness(
     bool or None
         Whether a row was recorded; `None` for a table without a commit to judge.
     """
-    commits: Sequence[tuple[datetime, int | None]] = session.execute(
-        select(TableHealthSignal.observed_at, TableHealthSignal.snapshot_id)
-        .where(
-            TableHealthSignal.table_id == table_id,
-            TableHealthSignal.signal == "volume",
-            TableHealthSignal.sequence_number.is_not(None),
-            NOT_SET_BACK,
-        )
-        .order_by(*NEWEST_COMMIT)
-        .limit(HISTORY + 1)
+    commits: Sequence[tuple[uuid.UUID, datetime, int | None]] = session.execute(
+        _data_commits(table_id)
     ).all()
     if not commits:
         return None
-    last_commit_at, snapshot_id = commits[0]
+    _, last_commit_at, snapshot_id = commits[0]
     effect = effects.of("freshness")
     deployed = None
     if effect == "off":
@@ -311,7 +372,7 @@ def _check_freshness(
         thresholds, paused = _thresholds(deployed, table, last_commit_at)
         observation = freshness_signal(
             now=now,
-            commit_times=[at for at, _ in commits],
+            commit_times=[at for _, at, _ in commits],
             thresholds=thresholds,
             paused=paused,
         )
@@ -320,6 +381,7 @@ def _check_freshness(
         previous is not None
         and previous.state == observation.state
         and previous.snapshot_id == snapshot_id
+        and (observation.state != "off" or previous.observed == observation.observed)
     ):
         return False
     rows = signal_rows(
@@ -392,12 +454,6 @@ def sweep_health(
         return should_stop() or time.monotonic() > deadline
 
     candidates = _candidates(session, rotation)
-    cutoff = now - timedelta(days=retention_days)
-    deleted = 0
-    for table_id in candidates:
-        if stopped():
-            break
-        deleted += _delete_old(session, table_id, cutoff, stopped)
     evaluated = recorded = 0
     deployments: dict[uuid.UUID, _Deployed] = {}
     for table_id in candidates:
@@ -412,6 +468,9 @@ def sweep_health(
             continue
         name, raw_effects, path, environment_id = found
         table = f"{NamespacePath.parse(path)}.{name}"
+        if not _lock_table(session, table_id):
+            session.rollback()
+            continue
         try:
             outcome = _check_freshness(
                 session,
@@ -436,4 +495,10 @@ def sweep_health(
         session.commit()
         evaluated += outcome is not None
         recorded += bool(outcome)
+    cutoff = now - timedelta(days=retention_days)
+    deleted = 0
+    for table_id in candidates:
+        if stopped():
+            break
+        deleted += _delete_old(session, table_id, cutoff, stopped)
     return HealthSweep(evaluated=evaluated, recorded=recorded, deleted=deleted)

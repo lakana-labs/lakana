@@ -1060,7 +1060,8 @@ class HealthConfig(BaseModel):
         How many days back the history of a table's health signals reaches (default 90, at
         least 7, so a weekly job has a history): `lakana table health --signals` and `days` of
         `GET .../health/signals` look back at most this far. A worker deletes older signals,
-        keeping the newest of each signal and column.
+        keeping the newest of each signal and column and the last 31 commits of each table that
+        added data, which freshness is judged from.
     """
 
     retention_days: int = Field(default=90, ge=7)

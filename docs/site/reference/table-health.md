@@ -352,7 +352,9 @@ observations, newest first.
 The answer is `{"items": [...], "next_cursor": ...}`; `next_cursor` is `null` on the last page.
 `LAKANA_HEALTH__RETENTION_DAYS` (90 by default, at least 7) is how far back `days` may reach. The
 workers' hourly sweep (`LAKANA_RUN__SWEEP_INTERVAL`) deletes older observations, but keeps the
-newest of each signal and column, so the current state never goes. Each sweep handles at most
+newest of each signal and column, so the current state never goes, and the last 31 commits of
+each table that added data, so freshness keeps the history it is judged from however long ago
+they were. Each sweep handles at most
 500 tables and the next sweep the next 500, so with more tables the deletion takes several hours
 to come round. A message still waiting to be delivered when its signal is deleted is dropped with
 it.

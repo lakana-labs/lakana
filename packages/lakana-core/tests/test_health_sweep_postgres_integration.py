@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from health_test_helpers import _seed, health_catalog
+from health_test_helpers import _seed, _table_id, health_catalog
 from sqlalchemy import select, update
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
@@ -84,8 +84,29 @@ def test_retention_keeps_the_newest_unmarked_row_of_each_key_on_postgres(
             TableHealthSignal.signal, TableHealthSignal.column_name, TableHealthSignal.snapshot_id
         )
     ).all()
+    spared = [("volume", None, n) for n in range(1, 9)]  # the data commits freshness reads
     assert sorted(remaining, key=str) == sorted(
-        [("volume", None, 8), ("range", None, 1), ("range", "id", 3), ("freshness", None, 8)],
-        key=str,
+        [*spared, ("range", None, 1), ("range", "id", 3), ("freshness", None, 8)], key=str
     )
-    assert (swept.deleted, swept.evaluated, swept.recorded) == (10, 1, 1)
+    assert (swept.deleted, swept.evaluated, swept.recorded) == (3, 1, 1)
+
+
+def test_a_table_another_sweep_holds_is_skipped_on_postgres(
+    session: Session, engine: Engine, tmp_path: Path, principal: PrincipalRef
+) -> None:
+    """Two leaders sweeping one table at once record one freshness row, not two."""
+    health_catalog(session, tmp_path, principal)
+    _seed(session, "volume", {"added": 1, "total": 1})
+    table_id = _table_id(session)
+    now = datetime(2026, 10, 20, tzinfo=UTC)
+    with Session(engine) as other:
+        assert health_sweep._lock_table(other, table_id) is True
+        held = sweep_health(
+            session, now=now, retention_days=90, rotation=0, should_stop=lambda: False
+        )
+        other.rollback()
+    free = sweep_health(session, now=now, retention_days=90, rotation=0, should_stop=lambda: False)
+    rows = session.scalars(
+        select(TableHealthSignal).where(TableHealthSignal.signal == "freshness")
+    ).all()
+    assert (held.evaluated, free.evaluated, len(rows)) == (0, 1, 1)

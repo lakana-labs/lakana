@@ -7,6 +7,7 @@ import uuid
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from unittest import mock
 
 import pytest
 from core_test_helpers import _prepared_catalog
@@ -363,7 +364,7 @@ def test_retention_deletes_in_batches_and_stops_when_asked(
     monkeypatch.setattr(health_sweep, "RETENTION_BATCH", 1)
     _seed(session, "schema", _COLUMNS, count=3)
     later = datetime(2027, 3, 1, tzinfo=UTC)
-    assert _sweep(session, later, should_stop=_stop_after(1)).deleted == 1
+    assert _sweep(session, later, should_stop=_stop_after(2)).deleted == 1
     assert _sweep(session, later).deleted == 1
     assert session.scalars(select(TableHealthSignal.snapshot_id)).all() == [3]
 
@@ -491,3 +492,134 @@ def test_a_database_error_ends_the_sweep(
     monkeypatch.setattr(health_sweep, "deployed_manifests", failing)
     with pytest.raises(OperationalError):
         _sweep(session)
+
+
+def test_a_stale_table_stays_fired_past_the_kept_period(
+    catalog: CatalogService, session: Session
+) -> None:
+    """Retention keeps the last data commits, so a table that stopped stays late, not young."""
+    _seed(session, "volume", _ADDED)
+    _sweep(session)
+    later = datetime(2027, 3, 1, tzinfo=UTC)
+    _sweep(session, later)
+    _sweep(session, later + timedelta(hours=1), rotation=1)
+    assert [r.state for r in _freshness(session)] == ["fired"]
+    volume = session.scalars(select(TableHealthSignal).where(TableHealthSignal.signal == "volume"))
+    assert len(volume.all()) == 8
+
+
+def test_a_table_written_every_20_days_builds_a_history(
+    catalog: CatalogService, session: Session
+) -> None:
+    for commit in range(9):
+        _seed(session, "volume", _ADDED, count=1, first_day=20 * commit)
+    last = datetime(2026, 10, 1, tzinfo=UTC) + timedelta(days=160)
+    _sweep(session, last + timedelta(days=30))
+    _sweep(session, last + timedelta(days=30, hours=1), rotation=1)
+    (row,) = _freshness(session)
+    assert (row.state, row.band) == ("ok", {"high": 60 * 86_400.0})
+
+
+def test_retention_spares_only_the_newest_data_commits(
+    catalog: CatalogService, session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(health_sweep, "HISTORY", 2)
+    _seed(session, "volume", _ADDED, count=5)
+    _seed(session, "range", {}, count=3, column="id")
+    _sweep(session, datetime(2027, 3, 1, tzinfo=UTC))
+    kept = session.execute(
+        select(TableHealthSignal.signal, TableHealthSignal.snapshot_id).where(
+            TableHealthSignal.signal != "freshness"
+        )
+    ).all()
+    assert sorted(kept) == [("range", 3), ("volume", 3), ("volume", 4), ("volume", 5)]
+
+
+def test_freshness_runs_before_retention_uses_up_the_deadline(
+    session: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _gold_tables(session, tmp_path, "a", "b")
+    for name in "ab":
+        _seed(session, "range", {}, count=3, column="id", table=name)
+    clock = [0.0]
+    real = health_sweep._delete_old
+
+    def slow(
+        session: Session, table_id: uuid.UUID, cutoff: datetime, stopped: Callable[[], bool]
+    ) -> int:
+        """Delete one table's rows, then let the deadline pass.
+
+        Parameters
+        ----------
+        session
+            Database session.
+        table_id
+            The table.
+        cutoff
+            Rows observed before this go.
+        stopped
+            Asked after each full batch.
+
+        Returns
+        -------
+        int
+            How many rows were deleted.
+        """
+        deleted = real(session, table_id, cutoff, stopped)
+        clock[0] = 1_000.0
+        return deleted
+
+    monkeypatch.setattr(health_sweep.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(health_sweep, "_delete_old", slow)
+    swept = _sweep(session, datetime(2027, 3, 1, tzinfo=UTC))
+    assert (swept.evaluated, swept.deleted) == (2, 2)
+    assert len(_freshness(session)) == 2
+
+
+def test_a_table_another_sweep_holds_is_skipped(
+    catalog: CatalogService, session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(health_sweep, "_lock_table", lambda *args: False)
+    _seed(session, "volume", _ADDED)
+    assert _sweep(session).evaluated == 0
+    assert _freshness(session) == []
+
+
+def test_a_change_of_the_off_reason_is_recorded(catalog: CatalogService, session: Session) -> None:
+    repository_id = _deployed(session, _MANIFEST)
+    table = session.get(Table, _table_id(session))
+    assert table is not None
+    table.health_effects = {"freshness": "off"}
+    session.commit()
+    _seed(session, "volume", _ADDED)
+    _sweep(session)
+    table.health_effects = {}
+    session.add(
+        JobSchedule(
+            id=uuid.uuid4(),
+            environment_id=_environment_id(session),
+            repository_id=repository_id,
+            job="nightly",
+            paused=True,
+        )
+    )
+    session.commit()
+    _sweep(session, _NOW + timedelta(hours=1))
+    _sweep(session, _NOW + timedelta(hours=2))
+    assert [(r.state, r.observed) for r in _freshness(session)] == [
+        ("off", None),
+        ("off", {"reason": "paused"}),
+    ]
+
+
+@pytest.mark.parametrize(("granted", "expected"), [(True, True), (False, False), (None, False)])
+def test_the_freshness_lock_asks_postgres_with_two_keys(
+    monkeypatch: pytest.MonkeyPatch, granted: bool | None, expected: bool
+) -> None:
+    """The statement itself runs on Postgres in `test_health_sweep_postgres_integration.py`."""
+    monkeypatch.setattr(health_sweep, "on_postgres", lambda session: True)
+    session = mock.MagicMock()
+    session.scalar.return_value = granted
+    assert health_sweep._lock_table(session, uuid.UUID(int=1 << 120)) is expected
+    (statement,) = session.scalar.call_args.args
+    assert "pg_try_advisory_xact_lock" in str(statement)
