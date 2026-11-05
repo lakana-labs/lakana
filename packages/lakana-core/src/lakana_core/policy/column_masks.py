@@ -87,12 +87,12 @@ def _check_column_exists(
     description = read_table_description(catalog, p, ref, policy="mask")
     names = [spec.name for spec in description.columns]
     if column in names:
-        binding = binding_for(description, columns_of(expression), masked_column=column)
-        if not type_checks_apply(description):
-            return description.schema_id, False, binding
-        typed = check_expression_types(
+        typed = type_checks_apply(description) and check_expression_types(
             expression, kind="mask", columns=description.columns, masked_column=column
         )
+        # After the type check, so a column the table lacks gets its message, which names the
+        # expression, before the binding's.
+        binding = binding_for(description, columns_of(expression), masked_column=column)
         return description.schema_id, typed, binding
     message = f"Table {dotted!r} in environment {environment!r} has no column {column!r}. "
     message += list_columns(names)

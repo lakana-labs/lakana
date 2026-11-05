@@ -1295,12 +1295,24 @@ def test_a_new_row_filter_stores_the_field_ids_of_the_columns_it_reads(session: 
 
 
 def test_a_filter_that_reads_no_column_is_bound_and_empty(session: Session) -> None:
-    """`TRUE` has nothing to follow: `field_ids` with an empty map (also on a raw table)."""
+    """`TRUE` has nothing to follow: `field_ids` with an empty map."""
     service, admin = _ready(session, FakeColumnCatalog(schema_id=1))
 
     row = service.create(admin, **_filter_args("TRUE"))
 
     assert (row.binding, row.field_ids) == ("field_ids", {})
+
+
+def test_a_filter_that_reads_no_column_on_a_raw_table_is_bound_and_empty(
+    session: Session,
+) -> None:
+    """Even on a raw table `TRUE` is `field_ids` with `{}`: it does not ask the catalog."""
+    catalog = FakeColumnCatalog(file_format="parquet")
+    service, admin = _ready(session, catalog)
+
+    row = service.create(admin, **_filter_args("TRUE"))
+
+    assert (row.binding, row.field_ids, catalog.calls) == ("field_ids", {}, [])
 
 
 def test_a_filter_on_a_raw_table_is_bound_by_name(session: Session) -> None:

@@ -1207,3 +1207,15 @@ def test_creation_refuses_a_mask_on_an_ambiguous_column(session: Session) -> Non
         service.create(admin, **_mask_args("ssn"))
 
     assert session.execute(select(ColumnMask)).scalars().all() == []
+
+
+def test_a_mask_reading_a_missing_column_gets_the_type_check_message(session: Session) -> None:
+    """The expression's own message wins over the binding's "no column to bind to"."""
+    catalog = FakeColumnCatalog(names=["id", "ssn"], schema_id=1)
+    service, admin = _ready(session, catalog)
+
+    with pytest.raises(ValidationError) as exc_info:
+        service.create(admin, **{**_mask_args("ssn"), "expression": "md5(nope)"})
+
+    assert "to bind the policy to" not in str(exc_info.value)
+    assert "md5(nope)" in str(exc_info.value)

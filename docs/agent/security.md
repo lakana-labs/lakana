@@ -87,10 +87,10 @@ fails every query it covers, on the first value that cannot be converted (GHSA-3
 `lakana_core.policy.expression_types.check_expression_types` refuses that at creation, in the same
 place that checks the columns exist (`_check_columns_exist` in `row_filters.py`,
 `_check_column_exists` in `column_masks.py`), against the schema whose id the policy records, so the
-types checked and the `schema_id` stored are one read. The same `TableDescription` also gives the `field_ids` the policy stores
-(`policy.field_binding.bind_policy`, through `policy.columns.binding_for`), so schema id, types and
-binding are one read. Rules: a comparison is accepted only when
-DuckDB's implicit cast cannot fail. Both sides are of one kind (text; date/timestamp; otherwise
+types checked and the `schema_id` stored are one read. The same `TableDescription` also gives the
+`field_ids` the policy stores (`policy.field_binding.bind_policy`, through
+`policy.columns.binding_for`), so schema id, types and binding are one read. Rules: a comparison is
+accepted only when DuckDB's implicit cast cannot fail. Both sides are of one kind (text; date/timestamp; otherwise
 the same type; a `timestamptz` only with a `timestamptz` column, because the read does not pin the
 time zone). For numbers, a literal must be exactly representable in the column's type (integer
 range, `decimal(p,s)` places and digits with no exponent, finite and in range for floats), and two
@@ -4085,7 +4085,8 @@ work.
   stored filters are never re-judged, so one that names a missing column still fails every read of
   its person closed. A column name that two columns of the table match under `casefold()` (`Maß` and
   `MASS`) is refused with `AmbiguousPolicyColumnError` (`field_binding.match_column`) rather than
-  guessed; the same holds for a mask's own column. The shared reading and wording are in `policy/columns.py`. A column mask
+  guessed; the same holds for a mask's own column. The shared reading and wording are in
+  `policy/columns.py`. A column mask
   expression is refused the same way when it qualifies a column. A dotted name whose first part is
   a column of the table is worded as a struct field (the columns are read only after the
   expression turned out to hold a dotted name; unreadable columns leave the qualifier wording;
