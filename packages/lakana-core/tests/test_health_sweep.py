@@ -7,6 +7,7 @@ import uuid
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import cast
 from unittest import mock
 
 import pytest
@@ -232,7 +233,7 @@ def test_freshness_that_is_off_records_off(catalog: CatalogService, session: Ses
 
 _ONLY_SCHEDULED = {
     **_MANIFEST,
-    "jobs": {k: v for k, v in _MANIFEST["jobs"].items() if k != "quiet"},
+    "jobs": {k: v for k, v in cast(dict, _MANIFEST["jobs"]).items() if k != "quiet"},
 }
 """`_MANIFEST` without job ``quiet``, so every job that builds `silver.orders` is scheduled."""
 
