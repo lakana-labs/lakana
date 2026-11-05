@@ -486,6 +486,8 @@ lakana sql "SELECT * FROM gold.station_ranking ORDER BY warmth_rank"
 | `uuid` | run, deploy and query identifiers | `<uuid>` |
 | `timestamp` | ISO 8601 date and time, with or without zone | `<timestamp>` |
 | `hash` | 40 to 64 hexadecimal digits: commits, SHA-256 digests | `<hash>` |
+| `alert time` | the time of a health alert, `05 Nov 00:33 UTC` | `<alert time>` |
+| `snapshot` | an Iceberg snapshot id, 16 to 19 digits | `<snapshot>` |
 | `token` | `lakana_pat_`, `lakana_ci_` and `lakana_task_` tokens | `lakana_pat_<key id>_<secret>` |
 | `port` | the port after `localhost`, `127.0.0.1`, `0.0.0.0`, `[::1]` | `host:<port>` |
 | `path` | absolute paths under `/tmp`, `/var/tmp`, `/var/folders`, `/home`, `/Users`, `/root`, `/run/user`, also after `file://` | `<path>` |
