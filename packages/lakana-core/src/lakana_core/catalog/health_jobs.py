@@ -207,7 +207,9 @@ def rows_to_tell(
 def _still_fired(
     session: Session, rows: Sequence[TableHealthSignal]
 ) -> set[tuple[str, str | None]]:
-    """Find the signals whose previous observation already fired.
+    """Find the signals whose previous observation was already in the state of these rows.
+
+    A fired row after a fired one, or a ``no_metrics`` row after one, is not told again.
 
     The previous observation of a key is found as `ranked` orders rows (by sequence number, a
     row without one last), but with one ordered seek per key on the index of
@@ -219,13 +221,13 @@ def _still_fired(
     session
         Database session.
     rows
-        Fired rows of one table.
+        Rows to tell of, of one table: fired, or ``no_metrics``.
 
     Returns
     -------
     set of tuple
         (signal, column) whose newest row before these, set-back rows left out (`NOT_SET_BACK`),
-        is ``fired``.
+        has the same state as the row of that key.
     """
     table_id = rows[0].table_id
     own = [row.id for row in rows]
@@ -276,7 +278,8 @@ def _still_fired(
             )
         )
     ).one()
-    return {key for key, state in zip(keys, states, strict=True) if state == "fired"}
+    told = {(row.signal, row.column_name): row.state for row in rows}
+    return {key for key, state in zip(keys, states, strict=True) if state == told[key]}
 
 
 def queue_health_notifications(
@@ -318,7 +321,9 @@ def queue_health_notifications(
         The new deliveries, not added to the session: to add after `rows`, for their foreign
         key. None for a table no job with `notify:` builds, and none for a pair already queued.
     """
-    fired = [row for row in rows if row.state == "fired"]
+    # A fired row; or a `no_metrics` row that a blocking check could not judge, which only the
+    # check phase passes (`lakana_worker.task_checks._tell_unjudged`).
+    fired = [row for row in rows if row.state in ("fired", "no_metrics")]
     if not fired:
         return []
     with session.no_autoflush:

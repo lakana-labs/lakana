@@ -275,8 +275,26 @@ names the same command. A first build that is set back is not published and keep
 its text says so instead of naming the history:
 `… fired at snapshot 4711; this first build is not published, so its health signals are not kept;
 fix the data the asset reads, or let such data through with health: {volume: warn} in the asset
-header`. A signal that fired without `block` never stops a run, and a signal that was not computed
-(`no_history`, `no_metrics`) never blocks. A view or an artifact never gets such a check. Which
+header`. A signal that fired without `block` never stops a run, and a signal without enough history
+yet (`no_history`) never blocks. A view or an artifact never gets such a check.
+
+**When a signal could not be judged.** A `block` signal that a commit of the run could not judge
+does not pass in silence: the check is recorded as `warned` (and with `on_failure` `warn`), the run
+goes on and the table is not set back. That is the case when the commit's files could not be read
+within the health limits (more than 2,000 added files, or longer than 5 s), when computing the
+signals failed, or when nothing was recorded for the signal or the check's column. The check's text
+says why and what to do, and names no value:
+
+> 1 check warned: `health_volume` (health signal volume could not be judged: computing it failed (snapshot 4711); the run went on: the server's log names the error, and the next commit is judged again).
+
+It is in the run's message, `lakana runs show` and the task's log, and the notify targets of the
+jobs that build the table get a `health` message with the same text when the commit recorded why
+(`no_metrics` with reason `unreadable` or `error`), once until the signal is judged again. A column
+that never records a value can never be judged: `range` of a column without a range (text,
+boolean, a nested type) and any column past the 200th. A deploy that knows the columns refuses
+`block` on a column past the 200th; for the rest, `lakana table get` marks the entry, as in
+`range of note block (never judged: a string column has no range)`. Use `null_rate` for such a
+column, or set it to `warn` or `off`. Which
 signals block comes from the deployment the run started with; for `null_rate: block` and
 `range: block`, which columns block comes from the effects of the current deployment, so a deploy
 that lands while the run is going decides those. Such a deploy that sets a blocking signal `off`
@@ -304,6 +322,7 @@ Write `off` unquoted or quoted; `on`, `yes` and `true` are not effects. A deploy
 | ``health: null_rate takes warn, block or off in lakana.yaml; name single columns in an asset's header`` | Columns in `lakana.yaml`. |
 | ``health: range names column price, which gold.orders does not have (columns: order_id); fix the name or remove it`` | A column the table's `SELECT` does not return. |
 | ``health: does not apply to a view, which has no snapshots to watch; remove it, or materialize the asset as a table`` | `health:` on a view. |
+| ``health: range of c200 can never block: only the first 200 columns of a table are judged, and c200 is column 201; move it among the first 200, or set it to warn or off`` | `block` on a column past the 200th of the `SELECT`. |
 
 The deploy checks a column only when it knows the asset's columns: from a SQL asset's column
 list. For a `SELECT *` and for a Python asset it cannot; an entry for a column the table does not
@@ -395,7 +414,7 @@ history and what happens to a message still waiting is in [The history](#the-his
 | `lakana table health NAME --signals` | Lists the history of the health signals, newest first; a signal whose snapshot a failed check set back has `(set back)` after its state. Narrow it with `--signal S`, `--column C` and `--days N`; page with `--limit N` and `--cursor X`. |
 | `lakana table health NAME --output json` | Every field of the answer as JSON. |
 | `lakana table get NAME` | Lists the effects of `health:` that are not the default `warn`, and marks one that names a column the table does not have. |
-| `lakana table get NAME --output json` | Includes `last_write_at`, `row_count`, `size_bytes`, `file_count`, `health` (the effects that are not `warn`, by `signal` or `signal.column`) and `health_missing` (the keys of `health` that name a column the table does not have). |
+| `lakana table get NAME --output json` | Includes `last_write_at`, `row_count`, `size_bytes`, `file_count`, `health` (the effects that are not `warn`, by `signal` or `signal.column`), `health_missing` (the keys of `health` that name a column the table does not have) and `health_never_judged` (the `block` column entries no commit can judge, with the reason). |
 
 Without a right to see the grants the command says that the readers are not shown, and why.
 
@@ -407,7 +426,8 @@ Without a right to see the grants the command says that the readers are not show
 `Table.size_bytes` and `Table.file_count` hold the numbers of the snapshot; they are `None` for a
 server that is older than table health. `Table.health` holds the effects that are not `warn` (empty when
 every signal warns, and from an older server), `Table.health_missing` the keys of it that name a
-column the table does not have.
+column the table does not have, and `Table.health_never_judged` the `block` column entries that no
+commit can judge, with the reason (empty from an older server).
 
 `client.tables.health(...).signals` is a list of `HealthSignal`, or `None` from a server older
 than signals. `client.tables.health_signals(environment, "namespace.table", days=None, signal=None,

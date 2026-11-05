@@ -1011,6 +1011,10 @@ class TableOut(BaseModel):
     health_missing
         The keys of `health` whose column the table does not have: the deploy cannot check the
         columns of a ``SELECT *`` or Python asset. Such an entry has no effect.
+    health_never_judged
+        The ``block`` column entries of `health` that no commit can judge, by key, with the
+        reason (``a string column has no range``, ``only the first 200 columns are judged``): a
+        run warns on such an entry instead of blocking.
     """
 
     name: str
@@ -1044,6 +1048,7 @@ class TableOut(BaseModel):
     terms: list[TermRefOut] = []
     health: dict[str, str] = {}
     health_missing: list[str] = []
+    health_never_judged: dict[str, str] = {}
 
 
 class LastMaintenanceOut(BaseModel):

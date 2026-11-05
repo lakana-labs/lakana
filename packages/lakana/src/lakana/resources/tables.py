@@ -443,21 +443,23 @@ def _table_from_json(data: dict[str, Any]) -> Table:
         health_missing=tuple(k for k in missing if isinstance(k, str))
         if isinstance(missing, list)
         else (),
+        health_never_judged=_effects_from_json(data.get("health_never_judged")),
     )
 
 
 def _effects_from_json(value: object) -> dict[str, str]:
-    """Read a table's non-default health effects from the response body.
+    """Read a map of text by health key from the response body.
 
     Parameters
     ----------
     value
-        The body's `health`; absent from an older server.
+        The body's `health` (effects) or `health_never_judged` (reasons); absent from an older
+        server.
 
     Returns
     -------
     dict
-        The entries whose key and effect are text; empty for anything else.
+        The entries whose key and value are text; empty for anything else.
     """
     if not isinstance(value, dict):
         return {}

@@ -561,6 +561,11 @@ def get(ctx: typer.Context, name: str, lang: _LANG = None, env: _ENV = None) -> 
         listed = ", ".join(
             f"{key.replace('.', ' of ', 1)} {effect}"
             + (" (no such column)" if key in table.health_missing else "")
+            + (
+                f" (never judged: {table.health_never_judged[key]})"
+                if key in table.health_never_judged
+                else ""
+            )
             for key, effect in table.health.items()
         )
         _output.emit(state, _output.inline(f"Health (not the default warn): {listed}"))

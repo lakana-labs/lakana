@@ -734,7 +734,7 @@ def _found(result: CheckResult) -> str:
 
 
 def _without_rows(result: CheckResult) -> bool:
-    """Say whether a result is a failure that counted no rows: a health check's.
+    """Say whether a result is a failure or a warning that counted no rows: a health check's.
 
     Parameters
     ----------
@@ -744,10 +744,12 @@ def _without_rows(result: CheckResult) -> bool:
     Returns
     -------
     bool
-        Whether it failed with a text and no count.
+        Whether it failed or warned with a text and no count.
     """
     return (
-        result.outcome is CheckOutcome.FAILED and result.failing_rows is None and bool(result.error)
+        result.outcome in (CheckOutcome.FAILED, CheckOutcome.WARNED)
+        and result.failing_rows is None
+        and bool(result.error)
     )
 
 

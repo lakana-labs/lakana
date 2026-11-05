@@ -411,7 +411,9 @@ def _fired(
     signal: str,
     column: str | None,
     observed: dict,
-    band: dict,
+    band: dict | None,
+    *,
+    state: str = "fired",
 ) -> NotificationDelivery:
     """Record a fired signal of `silver.orders` and a delivery queued for it.
 
@@ -427,6 +429,8 @@ def _fired(
         What was observed.
     band
         The usual band.
+    state
+        The row's state: ``no_metrics`` for a signal its commit could not judge.
 
     Returns
     -------
@@ -444,7 +448,7 @@ def _fired(
         sequence_number=7,
         observed=observed,
         band=band,
-        state="fired",
+        state=state,
         effect="warn",
         observed_at=_FIRED_AT,
     )
@@ -729,3 +733,52 @@ def test_the_previous_observation_is_the_newest_unmarked_row_of_each_key(
         event.remove(engine, "before_cursor_execute", seen)
     assert still == {("volume", None), ("null_rate", "c"), ("freshness", None)}
     assert statements and not any("row_number" in s.lower() for s in statements)
+
+
+def test_a_signal_its_commit_could_not_judge_is_told_without_values(
+    catalog: CatalogService, session: Session
+) -> None:
+    """A `no_metrics` row a warned health check names is told: why, and what to do.
+
+    The same state again is not told twice.
+
+    Parameters
+    ----------
+    catalog
+        The catalog, which creates `silver.orders`.
+    session
+        Database session.
+    """
+    delivery = _fired(session, "range", None, {"reason": "unreadable"}, None, state="no_metrics")
+    assert facts_for_health(session, delivery, "dev", delivery.id).alert == (
+        "silver.orders: health signal range could not be judged: the files the commit added "
+        "could not be read within the health limits (at most 2,000 files, 5 s) (snapshot 7); "
+        "the run went on: commit fewer, larger files, or set health: {range: warn} to stop "
+        "blocking on it"
+    )
+    again = TableHealthSignal(
+        id=uuid.uuid4(),
+        environment_id=_environment_id(session),
+        table_id=_table_id(session),
+        signal="range",
+        column_name=None,
+        snapshot_id=8,
+        sequence_number=8,
+        observed={"reason": "unreadable"},
+        band=None,
+        state="no_metrics",
+        effect="warn",
+        observed_at=_FIRED_AT,
+    )
+    session.add(again)
+    session.flush()
+    assert (
+        queue_health_notifications(
+            session,
+            environment_id=again.environment_id,
+            table="silver.orders",
+            rows=[again],
+            now=_FIRED_AT,
+        )
+        == []
+    )

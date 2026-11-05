@@ -386,6 +386,11 @@ A table's header, an `@asset(health=...)` argument or `lakana.yaml` can set each
   of its table generates, such as `checks/silver/orders/health_volume.sql` with
   `health: {volume: block}`: ``A check named `health_volume` is generated for `silver.orders`; rename
   `checks/silver/orders/health_volume.sql`.`` Rename the file.
+- A `block` signal that a commit could not judge (unreadable files, a computing error, nothing
+  recorded) makes its check `warned`, with the reason, instead of passing; the run goes on. A deploy
+  refuses `block` on a column past the 200th of the `SELECT`, and `lakana table get` marks a
+  `block` entry that can never be judged (`health_never_judged` in REST and the SDK). See
+  [When a signal could not be judged](../reference/table-health.md#effects-warn-block-off).
 
 ## Notes for 0.21.0
 

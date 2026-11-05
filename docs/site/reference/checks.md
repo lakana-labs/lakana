@@ -106,7 +106,10 @@ block, and `lakana check rows RUN TABLE/key_unique --env ENV` shows the rows the
 A table's [`health:`](table-health.md#effects-warn-block-off) adds one more kind: each `block`
 entry is a generated `health_<signal>` check that reads no rows. It fails when the signal fired at
 any snapshot the run wrote ([which ones](table-health.md#effects-warn-block-off)), and sets the table back like the others; its text names no value, and
-`lakana check rows` of it names `lakana table health NAME --signals` instead.
+`lakana check rows` of it names `lakana table health NAME --signals` instead. A signal a commit
+of the run could not judge (unreadable files, a computing error, nothing recorded) makes the check
+`warned` instead, with a text that says why: the run goes on and is not set back
+([When a signal could not be judged](table-health.md#effects-warn-block-off)).
 
 | Rule | Value |
 |---|---|

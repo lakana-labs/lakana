@@ -119,7 +119,7 @@ from lakana_core.catalog.health_read import (
     visibility_for,
 )
 from lakana_core.catalog.health_record import commit_observations, forget_set_back, signal_rows
-from lakana_core.catalog.health_signals import SIGNALS, HealthEffects
+from lakana_core.catalog.health_signals import SIGNALS, HealthEffects, never_judged
 from lakana_core.catalog.history import (
     EARLIEST_START,
     HISTORY_KEY_PROPERTY,
@@ -741,6 +741,10 @@ class TableDescription:
     health_missing
         The keys of `health` whose column the table does not have (a ``SELECT *`` or Python
         asset, whose columns the deploy cannot check); such an entry has no effect.
+    health_never_judged
+        The ``block`` column entries of `health` that no commit can judge, with the reason
+        (`health_signals.never_judged`): ``range`` on a type without one, a column past the
+        200th. A run warns on them instead of blocking.
     """
 
     ref: TableRef
@@ -778,6 +782,7 @@ class TableDescription:
     column_terms: Mapping[str, tuple[TermRef, ...]] = dataclass_field(default_factory=dict)
     health: dict[str, str] = dataclass_field(default_factory=dict)
     health_missing: tuple[str, ...] = ()
+    health_never_judged: Mapping[str, str] = dataclass_field(default_factory=dict)
 
 
 def _stored_effects(row: Table, dotted: str) -> HealthEffects:
@@ -4132,6 +4137,7 @@ class CatalogService:
             health_missing=tuple(
                 key for key in health if "." in key and key.partition(".")[2] not in names
             ),
+            health_never_judged=never_judged(health, loaded.metadata.schema()),
             snapshot_id=loaded.metadata.current_snapshot_id,
             state=state,
             state_message=message,

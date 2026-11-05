@@ -167,6 +167,23 @@ def test_a_column_the_table_does_not_have_is_refused() -> None:
     )
 
 
+def test_a_blocking_column_past_the_200th_is_refused() -> None:
+    """Only the first 200 columns are judged, so `block` on a later one could never stop a run.
+
+    `warn` or `off` there is accepted: it never stops a run either way.
+    """
+    columns = tuple(f"c{i}" for i in range(201))
+    table = _with(
+        make_asset("gold.t", columns=columns),
+        health={"range": {"c200": "block", "c199": "block"}, "null_rate": {"c200": "warn"}},
+    )
+    [issue] = health_issues([table])
+    assert issue.message == (
+        "health: range of c200 can never block: only the first 200 columns of a table are "
+        "judged, and c200 is column 201; move it among the first 200, or set it to warn or off"
+    )
+
+
 def test_a_history_asset_has_its_added_columns() -> None:
     """The columns a history write adds count as the table's columns, `valid_from` does not."""
     table = _with(

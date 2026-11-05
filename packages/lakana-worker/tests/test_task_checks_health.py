@@ -25,10 +25,12 @@ from pyiceberg.types import LongType, NestedField
 from sqlalchemy import select
 from task_run_helpers import World, _engine, _start, _task
 
+import lakana_core.catalog.health_record as health_record_module
 import lakana_worker.task_checks as task_checks_module
 from lakana_core.catalog.attempt_stamp import CLAIM_PROPERTY, TASK_RUN_PROPERTY
 from lakana_core.catalog.health_read import Visibility, current_signals
 from lakana_core.catalog.health_record import recent_observations
+from lakana_core.catalog.health_signals import unjudged_text
 from lakana_core.catalog.identity import resolve_table_id
 from lakana_core.catalog.metadata import apply_updates, build_table_metadata
 from lakana_core.models import (
@@ -307,7 +309,12 @@ def test_the_health_result_reads_the_firings_of_the_own_chain(world: World) -> N
         CheckOutcome.FAILED,
         health_blocked("range", "price", 5, "bronze.events", "dev"),
     )
-    assert judge(_health_spec("range", "qty"), 5)[0] is CheckOutcome.PASSED
+    # Snapshot 5 added data and recorded nothing for qty: not judged, so the check warns.
+    assert judge(_health_spec("range", "qty"), 5) == (
+        CheckOutcome.WARNED,
+        unjudged_text("range", "qty", 5, "missing", "bronze.events", "dev"),
+        5,
+    )
     # The whole signal: any column whose firing was recorded as blocking.
     whole = _health_spec("range")
     assert judge(whole, 7, 6) == (
@@ -503,6 +510,7 @@ def test_a_retried_attempt_is_judged_on_its_own_commits(
     )
     monkeypatch.setattr(task_checks_module, "read_metadata", lambda *args: metadata)
     _signal(world, "bronze.events", "volume", snapshot=2, state="fired")
+    _signal(world, "bronze.events", "volume", snapshot=3)
     with world.session() as session:
         table_id = resolve_table_id(session, "dev", "bronze", "events")
         assert table_id is not None
@@ -512,3 +520,218 @@ def test_a_retried_attempt_is_judged_on_its_own_commits(
         assert task_checks_module._health_result(
             session, _health_spec("volume"), table_id, chain, "dev", kept=True
         ) == (CheckOutcome.PASSED, None, 3)
+
+
+def test_a_block_signal_that_could_not_be_judged_warns(world: World) -> None:
+    """Unreadable files, a computing error or nothing recorded: the check warns and says why.
+
+    A firing anywhere in the chain still fails; a compaction, which records only the schema,
+    and a whole column signal with no table-level reason are judged.
+
+    Parameters
+    ----------
+    world
+        The world.
+    """
+    _outside_table(world, "bronze.events", [1])
+    _signal(world, "bronze.events", "volume", snapshot=10)
+    _signal(
+        world,
+        "bronze.events",
+        "range",
+        snapshot=10,
+        state="no_metrics",
+        observed={"reason": "unreadable"},
+    )
+    _signal(
+        world,
+        "bronze.events",
+        "volume",
+        snapshot=11,
+        state="no_metrics",
+        observed={"reason": "error"},
+    )
+    _signal(world, "bronze.events", "volume", snapshot=12, state="fired")
+    _signal(world, "bronze.events", "schema", snapshot=13)  # a compaction
+    _signal(world, "bronze.events", "volume", snapshot=14)
+    _signal(world, "bronze.events", "range", snapshot=14, column="price")
+    _signal(
+        world,
+        "bronze.events",
+        "null_rate",
+        snapshot=14,
+        state="no_metrics",
+        observed={"reason": "no_rows"},
+        column="price",
+    )
+
+    def judge(spec: CheckSpec, *chain: int) -> tuple[CheckOutcome, str | None, int | None]:
+        """Judge one check over a chain of snapshots, the tip first.
+
+        Parameters
+        ----------
+        spec
+            The check.
+        *chain
+            The task's own snapshots, the tip first.
+
+        Returns
+        -------
+        tuple
+            What `_health_result` gives.
+        """
+        with world.session() as session:
+            table_id = resolve_table_id(session, "dev", "bronze", "events")
+            return task_checks_module._health_result(
+                session, spec, table_id, list(chain), "dev", kept=True
+            )
+
+    def warned(signal: str, column: str | None, snapshot: int, reason: str, tip: int) -> tuple:
+        """Build the warned result of a check.
+
+        Parameters
+        ----------
+        signal
+            The signal.
+        column
+            The column, or `None`.
+        snapshot
+            The snapshot not judged.
+        reason
+            Why.
+        tip
+            The chain's tip.
+
+        Returns
+        -------
+        tuple
+            The expected result.
+        """
+        text = unjudged_text(signal, column, snapshot, reason, "bronze.events", "dev")
+        return CheckOutcome.WARNED, text, tip
+
+    assert judge(_health_spec("range", "price"), 10) == warned(
+        "range", "price", 10, "unreadable", 10
+    )
+    assert judge(_health_spec("range"), 10) == warned("range", None, 10, "unreadable", 10)
+    assert judge(_health_spec("volume"), 11) == warned("volume", None, 11, "error", 11)
+    assert judge(_health_spec("volume"), 12, 11)[0] is CheckOutcome.FAILED  # a firing wins
+    assert judge(_health_spec("schema"), 10) == warned("schema", None, 10, "missing", 10)
+    assert judge(_health_spec("volume"), 13) == (CheckOutcome.PASSED, None, 13)
+    assert judge(_health_spec("range", "price"), 14) == (CheckOutcome.PASSED, None, 14)
+    assert judge(_health_spec("null_rate", "price"), 14) == (CheckOutcome.PASSED, None, 14)
+    assert judge(_health_spec("range"), 14) == (CheckOutcome.PASSED, None, 14)
+    assert judge(_health_spec("volume"), 99) == warned("volume", None, 99, "missing", 99)
+
+
+def test_a_run_whose_block_signal_could_not_be_judged_goes_on_and_says_so(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A commit whose signals fail to compute: the run succeeds, the check warns, it is told.
+
+    Parameters
+    ----------
+    world
+        The world.
+    monkeypatch
+        Breaks the computing of the signals and records what is queued.
+    """
+    _built_once_then_redeployed(world, health={"volume": "block"})
+
+    def broken(*args: object, **kwargs: object) -> object:
+        """Fail as a damaged file would.
+
+        Parameters
+        ----------
+        *args
+            Ignored.
+        **kwargs
+            Ignored.
+
+        Raises
+        ------
+        RuntimeError
+            Always.
+        """
+        raise RuntimeError("a damaged file")
+
+    told: list[tuple[str, str | None, str]] = []
+
+    def queue(session: object, **kwargs: list[TableHealthSignal]) -> list[object]:
+        """Record the rows a message would tell of.
+
+        Parameters
+        ----------
+        session
+            Ignored.
+        **kwargs
+            The call's arguments; ``rows`` is read.
+
+        Returns
+        -------
+        list
+            No deliveries.
+        """
+        told.extend((r.signal, r.column_name, r.state) for r in kwargs["rows"])
+        return []
+
+    monkeypatch.setattr(health_record_module, "_observe", broken)
+    monkeypatch.setattr(task_checks_module, "queue_health_notifications", queue)
+    _start(world)
+    _drain(world)
+
+    task = _task(world, "silver.orders")
+    assert task.status is TaskStatus.SUCCEEDED
+    assert _ids(world, "silver.orders") == [11, 11, 12]  # not set back
+    (result,) = _results(world, task.id)
+    assert (result.check_name, result.outcome, result.on_failure) == (
+        "silver.orders/health_volume",
+        CheckOutcome.WARNED,
+        "warn",
+    )
+    assert result.error is not None
+    assert result.error.startswith("health signal volume could not be judged: computing it failed")
+    assert task.error_message is not None
+    assert task.error_message.startswith(
+        "1 check warned: `health_volume` (health signal volume could not be judged: computing "
+    )
+    assert told == [("volume", None, "no_metrics")]
+    assert _task(world, "gold.report").status is TaskStatus.SUCCEEDED
+
+
+def test_a_failure_to_tell_of_an_unjudged_signal_never_stops_the_checks(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A damaged manifest while queuing is logged; the run still ends as the checks say.
+
+    Parameters
+    ----------
+    world
+        The world.
+    monkeypatch
+        Breaks the computing of the signals and the queuing.
+    """
+    _built_once_then_redeployed(world, health={"volume": "block"})
+
+    def broken(*args: object, **kwargs: object) -> object:
+        """Fail as a damaged file would.
+
+        Parameters
+        ----------
+        *args
+            Ignored.
+        **kwargs
+            Ignored.
+
+        Raises
+        ------
+        RuntimeError
+            Always.
+        """
+        raise RuntimeError("damaged")
+
+    monkeypatch.setattr(health_record_module, "_observe", broken)
+    monkeypatch.setattr(task_checks_module, "queue_health_notifications", broken)
+    _start(world)
+    _drain(world)
+    assert _task(world, "silver.orders").status is TaskStatus.SUCCEEDED

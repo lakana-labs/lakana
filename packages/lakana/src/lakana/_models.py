@@ -607,6 +607,9 @@ class Table:
         effects.
     health_missing
         The keys of `health` whose column the table does not have; such an entry has no effect.
+    health_never_judged
+        The ``block`` column entries of `health` that no commit can judge, with the reason; a
+        run warns on them instead of blocking. Empty from an older server.
     """
 
     name: str
@@ -640,6 +643,7 @@ class Table:
     terms: tuple[TermRef, ...] = ()
     health: dict[str, str] = field(default_factory=dict)
     health_missing: tuple[str, ...] = ()
+    health_never_judged: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

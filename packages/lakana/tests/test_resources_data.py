@@ -3352,11 +3352,18 @@ def test_tables_get_reads_no_markers_from_an_older_server() -> None:
 
 
 def test_tables_get_carries_the_health_effects_and_the_keys_naming_no_column() -> None:
-    """`Table.health` and `Table.health_missing` parse; an older server's body has neither."""
+    """`Table.health`, `health_missing` and `health_never_judged` parse.
+
+    An older server's body has none of them, and an entry that is not text is left out.
+    """
     bodies: list[dict[str, Any]] = [
-        {"health": {"range.pricee": "off", "volume": "block"}, "health_missing": ["range.pricee"]},
+        {
+            "health": {"range.pricee": "off", "range.note": "block", "volume": "block"},
+            "health_missing": ["range.pricee"],
+            "health_never_judged": {"range.note": "a string column has no range", "x": 1},
+        },
         {},
-        {"health": ["volume"], "health_missing": "range.pricee"},
+        {"health": ["volume"], "health_missing": "range.pricee", "health_never_judged": ["x"]},
     ]
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -3387,7 +3394,8 @@ def test_tables_get_carries_the_health_effects_and_the_keys_naming_no_column() -
     tables = Tables(_transport(handler))
     full, bare, odd = (tables.get("dev", "bronze.sales") for _ in range(3))
 
-    assert full.health == {"range.pricee": "off", "volume": "block"}
+    assert full.health == {"range.pricee": "off", "range.note": "block", "volume": "block"}
     assert full.health_missing == ("range.pricee",)
-    assert (bare.health, bare.health_missing) == ({}, ())
-    assert (odd.health, odd.health_missing) == ({}, ())
+    assert full.health_never_judged == {"range.note": "a string column has no range"}
+    assert (bare.health, bare.health_missing, bare.health_never_judged) == ({}, (), {})
+    assert (odd.health, odd.health_missing, odd.health_never_judged) == ({}, (), {})

@@ -1491,6 +1491,11 @@ def test_the_warning_note() -> None:
         ]
     )
     assert two == "2 checks warned: `a` (12 rows), `b` (could not run)."
+    # A health check that could not be judged counted no rows: its text says why.
+    health = warning_note(
+        [_result("health_volume", CheckOutcome.WARNED, on_failure="warn", error="not judged")]
+    )
+    assert health == "1 check warned: `health_volume` (not judged)."
     many = warning_note(
         [_result(f"w{i}", CheckOutcome.WARNED, on_failure="warn", rows=1) for i in range(6)]
     )

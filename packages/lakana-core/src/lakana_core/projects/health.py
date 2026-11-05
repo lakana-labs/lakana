@@ -47,6 +47,11 @@ UNKNOWN_COLUMN = (
     "health: {signal} names column {column}, which {table} does not have "
     "(columns: {columns}); fix the name or remove it"
 )
+PAST_THE_JUDGED_COLUMNS = (
+    "health: {signal} of {column} can never block: only the first {most} columns of a table are "
+    "judged, and {column} is column {position}; move it among the first {most}, or set it to warn "
+    "or off"
+)
 
 
 def _effect(where: str, value: object) -> str:
@@ -193,11 +198,14 @@ def health_issues(assets: Sequence[ParsedAsset]) -> list[ProjectIssue]:
     Returns
     -------
     list of ProjectIssue
-        One per asset that is a view and has `health:`, and one per column entry that names a
+        One per asset that is a view and has `health:`, one per column entry that names a
         column the table does not have (the exact name; a history table's added columns count,
-        its `valid_from:` column does not); columns are not checked for a star or a Python
-        asset. In path order.
+        its `valid_from:` column does not), and one per ``block`` entry on a column past the
+        `MAX_HEALTH_COLUMNS`-th, which no commit judges; columns are not checked for a star or a
+        Python asset. In path order.
     """
+    from lakana_core.catalog.health_signals import MAX_HEALTH_COLUMNS
+
     issues: list[ProjectIssue] = []
     for asset in sorted(assets, key=lambda a: a.path):
         health = asset.metadata.health
@@ -225,5 +233,20 @@ def health_issues(assets: Sequence[ParsedAsset]) -> list[ProjectIssue]:
             )
             for signal, _, column in (key.partition(".") for key in health if "." in key)
             if column not in has
+        )
+        issues.extend(
+            ProjectIssue(
+                asset.path,
+                line,
+                PAST_THE_JUDGED_COLUMNS.format(
+                    signal=signal,
+                    column=shown_key(column),
+                    most=MAX_HEALTH_COLUMNS,
+                    position=has.index(column) + 1,
+                ),
+            )
+            for key, effect in health.items()
+            for signal, _, column in (key.partition("."),)
+            if effect == "block" and column in has[MAX_HEALTH_COLUMNS:]
         )
     return issues

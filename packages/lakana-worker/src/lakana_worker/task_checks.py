@@ -55,16 +55,17 @@ import logging
 import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import select
+from sqlalchemy import Row, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from lakana_core.auth import PrincipalRef, RunContext
 from lakana_core.catalog.attempt_stamp import last_attempts_snapshots
+from lakana_core.catalog.health_jobs import queue_health_notifications
 from lakana_core.catalog.health_record import own_chain
-from lakana_core.catalog.health_signals import COLUMN_SIGNALS
+from lakana_core.catalog.health_signals import COLUMN_SIGNALS, UNJUDGED_REASONS, unjudged_text
 from lakana_core.catalog.identity import resolve_table_id, resolve_table_with_note
 from lakana_core.catalog.metadata import read_metadata
 from lakana_core.catalog.service import ROLLBACK_NOT_KNOWN_REASON, CatalogService, Rollback
@@ -474,6 +475,9 @@ def _health_result(
     differ only when a deploy lands during the run, and then the current deployment decides
     for the whole of a column signal.
 
+    A signal that could not be judged never passes silently (`_unjudged`): the check warns, so
+    the run goes on and its message, `lakana runs show` and the notify targets say why.
+
     Parameters
     ----------
     session
@@ -495,36 +499,176 @@ def _health_result(
     tuple
         The outcome, the error and the snapshot judged (the tip): ``failed`` with
         `health_blocked`, naming the first snapshot of the chain where the signal fired;
-        else ``passed`` and no text. A signal that was not computed (no row, ``no_metrics``)
-        passes: only a firing blocks.
+        ``warned`` with `unjudged_text` when it fired nowhere but could not be judged at one
+        snapshot; else ``passed`` and no text.
     """
     tip = chain[0] if chain else None
     names = () if spec.generated is None else spec.generated.columns
     if tip is None or table_id is None or not names:
         return CheckOutcome.PASSED, None, tip
     signal, column = names[0], (names[1] if len(names) > 1 else None)
-    query = select(TableHealthSignal.snapshot_id).where(
-        TableHealthSignal.table_id == table_id,
-        TableHealthSignal.snapshot_id.in_(list(chain)),
-        TableHealthSignal.signal == signal,
-        TableHealthSignal.state == "fired",
-    )
-    if column is not None:
-        query = query.where(TableHealthSignal.column_name == column)
-    elif signal in COLUMN_SIGNALS:
-        query = query.where(TableHealthSignal.effect == "block")
-    else:
-        query = query.where(TableHealthSignal.column_name.is_(None))
-    fired = set(session.scalars(query))
+    rows = session.execute(
+        select(
+            TableHealthSignal.snapshot_id,
+            TableHealthSignal.signal,
+            TableHealthSignal.column_name,
+            TableHealthSignal.state,
+            TableHealthSignal.effect,
+            TableHealthSignal.observed,
+        ).where(
+            TableHealthSignal.table_id == table_id,
+            TableHealthSignal.snapshot_id.in_(list(chain)),
+        )
+    ).all()
     session.rollback()
+    mine = [row for row in rows if row.signal == signal]
+    if column is not None:
+        fired = {r.snapshot_id for r in mine if r.state == "fired" and r.column_name == column}
+    elif signal in COLUMN_SIGNALS:
+        fired = {r.snapshot_id for r in mine if r.state == "fired" and r.effect == "block"}
+    else:
+        fired = {r.snapshot_id for r in mine if r.state == "fired" and r.column_name is None}
     first = next((snapshot for snapshot in reversed(chain) if snapshot in fired), None)
-    if first is None:
+    if first is not None:
+        return (
+            CheckOutcome.FAILED,
+            health_blocked(signal, column, first, spec.table, environment, kept=kept),
+            tip,
+        )
+    unjudged = _unjudged(rows, signal, column, chain)
+    if unjudged is None:
         return CheckOutcome.PASSED, None, tip
+    snapshot, reason = unjudged
     return (
-        CheckOutcome.FAILED,
-        health_blocked(signal, column, first, spec.table, environment, kept=kept),
+        CheckOutcome.WARNED,
+        unjudged_text(signal, column, snapshot, reason, spec.table, environment),
         tip,
     )
+
+
+def _tell_unjudged(
+    session: Session,
+    environment_id: uuid.UUID,
+    table: str,
+    table_id: uuid.UUID,
+    chain: Sequence[int],
+    signals: Sequence[str],
+) -> None:
+    """Queue a ``health`` message for each commit row that left a blocking signal not judged.
+
+    A firing ``warn`` signal is told to the notify targets of the jobs that build the table; a
+    ``block`` signal that could not be judged warns, so it is told the same way, of the
+    ``no_metrics`` row its commit recorded (`UNJUDGED_REASONS`). A signal with no row at all has
+    nothing to name and is told only by the run. Queuing never fails the check phase but on a
+    database error.
+
+    Parameters
+    ----------
+    session
+        Database session; committed.
+    environment_id
+        The table's environment.
+    table
+        The dotted table name.
+    table_id
+        The table.
+    chain
+        The snapshots the task run wrote.
+    signals
+        The signals of the checks that warned.
+
+    Raises
+    ------
+    SQLAlchemyError
+        If the database failed; the check phase then runs again.
+    """
+    rows = [
+        row
+        for row in session.scalars(
+            select(TableHealthSignal).where(
+                TableHealthSignal.table_id == table_id,
+                TableHealthSignal.snapshot_id.in_(list(chain)),
+                TableHealthSignal.signal.in_(sorted(set(signals))),
+                TableHealthSignal.column_name.is_(None),
+                TableHealthSignal.state == "no_metrics",
+            )
+        )
+        if isinstance(row.observed, dict) and row.observed.get("reason") in UNJUDGED_REASONS
+    ]
+    if not rows:
+        session.rollback()
+        return
+    try:
+        deliveries = queue_health_notifications(
+            session, environment_id=environment_id, table=table, rows=rows, now=db_now(session)
+        )
+    except SQLAlchemyError:
+        raise
+    except Exception as exc:  # a damaged manifest must not stop the checks
+        logger.warning(
+            "The health notifications of %s could not be queued (%s).",
+            shown(table),
+            type(exc).__name__,
+        )
+        session.rollback()
+        return
+    session.add_all(deliveries)
+    session.commit()
+
+
+_SignalRow = Row[int | None, str, str | None, str, str, dict[str, Any] | None]
+"""A row of `_health_result`'s read: snapshot, signal, column, state, effect, observed."""
+
+
+def _unjudged(
+    rows: Sequence[_SignalRow], signal: str, column: str | None, chain: Sequence[int]
+) -> tuple[int, str] | None:
+    """Find the first snapshot of a chain at which a blocking signal could not be judged.
+
+    A commit that could not read its files, or failed to compute, recorded a table-level
+    ``no_metrics`` row with that reason (`UNJUDGED_REASONS`). A commit that added data (it has a
+    ``volume`` row) and recorded nothing for the signal, or for the check's column, did not judge
+    it either; a compaction, which records only ``schema``, is not such a commit. A chain with no
+    row at all was not judged.
+
+    Parameters
+    ----------
+    rows
+        Every signal row of the chain's snapshots: ``snapshot_id``, ``signal``, ``column_name``,
+        ``state``, ``effect`` and ``observed``.
+    signal
+        The check's signal.
+    column
+        The check's column; `None` for the whole signal.
+    chain
+        The snapshots, the tip first.
+
+    Returns
+    -------
+    tuple or None
+        The snapshot and the reason (``unreadable``, ``error`` or ``missing``); `None` when
+        every snapshot was judged.
+    """
+    if not rows:
+        return chain[0], "missing"
+    for snapshot in reversed(chain):
+        here = [row for row in rows if row.snapshot_id == snapshot]
+        own = [row for row in here if row.signal == signal]
+        for row in own:
+            reason = row.observed.get("reason") if isinstance(row.observed, dict) else None
+            if row.column_name is None and row.state == "no_metrics" and reason in UNJUDGED_REASONS:
+                return snapshot, reason
+        if not any(row.signal == "volume" for row in here):
+            continue  # a compaction, or nothing recorded here: no data to judge
+        if column is not None:
+            judged = any(row.column_name in (column, None) for row in own)
+        elif signal in COLUMN_SIGNALS:
+            judged = True  # which columns there are is the commit's to say
+        else:
+            judged = any(row.column_name is None for row in own)
+        if not judged:
+            return snapshot, "missing"
+    return None
 
 
 def _stop_if_asked(session: Session, keeper: LeaseKeeper, run_id: uuid.UUID) -> None:
@@ -1666,10 +1810,13 @@ def _checks_under(
         specs.append(stand_in)
     # The snapshots the task run wrote, read once for its health checks.
     chain: list[int] | None = None
+    # The signals of the blocking health checks that could not be judged, to tell of.
+    unjudged: list[str] = []
     for spec in specs:
         started = db_now(session)
         session.rollback()
         health_snapshot: int | None = None
+        recorded = spec
         if spec.name in refusals:
             counted, outcome, error = None, CheckOutcome.ERRORED, refusals[spec.name]
         elif spec.generated is not None and spec.generated.family == HEALTH_FAMILY:
@@ -1687,6 +1834,10 @@ def _checks_under(
                 and not written.publishes
                 and written.snapshot_before is not None,
             )
+            if outcome is CheckOutcome.WARNED:
+                # Not judged: it warns, as a `warn` check does, and the run goes on.
+                recorded = dataclasses.replace(spec, on_failure="warn")
+                unjudged.append(spec.generated.columns[0])
         elif phase.active:
             counted, outcome, error = _count_one(
                 session,
@@ -1708,7 +1859,7 @@ def _checks_under(
             task_run_id=claimed.task_run_id,
             worker=worker,
             claim=claimed.claim,
-            spec=spec,
+            spec=recorded,
             outcome=outcome,
             failing_rows=None if counted is None else counted.rows,
             error=error,
@@ -1719,6 +1870,8 @@ def _checks_under(
             started_at=started if counted is None else counted.started_at,
         ):
             raise LeaseLost
+    if unjudged and table_id is not None and chain:
+        _tell_unjudged(session, phase.environment_id, claimed.asset, table_id, chain, unjudged)
     results = results_of_task(session, claimed.task_run_id)
     # Detached, so that the rollback's commit does not expire what the message is built from.
     session.expunge_all()

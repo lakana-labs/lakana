@@ -583,6 +583,8 @@ def test_metadata_that_cannot_be_read_hides_a_masked_readers_values(
 def test_a_table_shows_its_effects_that_differ_from_warn(client: TestClient) -> None:
     """`health` holds the stored effects, `health_missing` the keys naming no column of it.
 
+    `health_never_judged` names each blocking column entry no commit can judge, with the reason.
+
     Parameters
     ----------
     client
@@ -593,10 +595,11 @@ def test_a_table_shows_its_effects_that_differ_from_warn(client: TestClient) -> 
     with Session(client.app.state.engine) as session:
         row = session.get(Table, _table_id(client))
         assert row is not None
-        row.health_effects = {"null_rate.notes": "off", "volume": "block"}
+        row.health_effects = {"null_rate.notes": "off", "range.note": "block", "volume": "block"}
         session.commit()
     detail = client.get(f"{_TABLES}/t", headers=AUTH_HEADER).json()
-    assert detail["health"] == {"null_rate.notes": "off", "volume": "block"}
+    assert detail["health"] == {"null_rate.notes": "off", "range.note": "block", "volume": "block"}
     assert detail["health_missing"] == ["null_rate.notes"]
+    assert detail["health_never_judged"] == {"range.note": "a string column has no range"}
     plain = client.get(f"{_TABLES}/plain", headers=AUTH_HEADER).json()
-    assert (plain["health"], plain["health_missing"]) == ({}, [])
+    assert (plain["health"], plain["health_missing"], plain["health_never_judged"]) == ({}, [], {})

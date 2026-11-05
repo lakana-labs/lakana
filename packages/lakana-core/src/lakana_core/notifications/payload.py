@@ -22,7 +22,12 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from lakana_core.catalog.health_signals import COLUMN_SIGNALS, alert_text, value_free_alert
+from lakana_core.catalog.health_signals import (
+    COLUMN_SIGNALS,
+    alert_text,
+    unjudged_text,
+    value_free_alert,
+)
 from lakana_core.identifiers import NOTIFY_FORMATS, NamespacePath
 from lakana_core.models import (
     CheckOutcome,
@@ -295,7 +300,18 @@ def facts_for_health(
     table = f"{NamespacePath.parse(path)}.{name}"
     repository = session.get(Repository, row.repository_id)
     alert = None
-    if not _values_withheld(session, signal):
+    if signal.state == "no_metrics":
+        # A blocking signal its commit could not judge: the text names no value.
+        reason = signal.observed.get("reason") if isinstance(signal.observed, dict) else None
+        alert = f"{table}: " + unjudged_text(
+            signal.signal,
+            signal.column_name,
+            signal.snapshot_id or 0,
+            str(reason),
+            table,
+            environment,
+        )
+    elif not _values_withheld(session, signal):
         try:
             alert = alert_text(
                 table,

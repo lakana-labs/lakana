@@ -2721,7 +2721,12 @@ def test_table_list_passes_lang(tmp_path: Path) -> None:
     assert dict(api.requests[-1].url.params) == {"lang": "de"}
 
 
-def _get_with_health(tmp_path: Path, health: dict[str, str], missing: list[str]) -> str:
+def _get_with_health(
+    tmp_path: Path,
+    health: dict[str, str],
+    missing: list[str],
+    never: dict[str, str] | None = None,
+) -> str:
     """Run `lakana table get` on a table with the given effects.
 
     Parameters
@@ -2732,6 +2737,8 @@ def _get_with_health(tmp_path: Path, health: dict[str, str], missing: list[str])
         The body's `health`.
     missing
         The body's `health_missing`.
+    never
+        The body's `health_never_judged`.
 
     Returns
     -------
@@ -2742,7 +2749,12 @@ def _get_with_health(tmp_path: Path, health: dict[str, str], missing: list[str])
     api.on(
         "GET",
         f"{_BASE}/sales",
-        json={**_TABLE, "health": health, "health_missing": missing},
+        json={
+            **_TABLE,
+            "health": health,
+            "health_missing": missing,
+            "health_never_judged": never or {},
+        },
     )
     result = invoke(make_state(tmp_path, api), "table", "get", "bronze.sales", "--env", "dev")
     assert result.exit_code == 0, result.stderr
@@ -2771,6 +2783,23 @@ def test_table_get_marks_an_effect_on_a_column_the_table_does_not_have(tmp_path:
     """
     shown = _get_with_health(tmp_path, {"range.pricee": "off"}, ["range.pricee"])
     assert "Health (not the default warn): range of pricee off (no such column)" in shown
+
+
+def test_table_get_marks_an_effect_that_can_never_be_judged(tmp_path: Path) -> None:
+    """A blocking entry no commit can judge says why.
+
+    Parameters
+    ----------
+    tmp_path
+        The CLI's home.
+    """
+    shown = _get_with_health(
+        tmp_path, {"range.note": "block"}, [], {"range.note": "a string column has no range"}
+    )
+    assert (
+        "Health (not the default warn): range of note block (never judged: a string column has "
+        "no range)"
+    ) in shown
 
 
 def test_table_get_without_effects_prints_no_health_line(tmp_path: Path) -> None:

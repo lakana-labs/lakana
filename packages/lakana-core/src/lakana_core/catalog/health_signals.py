@@ -1163,3 +1163,104 @@ def value_free_alert(
         f"{shown(environment)} --signals` shows its usual band and new value to readers who may "
         f"see them; {step}, or set health: {setting} if this is expected"
     )
+
+
+UNJUDGED_REASONS = frozenset({"unreadable", "error"})
+"""The reasons of a ``no_metrics`` row whose commit could not judge the signal: its files could
+not be read within the health limits, or computing failed. A blocking health check that meets one
+warns (`unjudged_text`) instead of passing."""
+
+_UNJUDGED_CAUSE = {
+    "unreadable": (
+        "the files the commit added could not be read within the health limits (at most 2,000 "
+        "files, 5 s)"
+    ),
+    "error": "computing it failed",
+    "missing": "nothing was recorded for it",
+}
+
+
+def unjudged_text(
+    signal: str, column: str | None, snapshot: int, reason: str, table: str, environment: str
+) -> str:
+    """Word why a blocking health signal could not be judged at a snapshot, and what to do.
+
+    The text of the health check, which warns, and of its ``health`` message; it names no value.
+
+    Parameters
+    ----------
+    signal
+        The signal.
+    column
+        The column of a check about one column; `None` for the whole signal.
+    snapshot
+        The snapshot that could not be judged.
+    reason
+        ``unreadable`` or ``error`` (`UNJUDGED_REASONS`), or ``missing`` when nothing was
+        recorded for the signal at that snapshot.
+    table
+        The table.
+    environment
+        The environment's name.
+
+    Returns
+    -------
+    str
+        ``health signal WHAT could not be judged: CAUSE (snapshot N); the run went on: STEP``.
+    """
+    col = None if column is None else shown(column)
+    what = signal if col is None else f"{signal} of {col}"
+    warn = f"{{{signal}: warn}}" if col is None else f"{{{signal}: {{{col}: warn}}}}"
+    if reason == "unreadable":
+        step = f"commit fewer, larger files, or set health: {warn} to stop blocking on it"
+    elif reason == "error":
+        step = "the server's log names the error, and the next commit is judged again"
+    elif col is not None:
+        step = (
+            "a column without a range (text, boolean) or past the 200th column is never "
+            f"judged; use null_rate for it, or set health: {warn} or off"
+        )
+    else:
+        step = (
+            f"`lakana table health {shown(table)} --env {shown(environment)} --signals` shows "
+            "what was recorded"
+        )
+    cause = _UNJUDGED_CAUSE.get(reason, _UNJUDGED_CAUSE["missing"])
+    return (
+        f"health signal {what} could not be judged: {cause} (snapshot {snapshot}); "
+        f"the run went on: {step}"
+    )
+
+
+def never_judged(effects: Mapping[str, str], schema: Schema) -> dict[str, str]:
+    """Find the blocking column entries that no commit of the table can ever judge.
+
+    Only the first `MAX_HEALTH_COLUMNS` top-level columns are evaluated, and ``range`` only for a
+    column type that has one (numbers, dates, times). An entry on a column the table does not
+    have is left out: it is named as missing instead.
+
+    Parameters
+    ----------
+    effects
+        The table's effects, flat (`HealthEffects.flat`).
+    schema
+        The table's current schema.
+
+    Returns
+    -------
+    dict
+        The reason by key (``range.name``), in the order of `effects`.
+    """
+    position = {f.name: (index, f.field_type) for index, f in enumerate(schema.fields)}
+    found: dict[str, str] = {}
+    for key, effect in effects.items():
+        signal, _, column = key.partition(".")
+        if effect != "block" or column not in position:
+            continue
+        index, field_type = position[column]
+        if index >= MAX_HEALTH_COLUMNS:
+            found[key] = f"only the first {MAX_HEALTH_COLUMNS} columns are judged"
+        elif signal == "range" and _kind(field_type) is None:
+            name = str(field_type) if field_type.is_primitive else "nested"
+            found[key] = f"a {name} column has no range"
+    return found

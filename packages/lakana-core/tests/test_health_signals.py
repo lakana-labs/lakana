@@ -35,10 +35,12 @@ from lakana_core.catalog.health_signals import (
     columns_of,
     freshness_signal,
     learn_band,
+    never_judged,
     null_rate_signal,
     range_signal,
     schedule_threshold,
     schema_signal,
+    unjudged_text,
     volume_signal,
 )
 
@@ -873,3 +875,55 @@ def test_a_value_free_freshness_alert_names_what_writes_the_table() -> None:
     )
     assert "health signal freshness fired at snapshot 7" in text
     assert "check what writes gold.t, or set health: {freshness: off} if this is expected" in text
+
+
+def test_a_block_that_could_not_be_judged_says_why_and_what_to_do() -> None:
+    """The text of a warned health check names the cause and the next step, and no value."""
+    assert unjudged_text("range", "price", 42, "unreadable", "gold.t", "prod") == (
+        "health signal range of price could not be judged: the files the commit added could not "
+        "be read within the health limits (at most 2,000 files, 5 s) (snapshot 42); the run went "
+        "on: commit fewer, larger files, or set health: {range: {price: warn}} to stop blocking "
+        "on it"
+    )
+    assert unjudged_text("volume", None, 42, "error", "gold.t", "prod") == (
+        "health signal volume could not be judged: computing it failed (snapshot 42); the run "
+        "went on: the server's log names the error, and the next commit is judged again"
+    )
+    assert unjudged_text("range", "name", 42, "missing", "gold.t", "prod") == (
+        "health signal range of name could not be judged: nothing was recorded for it "
+        "(snapshot 42); the run went on: a column without a range (text, boolean) or past the "
+        "200th column is never judged; use null_rate for it, or set health: "
+        "{range: {name: warn}} or off"
+    )
+    assert unjudged_text("schema", None, 42, "missing", "gold.t", "prod") == (
+        "health signal schema could not be judged: nothing was recorded for it (snapshot 42); "
+        "the run went on: `lakana table health gold.t --env prod --signals` shows what was "
+        "recorded"
+    )
+
+
+def test_a_column_block_that_can_never_be_judged_is_named_with_the_reason() -> None:
+    """`range` on a type without a range and any column past the 200th never record a value."""
+    fields = [
+        NestedField(1, "id", LongType(), required=False),
+        NestedField(2, "name", StringType(), required=False),
+        *(
+            NestedField(3 + i, f"c{i}", LongType(), required=False)
+            for i in range(health_signals.MAX_HEALTH_COLUMNS)
+        ),
+    ]
+    schema = Schema(*fields)
+    late = f"c{health_signals.MAX_HEALTH_COLUMNS - 1}"
+    effects = {
+        "range.id": "block",
+        "range.name": "block",
+        "null_rate.name": "block",
+        f"null_rate.{late}": "block",
+        "range.c0": "warn",
+        "range.gone": "block",
+        "volume": "block",
+    }
+    assert never_judged(effects, schema) == {
+        "range.name": "a string column has no range",
+        f"null_rate.{late}": "only the first 200 columns are judged",
+    }

@@ -1120,6 +1120,8 @@ def test_table_get_shows_the_effects_and_marks_a_column_the_table_does_not_have(
 ) -> None:
     """`health` holds the stored effects; `health_missing` the keys naming no column of it.
 
+    `health_never_judged` names the blocking column entries no commit can judge, with why.
+
     Parameters
     ----------
     session
@@ -1131,12 +1133,21 @@ def test_table_get_shows_the_effects_and_marks_a_column_the_table_does_not_have(
     """
     plain = _described(catalog_with_orders, principal)
     assert (plain.health, plain.health_missing) == ({}, ())
+    assert plain.health_never_judged == {}
     session.scalars(select(Table)).one().health_effects = {
         "range.pricee": "off",
         "range.id": "block",
+        "range.status": "block",
         "volume": "block",
     }
     session.commit()
     shown = _described(catalog_with_orders, principal)
-    assert shown.health == {"range.id": "block", "range.pricee": "off", "volume": "block"}
+    assert shown.health == {
+        "range.id": "block",
+        "range.pricee": "off",
+        "range.status": "block",
+        "volume": "block",
+    }
     assert shown.health_missing == ("range.pricee",)
+    # A string column has no range: a blocking entry on it is never judged.
+    assert shown.health_never_judged == {"range.status": "a string column has no range"}
