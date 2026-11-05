@@ -487,6 +487,87 @@ def test_anchors_aliases_merge_keys_and_duplicate_keys_are_refused(text: str) ->
     assert _problems(text)[0].startswith("access.yaml")
 
 
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        (
+            "version: 1\nmanages: &m [prod]\nother: *m\n",
+            "access.yaml (line 2): anchors and aliases are not allowed; write the entries out "
+            "instead",
+        ),
+        (
+            "version: 1\nmanages: [instance]\ngroups: {f: {members: [a],\n members: [b]}}\n",
+            "access.yaml (line 4): duplicate key 'members'; remove the repeat",
+        ),
+        (
+            "version: 1\nmanages: [prod]\ngrants:\n"
+            "  - {<<: {to: user:a}, role: VIEWER, on: prod}\n",
+            "access.yaml (line 4): merge keys (<<) are not allowed; write the entries out instead",
+        ),
+        (
+            "version: 1\nmanages: [prod]\nx: !foo bar\n",
+            "access.yaml (line 3): is not valid YAML: could not determine a constructor "
+            "for the tag "
+            "'!foo'; remove the tag",
+        ),
+        (
+            "version: 1\nmanages: " + "[" * 70 + "\n",
+            "access.yaml (line 2): nesting is deeper than 64 levels; flatten the file",
+        ),
+        (
+            "version: 1\nmanages: [prod\n",
+            None,
+        ),
+    ],
+)
+def test_a_yaml_refusal_names_the_line_the_cause_and_the_next_step(
+    text: str, expected: str | None
+) -> None:
+    """Each YAML-level cause gets its line and its step, in the same shape as the rest."""
+    problem = _problems(text)[0]
+    if expected is None:
+        assert problem.startswith("access.yaml (line ")
+        assert problem.endswith("; fix the YAML at that line")
+    else:
+        assert problem == expected
+
+
+def test_a_character_that_is_not_utf8_is_refused_not_raised() -> None:
+    """A lone surrogate (reachable through a JSON body) is a problem, not a crash."""
+    assert _problems("version: 1\nmanages: [prod]\n#\ud800\n") == [
+        "access.yaml: the file holds a character that is not valid UTF-8 at position 28; remove it"
+    ]
+
+
+def test_a_missing_key_is_one_problem() -> None:
+    """The missing key is reported once, not again as a wrong value."""
+    items = [
+        (_grant("role: VIEWER, on: prod"), 1),
+        (_policy("kind: row_filter, to: user:a, expression: x"), 1),
+        (_policy("kind: row_filter, to: user:a, table: prod.g.t"), 1),
+        (_policy("kind: column_mask, to: user:a, " + _EXPR), 1),
+        (_ci("repository: r, as: service:a, on: prod, conditions: {ref: m}"), 1),
+        (_ci("issuer: g, repository: r, as: service:a, on: prod"), 1),
+        (_ci("issuer: g, repository: r, as: service:a, conditions: {ref: m}"), 1),
+    ]
+    assert [len(_problems(text)) for text, _ in items] == [n for _, n in items]
+
+
+@pytest.mark.parametrize("target", ["prod.", "prod.gold.", ".x"])
+def test_a_target_with_an_empty_part_is_refused(target: str) -> None:
+    """A trailing dot is not an environment."""
+    assert "is not a target" in _problems(_grant(f"to: user:a, role: VIEWER, on: '{target}'"))[0]
+
+
+@pytest.mark.parametrize("target", ["instance", "prod.gold"])
+def test_a_ci_trust_rule_names_one_environment(target: str) -> None:
+    """Not the instance and not a namespace."""
+    text = _one("ci_trust", _CI.replace("on: prod", f"on: {target}"), "instance")
+    assert _at(
+        "ci_trust[0].on", 4, "a CI trust rule names one environment, such as prod"
+    ) in _problems(text)
+
+
 def test_a_file_over_the_size_limit_is_refused_before_parsing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

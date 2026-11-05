@@ -57,6 +57,9 @@ _PATH_TOKEN = re.compile(r"\[(\d+)\]|([^.\[\]]+)")
 
 Path = tuple[object, ...]
 
+_MISSING = object()
+"""What `_Reader.required` returns for a key that is not there, so no second problem follows."""
+
 
 class AccessFileError(ValidationError):
     """An access file with problems, every one found.
@@ -327,6 +330,8 @@ class _Reader:
         Mapping or None
             The mapping, or `None` (after a problem) when the value is not one.
         """
+        if value is _MISSING:
+            return None
         if not isinstance(value, dict):
             self.problem(path, f"must be a mapping{hint}")
             return None
@@ -379,6 +384,8 @@ class _Reader:
         str or None
             The name, or `None` after a problem.
         """
+        if value is _MISSING:
+            return None
         if not isinstance(value, str):
             self.problem(path, f"{what} must be text, not {shown_key(value)}; put it in quotes")
         elif not 1 <= len(value) <= _MAX_NAME or value != value.strip() or not value.isprintable():
@@ -410,6 +417,8 @@ class _Reader:
         """
         if isinstance(value, str) and value.strip():
             return value
+        if value is _MISSING:
+            return None
         self.problem(path, f"{what} must be text that is not empty; put it in quotes")
         return None
 
@@ -430,11 +439,11 @@ class _Reader:
         Returns
         -------
         object
-            The value; `None` after a problem when the key is missing.
+            The value; a sentinel the checkers skip, after a problem, when the key is missing.
         """
         if key not in item:
             self.problem(path, f"missing key '{key}'; write {example}")
-            return None
+            return _MISSING
         return item[key]
 
     def subject(self, value: object, path: Path) -> Subject | None:
@@ -452,6 +461,8 @@ class _Reader:
         Subject or None
             The subject, or `None` after a problem.
         """
+        if value is _MISSING:
+            return None
         if not isinstance(value, str):
             self.problem(path, f"must be text such as user:alice, not {shown_key(value)}")
             return None
@@ -494,7 +505,7 @@ class _Reader:
             return Target()
         environment, _, namespace = text.partition(".")
         try:
-            parts = NamespacePath.from_parts(namespace.split(".")).parts if namespace else ()
+            parts = NamespacePath.from_parts(namespace.split(".")).parts if "." in text else ()
             problem = "An environment name must not be empty." if not environment else ""
         except ValidationError as exc:
             parts, problem = (), str(exc)
@@ -990,6 +1001,9 @@ def _ci_trust(reader: _Reader, out: _Collector, value: object) -> None:
         environment = reader.name(
             reader.required(body, "on", path, "on: prod"), (*path, "on"), "an environment"
         )
+        if environment is not None and (environment == INSTANCE or "." in environment):
+            reader.problem((*path, "on"), "a CI trust rule names one environment, such as prod")
+            environment = None
         conditions = _conditions(
             reader,
             reader.required(body, "conditions", path, "conditions: {ref: refs/heads/main}"),
@@ -1007,6 +1021,38 @@ def _ci_trust(reader: _Reader, out: _Collector, value: object) -> None:
         )
         if reader.owned(entry, path):
             out.add(path, entry)
+
+
+_YAML_STEPS = (
+    ("duplicate key", "remove the repeat"),
+    ("anchors and aliases", "write the entries out instead"),
+    ("merge keys", "write the entries out instead"),
+    ("nesting", "flatten the file"),
+    ("more than", "split access across fewer, broader grants"),
+    ("determine a constructor", "remove the tag"),
+    ("remove it", ""),
+)
+
+
+def _yaml_problem(file_name: str, exc: YamlError) -> str:
+    """Say a YAML-level refusal in the shape of every other problem.
+
+    Parameters
+    ----------
+    file_name
+        The base name the messages use.
+    exc
+        The loader's refusal.
+
+    Returns
+    -------
+    str
+        The file, the line when known, the cause and the next step.
+    """
+    cause = str(exc).removeprefix(file_name).lstrip(": ").removesuffix(".")
+    step = next((step for part, step in _YAML_STEPS if part in cause), "fix the YAML at that line")
+    place = f"{file_name} (line {exc.line})" if exc.line else file_name
+    return f"{place}: {cause}; {step}" if step else f"{place}: {cause}"
 
 
 def parse_access_file(text: str, *, file_name: str) -> AccessFile:
@@ -1031,7 +1077,16 @@ def parse_access_file(text: str, *, file_name: str) -> AccessFile:
         unknown keys, wrong types, unknown roles, actions or kinds, a target outside `manages`,
         instance-wide sections without ``instance``, repeated entries, more than `MAX_ENTRIES`.
     """
-    if len(text.encode()) > MAX_FILE_BYTES:
+    try:
+        encoded = text.encode()
+    except UnicodeEncodeError as exc:
+        raise AccessFileError(
+            [
+                f"{file_name}: the file holds a character that is not valid UTF-8 at position "
+                f"{exc.start}; remove it"
+            ]
+        ) from exc
+    if len(encoded) > MAX_FILE_BYTES:
         raise AccessFileError(
             [
                 f"{file_name}: the file is larger than {MAX_FILE_BYTES} bytes; use a group "
@@ -1047,7 +1102,7 @@ def parse_access_file(text: str, *, file_name: str) -> AccessFile:
             yaml12_booleans=True,
         )
     except YamlError as exc:
-        raise AccessFileError([str(exc)]) from exc
+        raise AccessFileError([_yaml_problem(file_name, exc)]) from exc
     reader = _Reader(file_name, lines)
     if raw is None:
         raise AccessFileError(
@@ -1078,7 +1133,7 @@ def parse_access_file(text: str, *, file_name: str) -> AccessFile:
         )
     return AccessFile(
         file_name=file_name,
-        sha256=hashlib.sha256(text.encode()).hexdigest(),
+        sha256=hashlib.sha256(encoded).hexdigest(),
         manages=tuple(sorted(reader.scopes.names)),
         entries=tuple(out.pairs),
         locator=reader.locator(out.tuples),
