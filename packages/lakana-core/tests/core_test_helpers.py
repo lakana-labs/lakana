@@ -1043,8 +1043,27 @@ COMMON_MASK_COLUMNS = ["id", "name", "email", "ssn", "region", "salary", "owner"
 """The columns `FakeColumnCatalog` reports unless a test says otherwise."""
 
 
+class NoPolicyFields:
+    """The `ColumnSource.policy_fields` of a fake catalog that has no table metadata."""
+
+    def policy_fields(self, table_id: uuid.UUID) -> tuple[NestedField, ...] | None:
+        """Report no fields: listings show the text as written.
+
+        Parameters
+        ----------
+        table_id
+            The table.
+
+        Returns
+        -------
+        None
+            Always.
+        """
+        return None
+
+
 @dataclass
-class FakeColumnCatalog:
+class FakeColumnCatalog(NoPolicyFields):
     """A `ColumnSource` that reports fixed columns, or raises, and records its calls.
 
     Parameters

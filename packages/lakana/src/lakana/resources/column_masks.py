@@ -39,6 +39,7 @@ def _column_mask_from_json(data: dict[str, Any]) -> ColumnMask:
         expression=data["expression"],
         created_by=data["created_by"],
         created_at=datetime.fromisoformat(data["created_at"]),
+        bound=data.get("bound"),
     )
 
 

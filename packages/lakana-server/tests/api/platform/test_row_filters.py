@@ -1,9 +1,19 @@
 """Tests for the row-filters resource of the platform API."""
 
 from fastapi.testclient import TestClient
+from sqlalchemy import update
+from sqlalchemy.orm import Session
 
+from lakana_core.db import create_engine
+from lakana_core.models import RowFilter
+from lakana_server.settings import Settings
 from tests.conftest import AUTH_HEADER
-from tests.server_test_helpers import create_environment, create_table
+from tests.server_test_helpers import (
+    create_environment,
+    create_table,
+    create_table_with_fields,
+    rename_fields,
+)
 
 
 def test_create_a_row_filter_and_list_it_for_the_principal(client: TestClient) -> None:
@@ -171,3 +181,35 @@ def test_create_refuses_a_comparison_across_types_with_the_fix(client: TestClien
         "/api/v1/row-filters", headers=AUTH_HEADER, params={"principal_name": "alice"}
     )
     assert listed.json() == []
+
+
+def test_a_listed_filter_shows_the_current_column_name_and_bound(
+    client: TestClient, settings: Settings
+) -> None:
+    """A filter bound to a field id follows a rename in the listing; one that is not does not."""
+    create_environment(client)
+    fields = {1: "id", 2: "dept"}
+    create_table_with_fields(client, "dev", "gold", "people", fields)
+    client.post("/api/v1/principals", headers=AUTH_HEADER, json={"name": "alice", "type": "USER"})
+    where = {"environment": "dev", "namespace": "gold", "table": "people"}
+    created = client.post(
+        "/api/v1/row-filters",
+        headers=AUTH_HEADER,
+        json={"principal": "alice", **where, "expression": "dept = 'a'"},
+    )
+    assert created.status_code == 201, created.text
+    assert created.json()["bound"] is True
+    rename_fields(client, "people", fields, {1: "id", 2: "team"})
+
+    listed = client.get("/api/v1/row-filters", headers=AUTH_HEADER, params=where).json()
+
+    assert [(f["expression"], f["bound"]) for f in listed] == [("\"team\" = 'a'", True)]
+
+    engine = create_engine(settings.database)
+    with Session(engine) as session:
+        session.execute(update(RowFilter).values(binding="unbound"))
+        session.commit()
+    engine.dispose()
+    listed = client.get("/api/v1/row-filters", headers=AUTH_HEADER, params=where).json()
+
+    assert [(f["expression"], f["bound"]) for f in listed] == [("dept = 'a'", False)]

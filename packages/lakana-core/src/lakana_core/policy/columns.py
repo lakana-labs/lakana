@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from collections.abc import Iterable
 from typing import TYPE_CHECKING, Literal, Protocol
 
@@ -40,6 +41,21 @@ class ColumnSource(Protocol):
         -------
         TableDescription
             The table, including its columns.
+        """
+        ...
+
+    def policy_fields(self, table_id: uuid.UUID) -> tuple[NestedField, ...] | None:
+        """Read a table's current top-level fields, to show the policies on it.
+
+        Parameters
+        ----------
+        table_id
+            The table's id.
+
+        Returns
+        -------
+        tuple of NestedField or None
+            The fields; `None` when the table has none to read or they cannot be read.
         """
         ...
 

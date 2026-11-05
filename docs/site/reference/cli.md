@@ -1252,7 +1252,7 @@ Usage: `lakana row-filter list [OPTIONS]`
 
 List active row filters, optionally filtered.
 
-The table names who each row filter is for in `subject`. When the terminal is too narrow it leaves out `environment`, `id` and `namespace`, in that order; `--output json` always has every field.
+The table names who each row filter is for in `subject`. When the terminal is too narrow it leaves out `environment`, `id`, `namespace` and `bound`, in that order; `--output json` always has every field.
 
 | Name | Type | Default | Description |
 |---|---|---|---|
@@ -1300,7 +1300,7 @@ Usage: `lakana column-mask list [OPTIONS]`
 
 List active column masks, optionally filtered.
 
-The table names who each column mask is for in `subject`. When the terminal is too narrow it leaves out `environment`, `id` and `namespace`, in that order; `--output json` always has every field.
+The table names who each column mask is for in `subject`. When the terminal is too narrow it leaves out `environment`, `id`, `namespace` and `bound`, in that order; `--output json` always has every field.
 
 | Name | Type | Default | Description |
 |---|---|---|---|

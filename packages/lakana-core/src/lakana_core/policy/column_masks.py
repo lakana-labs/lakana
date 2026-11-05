@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Sequence
 from datetime import UTC, datetime
 
 from sqlalchemy import select
@@ -29,6 +30,7 @@ from lakana_core.policy.columns import (
 from lakana_core.policy.expression_types import check_expression_types
 from lakana_core.policy.expressions import columns_of
 from lakana_core.policy.field_binding import PolicyBinding
+from lakana_core.policy.shown import ShownPolicy, shown_policies
 
 
 def _check_column_exists(
@@ -316,6 +318,23 @@ class ColumnMaskService:
         )
         self._session.commit()
         return row
+
+    def shown(self, rows: Sequence[ColumnMask]) -> dict[uuid.UUID, ShownPolicy]:
+        """Show column masks in the current column names of their tables.
+
+        Does not authorize: the rows come from a list method, which did.
+
+        Parameters
+        ----------
+        rows
+            The column masks to show.
+
+        Returns
+        -------
+        dict
+            Each row's id to how a listing shows it (`ShownPolicy`).
+        """
+        return shown_policies(rows, self._catalog.policy_fields)
 
     def list_for_principal(self, p: PrincipalRef, principal_name: str) -> list[ColumnMask]:
         """List a principal's own active, direct column masks.

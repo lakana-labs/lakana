@@ -438,7 +438,10 @@ Policies created by earlier releases are bound to their columns by the worker in
 after the upgrade, from the version of the table they were created against. A policy made before
 0.13.0, whose table has had a column it uses renamed since, cannot be bound exactly and keeps
 the old rule: reads are refused after a rename until the policy is created again for the column
-it is meant for and the old one is revoked.
+it is meant for and the old one is revoked. Find them with `lakana row-filter list` and
+`lakana column-mask list`: the `bound` column says `no` for such a policy (`"bound": false` in
+`--output json`, `bound` in the SDK and REST API), `yes` for every other. While the backfill has not
+reached a policy yet it also says `no`; check again after a few minutes.
 
 ## Notes for 0.21.0
 

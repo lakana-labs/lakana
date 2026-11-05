@@ -106,15 +106,21 @@ lakana column-mask revoke 49fa89ee-275a-4b86-a6fc-76b2b5b32b7e --yes
 ```
 
 `list` takes `--principal`, `--group` or `--env` to narrow the list; it shows the id of each mask,
-which `revoke` needs:
+which `revoke` needs. The `column` and the `expression` are shown with the column names the table
+has now: after a column was renamed, a mask on it is listed under the new name. The `bound` column
+says whether the mask follows its column through such a rename: `yes` for every mask you create
+now. `no` marks a mask of an earlier release that Lakana could not bind exactly; it keeps refusing
+reads after a rename until you create it again and revoke the old one ([Row filters and column
+masks follow renamed
+columns](../explanation/upgrades.md#row-filters-and-column-masks-follow-renamed-columns)):
 
 <!-- output -->
 ```text
-┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━┓
-┃ id                                   ┃ principal_id                         ┃ group_id ┃ environment ┃ namespace ┃ table     ┃ column ┃ expression ┃
-┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━┩
-│ 49fa89ee-275a-4b86-a6fc-76b2b5b32b7e │ 52acdc6f-ad90-4c8f-9f92-e0f4c990b1b1 │          │ dev         │ gold      │ customers │ ssn    │ '***'      │
-└──────────────────────────────────────┴──────────────────────────────────────┴──────────┴─────────────┴───────────┴───────────┴────────┴────────────┘
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━┓
+┃ id                                   ┃ subject                                        ┃ environment ┃ namespace ┃ table     ┃ column ┃ expression ┃ bound ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━┩
+│ 49fa89ee-275a-4b86-a6fc-76b2b5b32b7e │ principal 52acdc6f-ad90-4c8f-9f92-e0f4c990b1b1 │ dev         │ gold      │ customers │ ssn    │ '***'      │ yes   │
+└──────────────────────────────────────┴────────────────────────────────────────────────┴─────────────┴───────────┴───────────┴────────┴────────────┴───────┘
 ```
 
 After `revoke` (without `--yes` it asks first) the person sees the stored value again on her next
@@ -128,7 +134,8 @@ Revoked column mask 49fa89ee-275a-4b86-a6fc-76b2b5b32b7e
 Revoking is the only way to change a mask: to change an expression, create the new mask and revoke
 the old one. Until you revoke the old one, the two masks on the column make it read `NULL`. The same
 commands are `client.column_masks.create(...)`, `.list(...)` and `.revoke(...)` in the Python SDK
-and `/api/v1/column-masks` in the REST API.
+(each mask has `bound`, `None` from a server before this release) and `/api/v1/column-masks` in the
+REST API.
 
 ## An expression must not fail on any stored value
 

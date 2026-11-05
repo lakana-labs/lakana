@@ -5,7 +5,8 @@ name when its type changes in a way that does not widen. A row filter or column 
 such a column then refuses the reads of the people it applies to until an administrator creates
 it again (`lakana_core.policy.renames`). The write still lands; this module finds those policies
 when the write is planned, so that the run can say so at once rather than when readers' queries
-fail.
+fail. A policy bound to field ids (`policy.field_binding`) is judged by them: a rename keeps it
+working and is no warning; only a dropped or replaced field is.
 
 A task run stores, for its writes that removed or replaced a column, the tables and the policies
 found (`merge_schema_change`): ``{"tables": [...], "policies": [BrokenPolicy.to_json(), ...]}``.
@@ -29,6 +30,7 @@ from sqlalchemy.orm import Session
 from lakana_core.identifiers import shown
 from lakana_core.models import ColumnMask, RowFilter
 from lakana_core.policy.expressions import columns_of
+from lakana_core.policy.field_binding import FIELD_IDS, UnreadablePolicyError, bound_field_ids
 
 ROW_FILTER = "row_filter"
 """The kind of a row filter."""
@@ -215,10 +217,64 @@ def _read_columns(expression: str) -> set[str]:
         return set()
 
 
+def _changed_by_id(
+    row: RowFilter | ColumnMask,
+    changed: Mapping[str, str],
+    before: Mapping[int, str],
+    after: frozenset[int],
+) -> list[tuple[str, str]] | None:
+    """Judge a bound policy by the field ids it follows.
+
+    Parameters
+    ----------
+    row
+        The policy.
+    changed
+        The removed or replaced columns (`changed_columns`).
+    before
+        The names of the fields before the change, by id.
+    after
+        The ids of the fields the change leaves.
+
+    Returns
+    -------
+    list of tuple or None
+        Each column as written whose field the change leaves out, with `REMOVED` or `REPLACED`,
+        the mask's own column first; `None` when the row is not bound by field id or its ids
+        cannot be read, which the name rule then judges.
+    """
+    if row.binding != FIELD_IDS:
+        return None
+    column = row.column if isinstance(row, ColumnMask) else None
+    try:
+        ids = bound_field_ids(
+            row.field_ids,
+            column=column,
+            column_field_id=row.column_field_id if isinstance(row, ColumnMask) else None,
+        )
+    except UnreadablePolicyError:
+        return None
+    ordered = sorted(ids, key=lambda name: (name != column, name))
+    return [
+        (name, changed.get(before.get(ids[name], name).casefold(), REMOVED))
+        for name in ordered
+        if ids[name] not in after
+    ]
+
+
 def broken_policies(
-    session: Session, table_id: uuid.UUID, table: str, changed: Mapping[str, str]
+    session: Session,
+    table_id: uuid.UUID,
+    table: str,
+    changed: Mapping[str, str],
+    *,
+    before: Schema,
+    after: Schema,
 ) -> tuple[BrokenPolicy, ...]:
     """Find the active row filters and column masks a schema change leaves out of date.
+
+    A policy bound to field ids is judged by them: a renamed column keeps it working, a
+    dropped or replaced one breaks it. Any other policy is judged by the names it uses.
 
     Parameters
     ----------
@@ -230,6 +286,10 @@ def broken_policies(
         The table's dotted name, for the warnings.
     changed
         The removed or replaced columns (`changed_columns`).
+    before
+        The table's schema before the change.
+    after
+        The schema the change makes current.
 
     Returns
     -------
@@ -239,14 +299,16 @@ def broken_policies(
     """
     if not changed:
         return ()
-    used: list[tuple[str, uuid.UUID, list[str]]] = [
-        (ROW_FILTER, row.id, sorted(_read_columns(row.expression)))
+    names_before = {field.field_id: field.name for field in before.fields}
+    ids_after = frozenset(field.field_id for field in after.fields)
+    rows: list[tuple[str, RowFilter | ColumnMask]] = [
+        (ROW_FILTER, row)
         for row in session.scalars(
             select(RowFilter).where(RowFilter.table_id == table_id, RowFilter.revoked_at.is_(None))
         )
     ]
-    used += [
-        (COLUMN_MASK, row.id, [row.column, *sorted(_read_columns(row.expression))])
+    rows += [
+        (COLUMN_MASK, row)
         for row in session.scalars(
             select(ColumnMask).where(
                 ColumnMask.table_id == table_id, ColumnMask.revoked_at.is_(None)
@@ -254,15 +316,21 @@ def broken_policies(
         )
     ]
     found: dict[tuple[str, uuid.UUID, str], BrokenPolicy] = {}
-    for kind, policy_id, columns in used:
-        # A mask's own column comes first, so that its spelling wins over the expression's.
-        for column in columns:
-            folded = column.casefold()
-            if folded in changed:
-                found.setdefault(
-                    (kind, policy_id, folded),
-                    BrokenPolicy(table, kind, policy_id, column, changed[folded]),
-                )
+    for kind, row in rows:
+        by_id = _changed_by_id(row, changed, names_before, ids_after)
+        if by_id is None:
+            # A mask's own column comes first, so that its spelling wins over the expression's.
+            own = [row.column] if isinstance(row, ColumnMask) else []
+            by_id = [
+                (column, changed[column.casefold()])
+                for column in [*own, *sorted(_read_columns(row.expression))]
+                if column.casefold() in changed
+            ]
+        for column, change in by_id:
+            found.setdefault(
+                (kind, row.id, column.casefold()),
+                BrokenPolicy(table, kind, row.id, column, change),
+            )
     return tuple(
         sorted(found.values(), key=lambda b: (b.kind, b.column.casefold(), str(b.policy_id)))
     )

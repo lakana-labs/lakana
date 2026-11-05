@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from core_test_helpers import FakeColumnCatalog, ensure_table
+from core_test_helpers import FakeColumnCatalog, NoPolicyFields, ensure_table
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -36,6 +36,7 @@ from lakana_core.models import (
     TableType,
 )
 from lakana_core.policy.column_masks import ColumnMaskService
+from lakana_core.policy.shown import ShownPolicy
 from lakana_core.statement_limit import statement_too_long_message
 
 
@@ -318,6 +319,8 @@ def test_create_then_list_for_principal(session: Session) -> None:
     )
     listed = service.list_for_principal(admin, "alice")
     assert [m.id for m in listed] == [created.id]
+    # The fake catalog has no table metadata to rename from: shown as written, bound.
+    assert service.shown(listed) == {created.id: ShownPolicy("NULL", "ssn", True)}
 
 
 def test_create_then_list_for_group(session: Session) -> None:
@@ -791,7 +794,7 @@ def test_create_says_when_the_table_has_no_recorded_columns(session: Session) ->
 
 
 @dataclass
-class _GrantCheckingCatalog:
+class _GrantCheckingCatalog(NoPolicyFields):
     """A catalog whose `describe_table` asks the real grant authorization for READ_TABLE."""
 
     authz: GrantAuthorization

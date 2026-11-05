@@ -9,19 +9,26 @@ import pyarrow.ipc
 from fastapi.testclient import TestClient
 from pyiceberg.schema import Schema
 from pyiceberg.types import LongType, NestedField, StringType
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from lakana_core.auth import AllowAllAuthorization, PrincipalRef
 from lakana_core.catalog.service import CatalogService
 from lakana_core.config import StorageConfig
+from lakana_core.db import create_engine
 from lakana_core.grants.authorization import GrantAuthorization
 from lakana_core.identifiers import NamespacePath, TableRef
-from lakana_core.models import Principal, QueryRun, QueryRunStatus
+from lakana_core.models import ColumnMask, Principal, QueryRun, QueryRunStatus
 from lakana_core.storage.resolver import StorageResolver
+from lakana_server.settings import Settings
 from lakana_worker.pipeline import run_one
 from tests.conftest import AUTH_HEADER
-from tests.server_test_helpers import create_environment, create_table
+from tests.server_test_helpers import (
+    create_environment,
+    create_table,
+    create_table_with_fields,
+    rename_fields,
+)
 
 
 def test_create_a_column_mask_and_list_it_for_the_principal(client: TestClient) -> None:
@@ -354,3 +361,35 @@ def test_create_refuses_a_mask_of_another_type_than_its_column(client: TestClien
         "`id` is long, but the mask is text. Use a value of its own type: 0 or NULL."
         in response.json()["detail"]
     )
+
+
+def test_a_listed_mask_shows_the_current_column_name_and_bound(
+    client: TestClient, settings: Settings
+) -> None:
+    """A bound mask is listed on the column's current name; an unbound one as written."""
+    create_environment(client)
+    fields = {1: "id", 2: "ssn"}
+    create_table_with_fields(client, "dev", "gold", "people", fields)
+    client.post("/api/v1/principals", headers=AUTH_HEADER, json={"name": "alice", "type": "USER"})
+    where = {"environment": "dev", "namespace": "gold", "table": "people"}
+    created = client.post(
+        "/api/v1/column-masks",
+        headers=AUTH_HEADER,
+        json={"principal": "alice", **where, "column": "ssn", "expression": "'***'"},
+    )
+    assert created.status_code == 201, created.text
+    assert (created.json()["column"], created.json()["bound"]) == ("ssn", True)
+    rename_fields(client, "people", fields, {1: "id", 2: "tax_id"})
+
+    listed = client.get("/api/v1/column-masks", headers=AUTH_HEADER, params=where).json()
+
+    assert [(m["column"], m["bound"]) for m in listed] == [("tax_id", True)]
+
+    engine = create_engine(settings.database)
+    with Session(engine) as session:
+        session.execute(update(ColumnMask).values(binding="unbound"))
+        session.commit()
+    engine.dispose()
+    listed = client.get("/api/v1/column-masks", headers=AUTH_HEADER, params=where).json()
+
+    assert [(m["column"], m["bound"]) for m in listed] == [("ssn", False)]

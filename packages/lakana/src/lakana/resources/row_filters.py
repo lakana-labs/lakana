@@ -38,6 +38,7 @@ def _row_filter_from_json(data: dict[str, Any]) -> RowFilter:
         expression=data["expression"],
         created_by=data["created_by"],
         created_at=datetime.fromisoformat(data["created_at"]),
+        bound=data.get("bound"),
     )
 
 

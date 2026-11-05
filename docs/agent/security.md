@@ -3948,6 +3948,19 @@ work.
 
 ## Row filters and column masks (M3c — shipped)
 
+- **A listing shows current column names, and `bound`, to whoever may manage policies
+  (#120).** `GET /api/v1/row-filters` and `/column-masks` (and the SDK and CLI over them) show
+  a bound policy's expression and a mask's column in the names the table has now
+  (`policy.shown.shown_policies`, one metadata read per table through
+  `CatalogService.policy_fields`, which does not authorize: the list methods already required
+  `MANAGE_POLICY`). That reveals the table's current column names to a `MANAGE_POLICY` holder
+  who may lack `READ_TABLE`; instance-scoped policy managers already see every policy's text,
+  and a name a policy uses is one they could read there. The visibility rules of the list
+  methods are unchanged and no reader without `MANAGE_POLICY` gets a listing. A policy whose
+  field is gone, whose ids or metadata cannot be read, or that is not bound is shown as
+  written (display only; a read refuses it); `bound` is `false` for `pending` and `unbound`.
+  A failed metadata read logs the error's class only.
+
 - **Row filters and column masks are written** in a restricted expression subset
   (comparisons, boolean logic, literals, column references, and exactly two context
   functions — `current_user()` and `has_group('name')`; column masks additionally allow
@@ -4033,9 +4046,12 @@ work.
   (#376).** `CatalogService.write_batches` compares the current schema with the planned one
   (`policy.schema_change.changed_columns`: a column whose name is gone, or whose name now owns
   another field id; widening keeps the id) and reads the table's active row filters and column
-  masks by `table_id` (`broken_policies`; a mask counts its own column and its expression's, a
-  filter its expression's, compared case-folded; an expression that no longer parses counts only a
-  mask's own column, so the write never fails for it). Stored as kind, policy id, column and change,
+  masks by `table_id` (`broken_policies`; a policy bound to field ids is judged by them: a
+  column whose field the new schema still has, renamed or not, warns nothing, one whose field is
+  gone warns by the name as written, and a bound row with unreadable ids falls back to the name
+  rule; any other policy counts a mask's own column and its expression's, a filter its
+  expression's, compared case-folded; an expression that no longer parses counts only a mask's
+  own column, so the write never fails for it). Stored as kind, policy id, column and change,
   never the expression or the subject: in the `TABLE_WRITE` audit detail (`broken_policies`, a
   shown field; the audit log needs `READ_AUDIT_LOG`) and, for a write in a run, in
   `task_runs.schema_change_json` (`{"tables", "policies"}`) through the guard (`note_result` ->

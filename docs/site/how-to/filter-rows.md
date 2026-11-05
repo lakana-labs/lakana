@@ -69,7 +69,13 @@ lakana row-filter list --principal alice
 ```
 
 `list` takes `--principal`, `--group` or `--env` to narrow the list; it shows the id of each filter,
-which `revoke` needs:
+which `revoke` needs. The `expression` is shown with the column names the table has now (`"region"`
+for a `REGION` you wrote): after a
+column was renamed, a filter on it is listed under the new name. The `bound` column says whether the
+filter follows its columns through such a rename: `yes` for every filter you create now. `no` marks
+a filter of an earlier release that Lakana could not bind exactly; it keeps refusing reads after a
+rename until you create it again and revoke the old one ([Row filters and column masks follow
+renamed columns](../explanation/upgrades.md#row-filters-and-column-masks-follow-renamed-columns)).
 
 `$ROW_FILTER_ID` is the id that `list` printed:
 
@@ -81,7 +87,8 @@ lakana row-filter revoke "$ROW_FILTER_ID" --yes
 Revoking is the only way to change a filter: to change a condition, create the new filter and
 revoke the old one. When several filters apply to one person, a row must pass all of them. The same
 commands are `client.row_filters.create(...)`, `.list(...)` and `.revoke(...)` in the Python SDK
-and `/api/v1/row-filters` in the REST API.
+(each filter has `bound`, `None` from a server before this release) and `/api/v1/row-filters` in the
+REST API.
 
 ## An expression must not fail on any stored value
 

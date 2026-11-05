@@ -4078,6 +4078,47 @@ class CatalogService:
 
         return visibility_for(self._session, p, ref, row.id, metadata=metadata)
 
+    def policy_fields(self, table_id: uuid.UUID) -> tuple[NestedField, ...] | None:
+        """Read a table's current top-level fields, to show the policies on it.
+
+        Does not authorize: the caller lists policies and so holds `MANAGE_POLICY`.
+
+        Parameters
+        ----------
+        table_id
+            The table's id.
+
+        Returns
+        -------
+        tuple of NestedField or None
+            The fields; `None` for a table that is not an Iceberg table, one without
+            metadata, or one whose metadata cannot be read (logged with the error's class only).
+        """
+        found = self._session.execute(
+            select(Table, Environment.name)
+            .join(Namespace, Namespace.id == Table.namespace_id)
+            .join(Environment, Environment.id == Namespace.environment_id)
+            .where(Table.id == table_id)
+        ).one_or_none()
+        if found is None or found[0].table_type is not TableType.ICEBERG:
+            return None
+        row, environment = found
+        if row.metadata_location is None:
+            return None
+        try:
+            metadata = read_metadata(
+                self._storage.for_environment(environment).file_io, row.metadata_location
+            )
+            return tuple(metadata.schema().fields)
+        except Exception as exc:
+            logger.warning(
+                "The columns of table %s in %s could not be read to list its policies (%s).",
+                shown(row.name),
+                shown(environment),
+                type(exc).__name__,
+            )
+            return None
+
     def _describe_row(self, p: PrincipalRef, ref: TableRef, row: Table) -> TableDescription:
         """Describe a table row by kind, without its descriptions.
 
@@ -5344,7 +5385,14 @@ class CatalogService:
         changed = changed_columns(current.schema(), updated.schema())
         if not changed:
             return None
-        broken = broken_policies(self._session, table_id, ref.dotted(), changed)
+        broken = broken_policies(
+            self._session,
+            table_id,
+            ref.dotted(),
+            changed,
+            before=current.schema(),
+            after=updated.schema(),
+        )
         return tuple(warning.to_json() for warning in broken)
 
     def roll_back(
@@ -7566,7 +7614,14 @@ class CatalogService:
             table_name=ref.dotted(),
         )
         changed = {} if plan.schema is None else changed_columns(current.schema(), plan.schema)
-        broken = broken_policies(self._session, table_id, ref.dotted(), changed)
+        broken = broken_policies(
+            self._session,
+            table_id,
+            ref.dotted(),
+            changed,
+            before=current.schema(),
+            after=plan.schema or current.schema(),
+        )
         schema_updates: list[TableUpdate] = (
             []
             if plan.schema is None

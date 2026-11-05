@@ -879,6 +879,10 @@ _NOTHING_OF_A_KEPT_TABLE = {
         "for a managed table and reads files itself only for an EXTERNAL one, which no task "
         "builds and which therefore never carries the note"
     ),
+    "policy_fields": (
+        "the current column names and field ids of a table, for listing its policies; no rows, "
+        "no file locations"
+    ),
     "describe_table": "the state `kept`, the schema and snapshot ids; no rows, no file locations",
     "can_read_table": "a boolean about a grant",
     "table_references": (
