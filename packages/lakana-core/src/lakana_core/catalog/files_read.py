@@ -424,6 +424,48 @@ def _lines(raw: bytes) -> list[bytes]:
     return lines
 
 
+_MAX_NESTING = 4
+"""The deepest nesting of arrays and objects a line may have; a header or an entry has 1."""
+
+
+def _too_deep(line: bytes) -> bool:
+    """Say whether a line nests arrays and objects deeper than `_MAX_NESTING`, outside strings.
+
+    The count of brackets, at C speed, settles nearly every line; only a line with more of
+    them than the limit (brackets in names) is walked.
+
+    Parameters
+    ----------
+    line
+        The line, at most `MAX_LINE_BYTES`.
+
+    Returns
+    -------
+    bool
+        Whether it nests too deep.
+    """
+    if line.count(b"[") + line.count(b"{") <= _MAX_NESTING:
+        return False
+    depth, in_string, escaped = 0, False, False
+    for byte in line:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif byte == 0x5C:  # backslash
+                escaped = True
+            elif byte == 0x22:  # quote
+                in_string = False
+        elif byte == 0x22:
+            in_string = True
+        elif byte in (0x5B, 0x7B):  # [ {
+            depth += 1
+            if depth > _MAX_NESTING:
+                return True
+        elif byte in (0x5D, 0x7D):  # ] }
+            depth -= 1
+    return False
+
+
 def _load(line: bytes, number: int) -> object:
     """Parse one line of a record.
 
@@ -442,12 +484,16 @@ def _load(line: bytes, number: int) -> object:
     Raises
     ------
     ValidationError
-        If it is not JSON.
+        If it is not JSON, or nests deeper than `_MAX_NESTING` (refused before `json.loads`,
+        whose recursion would otherwise be a 500 on Python before 3.14).
     """
+    refused = ValidationError(_malformed(f"line {number} is not JSON"))
+    if _too_deep(line):
+        raise refused
     try:
         return json.loads(line)
-    except ValueError:  # UnicodeDecodeError is a ValueError
-        raise ValidationError(_malformed(f"line {number} is not JSON")) from None
+    except (ValueError, RecursionError):  # UnicodeDecodeError is a ValueError
+        raise refused from None
 
 
 def parse_files_read(raw: bytes, p: PrincipalRef) -> FilesReadReport:

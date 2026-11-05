@@ -219,6 +219,19 @@ _HEADER = b'{"version": 1, "watermark": null}\n'
 _NOT_A_FILE = "file 1 is not a connection, name, size, modified time and ETag"
 
 
+def test_brackets_inside_a_name_are_no_nesting(principal: PrincipalRef) -> None:
+    """The nesting scan skips strings: a name of brackets and escaped quotes still parses.
+
+    Parameters
+    ----------
+    principal
+        The run principal.
+    """
+    name = '[[[[{{{{\\"[[[[.csv'
+    report = parse_files_read(_report(_file(name)), _task(principal, "exports"))
+    assert report.files[0].name == name
+
+
 @pytest.mark.parametrize(
     ("raw", "what"),
     [
@@ -237,6 +250,9 @@ _NOT_A_FILE = "file 1 is not a connection, name, size, modified time and ETag"
             "watermark 2026-11-01T12:00:00 has no time zone; it must be UTC",
         ),
         (_HEADER + b"\xff\n", "line 2 is not JSON"),
+        # Deeper than any interpreter's recursion limit, within the line cap: never a 500.
+        (_HEADER + b"[" * 16000 + b"]" * 16000, "line 2 is not JSON"),
+        (_HEADER + b'{"a": ' * 9 + b"1" + b"}" * 9, "line 2 is not JSON"),
         (_HEADER + b"\n" + json.dumps(_file("a.csv")).encode(), "line 2 is not JSON"),
         (_HEADER + b'{"connection": "exports"}', _NOT_A_FILE),
         (_HEADER + b'"a.csv"', _NOT_A_FILE),

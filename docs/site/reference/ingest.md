@@ -228,6 +228,9 @@ dated in the future, or one that looks the same as a file already read:
 - with `modified_from=` and a date in the names, a file named for the day before the watermark's
   date has the time `since` minus 24 hours, which the default window leaves out. Make the
   lookback longer than the names' step, such as `lookback=timedelta(days=2)` for daily names;
+- with `modified_from=`, every file of a day has the time of that day's start, so a dated file
+  that is rewritten with a new size during its day is a new file and is read again whole while
+  its day is inside the window. Write each dated file once, or use `write="merge"` with a key;
 - a connection with no file read in the last 30 days, in an asset with several connections (see
   above);
 - a writer keeps the source's time (`cp -p`, `rsync -t`, an archive unpacked with its dates), so
@@ -353,8 +356,8 @@ could end differently (the task is retried only when it could):
 | `lookback= takes a datetime.timedelta` | `lookback` has another type, such as a number of hours. | Pass `timedelta(hours=...)`. |
 | `lookback= cannot be negative` | `lookback` is less than zero. | Pass `timedelta(0)` to turn it off. |
 | `lookback= is at most 30 days` | `lookback` is longer than the record of files read reaches. | Lower it; copy a file older than that into the folder again. |
-| `names a file whose path is longer than 1024 characters` | A file `files.read` would record has a path Lakana cannot store. | Move it to a shorter path, or narrow the pattern so that it does not match. |
-| `names a file Lakana cannot store` | A file's name holds a NUL character or is not valid UTF-8. | Rename the file. |
+| `names a file whose path is longer than 1024 characters` | With `since=` (also `since=None`), a matching file has a path Lakana cannot record. Nothing is read. | Move it to a shorter path, or narrow the pattern so that it does not match. |
+| `names a file Lakana cannot store` | With `since=` (also `since=None`), a matching file's name holds a NUL character or is not valid UTF-8, such as a Latin-1 name from an SMB share. Nothing is read. | Rename the file to UTF-8, or narrow the pattern so that it does not match. |
 | `gives ... the time ..., within 30 days of the earliest or latest time Lakana can store` | A file is dated near year 1 or year 9999. | Correct the file's time (or the date in its name), or narrow the pattern. |
 
 ## rest
