@@ -160,7 +160,6 @@ deactivated cannot be used again: its name stays taken.
 `lakana access export` writes the instance; `lakana access export --scope prod --scope staging
 -o access.yaml` writes two environments to a file.
 
-
 `--scope` is `instance` (the default) or an environment, and can be repeated for environments.
 Without `-o` the file is printed. The file starts with a comment that says how to review and
 plan it. Planning an export that you did not edit plans nothing: that is the starting point for
@@ -172,7 +171,6 @@ Route: `GET /api/v1/access/export?scope=prod&scope=staging`, answering `{"text":
 ## Plan
 
 `lakana access plan access.yaml` reads the file and prints the plan.
-
 
 `plan` sends the file to the server, which reads it and compares it with the live access. It
 changes nothing. It prints:

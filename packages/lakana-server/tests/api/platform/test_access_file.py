@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from tests.conftest import AUTH_HEADER
+from tests.server_test_helpers import create_environment
 
 
 def _user_header(client: TestClient, name: str) -> dict[str, str]:
@@ -105,3 +106,22 @@ def test_a_file_name_with_a_path_is_refused(client: TestClient) -> None:
     )
     assert response.status_code == 422
     assert "file_name" in response.text
+
+
+def test_a_task_token_is_refused_on_the_access_routes(client: TestClient) -> None:
+    """R10: a task token, even the administrator's own, gets 403 on export and plan."""
+    create_environment(client)
+    minted = client.post(
+        "/api/v1/task-tokens",
+        headers=AUTH_HEADER,
+        json={
+            "principal": "admin",
+            "environment": "dev",
+            "asset_scope": ["gold.a"],
+            "ttl_seconds": 300,
+        },
+    )
+    assert minted.status_code == 201, minted.text
+    header = {"Authorization": f"Bearer {minted.json()['token']}"}
+    assert client.get("/api/v1/access/export", headers=header).status_code == 403
+    assert client.post("/api/v1/access/plan", headers=header, json={"text": ""}).status_code == 403
