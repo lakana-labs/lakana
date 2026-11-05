@@ -171,7 +171,7 @@ fails the write.
 
 | Signal | `observed` | `band` |
 |---|---|---|
-| `volume` | `added`, `total` | `low`, `high`, `median` |
+| `volume` | `added`, `total`, and `loaded` `false` for a delete-only commit | `low`, `high`, `median` |
 | `null_rate` | `nulls`, `values`, `rate` | `low`, `high`, `median` |
 | `range` | `lower`, `upper`, `kind` | `min`, `max` (learned), `low`, `high` (the limits) |
 | `schema` | `columns`, `added`, `dropped`, `retyped` | none |
@@ -297,9 +297,13 @@ It is in the run's message, `lakana runs show` and the task's log, and the notif
 jobs that build the table get a `health` message with the same text whenever a row says why (a
 `no_metrics` row, of the commit or of the check's own signal or column), once until the signal is
 judged again; a signal with nothing recorded is told only by the run. It is one message per signal,
-which names up to 10 of its columns that could not be judged and how many more. A commit that adds
-no data file (a delete of whole files, or a merge-on-read commit that adds only delete files) added
-0 rows: `volume` judges that, and its columns, which it did not write, are not counted as unjudged. A column
+which names up to 10 of its columns that could not be judged and how many more. A delete-only commit
+(one that adds no data file: a delete of whole files, or a merge-on-read commit that adds only
+delete files) is not judged by volume and does not move its band: `volume` records it as `ok` with
+`observed` `{"added": 0, "loaded": false}`, it never fires, and its columns, which it did not write,
+are not counted as unjudged. It still counts as a write for freshness. Lakana takes a commit for
+delete-only when it read the commit's added files and none was a data file, or when the snapshot
+says `added-data-files` is 0; a summary without any counts is `not_recorded`. A column
 that never records a value can never be judged: `range` of a column without a range (text,
 boolean, a nested type) and any column past the 200th. A deploy that knows the columns refuses
 `block` on a column past the 200th (counted as the refusal table below says); for the rest, `lakana table get` marks the entry, as in

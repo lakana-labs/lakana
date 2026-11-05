@@ -1036,7 +1036,7 @@ def test_a_commit_that_added_no_data_files_is_judged_and_not_told() -> None:
         Operation.DELETE,
         **{"deleted-records": "5", "deleted-data-files": "1", "total-records": "0"},
     )
-    seen = volume_signal(summary, [])
+    seen = volume_signal(summary, [], no_data_files=True)
     volume = _row("volume", None, seen.state, seen.observed)
     schema = _row("schema", None, "ok", {}, effect="warn")
     rows = cast("list[Any]", [volume, schema])
@@ -1044,6 +1044,12 @@ def test_a_commit_that_added_no_data_files_is_judged_and_not_told() -> None:
     assert task_checks_module._unjudged(rows, "volume", None, [20]) is None
     assert task_checks_module._judges(cast("Any", volume), "volume", None)
     assert seen.state != "no_metrics"  # nothing for `_tell_unjudged` to name
+    # Then an append in the same run: both commits judged, nothing fired, nothing to tell.
+    appended = volume_signal({"added-records": "1000"}, [])
+    load = SimpleNamespace(**{**vars(volume), "snapshot_id": 21, "observed": appended.observed})
+    load.state = appended.state
+    both = cast("list[Any]", [volume, schema, load])
+    assert task_checks_module._unjudged(both, "volume", None, [21, 20]) is None
 
 
 def test_one_message_per_check_names_its_columns(

@@ -1005,8 +1005,11 @@ def test_a_value_that_could_not_be_judged_says_why(reason: str, cause: str) -> N
         },
     ],
 )
-def test_a_commit_that_added_no_data_files_added_no_rows(properties: dict[str, str]) -> None:
-    """Pyiceberg writes `added-records` only above 0: no data files added is 0 rows, judged.
+def test_a_commit_that_added_no_data_files_is_no_load(properties: dict[str, str]) -> None:
+    """With evidence of no data file added, the commit is not a load: ok, never fired, no band.
+
+    pyiceberg writes `added-records` and `added-data-files` only above 0, so the evidence is the
+    commit's own files, read and none found, or an `added-data-files` of 0.
 
     Parameters
     ----------
@@ -1014,9 +1017,21 @@ def test_a_commit_that_added_no_data_files_added_no_rows(properties: dict[str, s
         The snapshot summary's properties, as pyiceberg writes them.
     """
     summary = Summary(Operation.DELETE, **properties)
-    seen = volume_signal(summary, _volumes(*[9] * 8))
-    assert seen.state in ("ok", "fired")
-    assert seen.observed is not None and seen.observed["added"] == 0
-    # Known from the commit itself: no data file was read.
-    told = volume_signal({"added-data-files": "1"}, [], no_data_files=True)
-    assert (told.state, told.observed) == ("no_history", {"added": 0, "total": None})
+    seen = volume_signal(summary, _volumes(*[9_000] * 8), no_data_files=True)
+    assert (seen.state, seen.band) == ("ok", None)
+    assert seen.observed is not None
+    assert (seen.observed["added"], seen.observed["loaded"]) == (0, False)
+    counted = volume_signal({"added-data-files": "0"}, _volumes(*[9_000] * 8))
+    assert (counted.state, counted.band) == ("ok", None)
+    # Without evidence, a summary without counts records nothing, and never fires (round 4).
+    probe = volume_signal(Summary(Operation.APPEND, **{"total-records": "9000"}), [])
+    assert (probe.state, probe.observed) == ("no_metrics", {"reason": "not_recorded"})
+
+
+def test_the_band_leaves_out_commits_that_loaded_nothing() -> None:
+    """A delete in a run of appends does not pull the band of added rows towards 0."""
+    loads = _volumes(*[1_000] * 8)
+    with_delete = [{"added": 0, "loaded": False, "total": 0}, *loads]
+    assert volume_signal({"added-records": "1000"}, with_delete) == volume_signal(
+        {"added-records": "1000"}, loads
+    )

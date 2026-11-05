@@ -326,39 +326,46 @@ def volume_signal(
 ) -> Observation:
     """Compare the rows a snapshot added with the usual.
 
-    pyiceberg writes ``added-records`` and ``added-data-files`` only when they are above 0, so a
-    commit that adds no data file (a delete of whole files, a merge-on-read commit that adds
-    only delete files) has neither: it added 0 rows, an observation like any other.
+    A commit that added no data file (a delete of whole files, a merge-on-read commit that adds
+    only delete files) is not a load: it records ``ok`` with observed ``{"added": 0, "loaded":
+    false}``, never fires and is left out of the band. That needs evidence: the commit's added
+    files read and none found (`no_data_files`), or an ``added-data-files`` of 0. pyiceberg
+    writes both counts only above 0, so without either a summary that lacks ``added-records``
+    records ``not_recorded``.
 
     Parameters
     ----------
     summary
         The snapshot's summary.
     history
-        Past observed values of this signal, newest first.
+        Past observed values of this signal, newest first; a commit that loaded nothing does not
+        count.
     no_data_files
-        Whether the commit is known to have added no data file (its added files were read).
+        Whether the commit's added files were read and none was a data file.
 
     Returns
     -------
     Observation
-        `no_metrics` when data files were added without an added-records count (reason
-        ``not_recorded``) or when the band overflows (``not_finite``), `no_history` without a
-        band.
+        `no_metrics` without an added-records count (reason ``not_recorded``) or when the band
+        overflows (``not_finite``); ``ok`` and no band for a commit that loaded nothing;
+        `no_history` without a band.
     """
     raw = (summary or {}).get("added-records")
+    total = _whole((summary or {}).get("total-records"))
+    files = (summary or {}).get("added-data-files")
+    if raw is None and (no_data_files or (files is not None and _whole(files) == 0)):
+        return Observation(
+            "volume", None, "ok", {"added": 0, "loaded": False, "total": total}, None
+        )
     added = _whole(raw)
-    if raw is None and summary is not None:
-        files = summary.get("added-data-files")
-        if no_data_files or files is None or _whole(files) == 0:
-            added = 0
     if added is None:
         return Observation("volume", None, "no_metrics", {"reason": "not_recorded"}, None)
-    band = learn_band(_numbers(history, "added"), floor=VOLUME_FLOOR_ROWS, share=VOLUME_FLOOR_SHARE)
+    loads = [h for h in history if h.get("loaded") is not False]
+    band = learn_band(_numbers(loads, "added"), floor=VOLUME_FLOOR_ROWS, share=VOLUME_FLOOR_SHARE)
     if band is not None and not _finite(band.low, band.high, band.median):
         return _not_finite("volume", None)
     state = "no_history" if band is None else "ok" if band.holds(added) else "fired"
-    observed = {"added": added, "total": _whole((summary or {}).get("total-records"))}
+    observed = {"added": added, "total": total}
     return Observation("volume", None, state, observed, band.to_json() if band else None)
 
 
