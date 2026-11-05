@@ -77,6 +77,16 @@ def test_a_nul_in_a_name_is_refused_escaped() -> None:
     )
 
 
+def test_a_name_that_was_not_utf8_is_refused_escaped() -> None:
+    """A non-UTF-8 local name arrives as a lone surrogate (`os.fsdecode`); on every platform."""
+    with pytest.raises(FileShapeError) as caught:
+        _read_set.check_storable("exports", [_file("bad\udcff.csv")])
+    assert str(caught.value) == (
+        "`exports`: names a file Lakana cannot store ('bad\\udcff.csv'): its name holds a NUL "
+        "character or is not valid UTF-8; rename the file; Lakana stores file names as UTF-8 text"
+    )
+
+
 @pytest.mark.parametrize(
     "modified",
     [

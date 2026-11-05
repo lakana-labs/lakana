@@ -1670,9 +1670,16 @@ def test_the_lookback_is_named_in_minutes_or_seconds(
 
 
 def test_a_name_lakana_cannot_store_is_refused_before_any_file_is_read(root: Path) -> None:
-    """Non-UTF-8 bytes in a local name arrive as lone surrogates; the record cannot hold them."""
-    with open(os.fsencode(root) + b"/bad\xff.csv", "wb") as handle:
-        handle.write(b"id\n1\n")
+    """Non-UTF-8 bytes in a local name arrive as lone surrogates; the record cannot hold them.
+
+    APFS (macOS) refuses such a name, so there the test is skipped;
+    `test_ingest_read_set.py` covers the refusal itself on every platform.
+    """
+    try:
+        with open(os.fsencode(root) + b"/bad\xff.csv", "wb") as handle:
+            handle.write(b"id\n1\n")
+    except OSError as exc:  # EILSEQ on APFS
+        pytest.skip(f"this filesystem refuses a name that is not UTF-8 ({exc.strerror})")
     with pytest.raises(FileShapeError) as caught:
         files.read("exports", "*.csv", since=None)
     assert str(caught.value) == (
