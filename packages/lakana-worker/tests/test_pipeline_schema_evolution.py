@@ -52,7 +52,12 @@ from lakana_core.models import (
     RowFilter,
 )
 from lakana_core.policy.column_masks import ColumnMaskService
-from lakana_core.policy.field_binding import PENDING, UNBOUND, PolicySchema
+from lakana_core.policy.field_binding import (
+    PENDING,
+    UNBOUND,
+    UNREADABLE_POLICY_MESSAGE,
+    PolicySchema,
+)
 from lakana_core.policy.resolver import PolicyResolver, ResolvedPolicy
 from lakana_core.policy.row_filters import RowFilterService
 from lakana_core.storage.fsspec_storage import FsspecStorage
@@ -1327,3 +1332,26 @@ def test_an_external_table_whose_files_lack_a_declared_column_fails_under_a_row_
     assert run.result_location is None
     first = [name for name in seen[0] if name.endswith(".parquet")]
     assert len(first) == 2
+
+
+@pytest.mark.parametrize(
+    "corrupt", [{"field_ids": []}, {"column_field_id": None}, {"binding": "names2"}]
+)
+def test_a_corrupt_bound_policy_names_itself_unreadable(
+    session: Session,
+    principal: PrincipalRef,
+    catalog: CatalogService,
+    tmp_path: Path,
+    corrupt: dict[str, object],
+) -> None:
+    """A bound mask whose stored binding cannot be read: the reader is told so, nothing shown."""
+    _people(catalog, principal, "staff")
+    mask = session.get(ColumnMask, _mask(session, catalog, principal, "staff", "ssn"))
+    assert mask is not None
+    for key, value in corrupt.items():
+        setattr(mask, key, value)
+    session.commit()
+
+    _assert_refused(
+        _query(session, principal, "SELECT id FROM gold.staff"), UNREADABLE_POLICY_MESSAGE
+    )

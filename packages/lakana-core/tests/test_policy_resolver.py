@@ -31,6 +31,7 @@ from lakana_core.policy.field_binding import (
     UNBOUND,
     UNREADABLE_POLICY_MESSAGE,
     PolicySchema,
+    UnreadablePolicyError,
 )
 from lakana_core.policy.renames import PolicyColumns
 from lakana_core.policy.resolver import PolicyResolver
@@ -1091,7 +1092,7 @@ def test_a_stored_binding_that_is_not_a_map_refuses(session: Session, with_schem
     )
     schema = PolicySchema.of((_field(2, "dept"),)) if with_schema else None
 
-    with pytest.raises(ValidationError) as caught:
+    with pytest.raises(UnreadablePolicyError) as caught:
         PolicyResolver(session).resolve(alice, _ref(), schema=schema)
 
     assert str(caught.value) == UNREADABLE_POLICY_MESSAGE
@@ -1111,7 +1112,31 @@ def test_a_bound_mask_without_its_columns_id_refuses(session: Session, with_sche
     )
     schema = PolicySchema.of((_field(3, "ssn"),)) if with_schema else None
 
-    with pytest.raises(ValidationError) as caught:
+    with pytest.raises(UnreadablePolicyError) as caught:
         PolicyResolver(session).resolve(alice, _ref(), schema=schema)
+
+    assert str(caught.value) == UNREADABLE_POLICY_MESSAGE
+
+
+@pytest.mark.parametrize("with_schema", [True, False])
+def test_a_binding_state_nobody_knows_refuses(session: Session, with_schema: bool) -> None:
+    """M1: a `binding` outside the four states is unreadable, never read as a legacy row."""
+    alice = _add_principal(session, "alice")
+    _add_filter(session, principal_id=alice.id, expression="dept = 'a'", binding="Field_Ids")
+    schema = PolicySchema.of((_field(2, "dept"),)) if with_schema else None
+
+    with pytest.raises(UnreadablePolicyError) as caught:
+        PolicyResolver(session).resolve(alice, _ref(), schema=schema)
+
+    assert str(caught.value) == UNREADABLE_POLICY_MESSAGE
+
+
+def test_an_unparseable_legacy_policy_refuses_as_unreadable(session: Session) -> None:
+    """The text of a row of an earlier release that no longer parses: the same error class."""
+    alice = _add_principal(session, "alice")
+    _add_filter(session, principal_id=alice.id, expression="dept = (")
+
+    with pytest.raises(UnreadablePolicyError) as caught:
+        PolicyResolver(session).resolve(alice, _ref())
 
     assert str(caught.value) == UNREADABLE_POLICY_MESSAGE

@@ -31,8 +31,9 @@ from lakana_core.catalog.health_read import (
 from lakana_core.catalog.service import CatalogService
 from lakana_core.errors import PermissionDenied, StorageUnavailableError, ValidationError
 from lakana_core.identifiers import NamespacePath, TableRef
-from lakana_core.models import Namespace, Table, TableHealthSignal
+from lakana_core.models import ColumnMask, Namespace, Table, TableHealthSignal
 from lakana_core.pagination import Page
+from lakana_core.policy.field_binding import FIELD_IDS
 from lakana_core.policy.renames import PolicyColumns
 from lakana_core.policy.resolver import ResolvedPolicy
 
@@ -914,6 +915,53 @@ def test_a_mask_on_a_renamed_column_hides_every_value(
     """
     _answer_with(monkeypatch, _PRICE_MASK)
     seen = _visibility(session, tmp_path, principal, _renamed_price)
+    assert seen.filtered
+    assert seen.hides("null_rate", "amount") and seen.hides("range", "amount")
+
+
+def test_a_bound_mask_on_a_renamed_column_hides_every_value(
+    session: Session, tmp_path: Path, principal: PrincipalRef
+) -> None:
+    """A stored mask bound to field 2 (`price`, now `amount`): every value hidden (I1).
+
+    A real policy row, resolved by the real resolver: a bound mask is not judged by name, so
+    the health read hides everything rather than miss the column's new name.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    tmp_path
+        Storage root.
+    principal
+        The reader.
+    """
+    _catalog(session, tmp_path)
+    table = session.scalars(select(Table)).one()
+    namespace = session.get(Namespace, table.namespace_id)
+    assert namespace is not None
+    session.add(
+        ColumnMask(
+            id=uuid.uuid4(),
+            principal_id=principal.id,
+            environment="dev",
+            namespace="silver",
+            table="orders",
+            environment_id=namespace.environment_id,
+            table_id=table.id,
+            column="price",
+            expression="NULL",
+            created_by=principal.id,
+            created_at=_NOW,
+            binding=FIELD_IDS,
+            field_ids={"price": 2},
+            column_field_id=2,
+        )
+    )
+    session.commit()
+
+    seen = _visibility(session, tmp_path, principal, _renamed_price)
+
     assert seen.filtered
     assert seen.hides("null_rate", "amount") and seen.hides("range", "amount")
 

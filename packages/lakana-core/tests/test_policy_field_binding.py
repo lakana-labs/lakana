@@ -8,6 +8,7 @@ from lakana_core.policy.field_binding import (
     FIELD_IDS,
     AmbiguousPolicyColumnError,
     PolicySchema,
+    UnreadablePolicyError,
     bind_policy,
     bound_field_ids,
     match_column,
@@ -103,7 +104,7 @@ def test_a_mask_on_a_column_with_a_case_twin_is_refused_as_ambiguous() -> None:
 @pytest.mark.parametrize("value", [None, [], {"a": "1"}, {"a": True}, {1: 2}, "{}"])
 def test_a_stored_map_that_is_not_names_to_ids_fails_closed(value: object) -> None:
     """Anything but `dict[str, int]` refuses as an unreadable policy."""
-    with pytest.raises(ValidationError) as caught:
+    with pytest.raises(UnreadablePolicyError) as caught:
         stored_field_ids(value)
 
     assert str(caught.value) == UNREADABLE_POLICY_MESSAGE
@@ -189,7 +190,7 @@ def test_rename_columns_of_a_bare_column_mask() -> None:
 @pytest.mark.parametrize("expression", ["t.dept = 'a'", "other = 1", "dept = ("])
 def test_rename_columns_fails_closed(expression: str) -> None:
     """Qualified, unmapped, unparseable: an unreadable policy, never the text as written."""
-    with pytest.raises(ValidationError) as caught:
+    with pytest.raises(UnreadablePolicyError) as caught:
         rename_columns(expression, {"dept": "dept"})
 
     assert str(caught.value) == UNREADABLE_POLICY_MESSAGE
@@ -222,7 +223,7 @@ def test_a_masks_binding_that_does_not_add_up_fails_closed(
     field_ids: object, column_field_id: object
 ) -> None:
     """F4: no id of its own, an expression key with another id, no map, or a non-int id."""
-    with pytest.raises(ValidationError) as caught:
+    with pytest.raises(UnreadablePolicyError) as caught:
         bound_field_ids(field_ids, column="ssn", column_field_id=column_field_id)
 
     assert str(caught.value) == UNREADABLE_POLICY_MESSAGE

@@ -11,16 +11,19 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from lakana_core.auth import PrincipalRef
-from lakana_core.errors import ValidationError
 from lakana_core.identifiers import TableRef
 from lakana_core.models import ColumnMask, Group, GroupMembership, RowFilter
 from lakana_core.policy.expressions import HAS_GROUP, columns_of
 from lakana_core.policy.field_binding import (
+    BINDING_STATES,
     FIELD_IDS,
-    UNREADABLE_POLICY_MESSAGE,
     PolicySchema,
+    UnreadablePolicyError,
     bound_field_ids,
     resolve_expression,
+)
+from lakana_core.policy.field_binding import (
+    UNREADABLE_POLICY_MESSAGE as UNREADABLE_POLICY_MESSAGE,
 )
 from lakana_core.policy.renames import PolicyColumns
 from lakana_core.sql_syntax import SQL_SYNTAX_ERRORS
@@ -106,10 +109,12 @@ def _resolved_text(
 
     Raises
     ------
-    ValidationError
-        If the stored binding or expression of a bound row cannot be read (fail closed), with
-        or without a schema.
+    UnreadablePolicyError
+        If the binding state is none of `BINDING_STATES`, or the stored binding or expression of
+        a bound row cannot be read (fail closed), with or without a schema.
     """
+    if row.binding not in BINDING_STATES:
+        raise UnreadablePolicyError
     column = row.column if isinstance(row, ColumnMask) else None
     if row.binding != FIELD_IDS:
         return row.expression, column, ()
@@ -163,14 +168,14 @@ def _substitute_context_functions(
 
     Raises
     ------
-    ValidationError
+    UnreadablePolicyError
         If the stored expression no longer parses; the message names none of
         its text (`UNREADABLE_POLICY_MESSAGE`).
     """
     try:
         parsed = sqlglot.parse_one(expression, dialect=dialect, into=exp.Condition)
     except SQL_SYNTAX_ERRORS as exc:
-        raise ValidationError(UNREADABLE_POLICY_MESSAGE) from exc
+        raise UnreadablePolicyError from exc
     for node in list(parsed.walk()):
         if isinstance(node, exp.CurrentUser):
             replacement: exp.Expression = exp.Literal.string(principal_name)
@@ -271,9 +276,9 @@ class PolicyResolver:
 
         Raises
         ------
-        ValidationError
-            `UNREADABLE_POLICY_MESSAGE` if a stored policy, or the binding of one, cannot be
-            read.
+        UnreadablePolicyError
+            If a stored policy, its binding or its binding state cannot be read
+            (`UNREADABLE_POLICY_MESSAGE`).
         """
         if table_id is None:
             # Imported here because `lakana_core.catalog` imports this module at load time, so a

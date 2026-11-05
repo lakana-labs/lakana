@@ -13,6 +13,8 @@ under any name the current schema does not have (history whose column cannot be 
 whose column was renamed since it was written is refused by the query path
 (`policy.renames.renamed_policy_column`); here every value of the table is hidden instead, as
 for a row filter, and so it is when the table's metadata cannot be read, or the table has none.
+A mask bound to field ids follows its column under any name, so for now every value is hidden
+from a reader one applies to, as for a row filter.
 
 A row whose snapshot a check set back (`health_record.forget_set_back`) is no longer the table's
 data: the current state and its last firings leave it out (`NOT_SET_BACK`), and the history
@@ -170,15 +172,17 @@ def visibility_for(
         Its id.
     metadata
         Reads the table's current metadata, `None` for a table without any; called only when a
-        mask applies and no row filter does, to find every name of a masked column.
+        mask of an earlier release applies and no row filter or bound mask does, to find every
+        name of a masked column.
 
     Returns
     -------
     Visibility
-        Everything value-revealing hidden when the policies cannot be read, when a column a
-        mask uses was renamed since the mask was written, or when no metadata says which names
-        a masked column has had: none, or a read that failed for any reason but the database's
-        (storage that did not answer, a missing or refused file, a damaged one).
+        Everything value-revealing hidden when the policies cannot be read, when a mask bound
+        to field ids applies, when a column a mask uses was renamed since the mask was written,
+        or when no metadata says which names a masked column has had: none, or a read that
+        failed for any reason but the database's (storage that did not answer, a missing or
+        refused file, a damaged one).
 
     Raises
     ------
@@ -190,7 +194,9 @@ def visibility_for(
     except ValidationError:
         return Visibility(filtered=True)
     masked = frozenset(column.casefold() for column in policy.column_masks)
-    if policy.row_filters:
+    if policy.row_filters or policy.masked_field_ids:
+        # A mask bound to field ids is not judged by name here: its column may carry another
+        # name now, so every value is hidden rather than one name missed.
         return Visibility(masked=masked, filtered=True)
     if not masked:
         return Visibility()

@@ -40,6 +40,9 @@ UNBOUND = "unbound"
 BOUND_STATES = frozenset({FIELD_IDS, BY_NAME})
 """The states shown as `bound`."""
 
+BINDING_STATES = frozenset({FIELD_IDS, BY_NAME, PENDING, UNBOUND})
+"""Every state a policy row may hold; any other is refused as unreadable."""
+
 UNREADABLE_POLICY_MESSAGE = (
     "A row filter or column mask stored on this table could not be read. "
     "Ask an administrator to correct or remove it."
@@ -53,6 +56,18 @@ POLICY_COLUMN_GONE = (
     "for, or revokes it"
 )
 """Why a read is refused when a column a bound policy uses is no longer in the table."""
+
+
+class UnreadablePolicyError(ValidationError):
+    """A stored row filter or column mask, or its binding, cannot be read.
+
+    Always carries `UNREADABLE_POLICY_MESSAGE`, which names no policy text. The worker passes it
+    through to the reader (`lakana_worker.pipeline._resolve_sources_opaquely`): it is raised
+    only after the read grant on the table, and it says what to do next.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(UNREADABLE_POLICY_MESSAGE)
 
 
 class AmbiguousPolicyColumnError(ValidationError):
@@ -173,14 +188,14 @@ def stored_field_ids(value: object) -> dict[str, int]:
 
     Raises
     ------
-    ValidationError
+    UnreadablePolicyError
         If `value` is not a `dict` of `str` keys to `int` (not `bool`) values.
     """
     if not isinstance(value, dict) or not all(
         isinstance(key, str) and isinstance(each, int) and not isinstance(each, bool)
         for key, each in value.items()
     ):
-        raise ValidationError(UNREADABLE_POLICY_MESSAGE)
+        raise UnreadablePolicyError
     return dict(value)
 
 
@@ -205,8 +220,8 @@ def bound_field_ids(
 
     Raises
     ------
-    ValidationError
-        `UNREADABLE_POLICY_MESSAGE` if `field_ids` is not a map of names to ids, a mask has no
+    UnreadablePolicyError
+        If `field_ids` is not a map of names to ids, a mask has no
         integer id of its own, or its expression's key for its own column holds another id: a
         bound row whose ids do not add up is refused, never skipped.
     """
@@ -214,9 +229,9 @@ def bound_field_ids(
     if column is None:
         return ids
     if not isinstance(column_field_id, int) or isinstance(column_field_id, bool):
-        raise ValidationError(UNREADABLE_POLICY_MESSAGE)
+        raise UnreadablePolicyError
     if ids.get(column, column_field_id) != column_field_id:
-        raise ValidationError(UNREADABLE_POLICY_MESSAGE)
+        raise UnreadablePolicyError
     return {**ids, column: column_field_id}
 
 
@@ -319,17 +334,17 @@ def rename_columns(expression: str, names: Mapping[str, str]) -> str:
 
     Raises
     ------
-    ValidationError
-        `UNREADABLE_POLICY_MESSAGE` if it does not parse, qualifies a column, or names a column
+    UnreadablePolicyError
+        If it does not parse, qualifies a column, or names a column
         the binding does not have: the policy is never applied as written instead.
     """
     try:
         parsed = sqlglot.parse_one(expression, dialect="duckdb", into=exp.Condition)
     except SQL_SYNTAX_ERRORS as exc:
-        raise ValidationError(UNREADABLE_POLICY_MESSAGE) from exc
+        raise UnreadablePolicyError from exc
     for column in list(parsed.find_all(exp.Column)):
         if column.table or column.name not in names:
-            raise ValidationError(UNREADABLE_POLICY_MESSAGE)
+            raise UnreadablePolicyError
         column.set("this", exp.to_identifier(names[column.name], quoted=True))
     return parsed.sql(dialect="duckdb")
 
@@ -388,8 +403,8 @@ def resolve_expression(
 
     Raises
     ------
-    ValidationError
-        `UNREADABLE_POLICY_MESSAGE` if the stored ids or the expression cannot be read.
+    UnreadablePolicyError
+        If the stored ids or the expression cannot be read.
     """
     ids = bound_field_ids(field_ids, column=column, column_field_id=column_field_id)
     resolved = resolve_names(ids, schema)

@@ -4003,9 +4003,16 @@ work.
   column, one dropped and added again, a non-promoting retype through `evolve_schema` and a
   set-back to a schema before the column all refuse the same way. A bound row whose ids are missing
   or not a map of names to integers (a mask without `column_field_id`, an expression key with an
-  id other than the mask's own) is refused as unreadable, with or without a schema, never
-  skipped. Callers that only ask whether a policy applies (incremental append, the write refusal,
-  the health read) pass no schema and get the text as written. Policies of earlier releases
+  id other than the mask's own), and a row whose `binding` is none of the four states, is refused
+  as unreadable (`UnreadablePolicyError`, text `UNREADABLE_POLICY_MESSAGE`), with or without a
+  schema, never skipped and never read as a legacy row; the worker passes that text through to
+  the reader (it names no policy). Callers that only ask whether a policy applies (incremental
+  append, the write refusal) pass no schema and get the text as written, which is enough to know
+  that one applies. The health read passes no schema either, so it cannot know a bound mask's
+  column's names: while any bound mask applies to the reader it hides every value, as for a row
+  filter (`catalog.health_read.visibility_for`, pinned by
+  `test_a_bound_mask_on_a_renamed_column_hides_every_value`) until #120's health task
+  resolves the mask by field id. Policies of earlier releases
   (`binding` `pending` or `unbound`) and a raw table's (`names`) keep the rename rule: each records
   the table's schema id at creation (`schema_id`; null for a raw table, a view and an artifact, for
   a filter that reads no column, and for a policy of a release before the column existed), and only

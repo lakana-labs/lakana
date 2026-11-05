@@ -23,9 +23,9 @@ name and a run id) and never carries a storage location. The refusals of a read 
 (`CheckedSnapshotGoneError`, `CheckResultGoneError`, `NoCheckedSnapshotError`) pass
 through on the same grounds, and so do the refusal of a read after a rename touched the column
 of a policy not bound to field ids (`PolicyColumnRenamedError`) and the refusal of a read whose
-bound policy's column was dropped or replaced (`PolicyColumnGoneError`); see
-`_resolve_sources_opaquely`. Every other
-stage's message has the run's own resolved locations redacted out of it before it is
+bound policy's column was dropped or replaced (`PolicyColumnGoneError`), and the fixed text
+of a policy that cannot be read (`UnreadablePolicyError`); see `_resolve_sources_opaquely`.
+Every other stage's message has the run's own resolved locations redacted out of it before it is
 stored. A decrypted secret's plaintext values are treated the same way: added to the same
 redaction list as soon as they are resolved, which `run_one` does first —
 before view expansion, `rewrite_query`, `execute_query`, the write step or
@@ -141,7 +141,11 @@ from lakana_core.models import (
 )
 from lakana_core.policy.cast_types import arrow_cast_type, iceberg_cast_type
 from lakana_core.policy.expressions import columns_of
-from lakana_core.policy.field_binding import PolicySchema, policy_column_gone_message
+from lakana_core.policy.field_binding import (
+    PolicySchema,
+    UnreadablePolicyError,
+    policy_column_gone_message,
+)
 from lakana_core.policy.read_errors import policy_read_failure
 from lakana_core.policy.renames import policy_column_renamed_message, renamed_policy_column
 from lakana_core.policy.resolver import PolicyResolver
@@ -631,6 +635,9 @@ def _resolve_sources(
     PolicyColumnGoneError
         For an Iceberg table: if the field a bound row filter or column mask of the reader
         uses is not in the table's current schema.
+    UnreadablePolicyError
+        If a row filter or column mask of the reader, or its binding, cannot be read
+        (from `PolicyResolver.resolve`).
     _RowsNotListed
         For the table read at a check: if the table has none of the snapshot's columns any
         more, or if a row filter or an applied column mask of the reader reads a column that
@@ -1065,8 +1072,9 @@ def _resolve_sources_opaquely(
     read at a check, after `load_table_at_check` authorized it, with a text of the same three
     names. `PolicyColumnRenamedError` and `PolicyColumnGoneError` pass through as well: raised
     after the read grant, with a text of the table's dotted name as the query names it and a
-    column of the reader's own policy. Every other exception is still made opaque exactly as
-    before.
+    column of the reader's own policy. So does `UnreadablePolicyError`, raised after the read
+    grant with a fixed text that names no policy and says to ask an administrator. Every other
+    exception is still made opaque exactly as before.
 
     Parameters
     ----------
@@ -1118,6 +1126,9 @@ def _resolve_sources_opaquely(
         If `_resolve_sources` raised it — passed through verbatim.
     PolicyColumnGoneError
         If `_resolve_sources` raised it — passed through verbatim.
+    UnreadablePolicyError
+        If the reader's policies, or the binding of one, cannot be read — passed through
+        verbatim: its text names no policy and says whom to ask.
     _ResolutionFailed
         If `_resolve_sources` raised anything else. The original exception
         is the `__cause__`; only its class name survives into the message, except for a
@@ -1148,6 +1159,7 @@ def _resolve_sources_opaquely(
         _RowsNotListed,
         PolicyColumnRenamedError,
         PolicyColumnGoneError,
+        UnreadablePolicyError,
     ):
         raise
     except Exception as exc:
