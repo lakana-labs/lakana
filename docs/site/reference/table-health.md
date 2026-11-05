@@ -279,7 +279,8 @@ header`. A signal that fired without `block` never stops a run, and a signal tha
 (`no_history`, `no_metrics`) never blocks. A view or an artifact never gets such a check. Which
 signals block comes from the deployment the run started with; for `null_rate: block` and
 `range: block`, which columns block comes from the effects of the current deployment, so a deploy
-that lands while the run is going decides those.
+that lands while the run is going decides those. Such a deploy that sets a blocking signal `off`
+also lifts its block for the commits after it: they record the signal as `off`, which never fires.
 
 Write `health:` in the asset's `/* lakana … */` block, or as `health=` in `@asset(...)`: `off` for
 every signal, or a mapping of signals to an effect. `null_rate` and `range` may instead name single
