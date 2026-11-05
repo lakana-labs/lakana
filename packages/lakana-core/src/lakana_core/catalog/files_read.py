@@ -5,7 +5,8 @@ files `files.read` gave it: the Arrow schema metadata key `lakana.files_read`, n
 JSON. The first line is the header ``{"version": 1, "watermark": ...}``, and each line after it
 is one file ``{"connection", "name", "size", "modified", "etag"}``. The commit of an append,
 replace or merge carrying one records its files in `incremental_files_read`, in the transaction
-that moves the table, so the record and the snapshot land together or not at all. A check that sets
+that moves the table, so the record and the snapshot land together or not at all. A replace
+deletes the table's earlier rows, since none of the old files' rows remain, and a check that sets
 snapshots back deletes their rows.
 
 Before the next run of the asset, the worker loads the files recorded within 30 days of its
@@ -552,6 +553,25 @@ def forget_files_read(session: Session, table_id: uuid.UUID, snapshot_ids: Colle
             )
             .execution_options(synchronize_session=False)
         )
+
+
+def forget_table_files_read(session: Session, table_id: uuid.UUID) -> None:
+    """Delete every row of a table, as a replace does: none of the old files' rows remain.
+
+    Uncommitted: the caller's transaction commits them, with the replace's snapshot.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    table_id
+        The table.
+    """
+    session.execute(
+        delete(IncrementalFileRead)
+        .where(IncrementalFileRead.table_id == table_id)
+        .execution_options(synchronize_session=False)
+    )
 
 
 def files_read_for_task(

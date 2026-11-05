@@ -4571,6 +4571,45 @@ secret's values, and the only way a secret reaches a Python asset (#23). User re
   first), compressed Arrow IPC refused. The generic append and
   replace routes, which assets use, keep accepting any layer.
 
+### The record of files read (#344)
+
+A run of a deployed asset that reads files incrementally sends, on its append, replace or merge,
+the list of files `files.read` handed it: the Arrow schema metadata `lakana.files_read`
+(`lakana_core.catalog.files_read`). The server takes it off the upload and checks it before
+anything else reads it (`_taking_record` in `api/platform/tables.py` calls `split_files_read`
+and `parse_files_read` first, then the catalog write), so every bad record is a 422 that names
+the cause and the next step, never a 500, and nothing is written.
+
+- **Only a task's bound token may send one** (`task_scope.bound`). A personal token, a service
+  account's token or an unbound task token is refused with "Only a run of a deployed asset may
+  send a record of the files it read …; remove it from the upload." Pinned by
+  `test_only_a_bound_task_may_send_a_record` and, over HTTP,
+  `test_a_user_upload_with_a_record_is_refused_naming_the_cause`.
+- **Only connections the asset declares** (`bound.connections`, from the deployed manifest);
+  any other is refused naming `@asset(connections=[...])`. Pinned by
+  `test_a_connection_the_asset_does_not_declare_is_refused` and
+  `test_a_bad_record_is_a_422_naming_the_cause_and_writes_nothing`.
+- **Only its own table.** The record rides on a write, and a bound token may write only its
+  asset's table (`GrantAuthorization._check_task_scope`). A task can therefore only make its own
+  table skip or re-read files, which its write right already lets it do: no new power.
+- **Bounded before it is parsed:** at most `MAX_RECORD_BYTES` (64 MiB, a quarter of the upload's
+  body cap), at most `MAX_FILES_READ` (100,000) files plus the header, no line over
+  `MAX_LINE_BYTES` (32 KiB), so each `json.loads` sees one small object. Every field is bounded
+  after: a connection name of at most 63 characters, a path of at most 1,024, a size that fits a
+  signed 64-bit integer, an ETag of at most 512; times within 30 days of years 1 and 9999 and
+  names holding NUL or a lone surrogate are refused, so no value reaches the database it cannot
+  store.
+- **Written in the commit's transaction** (`record_files_read` from `append`, `_record_write` and
+  `_publish_table`): a commit that loses its race records nothing
+  (`test_files_read_are_written_in_the_commits_transaction`). A committed replace deletes the
+  table's earlier record in the same transaction, sent or not, since none of the old files' rows
+  remain. A set-back deletes the rows of the snapshots it takes out of `main`
+  (`forget_files_read` over `own_chain` in `roll_back`'s `settle()`), so their files are read
+  again.
+- **Internal.** No route lists the record. Core strips all schema metadata before a write
+  (`strip_field_metadata`), so the key never reaches a data file; history and load routes ignore
+  it.
+
 ## Audit log (M3e — shipped)
 
 - **The audit log is real.** `lakana_core.audit`: `AuditEvent` is the append-only row model,
