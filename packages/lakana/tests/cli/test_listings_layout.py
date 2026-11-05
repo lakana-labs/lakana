@@ -174,7 +174,7 @@ def _deploy() -> dict[str, Any]:
     }
 
 
-def _policy(**more: str | None) -> dict[str, Any]:
+def _policy(**more: str | bool | None) -> dict[str, Any]:
     return {
         "id": _ID,
         "principal_id": _ID2,
@@ -185,6 +185,7 @@ def _policy(**more: str | None) -> dict[str, Any]:
         "expression": "region = 'EU' AND amount > 100",
         "created_by": "admin",
         "created_at": _TIME,
+        "bound": True,
         **more,
     }
 
@@ -706,3 +707,17 @@ def test_the_json_of_a_grant_or_policy_listing_keeps_both_id_fields(
         (item["principal_id"], item["group_id"]) for item in listing.items
     ]
     assert all("subject" not in row for row in rows)
+
+
+@pytest.mark.parametrize("name", ["row filters", "column masks"])
+def test_a_policy_listing_keeps_bound_when_there_is_room_and_drops_it_last(
+    tmp_path: Path, name: str
+) -> None:
+    """`bound` shows at 220 columns; at 80 it is the last column left out, with the hint."""
+    wide = _render(tmp_path, _LISTINGS[name], 220)
+    narrow = _render(tmp_path, _LISTINGS[name], 80)
+
+    assert "bound" in wide.splitlines()[1]
+    assert "Not shown" not in wide
+    hint = next(line for line in narrow.splitlines() if line.startswith("Not shown"))
+    assert hint.startswith("Not shown: environment, id, namespace")

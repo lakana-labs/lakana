@@ -762,6 +762,7 @@ _ARTIFACT_HANDLING = {
         "load_table_at_check": "hides",
         "commit_table": "refuses",
         "describe_table": "describes",
+        "policy_fields": "describes",
         "table_health": "describes",
         "table_health_signals": "describes",
         "table_references": "describes",

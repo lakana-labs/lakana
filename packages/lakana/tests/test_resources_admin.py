@@ -466,6 +466,30 @@ def test_row_filters_list_sends_only_the_given_filters() -> None:
     assert seen["params"] == {"environment": "dev", "namespace": "gold", "table": "customers"}
 
 
+def test_a_listed_policy_carries_bound_and_one_from_an_older_server_has_none() -> None:
+    """`bound` is read from the answer; a server before this release sends none: `None`."""
+    base = {
+        "principal_id": "p1",
+        "group_id": None,
+        "environment": "dev",
+        "namespace": "gold",
+        "table": "customers",
+        "expression": "id > 1",
+        "created_by": "admin1",
+        "created_at": "2024-01-01T00:00:00+00:00",
+    }
+    rows = [{"id": "a", **base, "bound": False}, {"id": "b", **base}]
+    masks = [{**row, "column": "ssn"} for row in rows]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=masks if "column-masks" in request.url.path else rows)
+
+    transport = _transport(handler)
+
+    assert [f.bound for f in RowFilters(transport).list(environment="dev")] == [False, None]
+    assert [m.bound for m in ColumnMasks(transport).list(environment="dev")] == [False, None]
+
+
 def test_row_filters_revoke_sends_a_delete() -> None:
     """`row_filters.revoke` DELETEs `/api/v1/row-filters/{row_filter_id}`."""
 

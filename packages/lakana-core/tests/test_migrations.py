@@ -5149,3 +5149,67 @@ def test_0065_adds_the_files_read_table_and_downgrades_cleanly(
         assert "incremental_files_read" not in inspect(engine).get_table_names()
     finally:
         engine.dispose()
+
+
+_REVISION_0066 = "f8b2c4d6e0a1"
+
+
+@pytest.mark.usefixtures("_without_fsync")
+def test_0066_adds_the_field_id_binding_and_marks_existing_policies_pending(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Revision `0066`: `field_ids`, `column_field_id`, `binding` (`pending` on old rows).
+
+    Parameters
+    ----------
+    tmp_path
+        Holds the throwaway SQLite file.
+    monkeypatch
+        Points `lakana_core.config.Settings` at that file.
+    """
+    db_path = tmp_path / "migrated.db"
+    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    config = Config(str(ALEMBIC_INI))
+    command.upgrade(config, _REVISION_0065)
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        with engine.begin() as connection:
+            connection.execute(sa.text("PRAGMA foreign_keys=OFF"))
+            common = (
+                ' (id, principal_id, environment, namespace, "table", expression, created_by,'
+                " created_at{extra}) VALUES (:id, :who, 'dev', 'gold', 'x', 'TRUE', :who,"
+                " '2026-11-05 00:00:00'{values})"
+            )
+            connection.execute(
+                sa.text("INSERT INTO row_filters" + common.format(extra="", values="")),
+                {"id": uuid.uuid4().hex, "who": uuid.uuid4().hex},
+            )
+            connection.execute(
+                sa.text(
+                    "INSERT INTO column_masks" + common.format(extra=', "column"', values=", 'ssn'")
+                ),
+                {"id": uuid.uuid4().hex, "who": uuid.uuid4().hex},
+            )
+    finally:
+        engine.dispose()
+    command.upgrade(config, _REVISION_0066)
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        with engine.connect() as conn:
+            assert conn.execute(sa.text("SELECT binding, field_ids FROM row_filters")).one() == (
+                "pending",
+                None,
+            )
+            assert conn.execute(
+                sa.text("SELECT binding, field_ids, column_field_id FROM column_masks")
+            ).one() == ("pending", None, None)
+    finally:
+        engine.dispose()
+    command.downgrade(config, _REVISION_0065)
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        for table in ("row_filters", "column_masks"):
+            names = {c["name"] for c in inspect(engine).get_columns(table)}
+            assert not names & {"field_ids", "column_field_id", "binding"}
+    finally:
+        engine.dispose()

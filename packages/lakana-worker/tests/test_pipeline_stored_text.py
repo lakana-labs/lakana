@@ -14,6 +14,7 @@ from test_pipeline_views import _grant_read, _principal, _query, _view, admin, c
 from lakana_core.auth import AllowAllAuthorization, PrincipalRef
 from lakana_core.catalog.service import CatalogService
 from lakana_core.models import QueryRunStatus, RowFilter, Table
+from lakana_core.policy.field_binding import UNREADABLE_POLICY_MESSAGE
 from lakana_core.policy.row_filters import RowFilterService
 from lakana_core.runs.tasks import FailureKind
 from lakana_worker import pipeline
@@ -174,13 +175,13 @@ def test_a_deeply_nested_query_is_invalid_and_permanent(
     assert classify(RecursionError()) is FailureKind.PERMANENT
 
 
-def test_a_broken_stored_policy_on_the_read_path_gives_the_opaque_resolution_message(
+def test_a_broken_stored_policy_on_the_read_path_gives_the_unreadable_policy_message(
     session: Session,
     admin: PrincipalRef,  # ruff: ignore[redefined-while-unused]
     catalog: CatalogService,  # ruff: ignore[redefined-while-unused]
     tmp_path: Path,
 ) -> None:
-    """C: policy resolution runs inside the opaque wrapper, so only the class name survives."""
+    """C: an unreadable policy is named with a fixed text that carries none of its own text."""
     bob = _principal(session, "bob")
     _grant_read(session, admin, "bob", "bronze.orders")
     RowFilterService(session, AllowAllAuthorization(), catalog).create(
@@ -198,7 +199,8 @@ def test_a_broken_stored_policy_on_the_read_path_gives_the_opaque_resolution_mes
     run, rows = _query(session, bob, tmp_path, "SELECT * FROM bronze.orders")
 
     assert rows == []
-    assert run.error_message == "Resolving the tables this query reads failed (ValidationError)."
+    assert run.error_message == UNREADABLE_POLICY_MESSAGE
+    assert "SECRETWORD" not in run.error_message
 
 
 def test_the_not_published_text_carries_no_storage_location(

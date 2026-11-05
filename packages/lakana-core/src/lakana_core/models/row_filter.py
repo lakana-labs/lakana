@@ -1,6 +1,6 @@
 """The row filter model."""
 
-from sqlalchemy import Integer, Text
+from sqlalchemy import Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from lakana_core.models.base import Base
@@ -44,11 +44,8 @@ class RowFilter(PolicyRecord, Base):
         The authoritative binding; the name columns are display-only.
     expression : str
         The SQL expression for filtering rows.
-    schema_id : int or None
-        The id of the table's current schema when this row filter was created, or `None` for a
-        row filter created before it was recorded or on a table without field ids. A rename since
-        then may have made the filter cover another column
-        (`lakana_core.policy.renames.renamed_policy_column`).
+    schema_id, field_ids, binding
+        The field-id binding of the columns it reads; see `PolicyRecord`.
     created_by : uuid.UUID
         ID of the principal who created this filter.
     created_at : datetime
@@ -62,4 +59,3 @@ class RowFilter(PolicyRecord, Base):
     __tablename__ = "row_filters"
 
     expression: Mapped[str] = mapped_column(Text)
-    schema_id: Mapped[int | None] = mapped_column(Integer, nullable=True)

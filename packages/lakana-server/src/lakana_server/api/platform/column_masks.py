@@ -16,6 +16,7 @@ from lakana_core.errors import ValidationError
 from lakana_core.identifiers import NamespacePath
 from lakana_core.models import ColumnMask
 from lakana_core.policy.column_masks import ColumnMaskService
+from lakana_core.policy.shown import ShownPolicy
 from lakana_server.api.platform.schemas import ColumnMaskCreate, ColumnMaskOut
 from lakana_server.api.responses import errors
 from lakana_server.api.routing import AuthenticateFirstRoute
@@ -65,13 +66,16 @@ def _joined_to_dotted(namespace: str) -> str:
     return ".".join(NamespacePath.parse(namespace).parts)
 
 
-def _to_out(row: ColumnMask) -> ColumnMaskOut:
+def _to_out(row: ColumnMask, shown: ShownPolicy) -> ColumnMaskOut:
     """Build a response body from a ColumnMask row.
 
     Parameters
     ----------
     row
         The row to convert.
+    shown
+        How a listing shows the mask: its column and its expression in the table's current
+        column names, and whether the mask is bound.
 
     Returns
     -------
@@ -85,10 +89,11 @@ def _to_out(row: ColumnMask) -> ColumnMaskOut:
         environment=row.environment,
         namespace=_joined_to_dotted(row.namespace),
         table=row.table,
-        column=row.column,
-        expression=row.expression,
+        column=shown.column or row.column,
+        expression=shown.expression,
         created_by=row.created_by,
         created_at=row.created_at,
+        bound=shown.bound,
     )
 
 
@@ -143,7 +148,7 @@ def create_column_mask(
         column=body.column,
         expression=body.expression,
     )
-    return _to_out(created)
+    return _to_out(created, service.shown(principal, [created])[created.id])
 
 
 @router.get("", response_model=list[ColumnMaskOut], responses=errors(403, 404))
@@ -202,7 +207,8 @@ def list_column_masks(
         raise ValidationError(
             "Provide 'principal_name', 'group_name', or 'environment'+'namespace'+'table' together."
         )
-    return [_to_out(row) for row in rows]
+    shown = service.shown(principal, rows)
+    return [_to_out(row, shown[row.id]) for row in rows]
 
 
 @router.delete("/{column_mask_id}", status_code=204, responses=errors(403, 404))

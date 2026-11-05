@@ -226,6 +226,32 @@ def test_column_mask_create_and_revoke(tmp_path: Path) -> None:
     assert invoke(make_state(tmp_path, api), "column-mask", "revoke", "m1", "--yes").exit_code == 0
 
 
+def test_policy_lists_show_whether_each_policy_is_bound(tmp_path: Path) -> None:
+    """Both listings have a `bound` column of yes/no; JSON has the boolean."""
+    row = {
+        "principal_id": "p1",
+        "group_id": None,
+        "environment": "dev",
+        "namespace": "bronze",
+        "table": "sales",
+        "expression": "id > 1",
+        "created_by": "a1",
+        "created_at": "2026-01-01T00:00:00+00:00",
+    }
+    api = FakeApi()
+    api.on("GET", "/api/v1/row-filters", json=[{**row, "id": "r1", "bound": True}])
+    api.on("GET", "/api/v1/column-masks", json=[{**row, "id": "m1", "column": "c", "bound": False}])
+
+    filters = invoke(make_state(tmp_path, api), "row-filter", "list")
+    masks = invoke(make_state(tmp_path, api), "column-mask", "list")
+    as_json = invoke(make_state(tmp_path, api), "--output", "json", "row-filter", "list")
+
+    assert "bound" in filters.stdout
+    assert "yes" in next(line for line in filters.stdout.splitlines() if "r1" in line).split()
+    assert "no" in next(line for line in masks.stdout.splitlines() if "m1" in line).split()
+    assert '"bound": true' in as_json.stdout
+
+
 def test_column_mask_list(tmp_path: Path) -> None:
     """Filters are forwarded to the list route."""
     mask = {

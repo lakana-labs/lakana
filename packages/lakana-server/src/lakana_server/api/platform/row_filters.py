@@ -15,6 +15,7 @@ from lakana_core.errors import ValidationError
 from lakana_core.identifiers import NamespacePath
 from lakana_core.models import RowFilter
 from lakana_core.policy.row_filters import RowFilterService
+from lakana_core.policy.shown import ShownPolicy
 from lakana_server.api.platform.schemas import RowFilterCreate, RowFilterOut
 from lakana_server.api.responses import errors
 from lakana_server.api.routing import AuthenticateFirstRoute
@@ -60,13 +61,16 @@ def _joined_to_dotted(namespace: str) -> str:
     return ".".join(NamespacePath.parse(namespace).parts)
 
 
-def _to_out(row: RowFilter) -> RowFilterOut:
+def _to_out(row: RowFilter, shown: ShownPolicy) -> RowFilterOut:
     """Build a response body from a RowFilter row.
 
     Parameters
     ----------
     row
         The row to convert.
+    shown
+        How a listing shows the filter: its expression in the table's current column names, and
+        whether the filter is bound.
 
     Returns
     -------
@@ -80,9 +84,10 @@ def _to_out(row: RowFilter) -> RowFilterOut:
         environment=row.environment,
         namespace=_joined_to_dotted(row.namespace),
         table=row.table,
-        expression=row.expression,
+        expression=shown.expression,
         created_by=row.created_by,
         created_at=row.created_at,
+        bound=shown.bound,
     )
 
 
@@ -134,7 +139,7 @@ def create_row_filter(
         table=body.table,
         expression=body.expression,
     )
-    return _to_out(created)
+    return _to_out(created, service.shown(principal, [created])[created.id])
 
 
 @router.get("", response_model=list[RowFilterOut], responses=errors(403, 404))
@@ -193,7 +198,8 @@ def list_row_filters(
         raise ValidationError(
             "Provide 'principal_name', 'group_name', or 'environment'+'namespace'+'table' together."
         )
-    return [_to_out(row) for row in rows]
+    shown = service.shown(principal, rows)
+    return [_to_out(row, shown[row.id]) for row in rows]
 
 
 @router.delete("/{row_filter_id}", status_code=204, responses=errors(403, 404))

@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from core_test_helpers import FakeColumnCatalog, ensure_table
+from core_test_helpers import FakeColumnCatalog, NoPolicyFields, ensure_table
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -38,6 +38,7 @@ from lakana_core.models import (
     TableType,
 )
 from lakana_core.policy.row_filters import RowFilterService
+from lakana_core.policy.shown import ShownPolicy
 from lakana_core.statement_limit import statement_too_long_message
 
 
@@ -336,6 +337,10 @@ def test_create_then_list_for_principal(session: Session) -> None:
 
     listed = service.list_for_principal(admin, "alice")
     assert [f.id for f in listed] == [created.id]
+    # The fake catalog has no table metadata to rename from: shown as written, bound.
+    assert service.shown(admin, listed) == {
+        created.id: ShownPolicy("region = current_user()", None, True)
+    }
 
 
 def test_create_then_list_for_group(session: Session) -> None:
@@ -864,7 +869,7 @@ def test_a_caller_without_manage_policy_learns_nothing_about_the_columns(
 
 
 @dataclass
-class _GrantCheckingCatalog:
+class _GrantCheckingCatalog(NoPolicyFields):
     """A catalog whose `describe_table` asks the real grant authorization for READ_TABLE."""
 
     authz: GrantAuthorization
@@ -987,9 +992,9 @@ def _page_quotes() -> list[str]:
     ]
 
 
-def test_the_page_quotes_seventeen_refusals() -> None:
+def test_the_page_quotes_nineteen_refusals() -> None:
     """The table the next tests read has the rows they expect."""
-    assert len(_page_quotes()) == 17
+    assert len(_page_quotes()) == 19
 
 
 def _create_error(session: Session, expression: str = "id > 1", **override: str) -> Exception:
@@ -1279,3 +1284,73 @@ def test_a_filter_on_the_types_infer_schema_really_stores_is_not_refused(
     catalog = FakeColumnCatalog(names=list(stored), types=stored, file_format=file_format)
 
     assert _create_filter(session, expression, catalog).expression == expression
+
+
+# --- the filter's columns are bound to field ids when it is created ---
+
+
+def test_a_new_row_filter_stores_the_field_ids_of_the_columns_it_reads(session: Session) -> None:
+    """`Region = 'eu'` against a table whose `region` is field 2; the name stays as written."""
+    catalog = FakeColumnCatalog(names=["id", "region"], schema_id=1)
+    service, admin = _ready(session, catalog)
+
+    row = service.create(admin, **_filter_args("Region = 'eu'"))
+
+    assert (row.binding, row.field_ids) == ("field_ids", {"Region": 2})
+
+
+def test_a_filter_that_reads_no_column_is_bound_and_empty(session: Session) -> None:
+    """`TRUE` has nothing to follow: `field_ids` with an empty map."""
+    service, admin = _ready(session, FakeColumnCatalog(schema_id=1))
+
+    row = service.create(admin, **_filter_args("TRUE"))
+
+    assert (row.binding, row.field_ids) == ("field_ids", {})
+
+
+def test_a_filter_that_reads_no_column_on_a_raw_table_is_bound_and_empty(
+    session: Session,
+) -> None:
+    """Even on a raw table `TRUE` is `field_ids` with `{}`: it does not ask the catalog."""
+    catalog = FakeColumnCatalog(file_format="parquet")
+    service, admin = _ready(session, catalog)
+
+    row = service.create(admin, **_filter_args("TRUE"))
+
+    assert (row.binding, row.field_ids, catalog.calls) == ("field_ids", {}, [])
+
+
+def test_a_filter_on_a_raw_table_is_bound_by_name(session: Session) -> None:
+    """An external table has no field ids: `names`, nothing stored."""
+    catalog = FakeColumnCatalog(names=["id", "region"], file_format="parquet")
+    service, admin = _ready(session, catalog)
+
+    row = service.create(admin, **_filter_args("region = 'eu'"))
+
+    assert (row.binding, row.field_ids) == ("names", None)
+
+
+def test_creation_binds_ids_from_the_description_it_type_checked(session: Session) -> None:
+    """Regression pin: one `describe_table` call gives the schema id, the types and the ids."""
+    catalog = FakeColumnCatalog(names=["id", "region"], schema_id=1)
+    service, admin = _ready(session, catalog)
+
+    service.create(admin, **_filter_args("region = 'eu'"))
+
+    assert len(catalog.calls) == 1
+
+
+def test_creation_refuses_an_ambiguous_column(session: Session) -> None:
+    """A table with `Maß` and `MASS`: the filter `Maß = 'x'` is refused with the ambiguity text."""
+    catalog = FakeColumnCatalog(names=["Maß", "MASS"], schema_id=1)
+    service, admin = _ready(session, catalog)
+
+    with pytest.raises(ValidationError) as exc_info:
+        service.create(admin, **_filter_args("Maß = 'x'"))
+
+    assert str(exc_info.value) == (
+        "The policy names column 'Maß', and the table has the columns 'MASS' and 'Maß', "
+        "which Lakana cannot tell apart for a policy. Ask the owner of the table to rename "
+        "one of them, then create the policy again."
+    )
+    assert session.execute(select(RowFilter)).scalars().all() == []

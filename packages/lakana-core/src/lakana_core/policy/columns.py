@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 import logging
+import uuid
+from collections.abc import Iterable
 from typing import TYPE_CHECKING, Literal, Protocol
+
+from pyiceberg.types import NestedField, StringType
 
 from lakana_core.auth import PrincipalRef
 from lakana_core.errors import ConflictError, LakanaError, NotFoundError, PermissionDenied
 from lakana_core.identifiers import NamespacePath, TableRef
 from lakana_core.policy.expressions import QualifiedColumnError, validate_restricted_expression
+from lakana_core.policy.field_binding import BY_NAME, PolicyBinding, bind_policy
 
 if TYPE_CHECKING:
     from lakana_core.catalog.service import TableDescription
@@ -36,6 +41,23 @@ class ColumnSource(Protocol):
         -------
         TableDescription
             The table, including its columns.
+        """
+        ...
+
+    def policy_fields(self, p: PrincipalRef, table_id: uuid.UUID) -> tuple[NestedField, ...] | None:
+        """Read a table's current top-level fields, to show the policies on it.
+
+        Parameters
+        ----------
+        p
+            The acting principal, who must be allowed to manage policies.
+        table_id
+            The table's id.
+
+        Returns
+        -------
+        tuple of NestedField or None
+            The fields; `None` when the table has none to read or they cannot be read.
         """
         ...
 
@@ -108,6 +130,44 @@ def type_checks_apply(description: TableDescription) -> bool:
         `False` for an external table of a CSV or JSON file, `True` otherwise.
     """
     return description.file_format in (None, "parquet")
+
+
+def binding_for(
+    description: TableDescription, columns: Iterable[str], *, masked_column: str | None = None
+) -> PolicyBinding:
+    """Bind a new policy's column names to the field ids of the table it was checked against.
+
+    Parameters
+    ----------
+    description
+        The table, as `read_table_description` returned it: the same read that gave the schema
+        id and the types.
+    columns
+        The names the policy's expression reads.
+    masked_column
+        A mask's own column.
+
+    Returns
+    -------
+    PolicyBinding
+        `BY_NAME` for a table without field ids (an external table, a view, an artifact);
+        otherwise `FIELD_IDS` with every name bound.
+
+    Raises
+    ------
+    ValidationError
+        If a name matches no column (`bind_policy`); the creation checks refuse that first.
+    AmbiguousPolicyColumnError
+        If a name matches two columns of the table under casefold.
+    """
+    if description.kind == "EXTERNAL" or description.schema_id is None:
+        return PolicyBinding(BY_NAME, None, None)
+    fields = [
+        NestedField(description.field_ids[spec.name], spec.name, StringType(), required=False)
+        for spec in description.columns
+        if spec.name in description.field_ids
+    ]
+    return bind_policy(fields, columns, masked_column=masked_column)
 
 
 def read_column_names(

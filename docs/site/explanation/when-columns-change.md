@@ -66,9 +66,10 @@ everything that reads all columns quietly gets one fewer.
 
 A column whose type changes in a way that does not widen is a new column under the old name. A row
 filter or column mask that uses it was made for the old column, so a read of the table by the
-people it applies to is refused, and nothing is shown: ``` `gold.payments` has a row filter or column mask that uses column `amount`, and a column was renamed or replaced since the policy was created, so the policy may now cover a different column. Nothing is shown. An administrator must review … ```.
+people it applies to is refused, and nothing is shown: ``` `gold.payments` has a row filter or column mask on a column that was dropped or replaced (created for `amount`); an administrator creates it again for the column it is meant for, or revokes it ```.
 An administrator creates the filter or mask again for the new column, then revokes the old one
-([After a rename](../how-to/filter-rows.md#after-a-rename) has the order). A widened column keeps
+([Filters and dropped columns](../how-to/filter-rows.md#filters-and-dropped-columns) has the
+order). A widened column keeps
 its policies: it is the same column. Before an asset with `evolve_schema` changes a column's type,
 ask whoever manages the table's policies, so the reads do not stop by surprise.
 
@@ -94,7 +95,7 @@ An administrator, someone who may manage policies, sees more under the same line
 row filter or column mask that uses the column, with its id, the column, and the next step: create
 the policy again for the column it is meant for, then revoke the old one with the
 `lakana row-filter revoke` or `lakana column-mask revoke` command it names, in that order
-([After a rename](../how-to/filter-rows.md#after-a-rename)). The SDK and the REST API have these in
+([Filters and dropped columns](../how-to/filter-rows.md#filters-and-dropped-columns)). The SDK and the REST API have these in
 `policy_warnings`, which is empty for everyone else. Nobody sees a policy's expression or whom it
 applies to here.
 

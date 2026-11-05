@@ -6,6 +6,7 @@ import dataclasses
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 
 import pyarrow as pa
 import pytest
@@ -49,6 +50,8 @@ from lakana_core.runs.lockdown import ProtectedWriteGuard, WriteOperation
 from lakana_core.storage.resolver import StorageResolver
 
 _TABLE = "gold.orders"
+_BEFORE = Schema(NestedField(2, "region", StringType(), required=False))
+_AFTER = Schema(NestedField(1, "id", LongType(), required=False))
 
 
 def _schema(*fields: tuple[int, str, IcebergType]) -> Schema:
@@ -161,6 +164,7 @@ def _policy(
     *,
     column: str | None = None,
     revoked: bool = False,
+    bound: dict[str, int] | None = None,
 ) -> uuid.UUID:
     """Store an active (or revoked) row filter or column mask on `gold.orders`.
 
@@ -178,6 +182,9 @@ def _policy(
         A mask's column.
     revoked
         Whether it is revoked.
+    bound
+        When given, the field ids it is bound to (a mask's own column included); the row is
+        then `field_ids`, otherwise it is `pending`.
 
     Returns
     -------
@@ -186,7 +193,11 @@ def _policy(
     """
     table = session.scalars(select(Table).where(Table.name == "orders")).one()
     now = datetime.now(UTC)
-    extra = {} if column is None else {"column": column}
+    extra: dict[str, object] = {} if column is None else {"column": column}
+    if bound is not None:
+        extra |= {"binding": "field_ids", "field_ids": bound}
+        if column is not None:
+            extra["column_field_id"] = bound[column]
     row = model(
         id=uuid.uuid4(),
         principal_id=principal.id,
@@ -406,7 +417,9 @@ def test_a_mask_whose_stored_expression_does_not_parse_still_counts_its_own_colu
     table = session.scalars(select(Table)).one()
     mask = _policy(session, principal, ColumnMask, "((", column="region")
     _policy(session, principal, RowFilter, "((")
-    found = broken_policies(session, table.id, _TABLE, {"region": "removed"})
+    found = broken_policies(
+        session, table.id, _TABLE, {"region": "removed"}, before=_BEFORE, after=_AFTER
+    )
 
     assert found == (BrokenPolicy(_TABLE, "column_mask", mask, "region", "removed"),)
 
@@ -476,7 +489,9 @@ def test_a_mask_whose_expression_spells_its_column_in_another_case_is_named_once
     table = session.scalars(select(Table)).one()
     mask = _policy(session, principal, ColumnMask, "upper(REGION)", column="region")
 
-    found = broken_policies(session, table.id, _TABLE, {"region": "removed"})
+    found = broken_policies(
+        session, table.id, _TABLE, {"region": "removed"}, before=_BEFORE, after=_AFTER
+    )
 
     assert found == (BrokenPolicy(_TABLE, "column_mask", mask, "region", "removed"),)
 
@@ -621,3 +636,99 @@ def test_a_noted_column_change_does_not_carry_over_to_a_check_of_another_table(
     session.commit()
 
     assert _stored(session, task_run_id) is None
+
+
+def _judged(
+    session: Session, table_id: uuid.UUID, before: Schema, after: Schema
+) -> tuple[BrokenPolicy, ...]:
+    """Judge the policies of the table by a schema change, as a write does.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    table_id
+        The table.
+    before
+        The schema before.
+    after
+        The schema after.
+
+    Returns
+    -------
+    tuple of BrokenPolicy
+        The warnings.
+    """
+    return broken_policies(
+        session, table_id, _TABLE, changed_columns(before, after), before=before, after=after
+    )
+
+
+def test_a_rename_does_not_warn_about_a_bound_policy_that_follows_it(
+    session: Session, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    _catalog(session, principal, tmp_path)
+    table = session.scalars(select(Table)).one()
+    _policy(session, principal, RowFilter, "dept = 'a'", bound={"dept": 2})
+    _policy(session, principal, ColumnMask, "'*'", column="dept", bound={"dept": 2})
+    before = _schema((2, "dept", StringType()))
+    after = _schema((2, "team", StringType()))
+
+    assert changed_columns(before, after) == {"dept": "removed"}
+    assert _judged(session, table.id, before, after) == ()
+
+
+def test_a_drop_warns_about_a_bound_policy_by_its_written_name(
+    session: Session, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    _catalog(session, principal, tmp_path)
+    table = session.scalars(select(Table)).one()
+    row = _policy(session, principal, RowFilter, "DEPT = 'a'", bound={"DEPT": 2})
+    before = _schema((1, "id", LongType()), (2, "dept", StringType()))
+
+    found = _judged(session, table.id, before, _schema((1, "id", LongType())))
+
+    assert found == (BrokenPolicy(_TABLE, "row_filter", row, "DEPT", "removed"),)
+
+
+def test_a_drop_and_add_warns_replaced(
+    session: Session, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    _catalog(session, principal, tmp_path)
+    table = session.scalars(select(Table)).one()
+    mask = _policy(session, principal, ColumnMask, "'*'", column="dept", bound={"dept": 2})
+    before = _schema((2, "dept", StringType()))
+
+    found = _judged(session, table.id, before, _schema((5, "dept", StringType())))
+
+    assert found == (BrokenPolicy(_TABLE, "column_mask", mask, "dept", "replaced"),)
+
+
+def test_an_unbound_policy_is_still_judged_by_name(
+    session: Session, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    _catalog(session, principal, tmp_path)
+    table = session.scalars(select(Table)).one()
+    row = _policy(session, principal, RowFilter, "dept = 'a'")
+    before = _schema((2, "dept", StringType()))
+
+    found = _judged(session, table.id, before, _schema((2, "team", StringType())))
+
+    assert found == (BrokenPolicy(_TABLE, "row_filter", row, "dept", "removed"),)
+
+
+def test_a_bound_policy_with_unreadable_ids_is_judged_by_name(
+    session: Session, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    _catalog(session, principal, tmp_path)
+    table = session.scalars(select(Table)).one()
+    row = _policy(session, principal, RowFilter, "dept = 'a'", bound={"dept": 2})
+    stored = session.get(RowFilter, row)
+    assert stored is not None
+    stored.field_ids = cast("dict[str, int]", {"dept": "x"})
+    session.commit()
+    before = _schema((2, "dept", StringType()))
+
+    found = _judged(session, table.id, before, _schema((2, "team", StringType())))
+
+    assert found == (BrokenPolicy(_TABLE, "row_filter", row, "dept", "removed"),)

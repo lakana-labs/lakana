@@ -20,12 +20,16 @@ from lakana_core.identifiers import NamespacePath, TableRef
 from lakana_core.models import AuditEventType, ColumnMask, Group, Principal
 from lakana_core.policy.columns import (
     ColumnSource,
+    binding_for,
     list_columns,
     read_table_description,
     type_checks_apply,
     validate_for_table,
 )
 from lakana_core.policy.expression_types import check_expression_types
+from lakana_core.policy.expressions import columns_of
+from lakana_core.policy.field_binding import PolicyBinding
+from lakana_core.policy.shown import PolicyShowing
 
 
 def _check_column_exists(
@@ -35,8 +39,8 @@ def _check_column_exists(
     environment: str,
     column: str,
     expression: str,
-) -> tuple[int | None, bool]:
-    """Refuse a mask on a missing column or of another type; give its schema and typed flag.
+) -> tuple[int | None, bool, PolicyBinding]:
+    """Refuse a mask on a missing column or of another type; give its schema, typed flag, binding.
 
     The comparison is exact, as it is when the mask is applied to a query, so
     a mask accepted here is a mask the query path can honour.
@@ -58,11 +62,13 @@ def _check_column_exists(
 
     Returns
     -------
-    tuple of int or None and bool
+    tuple of int or None, bool and PolicyBinding
         The id of the table's current schema as read for this check, so that the mask records
         the schema whose columns and types were checked (`None` for a table without field ids),
         and whether the types were checked: `False` for a CSV or JSON table, whose stored types
-        are only a guess, and for a nanosecond timestamp column, which has no cast target.
+        are only a guess, and for a nanosecond timestamp column, which has no cast target; and
+        the binding of the masked column and the columns the mask reads to the field ids of that
+        same read.
 
     Raises
     ------
@@ -70,6 +76,9 @@ def _check_column_exists(
         If the table has no column called `column`; or if the mask compares values of different
         types, or its own type differs from the column's (the message names the column, both
         types and a value that keeps the column's type).
+    AmbiguousPolicyColumnError
+        If the masked column or a column the mask reads matches two columns of the table
+        without regard to case.
     PermissionDenied
         If `p` lacks READ_TABLE on the table, which reading its columns needs.
     ConflictError
@@ -79,12 +88,13 @@ def _check_column_exists(
     description = read_table_description(catalog, p, ref, policy="mask")
     names = [spec.name for spec in description.columns]
     if column in names:
-        if not type_checks_apply(description):
-            return description.schema_id, False
-        typed = check_expression_types(
+        typed = type_checks_apply(description) and check_expression_types(
             expression, kind="mask", columns=description.columns, masked_column=column
         )
-        return description.schema_id, typed
+        # After the type check, so a column the table lacks gets its message, which names the
+        # expression, before the binding's.
+        binding = binding_for(description, columns_of(expression), masked_column=column)
+        return description.schema_id, typed, binding
     message = f"Table {dotted!r} in environment {environment!r} has no column {column!r}. "
     message += list_columns(names)
     if names:
@@ -95,7 +105,7 @@ def _check_column_exists(
     raise ValidationError(message)
 
 
-class ColumnMaskService:
+class ColumnMaskService(PolicyShowing):
     """Create, list, and revoke column masks.
 
     Parameters
@@ -271,7 +281,7 @@ class ColumnMaskService:
         ref = TableRef(
             environment=environment, namespace=NamespacePath.parse(namespace), name=table
         )
-        schema_id, type_checked = _check_column_exists(
+        schema_id, type_checked, binding = _check_column_exists(
             self._catalog, p, ref, environment, column, expression
         )
         row = ColumnMask(
@@ -286,6 +296,9 @@ class ColumnMaskService:
             column=column,
             expression=expression,
             schema_id=schema_id,
+            field_ids=binding.field_ids,
+            column_field_id=binding.column_field_id,
+            binding=binding.binding,
             type_checked=type_checked,
             created_by=p.id,
             created_at=datetime.now(UTC),

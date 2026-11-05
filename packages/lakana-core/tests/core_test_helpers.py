@@ -1043,8 +1043,29 @@ COMMON_MASK_COLUMNS = ["id", "name", "email", "ssn", "region", "salary", "owner"
 """The columns `FakeColumnCatalog` reports unless a test says otherwise."""
 
 
+class NoPolicyFields:
+    """The `ColumnSource.policy_fields` of a fake catalog that has no table metadata."""
+
+    def policy_fields(self, p: PrincipalRef, table_id: uuid.UUID) -> tuple[NestedField, ...] | None:
+        """Report no fields: listings show the text as written.
+
+        Parameters
+        ----------
+        p
+            The acting principal.
+        table_id
+            The table.
+
+        Returns
+        -------
+        None
+            Always.
+        """
+        return None
+
+
 @dataclass
-class FakeColumnCatalog:
+class FakeColumnCatalog(NoPolicyFields):
     """A `ColumnSource` that reports fixed columns, or raises, and records its calls.
 
     Parameters
@@ -1060,6 +1081,9 @@ class FakeColumnCatalog:
     file_format
         When set, the tables are external (raw-zone) tables of this format (`"parquet"`,
         `"csv"`, `"json"`); `None` for Iceberg tables.
+    field_ids
+        The field id of each column by name; for an Iceberg table, 1, 2, ... in the order of
+        `names` unless given, and none for an external table.
     calls
         Each `describe_table` call, as (principal, reference).
     """
@@ -1069,6 +1093,7 @@ class FakeColumnCatalog:
     schema_id: int | None = None
     types: dict[str, str] = field(default_factory=dict)
     file_format: str | None = None
+    field_ids: dict[str, int] | None = None
     calls: list[tuple[PrincipalRef, TableRef]] = field(default_factory=list)
 
     def describe_table(self, p: PrincipalRef, ref: TableRef) -> TableDescription:
@@ -1094,6 +1119,9 @@ class FakeColumnCatalog:
         self.calls.append((p, ref))
         if self.error is not None:
             raise self.error
+        ids = self.field_ids
+        if ids is None:
+            ids = {n: i for i, n in enumerate(self.names, 1)} if self.file_format is None else {}
         return TableDescription(
             ref=ref,
             id=uuid.uuid4(),
@@ -1105,6 +1133,7 @@ class FakeColumnCatalog:
             ],
             schema_id=self.schema_id,
             file_format=self.file_format,
+            field_ids=ids,
         )
 
 

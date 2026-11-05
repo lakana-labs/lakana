@@ -1,10 +1,13 @@
 """Finding a row filter or column mask whose column a rename may have moved.
 
-Policies bind to column names, while an Iceberg table is read by field id. A rename through
-the REST catalog therefore changes which column a policy covers without any error: a mask on
-`ssn` follows the name when `email` is renamed to `ssn`. Each policy records the id of the
-table schema it was written against; a read compares the schemas from then on and refuses when
-a name the policy uses changed owner.
+A policy bound to field ids (`policy.field_binding`) follows its column through a rename and
+is not judged here. This rule applies only to rows whose binding is `pending` or `unbound`
+(made by an earlier release and not bound exactly) and to a raw table's (`names`): these bind
+to column names, while an Iceberg table is read by field id. A rename through the REST catalog
+therefore changes which column such a policy covers without any error: a mask on `ssn` follows
+the name when `email` is renamed to `ssn`. Each policy records the id of the table schema it
+was written against; a read compares the schemas from then on and refuses when a name the
+policy uses changed owner.
 """
 
 from __future__ import annotations

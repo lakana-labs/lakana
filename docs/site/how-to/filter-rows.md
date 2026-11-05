@@ -69,7 +69,13 @@ lakana row-filter list --principal alice
 ```
 
 `list` takes `--principal`, `--group` or `--env` to narrow the list; it shows the id of each filter,
-which `revoke` needs:
+which `revoke` needs. The `expression` is shown with the column names the table has now:
+after a column was renamed, a filter on it is listed under the new name. The `bound` column says whether the
+filter follows its columns through such a rename: `yes` for every filter you create now. `no` marks
+a filter of an earlier release that is not bound yet: right after an upgrade the worker binds them over
+the next passes, and only a filter that stays `no` after that, which Lakana could not bind exactly,
+keeps refusing reads after a rename until you create it again and revoke the old one ([Row filters and column masks follow
+renamed columns](../explanation/upgrades.md#row-filters-and-column-masks-follow-renamed-columns)).
 
 `$ROW_FILTER_ID` is the id that `list` printed:
 
@@ -81,7 +87,8 @@ lakana row-filter revoke "$ROW_FILTER_ID" --yes
 Revoking is the only way to change a filter: to change a condition, create the new filter and
 revoke the old one. When several filters apply to one person, a row must pass all of them. The same
 commands are `client.row_filters.create(...)`, `.list(...)` and `.revoke(...)` in the Python SDK
-and `/api/v1/row-filters` in the REST API.
+(each filter has `bound`, `None` from a server before this release) and `/api/v1/row-filters` in the
+REST API.
 
 ## An expression must not fail on any stored value
 
@@ -204,6 +211,8 @@ someone's query later. The messages are the ones the commands print; the exit co
 | `'region = 5' is not a valid filter expression: `region` is text; compare it with '5', not 5.` (8) | A comparison puts a text against a number, or two columns of different types. Write the value in the column's own type, as the message says. |
 | `'region' is not a valid filter expression: `region` is text, not boolean; a condition is needed here. ...` (8) | A column that is not boolean stands where a condition is needed. Compare it with a value. |
 | `'born = DATE '2026-13-01'' is not a valid expression: '2026-13-01' is not a date. Write DATE 'YYYY-MM-DD', ...` (8) | A typed date or timestamp literal that is not one. Write `DATE '2026-01-01'` or `TIMESTAMP '2026-01-01 00:00:00'`. |
+| `The policy names column 'Mass', and the table has the columns 'MASS' and 'Maß', which Lakana cannot tell apart for a policy. Ask the owner of the table to rename one of them, then create the policy again.` (8) | Two columns of the table differ only in case. Lakana will not guess which one the filter means. Have the owner rename one of them, then create the filter again. |
+| `A row filter or column mask stored on this table could not be read. Ask an administrator to correct or remove it.` | Shown to whoever queries the table. A stored policy row can no longer be read, so the query is refused rather than run without it. An administrator finds it with `lakana row-filter list`, revokes it and creates it again. |
 | `Pass exactly one of --principal or --group` (2) | Name one person or one group, not both and not neither. |
 | `No principal named 'nobody'.` (6) | The principal does not exist. Create it first, or fix the spelling. A group says `No group named '...'.` |
 | `No table 'nope' in 'dev'/gold.` (6) | The table does not exist in that environment. Check the name and `--env`. |
@@ -236,8 +245,8 @@ specification requires, so a filter keeps working after the schema changes:
 
 - **An added column** reads as NULL in the rows written before it was added. A filter on it
   (`tier = 'gold'`) passes none of those rows; `tier IS NULL` passes all of them.
-- **A renamed column** keeps its data under the new name, in old and new files alike. The filter
-  itself does not follow the rename: see the next section.
+- **A renamed column** keeps its data under the new name, in old and new files alike, and the
+  filter follows the rename (see [After a rename](#after-a-rename)).
 - **A column dropped and added again** under the same name is a new column. The rows written
   before read as NULL, never as the old column's values. A write with `evolve_schema` that
   changes a column's type (other than widening it) does the same.
@@ -265,49 +274,41 @@ reads (a microsecond timestamp, for example) and writes the table's rows again.
 
 ## Filters and dropped columns
 
-A filter is bound to a column **name**, not to the column itself. When the column is dropped
-and nothing takes its name, a query of the filtered person that reads the table fails instead of
-showing rows. Revoke the filter and create it again for the column it is meant for. A rename is
-different: see the next section.
-
-### After a rename
-
-A rename can change what a filter covers: a column renamed *onto* the filtered name would be
-tested in the old column's place. The filter would test the other column's values and could pass
-rows it was meant to hide, and the renamed column would no longer be filtered. Lakana does not let
-that happen. Each filter records which version of the table's schema it was created against. When
-a column was renamed since, or replaced by a new column of the same name (dropped and added
-again), and the old or the new name is one the filter reads, a read of the table by the filtered
-person is refused, and nothing is shown:
+A filter is bound to its columns themselves, not to their names: when you create it, Lakana records
+the Iceberg field id of every column it reads. When one of those columns is dropped, dropped and
+added again under the same name (a new column), or replaced by a write with `evolve_schema` that
+changes its type (not a widening, such as `int` to `long`), the filter has no column left to test.
+A read of the table by the filtered person is then refused, and nothing is shown:
 
 <!-- output -->
 ```text
-`gold.customers` has a row filter or column mask that uses column `region`, and a column was renamed or replaced since the policy was created, so the policy may now cover a different column. Nothing is shown. An administrator must review the table's row filters and column masks, create each one that uses a renamed or replaced column again for the column it is meant for, and then revoke the old one.
+`gold.customers` has a row filter or column mask on a column that was dropped or replaced (created for `region`); an administrator creates it again for the column it is meant for, or revokes it
 ```
 
-A column is also replaced when a write with `evolve_schema` changes its type (not a widening, such
-as `int` to `long`): the column gets a new field id, reads of the table are refused until the
-filter is created again, and the rows written before read as NULL in that column. The run whose
-write did it, or removed the column, shows you, as an administrator, the filter's id, its column and
-the revoke command; other readers of the run see only that the table's columns changed
+An administrator creates the filter again for the column it is meant for, then revokes the old
+one, in that order: until the new one exists, revoking the old one lets the person read every row.
+If the filter is no longer needed, revoking it is enough. The run whose write removed or retyped
+the column shows you, as an administrator, the filter's id, its column and the revoke command;
+other readers of the run see only that the table's columns changed
 ([The run that changes a column says so](../explanation/when-columns-change.md#the-run-that-changes-a-column-says-so)).
+The rows written before a column was replaced read as NULL in that column.
 
-A rename therefore goes in this order:
+### After a rename
 
-1. Rename the column. From then on, reads of the table by the filtered person are refused. That is
-   the point: no rows are passed or hidden by a filter that is out of date.
-2. Create a filter for the column it is meant for. Lakana only accepts a filter on a column the
-   table has now, so it cannot be created before the rename. Reads are still refused, because the
-   old filter is still out of date, and filters are ANDed, so the new one only narrows.
-3. Revoke the old filter. List the filters and masks of the table with the `list` subcommand of
-   `lakana row-filter` and of `lakana column-mask`.
-4. Reads work again, with the filter on the right column.
+A filter follows its column through a rename: `region = 'EU'` keeps testing the same column after
+`region` is renamed to `area`, and a column renamed *onto* the name `region` is not the filter's.
+Nothing needs to be done, and `lakana row-filter list` shows the expression with the column's
+name of today. A rename that is undone leaves the filter as it was.
 
-Do not revoke the old filter first: until the new one exists, the person reads every row.
+A filter on a raw-zone (external) table stays bound to the column's name, as its files are read by
+name.
 
-A filter created after the rename records the new version of the schema, so it is not refused. A
-filter that an earlier release created has no recorded version: it is judged against every schema
-the table has had, so a rename from any time before also refuses the read until it is created again.
+A filter that an earlier release created is not bound to field ids until Lakana has bound it (see
+[Upgrading Lakana](../explanation/upgrades.md#row-filters-and-column-masks-follow-renamed-columns)). Such a filter keeps the earlier rule: after a
+column it reads was renamed or replaced, a read by the filtered person is refused with
+`` `gold.customers` has a row filter or column mask that uses column `region`, and a column was
+renamed or replaced since the policy was created ...``. Create the filter again for the column it
+is meant for, then revoke the old one: the new filter is bound and follows the column from then on.
 
 A filter stored by an earlier release is judged by the same rule, even if its text would not be
 accepted by `create` today.

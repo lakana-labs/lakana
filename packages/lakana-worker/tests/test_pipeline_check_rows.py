@@ -73,6 +73,7 @@ from lakana_core.models import (
     WriteMode,
 )
 from lakana_core.policy.column_masks import ColumnMaskService
+from lakana_core.policy.field_binding import PENDING, UNBOUND
 from lakana_core.policy.read_errors import policy_read_failure
 from lakana_core.policy.renames import policy_column_renamed_message
 from lakana_core.policy.row_filters import RowFilterService
@@ -691,13 +692,56 @@ def _not_shown(column: str, run_id: uuid.UUID) -> str:
     )
 
 
+def _column_gone(table: str, column: str) -> str:
+    """Write out the refusal of a read whose bound policy's column is gone.
+
+    Parameters
+    ----------
+    table
+        The table's dotted name.
+    column
+        The policy's column, as written.
+
+    Returns
+    -------
+    str
+        The whole text a user reads.
+    """
+    return (
+        f"`{table}` has a row filter or column mask on a column that was dropped or replaced "
+        f"(created for `{column}`); an administrator creates it again for the column it is "
+        "meant for, or revokes it"
+    )
+
+
+def _unbind(session: Session, policy_id: uuid.UUID, binding: str) -> None:
+    """Make a policy one of an earlier release: not bound to field ids.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    policy_id
+        The row filter's or column mask's id.
+    binding
+        `pending` or `unbound`.
+    """
+    row = session.get(ColumnMask, policy_id) or session.get(RowFilter, policy_id)
+    assert row is not None  # nosec B101 -- test setup
+    row.binding = binding
+    row.field_ids = None
+    if isinstance(row, ColumnMask):
+        row.column_field_id = None
+    session.commit()
+
+
 def _policy_needs(column: str, run_id: uuid.UUID) -> str:
     """Write out the text for a policy that reads a column the snapshot has not in the same form.
 
     Parameters
     ----------
     column
-        The column, as the policy spells it.
+        The column: a bound policy's by its name now, another as the policy spells it.
     run_id
         The run of the check result.
 
@@ -1055,8 +1099,9 @@ def test_a_column_dropped_since_is_not_shown_from_an_older_snapshot(
 ) -> None:
     """A later run dropped `ssn`; the snapshot of an earlier failed check still has it.
 
-    Nothing can mask the column any more, with the reader's stale mask on `ssn` still stored
-    or revoked, and it is not shown either way: neither with ``*`` nor by name.
+    Nothing can mask the column any more. While the reader's mask on `ssn` is still stored,
+    its field is gone and every read of the table under it is refused; once it is revoked the
+    column is still not shown: neither with ``*`` nor by name.
     """
     bad = _orders([2, -1], ["eu", "eu"], ssn=["s2", "s-1"])
     result = _warned_run(session, admin, bad, _NEGATIVE)
@@ -1071,13 +1116,13 @@ def test_a_column_dropped_since_is_not_shown_from_an_older_snapshot(
     _write(session, admin, _orders([3], ["eu"]), WriteMode.REPLACE, evolve_schema=True)
     assert list(_current_columns(session)) == ["id", "region", "email"]
 
-    with_stale_mask = _rows(session, tmp_path, ana, result)
+    with_stale_mask, _ = _failure(session, tmp_path, ana, result)
     ColumnMaskService(session, AllowAllAuthorization(), _catalog(session)).revoke(admin, mask_id)
     rows = _rows(session, tmp_path, ana, result)
     message, _ = _failure(session, tmp_path, ana, by_name)
 
     assert rows == [{"id": -1, "region": "eu", "email": "o-1@example.org"}]
-    assert with_stale_mask == rows
+    assert with_stale_mask == _column_gone("gold.orders", "ssn")
     assert message == _not_shown("ssn", by_name.run_id)
 
 
@@ -1191,23 +1236,28 @@ def test_a_row_filter_on_a_column_added_since_refuses_the_read_with_its_own_reas
 
     message, cause = _failure(session, tmp_path, ana, result)
 
-    assert message == _policy_needs("Tier", result.run_id)
+    # The filter is bound to the field; it reads the column by its name in the table.
+    assert message == _policy_needs("tier", result.run_id)
     assert cause == QueryErrorCause.INVALID_QUERY.value
 
 
 def test_a_row_filter_on_a_column_dropped_since_refuses_the_read(
     session: Session, admin: PrincipalRef, tmp_path: Path
 ) -> None:
-    """The snapshot has the filter's column and the table does not: it is not the same in both."""
+    """The snapshot has the filter's column and the table does not: the filter's field is gone.
+
+    That refuses every read of the table under the filter, the read at the check included.
+    """
     bad = _orders([2, -1, -2], ["eu", "eu", "us"], ssn=["s2", "s-1", "s-2"])
     result = _warned_run(session, admin, bad, _NEGATIVE)
     ana = _reader(session, admin, "ana", "orders")
     _filter(session, admin, "ana", "SSN = 's-1'")
     _write(session, admin, _orders([3], ["eu"]), WriteMode.REPLACE, evolve_schema=True)
 
-    message, _ = _failure(session, tmp_path, ana, result)
+    message, cause = _failure(session, tmp_path, ana, result)
 
-    assert message == _policy_needs("SSN", result.run_id)
+    assert message == _column_gone("gold.orders", "SSN")
+    assert cause == QueryErrorCause.INVALID_QUERY.value
 
 
 def _dropped_and_added_again(session: Session, admin: PrincipalRef) -> CheckResult:
@@ -1270,7 +1320,7 @@ def test_a_filter_on_a_column_dropped_and_added_again_refuses_the_read(
 def test_a_filter_written_before_the_column_was_dropped_and_added_again_refuses_the_read(
     session: Session, admin: PrincipalRef, tmp_path: Path
 ) -> None:
-    """A filter that names no schema is judged from the oldest one, also for a checked read.
+    """A legacy filter that names no schema is judged from the oldest one, also at a check.
 
     The refusal after a rename comes before the one about the checked snapshot: the policy may
     cover another column in every read of the table.
@@ -1278,7 +1328,8 @@ def test_a_filter_written_before_the_column_was_dropped_and_added_again_refuses_
     result = _dropped_and_added_again(session, admin)
     ana = _reader(session, admin, "ana", "orders")
     _filter(session, admin, "ana", "region = 'eu'")
-    for stored in session.execute(select(RowFilter)).scalars():
+    for stored in session.execute(select(RowFilter)).scalars().all():
+        _unbind(session, stored.id, PENDING)
         stored.schema_id = None
     session.commit()
 
@@ -1358,6 +1409,38 @@ def test_a_filter_on_one_of_two_columns_renamed_into_each_other_refuses_the_read
 
     assert message == _policy_needs("region", result.run_id)
     assert plain == [{"id": -2}, {"id": -1}]
+
+
+def test_a_check_read_before_a_swap_never_shows_the_masked_field(
+    session: Session, admin: PrincipalRef, tmp_path: Path
+) -> None:
+    """Review Focus 1: ana's mask on `email`; after the check, `email` and `region` swap names.
+
+    The snapshot's `email` is the field now called `region`: both columns are withheld, and
+    no row shows an unmasked value of the masked field under any name.
+    """
+    result = _warned_run(session, admin, _BAD, _NEGATIVE)
+    ana = _reader(session, admin, "ana", "orders")
+    _mask(session, admin, "ana", "email")
+    ids = _field_ids(session)
+    swapped = Schema(
+        NestedField(ids["id"], "id", LongType(), required=False),
+        NestedField(ids["email"], "region", StringType(), required=False),
+        NestedField(ids["region"], "email", StringType(), required=False),
+        schema_id=_catalog(session).load_table(admin, _ORDERS).metadata.current_schema_id + 1,
+    )
+    _catalog(session).commit_table(
+        admin,
+        _ORDERS,
+        requirements=[],
+        updates=[AddSchemaUpdate(schema_=swapped), SetCurrentSchemaUpdate(schema_id=-1)],
+    )
+
+    rows = _rows(session, tmp_path, ana, result)
+
+    assert rows == [{"id": -2}, {"id": -1}]
+    emails = set(_BAD.column("email").to_pylist())
+    assert not any(value in emails for row in rows for value in row.values())
 
 
 def test_a_filter_on_a_field_of_a_column_is_judged_by_the_column(
@@ -1442,10 +1525,13 @@ def test_a_mask_on_a_column_widened_since_does_not_block_the_read(
 def test_an_ordinary_query_with_a_mask_on_an_unknown_column_is_refused_as_before(
     session: Session, admin: PrincipalRef, tmp_path: Path
 ) -> None:
-    """Skipping a mask is for the read at a check only; any other source keeps the refusal."""
+    """Skipping a mask is for the read at a check only; any other source keeps the refusal.
+
+    The mask is one of an earlier release: a bound mask cannot name an unknown column.
+    """
     _write(session, admin, _orders([1], ["eu"], ssn=["s1"]), WriteMode.CREATE)
     ana = _reader(session, admin, "ana", "orders")
-    _mask(session, admin, "ana", "ssn")
+    _unbind(session, _mask(session, admin, "ana", "ssn"), UNBOUND)
     _write(session, admin, _orders([3], ["eu"]), WriteMode.REPLACE, evolve_schema=True)
 
     ordinary = QueryService(session, AllowAllAuthorization()).submit_query(
@@ -1464,11 +1550,13 @@ def test_a_mask_that_differs_from_a_shown_column_only_in_case_is_not_skipped(
 ) -> None:
     """A stored mask spelled `EMAIL` is meant for `email`: it stays, and the rewrite refuses.
 
-    Skipping it as "not in the read" would show the column unmasked.
+    Skipping it as "not in the read" would show the column unmasked. Only a mask of an earlier
+    release, not bound to field ids, can be spelled other than its column.
     """
     result = _failed_run(session, admin)
     ana = _reader(session, admin, "ana", "orders")
     mask_id = _mask(session, admin, "ana", "email")
+    _unbind(session, mask_id, UNBOUND)
     session.execute(update(ColumnMask).where(ColumnMask.id == mask_id).values(column="EMAIL"))
     session.commit()
 

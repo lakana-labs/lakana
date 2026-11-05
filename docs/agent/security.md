@@ -87,8 +87,10 @@ fails every query it covers, on the first value that cannot be converted (GHSA-3
 `lakana_core.policy.expression_types.check_expression_types` refuses that at creation, in the same
 place that checks the columns exist (`_check_columns_exist` in `row_filters.py`,
 `_check_column_exists` in `column_masks.py`), against the schema whose id the policy records, so the
-types checked and the `schema_id` stored are one read. Rules: a comparison is accepted only when
-DuckDB's implicit cast cannot fail. Both sides are of one kind (text; date/timestamp; otherwise
+types checked and the `schema_id` stored are one read. The same `TableDescription` also gives the
+`field_ids` the policy stores (`policy.field_binding.bind_policy`, through
+`policy.columns.binding_for`), so schema id, types and binding are one read. Rules: a comparison is
+accepted only when DuckDB's implicit cast cannot fail. Both sides are of one kind (text; date/timestamp; otherwise
 the same type; a `timestamptz` only with a `timestamptz` column, because the read does not pin the
 time zone). For numbers, a literal must be exactly representable in the column's type (integer
 range, `decimal(p,s)` places and digits with no exponent, finite and in range for floats), and two
@@ -593,7 +595,7 @@ reader is shown a term with its repository. Residuals:
 | `GET .../tables/{name}/health/signals`, and `signals` in the health answer | `READ_TABLE` on the table | Checked first (`403` before anything is read). The values are decided by `Visibility` below. |
 | The `readers` of that answer | `MANAGE_GRANT` and the `ADMIN` role at instance scope (`grants.admin.may_see_grants`) | The grants listing's rule asked as a yes or no: nothing is recorded as `AUTHORIZATION_DENIED` for a `False`, and the field is `null`, not an error. The helper lives in `grants/admin.py` because `test_admin_only_call_sites.py` allows the three actions nowhere else. |
 
-Signal values reveal data, so `catalog/health_read.py` (`Visibility`, `visibility_for`) decides per reader, and fails closed. A masked column with a mask that applies to the reader (no unmasked access): name, state, time and snapshot id stay, `observed`, `band` and `alert` are `None` and `values_hidden` is true. A mask covers every name the column's field has had (renames); when any mask applies to the reader, values under a name the current schema no longer has are hidden too, and a table whose metadata cannot be read hides all values for such a reader. A masked column renamed since the mask was written hides all values (the query path refuses such reads). A row filter that applies to the reader hides every value-revealing number (bounds, null rates, bands, alert values) for all columns; volume, freshness and schema stay (freshness is the time since the last snapshot, which `last_write_at` of the health and of `table get` shows the same reader). In a message, `payload._values_withheld` still withholds a freshness alert's times under any row filter, like every other signal's values (the value-free text names what writes the table). A kept table shows aggregates and snapshot ids, never rows, current metadata or file locations (`_NOTHING_OF_A_KEPT_TABLE` in `test_catalog_kept.py`). Pins: `test_health_read.py`, `test_tables_health.py`.
+Signal values reveal data, so `catalog/health_read.py` (`Visibility`, `visibility_for`) decides per reader, and fails closed. A masked column with a mask that applies to the reader (no unmasked access): name, state, time and snapshot id stay, `observed`, `band` and `alert` are `None` and `values_hidden` is true. A mask bound to field ids (#120) is hidden by its field id, under every name that field has had in the table's schemas (`_every_name`); a health row carries only a name, so a name the field once had stays hidden after another column takes it, and other columns' values are shown. A mask of an earlier release (`pending`, `unbound`) or a raw table's (`names`) is hidden under every name the field of its written name has had (renames). When any mask applies to the reader, values under a name the current schema no longer has are hidden too (`Visibility.columns`), and a table whose metadata cannot be read, or that has none, hides all values for such a reader. A bound mask whose field the current schema no longer has, an earlier mask whose column was renamed since it was written, and a bound row the resolver cannot read (`UnreadablePolicyError`, e.g. no `column_field_id`) hide all values (the query path refuses such reads). A row filter that applies to the reader hides every value-revealing number (bounds, null rates, bands, alert values) for all columns; volume, freshness and schema stay (freshness is the time since the last snapshot, which `last_write_at` of the health and of `table get` shows the same reader). In a message, `payload._values_withheld` still withholds a freshness alert's times under any row filter, like every other signal's values (the value-free text names what writes the table). A kept table shows aggregates and snapshot ids, never rows, current metadata or file locations (`_NOTHING_OF_A_KEPT_TABLE` in `test_catalog_kept.py`). Pins: `test_health_read.py`, `test_tables_health.py`.
 
 **A blocking health signal (#340).** `health: {signal: block}` adds a generated `health_<signal>` check (`projects/health_checks.py`) that the worker judges from the recorded rows (`task_checks._health_result`). Its `error` (`runs/checks.HEALTH_BLOCKED`) names the signal, the column, the snapshot and the next step, never a value or band: it reaches the task's `error_message` and the free-text log, which every reader of the run reads (`authorize_run_read`: `RUN` or `READ_ENVIRONMENT`, no table right and no policy), so it points to `lakana table health … --signals`, where `Visibility` applies. `lakana check rows` of it is a `CheckSqlGoneError` with its own text, before any query is queued. A set-back marks the rows of the snapshots it takes out (`set_back_at`, `forget_set_back`) instead of deleting them, so the reason for the block stays in the history under the same `Visibility`; `NOT_SET_BACK` keeps them out of the current state, the last firings and the band. A first build left not published has its rows deleted: its data is refused to every reader, so no number of it is kept. Its check text (`HEALTH_BLOCKED_FIRST_BUILD`) then names no command, since there is nothing to show. The check judges every snapshot of the task run's own chain (`health_record.own_chain`, the walk `forget_set_back` uses), not only the tip. Pins: `test_a_fired_block_signal_fails_the_task_and_sets_the_table_back` (the check's `error` holds no value), `test_task_checks_health.py`, `test_runs_checks.py`, `test_catalog_rollback.py`, `test_health_read.py`.
 
@@ -3946,6 +3948,19 @@ work.
 
 ## Row filters and column masks (M3c — shipped)
 
+- **A listing shows current column names, and `bound`, to whoever may manage policies
+  (#120).** `GET /api/v1/row-filters` and `/column-masks` (and the SDK and CLI over them) show
+  a bound policy's expression and a mask's column in the names the table has now
+  (`policy.shown.shown_policies`, one metadata read per table through
+  `CatalogService.policy_fields(p, table_id)`, which authorizes `MANAGE_POLICY` on the instance
+  itself, so a caller of `shown` cannot skip the check). That reveals the table's current column names to a `MANAGE_POLICY` holder
+  who may lack `READ_TABLE`; instance-scoped policy managers already see every policy's text,
+  and a name a policy uses is one they could read there. The visibility rules of the list
+  methods are unchanged and no reader without `MANAGE_POLICY` gets a listing. A policy whose
+  field is gone, whose ids or metadata cannot be read, or that is not bound is shown as
+  written (display only; a read refuses it); `bound` is `false` for `pending` and `unbound`.
+  A failed metadata read logs the error's class only.
+
 - **Row filters and column masks are written** in a restricted expression subset
   (comparisons, boolean logic, literals, column references, and exactly two context
   functions — `current_user()` and `has_group('name')`; column masks additionally allow
@@ -3978,38 +3993,65 @@ work.
   guessing which of two independently-authored expressions should win. Policies apply to
   every role including `admin` — there is no bypass *of the rewriter itself* — and layer on
   top of `READ_TABLE` authorization, never replacing it.
-- **A policy binds to column names, so a rename or a replaced column fails the read closed.** The
-  table is read by field id, and a rename through the Iceberg REST catalog can move a name onto
-  another column (`ssn` to `ssn_old`, `email` to `ssn`): a mask on `ssn` would cover the email
-  column and `ssn_old` would show the real values. A column dropped and added again, also by a
-  type change through `evolve_schema` (a non-promotion gets a new field id under the same name),
-  is replaced the same way. Each row filter and column mask records the id of the table's current
-  schema when it is created (`schema_id`; null for a raw table, a view and an artifact, for a
-  filter that reads no column, and for a policy of a release before the column existed). For a
-  read of an Iceberg table, `_resolve_sources` collects, from the reader's applied policies, every
-  column a mask covers or its expression reads and every column a filter reads, and calls
-  `policy.renames.renamed_policy_column` with the table's metadata. Two schemas are compared at a time, never
-  the ones between: the policy's schema and the CURRENT one (a policy with no recorded id, made by
-  an earlier release, is judged against every schema the table has had, since it may have been
-  written at any point of the history, and a name touched since any of them counts),
-  because schema ids are chosen by clients and a set-back makes the current schema an older one: a
-  name whose owning field id differs, or a field id that changed its name with the old or the new
-  name among the policy's, refuses the read before the query runs (`PolicyColumnRenamedError`,
-  cause `invalid_query`, text `POLICY_COLUMN_RENAMED`, which names the first such column and no
-  data). A recorded id the metadata does not have makes every column of the policy suspect. It
-  applies to a read at a checked snapshot too, before the comparison above. A refused read shows
-  nothing and never runs without the policy. The repair order is rename, create the policy for the
-  new name, revoke the old one: the old policy is touched until it is revoked, so reads stay
-  refused, and revoking it first would leave a window without any policy (two masks on one column
-  collapse to `NULL`, filters are ANDed). Binding policies to field ids is not done yet. Pins:
-  `test_pipeline_schema_evolution.py` (the `rename` and set-back tests), `test_policy_renames.py`.
+- **A policy is bound to field ids, so it follows a rename and a dropped or replaced column fails
+  the read closed (#120).** The table is read by field id, and a rename through the Iceberg REST
+  catalog can move a name onto another column (`ssn` to `ssn_old`, `email` to `ssn`). At creation
+  each column name a row filter or column mask uses (and a mask's own column) is bound to the field
+  id of the one top-level field of that name (`policy.field_binding.bind_policy`; `field_ids`,
+  `column_field_id`, `binding = field_ids`). On every read of an Iceberg table, `_resolve_sources`
+  passes the resolver a `PolicySchema`: the fields the read projects (the checked snapshot's shown
+  columns at a check) and the current schema's fields, both from the same loaded metadata, never a
+  second load. `policy.field_binding.resolve_expression` is the one function every reader of a
+  bound policy goes through: it maps each id to the read's name of the field (or, absent there,
+  its current name) and rewrites only the `Column` nodes of the stored text to quoted identifiers;
+  literals and `has_group` arguments keep their text, and a qualified column, a column outside
+  the binding, or text that no longer parses refuses as `UNREADABLE_POLICY_MESSAGE`, never applied
+  as written. A mask is keyed by its column's name in the read; masks are grouped without regard
+  to case, so a bound and a legacy mask on one column collapse to `NULL`. Whether a field is gone
+  is judged against the **current** schema only (G2): a field the table no longer has, also when
+  the checked snapshot still has it, refuses the read before the query runs
+  (`PolicyColumnGoneError`, cause `invalid_query`, text `POLICY_COLUMN_GONE`, which names the
+  table and the first gone column as the policy wrote it, and no data); a field the snapshot lacks
+  but the table has is named by its current name and handled by the at-check rule. A dropped
+  column, one dropped and added again, a non-promoting retype through `evolve_schema` and a
+  set-back to a schema before the column all refuse the same way. A bound row whose ids are missing
+  or not a map of names to integers (a mask without `column_field_id`, an expression key with an
+  id other than the mask's own), and a row whose `binding` is none of the four states, is refused
+  as unreadable (`UnreadablePolicyError`, text `UNREADABLE_POLICY_MESSAGE`), with or without a
+  schema, never skipped and never read as a legacy row; the worker passes that text through to
+  the reader (it names no policy). Callers that only ask whether a policy applies (incremental
+  append, the write refusal) pass no schema and get the text as written, which is enough to know
+  that one applies. The health read passes no schema either: it takes the bound masks' field ids
+  (`ResolvedPolicy.masked_field_ids`) and hides every name those fields have had
+  (`catalog.health_read.visibility_for`, pinned by
+  `test_a_bound_mask_hides_every_name_its_field_had`), or every value when one of those fields
+  is gone from the current schema. Policies of earlier releases
+  (`binding` `pending` or `unbound`) and a raw table's (`names`) keep the rename rule: each records
+  the table's schema id at creation (`schema_id`; null for a raw table, a view and an artifact, for
+  a filter that reads no column, and for a policy of a release before the column existed), and only
+  these are listed in `ResolvedPolicy.policies` for `policy.renames.renamed_policy_column`, which
+  compares two schemas at a time, never the ones between: the policy's and the CURRENT one (a
+  policy with no recorded id is judged against every schema the table has had), because schema
+  ids are chosen by clients and a set-back makes the current schema an older one. A name whose
+  owning field id differs, or a field id that changed its name with the old or the new name among
+  the policy's, refuses the read (`PolicyColumnRenamedError`, text `POLICY_COLUMN_RENAMED`). Both
+  refusals apply to a read at a checked snapshot too, before the at-check comparison. A refused
+  read shows nothing and never runs without the policy. The repair is: create the policy again for
+  the column it is meant for, then revoke the old one; revoking first would leave a window without
+  any policy (two masks on one column collapse to `NULL`, filters are ANDed). Pins:
+  `test_pipeline_schema_evolution.py` (the follow, gone, set-back and legacy tests),
+  `test_pipeline_check_rows.py` (`test_a_check_read_before_a_swap_never_shows_the_masked_field`),
+  `test_policy_field_binding.py`, `test_policy_resolver.py`, `test_policy_renames.py`.
 - **A write that removes or replaces a column says so; only an administrator learns of a policy
   (#376).** `CatalogService.write_batches` compares the current schema with the planned one
   (`policy.schema_change.changed_columns`: a column whose name is gone, or whose name now owns
   another field id; widening keeps the id) and reads the table's active row filters and column
-  masks by `table_id` (`broken_policies`; a mask counts its own column and its expression's, a
-  filter its expression's, compared case-folded; an expression that no longer parses counts only a
-  mask's own column, so the write never fails for it). Stored as kind, policy id, column and change,
+  masks by `table_id` (`broken_policies`; a policy bound to field ids is judged by them: a
+  column whose field the new schema still has, renamed or not, warns nothing, one whose field is
+  gone warns by the name as written, and a bound row with unreadable ids falls back to the name
+  rule; any other policy counts a mask's own column and its expression's, a filter its
+  expression's, compared case-folded; an expression that no longer parses counts only a mask's
+  own column, so the write never fails for it). Stored as kind, policy id, column and change,
   never the expression or the subject: in the `TABLE_WRITE` audit detail (`broken_policies`, a
   shown field; the audit log needs `READ_AUDIT_LOG`) and, for a write in a run, in
   `task_runs.schema_change_json` (`{"tables", "policies"}`) through the guard (`note_result` ->
@@ -4081,7 +4123,10 @@ work.
   a qualified column (`t.region`, `read_parquet.region`): the relation a policy runs against has no
   name to qualify by, and there is no fixed alias for the reader. Both apply at creation only;
   stored filters are never re-judged, so one that names a missing column still fails every read of
-  its person closed. The shared reading and wording are in `policy/columns.py`. A column mask
+  its person closed. A column name that two columns of the table match under `casefold()` (`Maß` and
+  `MASS`) is refused with `AmbiguousPolicyColumnError` (`field_binding.match_column`) rather than
+  guessed; the same holds for a mask's own column. The shared reading and wording are in
+  `policy/columns.py`. A column mask
   expression is refused the same way when it qualifies a column. A dotted name whose first part is
   a column of the table is worded as a struct field (the columns are read only after the
   expression turned out to hold a dotted name; unreadable columns leave the qualifier wording;

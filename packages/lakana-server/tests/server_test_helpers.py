@@ -132,6 +132,78 @@ def create_table(client: TestClient, environment: str, namespace: str, table: st
     assert response.status_code == 200, response.text
 
 
+def create_table_with_fields(
+    client: TestClient, environment: str, namespace: str, table: str, fields: Mapping[int, str]
+) -> None:
+    """Create an Iceberg table of string columns through the REST API.
+
+    Parameters
+    ----------
+    client
+        The test client.
+    environment
+        The environment; it must exist with `namespace` among its namespaces.
+    namespace
+        The (single-component) namespace.
+    table
+        The table's name.
+    fields
+        Each column's field id to its name; every column is an optional string.
+    """
+    schema = {
+        "type": "struct",
+        "schema-id": 0,
+        "fields": [
+            {"id": field_id, "name": name, "type": "string", "required": False}
+            for field_id, name in fields.items()
+        ],
+    }
+    response = client.post(
+        f"/v1/{environment}/namespaces/{namespace}/tables",
+        headers=AUTH_HEADER,
+        json={"name": table, "schema": schema, "properties": {}},
+    )
+    assert response.status_code == 200, response.text
+
+
+def rename_fields(
+    client: TestClient, table: str, before: Mapping[int, str], after: Mapping[int, str]
+) -> None:
+    """Rename columns of `dev.gold.<table>` through a REST catalog commit, keeping field ids.
+
+    Parameters
+    ----------
+    client
+        The test client.
+    table
+        The table's name, in namespace `gold` of environment `dev`.
+    before
+        The columns now, as `create_table_with_fields` made them (schema id 0).
+    after
+        The columns after: the same field ids under their new names.
+    """
+    schema = {
+        "type": "struct",
+        "schema-id": 1,
+        "fields": [
+            {"id": field_id, "name": name, "type": "string", "required": False}
+            for field_id, name in after.items()
+        ],
+    }
+    response = client.post(
+        f"/v1/dev/namespaces/gold/tables/{table}",
+        headers=AUTH_HEADER,
+        json={
+            "requirements": [{"type": "assert-current-schema-id", "current-schema-id": 0}],
+            "updates": [
+                {"action": "add-schema", "schema": schema, "last-column-id": max(before)},
+                {"action": "set-current-schema", "schema-id": -1},
+            ],
+        },
+    )
+    assert response.status_code == 200, response.text
+
+
 class SeaweedFsContainer(DockerContainer):
     """A SeaweedFS container exposing an S3-compatible gateway.
 

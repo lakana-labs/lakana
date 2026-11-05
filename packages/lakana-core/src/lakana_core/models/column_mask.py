@@ -37,11 +37,10 @@ class ColumnMask(PolicyRecord, Base):
         The column name being masked.
     expression : str
         The SQL expression providing the replacement value.
-    schema_id : int or None
-        The id of the table's current schema when this column mask was created, or `None` for a
-        column mask created before it was recorded or on a table without field ids. A rename since
-        then may have made the mask cover another column
-        (`lakana_core.policy.renames.renamed_policy_column`).
+    column_field_id : int or None
+        The field id of the masked column; `None` unless `binding` is `field_ids`.
+    schema_id, field_ids, binding
+        The field-id binding of the columns it uses; see `PolicyRecord`.
     type_checked : bool
         Whether the mask was checked against its column's type when it was created
         (`lakana_core.policy.expression_types`). `False` for a mask of an earlier release, which
@@ -61,5 +60,5 @@ class ColumnMask(PolicyRecord, Base):
 
     column: Mapped[str] = mapped_column(String(255))
     expression: Mapped[str] = mapped_column(Text)
-    schema_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    column_field_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     type_checked: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())

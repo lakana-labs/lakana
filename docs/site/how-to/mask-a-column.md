@@ -106,15 +106,22 @@ lakana column-mask revoke 49fa89ee-275a-4b86-a6fc-76b2b5b32b7e --yes
 ```
 
 `list` takes `--principal`, `--group` or `--env` to narrow the list; it shows the id of each mask,
-which `revoke` needs:
+which `revoke` needs. The `column` and the `expression` are shown with the column names the table
+has now: after a column was renamed, a mask on it is listed under the new name. The `bound` column
+says whether the mask follows its column through such a rename: `yes` for every mask you create
+now. `no` marks a mask of an earlier release that is not bound yet: right after an upgrade the worker
+binds them over the next passes, and only a mask that stays `no` after that, which Lakana could not
+bind exactly, keeps refusing reads after a rename until you create it again and revoke the old one ([Row filters and column
+masks follow renamed
+columns](../explanation/upgrades.md#row-filters-and-column-masks-follow-renamed-columns)):
 
 <!-- output -->
 ```text
-┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━┓
-┃ id                                   ┃ principal_id                         ┃ group_id ┃ environment ┃ namespace ┃ table     ┃ column ┃ expression ┃
-┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━┩
-│ 49fa89ee-275a-4b86-a6fc-76b2b5b32b7e │ 52acdc6f-ad90-4c8f-9f92-e0f4c990b1b1 │          │ dev         │ gold      │ customers │ ssn    │ '***'      │
-└──────────────────────────────────────┴──────────────────────────────────────┴──────────┴─────────────┴───────────┴───────────┴────────┴────────────┘
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━┓
+┃ id                                   ┃ subject                                        ┃ environment ┃ namespace ┃ table     ┃ column ┃ expression ┃ bound ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━┩
+│ 49fa89ee-275a-4b86-a6fc-76b2b5b32b7e │ principal 52acdc6f-ad90-4c8f-9f92-e0f4c990b1b1 │ dev         │ gold      │ customers │ ssn    │ '***'      │ yes   │
+└──────────────────────────────────────┴────────────────────────────────────────────────┴─────────────┴───────────┴───────────┴────────┴────────────┴───────┘
 ```
 
 After `revoke` (without `--yes` it asks first) the person sees the stored value again on her next
@@ -128,7 +135,8 @@ Revoked column mask 49fa89ee-275a-4b86-a6fc-76b2b5b32b7e
 Revoking is the only way to change a mask: to change an expression, create the new mask and revoke
 the old one. Until you revoke the old one, the two masks on the column make it read `NULL`. The same
 commands are `client.column_masks.create(...)`, `.list(...)` and `.revoke(...)` in the Python SDK
-and `/api/v1/column-masks` in the REST API.
+(each mask has `bound`, `None` from a server before this release) and `/api/v1/column-masks` in the
+REST API.
 
 ## An expression must not fail on any stored value
 
@@ -233,6 +241,8 @@ brackets.
 | `'sha256(ssn)' is not a valid mask expression: SHA2 is outside the restricted subset.` (8) | The expression uses something outside the list above. Use only what the list allows. |
 | `'0' is not a valid mask expression: `ssn` is text, but the mask is a number. Use a value of its own type: '***', NULL, ...` (8) | The mask has another type than its column. Use a value of the column's own type, as the message lists, or see the table above. |
 | `'ssn = 5' is not a valid mask expression: `ssn` is text; compare it with '5', not 5.` (8) | A comparison inside the mask puts a text against a number. Write the value in the column's own type. |
+| `The policy names column 'Mass', and the table has the columns 'MASS' and 'Maß', which Lakana cannot tell apart for a policy. Ask the owner of the table to rename one of them, then create the policy again.` (8) | Two columns of the table differ only in case. Lakana will not guess which one the mask means. Have the owner rename one of them, then create the mask again. |
+| `A row filter or column mask stored on this table could not be read. Ask an administrator to correct or remove it.` | Shown to whoever queries the table. A stored policy row can no longer be read, so the query is refused rather than run without it. An administrator finds it with `lakana column-mask list`, revokes it and creates it again. |
 | `Pass exactly one of --principal or --group` (2) | Name one person or one group, not both and not neither. |
 | `No principal named 'nobody'.` (6) | The principal does not exist. Create it first, or fix the spelling. A group says `No group named '...'.` |
 | `No table 'nope' in 'dev'/gold.` (6) | The table does not exist in that environment. Check the name and `--env`. |
@@ -247,50 +257,41 @@ brackets.
 A column added to the table later reads as NULL in the rows written before it, also under a
 mask, and a renamed column keeps its data. See [Show some people only some rows](filter-rows.md#when-a-tables-schema-changes).
 
-A mask is bound to a column **name**, not to the column itself. When the column is dropped and
-nothing takes its name, every query of the masked person that reads the table fails with
-`Column mask references unknown column 'ssn'; known columns: ['id', 'name']`. Revoke the mask and
-create it again for the column it is meant for. A rename is different: see the next section.
-
-### After a rename
-
-A rename can change what a mask covers: a column renamed *onto* the masked name would be masked in
-the old column's place, and the renamed column would show its values in clear under its new name.
-Lakana does not let that happen. Each mask records which version of the table's schema it was
-created against. When a column was renamed since, or replaced by a new column of the same name
-(dropped and added again), and the old or the new name is one the mask uses (the masked column, or
-a column its expression reads), a read of the table by the masked person is refused, and nothing
-is shown:
+A mask is bound to its column itself, not to its name: when you create it, Lakana records the
+Iceberg field id of the masked column and of every column its expression reads. When one of those
+columns is dropped, dropped and added again under the same name (a new column), or replaced by a
+write with `evolve_schema` that changes its type (not a widening, such as `int` to `long`), every
+read of the table by the masked person is refused, and nothing is shown:
 
 <!-- output -->
 ```text
-`gold.customers` has a row filter or column mask that uses column `ssn`, and a column was renamed or replaced since the policy was created, so the policy may now cover a different column. Nothing is shown. An administrator must review the table's row filters and column masks, create each one that uses a renamed or replaced column again for the column it is meant for, and then revoke the old one.
+`gold.customers` has a row filter or column mask on a column that was dropped or replaced (created for `ssn`); an administrator creates it again for the column it is meant for, or revokes it
 ```
 
-A column is also replaced when a write with `evolve_schema` changes its type (not a widening, such
-as `int` to `long`): the column gets a new field id, reads of the table are refused until the mask
-is created again, and the rows written before read as NULL in that column. The run whose
-write did it, or removed the column, shows you, as an administrator, the mask's id, its column and
-the revoke command; other readers of the run see only that the table's columns changed
+An administrator creates the mask again for the column it is meant for, then revokes the old one,
+in that order. If the mask is no longer needed, revoking it is enough. The run whose write removed
+or retyped the column shows you, as an administrator, the mask's id, its column and the revoke
+command; other readers of the run see only that the table's columns changed
 ([The run that changes a column says so](../explanation/when-columns-change.md#the-run-that-changes-a-column-says-so)).
 
-A rename therefore goes in this order:
+### After a rename
 
-1. Rename the column. From then on, reads of the table by the masked person are refused. That is
-   the point: nothing shows in clear while the mask is out of date.
-2. Create a mask for the column it is meant for. Lakana only accepts a mask on a column the table
-   has now, so it cannot be created before the rename. Reads are still refused, because the old
-   mask is still out of date, and two masks on one column read as `NULL`.
-3. Revoke the old mask. List the masks and row filters of the table with the `list` subcommand of
-   `lakana column-mask` and of `lakana row-filter`.
-4. Reads work again, with the mask on the right column.
+A mask follows its column through a rename: a mask on `ssn` keeps masking the same column after
+`ssn` is renamed to `tax_id`, and a column renamed *onto* the name `ssn` is not masked by it. A
+column its expression reads is followed the same way. Nothing needs to be done, and
+`lakana column-mask list` shows the mask on the column's name of today. A rename that is undone
+leaves the mask as it was.
 
-Do not revoke the old mask first: until the new one exists, the renamed column would show its
-values in clear.
+A mask on a raw-zone (external) table stays bound to the column's name, as its files are read by
+name.
 
-A mask created after the rename records the new version of the schema, so it is not refused. A mask
-that an earlier release created has no recorded version: it is judged against every schema the table
-has had, so a rename from any time before also refuses the read until it is created again.
+A mask that an earlier release created is not bound to field ids until Lakana has bound it (see
+[Upgrading Lakana](../explanation/upgrades.md#row-filters-and-column-masks-follow-renamed-columns)). Such a mask keeps the earlier rule: after a column
+it uses was renamed or replaced, a read by the masked person is refused with
+`` `gold.customers` has a row filter or column mask that uses column `ssn`, and a column was
+renamed or replaced since the policy was created ...``. Create the mask again for the column it is
+meant for, then revoke the old one; do not revoke the old one first, or the column shows in clear
+until the new one exists.
 
 ## What a mask does not protect
 

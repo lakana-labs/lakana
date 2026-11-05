@@ -1982,11 +1982,15 @@ class RowFilterOut(BaseModel):
     table
         The table this filter applies to.
     expression
-        The restricted-subset predicate.
+        The restricted-subset predicate, in the table's current column names.
     created_by
         The principal who created this filter.
     created_at
         When this filter was created.
+    bound
+        `true` when the policy follows its columns by field id (a raw table's, by name). `false`
+        right after an upgrade, while the worker binds earlier policies over the next passes (see
+        the upgrade notes); only a policy that stays `false` after that needs creating again.
     """
 
     id: uuid.UUID
@@ -1998,6 +2002,7 @@ class RowFilterOut(BaseModel):
     expression: str
     created_by: uuid.UUID
     created_at: datetime
+    bound: bool
 
 
 class ColumnMaskCreate(BaseModel):
@@ -2057,13 +2062,15 @@ class ColumnMaskOut(BaseModel):
     table
         The table this mask applies to.
     column
-        The masked column's name.
+        The masked column's name, as the table has it now.
     expression
         The replacement value.
     created_by
         The principal who created this mask.
     created_at
         When this mask was created.
+    bound
+        As `RowFilterOut.bound`.
     """
 
     id: uuid.UUID
@@ -2076,6 +2083,7 @@ class ColumnMaskOut(BaseModel):
     expression: str
     created_by: uuid.UUID
     created_at: datetime
+    bound: bool
 
 
 def _check_secret_values(value: object) -> object:

@@ -1668,6 +1668,11 @@ class RowFilter:
         The id of the principal who created this filter.
     created_at
         When this filter was created.
+    bound
+        `True` when the policy follows its columns by field id (a raw table's, by name). `False`
+        right after an upgrade, while the worker binds earlier policies over the next passes (see
+        the upgrade notes); only a policy that stays `False` after that needs to be created again.
+        `None` from a server before this release.
     """
 
     id: str
@@ -1679,6 +1684,7 @@ class RowFilter:
     expression: str
     created_by: str
     created_at: datetime
+    bound: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -1709,6 +1715,8 @@ class ColumnMask:
         The id of the principal who created this mask.
     created_at
         When this mask was created.
+    bound
+        As `RowFilter.bound`.
     """
 
     id: str
@@ -1721,6 +1729,7 @@ class ColumnMask:
     expression: str
     created_by: str
     created_at: datetime
+    bound: bool | None = None
 
 
 @dataclass(frozen=True)

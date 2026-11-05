@@ -11,19 +11,22 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from lakana_core.auth import PrincipalRef
-from lakana_core.errors import ValidationError
 from lakana_core.identifiers import TableRef
 from lakana_core.models import ColumnMask, Group, GroupMembership, RowFilter
 from lakana_core.policy.expressions import HAS_GROUP, columns_of
+from lakana_core.policy.field_binding import (
+    BINDING_STATES,
+    FIELD_IDS,
+    PolicySchema,
+    UnreadablePolicyError,
+    bound_field_ids,
+    resolve_expression,
+)
+from lakana_core.policy.field_binding import (
+    UNREADABLE_POLICY_MESSAGE as UNREADABLE_POLICY_MESSAGE,
+)
 from lakana_core.policy.renames import PolicyColumns
 from lakana_core.sql_syntax import SQL_SYNTAX_ERRORS
-
-UNREADABLE_POLICY_MESSAGE = (
-    "A row filter or column mask stored on this table could not be read. "
-    "Ask an administrator to correct or remove it."
-)
-"""Shown to a reader when a stored policy no longer parses; it names no policy text, which the
-reader may not be allowed to see."""
 
 
 @dataclass(frozen=True)
@@ -40,20 +43,97 @@ class ResolvedPolicy:
         Column name to its applicable, already-substituted mask expression.
         A column with no entry has no mask.
     policies
-        One entry per applicable filter and mask, with the columns it uses and the schema
-        it was written against. Unlike `column_masks`, two masks on a column that collapse to
-        `NULL` are still two entries, so the check for a rename sees both.
+        One entry per applicable filter and mask that is not bound to field ids (`pending`,
+        `unbound`, or a raw table's `names`), with the columns it uses and the schema it was
+        written against: these keep the rename rule of `policy.renames`. Unlike
+        `column_masks`, two masks on a column that collapse to `NULL` are still two entries,
+        so the check for a rename sees both.
     typed_masks
         The columns whose applicable masks were all checked against the column's type when they
         were created (`ColumnMask.type_checked`). Only these are cast to the column's type on a
         read, the `NULL` of two masks on one column included; a mask of an earlier release is
         used as written.
+    gone
+        With a schema: the first (without regard to case) name, as written, of a column a
+        bound policy uses whose field the table no longer has; the read is refused. `None`
+        when every bound policy resolved, and always without a schema.
+    masked_field_ids
+        The field id of the column of every applicable mask bound to field ids.
+    legacy_masked
+        The casefolded column of every other applicable mask.
     """
 
     row_filters: list[str] = field(default_factory=list)
     column_masks: dict[str, str] = field(default_factory=dict)
     policies: list[PolicyColumns] = field(default_factory=list)
     typed_masks: frozenset[str] = frozenset()
+    gone: str | None = None
+    masked_field_ids: frozenset[int] = frozenset()
+    legacy_masked: frozenset[str] = frozenset()
+
+
+def _by_case(name: str) -> tuple[str, str]:
+    """Order names without regard to case, ties by the name itself.
+
+    Parameters
+    ----------
+    name
+        A column name.
+
+    Returns
+    -------
+    tuple of str
+        The sort key.
+    """
+    return name.casefold(), name
+
+
+def _resolved_text(
+    row: RowFilter | ColumnMask, schema: PolicySchema | None
+) -> tuple[str, str | None, tuple[str, ...]]:
+    """Give a row's expression, and a mask's column, in the names of the schema read.
+
+    Parameters
+    ----------
+    row
+        The stored policy.
+    schema
+        The schema read; `None` for a caller that only asks whether a policy applies.
+
+    Returns
+    -------
+    tuple
+        The expression, a mask's column (`None` for a row filter), and the written names whose
+        field is gone. Without a schema, or for a row not bound to field ids, the text and
+        column as written.
+
+    Raises
+    ------
+    UnreadablePolicyError
+        If the binding state is none of `BINDING_STATES`, or the stored binding or expression of
+        a bound row cannot be read (fail closed), with or without a schema.
+    """
+    if row.binding not in BINDING_STATES:
+        raise UnreadablePolicyError
+    column = row.column if isinstance(row, ColumnMask) else None
+    if row.binding != FIELD_IDS:
+        return row.expression, column, ()
+    column_field_id = row.column_field_id if isinstance(row, ColumnMask) else None
+    if schema is None:
+        bound_field_ids(row.field_ids, column=column, column_field_id=column_field_id)
+        return row.expression, column, ()
+    resolved = resolve_expression(
+        row.expression,
+        row.field_ids,
+        column=column,
+        column_field_id=column_field_id,
+        schema=schema,
+    )
+    return (
+        resolved.expression,
+        resolved.names.get(column, column) if column is not None else None,
+        resolved.gone,
+    )
 
 
 def _substitute_context_functions(
@@ -88,14 +168,14 @@ def _substitute_context_functions(
 
     Raises
     ------
-    ValidationError
+    UnreadablePolicyError
         If the stored expression no longer parses; the message names none of
         its text (`UNREADABLE_POLICY_MESSAGE`).
     """
     try:
         parsed = sqlglot.parse_one(expression, dialect=dialect, into=exp.Condition)
     except SQL_SYNTAX_ERRORS as exc:
-        raise ValidationError(UNREADABLE_POLICY_MESSAGE) from exc
+        raise UnreadablePolicyError from exc
     for node in list(parsed.walk()):
         if isinstance(node, exp.CurrentUser):
             replacement: exp.Expression = exp.Literal.string(principal_name)
@@ -146,7 +226,12 @@ class PolicyResolver:
         self._session = session
 
     def resolve(
-        self, principal: PrincipalRef, ref: TableRef, *, table_id: uuid.UUID | None = None
+        self,
+        principal: PrincipalRef,
+        ref: TableRef,
+        *,
+        table_id: uuid.UUID | None = None,
+        schema: PolicySchema | None = None,
     ) -> ResolvedPolicy:
         """Resolve every active policy covering `ref` for `principal`.
 
@@ -171,6 +256,11 @@ class PolicyResolver:
             caller already has closes that window; `None` (the default)
             preserves the by-name resolution for callers with no row of
             their own to draw an id from.
+        schema
+            The fields the read projects and the table's current ones. Given, every policy
+            bound to field ids is rewritten to the names of the read, and one whose field is
+            gone is named in `ResolvedPolicy.gone`. `None` for a caller that only asks whether
+            a policy applies: the text is returned as written.
 
         Returns
         -------
@@ -183,6 +273,12 @@ class PolicyResolver:
             `table_id` was not given and `ref` does not resolve to an
             existing table — an unresolvable table has no id
             for a policy to be bound to, so it can never have one apply.
+
+        Raises
+        ------
+        UnreadablePolicyError
+            If a stored policy, its binding or its binding state cannot be read
+            (`UNREADABLE_POLICY_MESSAGE`).
         """
         if table_id is None:
             # Imported here because `lakana_core.catalog` imports this module at load time, so a
@@ -228,15 +324,6 @@ class PolicyResolver:
             .scalars()
             .all()
         )
-        row_filters = [
-            _substitute_context_functions(
-                row.expression,
-                principal_name=principal.name,
-                member_group_names=member_group_names,
-            )
-            for row in filter_rows
-        ]
-
         mask_rows = (
             self._session.execute(
                 select(ColumnMask).where(
@@ -248,34 +335,64 @@ class PolicyResolver:
             .scalars()
             .all()
         )
-        by_column: dict[str, list[ColumnMask]] = {}
-        for row in mask_rows:
-            by_column.setdefault(row.column, []).append(row)
+        gone: list[str] = []
+        row_filters: list[str] = []
+        for row in filter_rows:
+            text, _, row_gone = _resolved_text(row, schema)
+            gone.extend(row_gone)
+            if not row_gone:
+                row_filters.append(
+                    _substitute_context_functions(
+                        text, principal_name=principal.name, member_group_names=member_group_names
+                    )
+                )
+        # Masks are grouped by their column without regard to case, as the database matches
+        # it: a bound mask and a legacy one on the same column, spelled two ways, are two masks
+        # on it. The first row's spelling (by id, so it never changes) is the key.
+        by_column: dict[str, tuple[str, list[tuple[ColumnMask, str]]]] = {}
+        for row in sorted(mask_rows, key=lambda each: str(each.id)):
+            text, key, row_gone = _resolved_text(row, schema)
+            gone.extend(row_gone)
+            if not row_gone and key is not None:
+                by_column.setdefault(key.lower(), (key, []))[1].append((row, text))
         column_masks = {
-            column: (
+            key: (
                 _substitute_context_functions(
-                    rows[0].expression,
+                    rows[0][1],
                     principal_name=principal.name,
                     member_group_names=member_group_names,
                 )
                 if len(rows) == 1
                 else "NULL"
             )
-            for column, rows in by_column.items()
+            for key, rows in by_column.values()
         }
         policies = [
             PolicyColumns(frozenset(columns_of(row.expression)), row.schema_id)
             for row in filter_rows
+            if row.binding != FIELD_IDS
         ] + [
             PolicyColumns(frozenset({row.column, *columns_of(row.expression)}), row.schema_id)
             for row in mask_rows
+            if row.binding != FIELD_IDS
         ]
         typed_masks = frozenset(
-            column for column, rows in by_column.items() if all(row.type_checked for row in rows)
+            key for key, rows in by_column.values() if all(row.type_checked for row, _ in rows)
+        )
+        masked_field_ids = frozenset(
+            row.column_field_id
+            for row in mask_rows
+            if row.binding == FIELD_IDS and row.column_field_id is not None
+        )
+        legacy_masked = frozenset(
+            row.column.casefold() for row in mask_rows if row.binding != FIELD_IDS
         )
         return ResolvedPolicy(
             row_filters=row_filters,
             column_masks=column_masks,
             policies=policies,
             typed_masks=typed_masks,
+            gone=min(gone, key=_by_case) if gone else None,
+            masked_field_ids=masked_field_ids,
+            legacy_masked=legacy_masked,
         )

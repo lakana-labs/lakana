@@ -3123,3 +3123,50 @@ def test_0065_on_postgres() -> None:
         migrate.downgrade(url, revision_0064)
         assert "incremental_files_read" not in sqlalchemy.inspect(engine).get_table_names()
         engine.dispose()
+
+
+def test_0066_on_postgres() -> None:
+    """0066 adds the binding columns, `pending` on existing policies; downgrade drops them."""
+    revision_0065 = "e7a1b3c5d9f0"
+    revision_0066 = "f8b2c4d6e0a1"
+    with PostgresContainer("postgres:16", driver="pg8000") as pg:
+        url = pg.get_connection_url()
+        migrate.upgrade(url, revision_0065)
+        engine = sqlalchemy.create_engine(url)
+        now = datetime.now(UTC)
+        who = uuid.uuid4()
+        with engine.begin() as conn:
+            conn.execute(
+                sqlalchemy.text(
+                    "INSERT INTO principals (id, type, name, is_active, created_at, updated_at) "
+                    "VALUES (:id, 'USER', 'admin', true, :now, :now)"
+                ),
+                {"id": who, "now": now},
+            )
+            for table, extra, values in (
+                ("row_filters", "", ""),
+                ("column_masks", ', "column"', ", 'ssn'"),
+            ):
+                conn.execute(
+                    sqlalchemy.text(
+                        f"INSERT INTO {table} (id, principal_id, environment, namespace, "
+                        f'"table", expression, created_by, created_at{extra}) VALUES '
+                        f"(:id, :who, 'dev', 'gold', 'x', 'TRUE', :who, :now{values})"
+                    ),
+                    {"id": uuid.uuid4(), "who": who, "now": now},
+                )
+        migrate.upgrade(url, revision_0066)
+        assert _alembic_version(engine) == revision_0066
+        with engine.connect() as conn:
+            for table in ("row_filters", "column_masks"):
+                row = conn.execute(sqlalchemy.text(f"SELECT binding, field_ids FROM {table}")).one()
+                assert tuple(row) == ("pending", None)
+        types = {
+            c["name"]: c["type"] for c in sqlalchemy.inspect(engine).get_columns("row_filters")
+        }
+        assert isinstance(types["field_ids"], sqlalchemy.JSON)
+        migrate.downgrade(url, revision_0065)
+        for table in ("row_filters", "column_masks"):
+            names = {c["name"] for c in sqlalchemy.inspect(engine).get_columns(table)}
+            assert not names & {"field_ids", "column_field_id", "binding"}
+        engine.dispose()

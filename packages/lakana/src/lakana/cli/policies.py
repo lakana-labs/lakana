@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Protocol
 
 import typer
 
@@ -19,9 +19,36 @@ _ENV = Annotated[str | None, typer.Option("--env", help="Environment (default: t
 _FILTER_ENV = Annotated[str | None, typer.Option("--env", help="Only this environment.")]
 _EXPRESSION = Annotated[str, typer.Option("--expression", help="Restricted SQL expression.")]
 _YES = Annotated[bool, typer.Option("--yes", help="Don't ask for confirmation.")]
-_COLUMNS = ["id", "subject", "environment", "namespace", "table", "expression"]
-_DROPPABLE = ["environment", "id", "namespace"]
-"""What a policy listing leaves out first on a narrow terminal; subject and table stay."""
+_COLUMNS = ["id", "subject", "environment", "namespace", "table", "expression", "bound"]
+_DROPPABLE = ["environment", "id", "namespace", "bound"]
+"""What a policy listing leaves out first on a narrow terminal; subject and table stay.
+
+`bound` goes last: it only matters for a policy of an earlier release that was not bound.
+"""
+
+
+class _HasBound(Protocol):
+    """What says whether a policy follows its columns."""
+
+    @property
+    def bound(self) -> bool | None:
+        """Whether the policy is bound; `None` from a server before this release."""
+
+
+def _yes_no(item: _HasBound) -> str:
+    """Say whether a policy follows its columns.
+
+    Parameters
+    ----------
+    item
+        A row filter or column mask.
+
+    Returns
+    -------
+    str
+        `yes` or `no`; a server before this release does not say, shown as `?`.
+    """
+    return "?" if item.bound is None else "yes" if item.bound else "no"
 
 
 @row_filter_app.command("create")
@@ -77,8 +104,8 @@ def list_row_filters(
     """List active row filters, optionally filtered.
 
     The table names who each row filter is for in `subject`. When the terminal is too narrow it
-    leaves out `environment`, `id` and `namespace`, in that order; `--output json` always has
-    every field.
+    leaves out `environment`, `id`, `namespace` and `bound`, in that order; `--output json`
+    always has every field.
 
     Parameters
     ----------
@@ -100,8 +127,8 @@ def list_row_filters(
         filters,
         columns=_COLUMNS,
         droppable=_DROPPABLE,
-        derived={"subject": subject_of},
-        whole=["subject"],
+        derived={"subject": subject_of, "bound": _yes_no},
+        whole=["subject", "bound"],
     )
 
 
@@ -184,8 +211,8 @@ def list_column_masks(
     """List active column masks, optionally filtered.
 
     The table names who each column mask is for in `subject`. When the terminal is too narrow it
-    leaves out `environment`, `id` and `namespace`, in that order; `--output json` always has
-    every field.
+    leaves out `environment`, `id`, `namespace` and `bound`, in that order; `--output json`
+    always has every field.
 
     Parameters
     ----------
@@ -205,10 +232,10 @@ def list_column_masks(
     _output.emit(
         state,
         masks,
-        columns=[*_COLUMNS[:5], "column", "expression"],
+        columns=[*_COLUMNS[:5], "column", "expression", "bound"],
         droppable=[*_DROPPABLE, "expression"],
-        derived={"subject": subject_of},
-        whole=["subject"],
+        derived={"subject": subject_of, "bound": _yes_no},
+        whole=["subject", "bound"],
     )
 
 

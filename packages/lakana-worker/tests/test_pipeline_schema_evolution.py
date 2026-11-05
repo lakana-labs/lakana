@@ -39,12 +39,26 @@ from sqlalchemy.orm import Session
 import lakana_worker.pipeline as pipeline_module
 from lakana_core.auth import AllowAllAuthorization, PrincipalRef
 from lakana_core.catalog.field_ids import duckdb_type_of
-from lakana_core.catalog.query_service import QueryService
+from lakana_core.catalog.query_service import QueryService, WriteMode, WriteTarget
 from lakana_core.catalog.service import CatalogService, LoadedTable
 from lakana_core.config import StorageConfig
 from lakana_core.identifiers import NamespacePath, TableRef
-from lakana_core.models import ColumnMask, Principal, PrincipalType, QueryRun, QueryRunStatus
+from lakana_core.models import (
+    ColumnMask,
+    Principal,
+    PrincipalType,
+    QueryRun,
+    QueryRunStatus,
+    RowFilter,
+)
 from lakana_core.policy.column_masks import ColumnMaskService
+from lakana_core.policy.field_binding import (
+    PENDING,
+    UNBOUND,
+    UNREADABLE_POLICY_MESSAGE,
+    PolicySchema,
+)
+from lakana_core.policy.resolver import PolicyResolver, ResolvedPolicy
 from lakana_core.policy.row_filters import RowFilterService
 from lakana_core.storage.fsspec_storage import FsspecStorage
 from lakana_core.storage.resolver import StorageResolver
@@ -640,8 +654,8 @@ def test_every_duckdb_type_the_map_names_round_trips_through_duckdb(
     assert row[0].replace(" ", "") == duckdb_type.replace(" ", "")
 
 
-def _refused(table: str, column: str) -> str:
-    """Give the text of the refusal of a read after a rename touched a policy's column.
+def _renamed_refusal(table: str, column: str) -> str:
+    """Give the text of the refusal of a read after a rename touched a legacy policy's column.
 
     Parameters
     ----------
@@ -662,6 +676,49 @@ def _refused(table: str, column: str) -> str:
         "filters and column masks, create each one that uses a renamed or replaced column "
         "again for the column it is meant for, and then revoke the old one."
     )
+
+
+def _column_gone(table: str, column: str) -> str:
+    """Give the text of the refusal of a read whose bound policy's column is gone.
+
+    Parameters
+    ----------
+    table
+        The table's dotted name.
+    column
+        The policy's column, as written.
+
+    Returns
+    -------
+    str
+        The message.
+    """
+    return (
+        f"`{table}` has a row filter or column mask on a column that was dropped or replaced "
+        f"(created for `{column}`); an administrator creates it again for the column it is "
+        "meant for, or revokes it"
+    )
+
+
+def _unbind(session: Session, policy_id: uuid.UUID, binding: str) -> None:
+    """Make a policy one of an earlier release: not bound to field ids.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    policy_id
+        The row filter's or column mask's id.
+    binding
+        `pending` or `unbound`.
+    """
+    row = session.get(ColumnMask, policy_id) or session.get(RowFilter, policy_id)
+    assert row is not None
+    row.binding = binding
+    row.field_ids = None
+    if isinstance(row, ColumnMask):
+        row.column_field_id = None
+    session.commit()
 
 
 def _people(catalog: CatalogService, principal: PrincipalRef, name: str) -> tuple[TableRef, str]:
@@ -762,34 +819,71 @@ def _mask(
     )
 
 
-def _assert_nothing_shown(run: QueryRun, table: str, column: str) -> None:
-    """Assert a run failed with the refusal and wrote no result.
+def _assert_refused(run: QueryRun, message: str) -> None:
+    """Assert a run failed with the given refusal and wrote no result.
 
     Parameters
     ----------
     run
         The finished run.
-    table
-        The table's dotted name in the message.
-    column
-        The policy's column in the message.
+    message
+        The refusal: `_renamed_refusal` or `_column_gone`.
     """
     assert run.status == QueryRunStatus.FAILED
-    assert run.error_message == _refused(table, column)
+    assert run.error_message == message
     assert run.result_location is None
 
 
-def test_a_mask_whose_column_was_renamed_onto_another_refuses_the_read(
+def _filter(
+    session: Session, catalog: CatalogService, principal: PrincipalRef, expression: str
+) -> uuid.UUID:
+    """Filter `gold.staff` for the admin.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    catalog
+        The catalog.
+    principal
+        The acting principal.
+    expression
+        The row filter.
+
+    Returns
+    -------
+    uuid.UUID
+        The filter's id.
+    """
+    return (
+        RowFilterService(session, AllowAllAuthorization(), catalog)
+        .create(
+            principal,
+            principal="admin",
+            environment="dev",
+            namespace="gold",
+            table="staff",
+            expression=expression,
+        )
+        .id
+    )
+
+
+def test_a_mask_follows_its_column_when_another_takes_its_name(
     session: Session, principal: PrincipalRef, catalog: CatalogService, tmp_path: Path
 ) -> None:
-    """`ssn` -> `ssn_old` and `email` -> `ssn`: the mask would cover the email column."""
+    """`ssn` -> `ssn_old`, `email` -> `ssn`: the mask stays on field 3, now `ssn_old`."""
     ref, _ = _people(catalog, principal, "staff")
     _mask(session, catalog, principal, "staff", "ssn")
     _rename(catalog, principal, ref, ("ssn", "ssn_old"), ("email", "ssn"))
 
-    run = _query(session, principal, "SELECT * FROM gold.staff")
+    rows = sorted(
+        _result(tmp_path, _query(session, principal, "SELECT * FROM gold.staff")).to_pylist(),
+        key=lambda row: row["id"],
+    )
 
-    _assert_nothing_shown(run, "gold.staff", "ssn")
+    assert [row["ssn_old"] for row in rows] == ["hidden", "hidden"]
+    assert [row["ssn"] for row in rows] == ["x@example.org", "y@example.org"]
 
 
 def test_a_rename_that_touches_no_policy_column_reads_as_before(
@@ -807,24 +901,17 @@ def test_a_rename_that_touches_no_policy_column_reads_as_before(
     assert [row["email2"] for row in rows] == ["x@example.org", "y@example.org"]
 
 
-def test_a_row_filter_whose_column_was_renamed_refuses_the_read(
+def test_a_row_filter_follows_its_renamed_column(
     session: Session, principal: PrincipalRef, catalog: CatalogService, tmp_path: Path
 ) -> None:
-    """The filter reads `dept`; renamed to `department`, it is no longer sure what it tests."""
+    """`dept = 'a'`, `dept` -> `department`: one row, id 1."""
     ref, _ = _people(catalog, principal, "staff")
-    RowFilterService(session, AllowAllAuthorization(), catalog).create(
-        principal,
-        principal="admin",
-        environment="dev",
-        namespace="gold",
-        table="staff",
-        expression="dept = 'a'",
-    )
+    _filter(session, catalog, principal, "dept = 'a'")
     _rename(catalog, principal, ref, ("dept", "department"))
 
-    run = _query(session, principal, "SELECT * FROM gold.staff")
+    read = _result(tmp_path, _query(session, principal, "SELECT * FROM gold.staff"))
 
-    _assert_nothing_shown(run, "gold.staff", "dept")
+    assert [(row["id"], row["department"]) for row in read.to_pylist()] == [(1, "a")]
 
 
 def test_a_column_dropped_and_added_again_under_a_policy_name_refuses_the_read(
@@ -839,13 +926,63 @@ def test_a_column_dropped_and_added_again_under_a_policy_name_refuses_the_read(
 
     run = _query(session, principal, "SELECT * FROM gold.staff")
 
-    _assert_nothing_shown(run, "gold.staff", "ssn")
+    _assert_refused(run, _column_gone("gold.staff", "ssn"))
 
 
-def test_a_column_read_by_a_mask_expression_that_was_renamed_refuses_the_read(
+def test_a_dropped_masked_column_refuses_the_read(
     session: Session, principal: PrincipalRef, catalog: CatalogService, tmp_path: Path
 ) -> None:
-    """A mask on `ssn` built from `dept` is as stale as one on `dept`."""
+    """Drop `ssn`: the mask's field is gone, so even a read of `id` alone is refused."""
+    ref, _ = _people(catalog, principal, "staff")
+    _mask(session, catalog, principal, "staff", "ssn")
+    table = catalog.load_table(principal, ref)
+    _evolve(catalog, principal, ref, table, lambda u: u.delete_column("ssn"))
+
+    run = _query(session, principal, "SELECT id FROM gold.staff")
+
+    _assert_refused(run, _column_gone("gold.staff", "ssn"))
+
+
+def test_a_retype_by_replacement_refuses_the_read(
+    session: Session, principal: PrincipalRef, catalog: CatalogService, tmp_path: Path
+) -> None:
+    """A write with `evolve_schema` turns `ssn` from string to long: a new field, refused.
+
+    The mask is bob's, so the admin's write is not refused for a policy of its own.
+    """
+    bob_id = uuid.uuid4()
+    session.add(Principal(id=bob_id, type=PrincipalType.USER, name="bob"))
+    session.commit()
+    bob = PrincipalRef(id=bob_id, name="bob", type=PrincipalType.USER)
+    _people(catalog, principal, "staff")
+    ColumnMaskService(session, AllowAllAuthorization(), catalog).create(
+        principal,
+        principal="bob",
+        environment="dev",
+        namespace="gold",
+        table="staff",
+        column="ssn",
+        expression="'hidden'",
+    )
+    write = QueryService(session, AllowAllAuthorization()).submit_write(
+        principal,
+        "dev",
+        "SELECT id, dept, CAST(ssn AS BIGINT) AS ssn, email FROM gold.staff",
+        WriteTarget(table="gold.staff", mode=WriteMode.REPLACE, evolve_schema=True),
+    )
+    run_one(session, write.id, AllowAllAuthorization())
+    session.refresh(write)
+    assert write.status == QueryRunStatus.SUCCEEDED, write.error_message
+
+    _assert_refused(
+        _query(session, bob, "SELECT id FROM gold.staff"), _column_gone("gold.staff", "ssn")
+    )
+
+
+def test_a_column_read_by_a_mask_expression_follows_its_rename(
+    session: Session, principal: PrincipalRef, catalog: CatalogService, tmp_path: Path
+) -> None:
+    """Mask on `ssn` = `dept || '-x'`; `dept` -> `team`: applied with `team`'s values."""
     ref, _ = _people(catalog, principal, "staff")
     ColumnMaskService(session, AllowAllAuthorization(), catalog).create(
         principal,
@@ -854,13 +991,14 @@ def test_a_column_read_by_a_mask_expression_that_was_renamed_refuses_the_read(
         namespace="gold",
         table="staff",
         column="ssn",
-        expression="md5(dept)",
+        expression="dept || '-x'",
     )
-    _rename(catalog, principal, ref, ("dept", "department"))
+    _rename(catalog, principal, ref, ("dept", "team"))
 
-    run = _query(session, principal, "SELECT * FROM gold.staff")
+    read = _result(tmp_path, _query(session, principal, "SELECT * FROM gold.staff"))
 
-    _assert_nothing_shown(run, "gold.staff", "dept")
+    rows = sorted(read.to_pylist(), key=lambda row: row["id"])
+    assert [row["ssn"] for row in rows] == ["a-x", "b-x"]
 
 
 def test_a_policy_created_after_the_rename_reads(
@@ -880,18 +1018,21 @@ def test_a_policy_created_after_the_rename_reads(
 def test_the_documented_order_after_a_rename_never_shows_a_value_in_clear(
     session: Session, principal: PrincipalRef, catalog: CatalogService, tmp_path: Path
 ) -> None:
-    """Rename, create for the new name, revoke the old one: every read is refused or masked."""
+    """A legacy mask: rename, create for the new name, revoke the old one: refused or masked."""
     ref, _ = _people(catalog, principal, "staff")
     stale = _mask(session, catalog, principal, "staff", "ssn")
+    _unbind(session, stale, UNBOUND)
     _rename(catalog, principal, ref, ("ssn", "social"))
 
-    _assert_nothing_shown(
-        _query(session, principal, "SELECT * FROM gold.staff"), "gold.staff", "ssn"
+    _assert_refused(
+        _query(session, principal, "SELECT * FROM gold.staff"),
+        _renamed_refusal("gold.staff", "ssn"),
     )
     _mask(session, catalog, principal, "staff", "social")
     # The old mask is still in force and still touched, so the read is still refused.
-    _assert_nothing_shown(
-        _query(session, principal, "SELECT * FROM gold.staff"), "gold.staff", "ssn"
+    _assert_refused(
+        _query(session, principal, "SELECT * FROM gold.staff"),
+        _renamed_refusal("gold.staff", "ssn"),
     )
     ColumnMaskService(session, AllowAllAuthorization(), catalog).revoke(principal, stale)
 
@@ -909,8 +1050,8 @@ def test_a_schema_set_back_to_the_one_a_policy_was_written_for_reads_again(
     original = catalog.load_table(principal, ref)
     table = _evolve(catalog, principal, ref, original, lambda u: u.delete_column("ssn"))
     table = _evolve(catalog, principal, ref, table, lambda u: u.add_column("ssn", StringType()))
-    _assert_nothing_shown(
-        _query(session, principal, "SELECT * FROM gold.staff"), "gold.staff", "ssn"
+    _assert_refused(
+        _query(session, principal, "SELECT * FROM gold.staff"), _column_gone("gold.staff", "ssn")
     )
 
     first = original.metadata.current_schema_id
@@ -925,10 +1066,32 @@ def test_a_schema_set_back_to_the_one_a_policy_was_written_for_reads_again(
     assert {row["ssn"] for row in read.to_pylist()} == {"hidden"}
 
 
+def test_a_schema_set_back_before_the_policys_column_refuses_the_read(
+    session: Session, principal: PrincipalRef, catalog: CatalogService, tmp_path: Path
+) -> None:
+    """Review Focus 2: add `tier`, mask it, set the schema back to one without it: gone."""
+    ref, _ = _people(catalog, principal, "staff")
+    original = catalog.load_table(principal, ref)
+    _evolve(catalog, principal, ref, original, lambda u: u.add_column("tier", StringType()))
+    _mask(session, catalog, principal, "staff", "tier")
+
+    catalog.commit_table(
+        principal,
+        ref,
+        requirements=[],
+        updates=[SetCurrentSchemaUpdate(schema_id=original.metadata.current_schema_id)],
+    )
+
+    _assert_refused(
+        _query(session, principal, "SELECT * FROM gold.staff"),
+        _column_gone("gold.staff", "tier"),
+    )
+
+
 def test_a_column_renamed_and_renamed_back_reads_as_before(
     session: Session, principal: PrincipalRef, catalog: CatalogService, tmp_path: Path
 ) -> None:
-    """The mask covers the column it covered when it was created."""
+    """Spec "rename undone": the mask covers `ssn` again."""
     ref, _ = _people(catalog, principal, "staff")
     _mask(session, catalog, principal, "staff", "ssn")
     _rename(catalog, principal, ref, ("ssn", "x"), ("x", "ssn"))
@@ -941,12 +1104,14 @@ def test_a_column_renamed_and_renamed_back_reads_as_before(
 def test_creating_the_policy_again_after_the_refusal_reads(
     session: Session, principal: PrincipalRef, catalog: CatalogService, tmp_path: Path
 ) -> None:
-    """The administrator revokes the stale mask and creates it for the column it is meant for."""
+    """A legacy mask: the administrator revokes it and creates it for the column it is meant for."""
     ref, _ = _people(catalog, principal, "staff")
     stale = _mask(session, catalog, principal, "staff", "ssn")
+    _unbind(session, stale, UNBOUND)
     _rename(catalog, principal, ref, ("ssn", "ssn_old"))
-    _assert_nothing_shown(
-        _query(session, principal, "SELECT * FROM gold.staff"), "gold.staff", "ssn"
+    _assert_refused(
+        _query(session, principal, "SELECT * FROM gold.staff"),
+        _renamed_refusal("gold.staff", "ssn"),
     )
 
     ColumnMaskService(session, AllowAllAuthorization(), catalog).revoke(principal, stale)
@@ -963,6 +1128,7 @@ def test_a_policy_without_a_recorded_schema_is_judged_from_the_oldest_schema(
     ref, _ = _people(catalog, principal, "staff")
     _rename(catalog, principal, ref, ("email", "mail"))
     mask = _mask(session, catalog, principal, "staff", "mail")
+    _unbind(session, mask, UNBOUND)
     read = _result(tmp_path, _query(session, principal, "SELECT * FROM gold.staff"))
     assert {row["mail"] for row in read.to_pylist()} == {"hidden"}
 
@@ -971,8 +1137,9 @@ def test_a_policy_without_a_recorded_schema_is_judged_from_the_oldest_schema(
     row.schema_id = None
     session.commit()
 
-    _assert_nothing_shown(
-        _query(session, principal, "SELECT * FROM gold.staff"), "gold.staff", "mail"
+    _assert_refused(
+        _query(session, principal, "SELECT * FROM gold.staff"),
+        _renamed_refusal("gold.staff", "mail"),
     )
 
 
@@ -987,6 +1154,7 @@ def test_an_old_release_mask_on_a_column_added_later_is_refused_after_a_takeover
     )
     table = _evolve(catalog, principal, ref, table, lambda u: u.add_column("ssn", StringType()))
     mask = _mask(session, catalog, principal, "staff", "ssn")
+    _unbind(session, mask, UNBOUND)
     row = session.get(ColumnMask, mask)
     assert row is not None
     row.schema_id = None
@@ -997,9 +1165,67 @@ def test_an_old_release_mask_on_a_column_added_later_is_refused_after_a_takeover
     table = _evolve(catalog, principal, ref, table, lambda u: u.rename_column("ssn", "ssn_old"))
     _evolve(catalog, principal, ref, table, lambda u: u.add_column("ssn", StringType()))
 
-    _assert_nothing_shown(
-        _query(session, principal, "SELECT * FROM gold.staff"), "gold.staff", "ssn"
+    _assert_refused(
+        _query(session, principal, "SELECT * FROM gold.staff"),
+        _renamed_refusal("gold.staff", "ssn"),
     )
+
+
+@pytest.mark.parametrize("binding", [PENDING, UNBOUND])
+def test_a_policy_not_bound_by_id_keeps_the_rename_rule(
+    session: Session,
+    principal: PrincipalRef,
+    catalog: CatalogService,
+    tmp_path: Path,
+    binding: str,
+) -> None:
+    """A `pending` or `unbound` mask on `ssn`, then the swap: today's refusal, not a follow."""
+    ref, _ = _people(catalog, principal, "staff")
+    _unbind(session, _mask(session, catalog, principal, "staff", "ssn"), binding)
+    _rename(catalog, principal, ref, ("ssn", "ssn_old"), ("email", "ssn"))
+
+    _assert_refused(
+        _query(session, principal, "SELECT * FROM gold.staff"),
+        _renamed_refusal("gold.staff", "ssn"),
+    )
+
+
+def test_the_policy_is_resolved_against_the_fields_the_read_projects(
+    session: Session,
+    principal: PrincipalRef,
+    catalog: CatalogService,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Review Focus 5: the projected fields and the same metadata's current schema reach it."""
+    ref, _ = _people(catalog, principal, "staff")
+    _mask(session, catalog, principal, "staff", "ssn")
+    _rename(catalog, principal, ref, ("dept", "team"))
+    schemas: list[PolicySchema | None] = []
+    projected: list[tuple[NestedField, ...]] = []
+    real_resolve = PolicyResolver.resolve
+    real_read_fields = pipeline_module.read_fields
+
+    def resolve(self: PolicyResolver, *args: object, **kwargs: object) -> ResolvedPolicy:
+        schema = kwargs.get("schema")
+        assert schema is None or isinstance(schema, PolicySchema)
+        schemas.append(schema)
+        return real_resolve(self, *args, **kwargs)  # ty: ignore[invalid-argument-type]
+
+    def read_fields(table: str, fields: list[NestedField]) -> object:
+        projected.append(tuple(fields))
+        return real_read_fields(table, fields)
+
+    monkeypatch.setattr(PolicyResolver, "resolve", resolve)
+    monkeypatch.setattr(pipeline_module, "read_fields", read_fields)
+
+    _result(tmp_path, _query(session, principal, "SELECT * FROM gold.staff"))
+
+    [schema] = schemas
+    assert schema is not None
+    assert schema.read == projected[0]
+    assert schema.current == tuple(catalog.load_table(principal, ref).metadata.schema().fields)
+    assert [field.name for field in schema.read] == ["id", "team", "ssn", "email"]
 
 
 def test_a_policy_of_another_reader_does_not_refuse_this_reader(
@@ -1106,3 +1332,26 @@ def test_an_external_table_whose_files_lack_a_declared_column_fails_under_a_row_
     assert run.result_location is None
     first = [name for name in seen[0] if name.endswith(".parquet")]
     assert len(first) == 2
+
+
+@pytest.mark.parametrize(
+    "corrupt", [{"field_ids": []}, {"column_field_id": None}, {"binding": "names2"}]
+)
+def test_a_corrupt_bound_policy_names_itself_unreadable(
+    session: Session,
+    principal: PrincipalRef,
+    catalog: CatalogService,
+    tmp_path: Path,
+    corrupt: dict[str, object],
+) -> None:
+    """A bound mask whose stored binding cannot be read: the reader is told so, nothing shown."""
+    _people(catalog, principal, "staff")
+    mask = session.get(ColumnMask, _mask(session, catalog, principal, "staff", "ssn"))
+    assert mask is not None
+    for key, value in corrupt.items():
+        setattr(mask, key, value)
+    session.commit()
+
+    _assert_refused(
+        _query(session, principal, "SELECT id FROM gold.staff"), UNREADABLE_POLICY_MESSAGE
+    )

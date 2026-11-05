@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 import pytest
 import sqlglot.errors
 from core_test_helpers import ensure_table
+from pyiceberg.types import NestedField, StringType
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -24,7 +25,34 @@ from lakana_core.models import (
     TableType,
 )
 from lakana_core.policy import expressions, resolver
+from lakana_core.policy.field_binding import (
+    FIELD_IDS,
+    PENDING,
+    UNBOUND,
+    UNREADABLE_POLICY_MESSAGE,
+    PolicySchema,
+    UnreadablePolicyError,
+)
+from lakana_core.policy.renames import PolicyColumns
 from lakana_core.policy.resolver import PolicyResolver
+
+
+def _field(field_id: int, name: str) -> NestedField:
+    """Build an optional string column.
+
+    Parameters
+    ----------
+    field_id
+        The field id.
+    name
+        The column's name.
+
+    Returns
+    -------
+    NestedField
+        The column.
+    """
+    return NestedField(field_id, name, StringType(), required=False)
 
 
 def _add_principal(session: Session, name: str) -> PrincipalRef:
@@ -104,6 +132,8 @@ def _add_filter(
     namespace: str = "gold",
     revoked_at: datetime | None = None,
     schema_id: int | None = None,
+    binding: str = PENDING,
+    field_ids: object = None,
 ) -> None:
     """Insert a RowFilter row directly.
 
@@ -128,6 +158,10 @@ def _add_filter(
         When set, the filter is inserted already revoked.
     schema_id
         The schema id recorded with the filter.
+    binding
+        The binding state stored with the filter.
+    field_ids
+        The stored map of column names to field ids.
     """
     environment_id, table_id = ensure_table(session, environment, namespace, table)
     session.add(
@@ -145,6 +179,8 @@ def _add_filter(
             created_at=datetime.now(UTC),
             revoked_at=revoked_at,
             schema_id=schema_id,
+            binding=binding,
+            field_ids=field_ids,
         )
     )
     session.commit()
@@ -164,6 +200,10 @@ def _add_mask(
     created_at: datetime | None = None,
     schema_id: int | None = None,
     type_checked: bool = False,
+    binding: str = PENDING,
+    field_ids: object = None,
+    column_field_id: int | None = None,
+    row_id: uuid.UUID | None = None,
 ) -> None:
     """Insert a ColumnMask row directly.
 
@@ -194,11 +234,19 @@ def _add_mask(
         The schema id recorded with the mask.
     type_checked
         Whether the mask was checked against its column's type.
+    binding
+        The binding state stored with the mask.
+    field_ids
+        The stored map of column names to field ids.
+    column_field_id
+        The stored field id of the masked column.
+    row_id
+        The mask's id; random by default.
     """
     environment_id, table_id = ensure_table(session, environment, namespace, table)
     session.add(
         ColumnMask(
-            id=uuid.uuid4(),
+            id=row_id or uuid.uuid4(),
             principal_id=principal_id,
             group_id=group_id,
             environment=environment,
@@ -213,6 +261,9 @@ def _add_mask(
             revoked_at=revoked_at,
             schema_id=schema_id,
             type_checked=type_checked,
+            binding=binding,
+            field_ids=field_ids,
+            column_field_id=column_field_id,
         )
     )
     session.commit()
@@ -838,3 +889,254 @@ def test_a_mask_is_typed_only_when_every_mask_of_the_column_was_type_checked(
 
     assert resolved.column_masks["name"] == "NULL"
     assert resolved.typed_masks == frozenset({"ssn", "name"})
+
+
+def test_a_bound_filter_is_rewritten_to_the_names_of_the_schema_read(session: Session) -> None:
+    """Filter `dept = 'a'` bound to field 2, now called `department`."""
+    alice = _add_principal(session, "alice")
+    _add_filter(
+        session,
+        principal_id=alice.id,
+        expression="dept = 'a'",
+        binding=FIELD_IDS,
+        field_ids={"dept": 2},
+    )
+    schema = PolicySchema.of((_field(1, "id"), _field(2, "department")))
+
+    policy = PolicyResolver(session).resolve(alice, _ref(), schema=schema)
+
+    assert policy.row_filters == ["\"department\" = 'a'"]
+    assert (policy.gone, policy.policies) == (None, [])
+
+
+def test_a_bound_filter_is_substituted_after_the_rewrite(session: Session) -> None:
+    """`current_user()` still becomes the reader's name in the rewritten text."""
+    alice = _add_principal(session, "alice")
+    _add_filter(
+        session,
+        principal_id=alice.id,
+        expression="owner = current_user()",
+        binding=FIELD_IDS,
+        field_ids={"owner": 2},
+    )
+    schema = PolicySchema.of((_field(2, "owned_by"),))
+
+    policy = PolicyResolver(session).resolve(alice, _ref(), schema=schema)
+
+    assert policy.row_filters == ["\"owned_by\" = 'alice'"]
+
+
+def test_a_bound_mask_is_keyed_by_its_columns_current_name(session: Session) -> None:
+    """Mask on `ssn` (field 3), renamed `tax_id`: keyed `tax_id`, expression rewritten."""
+    alice = _add_principal(session, "alice")
+    _add_mask(
+        session,
+        principal_id=alice.id,
+        column="ssn",
+        expression="md5(ssn)",
+        type_checked=True,
+        binding=FIELD_IDS,
+        field_ids={"ssn": 3},
+        column_field_id=3,
+    )
+    schema = PolicySchema.of((_field(1, "id"), _field(3, "tax_id")))
+
+    policy = PolicyResolver(session).resolve(alice, _ref(), schema=schema)
+
+    assert policy.column_masks == {"tax_id": 'MD5("tax_id")'}
+    assert policy.masked_field_ids == frozenset({3})
+    assert policy.legacy_masked == frozenset()
+    assert policy.typed_masks == frozenset({"tax_id"})
+    assert (policy.gone, policy.policies) == (None, [])
+
+
+def test_a_bound_policy_on_a_dropped_column_names_it_as_gone(session: Session) -> None:
+    """Field 3 is not in the current schema: `gone` is the name as written; the rest resolves."""
+    alice = _add_principal(session, "alice")
+    _add_mask(
+        session,
+        principal_id=alice.id,
+        column="ssn",
+        expression="NULL",
+        binding=FIELD_IDS,
+        field_ids={},
+        column_field_id=3,
+    )
+    _add_filter(
+        session,
+        principal_id=alice.id,
+        expression="dept = 'a'",
+        binding=FIELD_IDS,
+        field_ids={"dept": 2},
+    )
+    schema = PolicySchema.of((_field(1, "id"), _field(2, "dept")))
+
+    policy = PolicyResolver(session).resolve(alice, _ref(), schema=schema)
+
+    assert policy.gone == "ssn"
+    assert policy.row_filters == ["\"dept\" = 'a'"]
+    assert policy.column_masks == {}
+    assert policy.masked_field_ids == frozenset({3})
+
+
+def test_the_gone_name_shown_is_the_first_without_regard_to_case(session: Session) -> None:
+    """Two rows gone: the refusal names the same one every time."""
+    alice = _add_principal(session, "alice")
+    for written in ("b", "A"):
+        _add_filter(
+            session,
+            principal_id=alice.id,
+            expression=f"{written} = 1",
+            binding=FIELD_IDS,
+            field_ids={written: 9},
+        )
+
+    policy = PolicyResolver(session).resolve(alice, _ref(), schema=PolicySchema.of(()))
+
+    assert policy.gone == "A"
+
+
+def test_two_masks_on_one_field_written_in_two_spellings_collapse_to_null(
+    session: Session,
+) -> None:
+    """G6 / Review Focus 4: a bound mask on field 3 and a legacy mask on `SSN`: one `NULL`."""
+    alice = _add_principal(session, "alice")
+    _add_mask(
+        session,
+        principal_id=alice.id,
+        column="ssn",
+        expression="'x'",
+        type_checked=True,
+        binding=FIELD_IDS,
+        field_ids={"ssn": 3},
+        column_field_id=3,
+        row_id=uuid.UUID(int=1),
+    )
+    _add_mask(
+        session,
+        principal_id=alice.id,
+        column="SSN",
+        expression="'y'",
+        type_checked=True,
+        row_id=uuid.UUID(int=2),
+    )
+    schema = PolicySchema.of((_field(3, "ssn"),))
+
+    policy = PolicyResolver(session).resolve(alice, _ref(), schema=schema)
+
+    assert policy.column_masks == {"ssn": "NULL"}
+    assert policy.typed_masks == frozenset({"ssn"})
+    assert (policy.masked_field_ids, policy.legacy_masked) == (frozenset({3}), frozenset({"ssn"}))
+
+
+def test_a_pending_or_unbound_policy_is_read_as_written_with_the_rename_rule(
+    session: Session,
+) -> None:
+    """Legacy rows keep today's path: text as written and an entry in `policies`."""
+    alice = _add_principal(session, "alice")
+    _add_filter(session, principal_id=alice.id, expression="dept = 'a'", schema_id=7)
+    _add_mask(
+        session,
+        principal_id=alice.id,
+        column="SSN",
+        expression="NULL",
+        schema_id=7,
+        binding=UNBOUND,
+    )
+    schema = PolicySchema.of((_field(2, "department"),))
+
+    policy = PolicyResolver(session).resolve(alice, _ref(), schema=schema)
+
+    assert policy.row_filters == ["dept = 'a'"]
+    assert policy.column_masks == {"SSN": "NULL"}
+    assert sorted(policy.policies, key=lambda p: sorted(p.columns)) == [
+        PolicyColumns(frozenset({"SSN"}), 7),
+        PolicyColumns(frozenset({"dept"}), 7),
+    ]
+    assert (policy.masked_field_ids, policy.legacy_masked) == (frozenset(), frozenset({"ssn"}))
+
+
+def test_without_a_schema_a_bound_policy_is_returned_as_written(session: Session) -> None:
+    """Presence checks (incremental append, write refusal) pass no schema."""
+    alice = _add_principal(session, "alice")
+    _add_filter(
+        session,
+        principal_id=alice.id,
+        expression="dept = 'a'",
+        binding=FIELD_IDS,
+        field_ids={"dept": 2},
+    )
+    _add_mask(
+        session,
+        principal_id=alice.id,
+        column="ssn",
+        expression="NULL",
+        binding=FIELD_IDS,
+        field_ids={"ssn": 3},
+        column_field_id=3,
+    )
+
+    policy = PolicyResolver(session).resolve(alice, _ref())
+
+    assert policy.row_filters == ["dept = 'a'"]
+    assert policy.column_masks == {"ssn": "NULL"}
+    assert (policy.gone, policy.policies, policy.masked_field_ids) == (None, [], frozenset({3}))
+
+
+@pytest.mark.parametrize("with_schema", [True, False])
+def test_a_stored_binding_that_is_not_a_map_refuses(session: Session, with_schema: bool) -> None:
+    """`field_ids` of `[]` on a bound row: `UNREADABLE_POLICY_MESSAGE`."""
+    alice = _add_principal(session, "alice")
+    _add_filter(
+        session, principal_id=alice.id, expression="dept = 'a'", binding=FIELD_IDS, field_ids=[]
+    )
+    schema = PolicySchema.of((_field(2, "dept"),)) if with_schema else None
+
+    with pytest.raises(UnreadablePolicyError) as caught:
+        PolicyResolver(session).resolve(alice, _ref(), schema=schema)
+
+    assert str(caught.value) == UNREADABLE_POLICY_MESSAGE
+
+
+@pytest.mark.parametrize("with_schema", [True, False])
+def test_a_bound_mask_without_its_columns_id_refuses(session: Session, with_schema: bool) -> None:
+    """F4: `column_field_id` NULL on a bound mask is refused, never skipped."""
+    alice = _add_principal(session, "alice")
+    _add_mask(
+        session,
+        principal_id=alice.id,
+        column="ssn",
+        expression="NULL",
+        binding=FIELD_IDS,
+        field_ids={},
+    )
+    schema = PolicySchema.of((_field(3, "ssn"),)) if with_schema else None
+
+    with pytest.raises(UnreadablePolicyError) as caught:
+        PolicyResolver(session).resolve(alice, _ref(), schema=schema)
+
+    assert str(caught.value) == UNREADABLE_POLICY_MESSAGE
+
+
+@pytest.mark.parametrize("with_schema", [True, False])
+def test_a_binding_state_nobody_knows_refuses(session: Session, with_schema: bool) -> None:
+    """M1: a `binding` outside the four states is unreadable, never read as a legacy row."""
+    alice = _add_principal(session, "alice")
+    _add_filter(session, principal_id=alice.id, expression="dept = 'a'", binding="Field_Ids")
+    schema = PolicySchema.of((_field(2, "dept"),)) if with_schema else None
+
+    with pytest.raises(UnreadablePolicyError) as caught:
+        PolicyResolver(session).resolve(alice, _ref(), schema=schema)
+
+    assert str(caught.value) == UNREADABLE_POLICY_MESSAGE
+
+
+def test_an_unparseable_legacy_policy_refuses_as_unreadable(session: Session) -> None:
+    """The text of a row of an earlier release that no longer parses: the same error class."""
+    alice = _add_principal(session, "alice")
+    _add_filter(session, principal_id=alice.id, expression="dept = (")
+
+    with pytest.raises(UnreadablePolicyError) as caught:
+        PolicyResolver(session).resolve(alice, _ref())
+
+    assert str(caught.value) == UNREADABLE_POLICY_MESSAGE

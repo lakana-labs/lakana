@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from core_test_helpers import FakeColumnCatalog, ensure_table
+from core_test_helpers import FakeColumnCatalog, NoPolicyFields, ensure_table
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -36,6 +36,7 @@ from lakana_core.models import (
     TableType,
 )
 from lakana_core.policy.column_masks import ColumnMaskService
+from lakana_core.policy.shown import ShownPolicy
 from lakana_core.statement_limit import statement_too_long_message
 
 
@@ -318,6 +319,8 @@ def test_create_then_list_for_principal(session: Session) -> None:
     )
     listed = service.list_for_principal(admin, "alice")
     assert [m.id for m in listed] == [created.id]
+    # The fake catalog has no table metadata to rename from: shown as written, bound.
+    assert service.shown(admin, listed) == {created.id: ShownPolicy("NULL", "ssn", True)}
 
 
 def test_create_then_list_for_group(session: Session) -> None:
@@ -791,7 +794,7 @@ def test_create_says_when_the_table_has_no_recorded_columns(session: Session) ->
 
 
 @dataclass
-class _GrantCheckingCatalog:
+class _GrantCheckingCatalog(NoPolicyFields):
     """A catalog whose `describe_table` asks the real grant authorization for READ_TABLE."""
 
     authz: GrantAuthorization
@@ -906,9 +909,9 @@ def _page_quotes() -> list[str]:
     ]
 
 
-def test_the_page_quotes_fifteen_refusals() -> None:
+def test_the_page_quotes_seventeen_refusals() -> None:
     """The table the next tests read has the rows they expect."""
-    assert len(_page_quotes()) == 15
+    assert len(_page_quotes()) == 17
 
 
 def test_a_qualified_mask_expression_is_refused_as_the_page_says(session: Session) -> None:
@@ -1153,3 +1156,69 @@ def test_a_mask_on_a_nanosecond_parquet_timestamp_is_stored_as_not_type_checked(
     catalog = FakeColumnCatalog(names=["c"], types={"c": "timestamp[ns]"}, file_format="parquet")
     created = _create_mask(session, "c", "TIMESTAMP '1970-01-01 00:00:00'", catalog)
     assert created.type_checked is False
+
+
+# --- the mask's columns are bound to field ids when it is created ---
+
+
+def test_a_new_column_mask_stores_its_column_field_id(session: Session) -> None:
+    """A mask on `email` reading `email`: both are field 3."""
+    catalog = FakeColumnCatalog(names=["id", "name", "email"], schema_id=1)
+    service, admin = _ready(session, catalog)
+
+    row = service.create(admin, **{**_mask_args("email"), "expression": "md5(email)"})
+
+    assert (row.binding, row.field_ids, row.column_field_id) == ("field_ids", {"email": 3}, 3)
+
+
+def test_a_mask_reading_another_column_stores_both_ids(session: Session) -> None:
+    """The mask's own column is a key of its own, beside the column its expression reads."""
+    catalog = FakeColumnCatalog(names=["id", "ssn", "dept"], schema_id=1)
+    service, admin = _ready(session, catalog)
+
+    row = service.create(admin, **{**_mask_args("ssn"), "expression": "dept"})
+
+    assert (row.field_ids, row.column_field_id) == ({"dept": 3, "ssn": 2}, 2)
+
+
+def test_a_mask_on_a_raw_table_is_bound_by_name(session: Session) -> None:
+    """An external table has no field ids: `names`, nothing stored."""
+    catalog = FakeColumnCatalog(names=["id", "ssn"], file_format="csv")
+    service, admin = _ready(session, catalog)
+
+    row = service.create(admin, **_mask_args("ssn"))
+
+    assert (row.binding, row.field_ids, row.column_field_id) == ("names", None, None)
+
+
+def test_creation_binds_ids_from_the_description_it_type_checked(session: Session) -> None:
+    """Regression pin: one `describe_table` call gives the schema id, the types and the ids."""
+    catalog = FakeColumnCatalog(names=["id", "ssn"], schema_id=1)
+    service, admin = _ready(session, catalog)
+
+    service.create(admin, **_mask_args("ssn"))
+
+    assert len(catalog.calls) == 1
+
+
+def test_creation_refuses_a_mask_on_an_ambiguous_column(session: Session) -> None:
+    """A table with `ssn` and `SSN`: a mask on `ssn` cannot be told apart, so it is refused."""
+    catalog = FakeColumnCatalog(names=["ssn", "SSN"], schema_id=1)
+    service, admin = _ready(session, catalog)
+
+    with pytest.raises(ValidationError, match="cannot tell apart for a policy"):
+        service.create(admin, **_mask_args("ssn"))
+
+    assert session.execute(select(ColumnMask)).scalars().all() == []
+
+
+def test_a_mask_reading_a_missing_column_gets_the_type_check_message(session: Session) -> None:
+    """The expression's own message wins over the binding's "no column to bind to"."""
+    catalog = FakeColumnCatalog(names=["id", "ssn"], schema_id=1)
+    service, admin = _ready(session, catalog)
+
+    with pytest.raises(ValidationError) as exc_info:
+        service.create(admin, **{**_mask_args("ssn"), "expression": "md5(nope)"})
+
+    assert "to bind the policy to" not in str(exc_info.value)
+    assert "md5(nope)" in str(exc_info.value)

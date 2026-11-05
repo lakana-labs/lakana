@@ -209,14 +209,16 @@ definition. A policy that does not apply to you changes nothing you see.
 
 - **Masked column.** If a column mask applies to you, the signal's name, state, time and snapshot
   id are shown, but not `observed`, `band` or `alert` (`values_hidden` is `true`). A mask covers
-  every name the column has had, so a rename does not lift it. When any mask applies to you,
-  values under a name the current schema no longer has are left out too, and a table whose
-  metadata cannot be read hides all values from you.
+  every name the column has had, so a rename does not lift it, and a name the column once had
+  stays hidden even after another column takes it. Other columns' values are shown. When any
+  mask applies to you, values under a name the current schema no longer has are left out too,
+  and a table whose metadata cannot be read hides all values from you.
 - **Row filter.** If a row filter applies to you, every value-revealing number (bounds, null
   rates, bands and alert values) is left out for all columns. `volume`, `freshness` and `schema`
   stay: `last_write_at` shows when the table was last written anyway.
-- **A masked column renamed since the mask was written.** All values are hidden, as the query
-  path refuses such reads.
+- **A masked column that was dropped, or renamed under a mask that is not bound to it** (`bound`
+  is `no` in `lakana column-mask list`). All values are hidden, as the query path refuses such
+  reads.
 - **A kept table** (a failed check kept its data): the routes show aggregates and snapshot ids,
   never rows, current metadata or file locations.
 

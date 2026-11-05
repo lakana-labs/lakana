@@ -799,6 +799,7 @@ def _run_main(
         mock.patch("lakana_worker.__main__.sweep_code_archives"),
         mock.patch("lakana_worker.__main__.sweep_table_locations"),
         mock.patch("lakana_worker.__main__.backfill_table_columns"),
+        mock.patch("lakana_worker.__main__.bind_legacy_policies"),
         mock.patch("lakana_worker.__main__.measure_table_sizes"),
         mock.patch("lakana_worker.__main__.signal.signal"),
     ):
@@ -852,6 +853,7 @@ def _housekeeping(
     locations: mock.MagicMock | None = None,
     sizes: mock.MagicMock | None = None,
     health: mock.MagicMock | None = None,
+    policies: mock.MagicMock | None = None,
 ) -> None:
     """Run `main`, then the housekeeping callable it gave the scheduler, once.
 
@@ -877,6 +879,8 @@ def _housekeeping(
         Stands in for `measure_table_sizes`; a mock that succeeds when `None`.
     health
         Stands in for `sweep_health`; a mock that succeeds when `None`.
+    policies
+        Stands in for `bind_legacy_policies`; a mock that succeeds when `None`.
     """
     monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{tmp_path}/lakana.db")
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg"))
@@ -891,6 +895,7 @@ def _housekeeping(
         mock.patch("lakana_worker.__main__.sweep_table_locations", locations or mock.MagicMock()),
         mock.patch("lakana_worker.__main__.measure_table_sizes", sizes or mock.MagicMock()),
         mock.patch("lakana_worker.__main__.sweep_health", health or mock.MagicMock()),
+        mock.patch("lakana_worker.__main__.bind_legacy_policies", policies or mock.MagicMock()),
         mock.patch("lakana_worker.__main__.signal.signal"),
     ):
         scheduler_mock.return_value.start.return_value.is_alive.return_value = False
@@ -1046,6 +1051,32 @@ def test_a_failing_column_backfill_is_logged_and_does_not_raise(
             columns=mock.MagicMock(side_effect=OSError),
         )
     assert "The table column backfill failed (OSError)" in caplog.text
+    assert "sweep_failed" in {getattr(r, "event", None) for r in caplog.records}
+
+
+def test_housekeeping_also_binds_the_policies_of_earlier_releases(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from lakana_core.storage.resolver import StorageResolver
+
+    policies = mock.MagicMock()
+    _housekeeping(tmp_path, monkeypatch, mock.MagicMock(), mock.MagicMock(), policies=policies)
+    assert policies.call_count == 1
+    assert isinstance(policies.call_args.args[1], StorageResolver)
+
+
+def test_a_failing_policy_binding_is_logged_and_does_not_raise(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level(logging.WARNING):
+        _housekeeping(
+            tmp_path,
+            monkeypatch,
+            mock.MagicMock(),
+            mock.MagicMock(),
+            policies=mock.MagicMock(side_effect=OSError),
+        )
+    assert "The binding of earlier row filters and column masks failed (OSError)" in caplog.text
     assert "sweep_failed" in {getattr(r, "event", None) for r in caplog.records}
 
 
@@ -1351,6 +1382,9 @@ def test_the_sweeps_off_notice_is_printed_by_the_real_entry_point(tmp_path: Path
     assert done.returncode == 0, done.stderr
     assert "INFO lakana_worker.__main__: LAKANA_RUN__SWEEP_INTERVAL=0: the sweeps are off" in (
         done.stderr
+    )
+    assert "row filters and column masks of earlier releases are not bound to field ids" in (
+        " ".join(done.stderr.split())
     )
 
 
