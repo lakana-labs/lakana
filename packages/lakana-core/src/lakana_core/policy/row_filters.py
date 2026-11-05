@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Sequence
 from datetime import UTC, datetime
+from functools import partial
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -301,13 +302,14 @@ class RowFilterService:
         self._session.commit()
         return row
 
-    def shown(self, rows: Sequence[RowFilter]) -> dict[uuid.UUID, ShownPolicy]:
+    def shown(self, p: PrincipalRef, rows: Sequence[RowFilter]) -> dict[uuid.UUID, ShownPolicy]:
         """Show row filters in the current column names of their tables.
-
-        Does not authorize: the rows come from a list method, which did.
 
         Parameters
         ----------
+        p
+            The acting principal, who listed the rows; reading the columns checks `MANAGE_POLICY`
+            again.
         rows
             The row filters to show.
 
@@ -315,8 +317,13 @@ class RowFilterService:
         -------
         dict
             Each row's id to how a listing shows it (`ShownPolicy`).
+
+        Raises
+        ------
+        PermissionDenied
+            If `p` may not manage policies.
         """
-        return shown_policies(rows, self._catalog.policy_fields)
+        return shown_policies(rows, partial(self._catalog.policy_fields, p))
 
     def list_for_principal(self, p: PrincipalRef, principal_name: str) -> list[RowFilter]:
         """List a principal's own active, direct row filters.

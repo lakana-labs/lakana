@@ -4078,13 +4078,13 @@ class CatalogService:
 
         return visibility_for(self._session, p, ref, row.id, metadata=metadata)
 
-    def policy_fields(self, table_id: uuid.UUID) -> tuple[NestedField, ...] | None:
+    def policy_fields(self, p: PrincipalRef, table_id: uuid.UUID) -> tuple[NestedField, ...] | None:
         """Read a table's current top-level fields, to show the policies on it.
-
-        Does not authorize: the caller lists policies and so holds `MANAGE_POLICY`.
 
         Parameters
         ----------
+        p
+            The acting principal; needs `MANAGE_POLICY` on the instance, as listing policies does.
         table_id
             The table's id.
 
@@ -4093,7 +4093,13 @@ class CatalogService:
         tuple of NestedField or None
             The fields; `None` for a table that is not an Iceberg table, one without
             metadata, or one whose metadata cannot be read (logged with the error's class only).
+
+        Raises
+        ------
+        PermissionDenied
+            If `p` may not manage policies.
         """
+        self._authz.authorize(p, Action.MANAGE_POLICY, Securable.instance_scope())
         found = self._session.execute(
             select(Table, Environment.name)
             .join(Namespace, Namespace.id == Table.namespace_id)
@@ -7620,7 +7626,7 @@ class CatalogService:
             ref.dotted(),
             changed,
             before=current.schema(),
-            after=plan.schema or current.schema(),
+            after=plan.schema if plan.schema is not None else current.schema(),
         )
         schema_updates: list[TableUpdate] = (
             []

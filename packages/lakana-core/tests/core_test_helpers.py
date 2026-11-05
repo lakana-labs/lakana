@@ -1046,11 +1046,13 @@ COMMON_MASK_COLUMNS = ["id", "name", "email", "ssn", "region", "salary", "owner"
 class NoPolicyFields:
     """The `ColumnSource.policy_fields` of a fake catalog that has no table metadata."""
 
-    def policy_fields(self, table_id: uuid.UUID) -> tuple[NestedField, ...] | None:
+    def policy_fields(self, p: PrincipalRef, table_id: uuid.UUID) -> tuple[NestedField, ...] | None:
         """Report no fields: listings show the text as written.
 
         Parameters
         ----------
+        p
+            The acting principal.
         table_id
             The table.
 

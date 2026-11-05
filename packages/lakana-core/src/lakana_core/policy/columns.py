@@ -44,11 +44,13 @@ class ColumnSource(Protocol):
         """
         ...
 
-    def policy_fields(self, table_id: uuid.UUID) -> tuple[NestedField, ...] | None:
+    def policy_fields(self, p: PrincipalRef, table_id: uuid.UUID) -> tuple[NestedField, ...] | None:
         """Read a table's current top-level fields, to show the policies on it.
 
         Parameters
         ----------
+        p
+            The acting principal, who must be allowed to manage policies.
         table_id
             The table's id.
 

@@ -338,7 +338,9 @@ def test_create_then_list_for_principal(session: Session) -> None:
     listed = service.list_for_principal(admin, "alice")
     assert [f.id for f in listed] == [created.id]
     # The fake catalog has no table metadata to rename from: shown as written, bound.
-    assert service.shown(listed) == {created.id: ShownPolicy("region = current_user()", None, True)}
+    assert service.shown(admin, listed) == {
+        created.id: ShownPolicy("region = current_user()", None, True)
+    }
 
 
 def test_create_then_list_for_group(session: Session) -> None:

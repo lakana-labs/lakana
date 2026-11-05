@@ -10,20 +10,22 @@ from typing import Any
 from unittest import mock
 
 import pytest
-from core_test_helpers import _config
+from core_test_helpers import _config, _RecordThenDeny
 from pyiceberg.schema import Schema
 from pyiceberg.types import LongType, NestedField, StringType
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from lakana_core.auth import PrincipalRef
+from lakana_core.auth import Action, PrincipalRef, Securable
 from lakana_core.catalog import service as catalog_service
 from lakana_core.catalog.json_schema import ColumnSpec
 from lakana_core.catalog.service import CatalogService
+from lakana_core.errors import PermissionDenied
 from lakana_core.identifiers import NamespacePath, TableRef
 from lakana_core.models import ColumnMask, RowFilter, Table, TableType
 from lakana_core.policy.field_binding import BY_NAME, FIELD_IDS, PENDING, UNBOUND
 from lakana_core.policy.shown import ShownPolicy, shown_policies
+from lakana_core.storage.resolver import StorageResolver
 
 _TABLE = uuid.UUID(int=1)
 
@@ -128,6 +130,14 @@ def test_a_bound_policy_whose_columns_kept_their_names_is_shown_as_written() -> 
 
     assert found[row.id] == ShownPolicy("dept = 'a' AND id > 1", None, True)
     assert found[mask.id] == ShownPolicy("'***'", "ssn", True)
+
+
+def test_a_case_only_difference_is_shown_as_written() -> None:
+    row = _filter("DEPT = 'a'", ids={"DEPT": 2})
+
+    found = shown_policies([row], lambda _: _fields((2, "dept")))
+
+    assert found[row.id] == ShownPolicy("DEPT = 'a'", None, True)
 
 
 def test_a_bound_mask_is_shown_on_its_current_column() -> None:
@@ -243,9 +253,9 @@ def _table_id(session: Session, name: str) -> uuid.UUID:
 
 
 def test_the_catalog_reads_the_current_fields_of_an_iceberg_table(
-    session: Session, gold: CatalogService
+    session: Session, principal: PrincipalRef, gold: CatalogService
 ) -> None:
-    fields = gold.policy_fields(_table_id(session, "orders"))
+    fields = gold.policy_fields(principal, _table_id(session, "orders"))
 
     assert fields is not None
     assert [(f.field_id, f.name) for f in fields] == [(1, "id"), (2, "status")]
@@ -271,18 +281,33 @@ def test_the_catalog_has_no_fields_for_what_is_not_an_iceberg_table_with_metadat
     )
     session.commit()
 
-    assert gold.policy_fields(_table_id(session, "v")) is None
-    assert gold.policy_fields(_table_id(session, "bare")) is None
-    assert gold.policy_fields(uuid.uuid4()) is None
+    assert gold.policy_fields(principal, _table_id(session, "v")) is None
+    assert gold.policy_fields(principal, _table_id(session, "bare")) is None
+    assert gold.policy_fields(principal, uuid.uuid4()) is None
 
 
 def test_the_catalog_logs_the_class_only_when_the_metadata_cannot_be_read(
-    session: Session, gold: CatalogService, caplog: pytest.LogCaptureFixture
+    session: Session,
+    principal: PrincipalRef,
+    gold: CatalogService,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     with mock.patch.object(catalog_service, "read_metadata", side_effect=OSError("secret path")):
-        assert gold.policy_fields(_table_id(session, "orders")) is None
+        assert gold.policy_fields(principal, _table_id(session, "orders")) is None
 
     warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
     assert len(warnings) == 1
     assert "(OSError)" in warnings[0].getMessage()
     assert "secret path" not in caplog.text
+
+
+def test_the_catalog_refuses_the_fields_to_a_principal_who_may_not_manage_policies(
+    session: Session, principal: PrincipalRef, gold: CatalogService
+) -> None:
+    denier = _RecordThenDeny()
+    refusing = CatalogService(session, StorageResolver(session), denier)
+
+    with pytest.raises(PermissionDenied):
+        refusing.policy_fields(principal, _table_id(session, "orders"))
+
+    assert denier.seen == (Action.MANAGE_POLICY, Securable.instance_scope())

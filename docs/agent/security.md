@@ -3952,8 +3952,8 @@ work.
   (#120).** `GET /api/v1/row-filters` and `/column-masks` (and the SDK and CLI over them) show
   a bound policy's expression and a mask's column in the names the table has now
   (`policy.shown.shown_policies`, one metadata read per table through
-  `CatalogService.policy_fields`, which does not authorize: the list methods already required
-  `MANAGE_POLICY`). That reveals the table's current column names to a `MANAGE_POLICY` holder
+  `CatalogService.policy_fields(p, table_id)`, which authorizes `MANAGE_POLICY` on the instance
+  itself, so a caller of `shown` cannot skip the check). That reveals the table's current column names to a `MANAGE_POLICY` holder
   who may lack `READ_TABLE`; instance-scoped policy managers already see every policy's text,
   and a name a policy uses is one they could read there. The visibility rules of the list
   methods are unchanged and no reader without `MANAGE_POLICY` gets a listing. A policy whose

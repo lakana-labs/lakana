@@ -174,5 +174,4 @@ def test_the_row_filter_how_to_does_what_the_page_says(
     left = json.loads(
         ok(cli_state, "--output", "json", "row-filter", "list", "--principal", "alice")
     )
-    # Listed with the column's own name, as the table has it.
-    assert [f["expression"] for f in left] == ["\"region\" = 'EU'"]
+    assert [f["expression"] for f in left] == ["REGION = 'EU'"]

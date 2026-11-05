@@ -148,7 +148,7 @@ def create_column_mask(
         column=body.column,
         expression=body.expression,
     )
-    return _to_out(created, service.shown([created])[created.id])
+    return _to_out(created, service.shown(principal, [created])[created.id])
 
 
 @router.get("", response_model=list[ColumnMaskOut], responses=errors(403, 404))
@@ -207,7 +207,7 @@ def list_column_masks(
         raise ValidationError(
             "Provide 'principal_name', 'group_name', or 'environment'+'namespace'+'table' together."
         )
-    shown = service.shown(rows)
+    shown = service.shown(principal, rows)
     return [_to_out(row, shown[row.id]) for row in rows]
 
 

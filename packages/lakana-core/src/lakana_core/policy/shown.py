@@ -78,8 +78,8 @@ def _shown(row: RowFilter | ColumnMask, fields: Sequence[NestedField] | None) ->
         return as_written
     if resolved.gone:
         return as_written
-    if all(now == written for written, now in resolved.names.items()):
-        # Nothing was renamed: the text as written, not its quoted rewrite.
+    if all(now.casefold() == written.casefold() for written, now in resolved.names.items()):
+        # Nothing was renamed (a case-only difference is the same column): the text as written.
         return as_written
     return ShownPolicy(
         resolved.expression, None if column is None else resolved.names[column], True

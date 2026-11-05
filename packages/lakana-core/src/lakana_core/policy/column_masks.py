@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Sequence
 from datetime import UTC, datetime
+from functools import partial
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -319,13 +320,14 @@ class ColumnMaskService:
         self._session.commit()
         return row
 
-    def shown(self, rows: Sequence[ColumnMask]) -> dict[uuid.UUID, ShownPolicy]:
+    def shown(self, p: PrincipalRef, rows: Sequence[ColumnMask]) -> dict[uuid.UUID, ShownPolicy]:
         """Show column masks in the current column names of their tables.
-
-        Does not authorize: the rows come from a list method, which did.
 
         Parameters
         ----------
+        p
+            The acting principal, who listed the rows; reading the columns checks `MANAGE_POLICY`
+            again.
         rows
             The column masks to show.
 
@@ -333,8 +335,13 @@ class ColumnMaskService:
         -------
         dict
             Each row's id to how a listing shows it (`ShownPolicy`).
+
+        Raises
+        ------
+        PermissionDenied
+            If `p` may not manage policies.
         """
-        return shown_policies(rows, self._catalog.policy_fields)
+        return shown_policies(rows, partial(self._catalog.policy_fields, p))
 
     def list_for_principal(self, p: PrincipalRef, principal_name: str) -> list[ColumnMask]:
         """List a principal's own active, direct column masks.

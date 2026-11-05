@@ -713,7 +713,7 @@ def test_the_json_of_a_grant_or_policy_listing_keeps_both_id_fields(
 def test_a_policy_listing_keeps_bound_when_there_is_room_and_drops_it_last(
     tmp_path: Path, name: str
 ) -> None:
-    """`bound` shows at 220 columns; at 80 it is the last column left out, and the hint says so."""
+    """`bound` shows at 220 columns; at 80 it is the last column left out, with the hint."""
     wide = _render(tmp_path, _LISTINGS[name], 220)
     narrow = _render(tmp_path, _LISTINGS[name], 80)
 
