@@ -295,7 +295,7 @@ A filter on a raw-zone (external) table stays bound to the column's name, as its
 name.
 
 A filter that an earlier release created is not bound to field ids until Lakana has bound it (see
-[Upgrading Lakana](../explanation/upgrades.md)). Such a filter keeps the earlier rule: after a
+[Upgrading Lakana](../explanation/upgrades.md#row-filters-and-column-masks-follow-renamed-columns)). Such a filter keeps the earlier rule: after a
 column it reads was renamed or replaced, a read by the filtered person is refused with
 `` `gold.customers` has a row filter or column mask that uses column `region`, and a column was
 renamed or replaced since the policy was created ...``. Create the filter again for the column it

@@ -427,6 +427,19 @@ window, up to 30 days. See [Reading only new files](../reference/ingest.md#readi
 - With `modified_from=`, a dated file rewritten with a new size during its day is read again
   whole. Write each dated file once, or use `write="merge"` with a key.
 
+### Row filters and column masks follow renamed columns
+
+A row filter or column mask now follows its column when the column is renamed. Reads that were
+refused after a rename are allowed again; a column that was dropped, dropped and added again, or
+replaced by a type change still refuses reads, with a message that names the column the policy
+was created for.
+
+Policies created by earlier releases are bound to their columns by the worker in the background
+after the upgrade, from the version of the table they were created against. A policy made before
+0.13.0, whose table has had a column it uses renamed since, cannot be bound exactly and keeps
+the old rule: reads are refused after a rename until the policy is created again for the column
+it is meant for and the old one is revoked.
+
 ## Notes for 0.21.0
 
 ### Python tasks: builds that cannot succeed fail at once, and a task proves its write

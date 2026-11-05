@@ -43,6 +43,7 @@ from lakana_core.jobs.scheduler import sweep_job_fires
 from lakana_core.log_events import LogEvent, log_event
 from lakana_core.log_setup import configure_logging
 from lakana_core.models import Worker
+from lakana_core.policy.legacy_binding import bind_legacy_policies
 from lakana_core.projects.code_sweep import CODE_SWEEP_MAX_SECONDS, sweep_code_archives
 from lakana_core.projects.limits import DeployLimits
 from lakana_core.projects.run_policy import RunCaps
@@ -733,6 +734,16 @@ def main() -> None:
                 exc_info=True,
                 extra=log_event(LogEvent.SWEEP_FAILED),
             )
+        try:
+            with session_factory() as session:
+                bind_legacy_policies(session, StorageResolver(session, key_provider))
+        except Exception as exc:
+            logger.warning(
+                "The binding of earlier row filters and column masks failed (%s).",
+                type(exc).__name__,
+                exc_info=True,
+                extra=log_event(LogEvent.SWEEP_FAILED),
+            )
 
     if settings.run.sweep_interval <= 0:
         logger.info(
@@ -744,9 +755,10 @@ def main() -> None:
             "not removed, table health signals are neither checked for freshness nor deleted "
             "after their kept period, the columns of tables that existed before search are not "
             "stored "
-            "for it, the sizes of tables and of the worker's caches are not measured, and uv's "
-            "package cache is not trimmed. Set it to a number "
-            "of seconds (3600 is the default) to turn them on."
+            "for it, the row filters and column masks of earlier releases are not bound to "
+            "field ids (they keep refusing reads after a rename), the sizes of tables and of the "
+            "worker's caches are not measured, and uv's package cache is not trimmed. Set it to a "
+            "number of seconds (3600 is the default) to turn them on."
         )
     scheduler = SchedulerLoop(
         engine,
