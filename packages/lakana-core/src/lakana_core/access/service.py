@@ -9,9 +9,12 @@ make every change in it one route at a time may see or plan it.
 from __future__ import annotations
 
 import hashlib
+import uuid
 from collections.abc import Sequence
 from functools import partial
+from typing import TYPE_CHECKING
 
+from pyiceberg.types import NestedField
 from sqlalchemy.orm import Session
 
 from lakana_core.access.checks import check_entries, normalized_entry
@@ -31,6 +34,7 @@ from lakana_core.access.model import (
     ServiceAccountEntry,
     Subject,
     fingerprint,
+    unwritable_environments,
 )
 from lakana_core.access.plan import AccessPlan, PlannedChange, diff, drift
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable
@@ -38,11 +42,68 @@ from lakana_core.ci_oidc.rules import CiTrustRuleService
 from lakana_core.errors import NotFoundError, ValidationError
 from lakana_core.grants.admin import authorize_admin_only
 from lakana_core.grants.service import GrantService
+from lakana_core.identifiers import TableRef, environment_name_problem
 from lakana_core.models import PrincipalType
 from lakana_core.policy.column_masks import ColumnMaskService
 from lakana_core.policy.columns import ColumnSource
 from lakana_core.policy.row_filters import RowFilterService
 from lakana_core.projects.lookups import environment_by_name
+
+if TYPE_CHECKING:
+    from lakana_core.catalog.service import TableDescription
+
+
+class _PlanColumns:
+    """A column source that reads each table once for the length of one plan.
+
+    A planned policy create is checked twice (`validate_for_table`, then the column check), and
+    a file can hold many policies on one table; each would read the table's metadata again.
+
+    Parameters
+    ----------
+    source
+        The real column source.
+    """
+
+    def __init__(self, source: ColumnSource) -> None:
+        self._source = source
+        self._described: dict[TableRef, TableDescription] = {}
+
+    def describe_table(self, p: PrincipalRef, ref: TableRef) -> TableDescription:
+        """Describe a table, reading it from the source the first time only.
+
+        Parameters
+        ----------
+        p
+            The acting principal; one principal makes the whole plan.
+        ref
+            The table reference.
+
+        Returns
+        -------
+        TableDescription
+            The table, including its columns.
+        """
+        if ref not in self._described:
+            self._described[ref] = self._source.describe_table(p, ref)
+        return self._described[ref]
+
+    def policy_fields(self, p: PrincipalRef, table_id: uuid.UUID) -> tuple[NestedField, ...] | None:
+        """Read a table's current top-level fields.
+
+        Parameters
+        ----------
+        p
+            The acting principal.
+        table_id
+            The table's id.
+
+        Returns
+        -------
+        tuple of NestedField or None
+            The fields; `None` when there are none to read.
+        """
+        return self._source.policy_fields(p, table_id)
 
 
 class AccessService:
@@ -129,7 +190,7 @@ class AccessService:
         ------
         ValidationError
             Without a scope, with ``instance`` beside another scope, or naming an environment
-            that does not exist.
+            that does not exist or whose name no access file can write.
         """
         names = frozenset(scopes)
         if not names:
@@ -146,6 +207,11 @@ class AccessService:
                 environment_by_name(self._session, name)
             except NotFoundError as exc:
                 raise ValidationError(f"no environment {name}; lakana env list shows them") from exc
+            if (problem := environment_name_problem(name)) is not None:
+                raise ValidationError(
+                    f"environment '{name}' cannot be exported: its name {problem[0]}. Create the "
+                    "environment again under another name with lakana env create"
+                )
         return Scopes(names)
 
     def export(self, p: PrincipalRef, scopes: Sequence[str]) -> str:
@@ -168,12 +234,16 @@ class AccessService:
         PermissionDenied
             Without the instance `ADMIN` role, `MANAGE_POLICY` or `MANAGE_PRINCIPAL`.
         ValidationError
-            For scopes `_export_scopes` refuses.
+            For scopes `_export_scopes` refuses, or live access on an environment whose name
+            no access file can write (`unwritable_environments`).
         """
         authorize_admin_only(self._session, self._authz, p, Action.MANAGE_GRANT)
         self._authorize(p)
         wanted = self._export_scopes(scopes)
-        return export_document(self._live(p).state, wanted)
+        state = self._live(p).state
+        if unwritable := unwritable_environments(state.owned(wanted)):
+            raise ValidationError("; ".join(unwritable))
+        return export_document(state, wanted)
 
     def plan(
         self,
@@ -267,6 +337,7 @@ class AccessService:
             The plan.
         """
         scopes = Scopes(frozenset(parsed.manages))
+        columns = _PlanColumns(self._catalog)
         problems = self._missing_environments(parsed)
         live = self._live(p)
         desired, found = check_entries(
@@ -274,14 +345,18 @@ class AccessService:
             live,
             scopes,
             grants=GrantService(self._session, self._authz),
-            row_filters=RowFilterService(self._session, self._authz, self._catalog),
-            column_masks=ColumnMaskService(self._session, self._authz, self._catalog),
+            row_filters=RowFilterService(self._session, self._authz, columns),
+            column_masks=ColumnMaskService(self._session, self._authz, columns),
             ci_rules=CiTrustRuleService(self._session, self._authz, issuers=self._issuers),
             session=self._session,
             p=p,
             issuers=self._issuers,
         )
         problems += found
+        problems += [
+            f"{parsed.file_name}: {problem}"
+            for problem in unwritable_environments(live.state.owned(scopes))
+        ]
         changes = diff(desired, live, scopes)
         after = admins_after(
             AccessState(live.state.outside(scopes).entries | desired.state.entries),

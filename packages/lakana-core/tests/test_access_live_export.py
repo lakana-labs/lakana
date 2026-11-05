@@ -171,3 +171,10 @@ def test_a_ci_rule_exports_every_setting_it_changes_from_the_default() -> None:
     assert text.count("kinds:") == 1
     assert "start_on_deploy_jobs: true" in text
     assert parse_access_file(text, file_name="a.yaml").state == state
+
+
+def test_the_export_header_points_at_plan_not_at_apply() -> None:
+    """`lakana access apply` does not exist until a later release (#46)."""
+    text = export_document(AccessState(frozenset()), Scopes(frozenset({"instance"})))
+    assert "plan with lakana access plan" in text.splitlines()[0]
+    assert "apply" not in text.splitlines()[0]

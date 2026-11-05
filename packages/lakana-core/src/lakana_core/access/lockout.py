@@ -64,7 +64,7 @@ def lockout_problems(
         return [
             f"{file_name}: the file leaves no active ADMIN on the instance; keep "
             f"{{to: {caller}, role: ADMIN, on: instance}} or give ADMIN to another active "
-            "person"
+            "user or service account"
         ]
     if caller.name not in after and not allow_lockout:
         return [

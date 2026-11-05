@@ -390,9 +390,10 @@ def normalized_expression(sql_expr: str) -> str:
     -------
     str
         The expression as sqlglot writes it back in the DuckDB dialect; the text unchanged when
-        it does not parse (the validation that follows names the problem).
+        it does not parse or is nested too deeply to parse (the validation that follows names
+        the problem).
     """
     try:
         return sqlglot.parse_one(sql_expr, dialect="duckdb").sql(dialect="duckdb")
-    except sqlglot.errors.SqlglotError:
+    except (sqlglot.errors.SqlglotError, RecursionError):
         return sql_expr

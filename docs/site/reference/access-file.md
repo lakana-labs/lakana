@@ -125,8 +125,9 @@ tokens](ci-trust-rules.md).
 | `start_on_deploy_jobs` | `false` | Let a deploy under the rule start the project's `on_deploy` jobs. |
 
 A rule is the one entry that changes in place: if the file's rule differs from the live one
-only in `conditions`, `kinds`, `enabled`, `start_on_deploy_jobs` or the service account, the plan
-shows `~`. Every other difference is a removal and a creation.
+only in `kinds`, `enabled` or `start_on_deploy_jobs`, the plan shows `~`. A difference in the
+issuer, the repository, the service account (`as`), the environment (`on`) or the `conditions`
+makes a different rule: the plan shows a removal and a creation.
 
 ## What `manages` owns
 
@@ -147,10 +148,23 @@ would each undo the other.
 
 | Limit | Value |
 |---|---|
-| File size | 1 MiB (1048576 bytes). `lakana access plan` checks it before it sends the file; the server checks the request body against the same limit. |
+| File size | 1 MiB (1048576 bytes). `lakana access plan` checks it before it sends the file, and checks the request it would send (the text escaped as JSON, plus the file name); the server checks the request body against the same limit. |
 | Entries | 10,000. |
 | Problems listed at once | 50, then a count of the rest. |
 | File name | The base name only, 1 to 255 characters, without `/` or `\`. |
+
+An export of a large instance can exceed the size or entry limit. Export and keep one file per
+environment instead: `lakana access export --scope prod -o prod.yaml`.
+
+## Environment names
+
+The file writes a target as `instance`, an environment, or `ENV.NAMESPACE`. An environment
+therefore cannot be called `instance` (in any case) or contain a `.`, and `lakana env create`
+refuses such names, as it does a name longer than 255 characters or with blanks at either end.
+An environment made by an older release with such a name cannot be exported or planned: `export`
+and `plan` name it and ask you to create the environment again under another name (`prod-eu`
+instead of `prod.eu`) and move its access there. Other environments are not affected; export them
+one by one with `--scope`.
 
 A deactivated person or service account is left out of an export. A service account that is
 deactivated cannot be used again: its name stays taken.
@@ -180,8 +194,6 @@ changes nothing. It prints:
 | `+ text  (grants[3])` | An entry the apply would create, and where the file lists it. |
 | `~ text  (ci_trust[0])` | A CI trust rule the apply would change in place; the text shows the rule before and after. |
 | `- text` | Access that exists in a managed scope and that the file does not list; the apply would remove it. |
-| `! drift in prod: text` | Access in a managed scope that did not come from the file, with who made it, when and why when that is known. |
-| `stops managing staging` | A scope the file no longer lists. |
 | `No changes.` | The file and the live access agree. |
 | `Fingerprint: ...` | A hash of the live access of the managed scopes, which an apply checks again. |
 
@@ -235,7 +247,7 @@ token is refused, so a CI job cannot read or change who has access.
 | `... repeats groups.finance; remove one` | The same entry is listed twice. |
 | `access.yaml: the file is larger than 1048576 bytes; use a group instead of many people, or remove entries that no longer apply` | See [Limits](#limits). |
 | `access.yaml: the file has 10001 entries, more than 10000; split access across fewer, broader grants` | See [Limits](#limits). |
-| `access.yaml: the file leaves no active ADMIN on the instance; keep {to: alice, role: ADMIN, on: instance} or give ADMIN to another active person` | Always refused. |
+| `access.yaml: the file leaves no active ADMIN on the instance; keep {to: alice, role: ADMIN, on: instance} or give ADMIN to another active user or service account` | Always refused. |
 | `access.yaml: the file removes your own ADMIN role on the instance (MANAGE_GRANT); keep it, or repeat with --allow-lockout if another administrator applies from now on` | Pass `--allow-lockout` only when someone else will apply from now on. |
 | `file_name must be 1 to 255 characters without / or \ or a control character; send the file's base name, such as access.yaml` | `422`: send the base name only. |
 | `no environment X; lakana env list shows them` | `422`, for `export --scope`. |

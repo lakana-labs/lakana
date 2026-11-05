@@ -65,6 +65,32 @@ def test_create_then_get(catalog: CatalogService, principal: PrincipalRef, tmp_p
     assert catalog.get_environment(principal, "dev").name == "dev"
 
 
+@pytest.mark.parametrize(
+    ("name", "cause", "next_step"),
+    [
+        ("instance", "reserved", "another name"),
+        ("INSTANCE", "reserved", "another name"),
+        ("prod.eu", "'.'", "prod-eu"),
+        (" dev", "blank", "Remove"),
+        ("de\nv", "printable", "Remove"),
+        ("x" * 256, "255", "shorter"),
+    ],
+)
+def test_an_environment_name_the_access_file_cannot_write_is_refused(
+    catalog: CatalogService,
+    principal: PrincipalRef,
+    tmp_path: Path,
+    name: str,
+    cause: str,
+    next_step: str,
+) -> None:
+    """The access file reads `instance` as the whole instance and `a.b` as a namespace (#46)."""
+    with pytest.raises(ValidationError) as caught:
+        catalog.create_environment(principal, name=name, storage=_config(tmp_path))
+    assert cause in str(caught.value)
+    assert next_step in str(caught.value)
+
+
 def test_duplicate_name_is_rejected(
     catalog: CatalogService, principal: PrincipalRef, tmp_path: Path
 ) -> None:

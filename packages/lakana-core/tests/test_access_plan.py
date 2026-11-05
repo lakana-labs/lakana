@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 
 import pytest
 from access_test_helpers import AccessWorld, access_world, seed_every_kind
+from core_test_helpers import ensure_table
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -121,8 +122,12 @@ def test_the_plan_lists_creates_changes_and_removals(session: Session) -> None:
         "  kinds:\n  - deploy\n  - dry_run\n", ""
     )
     plan = service.plan(world.admin, text)
-    assert [c.text for c in plan.creates] == ["grant role VIEWER on prod to group:finance"]
-    assert [c.text for c in plan.removals] == ["grant role ANALYST on prod to group:finance"]
+    assert [c.text for c in plan.creates] == [
+        "grant role VIEWER on environment prod to group:finance"
+    ]
+    assert [c.text for c in plan.removals] == [
+        "grant role ANALYST on environment prod to group:finance"
+    ]
     assert len(plan.removals[0].ids) == 2
     assert [c.op for c in plan.changed] == ["change"]
     change = plan.changed[0]
@@ -143,7 +148,8 @@ def test_removals_in_a_scope_not_yet_managed_are_drift(session: Session) -> None
     seed_every_kind(session, world)
     plan = _service(session, world).plan(world.admin, "version: 1\nmanages: [staging]\n")
     assert [d.text for d in plan.drift] == [
-        "grant role VIEWER on staging to user:bob exists outside the file; apply removes it"
+        "grant role VIEWER on environment staging to user:bob exists outside the file; "
+        "apply removes it"
     ]
     assert [(d.scope, d.by, d.reason, d.at) for d in plan.drift] == [("staging", None, None, None)]
     assert plan.fingerprint == fingerprint(
@@ -308,7 +314,7 @@ def test_a_new_service_account_and_group_plan_as_creates(session: Session) -> No
         "member alice of group g",
         "member new-bot of group g",
         "service account new-bot",
-        "grant role VIEWER on prod to service:new-bot",
+        "grant role VIEWER on environment prod to service:new-bot",
     ]
 
 
@@ -510,7 +516,8 @@ def test_plan_lists_a_file_that_leaves_no_admin_even_with_allow_lockout(session:
     problems = service.plan(world.admin, text, allow_lockout=True).problems
     assert problems == (
         "access.yaml: the file leaves no active ADMIN on the instance; keep "
-        "{to: user:admin, role: ADMIN, on: instance} or give ADMIN to another active person",
+        "{to: user:admin, role: ADMIN, on: instance} or give ADMIN to another active user or "
+        "service account",
     )
 
 
@@ -527,7 +534,8 @@ def test_the_no_admin_refusal_names_a_service_account_caller_as_one(session: Ses
     )
     assert plan.problems == (
         "access.yaml: the file leaves no active ADMIN on the instance; keep "
-        "{to: service:etl-bot, role: ADMIN, on: instance} or give ADMIN to another active person",
+        "{to: service:etl-bot, role: ADMIN, on: instance} or give ADMIN to another active user or "
+        "service account",
     )
 
 
@@ -713,3 +721,95 @@ def test_check_target_is_what_create_runs(
     monkeypatch.setattr(owner, name, refuse)
     with pytest.raises(ValidationError, match=r"^x$"):
         call(session, world)
+
+
+def _unwritable_world(session: Session) -> AccessWorld:
+    """Make environments ``instance`` and ``prod.eu``, each with an ANALYST grant on it.
+
+    Parameters
+    ----------
+    session
+        Database session.
+
+    Returns
+    -------
+    AccessWorld
+        The world, with both grants given to ``alice``.
+    """
+    world = access_world(session)
+    for name in ("instance", "prod.eu"):
+        ensure_table(session, name, "gold", "t")
+        GrantService(session, AllowAllAuthorization()).grant(
+            world.admin,
+            principal="alice",
+            role=Role.ANALYST,
+            kind=SecurableKind.ENVIRONMENT,
+            environment=name,
+        )
+    return world
+
+
+def test_export_refuses_access_on_an_environment_the_file_cannot_name(session: Session) -> None:
+    """`instance` and `prod.eu` would read back as other targets, so they are not written (#46)."""
+    world = _unwritable_world(session)
+    service = _service(session, world)
+    with pytest.raises(ValidationError) as caught:
+        service.export(world.admin, ["instance"])
+    message = str(caught.value)
+    assert "environment 'instance'" in message
+    assert "environment 'prod.eu'" in message
+    assert "lakana env create" in message
+    assert "on instance" not in message
+    assert "access.yaml" not in service.export(world.admin, ["prod"])
+    with pytest.raises(ValidationError, match=r"environment 'prod\.eu' cannot be exported"):
+        service.export(world.admin, ["prod.eu"])
+
+
+def test_plan_reports_access_on_an_environment_the_file_cannot_name(session: Session) -> None:
+    """The plan names the environment instead of listing a removal that reads like another."""
+    world = _unwritable_world(session)
+    service = _service(session, world)
+    plan = service.plan(world.admin, _INSTANCE)
+    assert [p for p in plan.problems if "environment 'instance'" in p]
+    assert [p for p in plan.problems if "environment 'prod.eu'" in p]
+    assert all("lakana env create" in p for p in plan.problems if "cannot name" in p)
+    assert not [p for p in service.plan(world.admin, _PROD).problems if "cannot name" in p]
+
+
+def test_a_too_deeply_nested_policy_expression_is_a_problem_not_an_error(session: Session) -> None:
+    """400 nested parentheses reach the plan as a problem, not a 500 (#46)."""
+    world = access_world(session)
+    service = _service(session, world)
+    deep = "(" * 400 + "region = 'EU'" + ")" * 400
+    plan = service.plan(
+        world.admin,
+        _PROD + "policies:\n  - {kind: row_filter, table: prod.gold.orders, "
+        f'expression: "{deep}", to: user:alice}}\n',
+    )
+    assert any("nested too deeply" in problem for problem in plan.problems)
+
+
+def test_a_plan_reads_each_planned_table_once(session: Session) -> None:
+    """Three policy creates on one table read its columns once, not twice per create (#46)."""
+    world = access_world(session)
+    service = _service(session, world)
+    world.catalog.calls.clear()
+    filters = "".join(
+        "  - {kind: row_filter, table: prod.gold.orders, expression: \"region = 'EU'\", "
+        f"to: user:{name}}}\n"
+        for name in ("alice", "bob", "admin")
+    )
+    plan = service.plan(world.admin, _PROD + "policies:\n" + filters)
+    assert len(plan.creates) == 3
+    assert plan.problems == ()
+    assert len(world.catalog.calls) == 1
+
+
+def test_the_plan_column_source_passes_policy_fields_through(session: Session) -> None:
+    """Only `describe_table` is cached; the live fields are read from the source."""
+    world = access_world(session)
+    columns = access_service._PlanColumns(world.catalog)
+    table_id = uuid.uuid4()
+    assert columns.policy_fields(world.admin, table_id) == world.catalog.policy_fields(
+        world.admin, table_id
+    )

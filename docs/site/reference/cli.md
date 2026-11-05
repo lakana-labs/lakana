@@ -263,6 +263,8 @@ Usage: `lakana env create [OPTIONS] {name}`
 
 Create environment NAME (with bronze/silver/gold namespaces).
 
+The name must not be `instance` (in any case), contain a `.`, have blanks at either end or be longer than 255 characters: the access file reads `instance` as the whole instance and `prod.eu` as the namespace `eu` of `prod`. Write `prod-eu` instead.
+
 Write the storage root the one way Lakana compares locations: a lower-case scheme (`s3`, not `s3a`), one slash between path segments and none doubled after `file://` (`file:///data`, not `file:////data`), for `file` an absolute path and no host (not `file://data` or `file://localhost/data`), no `.` or `..` segments, no percent escapes and no `*`, `?`, `[` or `]`. One trailing slash is fine. Another spelling is refused, and the message names the one to use. The root of the disk (`file:///`) cannot hold an environment: use a directory, such as `file:///data/lakana`.
 
 Environments may share a root, and one may lie elsewhere in another's (prod at `s3://bucket`, dev at `s3://bucket/dev`). A root at or inside another environment's `managed/`, `raw/`, `artifacts/` or `_artifacts/`, a deleted environment's too, is refused, and so is one whose own such directory would hold another environment's root: the message names that environment and a root to use instead.

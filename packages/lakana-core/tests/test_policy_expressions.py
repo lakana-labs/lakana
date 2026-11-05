@@ -418,3 +418,9 @@ def test_a_qualified_column_stays_refused_even_if_the_worded_check_passes(
 def test_normalized_expression_spells_one_policy_one_way(expression: str, expected: str) -> None:
     """Two spellings of one expression compare equal; text that does not parse stays as it is."""
     assert normalized_expression(expression) == expected
+
+
+def test_normalized_expression_leaves_a_too_deeply_nested_expression_alone() -> None:
+    """The parser's recursion limit is no reason to fail; validation reports it later (#46)."""
+    deep = "(" * 400 + "1" + ")" * 400
+    assert normalized_expression(deep) == deep

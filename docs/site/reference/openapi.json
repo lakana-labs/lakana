@@ -20970,7 +20970,7 @@
           "storage"
         ],
         "title": "EnvironmentCreate",
-        "description": "Request body for creating an environment.\n\nParameters\n----------\nname\n    Unique environment name.\nstorage\n    Where the environment's data lives.\nis_protected\n    Whether deleting this environment and changing its storage are\n    refused (`CatalogService.delete_environment`/\n    `update_environment_storage`) until cleared via\n    `PATCH /api/v1/environments/{name}`.\nproperties\n    Free-form metadata."
+        "description": "Request body for creating an environment.\n\nParameters\n----------\nname\n    Unique environment name. Not ``instance`` in any case, without a ``.``, at most 255\n    characters and without blanks at either end: the access file could not write it.\nstorage\n    Where the environment's data lives.\nis_protected\n    Whether deleting this environment and changing its storage are\n    refused (`CatalogService.delete_environment`/\n    `update_environment_storage`) until cleared via\n    `PATCH /api/v1/environments/{name}`.\nproperties\n    Free-form metadata."
       },
       "EnvironmentOut": {
         "properties": {

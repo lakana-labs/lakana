@@ -678,11 +678,22 @@ def test_the_fingerprint_ignores_order_and_changes_with_any_entry() -> None:
 def test_describe_says_each_entry_in_one_line() -> None:
     """The plan's lines."""
     assert describe(GrantEntry(Subject("group", "f"), "ANALYST", None, Target("prod"))) == (
-        "grant role ANALYST on prod to group:f"
+        "grant role ANALYST on environment prod to group:f"
     )
     assert describe(
         GrantEntry(Subject("user", "a"), None, "READ_TABLE", Target("prod", ("g",), "t"))
     ) == ("grant READ_TABLE on table prod.g.t to user:a")
+
+
+def test_describe_names_the_tier_of_a_role_grant() -> None:
+    """`on environment instance` and `on instance` never read the same (#46)."""
+    on_env = GrantEntry(Subject("group", "f"), "ANALYST", None, Target("instance"))
+    on_instance = GrantEntry(Subject("group", "f"), "ANALYST", None, Target())
+    assert describe(on_env) == "grant role ANALYST on environment instance to group:f"
+    assert describe(on_instance) == "grant role ANALYST on instance to group:f"
+    assert describe(GrantEntry(Subject("group", "f"), "ANALYST", None, Target("prod", ("g",)))) == (
+        "grant role ANALYST on namespace prod.g to group:f"
+    )
 
 
 @pytest.mark.parametrize("name", ["", "a/b", "..\\x", "a\nb", "x" * 256])

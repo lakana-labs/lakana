@@ -20,9 +20,7 @@ from lakana_core.access.model import (
     Target,
 )
 
-_HEADER = (
-    "# Lakana access file. Review changes in a pull request; apply with lakana access apply.\n"
-)
+_HEADER = "# Lakana access file. Review changes in a pull request; plan with lakana access plan.\n"
 _BOOL_TAG = "tag:yaml.org,2002:bool"
 
 
@@ -93,7 +91,7 @@ def export_document(state: AccessState, scopes: Scopes) -> str:
 
     Defaults are left out (`kinds: [deploy]`, `enabled: true`, `start_on_deploy_jobs: false`),
     entries are sorted by `sort_key`, and the text starts with a comment saying how to review
-    and apply it; ``manages`` names the scopes.
+    and plan it; ``manages`` names the scopes.
 
     Parameters
     ----------

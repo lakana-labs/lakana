@@ -295,6 +295,7 @@ from lakana_core.identifiers import (
     NAMESPACE_SEPARATOR,
     NamespacePath,
     TableRef,
+    check_environment_name,
     refuse_percent_in_new_name,
     shown,
     validate_path_component,
@@ -1440,7 +1441,10 @@ class CatalogService:
             If an environment with that name already exists, also a deleted one whose files
             are kept (`NAME_HELD_MESSAGE` names the restore and the early purge).
         ValidationError
-            If the storage root is in another scheme than `storage.scheme`, aliases such as
+            If the name is ``instance`` in any case, contains a ``.``, is longer than 255
+            characters or has blanks at either end (`check_environment_name`; the access file
+            could not write it), or if the storage root is in another scheme than
+            `storage.scheme`, aliases such as
             ``s3a`` mapped (`check_root_scheme`; the message names both schemes and a root to
             use), not written canonically (`check_storage_root`; the message
             names the spelling to use), or it lies at or inside another environment's
@@ -1460,6 +1464,7 @@ class CatalogService:
         root of — an environment nobody meant to delegate to them.
         """
         self._authz.authorize(p, Action.MANAGE_ENVIRONMENT, Securable.instance_scope())
+        check_environment_name(name)
         check_root_scheme(storage.root, storage.scheme)
         check_storage_root(storage.root)
         existing = self._session.execute(

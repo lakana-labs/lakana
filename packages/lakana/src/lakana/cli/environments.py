@@ -47,6 +47,10 @@ def create(
 ) -> None:
     """Create environment NAME (with bronze/silver/gold namespaces).
 
+    The name must not be `instance` (in any case), contain a `.`, have blanks at either end or
+    be longer than 255 characters: the access file reads `instance` as the whole instance and
+    `prod.eu` as the namespace `eu` of `prod`. Write `prod-eu` instead.
+
     Write the storage root the one way Lakana compares locations: a lower-case scheme
     (`s3`, not `s3a`), one slash between path segments and none doubled after `file://`
     (`file:///data`, not `file:////data`), for `file` an absolute path and no host

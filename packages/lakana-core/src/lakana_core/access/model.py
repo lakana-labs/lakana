@@ -14,7 +14,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from lakana_core.auth import SecurableKind
-from lakana_core.identifiers import NamespacePath
+from lakana_core.identifiers import NamespacePath, environment_name_problem
 
 INSTANCE = "instance"
 """The scope that covers every environment and the instance-wide objects."""
@@ -336,6 +336,31 @@ def environment_of(entry: Entry) -> str | None:
             return None
 
 
+def unwritable_environments(state: AccessState) -> list[str]:
+    """Name each environment the state has access on whose name no access file can write.
+
+    Parameters
+    ----------
+    state
+        The entries to check.
+
+    Returns
+    -------
+    list of str
+        One sentence per environment, sorted by name, each saying the cause and the next step.
+    """
+    names = sorted({e for entry in state.entries if (e := environment_of(entry)) is not None})
+    found = []
+    for name in names:
+        if (problem := environment_name_problem(name)) is not None:
+            found.append(
+                f"environment '{_line(name)}' has access that an access file cannot name: its "
+                f"name {problem[0]}. Create the environment again under another name with "
+                "lakana env create and move its access there, or leave it out of this scope"
+            )
+    return found
+
+
 @dataclass(frozen=True)
 class Scopes:
     """The scopes one file manages.
@@ -496,7 +521,8 @@ def describe(entry: Entry) -> str:
         case ServiceAccountEntry(name):
             return f"service account {_line(name)}"
         case GrantEntry(to, role, action, on):
-            what = f"role {role} on {on}" if role else f"{action} on {_TARGET_WORD[on.kind]}{on}"
+            given = f"role {role}" if role else str(action)
+            what = f"{given} on {_TARGET_WORD[on.kind]}{on}"
             return f"grant {what} to {_line(str(to))}"
         case RowFilterEntry(to, table, expression):
             return f"row filter on {_line(str(table))} for {_line(str(to))}: {_line(expression)}"

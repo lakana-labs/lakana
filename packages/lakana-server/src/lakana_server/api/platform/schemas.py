@@ -96,7 +96,8 @@ class EnvironmentCreate(BaseModel):
     Parameters
     ----------
     name
-        Unique environment name.
+        Unique environment name. Not ``instance`` in any case, without a ``.``, at most 255
+        characters and without blanks at either end: the access file could not write it.
     storage
         Where the environment's data lives.
     is_protected
