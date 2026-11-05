@@ -648,6 +648,9 @@ def test_a_block_signal_that_could_not_be_judged_warns(world: World) -> None:
     _signal(world, "bronze.events", "volume", snapshot=15)
     _signal(world, "bronze.events", "range", snapshot=15, state="off", effect="off")
     assert judge(_health_spec("range", "name"), 15) == warned("range", "name", 15, "missing", 15)
+    # A delete-only commit adds no files, so it records no column rows: not a gap (F1).
+    _signal(world, "bronze.events", "volume", snapshot=16, observed={"added": 0, "total": 5})
+    assert judge(_health_spec("range", "price"), 16) == (CheckOutcome.PASSED, None, 16)
 
 
 def test_a_run_whose_block_signal_could_not_be_judged_goes_on_and_says_so(
