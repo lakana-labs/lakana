@@ -8931,6 +8931,7 @@ def test_a_record_past_the_cap_loads_its_newest_files_and_the_asset_keeps_runnin
         _touch(folder / f"{n}.csv", f"id\n{n}\n".encode(), _T - timedelta(hours=2 - n))
     run_claimed(engine, py.claim_python(engine))
     monkeypatch.setattr(files_read, "MAX_FILES_READ", 2)
+    monkeypatch.setattr(files_read, "CONNECTION_RESERVE", 0)
     _touch(folder / "late.csv", b"id\n3\n", _T - timedelta(hours=3))
     _touch(folder / "new.csv", b"id\n4\n", _T + timedelta(hours=1))
     _rerun(py, engine)
@@ -8952,6 +8953,8 @@ def test_a_first_run_past_the_cap_succeeds_and_the_next_reads_nothing_twice(
     """
     monkeypatch.setattr(files_read, "MAX_FILES_READ", 2)
     monkeypatch.setattr(context, "MAX_FILES_READ", 2)
+    monkeypatch.setattr(files_read, "CONNECTION_RESERVE", 0)
+    monkeypatch.setattr(context, "CONNECTION_RESERVE", 0)
     folder, engine = _exports(py, tmp_path)
     for n in range(3):
         _touch(folder / f"{n}.csv", f"id\n{n}\n".encode(), _T - timedelta(hours=2 - n))

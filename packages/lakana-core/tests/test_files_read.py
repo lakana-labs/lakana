@@ -675,6 +675,7 @@ def test_more_rows_than_the_cap_load_the_newest_with_a_horizon(
         [f.to_json() for f in sorted(report.files, key=lambda f: f.name)], connections=["exports"]
     )
     monkeypatch.setattr(files_read, "MAX_FILES_READ", 2)
+    monkeypatch.setattr(files_read, "CONNECTION_RESERVE", 0)
     loaded = files_read_for_task(session, table_id, mark)
     assert loaded is not None
     assert [f["name"] for f in loaded.files] == ["a.csv", "b.csv"]
@@ -727,6 +728,7 @@ def test_the_record_names_every_connection_with_a_row_in_the_window(
     )
     record_files_read(session, table_id, 1, report)
     monkeypatch.setattr(files_read, "MAX_FILES_READ", 2)
+    monkeypatch.setattr(files_read, "CONNECTION_RESERVE", 0)
     loaded = files_read_for_task(session, table_id, f"timestamptz:{_T0.isoformat()}")
     assert loaded is not None
     assert [f["connection"] for f in loaded.files] == ["exports", "exports"]

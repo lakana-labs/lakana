@@ -250,3 +250,23 @@ def test_a_quiet_connection_below_the_horizon_is_not_taken_as_new() -> None:
         state=unnamed,
     )
     assert seeded.chosen == []  # an older worker: the connection is seeded as before
+
+
+def test_a_trimmed_record_keeps_the_newest_file_of_every_connection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A quieter connection trimmed out entirely keeps one file, so it is not taken as new."""
+    busy = [_file(f"x{n}", _MARK + dt.timedelta(hours=n)) for n in range(4)]
+    quiet = [
+        context.ReadFile("quiet", f"q{n}", 1, _MARK - dt.timedelta(hours=9 - n)) for n in range(2)
+    ]
+    monkeypatch.setattr(context, "RECORD_BUDGET_BYTES", 2 * len(context._line(busy[0].to_json())))
+    state = _state(files_read=[*busy, *quiet])
+    context._set(state)
+    try:
+        payload = context.files_read_payload()
+    finally:
+        context._set(None)
+    assert payload is not None
+    names = [line.split(b'"name": "')[1].split(b'"')[0] for line in payload.splitlines()[1:]]
+    assert names == [b"x2", b"x3", b"q1"]

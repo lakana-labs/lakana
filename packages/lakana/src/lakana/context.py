@@ -34,6 +34,9 @@ MAX_FILES_READ = 100_000
 RECORD_WINDOW = dt.timedelta(days=30)
 """The longest lookback, and how far before the watermark the worker's record reaches."""
 MAX_ETAG = 512
+CONNECTION_RESERVE = 16
+"""Room the record keeps for the newest file of each connection a run read (an asset declares
+at most 16); `lakana_core.catalog.files_read` has the same."""
 RECORD_BUDGET_BYTES = 60 * 1024 * 1024
 """The most bytes of entries a run sends; the newest files that fit are kept, so a record of
 long names never makes the server (whose cap is 64 MiB) refuse the run."""
@@ -334,8 +337,9 @@ def files_read_payload() -> bytes | None:
     bytes or None
         Newline-delimited JSON, as `lakana_core.catalog.files_read` parses it: the header
         ``{"version": 1, "watermark": ...}`` (the target's watermark in UTC, or null), then
-        each file once, one per line: the newest at most `MAX_FILES_READ` whose lines fit in
-        `RECORD_BUDGET_BYTES`; `None` outside a task or when no call with ``since=`` read or
+        each file once, one per line: the newest at most `MAX_FILES_READ` less
+        `CONNECTION_RESERVE` whose lines fit in `RECORD_BUDGET_BYTES`, and the newest of every
+        other connection read; `None` outside a task or when no call with ``since=`` read or
         reported a file.
     """
     if _state is None or not _state.files_read:
@@ -347,13 +351,24 @@ def files_read_payload() -> bytes | None:
     encoded = {file: _line(file.to_json()) for file in files}
     kept: set[ReadFile] = set()
     total = 0
-    for file in sorted(files, key=lambda f: f.modified, reverse=True):
+    newest = sorted(files, key=lambda f: f.modified, reverse=True)
+    for file in newest:
         # Never refuse a run for reading much: keep the newest that the record takes. The
         # worker's next load is then full, and its horizon takes the older ones as read.
-        if len(kept) == MAX_FILES_READ or total + len(encoded[file]) > RECORD_BUDGET_BYTES:
+        if (
+            len(kept) == MAX_FILES_READ - CONNECTION_RESERVE
+            or total + len(encoded[file]) > RECORD_BUDGET_BYTES
+        ):
             break
         kept.add(file)
         total += len(encoded[file])
+    # A connection trimmed out entirely keeps its newest file, in the room left below the
+    # server's caps, so that the next run does not take it as new (and seed it).
+    named = {file.connection for file in kept}
+    for file in newest:
+        if file.connection not in named:
+            named.add(file.connection)
+            kept.add(file)
     if len(kept) < len(files):
         print(
             f"files.read: this run read {len(files)} files with since=; Lakana records the newest "

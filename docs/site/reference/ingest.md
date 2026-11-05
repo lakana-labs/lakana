@@ -206,7 +206,8 @@ keeps running and nothing is read twice, but a late file older than that is not 
 connection of the asset that had files read in the window keeps its lookback even when all of
 them fall before the horizon. A run that reads more than the record takes, such as a first run
 or a backfill of a large archive, is not refused either: it records the newest files that fit,
-says so in its log, and the next run takes the older ones as read through the horizon. At 10,000 files a day that point is about
+and the newest file of every other connection it read, says so in its log, and the next run
+takes the older ones as read through the horizon. At 10,000 files a day that point is about
 10 days back, still well outside the default 24 h lookback. When a call takes files as read for
 this reason, its log line says how many and names the horizon: ``…, 3 files at or before the
 record's horizon 2026-10-23T08:00:00+00:00 taken as read (the table's record of files read is

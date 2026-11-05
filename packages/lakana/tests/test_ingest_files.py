@@ -1615,6 +1615,7 @@ def test_a_run_that_reads_more_than_the_record_takes_keeps_the_newest(
 ) -> None:
     """A big first run or backfill is never refused: the record keeps the newest files."""
     monkeypatch.setattr(context, "MAX_FILES_READ", 2)
+    monkeypatch.setattr(context, "CONNECTION_RESERVE", 0)
     for n in range(3):
         _write(root / f"{n}.csv", b"id\n1\n", _MARK + dt.timedelta(seconds=n))
     assert files.read("exports", "*.csv", since=None).num_rows == 3

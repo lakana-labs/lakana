@@ -49,6 +49,10 @@ FILES_READ_METADATA_KEY = b"lakana.files_read"
 """The Arrow schema metadata key of the record; `lakana.resources.tables` writes the same."""
 MAX_FILES_READ = 100_000
 """The most files a report may list, and the most rows a task gets; the SDK has the same cap."""
+CONNECTION_RESERVE = 16
+"""Room a run's record keeps for the newest file of each connection it read, one an asset
+declares at most (`lakana_core.projects.asset_model.MAX_CONNECTIONS`): the SDK keeps its newest
+files within `MAX_FILES_READ` less this, and the worker sets a horizon at that count."""
 MAX_RECORD_BYTES = 64 * 1024 * 1024
 """The largest record accepted, checked before it is parsed.
 
@@ -657,7 +661,8 @@ class TaskRecord:
         The connections with any row in the window, loaded or not, so that one whose rows all
         fall at or before the horizon is not taken as new.
     horizon : datetime.datetime or None
-        Set when `MAX_FILES_READ` or more files are recorded within the window, or more than
+        Set when `MAX_FILES_READ` less `CONNECTION_RESERVE` or more files are recorded within
+        the window, or more than
         `RECORD_BUDGET_BYTES` less `MAX_LINE_BYTES` of entries (the SDK keeps a run's newest
         under the budget, so a run that dropped files always leaves this many): the time of
         the oldest file loaded. Every recorded file after it is in `files`; `files.read` takes
@@ -713,13 +718,14 @@ def files_read_for_task(
             select(IncrementalFileRead)
             .where(*where)
             .order_by(IncrementalFileRead.modified.desc())
-            .limit(MAX_FILES_READ)
+            .limit(MAX_FILES_READ - CONNECTION_RESERVE)
         )
     )
     # A full load may have left older rows out, and a run that read more than the record takes
     # (in files or in bytes) recorded only its newest: every file at or before the oldest
     # loaded counts as read.
-    horizon = rows[-1].modified if len(rows) >= MAX_FILES_READ else None
+    full = MAX_FILES_READ - CONNECTION_RESERVE
+    horizon = rows[-1].modified if len(rows) >= full else None
     total = 0
     for kept, row in enumerate(rows, start=1):
         total += entry_bytes(FileRead(row.connection, row.name, row.size, row.modified, row.etag))
