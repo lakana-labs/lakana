@@ -301,13 +301,14 @@ def facts_for_health(
     repository = session.get(Repository, row.repository_id)
     alert = None
     if signal.state == "no_metrics":
-        # A blocking signal its commit could not judge: the text names no value.
+        # A blocking signal its commit could not judge: the text names no value. A row without
+        # a reason is one whose number did not fit what is stored.
         reason = signal.observed.get("reason") if isinstance(signal.observed, dict) else None
         alert = f"{table}: " + unjudged_text(
             signal.signal,
             signal.column_name,
             signal.snapshot_id or 0,
-            str(reason),
+            reason if isinstance(reason, str) else "unstorable",
             table,
             environment,
         )

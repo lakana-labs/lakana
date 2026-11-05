@@ -14,7 +14,7 @@ from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import ColumnElement, ScalarSelect, and_, case, func, select
+from sqlalchemy import ColumnElement, ScalarSelect, and_, case, func, or_, select
 from sqlalchemy.orm import Session
 
 from lakana_core.catalog.health_record import NEWEST_COMMIT, NOT_SET_BACK
@@ -249,10 +249,12 @@ def _still_fired(
         numbered
             Whether the rows have a sequence number (a commit's) or not (the sweep's).
         unjudged
-            For a ``no_metrics`` row its commit could not judge: the newest earlier row of the
-            signal in any column, which counts as the same state only when it is again such a
-            table-level row. A judged commit writes per-column rows only, so the previous
-            table-level row alone would be the last unjudged one, however old.
+            For a ``no_metrics`` row that could not be judged. A table-level one: the newest
+            earlier row of the signal in any column, which counts as the same state only when it
+            is again such a table-level row; a judged commit writes per-column rows only, so the
+            previous table-level row alone would be the last unjudged one, however old. A
+            column's own one: its previous row, the same state when it is ``no_metrics`` for any
+            reason but ``no_rows``.
 
         Returns
         -------
@@ -261,7 +263,21 @@ def _still_fired(
         """
         number = TableHealthSignal.sequence_number
         state: ColumnElement[str] = TableHealthSignal.state.expression
-        if unjudged:
+        if unjudged and column is not None:
+            # A column's own row that could not be judged: the same state is its previous row
+            # in `no_metrics` for any reason but `no_rows`, which had nothing to judge.
+            reason = TableHealthSignal.observed["reason"].as_string()
+            state = case(
+                (
+                    and_(
+                        TableHealthSignal.state == "no_metrics",
+                        or_(reason.is_(None), reason != "no_rows"),
+                    ),
+                    "no_metrics",
+                ),
+                else_="judged",
+            )
+        elif unjudged:
             state = case(
                 (
                     and_(
@@ -279,7 +295,7 @@ def _still_fired(
             TableHealthSignal.id.not_in(own),
             NOT_SET_BACK,
         ]
-        if not unjudged:
+        if not unjudged or column is not None:
             where.append(
                 TableHealthSignal.column_name.is_(None)
                 if column is None

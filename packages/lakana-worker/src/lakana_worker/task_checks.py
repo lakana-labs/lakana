@@ -564,13 +564,14 @@ def _tell_unjudged(
     table: str,
     table_id: uuid.UUID,
     chain: Sequence[int],
-    signals: Sequence[str],
+    checks: Sequence[tuple[str, str | None]],
 ) -> None:
     """Queue a ``health`` message for each commit row that left a blocking signal not judged.
 
     A firing ``warn`` signal is told to the notify targets of the jobs that build the table; a
     ``block`` signal that could not be judged warns, so it is told the same way, of the
-    ``no_metrics`` row its commit recorded (`UNJUDGED_REASONS`). A signal with no row at all has
+    ``no_metrics`` row that says so: the commit's table-level row (`UNJUDGED_REASONS`), or the
+    check's own row with any reason but ``no_rows`` (`_judges`). A signal with no row at all has
     nothing to name and is told only by the run. Queuing never fails the check phase but on a
     database error.
 
@@ -586,27 +587,33 @@ def _tell_unjudged(
         The table.
     chain
         The snapshots the task run wrote.
-    signals
-        The signals of the checks that warned.
+    checks
+        (signal, column) of the checks that warned; the column `None` for the whole signal.
 
     Raises
     ------
     SQLAlchemyError
         If the database failed; the check phase then runs again.
     """
-    rows = [
-        row
-        for row in session.scalars(
-            select(TableHealthSignal).where(
-                TableHealthSignal.table_id == table_id,
-                TableHealthSignal.snapshot_id.in_(list(chain)),
-                TableHealthSignal.signal.in_(sorted(set(signals))),
-                TableHealthSignal.column_name.is_(None),
-                TableHealthSignal.state == "no_metrics",
+    found = session.scalars(
+        select(TableHealthSignal).where(
+            TableHealthSignal.table_id == table_id,
+            TableHealthSignal.snapshot_id.in_(list(chain)),
+            TableHealthSignal.signal.in_(sorted({signal for signal, _ in checks})),
+            TableHealthSignal.state == "no_metrics",
+        )
+    )
+    rows = []
+    for row in found:
+        reason = row.observed.get("reason") if isinstance(row.observed, dict) else None
+        tells = (row.column_name is None and reason in UNJUDGED_REASONS) or (
+            reason != "no_rows"
+            and any(
+                signal == row.signal and _judges(row, signal, column) for signal, column in checks
             )
         )
-        if isinstance(row.observed, dict) and row.observed.get("reason") in UNJUDGED_REASONS
-    ]
+        if tells:
+            rows.append(row)
     if not rows:
         session.rollback()
         return
@@ -632,7 +639,7 @@ _SignalRow = Row[int | None, str, str | None, str, str, dict[str, Any] | None]
 """A row of `_health_result`'s read: snapshot, signal, column, state, effect, observed."""
 
 
-def _judges(row: _SignalRow, signal: str, column: str | None) -> bool:
+def _judges(row: _SignalRow | TableHealthSignal, signal: str, column: str | None) -> bool:
     """Say whether a row of the check's signal is one the check judges.
 
     Parameters
@@ -1872,7 +1879,7 @@ def _checks_under(
     # The snapshots the task run wrote, read once for its health checks.
     chain: list[int] | None = None
     # The signals of the blocking health checks that could not be judged, to tell of.
-    unjudged: list[str] = []
+    unjudged: list[tuple[str, str | None]] = []
     for spec in specs:
         started = db_now(session)
         session.rollback()
@@ -1900,7 +1907,8 @@ def _checks_under(
             if outcome is CheckOutcome.WARNED:
                 # Not judged: it warns, as a `warn` check does, and the run goes on.
                 recorded = dataclasses.replace(spec, on_failure="warn")
-                unjudged.append(spec.generated.columns[0])
+                names = spec.generated.columns
+                unjudged.append((names[0], names[1] if len(names) > 1 else None))
         elif phase.active:
             counted, outcome, error = _count_one(
                 session,

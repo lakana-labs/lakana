@@ -827,9 +827,9 @@ def test_telling_of_unjudged_signals_needs_a_recorded_reason_and_passes_database
         environment_id = session.scalars(
             select(Environment.id).where(Environment.name == "dev")
         ).one()
-        tell(session, environment_id, "bronze.events", table_id, [12], ["volume"])  # nothing
+        tell(session, environment_id, "bronze.events", table_id, [12], [("volume", None)])
         with pytest.raises(OperationalError):
-            tell(session, environment_id, "bronze.events", table_id, [11], ["volume"])
+            tell(session, environment_id, "bronze.events", table_id, [11], [("volume", None)])
 
 
 def _row(
@@ -948,3 +948,83 @@ def test_a_column_without_recorded_bounds_warns_through_the_check(world: World) 
             unjudged_text("range", "price", 21, "not_recorded", "bronze.events", "dev"),
             21,
         )
+
+
+def test_an_own_row_without_metrics_is_told_like_an_unreadable_commit(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`not_recorded`, `not_finite` and an unstorable number have a row to name: it is told.
+
+    A `no_rows` row and a row of a column no check names are not.
+
+    Parameters
+    ----------
+    world
+        The world.
+    monkeypatch
+        Records what is queued.
+    """
+    _outside_table(world, "bronze.events", [1])
+    _signal(world, "bronze.events", "volume", snapshot=30, state="no_metrics")  # unstorable
+    _signal(
+        world,
+        "bronze.events",
+        "range",
+        snapshot=30,
+        column="price",
+        state="no_metrics",
+        observed={"reason": "not_recorded"},
+        effect="block",
+    )
+    _signal(
+        world,
+        "bronze.events",
+        "range",
+        snapshot=30,
+        column="qty",
+        state="no_metrics",
+        observed={"reason": "not_finite"},
+        effect="warn",
+    )
+    _signal(
+        world,
+        "bronze.events",
+        "null_rate",
+        snapshot=30,
+        column="price",
+        state="no_metrics",
+        observed={"reason": "no_rows"},
+        effect="block",
+    )
+    told: list[tuple[str, str | None]] = []
+
+    def queue(session: object, **kwargs: list[TableHealthSignal]) -> list[object]:
+        """Record the rows a message would tell of.
+
+        Parameters
+        ----------
+        session
+            Ignored.
+        **kwargs
+            The call's arguments; ``rows`` is read.
+
+        Returns
+        -------
+        list
+            No deliveries.
+        """
+        told.extend((r.signal, r.column_name) for r in kwargs["rows"])
+        return []
+
+    monkeypatch.setattr(task_checks_module, "queue_health_notifications", queue)
+    with world.session() as session:
+        table_id = resolve_table_id(session, "dev", "bronze", "events")
+        assert table_id is not None
+        environment_id = session.scalars(
+            select(Environment.id).where(Environment.name == "dev")
+        ).one()
+        checks = [("volume", None), ("range", "price"), ("null_rate", "price")]
+        task_checks_module._tell_unjudged(
+            session, environment_id, "bronze.events", table_id, [30], checks
+        )
+    assert sorted(told, key=repr) == [("range", "price"), ("volume", None)]

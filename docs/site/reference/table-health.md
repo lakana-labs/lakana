@@ -294,8 +294,9 @@ and names no value:
 > 1 check warned: `health_volume` (health signal volume could not be judged: computing it failed (snapshot 4711); the run went on: the server's log names the error, and the next commit is judged again).
 
 It is in the run's message, `lakana runs show` and the task's log, and the notify targets of the
-jobs that build the table get a `health` message with the same text when the commit recorded why
-(`no_metrics` with reason `unreadable` or `error`), once until the signal is judged again. A column
+jobs that build the table get a `health` message with the same text whenever a row says why (a
+`no_metrics` row, of the commit or of the check's own signal or column), once until the signal is
+judged again; a signal with nothing recorded is told only by the run. A column
 that never records a value can never be judged: `range` of a column without a range (text,
 boolean, a nested type) and any column past the 200th. A deploy that knows the columns refuses
 `block` on a column past the 200th (counted as the refusal table below says); for the rest, `lakana table get` marks the entry, as in

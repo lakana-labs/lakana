@@ -410,7 +410,7 @@ def _fired(
     session: Session,
     signal: str,
     column: str | None,
-    observed: dict,
+    observed: dict | None,
     band: dict | None,
     *,
     state: str = "fired",
@@ -842,3 +842,81 @@ def test_an_unjudged_signal_is_told_again_once_it_was_judged_in_between(
     assert _still_fired(session, [again]) == set()  # told again
     twice = row(11, None, "no_metrics")
     assert _still_fired(session, [twice]) == {("range", None)}  # not told twice
+
+
+def test_a_column_that_could_not_be_judged_is_told_once_until_it_is_judged(
+    catalog: CatalogService, session: Session
+) -> None:
+    """A per-column `no_metrics` row is told; again only after a judged row of the column.
+
+    Parameters
+    ----------
+    catalog
+        The catalog, which creates `silver.orders`.
+    session
+        Database session.
+    """
+    environment_id, table_id = _environment_id(session), _table_id(session)
+
+    def row(sequence: int, state: str, observed: dict[str, str] | None) -> TableHealthSignal:
+        """Store one `range` row of `silver.orders`' column `price`.
+
+        Parameters
+        ----------
+        sequence
+            Its sequence number and snapshot.
+        state
+            Its state.
+        observed
+            What was observed.
+
+        Returns
+        -------
+        TableHealthSignal
+            The row, flushed.
+        """
+        stored = TableHealthSignal(
+            id=uuid.uuid4(),
+            environment_id=environment_id,
+            table_id=table_id,
+            signal="range",
+            column_name="price",
+            snapshot_id=sequence,
+            sequence_number=sequence,
+            observed=observed,
+            band=None,
+            state=state,
+            effect="block",
+            observed_at=_FIRED_AT + timedelta(days=sequence),
+        )
+        session.add(stored)
+        session.flush()
+        return stored
+
+    row(1, "no_metrics", {"reason": "no_rows"})  # nothing to judge: not "still"
+    first = row(2, "no_metrics", {"reason": "not_recorded"})
+    assert _still_fired(session, [first]) == set()
+    second = row(3, "no_metrics", None)  # unstorable, still not judged
+    assert _still_fired(session, [second]) == {("range", "price")}
+    row(4, "ok", {"low": "1"})
+    third = row(5, "no_metrics", {"reason": "not_finite"})
+    assert _still_fired(session, [third]) == set()
+
+
+def test_a_value_that_did_not_fit_is_told_without_values(
+    catalog: CatalogService, session: Session
+) -> None:
+    """A row stored without its observation (a number that did not fit) names that cause.
+
+    Parameters
+    ----------
+    catalog
+        The catalog, which creates `silver.orders`.
+    session
+        Database session.
+    """
+    delivery = _fired(session, "volume", None, None, None, state="no_metrics")
+    assert facts_for_health(session, delivery, "dev", delivery.id).alert.startswith(
+        "silver.orders: health signal volume could not be judged: its value did not fit what is "
+        "stored (snapshot 7)"
+    )
