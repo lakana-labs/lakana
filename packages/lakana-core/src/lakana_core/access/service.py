@@ -24,13 +24,21 @@ from lakana_core.access.file import (
 )
 from lakana_core.access.live import LiveAccess, read_live
 from lakana_core.access.lockout import admins_after, lockout_problems
-from lakana_core.access.model import INSTANCE, AccessState, Scopes, ServiceAccountEntry, fingerprint
+from lakana_core.access.model import (
+    INSTANCE,
+    AccessState,
+    Scopes,
+    ServiceAccountEntry,
+    Subject,
+    fingerprint,
+)
 from lakana_core.access.plan import AccessPlan, PlannedChange, diff, drift
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable
 from lakana_core.ci_oidc.rules import CiTrustRuleService
 from lakana_core.errors import NotFoundError, ValidationError
 from lakana_core.grants.admin import authorize_admin_only
 from lakana_core.grants.service import GrantService
+from lakana_core.models import PrincipalType
 from lakana_core.policy.column_masks import ColumnMaskService
 from lakana_core.policy.columns import ColumnSource
 from lakana_core.policy.row_filters import RowFilterService
@@ -280,7 +288,12 @@ class AccessService:
             _active_after(live, changes),
         )
         problems += lockout_problems(
-            file_name=parsed.file_name, after=after, caller=p.name, allow_lockout=allow_lockout
+            file_name=parsed.file_name,
+            after=after,
+            caller=Subject(
+                "service" if p.type is PrincipalType.SERVICE_ACCOUNT else "user", p.name
+            ),
+            allow_lockout=allow_lockout,
         )
         # PR 2 records managed scopes; until then no scope is managed and nothing is released.
         return AccessPlan(

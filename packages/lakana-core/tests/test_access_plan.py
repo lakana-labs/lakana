@@ -514,6 +514,23 @@ def test_plan_lists_a_file_that_leaves_no_admin_even_with_allow_lockout(session:
     )
 
 
+def test_the_no_admin_refusal_names_a_service_account_caller_as_one(session: Session) -> None:
+    """R7: an administrator that is a service account is told to keep a `service:` grant."""
+    world = access_world(session)
+    GrantService(session, AllowAllAuthorization()).grant(
+        world.admin, principal="etl-bot", role=Role.ADMIN, kind=SecurableKind.INSTANCE
+    )
+    plan = _service(session, world).plan(
+        world.ref("etl-bot"),
+        "version: 1\nmanages: [instance]\nservice_accounts: [etl-bot]\n",
+        allow_lockout=True,
+    )
+    assert plan.problems == (
+        "access.yaml: the file leaves no active ADMIN on the instance; keep "
+        "{to: service:etl-bot, role: ADMIN, on: instance} or give ADMIN to another active person",
+    )
+
+
 def test_admin_through_a_group_or_a_removed_account_counts_as_it_should(session: Session) -> None:
     """A group member keeps ADMIN; a service account the file removes does not."""
     world = access_world(session)

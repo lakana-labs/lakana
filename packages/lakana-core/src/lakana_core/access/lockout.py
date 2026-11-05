@@ -6,7 +6,7 @@ lets a caller drop their own ADMIN role while another administrator remains.
 
 from __future__ import annotations
 
-from lakana_core.access.model import AccessState, GrantEntry, MembershipEntry
+from lakana_core.access.model import AccessState, GrantEntry, MembershipEntry, Subject
 
 
 def admins_after(state: AccessState, active: frozenset[str]) -> frozenset[str]:
@@ -40,7 +40,7 @@ def admins_after(state: AccessState, active: frozenset[str]) -> frozenset[str]:
 
 
 def lockout_problems(
-    *, file_name: str, after: frozenset[str], caller: str, allow_lockout: bool
+    *, file_name: str, after: frozenset[str], caller: Subject, allow_lockout: bool
 ) -> list[str]:
     """Refuse a file that leaves no administrator, or drops the caller's own ADMIN role.
 
@@ -51,7 +51,7 @@ def lockout_problems(
     after
         The active instance administrators after the apply (`admins_after`).
     caller
-        The name of the principal planning or applying.
+        The principal planning or applying, as ``user:`` or ``service:``.
     allow_lockout
         Whether the caller accepts losing their own ADMIN role.
 
@@ -63,10 +63,10 @@ def lockout_problems(
     if not after:
         return [
             f"{file_name}: the file leaves no active ADMIN on the instance; keep "
-            f"{{to: user:{caller}, role: ADMIN, on: instance}} or give ADMIN to another active "
+            f"{{to: {caller}, role: ADMIN, on: instance}} or give ADMIN to another active "
             "person"
         ]
-    if caller not in after and not allow_lockout:
+    if caller.name not in after and not allow_lockout:
         return [
             f"{file_name}: the file removes your own ADMIN role on the instance (MANAGE_GRANT); "
             "keep it, or repeat with --allow-lockout if another administrator applies from now on"
