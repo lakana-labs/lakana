@@ -20,6 +20,7 @@ from lakana_core.identifiers import NamespacePath, TableRef
 from lakana_core.models import AuditEventType, Group, Principal, RowFilter
 from lakana_core.policy.columns import (
     ColumnSource,
+    binding_for,
     list_columns,
     read_table_description,
     type_checks_apply,
@@ -27,12 +28,13 @@ from lakana_core.policy.columns import (
 )
 from lakana_core.policy.expression_types import check_expression_types
 from lakana_core.policy.expressions import columns_of
+from lakana_core.policy.field_binding import FIELD_IDS, PolicyBinding
 
 
 def _check_columns_exist(
     catalog: ColumnSource, p: PrincipalRef, ref: TableRef, environment: str, expression: str
-) -> int | None:
-    """Refuse a row filter that reads a missing column or mixes types; give its schema id.
+) -> tuple[int | None, PolicyBinding]:
+    """Refuse a row filter that reads a missing column or mixes types; bind it to the table.
 
     The comparison ignores letter case, as the database does when the filter runs, so a
     filter accepted here is a filter the query path can apply. Then it checks the filter's types
@@ -56,10 +58,11 @@ def _check_columns_exist(
 
     Returns
     -------
-    int or None
+    tuple of int or None and PolicyBinding
         The id of the table's current schema as read for this check, so that the filter records
-        the schema whose columns were checked; `None` for a filter that reads no column and for
-        a table without field ids.
+        the schema whose columns were checked (`None` for a filter that reads no column and for
+        a table without field ids), and the binding of its columns to the field ids of that same
+        read.
 
     Raises
     ------
@@ -72,7 +75,7 @@ def _check_columns_exist(
     wanted = columns_of(expression)
     if not wanted:
         check_expression_types(expression, kind="filter", columns=[])
-        return None
+        return None, PolicyBinding(FIELD_IDS, {}, None)
     description = read_table_description(catalog, p, ref, policy="row filter")
     names = [spec.name for spec in description.columns]
     have = {name.lower() for name in names}
@@ -89,7 +92,7 @@ def _check_columns_exist(
         raise ValidationError(message)
     if type_checks_apply(description):
         check_expression_types(expression, kind="filter", columns=description.columns)
-    return description.schema_id
+    return description.schema_id, binding_for(description, wanted)
 
 
 class RowFilterService:
@@ -264,7 +267,7 @@ class RowFilterService:
         ref = TableRef(
             environment=environment, namespace=NamespacePath.parse(namespace), name=table
         )
-        schema_id = _check_columns_exist(self._catalog, p, ref, environment, expression)
+        schema_id, binding = _check_columns_exist(self._catalog, p, ref, environment, expression)
         row = RowFilter(
             id=uuid.uuid4(),
             principal_id=principal_id,
@@ -276,6 +279,8 @@ class RowFilterService:
             table_id=table_id,
             expression=expression,
             schema_id=schema_id,
+            field_ids=binding.field_ids,
+            binding=binding.binding,
             created_by=p.id,
             created_at=datetime.now(UTC),
         )

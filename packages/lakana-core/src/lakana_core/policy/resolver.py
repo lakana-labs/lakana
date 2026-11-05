@@ -15,15 +15,9 @@ from lakana_core.errors import ValidationError
 from lakana_core.identifiers import TableRef
 from lakana_core.models import ColumnMask, Group, GroupMembership, RowFilter
 from lakana_core.policy.expressions import HAS_GROUP, columns_of
+from lakana_core.policy.field_binding import UNREADABLE_POLICY_MESSAGE
 from lakana_core.policy.renames import PolicyColumns
 from lakana_core.sql_syntax import SQL_SYNTAX_ERRORS
-
-UNREADABLE_POLICY_MESSAGE = (
-    "A row filter or column mask stored on this table could not be read. "
-    "Ask an administrator to correct or remove it."
-)
-"""Shown to a reader when a stored policy no longer parses; it names no policy text, which the
-reader may not be allowed to see."""
 
 
 @dataclass(frozen=True)

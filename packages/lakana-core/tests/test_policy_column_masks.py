@@ -1153,3 +1153,57 @@ def test_a_mask_on_a_nanosecond_parquet_timestamp_is_stored_as_not_type_checked(
     catalog = FakeColumnCatalog(names=["c"], types={"c": "timestamp[ns]"}, file_format="parquet")
     created = _create_mask(session, "c", "TIMESTAMP '1970-01-01 00:00:00'", catalog)
     assert created.type_checked is False
+
+
+# --- the mask's columns are bound to field ids when it is created ---
+
+
+def test_a_new_column_mask_stores_its_column_field_id(session: Session) -> None:
+    """A mask on `email` reading `email`: both are field 3."""
+    catalog = FakeColumnCatalog(names=["id", "name", "email"], schema_id=1)
+    service, admin = _ready(session, catalog)
+
+    row = service.create(admin, **{**_mask_args("email"), "expression": "md5(email)"})
+
+    assert (row.binding, row.field_ids, row.column_field_id) == ("field_ids", {"email": 3}, 3)
+
+
+def test_a_mask_reading_another_column_stores_both_ids(session: Session) -> None:
+    """The mask's own column is a key of its own, beside the column its expression reads."""
+    catalog = FakeColumnCatalog(names=["id", "ssn", "dept"], schema_id=1)
+    service, admin = _ready(session, catalog)
+
+    row = service.create(admin, **{**_mask_args("ssn"), "expression": "dept"})
+
+    assert (row.field_ids, row.column_field_id) == ({"dept": 3, "ssn": 2}, 2)
+
+
+def test_a_mask_on_a_raw_table_is_bound_by_name(session: Session) -> None:
+    """An external table has no field ids: `names`, nothing stored."""
+    catalog = FakeColumnCatalog(names=["id", "ssn"], file_format="csv")
+    service, admin = _ready(session, catalog)
+
+    row = service.create(admin, **_mask_args("ssn"))
+
+    assert (row.binding, row.field_ids, row.column_field_id) == ("names", None, None)
+
+
+def test_creation_binds_ids_from_the_description_it_type_checked(session: Session) -> None:
+    """Regression pin: one `describe_table` call gives the schema id, the types and the ids."""
+    catalog = FakeColumnCatalog(names=["id", "ssn"], schema_id=1)
+    service, admin = _ready(session, catalog)
+
+    service.create(admin, **_mask_args("ssn"))
+
+    assert len(catalog.calls) == 1
+
+
+def test_creation_refuses_a_mask_on_an_ambiguous_column(session: Session) -> None:
+    """A table with `ssn` and `SSN`: a mask on `ssn` cannot be told apart, so it is refused."""
+    catalog = FakeColumnCatalog(names=["ssn", "SSN"], schema_id=1)
+    service, admin = _ready(session, catalog)
+
+    with pytest.raises(ValidationError, match="cannot tell apart for a policy"):
+        service.create(admin, **_mask_args("ssn"))
+
+    assert session.execute(select(ColumnMask)).scalars().all() == []
