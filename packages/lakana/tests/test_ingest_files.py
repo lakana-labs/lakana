@@ -1438,13 +1438,29 @@ def test_a_connection_without_records_is_seeded_and_reports_its_window(root: Pat
     assert {f.name for f in context.current().files_read} == {"before.csv", "month.csv", "new.csv"}
 
 
-def test_seeding_takes_every_file_at_or_before_the_watermark_as_read(root: Path) -> None:
-    """An earlier `since` than the watermark still reads no file the table already holds."""
-    _write(root / "ancient.csv", b"id\n3\n", _MARK - dt.timedelta(days=31))
+def test_seeding_stops_at_an_earlier_since_so_a_late_file_is_still_read(root: Path) -> None:
+    """I1: an asset with its own margin reads what it read before, and records it."""
+    _write(root / "late.csv", b"id\n2\n", _MARK - dt.timedelta(minutes=30))
+    _write(root / "before.csv", b"id\n1\n", _MARK - dt.timedelta(hours=2))
     _record()
-    since = _MARK - dt.timedelta(days=40)
-    assert files.read("exports", "*.csv", since=since, lookback=dt.timedelta(0)).num_rows == 0
-    assert context.current().files_read == []
+
+    table = files.read("exports", "*.csv", since=_MARK - dt.timedelta(hours=1))
+
+    assert table.column("id").to_pylist() == [2]
+    assert {f.name for f in context.current().files_read} == {"before.csv", "late.csv"}
+
+
+def test_the_window_never_starts_before_the_record_does(root: Path) -> None:
+    """A file older than the worker's record (30 days before the watermark) is not read again."""
+    _write(root / "pruned.csv", b"id\n1\n", _MARK - dt.timedelta(days=33))
+    _write(root / "late.csv", b"id\n2\n", _MARK - dt.timedelta(days=29))
+    _record(context.ReadFile("exports", "x.csv", 1, _MARK))
+
+    table = files.read(
+        "exports", "*.csv", since=_MARK - dt.timedelta(days=7), lookback=dt.timedelta(days=30)
+    )
+
+    assert table.column("id").to_pylist() == [2]
 
 
 def test_seeding_treats_a_naive_watermark_as_utc(root: Path) -> None:

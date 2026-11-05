@@ -1826,3 +1826,44 @@ def test_an_https_files_etag_comes_from_its_head_answer(monkeypatch: pytest.Monk
     _mock_site(monkeypatch, answer)
     assert [e.etag for e in _listed("site", "a.csv")] == ['"v1"']
     assert [e.etag for e in _listed("site", "a.csv")] == [None]
+
+
+@pytest.mark.parametrize(("recorded", "listed"), [(None, True), ('"0"', False)])
+def test_an_etag_on_one_side_only_does_not_make_an_object_new(
+    memory: MemoryStore, monkeypatch: pytest.MonkeyPatch, recorded: str | None, listed: bool
+) -> None:
+    """I2: a store that sends an ETag on one run and not on the next reads the object once."""
+    obstore.put(memory, "a.csv", b"id\n1\n")
+    (meta,) = next(iter(obstore.list(memory)))
+    if not listed:
+        bare = {k: v for k, v in meta.items() if k != "e_tag"}
+        monkeypatch.setattr(obstore, "list", lambda store, prefix=None, **kwargs: iter([[bare]]))
+    mark = meta["last_modified"]
+    state = context.current()
+    state.target_watermark = mark
+    state.recorded = frozenset({context.ReadFile("lake", "a.csv", 5, mark, recorded)})
+    assert files.read("lake", "*.csv", since=mark).num_rows == 0
+
+
+def test_an_https_etag_that_changes_on_an_unchanged_file_does_not_read_it_again(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """I2: servers vary ETags (weak, per node, compressed): HTTPS identity leaves them out."""
+    import httpx
+
+    stamp = "Mon, 02 Nov 2026 12:00:00 GMT"
+    mark = dt.datetime(2026, 11, 2, 12, tzinfo=dt.UTC)
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        headers = {"Last-Modified": stamp, "ETag": '"v2"', "Content-Length": "5"}
+        if request.method == "HEAD":
+            return httpx.Response(200, headers=headers)
+        return httpx.Response(200, content=b"id\n1\n")
+
+    _mock_site(monkeypatch, answer)
+    state = context.current()
+    state.target_watermark = mark
+    state.recorded = frozenset({context.ReadFile("site", "a.csv", 5, mark, '"v1"')})
+    assert files.read("site", "a.csv", since=mark).num_rows == 0
+    state.recorded = frozenset({context.ReadFile("site", "a.csv", 5, mark - dt.timedelta(hours=1))})
+    assert files.read("site", "a.csv", since=mark).num_rows == 1

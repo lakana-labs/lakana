@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from typing import cast
 
 from lakana import context
+from lakana.ingest import _read_set
 from lakana_core.auth import PrincipalRef
 from lakana_core.catalog import files_read
 
@@ -65,3 +66,5 @@ def test_the_caps_are_the_same() -> None:
     assert context.MAX_FILES_READ == files_read.MAX_FILES_READ
     assert context.RECORD_WINDOW == files_read.RECORD_WINDOW
     assert context.FILES_READ_KEY.encode() == files_read.FILES_READ_METADATA_KEY
+    assert _read_set.MAX_NAME_LENGTH == files_read.MAX_NAME_LENGTH
+    assert context.MAX_ETAG == files_read._MAX_ETAG

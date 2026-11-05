@@ -1131,6 +1131,7 @@ def read(
                 after=after,
                 lookback=window,
                 state=state,
+                use_etag=conn.kind in ("s3", "gcs", "azure"),
             )
             if choice.inside > max_files:
                 raise CapExceeded(

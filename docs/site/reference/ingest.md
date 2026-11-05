@@ -167,33 +167,44 @@ file: a column it names that a file lacks fails, naming the file and the column.
 - **Left out:** every file is read and the table has only the files' columns.
 - **`since=None`** (the first run of an asset with `watermark="_source_modified"`): every file
   is read and the column `_source_modified` holds each row's file time (UTC).
-- **`since=<datetime>`**, usually `ctx.watermark()`: only files modified strictly after it are
-  read, and the column is added. A naive datetime is UTC. Any other value is refused.
+- **`since=<datetime>`**, usually `ctx.watermark()`: the files modified strictly after it are
+  read, and the late files inside `lookback=` (below) that were not read yet; the column is
+  added. A naive datetime is UTC. Any other value is refused.
 
 **Late files inside the lookback are read once.** A run reads the files modified after `since`
-minus `lookback=` (24 hours by default) that the asset's table has not recorded as read. Lakana
-records each file it hands to the asset (its connection, name, size, time and, from S3, GCS,
-Azure and an HTTPS server that sends one, its ETag) with the write of the run, and a check that
-sets the run back forgets them, so those files are read again. The same name with a new time,
-size or ETag is a new file. A run that writes no rows records nothing; its files give no rows
-the next time either. So a file that shares the watermark's time, a file moved in with `mv`, or
+minus `lookback=` (24 hours by default) that the asset's table has not recorded as read; the
+window never starts more than 30 days before the table's watermark, as far back as the record
+reaches. Lakana records each file it hands to the asset (its connection, name, size, time and,
+where the source sends one, its ETag) with the write of the run, and a check that sets the run
+back forgets them, so those files are read again. The same name with a new time or size is a new
+file. From S3, GCS and Azure, a new ETag also makes a new file, when both runs saw one; an HTTPS
+server's ETag is not used, since servers may change it for a file that did not change. A run
+that writes no rows records nothing; its files give no rows the next time either. So a file that shares the watermark's time, a file moved in with `mv`, or
 an S3 upload dated by its start is still read, once, as long as its time is inside the window.
 `since=None` reads every file, recorded or not.
 
 **The first run after an upgrade, or of a connection newly added to the asset,** takes every
-file at or before the table's watermark as read, so nothing is read twice.
+file at or before the table's watermark (or at or before `since`, if that is earlier) as read,
+so nothing is read twice. In an asset with several connections, a connection none of whose files
+was read in the 30 days before the watermark is taken as new again on every run: it reads only
+the files after `since`, without the lookback, until one of its files is read.
 
 Each call with `since` prints a line to the task's log, such as
 ``files.read: `exports`: 3 new files, 2 late files inside the 24 h lookback, 41 already read``.
 A run records at most 100,000 files, and a file whose name Lakana cannot store (longer than 1,024
 characters, or not valid UTF-8) is refused before anything is read.
 
-**What the lookback still does not catch** is a file whose time is older than the window, or one
-dated in the future:
+**What the lookback still does not catch** is a file whose time is older than the window, one
+dated in the future, or one that looks the same as a file already read:
 
-- the filesystem keeps coarse times (FAT and exFAT keep 2 seconds; some NFS and SMB servers keep
-  1 second) and the files differ by more than the window, which only a lookback of `timedelta(0)`
-  makes likely;
+- a file overwritten in place with the same name, size and time, from a source without ETags (a
+  `directory` connection, or an HTTPS server). Coarse times make this likelier: FAT and exFAT keep
+  2 seconds, some NFS and SMB servers keep 1 second. Write each export under a new name;
+- with `modified_from=` and a date in the names, a file named for the day before the watermark's
+  date has the time `since` minus 24 hours, which the default window leaves out. Make the
+  lookback longer than the names' step, such as `lookback=timedelta(days=2)` for daily names;
+- a connection with no file read in the last 30 days, in an asset with several connections (see
+  above);
 - a writer keeps the source's time (`cp -p`, `rsync -t`, an archive unpacked with its dates), so
   a new file arrives with a time older than the window;
 - one file is dated in the future, which moves the watermark ahead of every file that follows;

@@ -2,8 +2,10 @@
 
 A run reads the files modified after ``since`` less ``lookback`` that the target has not recorded as
 read. A connection the target has no record for, while the target has a time watermark, is
-seeded: its files at or before the watermark count as read, and those within 30 days of it
-are reported as read, so that later runs know them too. With ``since=None`` nothing is
+seeded: its files at or before the watermark (or ``since``, if earlier) count as read, and
+those within 30 days of the watermark are reported as read, so that later runs know them too.
+A file is the same file when its connection, name, size and time match; an object store's
+ETag tells an overwritten object apart when both runs saw one. With ``since=None`` nothing is
 filtered: every file is read and reported.
 
 The record the worker sent is applied only when there is one (`_TaskState.recorded`); without
@@ -189,6 +191,62 @@ def _minus(value: dt.datetime, span: dt.timedelta) -> dt.datetime:
         return dt.datetime.min.replace(tzinfo=dt.UTC)
 
 
+def _index(
+    recorded: Iterable[ReadFile],
+) -> dict[tuple[str, str, int, dt.datetime], set[str | None]]:
+    """Index a record by connection, name, size and time, to the ETags recorded for each.
+
+    Parameters
+    ----------
+    recorded
+        The files the target recorded as read.
+
+    Returns
+    -------
+    dict
+        ``(connection, name, size, modified)`` to the set of its recorded ETags (`None` for
+        none).
+    """
+    index: dict[tuple[str, str, int, dt.datetime], set[str | None]] = {}
+    for file in recorded:
+        index.setdefault((file.connection, file.name, file.size, file.modified), set()).add(
+            file.etag
+        )
+    return index
+
+
+def _known(
+    file: ReadFile,
+    index: dict[tuple[str, str, int, dt.datetime], set[str | None]],
+    use_etag: bool,
+) -> bool:
+    """Tell whether the record holds a file.
+
+    Connection, name, size and time must match. The ETag takes part only for an object store,
+    and only when both the file and the record have one: a store that sends one on one run and
+    not on the next does not make a file new.
+
+    Parameters
+    ----------
+    file
+        The listed file.
+    index
+        The record, from `_index`.
+    use_etag
+        Whether the source's ETags identify a file (S3, GCS, Azure; not an HTTPS server, which
+        may vary them for an unchanged file).
+
+    Returns
+    -------
+    bool
+        Whether the file was recorded as read.
+    """
+    etags = index.get((file.connection, file.name, file.size, file.modified))
+    if etags is None:
+        return False
+    return not use_etag or file.etag is None or None in etags or file.etag in etags
+
+
 def choose(
     connection: str,
     timed: Sequence[tuple[FileEntry, dt.datetime]],
@@ -196,6 +254,7 @@ def choose(
     after: dt.datetime | None,
     lookback: dt.timedelta,
     state: _TaskState,
+    use_etag: bool = False,
 ) -> Choice:
     """Choose the files one call with ``since=`` reads, and the ones it reports as read.
 
@@ -208,9 +267,12 @@ def choose(
     after
         ``since`` in UTC; `None` reads every file.
     lookback
-        How far before `after` a file not recorded as read is still read.
+        How far before `after` a file not recorded as read is still read; never further than
+        30 days before the target's watermark, where the worker's record ends.
     state
         The task's state: its record and the target's watermark.
+    use_etag
+        Whether ETags take part in a file's identity (an object store's).
 
     Returns
     -------
@@ -228,26 +290,32 @@ def choose(
             )
         return choice
     recorded = state.recorded
+    mark = None if state.target_watermark is None else _utc(state.target_watermark)
     start = after if recorded is None else _minus(after, lookback)
+    if recorded is not None and mark is not None:
+        # Before the record's start a file read earlier is no longer known: never look there.
+        start = max(start, min(after, _minus(mark, RECORD_WINDOW)))
     seed = None
     if (
         recorded is not None
-        and state.target_watermark is not None
+        and mark is not None
         and not any(file.connection == connection for file in recorded)
     ):
-        seed = _utc(state.target_watermark)
+        # Up to `since` only: a file after it is read today, so it must not be taken as read.
+        seed = min(mark, after)
+    index = _index(recorded or ())
     for entry, modified in timed:
         file = ReadFile(connection, entry.path, entry.size, modified, entry.etag)
         seeded = False
-        if seed is not None and modified <= seed:
+        if seed is not None and mark is not None and modified <= seed:
             seeded = True
             # Seeding reports what the record keeps (30 days), so later runs know them too.
-            if _minus(seed, RECORD_WINDOW) < modified:
+            if _minus(mark, RECORD_WINDOW) < modified:
                 choice.reported.append(file)
         if modified <= start:
             continue
         choice.inside += 1
-        if seeded or (recorded is not None and file in recorded):
+        if seeded or _known(file, index, use_etag):
             choice.already += 1
             continue
         if modified <= after:
