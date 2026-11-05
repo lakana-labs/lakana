@@ -1040,10 +1040,15 @@ def test_the_record_file_keeps_names_unescaped_and_carries_a_horizon(
     directory.mkdir()
     named = {**_RECORDED, "name": "日本.csv"}
     horizon = "2026-10-30T00:00:00+00:00"
-    write_files_read(directory, harness.task(files_read=(named,), files_read_horizon=horizon))
+    write_files_read(
+        directory,
+        harness.task(
+            files_read=(named,), files_read_horizon=horizon, files_read_connections=("exports",)
+        ),
+    )
     raw = (directory / "files-read.json").read_bytes()
     assert "日本".encode() in raw
-    assert json.loads(raw) == {"files": [named], "horizon": horizon}
+    assert json.loads(raw) == {"files": [named], "horizon": horizon, "connections": ["exports"]}
 
 
 def test_the_record_file_is_not_written_through_a_planted_link(

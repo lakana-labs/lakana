@@ -68,3 +68,12 @@ def test_the_caps_are_the_same() -> None:
     assert context.FILES_READ_KEY.encode() == files_read.FILES_READ_METADATA_KEY
     assert _read_set.MAX_NAME_LENGTH == files_read.MAX_NAME_LENGTH
     assert context.MAX_ETAG == files_read._MAX_ETAG
+    assert context.RECORD_BUDGET_BYTES == files_read.RECORD_BUDGET_BYTES
+    assert context.RECORD_BUDGET_BYTES + 4096 < files_read.MAX_RECORD_BYTES
+
+
+def test_the_worker_counts_a_line_as_the_task_encodes_it() -> None:
+    """The byte budget's horizon relies on both sides counting the same bytes."""
+    for file in _FILES:
+        core = files_read.FileRead(file.connection, file.name, file.size, file.modified, file.etag)
+        assert files_read.entry_bytes(core) == len(context._line(file.to_json()))

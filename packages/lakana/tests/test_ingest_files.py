@@ -1554,6 +1554,27 @@ def test_more_files_to_read_than_max_files_names_the_window_and_the_cap(root: Pa
     )
 
 
+def test_a_run_whose_names_pass_the_byte_budget_keeps_the_newest_that_fit(
+    root: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Long names never make the server refuse the record: the newest that fit are kept."""
+    long = "日" * 80
+    for n in range(3):
+        _write(root / f"{long}{n}.csv", b"id\n1\n", _MARK + dt.timedelta(seconds=n))
+    files.read("exports", "*.csv", since=None)
+    line = len(context._line(context.current().files_read[0].to_json()))
+    monkeypatch.setattr(context, "RECORD_BUDGET_BYTES", 2 * line + 10)
+    payload = context.files_read_payload()
+    assert payload is not None
+    names = [json.loads(entry).get("name") for entry in payload.splitlines()[1:]]
+    assert names == [f"{long}1.csv", f"{long}2.csv"]
+    assert capsys.readouterr().err.splitlines()[-1] == (
+        "files.read: this run read 3 files with since=; Lakana records the newest 2 (at most "
+        "100000 files and 0 MiB of names), and the next run takes the older ones as read; see "
+        "'A busy table'"
+    )
+
+
 @pytest.mark.parametrize(
     ("lookback", "window", "advice"),
     [
@@ -1603,8 +1624,9 @@ def test_a_run_that_reads_more_than_the_record_takes_keeps_the_newest(
     names = [json.loads(line).get("name") for line in payload.splitlines()[1:]]
     assert names == ["1.csv", "2.csv"]
     assert capsys.readouterr().err.splitlines()[-1] == (
-        "files.read: this run read 3 files with since=; Lakana records the newest 2, and the "
-        "next run takes the older ones as read; see 'A busy table'"
+        "files.read: this run read 3 files with since=; Lakana records the newest 2 (at most 2 "
+        "files and 60 MiB of names), and the next run takes the older ones as read; see "
+        "'A busy table'"
     )
 
 

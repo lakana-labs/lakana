@@ -4199,6 +4199,8 @@ def test_a_watermark_that_is_no_time_gives_no_target_watermark(world: _World) ->
         None,
         '{"files": [], "horizon": "2026-11-01T00:00:00"}',
         '{"files": [], "horizon": 7}',
+        '{"files": [], "connections": "exports"}',
+        '{"files": [], "connections": [1]}',
     ],
 )
 def test_a_bad_record_is_refused_naming_the_field(world: _World, content: str | None) -> None:
@@ -4228,13 +4230,22 @@ def test_a_horizon_reaches_the_state(world: _World) -> None:
         "from lakana import context\n"
         "assert context.current().record_horizon == datetime.datetime(2026, 10, 30, "
         "tzinfo=datetime.UTC)\n"
+        "assert context.current().recorded_connections == {'exports', 'quiet'}\n"
         "return pl.DataFrame({'id': [1], '_source_modified': [datetime.datetime(2026, 11, 2)]})",
         signature="ctx",
         inputs="write='append', watermark='_source_modified'",
     )
     path = world.result_path.parent / "files-read.json"
     path.parent.mkdir(exist_ok=True)
-    path.write_text(json.dumps({"files": [_A_FILE], "horizon": "2026-10-30T00:00:00+00:00"}))
+    path.write_text(
+        json.dumps(
+            {
+                "files": [_A_FILE],
+                "horizon": "2026-10-30T00:00:00+00:00",
+                "connections": ["exports", "quiet"],
+            }
+        )
+    )
     overrides = _v3(watermark=_TIME_WATERMARK)
     assert world.run(inputs={}, input_kinds={}, files_read_path=str(path), **overrides) == 0
 

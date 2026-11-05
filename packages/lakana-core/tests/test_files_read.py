@@ -592,7 +592,7 @@ def test_the_task_gets_the_rows_inside_30_days_of_its_watermark(
     )
     record_files_read(session, table_id, 1, report)
     found = files_read_for_task(session, table_id, f"timestamptz:{_T0.isoformat()}")
-    assert found == TaskRecord([report.files[0].to_json()])
+    assert found == TaskRecord([report.files[0].to_json()], connections=["exports"])
     naive = _T0.replace(tzinfo=None).isoformat()
     assert files_read_for_task(session, table_id, f"timestamp:{naive}") == found
     assert len(_files(files_read_for_task(session, table_id, None))) == 2
@@ -672,7 +672,7 @@ def test_more_rows_than_the_cap_load_the_newest_with_a_horizon(
     record_files_read(session, table_id, 1, report)
     mark = f"timestamptz:{_T0.isoformat()}"
     assert files_read_for_task(session, table_id, mark) == TaskRecord(
-        [f.to_json() for f in sorted(report.files, key=lambda f: f.name)]
+        [f.to_json() for f in sorted(report.files, key=lambda f: f.name)], connections=["exports"]
     )
     monkeypatch.setattr(files_read, "MAX_FILES_READ", 2)
     loaded = files_read_for_task(session, table_id, mark)
@@ -683,12 +683,26 @@ def test_more_rows_than_the_cap_load_the_newest_with_a_horizon(
     full = files_read_for_task(session, table_id, mark)
     assert full is not None
     assert (len(full.files), full.horizon) == (3, _T0 - 3 * hour)  # a full load sets it too
+    monkeypatch.setattr(files_read, "MAX_FILES_READ", 100)
+    line = files_read.entry_bytes(report.files[0])
+    # Past the byte budget less one line: the run that wrote these may have dropped older files.
+    monkeypatch.setattr(files_read, "RECORD_BUDGET_BYTES", files_read.MAX_LINE_BYTES + line + 1)
+    by_bytes = files_read_for_task(session, table_id, mark)
+    assert by_bytes is not None
+    assert ([f["name"] for f in by_bytes.files], by_bytes.horizon) == (
+        ["a.csv", "b.csv"],
+        _T0 - hour,
+    )
+    assert by_bytes.connections == ["exports"]
 
 
-def test_a_file_already_recorded_is_not_recorded_twice(
-    session: Session, principal: PrincipalRef, catalog: CatalogService
+def test_the_record_names_every_connection_with_a_row_in_the_window(
+    session: Session,
+    principal: PrincipalRef,
+    catalog: CatalogService,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A seeded or known file reported again adds no second row.
+    """A quiet connection whose rows all fall below the horizon is still named.
 
     Parameters
     ----------
@@ -698,7 +712,51 @@ def test_a_file_already_recorded_is_not_recorded_twice(
         The run principal.
     catalog
         Holds `gold.t`.
+    monkeypatch
+        Lowers the cap.
     """
+    table_id = _table_id(catalog, principal)
+    hour = dt.timedelta(hours=1)
+    report = parse_files_read(
+        _report(
+            _file("q.csv", _T0 - 5 * hour, connection="quiet"),
+            _file("a.csv", _T0 - hour),
+            _file("b.csv", _T0),
+        ),
+        _task(principal, "exports", "quiet"),
+    )
+    record_files_read(session, table_id, 1, report)
+    monkeypatch.setattr(files_read, "MAX_FILES_READ", 2)
+    loaded = files_read_for_task(session, table_id, f"timestamptz:{_T0.isoformat()}")
+    assert loaded is not None
+    assert [f["connection"] for f in loaded.files] == ["exports", "exports"]
+    assert loaded.connections == ["exports", "quiet"]
+
+
+@pytest.mark.parametrize("chunk", [1000, 1, 2])
+def test_a_file_already_recorded_is_not_recorded_twice(
+    session: Session,
+    principal: PrincipalRef,
+    catalog: CatalogService,
+    monkeypatch: pytest.MonkeyPatch,
+    chunk: int,
+) -> None:
+    """A seeded or known file reported again adds no second row, across look-up chunks.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    principal
+        The run principal.
+    catalog
+        Holds `gold.t`.
+    monkeypatch
+        Sets the look-up chunk.
+    chunk
+        Files per look-up.
+    """
+    monkeypatch.setattr(files_read, "_DEDUPE_CHUNK", chunk)
     table_id = _table_id(catalog, principal)
     task = _task(principal, "exports")
     record_files_read(session, table_id, 1, parse_files_read(_report(_file("a.csv")), task))

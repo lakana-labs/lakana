@@ -316,7 +316,12 @@ def choose(
     if (
         recorded is not None
         and mark is not None
-        and not any(file.connection == connection for file in recorded)
+        and connection
+        not in (
+            {file.connection for file in recorded}
+            if state.recorded_connections is None
+            else state.recorded_connections
+        )
     ):
         # Up to `since` only: a file after it is read today, so it must not be taken as read.
         seed = min(mark, after)

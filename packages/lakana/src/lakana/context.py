@@ -34,6 +34,9 @@ MAX_FILES_READ = 100_000
 RECORD_WINDOW = dt.timedelta(days=30)
 """The longest lookback, and how far before the watermark the worker's record reaches."""
 MAX_ETAG = 512
+RECORD_BUDGET_BYTES = 60 * 1024 * 1024
+"""The most bytes of entries a run sends; the newest files that fit are kept, so a record of
+long names never makes the server (whose cap is 64 MiB) refuse the run."""
 """The longest ETag the record holds; a longer one is sent as none."""
 
 
@@ -209,6 +212,9 @@ class _TaskState:
         Docker runner `relay_port`, `root_path`, `grant`).
     secrets
         Values the harness masks in everything it writes.
+    recorded_connections
+        The connections with any file recorded inside the window, from the worker; `None`
+        from an older worker, when the connections of `recorded` count.
     recorded
         The files the target recorded as read inside 30 days of its watermark, from the
         worker; `None` when the worker sent none: `files.read` then reads strictly after
@@ -233,6 +239,7 @@ class _TaskState:
     target_watermark: dt.datetime | None = None
     files_read: list[ReadFile] = field(default_factory=list)
     record_horizon: dt.datetime | None = None
+    recorded_connections: frozenset[str] | None = None
 
 
 _state: _TaskState | None = None
@@ -303,6 +310,22 @@ def secret_forms(value: str) -> set[str]:
     # jscpd:ignore-end
 
 
+def _line(value: dict[str, object]) -> bytes:
+    """Encode one line of the record, as `lakana_core.catalog.files_read.entry_bytes` counts it.
+
+    Parameters
+    ----------
+    value
+        The header or a file's JSON.
+
+    Returns
+    -------
+    bytes
+        Unescaped UTF-8 JSON and a newline: a record of long non-ASCII names stays small.
+    """
+    return json.dumps(value, ensure_ascii=False).encode() + b"\n"
+
+
 def files_read_payload() -> bytes | None:
     """Encode the record of the files this attempt's `files.read` calls read, for the upload.
 
@@ -311,31 +334,35 @@ def files_read_payload() -> bytes | None:
     bytes or None
         Newline-delimited JSON, as `lakana_core.catalog.files_read` parses it: the header
         ``{"version": 1, "watermark": ...}`` (the target's watermark in UTC, or null), then
-        each file once, one per line, at most the newest `MAX_FILES_READ`; `None` outside a
-        task or when no call with ``since=`` read or reported a file.
+        each file once, one per line: the newest at most `MAX_FILES_READ` whose lines fit in
+        `RECORD_BUDGET_BYTES`; `None` outside a task or when no call with ``since=`` read or
+        reported a file.
     """
     if _state is None or not _state.files_read:
         return None
     mark = _state.target_watermark
     if mark is not None:
         mark = mark.replace(tzinfo=dt.UTC) if mark.tzinfo is None else mark.astimezone(dt.UTC)
-    lines: list[dict[str, object]] = [
-        {"version": 1, "watermark": None if mark is None else mark.isoformat()}
-    ]
     files = list(dict.fromkeys(_state.files_read))
-    if len(files) > MAX_FILES_READ:
-        # Never refuse a run for reading much: keep the newest. The worker's next load is then
-        # full, and its horizon takes the older ones as read.
-        kept = set(sorted(files, key=lambda f: f.modified, reverse=True)[:MAX_FILES_READ])
+    encoded = {file: _line(file.to_json()) for file in files}
+    kept: set[ReadFile] = set()
+    total = 0
+    for file in sorted(files, key=lambda f: f.modified, reverse=True):
+        # Never refuse a run for reading much: keep the newest that the record takes. The
+        # worker's next load is then full, and its horizon takes the older ones as read.
+        if len(kept) == MAX_FILES_READ or total + len(encoded[file]) > RECORD_BUDGET_BYTES:
+            break
+        kept.add(file)
+        total += len(encoded[file])
+    if len(kept) < len(files):
         print(
             f"files.read: this run read {len(files)} files with since=; Lakana records the newest "
-            f"{MAX_FILES_READ}, and the next run takes the older ones as read; see 'A busy table'",
+            f"{len(kept)} (at most {MAX_FILES_READ} files and {RECORD_BUDGET_BYTES // 2**20} MiB "
+            "of names), and the next run takes the older ones as read; see 'A busy table'",
             file=sys.stderr,
         )
-        files = [file for file in files if file in kept]
-    lines += [file.to_json() for file in files]
-    # ensure_ascii=False keeps a record of long non-ASCII names under the server's 64 MiB.
-    return b"".join(json.dumps(line, ensure_ascii=False).encode() + b"\n" for line in lines)
+    head = _line({"version": 1, "watermark": None if mark is None else mark.isoformat()})
+    return head + b"".join(encoded[file] for file in files if file in kept)
 
 
 def register_secret(value: str) -> None:

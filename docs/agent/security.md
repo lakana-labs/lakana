@@ -4616,8 +4616,10 @@ the cause and the next step, never a 500, and nothing is written.
 loads the target's record within 30 days of that watermark (`files_read_for_task`: at most the
 newest `MAX_FILES_READ` rows; with that many it adds the oldest loaded time as a `horizon`, at
 or before which `files.read` takes every file as read whatever `since` is, so a busy table never
-stops its asset; a run that read more reports only its newest `MAX_FILES_READ`, and
-`record_files_read` skips a file the table already recorded) and
+stops its asset; the same past `RECORD_BUDGET_BYTES` less `MAX_LINE_BYTES` of entries. A run
+that read more reports only its newest files under both bounds, so the 64 MiB server cap never
+refuses it. `record_files_read` skips a file the table already recorded, looking up exact keys
+1,000 at a time; the record also names every connection with a row in the window) and
 writes it, unescaped UTF-8, as
 `files-read.json` into the task's private work directory (`write_files_read` in
 `lakana_worker/runners.py`): the attempt directory under the local runner, `<attempt>/task`

@@ -199,12 +199,14 @@ the files in the newly covered part of the window that were never recorded are r
 `lookback` before late files arrive, or expect one re-read of the extra window.
 
 **A busy table.** The worker hands a run at most the 100,000 newest files recorded within 30 days
-of the watermark. When that many are recorded (a source above about 3,300 files a day), every
-file at or before the oldest one handed over (the record's horizon) counts as read, whatever
-`since` is: the asset keeps running and nothing is read twice, but a late file older than that
-is not caught. A run that reads more than 100,000 files, such as a first run or a backfill of a
-large archive, is not refused either: it records the newest 100,000, says so in its log, and the
-next run takes the older ones as read through the horizon. At 10,000 files a day that point is about
+of the watermark, and at most about 60 MiB of their names. When the record holds more (a source
+above about 3,300 files a day, or fewer files with very long names), every file at or before the
+oldest one handed over (the record's horizon) counts as read, whatever `since` is: the asset
+keeps running and nothing is read twice, but a late file older than that is not caught. A
+connection of the asset that had files read in the window keeps its lookback even when all of
+them fall before the horizon. A run that reads more than the record takes, such as a first run
+or a backfill of a large archive, is not refused either: it records the newest files that fit,
+says so in its log, and the next run takes the older ones as read through the horizon. At 10,000 files a day that point is about
 10 days back, still well outside the default 24 h lookback. When a call takes files as read for
 this reason, its log line says how many and names the horizon: ``…, 3 files at or before the
 record's horizon 2026-10-23T08:00:00+00:00 taken as read (the table's record of files read is

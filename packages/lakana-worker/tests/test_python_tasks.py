@@ -8963,3 +8963,34 @@ def test_a_first_run_past_the_cap_succeeds_and_the_next_reads_nothing_twice(
     assert _ids(py.world, "gold.scores") == [0, 1, 2, 3]
     second = py.runner.tasks[1]
     assert second.files_read_horizon == (_T - timedelta(hours=1)).isoformat()
+
+
+def test_a_run_of_long_names_past_the_byte_budget_is_accepted_and_reads_nothing_twice(
+    py: PyWorld, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A record of long names is trimmed to its newest, never refused (scaled: a tiny budget).
+
+    The server takes it, and the next run's load passes the byte threshold, so its horizon
+    takes the dropped older files as read.
+    """
+    folder, engine = _exports(py, tmp_path)
+    long = "日" * 80
+    stamps = [_T - timedelta(hours=2 - n) for n in range(3)]
+    for n, stamp in enumerate(stamps):
+        _touch(folder / f"{long}{n}.csv", f"id\n{n}\n".encode(), stamp)
+    line = len(
+        context._line(
+            context.ReadFile("exports", f"{long}0.csv", 4, stamps[0]).to_json()  # "id\n0\n"
+        )
+    )
+    monkeypatch.setattr(context, "RECORD_BUDGET_BYTES", 2 * line + 10)
+    monkeypatch.setattr(files_read, "RECORD_BUDGET_BYTES", 2 * line + 10)
+    monkeypatch.setattr(files_read, "MAX_LINE_BYTES", line + 50)
+    monkeypatch.setattr(files_read, "MAX_RECORD_BYTES", 2 * line + 210)  # three lines would not fit
+    run_claimed(engine, py.claim_python(engine))
+    _touch(folder / "new.csv", b"id\n3\n", _T + timedelta(hours=1))
+    _rerun(py, engine)
+
+    assert _task(py.world, "gold.scores").status is TaskStatus.SUCCEEDED
+    assert _ids(py.world, "gold.scores") == [0, 1, 2, 3]
+    assert py.runner.tasks[1].files_read_horizon is not None

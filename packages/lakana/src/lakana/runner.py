@@ -420,6 +420,9 @@ class TaskDescription:
     record_horizon
         The horizon of a record the worker loaded only in part: every file at or before it
         counts as read. `None` otherwise.
+    recorded_connections
+        The connections with any file in the record's window, from the worker; `None` when it
+        sent none.
     """
 
     server_url: str
@@ -448,6 +451,7 @@ class TaskDescription:
     close_missing: bool = False
     recorded: frozenset[ReadFile] | None = None
     record_horizon: dt.datetime | None = None
+    recorded_connections: frozenset[str] | None = None
 
 
 def _text(document: dict[str, object], key: str) -> str:
@@ -634,6 +638,8 @@ class _Writes:
         The files the target recorded as read, from ``files_read_path``; `None` without one.
     record_horizon
         The record's horizon, if the worker set one.
+    recorded_connections
+        The connections with any file in the record's window, if the worker sent them.
     """
 
     write: str = "replace"
@@ -646,6 +652,7 @@ class _Writes:
     close_missing: bool = False
     recorded: frozenset[ReadFile] | None = None
     record_horizon: dt.datetime | None = None
+    recorded_connections: frozenset[str] | None = None
 
 
 _RECORD_ENTRY_BYTES = (MAX_NAME_LENGTH + MAX_ETAG + 63) * 6 + 256
@@ -660,7 +667,9 @@ _RECORD_TOO_LARGE = (
 )
 
 
-def _recorded_files(path: object) -> tuple[frozenset[ReadFile], dt.datetime | None]:
+def _recorded_files(
+    path: object,
+) -> tuple[frozenset[ReadFile], dt.datetime | None, frozenset[str] | None]:
     """Read the worker's record of the files the target has read (`files-read.json`).
 
     Parameters
@@ -671,8 +680,9 @@ def _recorded_files(path: object) -> tuple[frozenset[ReadFile], dt.datetime | No
     Returns
     -------
     tuple
-        The files, and the horizon the worker set when it loaded only the newest
-        `MAX_FILES_READ` of them (`None` otherwise).
+        The files; the horizon the worker set when it loaded only the newest of them (`None`
+        otherwise); and the connections with any file in the window (`None` from a worker
+        that does not send them).
 
     Raises
     ------
@@ -695,13 +705,19 @@ def _recorded_files(path: object) -> tuple[frozenset[ReadFile], dt.datetime | No
         files = document.get("files")
         stamp = document.get("horizon")
         horizon = None if stamp is None else dt.datetime.fromisoformat(stamp)
+        named = document.get("connections")
         if (
             not isinstance(files, list)
             or len(files) > MAX_FILES_READ
             or (horizon is not None and horizon.tzinfo is None)
+            or not (
+                named is None
+                or (isinstance(named, list) and all(isinstance(c, str) for c in named))
+            )
         ):
             raise ValueError
-        return frozenset(ReadFile.from_json(item) for item in files), horizon
+        connections = None if named is None else frozenset(named)
+        return frozenset(ReadFile.from_json(item) for item in files), horizon, connections
     except (ValueError, AttributeError, TypeError):
         raise ValueError(_RECORD_REFUSED) from None
 
@@ -798,11 +814,13 @@ def _write_fields(document: dict[str, object]) -> _Writes:
     raw_path = document.get("files_read_path")
     recorded: frozenset[ReadFile] | None = None
     horizon: dt.datetime | None = None
+    with_files: frozenset[str] | None = None
     if raw_path is not None:
-        recorded, horizon = _recorded_files(raw_path)
+        recorded, horizon, with_files = _recorded_files(raw_path)
     return _Writes(
         recorded=recorded,
         record_horizon=horizon,
+        recorded_connections=with_files,
         table_exists=table_exists,
         write=write,
         key=tuple(key),
@@ -904,6 +922,7 @@ def parse_description(text: str) -> TaskDescription:
         close_missing=writes.close_missing,
         recorded=writes.recorded,
         record_horizon=writes.record_horizon,
+        recorded_connections=writes.recorded_connections,
     )
 
 
@@ -2566,6 +2585,7 @@ def _run_described(
                 connections=description.connections,
                 recorded=description.recorded,
                 record_horizon=description.record_horizon,
+                recorded_connections=description.recorded_connections,
                 target_watermark=description.watermark
                 if isinstance(description.watermark, dt.datetime)
                 else None,

@@ -255,6 +255,9 @@ class PythonTask:
     files_read_horizon
         When the worker loaded only the newest `MAX_FILES_READ` files of the record: the oldest
         one's time (ISO 8601), at or before which `files.read` takes every file as read.
+    files_read_connections
+        The connections with any row in the record's window, loaded or not: one of them is not
+        taken as new by `files.read` even when the horizon left all its rows out.
     """
 
     code_dir: Path
@@ -290,6 +293,7 @@ class PythonTask:
     history: HistorySpec | None = None
     files_read: tuple[Mapping[str, object], ...] | None = None
     files_read_horizon: str | None = None
+    files_read_connections: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -778,6 +782,8 @@ def write_files_read(directory: Path, task: PythonTask) -> None:
     document: dict[str, object] = {"files": [dict(f) for f in task.files_read]}
     if task.files_read_horizon is not None:
         document["horizon"] = task.files_read_horizon
+    if task.files_read_connections is not None:
+        document["connections"] = list(task.files_read_connections)
     with os.fdopen(descriptor, "w", encoding="utf-8") as out:
         # Unescaped, so a record of long non-ASCII names stays well inside the harness's bound.
         json.dump(document, out, ensure_ascii=False)

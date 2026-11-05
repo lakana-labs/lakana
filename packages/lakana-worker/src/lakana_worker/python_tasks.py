@@ -1509,6 +1509,7 @@ class PythonRuntime:
                     files_read_horizon=None
                     if record is None or record.horizon is None
                     else record.horizon.isoformat(),
+                    files_read_connections=None if record is None else tuple(record.connections),
                 ),
                 sink,
                 stop,

@@ -29,10 +29,10 @@ import datetime as dt
 import json
 import uuid
 from collections.abc import Collection
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from sqlalchemy import delete, insert, select
+from sqlalchemy import delete, insert, select, tuple_
 
 from lakana_core.catalog.watermark import Watermark
 from lakana_core.db import db_now
@@ -63,6 +63,9 @@ Above every legal entry: a file with every field at its cap in emoji, escaped as
 does by default (twelve bytes a character), is about 19 KB. So the cap refuses only a malformed
 line, and keeps each `json.loads` to one small object.
 """
+RECORD_BUDGET_BYTES = 60 * 1024 * 1024
+"""The most bytes of entries a run sends: the SDK keeps its newest files under it, below
+`MAX_RECORD_BYTES` with room for the header. A record never makes the server refuse a run."""
 MAX_NAME_LENGTH = 1024
 """The longest path of a file, in characters, as the artifact manifest bounds its paths."""
 RECORD_WINDOW = dt.timedelta(days=30)
@@ -218,6 +221,22 @@ def _storable(text: str) -> bool:
     except UnicodeEncodeError:
         return False
     return "\x00" not in text
+
+
+def entry_bytes(file: FileRead) -> int:
+    """Count the bytes of a file's line in a record, as the SDK encodes it.
+
+    Parameters
+    ----------
+    file
+        The file.
+
+    Returns
+    -------
+    int
+        Its JSON, unescaped UTF-8, and the newline.
+    """
+    return len(json.dumps(file.to_json(), ensure_ascii=False).encode()) + 1
 
 
 def _window_start(mark: dt.datetime) -> dt.datetime | None:
@@ -481,12 +500,18 @@ def parse_files_read(raw: bytes, p: PrincipalRef) -> FilesReadReport:
     return FilesReadReport(watermark, tuple(found))
 
 
+_DEDUPE_CHUNK = 1000
+"""How many files one look-up of `_not_yet_recorded` asks about."""
+
+
 def _not_yet_recorded(
     session: Session, table_id: uuid.UUID, files: tuple[FileRead, ...]
 ) -> list[FileRead]:
     """Drop the files the table has already recorded, so that no file is recorded twice.
 
-    A seeded run, or a known file reported again, would otherwise add a second row.
+    A seeded run, or a known file reported again, would otherwise add a second row. The files
+    are looked up by their exact keys, `_DEDUPE_CHUNK` at a time, so a request holds at most
+    that many keys' rows however large the table's record is.
 
     Parameters
     ----------
@@ -502,23 +527,26 @@ def _not_yet_recorded(
     list of FileRead
         Those not recorded yet, in order.
     """
-    if not files:
-        return []
-    times = [f.modified for f in files]
-    rows = session.execute(
-        select(
-            IncrementalFileRead.connection,
-            IncrementalFileRead.name,
-            IncrementalFileRead.size,
-            IncrementalFileRead.modified,
-            IncrementalFileRead.etag,
-        ).where(
-            IncrementalFileRead.table_id == table_id,
-            IncrementalFileRead.modified >= min(times),
-            IncrementalFileRead.modified <= max(times),
+    known: set[FileRead] = set()
+    for at in range(0, len(files), _DEDUPE_CHUNK):
+        chunk = files[at : at + _DEDUPE_CHUNK]
+        rows = session.execute(
+            select(
+                IncrementalFileRead.connection,
+                IncrementalFileRead.name,
+                IncrementalFileRead.size,
+                IncrementalFileRead.modified,
+                IncrementalFileRead.etag,
+            ).where(
+                IncrementalFileRead.table_id == table_id,
+                tuple_(
+                    IncrementalFileRead.connection,
+                    IncrementalFileRead.name,
+                    IncrementalFileRead.modified,
+                ).in_([(f.connection, f.name, f.modified) for f in chunk]),
+            )
         )
-    )
-    known = {FileRead(*row) for row in rows}
+        known.update(FileRead(*row) for row in rows)
     return [f for f in files if f not in known]
 
 
@@ -625,8 +653,13 @@ class TaskRecord:
     ----------
     files : list[dict[str, object]]
         The files, as `FileRead.to_json` renders them, ordered by connection, name and time.
+    connections : list[str]
+        The connections with any row in the window, loaded or not, so that one whose rows all
+        fall at or before the horizon is not taken as new.
     horizon : datetime.datetime or None
-        Set when `MAX_FILES_READ` or more files are recorded within the window: the time of
+        Set when `MAX_FILES_READ` or more files are recorded within the window, or more than
+        `RECORD_BUDGET_BYTES` less `MAX_LINE_BYTES` of entries (the SDK keeps a run's newest
+        under the budget, so a run that dropped files always leaves this many): the time of
         the oldest file loaded. Every recorded file after it is in `files`; `files.read` takes
         every file at or before it as read, so nothing is read twice and the asset keeps
         running, but a late file at or before it is not caught. ``None`` otherwise.
@@ -634,6 +667,7 @@ class TaskRecord:
 
     files: list[dict[str, object]]
     horizon: dt.datetime | None = None
+    connections: list[str] = field(default_factory=list)
 
 
 def files_read_for_task(
@@ -682,11 +716,22 @@ def files_read_for_task(
             .limit(MAX_FILES_READ)
         )
     )
-    horizon = None
-    if len(rows) >= MAX_FILES_READ:
-        # A full load may have left older rows out, and a run that read more than the cap
-        # recorded only its newest: every file at or before the oldest loaded counts as read.
-        horizon = rows[-1].modified
+    # A full load may have left older rows out, and a run that read more than the record takes
+    # (in files or in bytes) recorded only its newest: every file at or before the oldest
+    # loaded counts as read.
+    horizon = rows[-1].modified if len(rows) >= MAX_FILES_READ else None
+    total = 0
+    for kept, row in enumerate(rows, start=1):
+        total += entry_bytes(FileRead(row.connection, row.name, row.size, row.modified, row.etag))
+        if total > RECORD_BUDGET_BYTES - MAX_LINE_BYTES:
+            rows, horizon = rows[:kept], row.modified
+            break
     rows.sort(key=lambda r: (r.connection, r.name, r.modified))
     files = [FileRead(r.connection, r.name, r.size, r.modified, r.etag).to_json() for r in rows]
-    return TaskRecord(files, horizon)
+    connections = session.scalars(
+        select(IncrementalFileRead.connection)
+        .where(*where)
+        .distinct()
+        .order_by(IncrementalFileRead.connection)
+    )
+    return TaskRecord(files, horizon, list(connections))

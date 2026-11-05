@@ -417,7 +417,8 @@ window, up to 30 days. See [Reading only new files](../reference/ingest.md#readi
   files a run is not refused for the 12,000 it already read in the last day.
 - A table that records 100,000 files or more within 30 days keeps running: the worker hands
   over the newest 100,000 and takes older files as read, so a late file older than those is not
-  caught. A run that reads more than 100,000 files records the newest 100,000 instead of failing.
+  caught. A run that reads more than the record takes (100,000 files, or about 60 MiB of their
+  names) records the newest that fit instead of failing.
 - Only a set-back or a replace of the table makes recorded files count as unread again.
 
 ## Notes for 0.21.0

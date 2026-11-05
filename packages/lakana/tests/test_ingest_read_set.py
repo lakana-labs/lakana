@@ -219,3 +219,34 @@ def test_a_horizon_later_than_since_still_takes_older_files_as_read() -> None:
     )
     assert [entry.path for entry, _ in choice.chosen] == ["new.csv"]
     assert choice.horizon_skipped == 2
+
+
+def test_a_quiet_connection_below_the_horizon_is_not_taken_as_new() -> None:
+    """The worker names every connection with a row in the window: its late files are read."""
+    horizon = _MARK - dt.timedelta(days=1)
+    late = FileEntry("ylate.csv", 1, _MARK - dt.timedelta(hours=3))
+    state = _state(
+        recorded=frozenset({_file("x.csv")}),
+        target_watermark=_MARK,
+        record_horizon=horizon,
+        recorded_connections=frozenset({"exports", "quiet"}),
+    )
+    choice = _read_set.choose(
+        "quiet",
+        [(late, _MARK - dt.timedelta(hours=3))],
+        after=_MARK,
+        lookback=_read_set.DEFAULT_LOOKBACK,
+        state=state,
+    )
+    assert [entry.path for entry, _ in choice.chosen] == ["ylate.csv"]
+    unnamed = _state(
+        recorded=frozenset({_file("x.csv")}), target_watermark=_MARK, record_horizon=horizon
+    )
+    seeded = _read_set.choose(
+        "quiet",
+        [(late, _MARK - dt.timedelta(hours=3))],
+        after=_MARK,
+        lookback=_read_set.DEFAULT_LOOKBACK,
+        state=unnamed,
+    )
+    assert seeded.chosen == []  # an older worker: the connection is seeded as before
