@@ -632,13 +632,41 @@ _SignalRow = Row[int | None, str, str | None, str, str, dict[str, Any] | None]
 """A row of `_health_result`'s read: snapshot, signal, column, state, effect, observed."""
 
 
+def _judges(row: _SignalRow, signal: str, column: str | None) -> bool:
+    """Say whether a row of the check's signal is one the check judges.
+
+    Parameters
+    ----------
+    row
+        A row of the check's signal.
+    signal
+        The check's signal.
+    column
+        The check's column; `None` for the whole signal.
+
+    Returns
+    -------
+    bool
+        The column's own row for a column check; a column row recorded as ``block`` for the
+        whole of a column signal; the table-level row for a table signal.
+    """
+    if column is not None:
+        return row.column_name == column
+    if signal in COLUMN_SIGNALS:
+        return row.column_name is not None and row.effect == "block"
+    return row.column_name is None
+
+
 def _unjudged(
     rows: Sequence[_SignalRow], signal: str, column: str | None, chain: Sequence[int]
 ) -> tuple[int, str] | None:
     """Find the first snapshot of a chain at which a blocking signal could not be judged.
 
     A commit that could not read its files, or failed to compute, recorded a table-level
-    ``no_metrics`` row with that reason (`UNJUDGED_REASONS`). A commit that added data (it has a
+    ``no_metrics`` row with that reason (`UNJUDGED_REASONS`). A ``no_metrics`` row the check
+    judges (`_judges`) is not judged either, but for reason ``no_rows``, a column without values:
+    ``not_recorded``, ``not_finite``, and a number that did not fit (stored without a reason,
+    named ``unstorable``). A commit that added data (it has a
     ``volume`` row) and recorded nothing for the signal, or for the check's column, did not
     judge it either; a compaction, which records only ``schema``, is not such a commit, and for
     a column neither is a commit that recorded no ``null_rate`` or ``range`` row at all: it added
@@ -672,6 +700,12 @@ def _unjudged(
             reason = row.observed.get("reason") if isinstance(row.observed, dict) else None
             if row.column_name is None and row.state == "no_metrics" and reason in UNJUDGED_REASONS:
                 return snapshot, reason
+        for row in own:
+            if row.state != "no_metrics" or not _judges(row, signal, column):
+                continue
+            reason = row.observed.get("reason") if isinstance(row.observed, dict) else None
+            if reason != "no_rows":  # only a column without values had nothing to judge
+                return snapshot, reason if isinstance(reason, str) else "unstorable"
         if not any(row.signal == "volume" for row in here):
             continue  # a compaction, or nothing recorded here: no data to judge
         if column is not None and not any(row.signal in COLUMN_SIGNALS for row in here):

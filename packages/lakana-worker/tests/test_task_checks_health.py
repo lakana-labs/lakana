@@ -830,3 +830,121 @@ def test_telling_of_unjudged_signals_needs_a_recorded_reason_and_passes_database
         tell(session, environment_id, "bronze.events", table_id, [12], ["volume"])  # nothing
         with pytest.raises(OperationalError):
             tell(session, environment_id, "bronze.events", table_id, [11], ["volume"])
+
+
+def _row(
+    signal: str,
+    column: str | None,
+    state: str,
+    observed: dict[str, object] | None = None,
+    *,
+    effect: str = "block",
+) -> SimpleNamespace:
+    """Build a row of snapshot 20 as `_health_result` reads it.
+
+    Parameters
+    ----------
+    signal
+        The signal.
+    column
+        The column, or `None`.
+    state
+        The state.
+    observed
+        What was observed.
+    effect
+        The effect recorded.
+
+    Returns
+    -------
+    SimpleNamespace
+        The row's columns, by name.
+    """
+    return SimpleNamespace(
+        snapshot_id=20,
+        signal=signal,
+        column_name=column,
+        state=state,
+        effect=effect,
+        observed=observed,
+    )
+
+
+@pytest.mark.parametrize(
+    ("signal", "column", "observed", "reason"),
+    [
+        ("volume", None, None, "unstorable"),  # a number that did not fit
+        ("volume", None, {"reason": "not_finite"}, "not_finite"),
+        ("range", "price", None, "unstorable"),
+        ("range", "price", {"reason": "not_recorded"}, "not_recorded"),
+    ],
+)
+def test_an_own_row_without_metrics_is_not_judged(
+    signal: str, column: str | None, observed: dict[str, object] | None, reason: str
+) -> None:
+    """A `no_metrics` row of the check's own signal or column warns, but for `no_rows`.
+
+    Parameters
+    ----------
+    signal
+        The check's signal.
+    column
+        Its column, or `None`.
+    observed
+        The row's observed values.
+    reason
+        The reason the check names.
+    """
+    volume = _row("volume", None, "ok", {"added": 3, "total": 3}, effect="warn")
+    own = _row(signal, column, "no_metrics", observed)
+    rows = [volume, own] if signal != "volume" else [own]
+    assert task_checks_module._unjudged(cast("list[Any]", rows), signal, column, [20]) == (
+        20,
+        reason,
+    )
+    # The whole of the column signal judges the column rows that block.
+    if column is not None:
+        assert task_checks_module._unjudged(cast("list[Any]", rows), signal, None, [20]) == (
+            20,
+            reason,
+        )
+
+
+def test_no_rows_and_no_history_are_judged() -> None:
+    """A column without values had nothing to judge, and a signal without history is not due."""
+    volume = _row("volume", None, "no_history", {"added": 3, "total": 3})
+    empty = _row("null_rate", "price", "no_metrics", {"reason": "no_rows"})
+    rows = cast("list[Any]", [volume, empty])
+    assert task_checks_module._unjudged(rows, "null_rate", "price", [20]) is None
+    assert task_checks_module._unjudged(rows, "volume", None, [20]) is None
+
+
+def test_a_column_without_recorded_bounds_warns_through_the_check(world: World) -> None:
+    """`range: {price: block}` and a commit whose files carry no bounds for price: warned.
+
+    Parameters
+    ----------
+    world
+        The world.
+    """
+    _outside_table(world, "bronze.events", [1])
+    _signal(world, "bronze.events", "volume", snapshot=21)
+    _signal(
+        world,
+        "bronze.events",
+        "range",
+        snapshot=21,
+        column="price",
+        state="no_metrics",
+        observed={"reason": "not_recorded"},
+        effect="block",
+    )
+    with world.session() as session:
+        table_id = resolve_table_id(session, "dev", "bronze", "events")
+        assert task_checks_module._health_result(
+            session, _health_spec("range", "price"), table_id, [21], "dev", kept=True
+        ) == (
+            CheckOutcome.WARNED,
+            unjudged_text("range", "price", 21, "not_recorded", "bronze.events", "dev"),
+            21,
+        )

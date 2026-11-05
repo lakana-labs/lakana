@@ -1185,6 +1185,9 @@ _UNJUDGED_CAUSE = {
     ),
     "error": "computing it failed",
     "missing": "nothing was recorded for it",
+    "not_recorded": "the commit's files carry no counts or bounds for it",
+    "not_finite": "its value is not a finite number",
+    "unstorable": "its value did not fit what is stored",
 }
 
 
@@ -1204,8 +1207,9 @@ def unjudged_text(
     snapshot
         The snapshot that could not be judged.
     reason
-        ``unreadable`` or ``error`` (`UNJUDGED_REASONS`), or ``missing`` when nothing was
-        recorded for the signal at that snapshot.
+        ``unreadable`` or ``error`` (`UNJUDGED_REASONS`); ``missing`` when nothing was recorded
+        for the signal at that snapshot; or the reason of the check's own ``no_metrics`` row
+        (``not_recorded``, ``not_finite``, ``unstorable`` for a number that did not fit).
     table
         The table.
     environment
@@ -1223,6 +1227,11 @@ def unjudged_text(
         step = f"commit fewer, larger files, or set health: {warn} to stop blocking on it"
     elif reason == "error":
         step = "the server's log names the error, and the next commit is judged again"
+    elif reason != "missing":
+        step = (
+            "the next commit is judged again, and `lakana table health "
+            f"{shown(table)} --env {shown(environment)} --signals` shows what was recorded"
+        )
     elif col is not None:
         step = (
             "a column without a range (text, boolean) or past the 200th column is never "

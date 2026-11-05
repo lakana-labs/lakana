@@ -961,3 +961,28 @@ def test_a_table_written_every_few_minutes_builds_a_history_and_fires_after_a_st
         now=_FRIDAY + timedelta(minutes=61), commit_times=commits, thresholds=[], paused=False
     )
     assert stalled.state == "fired"
+
+
+@pytest.mark.parametrize(
+    ("reason", "cause"),
+    [
+        ("not_recorded", "the commit's files carry no counts or bounds for it"),
+        ("not_finite", "its value is not a finite number"),
+        ("unstorable", "its value did not fit what is stored"),
+    ],
+)
+def test_a_value_that_could_not_be_judged_says_why(reason: str, cause: str) -> None:
+    """Each reason of an own `no_metrics` row has its cause; the next commit is judged again.
+
+    Parameters
+    ----------
+    reason
+        The row's reason.
+    cause
+        The cause the text gives.
+    """
+    assert unjudged_text("range", "price", 42, reason, "gold.t", "prod") == (
+        f"health signal range of price could not be judged: {cause} (snapshot 42); the run "
+        "went on: the next commit is judged again, and `lakana table health gold.t --env prod "
+        "--signals` shows what was recorded"
+    )

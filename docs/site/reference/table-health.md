@@ -284,8 +284,12 @@ yet (`no_history`) never blocks. A view or an artifact never gets such a check.
 does not pass in silence: the check is recorded as `warned` (and with `on_failure` `warn`), the run
 goes on and the table is not set back. That is the case when the commit's files could not be read
 within the health limits (more than 2,000 added files, or longer than 5 s), when computing the
-signals failed, or when nothing was recorded for the signal or the check's column. The check's text
-says why and what to do, and names no value:
+signals failed, when nothing was recorded for the signal or the check's column, or when its own
+observation is `no_metrics` for another reason than `no_rows`: the files carry no counts or bounds
+for the column (`not_recorded`), the value is not a finite number (`not_finite`), or it did not
+fit what is stored. A column without values (`no_rows`) had nothing to judge, and a signal without
+enough history yet (`no_history`) is not due: both pass. The check's text says why and what to do,
+and names no value:
 
 > 1 check warned: `health_volume` (health signal volume could not be judged: computing it failed (snapshot 4711); the run went on: the server's log names the error, and the next commit is judged again).
 
