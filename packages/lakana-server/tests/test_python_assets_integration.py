@@ -2577,6 +2577,52 @@ def test_python_assets_append_past_the_watermark_and_merge_on_their_key(
     assert "snapshot:" not in nothing
 
 
+_HISTORY_DIM = '''\
+import polars as pl
+from lakana import asset
+
+
+@asset(
+    inputs={"events": "bronze.events"},
+    kind="dimension",
+    grain="One row per event and version of its count.",
+    key="id",
+    write="history",
+    close_missing=True,
+)
+def dim_event(events: pl.DataFrame) -> pl.DataFrame:
+    """Each event with the number of events the run saw, without event 1 once there are three."""
+    seen = events.with_columns(seen=pl.lit(events.height, dtype=pl.Int64))
+    return seen.filter(pl.col("id") != 1) if events.height > 2 else seen
+'''
+
+
+def test_a_python_history_asset_opens_closes_and_closes_missing_keys(
+    stack: _Stack, wheelhouse: Path
+) -> None:
+    """Two runs with the real harness over REST: open, then change, add and close a missing key."""
+    project = _deploy(stack, wheelhouse, {"assets/silver/dim_event.py": _HISTORY_DIM})
+    admin, env = stack.admin, project.environment
+    versions = "SELECT id, seen, is_current FROM silver.dim_event ORDER BY id, valid_from"
+
+    stack.succeed(env, admin.runs.start(env, project.repository).id)
+    assert stack.sql(versions, env) == [
+        {"id": 1, "seen": 2, "is_current": True},
+        {"id": 2, "seen": 2, "is_current": True},
+    ]
+
+    admin.tables.append(env, "bronze.events", pa.table({"id": pa.array([3], pa.int64())}))
+    second = admin.runs.start(env, project.repository)
+    stack.succeed(env, second.id)
+    assert stack.sql(versions, env) == [
+        {"id": 1, "seen": 2, "is_current": False},  # missing from the result: closed
+        {"id": 2, "seen": 2, "is_current": False},
+        {"id": 2, "seen": 3, "is_current": True},
+        {"id": 3, "seen": 3, "is_current": True},
+    ]
+    assert "write mode: history" in admin.runs.log(env, second.id, "silver.dim_event").text
+
+
 _CRM_PASSWORD = "crm-e2e-s3cr3t"
 
 _CRM_ROWS = '''\

@@ -424,7 +424,8 @@ def check_history_batch(
     close_missing
         Whether keys the batch lacks are closed.
     advice
-        How a repeated key is explained (`SQL_ADVICE` for a SQL asset's run).
+        How a repeated key and an empty batch with `close_missing` are explained (`SQL_ADVICE`
+        for a SQL asset's run).
 
     Raises
     ------
@@ -435,11 +436,7 @@ def check_history_batch(
         surrogate key cannot encode; or a nested column.
     """
     if close_missing and data.num_rows == 0:
-        raise ValidationError(
-            "The asset's result is empty, and `close_missing: true` would close every open "
-            f"version of {table}; nothing was written. If the source really is empty, remove "
-            "`close_missing:` for this run."
-        )
+        raise ValidationError(advice.empty_close.format(table=table))
     reserved = {name.casefold() for name in added_columns(table)}
     for name in data.column_names:
         if name.casefold() in reserved:

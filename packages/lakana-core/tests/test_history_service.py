@@ -346,7 +346,7 @@ def test_an_empty_result_with_close_missing_is_refused_before_anything_is_read(
 
     with (
         mock.patch.object(service_module, "read_open_versions", side_effect=AssertionError),
-        pytest.raises(ValidationError, match="The asset's result is empty"),
+        pytest.raises(ValidationError, match="The batch is empty"),
     ):
         hist.run([], T2, close_missing=True)
 

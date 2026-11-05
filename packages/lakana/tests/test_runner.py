@@ -3875,7 +3875,7 @@ def test_an_empty_result_with_close_missing_is_sent_so_the_server_refuses_it(
 ) -> None:
     _write_asset(world, "return obs.head(0)")
     world.client.tables.kept = ValidationError(
-        "The asset's result is empty, and `close_missing: true` would close every open version",
+        "The batch is empty, and `close_missing=True` would close every open version",
         status=422,
     )
     assert world.run(**_v4(close_missing=True)) != 0

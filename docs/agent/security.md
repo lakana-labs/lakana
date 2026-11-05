@@ -2610,6 +2610,26 @@ a row it did not plan to: its staged snapshot must add exactly `versions_opened`
 table whose open versions share a surrogate key (only a commit outside `CatalogService.history`
 can make one) is refused after staging, with every staged file deleted (`stage_history`).
 
+A Python asset's history write reaches the catalog over REST (`POST …/tables/{name}/history`,
+`write_table_history`): the same `_governed_arrow_write` body controls as an append (size,
+decode, the record of files read), then `CatalogService.history` with the server's
+`max_write_rows`, `max_history_open_versions` and `max_history_open_bytes`, so the server holds
+the open versions a SQL asset's write holds in the worker. Three bounds keep that from exhausting
+the server (threat model, "Exhausting the API server's memory through history writes"):
+`LAKANA_RUN__MAX_HISTORY_OPEN_VERSIONS` refuses from the manifests' counts before a version is
+read; `LAKANA_RUN__MAX_HISTORY_OPEN_BYTES` counts the Arrow bytes batch by batch while they are
+read, one data file after another (`_stream_batches`, never pyiceberg's parallel reader), and
+refuses as soon as they pass it, writing nothing, so at most the cap plus one data file is held;
+and the history slot, `LAKANA_APPEND__MAX_CONCURRENT_HISTORY` (1), bounds the writes that hold
+versions at once (503 past it), taken after the request's authorization is checked and before its
+body is read, so a refused request never holds it. The returning keys' ends (`read_last_ends`)
+are folded to one row per key while read, with the byte cap as a backstop. A bound task token
+writes history only into its own asset, and only as a reader of it would: pins
+`test_it_writes_history_into_its_own_asset_which_it_may_not_read`,
+`test_a_task_of_a_filtered_principal_may_not_write_history_into_its_own_asset`,
+`test_a_task_of_a_write_only_principal_may_not_write_history`,
+`test_a_task_of_a_reading_and_writing_principal_writes_history` (server).
+
 **Limit: `lakana.history-key` is an ordinary table property.** An Iceberg REST commit with
 `WRITE_TABLE` can set or remove it (`SetPropertiesUpdate`, `RemovePropertiesUpdate`):
 `validate_table_properties` refuses only the location and class-path properties, and no

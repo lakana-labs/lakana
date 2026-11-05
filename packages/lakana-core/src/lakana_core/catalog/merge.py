@@ -62,11 +62,15 @@ class MergeAdvice:
     holder
         The process whose memory a history write fills: ``"worker"`` for a SQL asset (the worker
         runs it), ``"server"`` for a caller of the REST API (the server holds the versions).
+    empty_close
+        An empty batch of a history write with `close_missing`, which would close every open
+        version; formatted with ``table``. Each spells the option as its caller writes it.
     """
 
     repeats: str
     too_many: str
     holder: Literal["worker", "server"]
+    empty_close: str
 
 
 SDK_ADVICE = MergeAdvice(
@@ -80,8 +84,14 @@ SDK_ADVICE = MergeAdvice(
         "of at most {cap} rows."
     ),
     holder="server",
+    empty_close=(
+        "The batch is empty, and `close_missing=True` would close every open version of {table}; "
+        "nothing was written. If the source really is empty, write it without "
+        "`close_missing=True` (a Python asset: for this run)."
+    ),
 )
-"""For a caller of the SDK, the CLI or the REST API: it builds and sends the batches."""
+"""For a caller of the SDK, the CLI or the REST API: it builds and sends the batches. A Python
+asset's run is one, so the server cannot tell it from another SDK caller."""
 SQL_ADVICE = MergeAdvice(
     repeats=(
         "key {key} repeats in {rows} rows of the asset's result; keep one row per key in its "
@@ -95,6 +105,11 @@ SQL_ADVICE = MergeAdvice(
         "one; a first run reads every row, so load the history in parts of at most {cap} rows."
     ),
     holder="worker",
+    empty_close=(
+        "The asset's result is empty, and `close_missing: true` would close every open version "
+        "of {table}; nothing was written. If the source really is empty, remove "
+        "`close_missing:` for this run."
+    ),
 )
 """For a SQL asset: its SELECT is the batch, one per run."""
 
