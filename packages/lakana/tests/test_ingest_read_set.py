@@ -169,3 +169,29 @@ def test_a_horizon_takes_every_older_file_as_read() -> None:
     )
     assert [entry.path for entry, _ in choice.chosen] == ["late.csv", "new.csv"]
     assert (choice.late, choice.new, choice.inside) == (1, 1, 2)
+
+
+def test_the_log_line_names_the_files_taken_as_read_at_the_horizon() -> None:
+    """Strict over silent: files skipped because of the horizon are counted, with the reason."""
+    horizon = _MARK - dt.timedelta(hours=2)
+    entries = [
+        FileEntry("older.csv", 1, _MARK - dt.timedelta(hours=3)),
+        FileEntry("oldest.csv", 1, _MARK - dt.timedelta(hours=30)),
+        FileEntry("new.csv", 1, _MARK + dt.timedelta(hours=1)),
+    ]
+    state = _state(
+        recorded=frozenset({_file("x.csv")}), target_watermark=_MARK, record_horizon=horizon
+    )
+    choice = _read_set.choose(
+        "exports",
+        [(f, f.modified) for f in entries if f.modified is not None],
+        after=_MARK,
+        lookback=_read_set.DEFAULT_LOOKBACK,
+        state=state,
+    )
+    assert choice.horizon_skipped == 1
+    assert _read_set.summary("exports", choice, _read_set.DEFAULT_LOOKBACK) == (
+        "files.read: `exports`: 1 new file, 0 late files inside the 24 h lookback, 0 already "
+        f"read, 1 file at or before the record's horizon {horizon.isoformat()} taken as read "
+        "(the table's record of files read is full); see 'A busy table'"
+    )

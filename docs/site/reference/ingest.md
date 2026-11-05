@@ -202,7 +202,10 @@ the files in the newly covered part of the window that were never recorded are r
 of the watermark. When more are recorded (a source above about 3,300 files a day), every file at
 or before the oldest one handed over counts as read: the asset keeps running and nothing is read
 twice, but a late file older than that is not caught. At 10,000 files a day that point is about
-10 days back, still well outside the default 24 h lookback.
+10 days back, still well outside the default 24 h lookback. When a call takes files as read for
+this reason, its log line says how many and names the horizon: ``…, 3 files at or before the
+record's horizon 2026-10-23T08:00:00+00:00 taken as read (the table's record of files read is
+full); see 'A busy table'``.
 
 Each call with `since` prints a line to the task's log, such as
 ``files.read: `exports`: 3 new files, 2 late files inside the 24 h lookback, 41 already read``.

@@ -53,6 +53,10 @@ class Choice:
         Every file inside the window, read or not: what ``max_files`` counts.
     reported
         Every file to report as read: the chosen ones and the seeded ones.
+    horizon
+        The record's horizon when it applied (`_TaskState.record_horizon`), else `None`.
+    horizon_skipped
+        Files inside the window without the horizon that it took as read.
     """
 
     chosen: list[tuple[FileEntry, dt.datetime]] = field(default_factory=list)
@@ -61,6 +65,8 @@ class Choice:
     already: int = 0
     inside: int = 0
     reported: list[ReadFile] = field(default_factory=list)
+    horizon: dt.datetime | None = None
+    horizon_skipped: int = 0
 
 
 def check_lookback(lookback: object) -> dt.timedelta:
@@ -299,9 +305,11 @@ def choose(
     if recorded is not None and mark is not None:
         # Before the record's start a file read earlier is no longer known: never look there.
         start = max(start, min(after, _minus(mark, RECORD_WINDOW)))
+    unclamped = start
     if recorded is not None and state.record_horizon is not None:
         # The worker loaded only the newest files of a busy record: older ones count as read.
-        start = max(start, min(after, _utc(state.record_horizon)))
+        choice.horizon = _utc(state.record_horizon)
+        start = max(start, min(after, choice.horizon))
     seed = None
     seed_report = after
     if (
@@ -322,6 +330,8 @@ def choose(
             if seed_report < modified:
                 choice.reported.append(file)
         if modified <= start:
+            if unclamped < modified:
+                choice.horizon_skipped += 1
             continue
         choice.inside += 1
         if seeded or _known(file, index, use_etag):
@@ -415,4 +425,10 @@ def summary(connection: str, choice: Choice, lookback: dt.timedelta | None) -> s
     if lookback:
         parts.append(f"{_files(choice.late, 'late file')} inside the {_span(lookback)} lookback")
     parts.append(f"{choice.already} already read")
+    if choice.horizon_skipped and choice.horizon is not None:
+        parts.append(
+            f"{_files(choice.horizon_skipped, 'file')} at or before the record's horizon "
+            f"{choice.horizon.isoformat()} taken as read (the table's record of files read is "
+            "full); see 'A busy table'"
+        )
     return f"files.read: `{connection}`: " + ", ".join(parts)
