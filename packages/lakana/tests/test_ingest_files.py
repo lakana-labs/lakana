@@ -1526,18 +1526,22 @@ def test_a_seeded_call_without_a_file_to_read_still_reports_them(root: Path) -> 
 
 
 def test_an_hourly_asset_is_not_refused_for_the_files_it_already_read(root: Path) -> None:
-    """500 files an hour, a 24 h lookback: max_files counts the 500 to read, not the 12,500."""
+    """An hourly asset with a 24 h lookback: max_files counts the files to read, not the window.
+
+    Scaled down from 500 files an hour (12,500 already read, 500 new, `max_files=10_000`):
+    50 an hour, 1,250 already read, 50 new and `max_files=50`, the same ratio.
+    """
     hour = dt.timedelta(hours=1)
     recorded = []
-    for n in range(25 * 500):
-        modified = _MARK - (n // 500) * hour - dt.timedelta(seconds=n % 500)
+    for n in range(25 * 50):
+        modified = _MARK - (n // 50) * hour - dt.timedelta(seconds=n % 50)
         _write(root / f"{n}.csv", b"id\n1\n", modified)
         recorded.append(_read(root / f"{n}.csv", modified))
-    for n in range(500):
+    for n in range(50):
         _write(root / f"new{n}.csv", b"id\n2\n", _MARK + dt.timedelta(seconds=n + 1))
     _record(*recorded)
-    table = files.read("exports", "*.csv", since=_MARK, max_files=10_000)
-    assert table.num_rows == 500
+    table = files.read("exports", "*.csv", since=_MARK, max_files=50)
+    assert table.num_rows == 50
 
 
 def test_more_files_to_read_than_max_files_names_the_window_and_the_cap(root: Path) -> None:
