@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import sys
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
@@ -310,8 +311,8 @@ def files_read_payload() -> bytes | None:
     bytes or None
         Newline-delimited JSON, as `lakana_core.catalog.files_read` parses it: the header
         ``{"version": 1, "watermark": ...}`` (the target's watermark in UTC, or null), then
-        each file once, one per line; `None` outside a task or when no call with ``since=``
-        read or reported a file.
+        each file once, one per line, at most the newest `MAX_FILES_READ`; `None` outside a
+        task or when no call with ``since=`` read or reported a file.
     """
     if _state is None or not _state.files_read:
         return None
@@ -321,7 +322,18 @@ def files_read_payload() -> bytes | None:
     lines: list[dict[str, object]] = [
         {"version": 1, "watermark": None if mark is None else mark.isoformat()}
     ]
-    lines += [file.to_json() for file in dict.fromkeys(_state.files_read)]
+    files = list(dict.fromkeys(_state.files_read))
+    if len(files) > MAX_FILES_READ:
+        # Never refuse a run for reading much: keep the newest. The worker's next load is then
+        # full, and its horizon takes the older ones as read.
+        kept = set(sorted(files, key=lambda f: f.modified, reverse=True)[:MAX_FILES_READ])
+        print(
+            f"files.read: this run read {len(files)} files with since=; Lakana records the newest "
+            f"{MAX_FILES_READ}, and the next run takes the older ones as read; see 'A busy table'",
+            file=sys.stderr,
+        )
+        files = [file for file in files if file in kept]
+    lines += [file.to_json() for file in files]
     # ensure_ascii=False keeps a record of long non-ASCII names under the server's 64 MiB.
     return b"".join(json.dumps(line, ensure_ascii=False).encode() + b"\n" for line in lines)
 

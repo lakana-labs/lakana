@@ -195,3 +195,27 @@ def test_the_log_line_names_the_files_taken_as_read_at_the_horizon() -> None:
         f"read, 1 file at or before the record's horizon {horizon.isoformat()} taken as read "
         "(the table's record of files read is full); see 'A busy table'"
     )
+
+
+def test_a_horizon_later_than_since_still_takes_older_files_as_read() -> None:
+    """A recorded file the worker did not load (before the horizon) is never read again."""
+    horizon = _MARK - dt.timedelta(minutes=30)
+    entries = [
+        FileEntry("old_read.csv", 1, _MARK - dt.timedelta(hours=1)),
+        FileEntry("a.csv", 1, horizon),
+        FileEntry("new.csv", 1, _MARK + dt.timedelta(hours=1)),
+    ]
+    state = _state(
+        recorded=frozenset({_file("a.csv", horizon)}),
+        target_watermark=_MARK,
+        record_horizon=horizon,
+    )
+    choice = _read_set.choose(
+        "exports",
+        [(f, f.modified) for f in entries if f.modified is not None],
+        after=_MARK - dt.timedelta(hours=2),
+        lookback=_read_set.DEFAULT_LOOKBACK,
+        state=state,
+    )
+    assert [entry.path for entry, _ in choice.chosen] == ["new.csv"]
+    assert choice.horizon_skipped == 2

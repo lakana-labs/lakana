@@ -309,7 +309,8 @@ def choose(
     if recorded is not None and state.record_horizon is not None:
         # The worker loaded only the newest files of a busy record: older ones count as read.
         choice.horizon = _utc(state.record_horizon)
-        start = max(start, min(after, choice.horizon))
+        # Whatever `since` is: a recorded file it left out was not loaded, so must not be read.
+        start = max(start, choice.horizon)
     seed = None
     seed_report = after
     if (

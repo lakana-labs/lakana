@@ -4614,8 +4614,10 @@ the cause and the next step, never a 500, and nothing is written.
 
 **The worker's half.** Before an append or merge task with a time watermark starts, the worker
 loads the target's record within 30 days of that watermark (`files_read_for_task`: at most the
-newest `MAX_FILES_READ` rows; past that it adds the oldest loaded time as a `horizon`, at or
-before which `files.read` takes every file as read, so a busy table never stops its asset) and
+newest `MAX_FILES_READ` rows; with that many it adds the oldest loaded time as a `horizon`, at
+or before which `files.read` takes every file as read whatever `since` is, so a busy table never
+stops its asset; a run that read more reports only its newest `MAX_FILES_READ`, and
+`record_files_read` skips a file the table already recorded) and
 writes it, unescaped UTF-8, as
 `files-read.json` into the task's private work directory (`write_files_read` in
 `lakana_worker/runners.py`): the attempt directory under the local runner, `<attempt>/task`

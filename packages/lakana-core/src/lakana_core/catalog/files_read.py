@@ -481,6 +481,47 @@ def parse_files_read(raw: bytes, p: PrincipalRef) -> FilesReadReport:
     return FilesReadReport(watermark, tuple(found))
 
 
+def _not_yet_recorded(
+    session: Session, table_id: uuid.UUID, files: tuple[FileRead, ...]
+) -> list[FileRead]:
+    """Drop the files the table has already recorded, so that no file is recorded twice.
+
+    A seeded run, or a known file reported again, would otherwise add a second row.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    table_id
+        The target table.
+    files
+        The run's files.
+
+    Returns
+    -------
+    list of FileRead
+        Those not recorded yet, in order.
+    """
+    if not files:
+        return []
+    times = [f.modified for f in files]
+    rows = session.execute(
+        select(
+            IncrementalFileRead.connection,
+            IncrementalFileRead.name,
+            IncrementalFileRead.size,
+            IncrementalFileRead.modified,
+            IncrementalFileRead.etag,
+        ).where(
+            IncrementalFileRead.table_id == table_id,
+            IncrementalFileRead.modified >= min(times),
+            IncrementalFileRead.modified <= max(times),
+        )
+    )
+    known = {FileRead(*row) for row in rows}
+    return [f for f in files if f not in known]
+
+
 def record_files_read(
     session: Session, table_id: uuid.UUID, snapshot_id: int, report: FilesReadReport
 ) -> None:
@@ -500,7 +541,8 @@ def record_files_read(
         The run's record. Its watermark, if any, prunes the table's rows older than it less
         `RECORD_WINDOW`.
     """
-    if report.files:
+    files = _not_yet_recorded(session, table_id, report.files)
+    if files:
         read_at = db_now(session)
         session.execute(
             insert(IncrementalFileRead),
@@ -516,7 +558,7 @@ def record_files_read(
                     "snapshot_id": snapshot_id,
                     "read_at": read_at,
                 }
-                for f in report.files
+                for f in files
             ],
         )
     start = None if report.watermark is None else _window_start(report.watermark)
@@ -584,7 +626,7 @@ class TaskRecord:
     files : list[dict[str, object]]
         The files, as `FileRead.to_json` renders them, ordered by connection, name and time.
     horizon : datetime.datetime or None
-        Set when more than `MAX_FILES_READ` files are recorded within the window: the time of
+        Set when `MAX_FILES_READ` or more files are recorded within the window: the time of
         the oldest file loaded. Every recorded file after it is in `files`; `files.read` takes
         every file at or before it as read, so nothing is read twice and the asset keeps
         running, but a late file at or before it is not caught. ``None`` otherwise.
@@ -637,12 +679,13 @@ def files_read_for_task(
             select(IncrementalFileRead)
             .where(*where)
             .order_by(IncrementalFileRead.modified.desc())
-            .limit(MAX_FILES_READ + 1)
+            .limit(MAX_FILES_READ)
         )
     )
     horizon = None
-    if len(rows) > MAX_FILES_READ:
-        rows = rows[:MAX_FILES_READ]
+    if len(rows) >= MAX_FILES_READ:
+        # A full load may have left older rows out, and a run that read more than the cap
+        # recorded only its newest: every file at or before the oldest loaded counts as read.
         horizon = rows[-1].modified
     rows.sort(key=lambda r: (r.connection, r.name, r.modified))
     files = [FileRead(r.connection, r.name, r.size, r.modified, r.etag).to_json() for r in rows]

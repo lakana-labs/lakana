@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import io
+import json
 import os
 import zipfile
 from collections.abc import Iterator, Mapping
@@ -1554,11 +1555,22 @@ def test_more_files_to_read_than_max_files_names_the_window_and_the_cap(root: Pa
 
 
 @pytest.mark.parametrize(
-    ("lookback", "window"),
-    [(dt.timedelta(hours=2), "inside the 2 h lookback window"), (None, "after since=")],
+    ("lookback", "window", "advice"),
+    [
+        (
+            dt.timedelta(hours=2),
+            "inside the 2 h lookback window",
+            "pass a shorter lookback= or narrow the pattern",
+        ),
+        (None, "after since=", "narrow the pattern"),
+    ],
 )
 def test_more_files_inside_the_window_than_a_call_checks_names_the_lookback(
-    root: Path, monkeypatch: pytest.MonkeyPatch, lookback: dt.timedelta | None, window: str
+    root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    lookback: dt.timedelta | None,
+    window: str,
+    advice: str,
 ) -> None:
     monkeypatch.setattr(context, "MAX_FILES_READ", 2)
     monkeypatch.setattr(files, "_INSIDE_FACTOR", 1)
@@ -1573,26 +1585,27 @@ def test_more_files_inside_the_window_than_a_call_checks_names_the_lookback(
             files.read("exports", "*.csv", since=_MARK, max_files=1, lookback=lookback)
     assert str(caught.value) == (
         f"`exports`: 3 files match '*.csv' {window} (already read or not), more than the 2 a "
-        "call checks; pass a shorter lookback= or narrow the pattern"
+        f"call checks; {advice}"
     )
 
 
-def test_more_files_read_in_a_run_than_the_record_takes_is_refused(
-    root: Path, monkeypatch: pytest.MonkeyPatch
+def test_a_run_that_reads_more_than_the_record_takes_keeps_the_newest(
+    root: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setattr(context, "MAX_FILES_READ", 1)
-    for n in range(2):
-        _write(root / f"{n}.csv", b"id\n1\n", _MARK)
-    files.read("exports", "0.csv", since=None)
+    """A big first run or backfill is never refused: the record keeps the newest files."""
+    monkeypatch.setattr(context, "MAX_FILES_READ", 2)
+    for n in range(3):
+        _write(root / f"{n}.csv", b"id\n1\n", _MARK + dt.timedelta(seconds=n))
+    assert files.read("exports", "*.csv", since=None).num_rows == 3
     files.read("exports", "0.csv", since=None)  # the same file again counts once
-    with pytest.raises(CapExceeded) as caught:
-        files.read("exports", "1.csv", since=None)
-    assert str(caught.value) == (
-        "`exports`: this run has read more than 1 files with since=; Lakana records each one to "
-        "find late files and keeps at most that many per run: pass a shorter lookback= or a "
-        "smaller max_files=, or narrow the pattern"
+    payload = context.files_read_payload()
+    assert payload is not None
+    names = [json.loads(line).get("name") for line in payload.splitlines()[1:]]
+    assert names == ["1.csv", "2.csv"]
+    assert capsys.readouterr().err.splitlines()[-1] == (
+        "files.read: this run read 3 files with since=; Lakana records the newest 2, and the "
+        "next run takes the older ones as read; see 'A busy table'"
     )
-    assert [f.name for f in context.current().files_read] == ["0.csv", "0.csv"]
 
 
 @pytest.mark.parametrize(

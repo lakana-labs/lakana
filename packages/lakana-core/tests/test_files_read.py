@@ -679,6 +679,39 @@ def test_more_rows_than_the_cap_load_the_newest_with_a_horizon(
     assert loaded is not None
     assert [f["name"] for f in loaded.files] == ["a.csv", "b.csv"]
     assert loaded.horizon == _T0 - hour
+    monkeypatch.setattr(files_read, "MAX_FILES_READ", 3)
+    full = files_read_for_task(session, table_id, mark)
+    assert full is not None
+    assert (len(full.files), full.horizon) == (3, _T0 - 3 * hour)  # a full load sets it too
+
+
+def test_a_file_already_recorded_is_not_recorded_twice(
+    session: Session, principal: PrincipalRef, catalog: CatalogService
+) -> None:
+    """A seeded or known file reported again adds no second row.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    principal
+        The run principal.
+    catalog
+        Holds `gold.t`.
+    """
+    table_id = _table_id(catalog, principal)
+    task = _task(principal, "exports")
+    record_files_read(session, table_id, 1, parse_files_read(_report(_file("a.csv")), task))
+    again = parse_files_read(
+        _report(_file("a.csv"), _file("a.csv", etag='"e"'), _file("b.csv")), task
+    )
+    record_files_read(session, table_id, 2, again)
+    rows = session.scalars(select(IncrementalFileRead))
+    assert {(r.name, r.etag, r.snapshot_id) for r in rows} == {
+        ("a.csv", None, 1),
+        ("a.csv", '"e"', 2),
+        ("b.csv", None, 2),
+    }
 
 
 @pytest.mark.parametrize(

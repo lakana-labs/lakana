@@ -8940,3 +8940,26 @@ def test_a_record_past_the_cap_loads_its_newest_files_and_the_asset_keeps_runnin
     second = py.runner.tasks[1]
     assert [f["name"] for f in second.files_read or ()] == ["1.csv", "2.csv"]
     assert second.files_read_horizon == (_T - timedelta(hours=1)).isoformat()
+
+
+def test_a_first_run_past_the_cap_succeeds_and_the_next_reads_nothing_twice(
+    py: PyWorld, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A backfill of more files than the record takes is never refused (scaled: a cap of 2).
+
+    The run records its newest files; the next load is full, so its horizon takes the older
+    ones as read.
+    """
+    monkeypatch.setattr(files_read, "MAX_FILES_READ", 2)
+    monkeypatch.setattr(context, "MAX_FILES_READ", 2)
+    folder, engine = _exports(py, tmp_path)
+    for n in range(3):
+        _touch(folder / f"{n}.csv", f"id\n{n}\n".encode(), _T - timedelta(hours=2 - n))
+    run_claimed(engine, py.claim_python(engine))
+    _touch(folder / "new.csv", b"id\n3\n", _T + timedelta(hours=1))
+    _rerun(py, engine)
+
+    assert _task(py.world, "gold.scores").status is TaskStatus.SUCCEEDED
+    assert _ids(py.world, "gold.scores") == [0, 1, 2, 3]
+    second = py.runner.tasks[1]
+    assert second.files_read_horizon == (_T - timedelta(hours=1)).isoformat()

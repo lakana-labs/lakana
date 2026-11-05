@@ -199,9 +199,12 @@ the files in the newly covered part of the window that were never recorded are r
 `lookback` before late files arrive, or expect one re-read of the extra window.
 
 **A busy table.** The worker hands a run at most the 100,000 newest files recorded within 30 days
-of the watermark. When more are recorded (a source above about 3,300 files a day), every file at
-or before the oldest one handed over counts as read: the asset keeps running and nothing is read
-twice, but a late file older than that is not caught. At 10,000 files a day that point is about
+of the watermark. When that many are recorded (a source above about 3,300 files a day), every
+file at or before the oldest one handed over (the record's horizon) counts as read, whatever
+`since` is: the asset keeps running and nothing is read twice, but a late file older than that
+is not caught. A run that reads more than 100,000 files, such as a first run or a backfill of a
+large archive, is not refused either: it records the newest 100,000, says so in its log, and the
+next run takes the older ones as read through the horizon. At 10,000 files a day that point is about
 10 days back, still well outside the default 24 h lookback. When a call takes files as read for
 this reason, its log line says how many and names the horizon: ``…, 3 files at or before the
 record's horizon 2026-10-23T08:00:00+00:00 taken as read (the table's record of files read is
@@ -209,8 +212,9 @@ full); see 'A busy table'``.
 
 Each call with `since` prints a line to the task's log, such as
 ``files.read: `exports`: 3 new files, 2 late files inside the 24 h lookback, 41 already read``.
-A run records at most 100,000 files, and a file whose name Lakana cannot store (longer than 1,024
-characters, or not valid UTF-8) is refused before anything is read.
+A run records at most its newest 100,000 files (see "A busy table"), and a file whose name Lakana
+cannot store (longer than 1,024 characters, or not valid UTF-8) is refused before anything is
+read.
 
 **What the lookback still does not catch** is a file whose time is older than the window, one
 dated in the future, or one that looks the same as a file already read:
@@ -298,7 +302,7 @@ could end differently (the task is retried only when it could):
 | `SourceError` | The store or server failed or could not be reached (a network error, a timeout, HTTP 404, 429 or 5xx, the egress proxy's refusal), which may pass. | Yes |
 | `DirectoryError` | A directory or file is missing, a link, not a directory, or denied; or the pattern is refused. The same path fails every attempt. | No |
 | `DirectoryError` from an I/O error (`EIO` and the like) on a path that is there | The disk or share failed this time. | Yes |
-| `CapExceeded` | A cap was reached, or a run read more than 100,000 files with `since`. | No |
+| `CapExceeded` | A cap was reached. | No |
 
 
 | Message starts or contains | Cause | Next step |
@@ -329,7 +333,7 @@ could end differently (the task is retried only when it could):
 | `... check the file, or pass schema= with the column's type` | A file has a value its column cannot hold. The message names file, column, value and problem. | Fix the file, or pass `schema=` with a type that holds it. |
 | `the pattern ... matches more than max_files (...) files to read` | Too many files would be read, without `since`. | Narrow the pattern, pass `since=`, or raise `max_files`. |
 | `N files matching ... are new or late inside the 24 h lookback window, more than max_files (...)` | With `since`, too many files are new or late. | Raise `max_files=`, or narrow the pattern. |
-| `N files match ... inside the 24 h lookback window (already read or not), more than the ... a call checks` | With `since`, the window holds too many files, read or not: ten times `max_files`, at least 100,000. | Pass a shorter `lookback=`, or narrow the pattern. |
+| `N files match ... inside the 24 h lookback window (already read or not), more than the ... a call checks` | With `since`, the window holds too many files, read or not: ten times `max_files`, at least 100,000. (`after since=` when no lookback applies.) | Pass a shorter `lookback=` (when a window applies), or narrow the pattern. |
 | `... is N bytes, more than max_file_bytes (...)` | One file is too large. | Split the file, or raise `max_file_bytes`. |
 | `the files matching ... hold more than max_total_bytes (...)` | The files together are too large. | Narrow the pattern or pass `since=` to read fewer files, or raise `max_total_bytes`. |
 | `does not say when ... was modified; pass modified_from=` | The source gives no file time. | Pass `modified_from=` with the date pattern of the name. |
@@ -346,7 +350,6 @@ could end differently (the task is retried only when it could):
 | `lookback= takes a datetime.timedelta` | `lookback` has another type, such as a number of hours. | Pass `timedelta(hours=...)`. |
 | `lookback= cannot be negative` | `lookback` is less than zero. | Pass `timedelta(0)` to turn it off. |
 | `lookback= is at most 30 days` | `lookback` is longer than the record of files read reaches. | Lower it; copy a file older than that into the folder again. |
-| `this run has read more than 100000 files with since=` | The run's `files.read` calls read or took as read more files than Lakana records. | Pass a shorter `lookback=` or a smaller `max_files=`, or narrow the pattern. |
 | `names a file whose path is longer than 1024 characters` | A file `files.read` would record has a path Lakana cannot store. | Move it to a shorter path, or narrow the pattern so that it does not match. |
 | `names a file Lakana cannot store` | A file's name holds a NUL character or is not valid UTF-8. | Rename the file. |
 | `gives ... the time ..., within 30 days of the earliest or latest time Lakana can store` | A file is dated near year 1 or year 9999. | Correct the file's time (or the date in its name), or narrow the pattern. |

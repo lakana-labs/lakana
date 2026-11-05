@@ -415,9 +415,9 @@ window, up to 30 days. See [Reading only new files](../reference/ingest.md#readi
   100,000 files in its last 24 hours at the default `max_files`, fails with a message naming the
   window: pass a shorter `lookback=` or raise `max_files=`. An hourly asset that reads 500 new
   files a run is not refused for the 12,000 it already read in the last day.
-- A table that records more than 100,000 files within 30 days keeps running: the worker hands
+- A table that records 100,000 files or more within 30 days keeps running: the worker hands
   over the newest 100,000 and takes older files as read, so a late file older than those is not
-  caught.
+  caught. A run that reads more than 100,000 files records the newest 100,000 instead of failing.
 - Only a set-back or a replace of the table makes recorded files count as unread again.
 
 ## Notes for 0.21.0

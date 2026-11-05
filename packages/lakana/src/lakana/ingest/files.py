@@ -1144,8 +1144,12 @@ def read(
             if choice.inside > bound:
                 raise CapExceeded(
                     f"`{connection}`: {choice.inside} files match {pattern!r} {span} (already "
-                    f"read or not), more than the {bound} a call checks; pass a shorter "
-                    "lookback= or narrow the pattern"
+                    f"read or not), more than the {bound} a call checks; "
+                    + (
+                        "pass a shorter lookback= or narrow the pattern"
+                        if applied
+                        else "narrow the pattern"
+                    )
                 )
             if len(choice.chosen) > max_files:
                 raise CapExceeded(
@@ -1158,13 +1162,6 @@ def read(
                 file=sys.stderr,
             )
             _read_set.check_storable(connection, choice.reported)
-            if len(dict.fromkeys([*state.files_read, *choice.reported])) > context.MAX_FILES_READ:
-                raise CapExceeded(
-                    f"`{connection}`: this run has read more than {context.MAX_FILES_READ} files "
-                    "with since=; Lakana records each one to find late files and keeps at most "
-                    "that many per run: pass a shorter lookback= or a smaller max_files=, or "
-                    "narrow the pattern"
-                )
             reported = choice.reported
             chosen = choice.chosen
         if not chosen:
