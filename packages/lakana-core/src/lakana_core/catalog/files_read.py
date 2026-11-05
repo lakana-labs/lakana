@@ -1,19 +1,24 @@
 """The record of the files an incremental `files.read` handed to an asset (#344).
 
 A run of a deployed asset that reads files incrementally sends, with its upload, the list of
-files `files.read` gave it: the Arrow schema metadata key `lakana.files_read`, a small JSON
-document. The commit of an append, replace or merge carrying one records its files in
-`incremental_files_read`, in the transaction that moves the table, so the record and the
-snapshot land together or not at all. A check that sets snapshots back deletes their rows.
+files `files.read` gave it: the Arrow schema metadata key `lakana.files_read`, newline-delimited
+JSON. The first line is the header ``{"version": 1, "watermark": ...}``, and each line after it
+is one file ``{"connection", "name", "size", "modified", "etag"}``. The commit of an append,
+replace or merge carrying one records its files in `incremental_files_read`, in the transaction
+that moves the table, so the record and the snapshot land together or not at all. A check that sets
+snapshots back deletes their rows.
 
 Before the next run of the asset, the worker loads the files recorded within 30 days of its
 watermark and hands them to the task, so that `files.read` skips a file it already read and
 still reads one that arrived late with an older time. The record is internal: no route lists it.
 
 Only a task's bound token may send a record, naming only connections its asset declares. The
-document is bounded before it is parsed (`MAX_RECORD_BYTES`), and every field after: at most
-`MAX_FILES_READ` files, a connection name of at most 63 characters, a path of at most
-`MAX_NAME_LENGTH`, a size that fits a signed 64-bit integer, and an ETag of at most 512.
+record is bounded before any of it is parsed: at most `MAX_RECORD_BYTES`, at most
+`MAX_FILES_READ` files plus the header (the lines are counted first), and no line over
+`MAX_LINE_BYTES`. So each `json.loads` sees one small object, and a hostile record costs at most
+one line's objects at a time. Every field is bounded after: a connection name of at most 63
+characters, a path of at most `MAX_NAME_LENGTH`, a size that fits a signed 64-bit integer,
+and an ETag of at most 512.
 """
 
 from __future__ import annotations
@@ -47,8 +52,10 @@ MAX_RECORD_BYTES = 64 * 1024 * 1024
 
 An entry is about 120 bytes plus its path and ETag, so 64 MiB holds `MAX_FILES_READ` entries
 whose paths and ETags average about 550 characters together: real paths with room to spare.
-It is a quarter of the largest upload, and keeps a hostile record's parse to a bounded size.
+It is a quarter of the largest upload.
 """
+MAX_LINE_BYTES = 4096
+"""The longest line, checked before it is parsed: a file at every bound is about 1,700 bytes."""
 MAX_NAME_LENGTH = 1024
 """The longest path of a file, in characters, as the artifact manifest bounds its paths."""
 RECORD_WINDOW = dt.timedelta(days=30)
@@ -264,13 +271,77 @@ def split_files_read(data: pa.Table) -> tuple[pa.Table, bytes | None]:
     return data.replace_schema_metadata(metadata or None), raw
 
 
+def _lines(raw: bytes) -> list[bytes]:
+    """Split a record into its lines, bounding their number and length before parsing.
+
+    Parameters
+    ----------
+    raw
+        The record, at most `MAX_RECORD_BYTES`.
+
+    Returns
+    -------
+    list[bytes]
+        The header and file lines, without a final empty line.
+
+    Raises
+    ------
+    ValidationError
+        If it lists more than `MAX_FILES_READ` files, or a line is over `MAX_LINE_BYTES`.
+    """
+    count = raw.count(b"\n") + (0 if raw.endswith(b"\n") else 1)
+    if count - 1 > MAX_FILES_READ:
+        raise ValidationError(
+            f"The record of the files read lists {count - 1} files, more than "
+            f"{MAX_FILES_READ}; {_NARROW}."
+        )
+    lines = raw.split(b"\n")
+    if len(lines) > 1 and not lines[-1]:
+        lines.pop()
+    for number, line in enumerate(lines, 1):
+        if len(line) > MAX_LINE_BYTES:
+            raise ValidationError(
+                f"The record of the files read has a line of {len(line)} bytes (line {number}), "
+                f"more than {MAX_LINE_BYTES}; move the file it lists to a shorter path, or "
+                f"{_NARROW}."
+            )
+    return lines
+
+
+def _load(line: bytes, number: int) -> object:
+    """Parse one line of a record.
+
+    Parameters
+    ----------
+    line
+        The line, at most `MAX_LINE_BYTES`.
+    number
+        Its number, from 1, for the error.
+
+    Returns
+    -------
+    object
+        The JSON value.
+
+    Raises
+    ------
+    ValidationError
+        If it is not JSON.
+    """
+    try:
+        return json.loads(line)
+    except ValueError:  # UnicodeDecodeError is a ValueError
+        raise ValidationError(_malformed(f"line {number} is not JSON")) from None
+
+
 def parse_files_read(raw: bytes, p: PrincipalRef) -> FilesReadReport:
     """Check the record a task sent, and who sent it.
 
     Parameters
     ----------
     raw
-        The JSON document: ``{"version": 1, "watermark": ..., "files": [...]}``.
+        Newline-delimited JSON: the header ``{"version": 1, "watermark": ...}``, then one
+        file per line. A final newline is optional.
     p
         The uploading principal; only a task's bound token may send a record.
 
@@ -282,9 +353,9 @@ def parse_files_read(raw: bytes, p: PrincipalRef) -> FilesReadReport:
     Raises
     ------
     ValidationError
-        If `p` is not a bound task, the record is larger than `MAX_RECORD_BYTES` or lists more
-        than `MAX_FILES_READ` files, any part is malformed, or it names a connection the asset
-        does not declare.
+        If `p` is not a bound task, the record is larger than `MAX_RECORD_BYTES`, lists more
+        than `MAX_FILES_READ` files or has a line over `MAX_LINE_BYTES`, any part is
+        malformed, or it names a connection the asset does not declare.
     """
     bound = p.task_scope.bound if p.task_scope is not None else None
     if bound is None:
@@ -294,22 +365,15 @@ def parse_files_read(raw: bytes, p: PrincipalRef) -> FilesReadReport:
             f"The record of the files read is {len(raw)} bytes, more than {MAX_RECORD_BYTES}; "
             f"{_NARROW}."
         )
-    try:
-        document = json.loads(raw)
-    except ValueError:  # UnicodeDecodeError is a ValueError
-        raise ValidationError(_malformed("not JSON")) from None
-    if not isinstance(document, dict) or document.get("version") != 1:
-        raise ValidationError(_malformed("version must be 1"))
-    watermark = _watermark(document.get("watermark"))
-    files = document.get("files")
-    if not isinstance(files, list):
-        raise ValidationError(_malformed("files must be a list"))
-    if len(files) > MAX_FILES_READ:
-        raise ValidationError(
-            f"The record of the files read lists {len(files)} files, more than "
-            f"{MAX_FILES_READ}; {_NARROW}."
-        )
-    found = dict.fromkeys(_file(item, number) for number, item in enumerate(files, 1))
+    lines = _lines(raw)
+    header = _load(lines[0], 1)
+    if not isinstance(header, dict) or header.get("version") != 1:
+        raise ValidationError(_malformed("the first line must be a header with version 1"))
+    watermark = _watermark(header.get("watermark"))
+    # Each line is parsed and checked in turn, so a line's objects are gone before the next.
+    found = dict.fromkeys(
+        _file(_load(line, number + 1), number) for number, line in enumerate(lines[1:], 1)
+    )
     for file in found:
         if file.connection not in bound.connections:
             raise ValidationError(

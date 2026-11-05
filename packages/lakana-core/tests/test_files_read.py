@@ -33,7 +33,7 @@ _T0 = dt.datetime(2026, 11, 1, 12, tzinfo=dt.UTC)
 
 
 def _report(*files: dict[str, object], watermark: str | None = None) -> bytes:
-    """Encode a record as the SDK sends it.
+    """Encode a record as the SDK sends it: a header line, then one line per file.
 
     Parameters
     ----------
@@ -45,9 +45,10 @@ def _report(*files: dict[str, object], watermark: str | None = None) -> bytes:
     Returns
     -------
     bytes
-        The JSON document.
+        The newline-delimited JSON, ending in a newline.
     """
-    return json.dumps({"version": 1, "watermark": watermark, "files": list(files)}).encode()
+    lines = [{"version": 1, "watermark": watermark}, *files]
+    return b"".join(json.dumps(line).encode() + b"\n" for line in lines)
 
 
 def _file(
@@ -191,50 +192,47 @@ def _entry(**changes: object) -> bytes:
     Returns
     -------
     bytes
-        The JSON document.
+        The newline-delimited JSON.
     """
     return _report({**_file("a.csv"), **changes})
+
+
+_HEADER = b'{"version": 1, "watermark": null}\n'
+_NOT_A_FILE = "file 1 is not a connection, name, size, modified time and ETag"
 
 
 @pytest.mark.parametrize(
     ("raw", "what"),
     [
-        (b"not json", "not JSON"),
-        (b"\xff", "not JSON"),
-        (b"[]", "version must be 1"),
-        (b'{"version": 2, "watermark": null, "files": []}', "version must be 1"),
+        (b"not json", "line 1 is not JSON"),
+        (b"\xff", "line 1 is not JSON"),
+        (b"", "line 1 is not JSON"),
+        (b"[]", "the first line must be a header with version 1"),
+        (b'{"version": 2, "watermark": null}', "the first line must be a header with version 1"),
         (
-            b'{"version": 1, "watermark": "yesterday", "files": []}',
+            b'{"version": 1, "watermark": "yesterday"}',
             "watermark must be null or a time with a zone",
         ),
+        (b'{"version": 1, "watermark": 7}', "watermark must be null or a time with a zone"),
         (
-            b'{"version": 1, "watermark": 7, "files": []}',
-            "watermark must be null or a time with a zone",
-        ),
-        (
-            b'{"version": 1, "watermark": "2026-11-01T12:00:00", "files": []}',
+            b'{"version": 1, "watermark": "2026-11-01T12:00:00"}',
             "watermark 2026-11-01T12:00:00 has no time zone; it must be UTC",
         ),
-        (b'{"version": 1, "watermark": null, "files": {}}', "files must be a list"),
-        (
-            b'{"version": 1, "watermark": null, "files": [{"connection": "exports"}]}',
-            "file 1 is not a connection, name, size, modified time and ETag",
-        ),
-        (
-            b'{"version": 1, "watermark": null, "files": ["a.csv"]}',
-            "file 1 is not a connection, name, size, modified time and ETag",
-        ),
-        (_entry(size=True), "file 1 is not a connection, name, size, modified time and ETag"),
-        (_entry(name=""), "file 1 is not a connection, name, size, modified time and ETag"),
+        (_HEADER + b"\xff\n", "line 2 is not JSON"),
+        (_HEADER + b"\n" + json.dumps(_file("a.csv")).encode(), "line 2 is not JSON"),
+        (_HEADER + b'{"connection": "exports"}', _NOT_A_FILE),
+        (_HEADER + b'"a.csv"', _NOT_A_FILE),
+        (_entry(size=True), _NOT_A_FILE),
+        (_entry(name=""), _NOT_A_FILE),
         (
             _entry(connection="c" * 64),
-            "file 1 is not a connection, name, size, modified time and ETag",
+            _NOT_A_FILE,
         ),
         (
             _entry(modified="2026-11-01T12:00:00"),
-            "file 1 is not a connection, name, size, modified time and ETag",
+            _NOT_A_FILE,
         ),
-        (_entry(etag=7), "file 1 is not a connection, name, size, modified time and ETag"),
+        (_entry(etag=7), _NOT_A_FILE),
         (_entry(size=-1), "file 1 has the size -1, outside 0 to 9223372036854775807 bytes"),
         (
             _entry(size=2**63),
@@ -324,8 +322,72 @@ def test_a_record_larger_than_the_byte_cap_is_refused_before_it_is_parsed(
 def test_the_byte_cap_fits_the_most_files_with_long_names() -> None:
     """100,000 entries with 300-character names and an ETag fit inside the byte cap."""
     entry = _file("n" * 300, etag='"' + "e" * 32 + '"')
-    one = len(json.dumps(entry).encode()) + 2
+    one = len(json.dumps(entry).encode()) + 1
     assert one * files_read.MAX_FILES_READ < files_read.MAX_RECORD_BYTES
+
+
+def test_the_longest_entry_fits_a_line() -> None:
+    """A file at every bound (path, ETag, connection, size) still fits one line."""
+    entry = {**_file("n" * 1024, etag="e" * 512, connection="c" * 63), "size": 2**63 - 1}
+    assert len(json.dumps(entry).encode()) < files_read.MAX_LINE_BYTES
+
+
+def test_more_lines_than_the_cap_are_refused_before_they_are_parsed(
+    principal: PrincipalRef, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The lines are counted before any is split off or parsed.
+
+    Parameters
+    ----------
+    principal
+        The run principal.
+    monkeypatch
+        Lowers the cap and takes `json.loads` away.
+    """
+    monkeypatch.setattr(files_read, "MAX_FILES_READ", 2)
+    monkeypatch.setattr(files_read, "json", SimpleNamespace())
+    raw = _HEADER + b"{}\n" * 3
+    with pytest.raises(ValidationError) as caught:
+        parse_files_read(raw.rstrip(b"\n"), _task(principal, "exports"))
+    assert str(caught.value) == (
+        "The record of the files read lists 3 files, more than 2; narrow the pattern the asset "
+        "passes to files.read."
+    )
+
+
+def test_a_line_over_4_kib_is_refused_before_it_is_parsed(principal: PrincipalRef) -> None:
+    """A hostile single line of 64 MiB is refused by its length, without `json.loads`.
+
+    Parameters
+    ----------
+    principal
+        The run principal.
+    """
+    raw = b"[" + b"[]," * ((files_read.MAX_RECORD_BYTES - 4) // 3) + b"[]]"
+    assert len(raw) <= files_read.MAX_RECORD_BYTES
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(files_read, "json", SimpleNamespace())
+        with pytest.raises(ValidationError) as caught:
+            parse_files_read(raw, _task(principal, "exports"))
+    assert str(caught.value) == (
+        f"The record of the files read has a line of {len(raw)} bytes (line 1), more than 4096; "
+        "move the file it lists to a shorter path, or narrow the pattern the asset passes to "
+        "files.read."
+    )
+
+
+def test_a_long_line_after_the_header_names_its_number(principal: PrincipalRef) -> None:
+    """The refusal names the line, so the file it lists can be found.
+
+    Parameters
+    ----------
+    principal
+        The run principal.
+    """
+    raw = _report(_file("a.csv"), _file("n" * 5000))
+    with pytest.raises(ValidationError) as caught:
+        parse_files_read(raw, _task(principal, "exports"))
+    assert "(line 3), more than 4096" in str(caught.value)
 
 
 def test_more_files_than_the_cap_are_refused(
