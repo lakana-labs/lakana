@@ -111,6 +111,31 @@ def test_a_policy_without_a_schema_after_a_rename_of_its_column_stays_unbound() 
     assert legacy_field_ids(_RENAMED, "dept = 'a'", None) is None
 
 
+# Field 2 was `a`, renamed `b`; a new field 3 then took the name `a`.
+_REUSED = _metadata(1, _schema(0, (2, "a")), _schema(1, (2, "b"), (3, "a")))
+
+
+def test_a_reused_name_binds_the_original_field_through_the_recorded_schema() -> None:
+    """Written against schema 0, `a` meant field 2, not the new `a` (3)."""
+    binding = legacy_field_ids(_REUSED, "a = 'x'", 0)
+
+    assert binding is not None
+    assert binding.field_ids == {"a": 2}
+
+
+def test_a_reused_name_without_a_recorded_schema_stays_unbound() -> None:
+    """The old `a` may be either field: never a guess."""
+    assert legacy_field_ids(_REUSED, "a = 'x'", None) is None
+
+
+def test_a_mask_whose_own_column_was_renamed_without_a_schema_stays_unbound() -> None:
+    """The expression reads no column; the masked `a` was renamed `b` and `a` is a new field.
+
+    Without the masked column in the rename check, the mask would bind to the new `a` (3).
+    """
+    assert legacy_field_ids(_REUSED, "'x'", None, masked_column="a") is None
+
+
 def test_a_legacy_qualified_column_stays_unbound() -> None:
     """`t.dept = 'a'` (accepted by an old release) is never bound, even to a schema it fits."""
     assert legacy_field_ids(_RENAMED, "t.dept = 'a'", 0) is None
@@ -301,7 +326,10 @@ def test_the_backfill_marks_a_policy_it_cannot_bind_unbound(
 
     session.refresh(row)
     assert (row.binding, row.field_ids) == (UNBOUND, None)
-    assert "Bound 0 row filters and column masks to field ids; 1 left unbound." in caplog.text
+    assert (
+        "Bound 0 row filters and column masks to field ids and 0 by name; 1 left unbound."
+        in caplog.text
+    )
 
 
 def test_the_backfill_binds_a_raw_tables_policies_by_name(

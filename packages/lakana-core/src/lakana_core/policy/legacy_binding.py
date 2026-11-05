@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass
 
@@ -245,7 +246,7 @@ def bind_legacy_policies(
     int
         How many rows were bound or marked unbound. `0` once none is pending that can be bound.
     """
-    bound = unbound = 0
+    counts = Counter[str]()
     for table_id, pending in _pending_rows(session, limit).items():
         found = session.execute(
             select(Table, Environment.name)
@@ -282,10 +283,13 @@ def bind_legacy_policies(
                 execution_options={"synchronize_session": False},
             )
             if rowcount(done):
-                bound, unbound = (bound + 1, unbound) if binding else (bound, unbound + 1)
+                counts[binding.binding if binding else UNBOUND] += 1
     session.commit()
-    if bound or unbound:
+    if counts:
         logger.info(
-            "Bound %d row filters and column masks to field ids; %d left unbound.", bound, unbound
+            "Bound %d row filters and column masks to field ids and %d by name; %d left unbound.",
+            counts[FIELD_IDS],
+            counts[BY_NAME],
+            counts[UNBOUND],
         )
-    return bound + unbound
+    return counts.total()
