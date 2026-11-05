@@ -6,6 +6,7 @@ accepted is refused before it is sent.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Annotated
 
@@ -39,7 +40,8 @@ def _read_file(path: Path) -> str:
     Raises
     ------
     CliError
-        If it cannot be read, is larger than 1 MiB, or is not UTF-8 (exit 1).
+        If it cannot be read, is larger than 1 MiB (as a file or as the request that sends it),
+        or is not UTF-8 (exit 1).
     """
     name = _output.inline(str(path))
     try:
@@ -59,11 +61,25 @@ def _read_file(path: Path) -> str:
             1,
         ) from exc
     try:
-        return data.decode("utf-8")
+        text = data.decode("utf-8")
     except UnicodeDecodeError as exc:
         raise CliError(
             f"{name} is not UTF-8 text (byte {exc.start}). Save it as UTF-8 and try again.", 1
         ) from exc
+    body = json.dumps(
+        {"file_name": path.name, "text": text, "allow_lockout": False},
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode()
+    if len(body) > MAX_FILE_BYTES:
+        raise CliError(
+            f"The request for {name} would be {len(body)} bytes once the text is escaped for "
+            f"sending, larger than the {MAX_FILE_BYTES} bytes the server accepts. Remove entries "
+            "that no longer apply, or manage fewer scopes in this file: "
+            "`lakana access export --scope ENV` writes one environment.",
+            1,
+        )
+    return text
 
 
 def _drift_line(scope: str, text: str, by: str | None, reason: str | None, at: str | None) -> str:

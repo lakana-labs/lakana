@@ -156,6 +156,21 @@ def test_plan_refuses_a_file_over_one_mib_before_sending(tmp_path: Path) -> None
     assert api.requests == []
 
 
+def test_plan_refuses_a_file_whose_request_body_exceeds_one_mib(tmp_path: Path) -> None:
+    """Escaping grows the body past the server's limit, so the CLI checks the body (#46)."""
+    big = tmp_path / "access.yaml"
+    big.write_bytes(b"\\" * (700 * 1024))
+    assert big.stat().st_size < 1024 * 1024
+    api = FakeApi()
+    result = invoke(make_state(tmp_path, api), "access", "plan", str(big))
+    assert result.exit_code == 1
+    stderr = " ".join(result.stderr.split())
+    assert "1048576 bytes" in stderr
+    assert "request" in stderr
+    assert "--scope" in stderr
+    assert api.requests == []
+
+
 def test_plan_names_a_missing_or_unreadable_file(tmp_path: Path) -> None:
     """The message names the path and the next step."""
     result = invoke(make_state(tmp_path, FakeApi()), "access", "plan", str(tmp_path / "no.yaml"))
