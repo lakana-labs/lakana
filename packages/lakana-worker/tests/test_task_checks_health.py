@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from check_run_helpers import (
     _built_once_then_redeployed,
+    _check,
     _drain,
     _events,
     _ids,
@@ -392,3 +393,42 @@ def test_a_health_check_whose_metadata_cannot_be_read_is_retried_and_never_passe
     assert "_own_chain" in callers
     assert (task.status, task.failure_code) == (TaskStatus.PENDING, "internal")
     assert _results(world, task.id) == []  # nothing judged, nothing passed
+
+
+def test_a_hand_written_check_that_takes_a_health_check_name_fails_the_task(world: World) -> None:
+    """A manifest stored without the deploy's refusal never lets one result replace the other.
+
+    The hand-written `health_volume` always fails; under the health check's name its result
+    would be replaced by the health check's ``passed``. Instead one result errors, blocks and
+    names both files, even for a hand-written check that only warns.
+
+    Parameters
+    ----------
+    world
+        The world.
+    """
+    _built_once_then_redeployed(
+        world,
+        _check("health_volume", "SELECT id FROM silver.orders", on_failure="warn"),
+        health={"volume": "block"},
+    )
+    _start(world)
+    _drain(world)
+
+    task = _task(world, "silver.orders")
+    assert task.status is TaskStatus.FAILED
+    assert _ids(world, "silver.orders") == [1, 1, 2]  # set back
+    (result,) = _results(world, task.id)
+    clash = (
+        "two checks of `silver.orders` are named `health_volume` "
+        "(`checks/silver/orders/health_volume.sql` and `assets/silver/orders`), so only "
+        "one result would count; rename the hand-written check and deploy again."
+    )
+    assert (result.check_name, result.outcome, result.on_failure, result.error) == (
+        "silver.orders/health_volume",
+        CheckOutcome.ERRORED,
+        "block",
+        clash,
+    )
+    assert task.error_message is not None
+    assert clash in task.error_message

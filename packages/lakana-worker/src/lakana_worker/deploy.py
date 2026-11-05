@@ -58,6 +58,7 @@ from lakana_core.projects.diff import diff_manifests
 from lakana_core.projects.discovery import discover
 from lakana_core.projects.glossary import glossary_entries, parse_glossary
 from lakana_core.projects.health import health_issues
+from lakana_core.projects.health_checks import project_health_specs
 from lakana_core.projects.issues import ProjectIssue, ProjectValidationError, withheld_lines
 from lakana_core.projects.jobs import job_issues
 from lakana_core.projects.layer_rules import layer_hints, layer_issues
@@ -875,7 +876,7 @@ def _deploy(
                 principal, environment_name, repository_id, assets, graph
             )
             + check_issues(every_check, assets, graph, limits=limits)
-            + generated_name_issues(checks, generated)
+            + generated_name_issues(checks, [*generated, *project_health_specs(assets, config)])
             + service.validate_checks_against_environment(
                 principal, environment_name, repository_id, checks, assets
             )

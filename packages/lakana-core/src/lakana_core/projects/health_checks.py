@@ -11,9 +11,13 @@ This module imports `projects.manifest`, which imports `projects.health`; so it 
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from lakana_core.projects.checks import CheckSpec, GeneratedFrom
 from lakana_core.projects.health import entry_effects
-from lakana_core.projects.manifest import manifest_assets
+from lakana_core.projects.manifest import asset_health, manifest_assets
+from lakana_core.projects.parse import ParsedAsset
+from lakana_core.projects.project_config import ResolvedProjectConfig
 
 HEALTH_FAMILY = "health"
 """The `GeneratedFrom.family` of a health check."""
@@ -82,6 +86,36 @@ def health_specs(manifest: object, asset: str) -> tuple[CheckSpec, ...]:
         What `entry_health_specs` gives for the asset's entry; empty without one.
     """
     return entry_health_specs(manifest_assets(manifest).get(asset), asset)
+
+
+def project_health_specs(
+    assets: Sequence[ParsedAsset], config: ResolvedProjectConfig
+) -> list[CheckSpec]:
+    """Build the blocking health checks a deploy's manifest will give its tables' runs.
+
+    What `health_specs` gives each asset once the manifest stores its resolved `health:`
+    (`manifest.asset_health`). The deploy refuses a hand-written check that takes one of these
+    names (`model_checks.generated_name_issues`): both results would be recorded under one name,
+    and the later would replace the earlier.
+
+    Parameters
+    ----------
+    assets
+        The parsed assets.
+    config
+        `lakana.yaml` resolved for the target environment.
+
+    Returns
+    -------
+    list of CheckSpec
+        Every asset's health checks, in the order of `assets`.
+    """
+    specs: list[CheckSpec] = []
+    for asset in assets:
+        effects = asset_health(asset, config)
+        if effects:
+            specs.extend(entry_health_specs({"path": asset.path, "health": effects}, asset.table))
+    return specs
 
 
 def is_health_check(check_name: str, *, generated: bool) -> bool:

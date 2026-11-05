@@ -3992,3 +3992,35 @@ def test_a_deploy_refuses_a_bad_health_value_with_the_file(
     assert run.error_message is not None
     assert run.error_message.startswith("assets/gold/t.sql:")
     assert message in run.error_message
+
+
+def test_a_deploy_refuses_a_hand_written_check_that_takes_a_health_check_name(
+    session: Session, principal: PrincipalRef, world: World
+) -> None:
+    """`health: {volume: block}` generates `health_volume`; a file of that name is refused.
+
+    Both results would be recorded under one name and the later would replace the earlier, so a
+    failing hand-written check could pass. A `health_volume` file is fine while `volume` does not
+    block.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    principal
+        The deploying principal.
+    world
+        The world.
+    """
+    files = {
+        "assets/silver/orders.sql": "/* lakana\nhealth: {volume: block}\n*/\nSELECT 1 AS id\n",
+        "checks/silver/orders/health_volume.sql": "SELECT id FROM silver.orders\n",
+    }
+    commit(world.repo_path, files)
+    run = _submit_and_run(session, principal, world)
+    assert run.status is DeployStatus.FAILED
+    assert run.error_message is not None
+    assert (
+        "A check named `health_volume` is generated for `silver.orders`; rename "
+        "`checks/silver/orders/health_volume.sql`." in run.error_message
+    )

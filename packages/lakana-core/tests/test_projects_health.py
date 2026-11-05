@@ -16,10 +16,15 @@ from lakana_core.projects.health import (
     normalize_health,
     resolve_effects,
 )
-from lakana_core.projects.health_checks import entry_health_specs, health_specs, is_health_check
+from lakana_core.projects.health_checks import (
+    entry_health_specs,
+    health_specs,
+    is_health_check,
+    project_health_specs,
+)
 from lakana_core.projects.issues import ProjectValidationError
 from lakana_core.projects.parse import ParsedAsset
-from lakana_core.projects.project_config import parse_project_config
+from lakana_core.projects.project_config import ResolvedProjectConfig, parse_project_config
 
 _ALL_OFF = dict.fromkeys(("freshness", "volume", "null_rate", "range", "schema"), "off")
 
@@ -241,3 +246,18 @@ def test_a_health_check_is_told_by_its_generated_name() -> None:
     assert is_health_check("gold.t/health_volume", generated=True)
     assert not is_health_check("gold.t/health_volume", generated=False)
     assert not is_health_check("gold.t/key_id", generated=True)
+
+
+def test_a_deploy_knows_the_health_checks_each_table_will_gain() -> None:
+    """The checks a run would add, from `lakana.yaml` and each header, so names can be refused.
+
+    A view gains none, and neither does a table whose resolved `health:` blocks nothing.
+    """
+    config = ResolvedProjectConfig(health={"volume": "block"})
+    table = dataclasses.replace(make_asset("silver.orders"), path="assets/silver/orders.sql")
+    quiet = _with(make_asset("silver.quiet"), health={"volume": "warn"})
+    view = _with(make_asset("gold.v"), materialize="view")
+    specs = project_health_specs([table, quiet, view], config)
+    assert [(s.name, s.path) for s in specs] == [
+        ("silver.orders/health_volume", "assets/silver/orders.sql")
+    ]

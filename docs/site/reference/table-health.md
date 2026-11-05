@@ -257,7 +257,8 @@ choose, per signal, between three effects:
 
 **When a signal blocks.** Each `block` entry of a table adds one check to the table's task, named
 `health_<signal>` (`health_range__price` for one column), marked generated like the checks of the
-asset's header. It reads no rows: after the write, it looks at whether the signal fired at any
+asset's header; a deploy refuses a hand-written check of the table with that name
+([Names](checks.md#generated-checks)). It reads no rows: after the write, it looks at whether the signal fired at any
 snapshot the run wrote (a Python asset that commits several times has every commit judged, not only
 the last). `null_rate: block` or `range: block` fails when any column whose effect is `block`
 fired. When the signal fired, the check fails, the table is set back, and nothing downstream is

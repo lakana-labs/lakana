@@ -376,6 +376,16 @@ A table's header, an `@asset(health=...)` argument or `lakana.yaml` can set each
   manifest version.
 - A deploy refuses an unknown signal, a column the table does not have, `block` on `freshness` and
   `health:` on a view, with the file and the next step.
+- **Existing `notify:` targets now also get `health` messages** for the tables their job builds,
+  because every signal warns by default. Such a message has `"event": "health"`, an empty `run_id`
+  and a `table` and an `alert` key ([Get told when a job fails](../how-to/get-told-when-a-job-fails.md)).
+  A receiver that reads `event` or needs a `run_id` must handle it. To stop them, set
+  `health: {SIGNAL: off}` for the signals you do not want, or `health: off` for all of them, in the
+  asset header or in `lakana.yaml`.
+- A deploy refuses a hand-written check named like the `health_<signal>` check that a `block` entry
+  of its table generates, such as `checks/silver/orders/health_volume.sql` with
+  `health: {volume: block}`: ``A check named `health_volume` is generated for `silver.orders`; rename
+  `checks/silver/orders/health_volume.sql`.`` Rename the file.
 
 ## Notes for 0.21.0
 

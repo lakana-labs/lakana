@@ -341,7 +341,7 @@ def _entry(
     return entry
 
 
-def _health(asset: ParsedAsset, config: ResolvedProjectConfig) -> dict[str, str]:
+def asset_health(asset: ParsedAsset, config: ResolvedProjectConfig) -> dict[str, str]:
     """Resolve the health effects of one asset, for a table that has snapshots to watch.
 
     Parameters
@@ -576,7 +576,7 @@ def build_manifest(
         or bool(texts)
         or any(a.metadata.label is not None or a.metadata.column_labels() for a in assets)
     )
-    health = {a.table: _health(a, config) for a in assets}
+    health = {a.table: asset_health(a, config) for a in assets}
     version = _version(
         config,
         has_checks=bool(checks),

@@ -15,7 +15,7 @@ from collections.abc import Mapping, Sequence
 
 from lakana_core.identifiers import shown
 from lakana_core.projects.asset_model import ParsedAsset, ResolvedReference, key_columns
-from lakana_core.projects.checks import GeneratedFrom, ParsedCheck
+from lakana_core.projects.checks import CheckSpec, GeneratedFrom, ParsedCheck
 from lakana_core.projects.discovery import _fold
 from lakana_core.projects.history_columns import IS_CURRENT, VALID_FROM, VALID_TO, surrogate_column
 from lakana_core.projects.issues import ProjectIssue
@@ -378,7 +378,7 @@ def generated_checks(
 
 
 def generated_name_issues(
-    hand: Sequence[ParsedCheck], generated: Sequence[ParsedCheck]
+    hand: Sequence[ParsedCheck], generated: Sequence[ParsedCheck | CheckSpec]
 ) -> list[ProjectIssue]:
     """Refuse a hand-written check that takes a generated name or looks generated.
 
@@ -393,7 +393,8 @@ def generated_name_issues(
     hand
         The hand-written checks.
     generated
-        The generated checks.
+        The generated checks: those of the headers, and the health checks a run will add
+        (`health_checks.project_health_specs`).
 
     Returns
     -------

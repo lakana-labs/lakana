@@ -118,8 +118,10 @@ with the values of a test project:
 
 `event` is `failed`, `recovered`, `columns_changed`, `health` or, from `notify-test`, `test`.
 
-A `health` message has no run, so its `run_id`, `commit`, `trigger`, `status` and `finished_at` are
-empty (`failed_tasks` and `failed_checks` are empty lists), and two keys are added: `table`, the
+A `health` message has no run, so its `run_id`, `commit`, `trigger` and `status` are empty
+(`failed_tasks` and `failed_checks` are empty lists), and its `finished_at` is when the signal was
+observed: the commit that fired it, or the freshness sweep that found the table late. Two keys are
+added: `table`, the
 table whose signal fired, and `alert`, the signal's text. Its `command` is
 ``lakana table health TABLE --env ENV``. In **slack** and **teams** the message has these lines:
 the title ``Lakana: table `silver.orders` needs a look in `prod` ``, the alert, the job and

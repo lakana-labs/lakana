@@ -85,6 +85,7 @@ from lakana_core.models import (
     TaskStatus,
 )
 from lakana_core.projects.checks import CheckSpec, read_manifest_checks
+from lakana_core.projects.discovery import _fold
 from lakana_core.projects.health_checks import HEALTH_FAMILY, health_specs
 from lakana_core.projects.manifest import manifest_assets
 from lakana_core.runs.check_message import (
@@ -857,6 +858,41 @@ class _Phase:
     is_asset: bool
 
 
+def _without_clashes(specs: Sequence[CheckSpec]) -> tuple[list[CheckSpec], dict[str, str]]:
+    """Keep one check of each name, refused, when two of a task's checks share it.
+
+    Every result is recorded under its check's name and the later replaces the earlier
+    (`record_result`), so of two checks with one name only one would count: a failing
+    hand-written check could pass under a health check's result. The deploy refuses a
+    hand-written check that takes a generated name (`generated_name_issues`); this guard keeps a
+    manifest stored without that refusal from losing a result. The check kept errors and
+    blocks, whatever its own `on_failure`, so the task fails with a text that names the clash.
+
+    Parameters
+    ----------
+    specs
+        The task's checks, hand-written first, then generated.
+
+    Returns
+    -------
+    tuple
+        The checks without the later of each clash, the first made blocking; and the refusal
+        text by the kept check's name, for `check_phase`'s refusals.
+    """
+    kept: dict[str, CheckSpec] = {}
+    refusals: dict[str, str] = {}
+    for spec in specs:
+        earlier = kept.setdefault(_fold(spec.name), spec)
+        if earlier is not spec:
+            kept[_fold(spec.name)] = dataclasses.replace(earlier, on_failure="block")
+            refusals[earlier.name] = (
+                f"two checks of `{shown(spec.table)}` are named `{shown(spec.check)}` "
+                f"(`{shown(earlier.path)}` and `{shown(spec.path)}`), so only one result would "
+                "count; rename the hand-written check and deploy again."
+            )
+    return list(kept.values()), refusals
+
+
 def _read_phase(session: Session, claimed: ClaimedTask, *, set_back: bool = False) -> _Phase:
     """Read what the check phase needs: the run, its project version's checks and its principal.
 
@@ -1581,12 +1617,11 @@ def _checks_under(
     # A task created with checks never succeeds without one: a project version that lists none that
     # can be read gives one blocking result that says so, and so does an entry that cannot be
     # read, beside the checks that can. A stand-in is run in place of a check.
-    refusals: dict[str, str] = {}
     # The checks whose count was refused a kept table, with the refusal's text. Told by the
     # type of what failed the count, in the claim that counted: every check is counted again
     # in every check phase, so this never has to be read back from a stored text.
     kept_refusals: dict[str, str] = {}
-    specs = list(phase.specs)
+    specs, refusals = _without_clashes(phase.specs)
     if phase.unreadable:
         stand_in = _stand_in(claimed.asset, "(unreadable)")
         refusals[stand_in.name] = ERROR_UNREADABLE_CHECK
