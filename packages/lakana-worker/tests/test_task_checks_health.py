@@ -17,13 +17,20 @@ from check_run_helpers import (
     _results,
     _run_until,
 )
+from pyiceberg.schema import Schema
+from pyiceberg.table.refs import SnapshotRefType
+from pyiceberg.table.snapshots import Operation, Snapshot, Summary
+from pyiceberg.table.update import AddSnapshotUpdate, SetSnapshotRefUpdate
+from pyiceberg.types import LongType, NestedField
 from sqlalchemy import select
 from task_run_helpers import World, _engine, _start, _task
 
 import lakana_worker.task_checks as task_checks_module
+from lakana_core.catalog.attempt_stamp import CLAIM_PROPERTY, TASK_RUN_PROPERTY
 from lakana_core.catalog.health_read import Visibility, current_signals
 from lakana_core.catalog.health_record import recent_observations
 from lakana_core.catalog.identity import resolve_table_id
+from lakana_core.catalog.metadata import apply_updates, build_table_metadata
 from lakana_core.models import (
     AuditEventType,
     CheckOutcome,
@@ -432,3 +439,76 @@ def test_a_hand_written_check_that_takes_a_health_check_name_fails_the_task(worl
     )
     assert task.error_message is not None
     assert clash in task.error_message
+
+
+def test_a_retried_attempt_is_judged_on_its_own_commits(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The chain judged leaves out what an earlier, failed attempt of the task run committed.
+
+    Attempt 1 committed snapshot 2 (half the rows, its volume fired) and failed; attempt 2
+    committed 3. Only 3 is judged.
+
+    Parameters
+    ----------
+    world
+        The world.
+    monkeypatch
+        Serves the stamped metadata of the chain.
+    """
+    _outside_table(world, "bronze.events", [1])
+    task_run = uuid.uuid4()
+
+    def snapshot(snapshot_id: int, claim: int | None) -> Snapshot:
+        """Build a snapshot on the previous one, stamped by an attempt when `claim` is given.
+
+        Parameters
+        ----------
+        snapshot_id
+            Its id and sequence number.
+        claim
+            The attempt's claim; `None` for the baseline.
+
+        Returns
+        -------
+        Snapshot
+            The snapshot.
+        """
+        stamp = (
+            {} if claim is None else {TASK_RUN_PROPERTY: str(task_run), CLAIM_PROPERTY: str(claim)}
+        )
+        return Snapshot(
+            snapshot_id=snapshot_id,
+            parent_snapshot_id=snapshot_id - 1 if snapshot_id > 1 else None,
+            sequence_number=snapshot_id,
+            timestamp_ms=1_700_000_000_000 + snapshot_id,
+            manifest_list=f"file:///t/metadata/snap-{snapshot_id}.avro",
+            summary=Summary(Operation.APPEND, **stamp),
+            schema_id=0,
+        )
+
+    snapshots = [snapshot(1, None), snapshot(2, 1), snapshot(3, 2)]
+    metadata = apply_updates(
+        build_table_metadata(
+            schema=Schema(NestedField(1, "id", LongType(), required=False)),
+            location="file:///t",
+            partition_spec=None,
+            sort_order=None,
+            properties={},
+        ),
+        [
+            *(AddSnapshotUpdate(snapshot=s) for s in snapshots),
+            SetSnapshotRefUpdate(ref_name="main", type=SnapshotRefType.BRANCH, snapshot_id=3),
+        ],
+    )
+    monkeypatch.setattr(task_checks_module, "read_metadata", lambda *args: metadata)
+    _signal(world, "bronze.events", "volume", snapshot=2, state="fired")
+    with world.session() as session:
+        table_id = resolve_table_id(session, "dev", "bronze", "events")
+        assert table_id is not None
+        written = Written(table_id, 1, 3, publishes=False)
+        chain = task_checks_module._own_chain(session, _engine(world), "dev", written)
+        assert chain == [3]
+        assert task_checks_module._health_result(
+            session, _health_spec("volume"), table_id, chain, "dev", kept=True
+        ) == (CheckOutcome.PASSED, None, 3)

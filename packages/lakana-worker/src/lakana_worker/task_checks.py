@@ -36,8 +36,9 @@ after the write on its last attempt, or in a run that is cancelled, is followed 
 that only sets the table back (`set_back_only`): it builds and checks nothing.
 
 A check of family `health` (`projects.health_checks`, from `health: {signal: block}`) counts
-nothing: `_health_result` reads whether the signal fired at any snapshot the task run wrote, and
-a firing fails the check with a text that names no value, since every reader of the run reads it.
+nothing: `_health_result` reads whether the signal fired at any snapshot the task run's last
+attempt wrote (an earlier attempt's partial commit is not judged; it is still set back), and a
+firing fails the check with a text that names no value, since every reader of the run reads it.
 
 What such a rollback undoes is the task run's own chain of writes and nothing else. The
 write guard records the tip of that chain in each write's own commit
@@ -61,6 +62,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from lakana_core.auth import PrincipalRef, RunContext
+from lakana_core.catalog.attempt_stamp import last_attempts_snapshots
 from lakana_core.catalog.health_record import own_chain
 from lakana_core.catalog.health_signals import COLUMN_SIGNALS
 from lakana_core.catalog.identity import resolve_table_id, resolve_table_with_note
@@ -404,10 +406,12 @@ def _counted_outcome(spec: CheckSpec, rows: int) -> CheckOutcome:
 def _own_chain(
     session: Session, engine: RunEngine, environment: str, written: Written | None
 ) -> list[int]:
-    """List the snapshots the task run wrote, its tip first.
+    """List the snapshots the task run's last attempt wrote, its tip first.
 
     A Python asset can commit several times; each commit records the signals of its own
-    snapshot, so a blocking health check judges every one, not only the tip.
+    snapshot, so a blocking health check judges every one, not only the tip. Only the commits of
+    the attempt that wrote the tip count (`attempt_stamp.last_attempts_snapshots`): a partial
+    commit an earlier, failed attempt left is what the retry replaced.
 
     Parameters
     ----------
@@ -423,9 +427,9 @@ def _own_chain(
     Returns
     -------
     list of int
-        `health_record.own_chain` from `Written.snapshot_after` back to `Written.snapshot_before`;
-        the tip alone when the table's metadata no longer holds it (expired) or the table is not
-        a managed one; empty without a tip.
+        `health_record.own_chain` from `Written.snapshot_after` back to `Written.snapshot_before`,
+        without the snapshots of earlier attempts; the tip alone when the table's metadata no
+        longer holds it (expired) or the table is not a managed one; empty without a tip.
 
     Raises
     ------
@@ -443,9 +447,9 @@ def _own_chain(
         metadata = read_metadata(resolved.file_io, row.metadata_location)
     finally:
         session.rollback()
-    return own_chain(metadata, written.snapshot_after, written.snapshot_before) or [
-        written.snapshot_after
-    ]
+    return last_attempts_snapshots(
+        metadata, own_chain(metadata, written.snapshot_after, written.snapshot_before)
+    ) or [written.snapshot_after]
 
 
 def _health_result(

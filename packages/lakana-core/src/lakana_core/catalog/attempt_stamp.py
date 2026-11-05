@@ -151,6 +151,56 @@ def written_by_attempt(
     return False
 
 
+def last_attempts_snapshots(metadata: TableMetadata, chain: Sequence[int]) -> list[int]:
+    """Keep the snapshots of a task run's chain that the attempt which wrote its tip committed.
+
+    Every attempt's chain starts from the task run's baseline, so it holds what an earlier
+    attempt committed before it failed: a partial write the last attempt replaced. A blocking
+    health check judges only the last attempt's own snapshots, told by the stamp of the tip
+    (`TASK_RUN_PROPERTY` and `CLAIM_PROPERTY`), which no client can set.
+
+    Parameters
+    ----------
+    metadata
+        The table's metadata, holding the chain.
+    chain
+        The task run's snapshots, the tip first.
+
+    Returns
+    -------
+    list of int
+        The snapshots of `chain` that carry the tip's stamp, in its order; `chain` itself when
+        the tip carries no attempt's stamp (a SQL task's write, or a tip the metadata no longer
+        holds).
+    """
+    if not chain:
+        return []
+
+    def stamp(snapshot_id: int) -> tuple[str | None, str | None]:
+        """Read the attempt's stamp of one snapshot.
+
+        Parameters
+        ----------
+        snapshot_id
+            The snapshot.
+
+        Returns
+        -------
+        tuple
+            Its task run and claim properties; `None` for each it lacks.
+        """
+        snapshot = metadata.snapshot_by_id(snapshot_id)
+        summary = None if snapshot is None else snapshot.summary
+        if summary is None:
+            return None, None
+        return summary.get(TASK_RUN_PROPERTY), summary.get(CLAIM_PROPERTY)
+
+    tip = stamp(chain[0])
+    if None in tip:
+        return list(chain)
+    return [snapshot_id for snapshot_id in chain if stamp(snapshot_id) == tip]
+
+
 def created_by_task_run(session: Session, table_id: uuid.UUID, task_run_id: uuid.UUID) -> bool:
     """Tell whether a task run's write created a table, by the claim of the table's location.
 
