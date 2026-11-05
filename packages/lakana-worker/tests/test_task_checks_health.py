@@ -47,8 +47,12 @@ from lakana_core.models import (
 from lakana_core.projects.checks import CheckSpec, GeneratedFrom
 from lakana_core.projects.health_checks import health_specs
 from lakana_core.runs.checks import health_blocked
+from lakana_core.runs.selection import Selection
 from lakana_core.runs.tasks import Written
 from lakana_worker.tasks import run_claimed
+
+_SILVER_ONLY = Selection(patterns=("silver.orders",))
+"""The second run of a test that asserts nothing about `gold.report`: two task runs fewer."""
 
 
 def _signal(
@@ -143,7 +147,7 @@ def test_a_fired_block_signal_fails_the_task_and_sets_the_table_back(world: Worl
     world
         The world.
     """
-    _built_once_then_redeployed(world, health={"volume": "block"})
+    _built_once_then_redeployed(world, only_silver_first=True, health={"volume": "block"})
     _seed_volume(world, "silver.orders", 1_000)
     _start(world)
     _drain(world)
@@ -191,8 +195,10 @@ def test_a_block_signal_that_did_not_fire_passes(world: World) -> None:
     world
         The world.
     """
-    _built_once_then_redeployed(world, health={"volume": "block", "schema": "block"})
-    _start(world)
+    _built_once_then_redeployed(
+        world, only_silver_first=True, health={"volume": "block", "schema": "block"}
+    )
+    _start(world, _SILVER_ONLY)
     _drain(world)
     task = _task(world, "silver.orders")
     assert task.status is TaskStatus.SUCCEEDED
@@ -213,9 +219,9 @@ def test_a_warn_signal_that_fired_does_not_stop_the_run(world: World) -> None:
     world
         The world.
     """
-    _built_once_then_redeployed(world)
+    _built_once_then_redeployed(world, only_silver_first=True)
     _seed_volume(world, "silver.orders", 1_000)
-    _start(world)
+    _start(world, _SILVER_ONLY)
     _drain(world)
     task = _task(world, "silver.orders")
     assert task.status is TaskStatus.SUCCEEDED
@@ -403,8 +409,8 @@ def test_a_health_check_whose_metadata_cannot_be_read_is_retried_and_never_passe
     monkeypatch
         Breaks the metadata read of the chain.
     """
-    _built_once_then_redeployed(world, health={"volume": "block"})
-    _start(world)
+    _built_once_then_redeployed(world, only_silver_first=True, health={"volume": "block"})
+    _start(world, _SILVER_ONLY)
     claimed = _run_until(world, "silver.orders")
     callers: list[str] = []
 
@@ -436,9 +442,10 @@ def test_a_hand_written_check_that_takes_a_health_check_name_fails_the_task(worl
     _built_once_then_redeployed(
         world,
         _check("health_volume", "SELECT id FROM silver.orders", on_failure="warn"),
+        only_silver_first=True,
         health={"volume": "block"},
     )
-    _start(world)
+    _start(world, _SILVER_ONLY)
     _drain(world)
 
     task = _task(world, "silver.orders")
@@ -679,7 +686,7 @@ def test_a_run_whose_block_signal_could_not_be_judged_goes_on_and_says_so(
     monkeypatch
         Breaks the computing of the signals and records what is queued.
     """
-    _built_once_then_redeployed(world, health={"volume": "block"})
+    _built_once_then_redeployed(world, only_silver_first=True, health={"volume": "block"})
 
     def broken(*args: object, **kwargs: object) -> object:
         """Fail as a damaged file would.
@@ -754,7 +761,7 @@ def test_a_failure_to_tell_of_an_unjudged_signal_never_stops_the_checks(
     monkeypatch
         Breaks the computing of the signals and the queuing.
     """
-    _built_once_then_redeployed(world, health={"volume": "block"})
+    _built_once_then_redeployed(world, only_silver_first=True, health={"volume": "block"})
 
     def broken(*args: object, **kwargs: object) -> object:
         """Fail as a damaged file would.
@@ -775,7 +782,7 @@ def test_a_failure_to_tell_of_an_unjudged_signal_never_stops_the_checks(
 
     monkeypatch.setattr(health_record_module, "_observe", broken)
     monkeypatch.setattr(task_checks_module, "queue_health_notifications", broken)
-    _start(world)
+    _start(world, _SILVER_ONLY)
     _drain(world)
     assert _task(world, "silver.orders").status is TaskStatus.SUCCEEDED
 

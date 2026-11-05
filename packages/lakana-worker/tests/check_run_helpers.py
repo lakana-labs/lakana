@@ -495,6 +495,7 @@ def _built_once_then_redeployed(
     world: World,
     *checks: dict[str, object],
     sql: str = "SELECT id + 10 AS id FROM bronze.src",
+    only_silver_first: bool = False,
     **extra: object,
 ) -> None:
     """Build `silver.orders` (ids 1, 1, 2) in a run without checks, then deploy checks.
@@ -507,11 +508,18 @@ def _built_once_then_redeployed(
         The checks of the second deploy.
     sql
         The SELECT of `silver.orders` in the second deploy; ids 11, 11, 12 by default.
+    only_silver_first
+        Build only `silver.orders` and its upstream the first time, leaving `gold.report`
+        unbuilt: one task run fewer, for a test that needs just the prior snapshot of silver.
     **extra
         Overrides of the second deploy's entry of `silver.orders`.
     """
-    _checked(world)
-    first = _start(world)
+    if only_silver_first:
+        _checked(world)
+        first = _start(world, Selection(patterns=("silver.orders",), upstream=True))
+    else:
+        _checked(world)
+        first = _start(world)
     _drain(world)
     with world.session() as session:
         run = session.get(Run, first)
