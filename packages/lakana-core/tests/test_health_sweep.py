@@ -230,9 +230,23 @@ def test_freshness_that_is_off_records_off(catalog: CatalogService, session: Ses
     assert (row.state, row.effect, row.observed, row.band) == ("off", "off", None, None)
 
 
-def test_a_paused_scheduled_job_records_off(catalog: CatalogService, session: Session) -> None:
-    """A paused job is not expected to write: no firing, and so no message."""
-    repository_id = _deployed(session, _MANIFEST)
+_ONLY_SCHEDULED = {
+    **_MANIFEST,
+    "jobs": {k: v for k, v in _MANIFEST["jobs"].items() if k != "quiet"},
+}
+"""`_MANIFEST` without job ``quiet``, so every job that builds `silver.orders` is scheduled."""
+
+
+def _pause_nightly(session: Session, repository_id: uuid.UUID) -> None:
+    """Pause the job ``nightly`` of a repository in `dev`.
+
+    Parameters
+    ----------
+    session
+        Database session; committed.
+    repository_id
+        The repository.
+    """
     session.add(
         JobSchedule(
             id=uuid.uuid4(),
@@ -243,11 +257,37 @@ def test_a_paused_scheduled_job_records_off(catalog: CatalogService, session: Se
         )
     )
     session.commit()
+
+
+def test_a_paused_scheduled_job_records_off(catalog: CatalogService, session: Session) -> None:
+    """A paused job is not expected to write: no firing, and so no message."""
+    _pause_nightly(session, _deployed(session, _ONLY_SCHEDULED))
     _seed(session, "volume", _ADDED)
     _sweep(session)
     (row,) = _freshness(session)
     assert (row.state, row.observed, row.effect) == ("off", {"reason": "paused"}, "warn")
     assert session.scalars(select(NotificationDelivery)).all() == []
+
+
+def test_an_unscheduled_building_job_keeps_freshness_on_while_the_scheduled_one_is_paused(
+    catalog: CatalogService, session: Session
+) -> None:
+    """Job ``quiet`` has no schedule and can write `silver.orders` at any time: the history rule.
+
+    Parameters
+    ----------
+    catalog
+        The catalog.
+    session
+        Database session.
+    """
+    _pause_nightly(session, _deployed(session, _MANIFEST))
+    _seed(session, "volume", _ADDED)
+    _sweep(session)
+    (row,) = _freshness(session)
+    assert row.state != "off"
+    assert row.observed is not None
+    assert (row.observed["source"], row.observed["job"]) == ("history", None)
 
 
 def test_a_compaction_does_not_make_a_stale_table_fresh(
@@ -586,7 +626,7 @@ def test_a_table_another_sweep_holds_is_skipped(
 
 
 def test_a_change_of_the_off_reason_is_recorded(catalog: CatalogService, session: Session) -> None:
-    repository_id = _deployed(session, _MANIFEST)
+    repository_id = _deployed(session, _ONLY_SCHEDULED)
     table = session.get(Table, _table_id(session))
     assert table is not None
     table.health_effects = {"freshness": "off"}
@@ -594,16 +634,7 @@ def test_a_change_of_the_off_reason_is_recorded(catalog: CatalogService, session
     _seed(session, "volume", _ADDED)
     _sweep(session)
     table.health_effects = {}
-    session.add(
-        JobSchedule(
-            id=uuid.uuid4(),
-            environment_id=_environment_id(session),
-            repository_id=repository_id,
-            job="nightly",
-            paused=True,
-        )
-    )
-    session.commit()
+    _pause_nightly(session, repository_id)
     _sweep(session, _NOW + timedelta(hours=1))
     _sweep(session, _NOW + timedelta(hours=2))
     assert [(r.state, r.observed) for r in _freshness(session)] == [

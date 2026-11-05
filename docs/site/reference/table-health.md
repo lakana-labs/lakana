@@ -326,9 +326,13 @@ snapshots that added data: a compaction does not make a stale table fresh. A tab
 scheduled job is late after twice the interval of that schedule, and never before the second run
 after its last snapshot has passed, so a weekday job is not late over the weekend. With several
 such jobs, the shortest limit counts. A table without one is late after 3 times the median gap
-between its last 31 snapshots, and at least 1 hour; a schedule that cannot be read counts as none.
-A table whose scheduled jobs are all paused shows `off` with `observed.reason` `paused`: it is not
-expected to change, and nothing is sent.
+between its writes, and at least 1 hour; a schedule that cannot be read counts as none. For that
+median, snapshots less than 10 minutes apart count as one write: a run that commits three times is
+one, so a table written in bursts is not late an hour after each run. It reads the last 31
+snapshots, and with fewer than 8 writes among them the table shows `no_history`. A table whose
+building jobs are all scheduled and paused shows `off` with `observed.reason` `paused`: it is not
+expected to change, and nothing is sent. When a job without a schedule builds it too (one that CI
+or another tool starts), that job can write at any time, so the table is judged by its history.
 
 The sweep handles at most 500 tables per run and the next run the next 500, so with more
 tables a table's freshness is judged every few hours. A table that has not been written since the

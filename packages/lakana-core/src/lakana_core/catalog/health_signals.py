@@ -61,7 +61,10 @@ FRESHNESS_SCHEDULE_FACTOR = 2.0
 FRESHNESS_HISTORY_FACTOR = 3.0
 """A table without a schedule is late after this many median intervals of its commits."""
 FRESHNESS_MIN_SECONDS = 3_600.0
-"""The least limit of the history rule, so commits within the same second do not fire at once."""
+"""The least limit of the history rule, so commits a few minutes apart do not fire at once."""
+FRESHNESS_BURST_SECONDS = 600.0
+"""Data commits less than this apart are one data point of the history rule: one run that commits
+several times is one, so the median gap is between runs, not seconds."""
 
 _RANGE_KINDS: tuple[tuple[tuple[type[PrimitiveType], ...], str], ...] = (
     ((IntegerType, LongType), "integer"),
@@ -657,6 +660,27 @@ def schedule_threshold(cron: str, timezone: str, last_commit_at: datetime) -> fl
     return max(FRESHNESS_SCHEDULE_FACTOR * gap, (second - last_commit_at).total_seconds())
 
 
+def _data_points(commit_times: Sequence[datetime]) -> list[datetime]:
+    """Merge commits less than `FRESHNESS_BURST_SECONDS` apart into one data point.
+
+    Parameters
+    ----------
+    commit_times
+        When the table's commits happened, newest first.
+
+    Returns
+    -------
+    list of datetime
+        The newest commit of each run of commits whose neighbours are less than
+        `FRESHNESS_BURST_SECONDS` apart, newest first.
+    """
+    points = list(commit_times[:1])
+    for newer, older in itertools.pairwise(commit_times):
+        if (newer - older).total_seconds() >= FRESHNESS_BURST_SECONDS:
+            points.append(older)
+    return points
+
+
 def freshness_signal(
     *,
     now: datetime,
@@ -668,9 +692,11 @@ def freshness_signal(
 
     The limit is the smallest of `thresholds`, the schedules of the jobs that build the table;
     without one, `FRESHNESS_HISTORY_FACTOR` times the median gap between the newest `HISTORY` + 1
-    commits, at least `FRESHNESS_MIN_SECONDS`. Either way a table with fewer than `MIN_HISTORY`
-    commits is not judged, and a table whose scheduled jobs are all paused is not expected to
-    change.
+    data points, at least `FRESHNESS_MIN_SECONDS`. A data point is a commit, or several less than
+    `FRESHNESS_BURST_SECONDS` apart (`_data_points`): a run that commits three times is one.
+    Either way a table with fewer than `MIN_HISTORY` commits (by the history rule, data points)
+    is not judged, and a table whose building jobs are all scheduled and paused is not expected
+    to change.
 
     Parameters
     ----------
@@ -682,7 +708,7 @@ def freshness_signal(
         (seconds, job) for each scheduled job that builds the table, is not paused and has a
         limit (`schedule_threshold`).
     paused
-        Whether the table has scheduled building jobs and every one of them is paused.
+        Whether the table has building jobs and every one of them is scheduled and paused.
 
     Returns
     -------
@@ -707,7 +733,10 @@ def freshness_signal(
         limit, job = min(thresholds)
         observed |= {"source": "schedule", "job": job}
     else:
-        recent = commit_times[: HISTORY + 1]
+        points = _data_points(commit_times)
+        if len(points) < MIN_HISTORY:
+            return Observation("freshness", None, "no_history", observed, None)
+        recent = points[: HISTORY + 1]
         gaps = [(newer - older).total_seconds() for newer, older in itertools.pairwise(recent)]
         limit = max(FRESHNESS_HISTORY_FACTOR * statistics.median(gaps), FRESHNESS_MIN_SECONDS)
         observed["source"] = "history"

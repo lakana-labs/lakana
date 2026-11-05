@@ -755,16 +755,66 @@ def test_a_paused_job_turns_freshness_off() -> None:
 
 
 def test_the_history_rule_allows_at_least_an_hour() -> None:
-    """Commits within the same second give a median gap of 0, which must not fire at once."""
-    burst = [_FRIDAY] * 8
+    """Commits every ten minutes give a limit of 30 minutes, which must not fire that soon."""
+    often = _commits(8, timedelta(minutes=10))
     soon = freshness_signal(
-        now=_FRIDAY + timedelta(minutes=30), commit_times=burst, thresholds=[], paused=False
+        now=_FRIDAY + timedelta(minutes=30), commit_times=often, thresholds=[], paused=False
     )
     assert (soon.state, soon.band) == ("ok", {"high": 3_600.0})
     later = freshness_signal(
-        now=_FRIDAY + timedelta(minutes=61), commit_times=burst, thresholds=[], paused=False
+        now=_FRIDAY + timedelta(minutes=61), commit_times=often, thresholds=[], paused=False
     )
     assert later.state == "fired"
+
+
+def _runs(days: int, commits: int) -> list[datetime]:
+    """Build the commit times of one run a day that commits several times, newest first.
+
+    Parameters
+    ----------
+    days
+        How many daily runs, the newest ending at `_FRIDAY`.
+    commits
+        How many commits each run makes, a few seconds apart.
+
+    Returns
+    -------
+    list of datetime
+        The times.
+    """
+    return [
+        _FRIDAY - timedelta(days=day, seconds=5 * commit)
+        for day in range(days)
+        for commit in range(commits)
+    ]
+
+
+def test_a_run_that_commits_several_times_is_one_data_point() -> None:
+    """Commits less than ten minutes apart count as one write of the history rule.
+
+    A table without a schedule written three times a run does not fire an hour after each run,
+    as it would with a median gap of seconds.
+    """
+    commits = _runs(11, 3)[: health_signals.HISTORY + 1]
+    after = freshness_signal(
+        now=_FRIDAY + timedelta(hours=2), commit_times=commits, thresholds=[], paused=False
+    )
+    assert (after.state, after.band) == ("ok", {"high": 3 * 86_400.0})
+    late = freshness_signal(
+        now=_FRIDAY + timedelta(days=4), commit_times=commits, thresholds=[], paused=False
+    )
+    assert late.state == "fired"
+    # Seven runs are seven data points, fewer than the eight the history rule needs.
+    young = freshness_signal(
+        now=_FRIDAY + timedelta(hours=2), commit_times=_runs(7, 3), thresholds=[], paused=False
+    )
+    assert (young.state, young.band) == ("no_history", None)
+    assert young.observed is not None and young.observed["source"] is None
+    # A burst within the same second is one data point too.
+    burst = freshness_signal(
+        now=_FRIDAY + timedelta(hours=2), commit_times=[_FRIDAY] * 8, thresholds=[], paused=False
+    )
+    assert burst.state == "no_history"
 
 
 @pytest.mark.parametrize(

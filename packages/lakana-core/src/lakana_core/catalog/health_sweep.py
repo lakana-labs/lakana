@@ -7,8 +7,9 @@ next slice on each call (`rotation`), and stops when asked or after `HEALTH_SWEE
 It first observes the freshness of each table of the slice: the time since the table's last
 commit that added data (one with a ``volume`` row; a compaction records only ``schema``, so
 maintenance cannot hide a stale source), against the schedules of the jobs that build the table,
-or its own history (`health_signals.freshness_signal`). A table whose scheduled building jobs are
-all paused records ``off``. A table with no such commit recorded since signals exist is not
+or its own history (`health_signals.freshness_signal`). A table whose building jobs are
+all scheduled and paused records ``off``; one that a job without a schedule also builds is
+judged by its history. A table with no such commit recorded since signals exist is not
 judged. A row is recorded only when the state, the reason of an ``off`` or the last commit
 changed, so a table that stays late or on time adds nothing; a fired row is told to the notify
 targets of the building jobs once (`health_jobs.queue_health_notifications`). On Postgres each
@@ -301,14 +302,11 @@ def _thresholds(
     -------
     tuple
         (seconds, job) of each scheduled job that is not paused and whose schedule fires twice
-        (empty falls back to the table's history), and whether there are scheduled jobs and all
-        of them are paused.
+        (empty falls back to the table's history), and whether there are building jobs and every
+        one of them is scheduled and paused.
     """
-    scheduled = [
-        (job, job.schedule)
-        for job in building_jobs(deployed.manifests, table)
-        if job.schedule is not None
-    ]
+    building = building_jobs(deployed.manifests, table)
+    scheduled = [(job, job.schedule) for job in building if job.schedule is not None]
     running = [
         (job.job, schedule)
         for job, schedule in scheduled
@@ -319,7 +317,8 @@ def _thresholds(
         limit = schedule_threshold(cron, zone, last_commit_at)
         if limit is not None:
             found.append((limit, name))
-    return found, bool(scheduled) and not running
+    # A job without a schedule can write the table at any time: never paused then.
+    return found, bool(scheduled) and len(scheduled) == len(building) and not running
 
 
 def _check_freshness(
