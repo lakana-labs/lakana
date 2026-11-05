@@ -26,6 +26,14 @@ WATERMARK_TAGS = ("int", "long", "decimal", "date", "timestamp", "timestamptz")
 """The tags of the worker's encoding, one per column type a watermark may have."""
 MIN_SECRET_CHARS = 4
 """Shortest value `register_secret` masks: a shorter one would mask ordinary text."""
+FILES_READ_KEY = "lakana.files_read"
+"""The upload's schema metadata key for the record; `lakana_core.catalog.files_read` reads it."""
+MAX_FILES_READ = 100_000
+"""The most files one run reports, and the most the worker hands a task; the server's cap too."""
+RECORD_WINDOW = dt.timedelta(days=30)
+"""The longest lookback, and how far before the watermark the worker's record reaches."""
+MAX_ETAG = 512
+"""The longest ETag the record holds; a longer one is sent as none."""
 
 
 def decode_watermark(text: str) -> WatermarkValue:
@@ -91,6 +99,96 @@ class AssetContext:
         return default if self.watermark_value is None else self.watermark_value
 
 
+# The copy of `lakana_core.catalog.files_read.FileRead`: the SDK cannot import lakana_core, and
+# `lakana-worker/tests/test_files_read_parity.py` keeps the two the same.
+# jscpd:ignore-start
+@dataclass(frozen=True)
+class ReadFile:
+    """One file `lakana.ingest.files.read` handed to the asset: what makes it the same file.
+
+    Parameters
+    ----------
+    connection
+        The connection's name.
+    name
+        Its path relative to the connection.
+    size
+        Its size in bytes, as listed.
+    modified
+        The time `files.read` used for it, UTC.
+    etag
+        Its ETag where the store reports one.
+    """
+
+    connection: str
+    name: str
+    size: int
+    modified: dt.datetime
+    etag: str | None = None
+
+    def to_json(self) -> dict[str, object]:
+        """Render the file as the record's JSON carries it.
+
+        Returns
+        -------
+        dict[str, object]
+            The five fields, the time in ISO 8601.
+        """
+        return {
+            "connection": self.connection,
+            "name": self.name,
+            "size": self.size,
+            "modified": self.modified.isoformat(),
+            "etag": self.etag,
+        }
+
+    @classmethod
+    def from_json(cls, value: object) -> ReadFile:
+        """Read one file of the record the worker hands the task.
+
+        Parameters
+        ----------
+        value
+            The JSON value.
+
+        Returns
+        -------
+        ReadFile
+            The file, its time in UTC.
+
+        Raises
+        ------
+        ValueError
+            ``not a file read``, naming no value, for anything else.
+        """
+        bad = ValueError("not a file read")
+        if not isinstance(value, dict):
+            raise bad
+        connection, name, size, etag = (
+            value.get(k) for k in ("connection", "name", "size", "etag")
+        )
+        stamp = value.get("modified")
+        try:
+            modified = dt.datetime.fromisoformat(stamp) if isinstance(stamp, str) else None
+        except ValueError:
+            raise bad from None
+        if (
+            not isinstance(connection, str)
+            or not connection
+            or not isinstance(name, str)
+            or not name
+            or not isinstance(size, int)
+            or isinstance(size, bool)
+            or size < 0
+            or modified is None
+            or modified.tzinfo is None
+            or not (etag is None or (isinstance(etag, str) and len(etag) <= MAX_ETAG))
+        ):
+            raise bad
+        return cls(connection, name, size, modified.astimezone(dt.UTC), etag)
+        # jscpd:ignore-end
+
+
 @dataclass
 class _TaskState:
     """What the helpers share during one attempt.
@@ -110,6 +208,15 @@ class _TaskState:
         Docker runner `relay_port`, `root_path`, `grant`).
     secrets
         Values the harness masks in everything it writes.
+    recorded
+        The files the target recorded as read inside 30 days of its watermark, from the
+        worker; `None` when the worker sent none: `files.read` then reads strictly after
+        ``since`` as before.
+    target_watermark
+        The target's watermark when it is a time (a naive one is UTC); seeds a connection
+        without records and lets the server prune.
+    files_read
+        What the `files.read` calls with ``since=`` read or took as read, in order.
     """
 
     client: Client
@@ -118,6 +225,9 @@ class _TaskState:
     declared: frozenset[str]
     connections: Mapping[str, Mapping[str, object]]
     secrets: set[str] = field(default_factory=set)
+    recorded: frozenset[ReadFile] | None = None
+    target_watermark: dt.datetime | None = None
+    files_read: list[ReadFile] = field(default_factory=list)
 
 
 _state: _TaskState | None = None
@@ -186,6 +296,30 @@ def secret_forms(value: str) -> set[str]:
         found |= {json.dumps(text)[1:-1], json.dumps(text, ensure_ascii=False)[1:-1]}
     return {form for form in found if len(form) >= MIN_SECRET_CHARS}
     # jscpd:ignore-end
+
+
+def files_read_payload() -> bytes | None:
+    """Encode the record of the files this attempt's `files.read` calls read, for the upload.
+
+    Returns
+    -------
+    bytes or None
+        Newline-delimited JSON, as `lakana_core.catalog.files_read` parses it: the header
+        ``{"version": 1, "watermark": ...}`` (the target's watermark in UTC, or null), then
+        each file once, one per line; `None` outside a task or when no call with ``since=``
+        read or reported a file.
+    """
+    if _state is None or not _state.files_read:
+        return None
+    mark = _state.target_watermark
+    if mark is not None:
+        mark = mark.replace(tzinfo=dt.UTC) if mark.tzinfo is None else mark.astimezone(dt.UTC)
+    lines: list[dict[str, object]] = [
+        {"version": 1, "watermark": None if mark is None else mark.isoformat()}
+    ]
+    lines += [file.to_json() for file in dict.fromkeys(_state.files_read)]
+    # ensure_ascii=False keeps a record of long non-ASCII names under the server's 64 MiB.
+    return b"".join(json.dumps(line, ensure_ascii=False).encode() + b"\n" for line in lines)
 
 
 def register_secret(value: str) -> None:

@@ -86,7 +86,7 @@ cd sources
 
 | Template | Asset | Reads | Write mode |
 |---|---|---|---|
-| `ingest-files` | `assets/bronze/exports.py` | the CSV files of a `directory` connection, with `files.read` | `append`, the files changed since the last run |
+| `ingest-files` | `assets/bronze/exports.py` | the CSV files of a `directory` connection, with `files.read` | `append`, the files changed since the last run, and a late file once |
 | `ingest-sql` | `assets/bronze/orders.py` | a table of a PostgreSQL, MariaDB or SQLite database, with `sql.read` | `merge` on `id`, the ids from 1,000 before the largest one loaded |
 | `ingest-rest` | `assets/bronze/items.py` | a JSON REST API, with `rest.read` | `merge` on `id`, the items updated since an hour before the newest one loaded |
 
@@ -111,8 +111,9 @@ from lakana.ingest import files
 def exports(ctx):
     """Rows of the exported CSV files, appended as new files arrive."""
     # files.read adds `_source_modified`, the time each file was last changed, and with since=
-    # reads only files changed after it. On the first run ctx.watermark() is None, which is
-    # right here: every file is new, so every file is read.
+    # reads only files changed after it, and once a late file up to 24 hours older (lookback=).
+    # On the first run ctx.watermark() is None, which is right here: every file is new, so every
+    # file is read.
     return files.read("exports", "*.csv", since=ctx.watermark())
 ```
 

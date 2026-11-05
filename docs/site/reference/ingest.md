@@ -119,9 +119,10 @@ rows into one table.
 | `schema` | none | Column name to Polars type, such as `{"id": pl.Int64}`. Those columns get that type; the others are inferred. |
 | `since` | left out | See [Reading only new files](#reading-only-new-files). |
 | `modified_from` | `"mtime"` | Where a file's time comes from; only with `since`. |
+| `lookback` | 24 hours | How far before `since` a late file is still read once; `timedelta(0)` turns it off; at most 30 days. Only with `since`. See [Reading only new files](#reading-only-new-files). |
 | `max_file_bytes` | 256 MiB | The largest file read. A workbook (`xlsx`, `xlsm`, `xlsb`, `ods`) counts what it really unpacks to: its entries are inflated in chunks before it is parsed, and the read stops as soon as the cap is passed. |
 | `max_total_bytes` | 256 MiB | The most bytes read in all (file bytes; a workbook counts its unpacked size). |
-| `max_files` | `10_000` | The most files read: with `since`, only files newer than it count. |
+| `max_files` | `10_000` | The most files read. With `since`, every file inside the lookback window counts, also those already read, so a busy folder reaches it a little sooner. |
 | `max_rows` | `10_000_000` | The most rows read in all. Each reader stops after it, so it also bounds what a compressed file is decoded to (see [Memory](#memory)). The default is about the most rows of a narrow table the server takes in one write of 256 MiB. |
 
 Each cap must be a positive whole number; zero, a negative number or anything else is refused.
@@ -169,26 +170,41 @@ file: a column it names that a file lacks fails, naming the file and the column.
 - **`since=<datetime>`**, usually `ctx.watermark()`: only files modified strictly after it are
   read, and the column is added. A naive datetime is UTC. Any other value is refused.
 
-A new file whose modification time equals the stored watermark is **never read**: `since`
-means strictly after, so the last time is not read again, and a file that shares it is taken for
-one already read. That happens when:
+**Late files inside the lookback are read once.** A run reads the files modified after `since`
+minus `lookback=` (24 hours by default) that the asset's table has not recorded as read. Lakana
+records each file it hands to the asset (its connection, name, size, time and, from S3, GCS,
+Azure and an HTTPS server that sends one, its ETag) with the write of the run, and a check that
+sets the run back forgets them, so those files are read again. The same name with a new time,
+size or ETag is a new file. A run that writes no rows records nothing; its files give no rows
+the next time either. So a file that shares the watermark's time, a file moved in with `mv`, or
+an S3 upload dated by its start is still read, once, as long as its time is inside the window.
+`since=None` reads every file, recorded or not.
+
+**The first run after an upgrade, or of a connection newly added to the asset,** takes every
+file at or before the table's watermark as read, so nothing is read twice.
+
+Each call with `since` prints a line to the task's log, such as
+``files.read: `exports`: 3 new files, 2 late files inside the 24 h lookback, 41 already read``.
+A run records at most 100,000 files, and a file whose name Lakana cannot store (longer than 1,024
+characters, or not valid UTF-8) is refused before anything is read.
+
+**What the lookback still does not catch** is a file whose time is older than the window, or one
+dated in the future:
 
 - the filesystem keeps coarse times (FAT and exFAT keep 2 seconds; some NFS and SMB servers keep
-  1 second), so two files written close together share a time;
+  1 second) and the files differ by more than the window, which only a lookback of `timedelta(0)`
+  makes likely;
 - a writer keeps the source's time (`cp -p`, `rsync -t`, an archive unpacked with its dates), so
-  a new file arrives with an old time;
+  a new file arrives with a time older than the window;
 - one file is dated in the future, which moves the watermark ahead of every file that follows;
-- a file is moved into the folder with `mv` or a rename: it keeps the time it was written, so if
-  a read has already moved the watermark past that time, the file is never read. Copy the file in
-  instead of moving it, or `touch` it after the move;
+- a file is moved into the folder with `mv` or a rename long after it was written: it keeps the
+  time it was written. Copy the file in instead of moving it, or `touch` it after the move;
 - **in an S3 bucket**, a large file is uploaded in parts (the AWS CLI and SDKs do this above
-  8 MiB), and S3 dates the object by the time the upload **started**, not when it finished. If a
-  read runs while the upload is still going and reads a newer file, the watermark moves past the
-  upload's start, and the finished object is never read. Upload to a staging prefix and copy the
-  finished object into the prefix you read (a copy is dated when it is made), or read by name
-  with `modified_from=`. GCS dates an object when its upload completes, and Azure Blob Storage
-  when its blocks are committed, so a finished upload there is newer than any read that ran
-  before it.
+  8 MiB), and S3 dates the object by the time the upload **started**, not when it finished. An
+  upload that takes longer than the window is dated before it, and the finished object is never
+  read. Upload to a staging prefix and copy the finished object into the prefix you read (a copy
+  is dated when it is made), or read by name with `modified_from=`. GCS dates an object when its
+  upload completes, and Azure Blob Storage when its blocks are committed.
 
 If your source can do any of these, read by name instead: `modified_from="export-%Y-%m-%d.csv"`
 takes the time from a `strptime` pattern applied to the file's name (the part after the last
@@ -247,13 +263,13 @@ could end differently (the task is retried only when it could):
 
 | Class | Meaning | Retried |
 |---|---|---|
-| `UsageError` | The call or the setup is wrong: a connection of another kind, an unknown extension or `format=`, `sheet=` or `header_row=` where they mean nothing, a cap that is not a positive whole number, `since=` of the wrong type, `modified_from=` without `since=`, a wildcard in an `http` path; a missing secret or one that is no service-account key, a secret value no HTTP header can carry, a token endpoint that answers without a bearer token, a CA certificate that is not PEM, a trust bundle the worker cannot read. Every attempt fails the same way. | No |
+| `UsageError` | The call or the setup is wrong: a connection of another kind, an unknown extension or `format=`, `sheet=` or `header_row=` where they mean nothing, a cap that is not a positive whole number, `since=` of the wrong type, `modified_from=` without `since=`, `lookback=` without `since=` or of the wrong type or size, a wildcard in an `http` path; a missing secret or one that is no service-account key, a secret value no HTTP header can carry, a token endpoint that answers without a bearer token, a CA certificate that is not PEM, a trust bundle the worker cannot read. Every attempt fails the same way. | No |
 | `FileShapeError` (a `SourceError`) | The files are wrong: types that do not fit across files, a `schema=` column a file lacks, a `schema=` value that is no Polars type, a file that cannot be parsed, a CSV, JSON or NDJSON file that is compressed or not UTF-8, a JSON file that nests arrays and objects more than 100 levels deep, a bucket key with an empty, `.` or `..` segment. The same files fail every attempt. | No |
 | `SourceRefused` (a `SourceError`) | The store or server refused the credential (HTTP 401 or 403), an OAuth2 token endpoint refused the client (400 or 401) or answered with a redirect, another 4xx, a 1xx or a 2xx other than 200, its certificate is not trusted, it answered with a redirect or in a `Content-Encoding` Lakana did not ask for (zstd, br), or a request would go to another host than the `base_url`'s. Every attempt would; the message names the next step. | No |
 | `SourceError` | The store or server failed or could not be reached (a network error, a timeout, HTTP 404, 429 or 5xx, the egress proxy's refusal), which may pass. | Yes |
 | `DirectoryError` | A directory or file is missing, a link, not a directory, or denied; or the pattern is refused. The same path fails every attempt. | No |
 | `DirectoryError` from an I/O error (`EIO` and the like) on a path that is there | The disk or share failed this time. | Yes |
-| `CapExceeded` | A cap was reached. | No |
+| `CapExceeded` | A cap was reached, or a run read more than 100,000 files with `since`. | No |
 
 
 | Message starts or contains | Cause | Next step |
@@ -282,7 +298,7 @@ could end differently (the task is retried only when it could):
 | `... has no column ..., which schema= names` | A file lacks a column `schema=` names. | Fix the name in `schema=`, or the file. |
 | `... column ... is ..., which does not fit ... in the files before it` | A column has types that do not fit across files. | Pass `schema=` with one type for it, or narrow the pattern. |
 | `... check the file, or pass schema= with the column's type` | A file has a value its column cannot hold. The message names file, column, value and problem. | Fix the file, or pass `schema=` with a type that holds it. |
-| `the pattern ... matches more than max_files (...) files to read` | Too many files would be read (with `since`, too many new ones). | Narrow the pattern, pass `since=` if you did not, or raise `max_files`. |
+| `the pattern ... matches more than max_files (...) files to read` | Too many files would be read (with `since`, too many inside the lookback window, already read or not). | Narrow the pattern, pass `since=` if you did not, or raise `max_files`. |
 | `... is N bytes, more than max_file_bytes (...)` | One file is too large. | Split the file, or raise `max_file_bytes`. |
 | `the files matching ... hold more than max_total_bytes (...)` | The files together are too large. | Narrow the pattern or pass `since=` to read fewer files, or raise `max_total_bytes`. |
 | `does not say when ... was modified; pass modified_from=` | The source gives no file time. | Pass `modified_from=` with the date pattern of the name. |
@@ -295,6 +311,15 @@ could end differently (the task is retried only when it could):
 | `... cannot be searched (Permission denied); give this worker read and search access to it` | A directory the pattern needs can be listed but not searched. | Give the worker search (execute) access, or narrow the pattern. |
 | `... has a modification time past the year 9999` | A file is dated beyond what a timestamp holds. | Set a sane time on the file. |
 | `since= takes a datetime or None` | `since` has another type. | Pass `ctx.watermark()` of an asset with `watermark="_source_modified"`. |
+| `lookback= needs since=` | `lookback` without `since`. | Pass `since=ctx.watermark()`, or drop `lookback`. |
+| `lookback= takes a datetime.timedelta` | `lookback` has another type, such as a number of hours. | Pass `timedelta(hours=...)`. |
+| `lookback= cannot be negative` | `lookback` is less than zero. | Pass `timedelta(0)` to turn it off. |
+| `lookback= is at most 30 days` | `lookback` is longer than the record of files read reaches. | Lower it; copy a file older than that into the folder again. |
+| `this run has read more than 100000 files with since=` | The run's `files.read` calls read or took as read more files than Lakana records. | Narrow the pattern. |
+| `... files recorded as read within 30 days of its watermark, more than the 100000 a run can check` | The worker refuses to start the run: the table's record is too large. | Narrow the pattern of `files.read`, or split the asset so that each reads a part. |
+| `names a file whose path is longer than 1024 characters` | A file `files.read` would record has a path Lakana cannot store. | Move it to a shorter path, or narrow the pattern so that it does not match. |
+| `names a file Lakana cannot store` | A file's name holds a NUL character or is not valid UTF-8. | Rename the file. |
+| `gives ... the time ..., within 30 days of the earliest or latest time Lakana can store` | A file is dated near year 1 or year 9999. | Correct the file's time (or the date in its name), or narrow the pattern. |
 
 ## rest
 
@@ -321,6 +346,9 @@ def customers():
 
 The tested recipe of an incremental read that merges on a key:
 [A REST API](../how-to/load-data-from-a-source.md#a-rest-api).
+Late records are not caught by a lookback here: ask for the records from a margin before the
+watermark (such as `ctx.watermark(default=...) - timedelta(hours=1)` in `params`) and use
+`write="merge"` with a key so a record read twice is updated, not duplicated.
 
 ### rest.read
 
@@ -465,6 +493,9 @@ def customers(ctx):
 
 The tested recipe of an incremental read that appends by an integer key:
 [A SQL database](../how-to/load-data-from-a-source.md#a-sql-database).
+Late rows are not caught by a lookback here: write the `WHERE` clause with a margin (such as
+`updated_at > :since - interval '1 hour'`) and use `write="merge"` with a key so a row read twice
+is updated, not duplicated.
 
 ### sql.read
 

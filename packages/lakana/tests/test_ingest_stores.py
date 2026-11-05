@@ -28,6 +28,7 @@ from lakana.ingest import (
     SourceError,
     SourceRefused,
     _connections,
+    _directory,
     _http,
     _stores,
     files,
@@ -930,8 +931,6 @@ def test_an_object_store_listing_is_bounded_in_objects(
     memory: MemoryStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A listing looks at `MAX_ENTRIES` objects at most, matching or not."""
-    from lakana.ingest import _directory
-
     monkeypatch.setattr(_directory, "MAX_ENTRIES", 3)
     for index in range(4):
         obstore.put(memory, f"x{index}.txt", b"x")
@@ -1760,3 +1759,70 @@ def test_a_key_obstore_cannot_parse_fails_the_read_naming_it(
     assert "rename or remove the object, or narrow the pattern or the prefix" in message
     assert "\n" not in message
     assert runner._retryable("function", caught.value) is False
+
+
+def _listed(name: str, pattern: str) -> list[_directory.FileEntry]:
+    """List a declared connection's files as `files.read` sees them.
+
+    Parameters
+    ----------
+    name
+        The connection.
+    pattern
+        The pattern.
+
+    Returns
+    -------
+    list
+        The `FileEntry` values.
+    """
+    source = files._source(_connections.fetch(name))
+    try:
+        return list(source.list(pattern, 10).files)
+    finally:
+        source.close()
+
+
+def test_an_object_store_listing_carries_the_etag(
+    memory: MemoryStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An ETag over 512 characters, with a NUL, or none, identifies nothing: `None`."""
+    obstore.put(memory, "a.csv", b"id\n1\n")
+    (entry,) = _listed("lake", "*.csv")
+    assert entry.etag == '"0"'
+    now = dt.datetime.now(dt.UTC)
+    metas = [
+        {"path": "long.csv", "size": 1, "last_modified": now, "e_tag": "x" * 513},
+        {"path": "none.csv", "size": 1, "last_modified": now},
+        {"path": "max.csv", "size": 1, "last_modified": now, "e_tag": "y" * 512},
+        {"path": "nul.csv", "size": 1, "last_modified": now, "e_tag": "a\x00b"},
+    ]
+    monkeypatch.setattr(obstore, "list", lambda store, prefix=None, **kwargs: iter([metas]))
+    assert [e.etag for e in _listed("lake", "*.csv")] == [None, "y" * 512, None, None]
+
+
+def test_the_same_object_with_another_etag_is_read_again(memory: MemoryStore) -> None:
+    """F10: name, size and time equal, the ETag tells an overwritten object from the one read."""
+    obstore.put(memory, "a.csv", b"id\n1\n")
+    (meta,) = next(iter(obstore.list(memory)))
+    mark = meta["last_modified"]
+    state = context.current()
+    state.target_watermark = mark
+    for etag, rows in ((meta["e_tag"], 0), ('"other"', 1)):
+        state.recorded = frozenset({context.ReadFile("lake", "a.csv", 5, mark, etag)})
+        assert files.read("lake", "*.csv", since=mark).num_rows == rows
+    assert [f.etag for f in state.files_read] == ['"0"']
+
+
+def test_an_https_files_etag_comes_from_its_head_answer(monkeypatch: pytest.MonkeyPatch) -> None:
+    import httpx
+
+    tags = ['"v1"', None]
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        tag = tags.pop(0)
+        return httpx.Response(200, headers={} if tag is None else {"ETag": tag})
+
+    _mock_site(monkeypatch, answer)
+    assert [e.etag for e in _listed("site", "a.csv")] == ['"v1"']
+    assert [e.etag for e in _listed("site", "a.csv")] == [None]

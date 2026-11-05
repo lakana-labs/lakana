@@ -15,7 +15,9 @@ Example::
 connection (one file below its base URL, through httpx) or a ``directory`` connection (below an
 ingestion root, never following a symbolic link). Under the Docker runner the stores and the
 HTTPS client go through the task's egress proxy; nothing else in the task uses it. With
-``since=`` it reads only the files modified after it and adds the column ``_source_modified``.
+``since=`` it reads only the files modified after it, and a late file inside ``lookback=`` (24
+hours by default) that the asset's table has not recorded as read, and adds the column
+``_source_modified``.
 """
 
 from __future__ import annotations
@@ -25,13 +27,13 @@ import contextlib
 import datetime as dt
 import re
 import sys
-from collections.abc import Generator, Mapping
+from collections.abc import Generator, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Final, NoReturn, Protocol
 from urllib.parse import quote, urlsplit
 
 from lakana import context
-from lakana.ingest import _check, _directory, _formats, _http, _stores, connections
+from lakana.ingest import _check, _directory, _formats, _http, _read_set, _stores, connections
 from lakana.ingest._connections import FetchedConnection, fetch
 from lakana.ingest._errors import (
     CapExceeded,
@@ -217,6 +219,25 @@ def _utc(value: dt.datetime) -> dt.datetime:
         UTC-aware.
     """
     return value.replace(tzinfo=dt.UTC) if value.tzinfo is None else value.astimezone(dt.UTC)
+
+
+def _etag(value: object) -> str | None:
+    """Keep an ETag that identifies a file: text the record can hold.
+
+    Parameters
+    ----------
+    value
+        What the store or server reported.
+
+    Returns
+    -------
+    str or None
+        The ETag; `None` for none, or for one longer than `context.MAX_ETAG` characters or
+        holding a NUL or a lone surrogate, which the record cannot hold.
+    """
+    if not isinstance(value, str) or not 0 < len(value) <= context.MAX_ETAG:
+        return None
+    return value if _read_set.storable(value) else None
 
 
 def _quoted(path: str) -> str:
@@ -490,7 +511,7 @@ class _ObjectSource:
         Returns
         -------
         Listing
-            The matching objects, sorted by key.
+            The matching objects, sorted by key, each with its ETag where it fits the record.
 
         Raises
         ------
@@ -531,7 +552,10 @@ class _ObjectSource:
                         )
                     listing.files.append(
                         _directory.FileEntry(
-                            meta["path"], meta["size"], _utc(meta["last_modified"])
+                            meta["path"],
+                            meta["size"],
+                            _utc(meta["last_modified"]),
+                            _etag(meta.get("e_tag")),
                         )
                     )
         except obstore.exceptions.InvalidPathError as exc:
@@ -713,8 +737,8 @@ class _HttpSource:
         Returns
         -------
         Listing
-            The file, with ``Content-Length`` (0 without one) and ``Last-Modified`` (`None`
-            without one).
+            The file, with ``Content-Length`` (0 without one), ``Last-Modified`` and ``ETag``
+            (`None` without one).
 
         Raises
         ------
@@ -739,7 +763,8 @@ class _HttpSource:
             modified = None
         length = response.headers.get("content-length", "")
         size = int(length) if length.isdigit() else 0
-        return _directory.Listing(files=[_directory.FileEntry(path, size, modified)])
+        entry = _directory.FileEntry(path, size, modified, _etag(response.headers.get("etag")))
+        return _directory.Listing(files=[entry])
 
     def read(self, path: str, max_bytes: int) -> bytes:
         """Download the file, stopping at the cap.
@@ -962,6 +987,7 @@ def read(
     schema: Mapping[str, Any] | None = None,
     since: dt.datetime | _Unset | None = UNSET,
     modified_from: str = "mtime",
+    lookback: dt.timedelta | _Unset = UNSET,
     max_file_bytes: int = DEFAULT_MAX_BYTES,
     max_total_bytes: int = DEFAULT_MAX_BYTES,
     max_files: int = 10_000,
@@ -997,12 +1023,19 @@ def read(
         ``"mtime"`` (the file's modification time), or a `datetime.strptime` pattern for a
         date in the file's name, such as ``"export-%Y-%m-%d.csv"`` (midnight UTC); a name that
         does not fit is skipped with a line on standard error. Only with ``since=``.
+    lookback
+        How far before ``since`` a late file is still read once, such as a file moved in with
+        ``mv`` or an S3 upload dated by its start: `timedelta(hours=24)` when left out,
+        `timedelta(0)` turns it off, at most 30 days. Only with ``since=``; a file the asset's
+        table has recorded as read is never read again. Each call with ``since=`` prints a line
+        on standard error counting the new, late and already read files.
     max_file_bytes
         The largest file read.
     max_total_bytes
         The most bytes read in all.
     max_files
-        The most files read.
+        The most files read. With ``since``, every file inside the lookback window counts,
+        also those already read.
     max_rows
         The most rows read in all; each reader stops after it, so it also bounds what a
         compressed file (Parquet, a workbook) is decoded to.
@@ -1019,14 +1052,17 @@ def read(
     ConnectionNotDeclared
         For a connection the asset does not declare.
     UsageError
-        For a connection of another kind or set up wrong, a bad argument, or a path or pattern
+        For a connection of another kind or set up wrong, a bad argument (such as
+        ``lookback=`` without ``since=`` or of the wrong type or size), or a path or pattern
         the walker refuses (`DirectoryError`, not retried).
     CapExceeded
-        When a cap is passed; the message names the cap and how to narrow.
+        When a cap is passed, or more than 100,000 files are read with ``since=`` in one run;
+        the message names the cap and how to narrow.
     SourceError
         When the source fails (retried); `SourceRefused` when it refuses the credential or the
         certificate or answers with a redirect, `FileShapeError` when a file cannot be parsed or
-        does not fit the others (neither retried).
+        does not fit the others, or with ``since=`` has a name or time Lakana cannot record
+        (neither retried).
     """
     _positive(
         max_files=max_files,
@@ -1037,11 +1073,18 @@ def read(
     _formats.check_schema(schema)
     if modified_from != "mtime" and since is UNSET:
         raise UsageError("modified_from= applies only with since=")
+    if not isinstance(lookback, _Unset) and isinstance(since, _Unset):
+        raise UsageError("lookback= needs since=; pass since=ctx.watermark()")
+    window = (
+        _read_set.DEFAULT_LOOKBACK
+        if isinstance(lookback, _Unset)
+        else _read_set.check_lookback(lookback)
+    )
     conn = fetch(connection)
     source = _source(conn)
     try:
         with _naming(conn):
-            # The cap counts the files that will be read, so it applies after `since` filters.
+            # With since=, the cap counts the files inside the window, already read or not.
             listing = source.list(pattern, _directory.MAX_ENTRIES)
         for skipped in listing.skipped:
             print(
@@ -1051,7 +1094,7 @@ def read(
             )
         with_since = not isinstance(since, _Unset)
         after = _as_utc(since) if with_since else None
-        chosen: builtins.list[tuple[_directory.FileEntry, dt.datetime | None]] = []
+        timed: builtins.list[tuple[_directory.FileEntry, dt.datetime | None]] = []
         for entry in listing.files:
             modified = entry.modified
             if with_since and modified_from == "mtime" and modified is None:
@@ -1069,15 +1112,49 @@ def read(
                     )
                     continue
                 modified = named
-            if after is None or (modified is not None and modified > after):
-                if len(chosen) == max_files:
-                    advice = "narrow the pattern" + ("" if with_since else " or pass since=")
-                    raise CapExceeded(
-                        f"`{connection}`: the pattern {pattern!r} matches more than max_files "
-                        f"({max_files}) files to read; {advice}"
-                    )
-                chosen.append((entry, modified))
+            timed.append((entry, modified))
+        reported: builtins.list[context.ReadFile] = []
+        chosen: Sequence[tuple[_directory.FileEntry, dt.datetime | None]]
+        if not with_since:
+            if len(timed) > max_files:
+                raise CapExceeded(
+                    f"`{connection}`: the pattern {pattern!r} matches more than max_files "
+                    f"({max_files}) files to read; narrow the pattern or pass since="
+                )
+            chosen = timed
+        else:
+            state = context.current()
+            # With since=, every file has a time: one without is refused above.
+            choice = _read_set.choose(
+                connection,
+                [(entry, modified) for entry, modified in timed if modified is not None],
+                after=after,
+                lookback=window,
+                state=state,
+            )
+            if choice.inside > max_files:
+                raise CapExceeded(
+                    f"`{connection}`: the pattern {pattern!r} matches more than max_files "
+                    f"({max_files}) files to read; narrow the pattern"
+                )
+            applied = state.recorded is not None and after is not None
+            print(
+                _read_set.summary(connection, choice, window if applied else None),
+                file=sys.stderr,
+            )
+            _read_set.check_storable(connection, choice.reported)
+            if len(dict.fromkeys([*state.files_read, *choice.reported])) > context.MAX_FILES_READ:
+                raise CapExceeded(
+                    f"`{connection}`: this run has read more than {context.MAX_FILES_READ} files "
+                    "with since=; Lakana records each one to find late files and keeps at most "
+                    "that many per run: narrow the pattern"
+                )
+            reported = choice.reported
+            chosen = choice.chosen
         if not chosen:
+            # Only seeded files, taken as read: reported though nothing is read.
+            if reported:
+                context.current().files_read.extend(reported)
             return _empty(schema, with_since)
         import polars as pl
 
@@ -1144,7 +1221,11 @@ def read(
                 )
             frames.append(frame)
             names.append(name)
-        return _formats.combine(frames, names).to_arrow()
+        combined = _formats.combine(frames, names).to_arrow()
+        # Only now, every file read: an asset that catches an error must not record unread files.
+        if reported:
+            context.current().files_read.extend(reported)
+        return combined
     finally:
         source.close()
 

@@ -59,11 +59,15 @@ class FileEntry:
         Its modification time, UTC, truncated to the microsecond (the precision of a stored
         timestamp, so that a watermark read back compares equal); `None` only from a source
         that does not say (an HTTPS server without ``Last-Modified``).
+    etag
+        Its ETag from an object store or an HTTPS server, at most 512 characters; `None` where
+        there is none or it is longer.
     """
 
     path: str
     size: int
     modified: dt.datetime | None
+    etag: str | None = None
 
 
 @dataclass
