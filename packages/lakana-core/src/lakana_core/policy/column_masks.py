@@ -10,18 +10,15 @@ from sqlalchemy.orm import Session
 
 from lakana_core.audit.service import AuditService
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable, SecurableKind
-from lakana_core.catalog.identity import (
-    refuse_view_as_policy_target,
-    resolve_environment_id,
-    resolve_table_id,
-)
 from lakana_core.errors import NotFoundError, ValidationError
 from lakana_core.identifiers import NamespacePath, TableRef
 from lakana_core.models import AuditEventType, ColumnMask, Group, Principal
 from lakana_core.policy.columns import (
     ColumnSource,
+    PolicyTarget,
     binding_for,
     list_columns,
+    policy_table,
     read_table_description,
     type_checks_apply,
     validate_for_table,
@@ -197,6 +194,68 @@ class ColumnMaskService(PolicyShowing):
         assert group is not None  # nosec B101 -- FK guarantees the row still exists
         return group.name
 
+    def check_target(
+        self,
+        p: PrincipalRef,
+        *,
+        environment: str,
+        namespace: str,
+        table: str,
+        column: str,
+        expression: str,
+    ) -> PolicyTarget:
+        """Run every check `create` runs on a mask's table, column and expression, writing nothing.
+
+        `create` calls it after authorizing; an access file plan (#46) calls it after its own
+        authorization, so a planned mask is refused exactly as its single route would be.
+
+        Parameters
+        ----------
+        p
+            The acting principal, already authorized to manage policies.
+        environment
+            The environment the masked table lives in.
+        namespace
+            The namespace, in its unit-separator-joined storage form.
+        table
+            The table name.
+        column
+            The masked column.
+        expression
+            The restricted-subset replacement value.
+
+        Returns
+        -------
+        PolicyTarget
+            The ids, schema, binding and type-checked flag `create` stores.
+
+        Raises
+        ------
+        ValidationError
+            If the target is a view, or `expression` is outside the restricted subset, or the
+            column does not exist or has another type than the expression.
+        ConflictError
+            If the table's columns cannot be read.
+        NotFoundError
+            If no such table exists.
+        PermissionDenied
+            If `p` lacks READ_TABLE on the table.
+        """
+        validate_for_table(
+            self._catalog,
+            p,
+            environment=environment,
+            namespace=namespace,
+            table=table,
+            expression=expression,
+            kind="mask",
+        )
+        environment_id, table_id, ref = policy_table(self._session, environment, namespace, table)
+        schema_id, typed, binding = _check_column_exists(
+            self._catalog, p, ref, environment, column, expression
+        )
+        return PolicyTarget(environment_id, table_id, schema_id, binding, typed)
+
     def create(
         self,
         p: PrincipalRef,
@@ -260,29 +319,15 @@ class ColumnMaskService(PolicyShowing):
         self._authz.authorize(p, Action.MANAGE_POLICY, Securable.instance_scope())
         if (principal is None) == (group is None):
             raise ValidationError("Exactly one of 'principal' or 'group' must be given.")
-        validate_for_table(
-            self._catalog,
+        principal_id = self._get_principal(principal).id if principal is not None else None
+        group_id = self._get_group(group).id if group is not None else None
+        target = self.check_target(
             p,
             environment=environment,
             namespace=namespace,
             table=table,
+            column=column,
             expression=expression,
-            kind="mask",
-        )
-        principal_id = self._get_principal(principal).id if principal is not None else None
-        group_id = self._get_group(group).id if group is not None else None
-        environment_id = resolve_environment_id(self._session, environment)
-        table_id = resolve_table_id(self._session, environment, namespace, table)
-        if environment_id is None or table_id is None:
-            raise NotFoundError(
-                f"No table {table!r} in {environment!r}/{NamespacePath.parse(namespace)}."
-            )
-        refuse_view_as_policy_target(self._session, table_id, namespace, table)
-        ref = TableRef(
-            environment=environment, namespace=NamespacePath.parse(namespace), name=table
-        )
-        schema_id, type_checked, binding = _check_column_exists(
-            self._catalog, p, ref, environment, column, expression
         )
         row = ColumnMask(
             id=uuid.uuid4(),
@@ -291,15 +336,15 @@ class ColumnMaskService(PolicyShowing):
             environment=environment,
             namespace=namespace,
             table=table,
-            environment_id=environment_id,
-            table_id=table_id,
+            environment_id=target.environment_id,
+            table_id=target.table_id,
             column=column,
             expression=expression,
-            schema_id=schema_id,
-            field_ids=binding.field_ids,
-            column_field_id=binding.column_field_id,
-            binding=binding.binding,
-            type_checked=type_checked,
+            schema_id=target.schema_id,
+            field_ids=target.binding.field_ids,
+            column_field_id=target.binding.column_field_id,
+            binding=target.binding.binding,
+            type_checked=target.type_checked,
             created_by=p.id,
             created_at=datetime.now(UTC),
         )

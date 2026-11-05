@@ -63,6 +63,38 @@ class LiveAccess:
     active: frozenset[str]
     stored: Mapping[Entry, tuple[Entry, ...]]
 
+    def mapped(self, change: Callable[[Entry], Entry]) -> LiveAccess:
+        """Rebuild the facts with every entry changed, such as to a normalized spelling.
+
+        Entries the change makes equal become one entry with the row ids of all of them, so a
+        removal still names every row; a stored form that becomes its shown entry is dropped.
+
+        Parameters
+        ----------
+        change
+            The change of one entry.
+
+        Returns
+        -------
+        LiveAccess
+            The same facts, keyed by the changed entries.
+        """
+        ids: defaultdict[Entry, list[uuid.UUID]] = defaultdict(list)
+        for entry, found in self.ids.items():
+            ids[change(entry)].extend(found)
+        stored: defaultdict[Entry, list[Entry]] = defaultdict(list)
+        for entry, forms in self.stored.items():
+            shown = change(entry)
+            for form in map(change, forms):
+                if form != shown and form not in stored[shown]:
+                    stored[shown].append(form)
+        return LiveAccess(
+            AccessState(frozenset(map(change, self.state.entries))),
+            {entry: tuple(found) for entry, found in ids.items()},
+            self.active,
+            {entry: tuple(forms) for entry, forms in stored.items() if forms},
+        )
+
 
 def _target(environment: str | None, namespace: str | None, table: str | None) -> Target:
     """Build a target from stored names.
@@ -104,7 +136,8 @@ def read_live(
     Returns
     -------
     LiveAccess
-        The state, the ids of every copy and the names of the active principals.
+        The state, the ids of every copy, the names of the active principals and the stored
+        form of every policy shown under a renamed column.
     """
     principals = {
         row.id: row
@@ -116,6 +149,20 @@ def read_live(
     stored: defaultdict[Entry, list[Entry]] = defaultdict(list)
 
     def subject_of(principal_id: uuid.UUID | None, group_id: uuid.UUID | None) -> Subject | None:
+        """Name the subject of a row, or nothing for a deactivated principal.
+
+        Parameters
+        ----------
+        principal_id
+            The row's principal, or `None`.
+        group_id
+            The row's group, or `None`.
+
+        Returns
+        -------
+        Subject or None
+            The group or the active principal; `None` when the principal is not active.
+        """
         if group_id is not None:
             return Subject("group", groups[group_id])
         found = principals.get(principal_id) if principal_id is not None else None

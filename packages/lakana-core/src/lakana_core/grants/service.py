@@ -237,6 +237,65 @@ class GrantService:
             )
         return environment_id, table_id
 
+    def check_target(
+        self,
+        *,
+        role: Role | None,
+        action: Action | None,
+        kind: SecurableKind,
+        environment: str | None,
+        namespace: str | None,
+        table: str | None,
+    ) -> tuple[uuid.UUID | None, uuid.UUID | None]:
+        """Run every check `grant` runs on what is granted and where, writing nothing.
+
+        `grant` calls it after authorizing; an access file plan (#46) calls it after its own
+        authorization, so a planned grant is refused exactly as its single route would be.
+
+        Parameters
+        ----------
+        role
+            A role template, or `None` when `action` is given.
+        action
+            A raw action, or `None` when `role` is given.
+        kind
+            Which tier of the securable hierarchy the grant applies to.
+        environment
+            The environment, or `None` for the instance.
+        namespace
+            The namespace in its joined storage form, or `None`.
+        table
+            The table, or `None`.
+
+        Returns
+        -------
+        tuple of (uuid.UUID or None, uuid.UUID or None)
+            `(environment_id, table_id)`, as `_resolve_securable_ids` gives them.
+
+        Raises
+        ------
+        ValidationError
+            If not exactly one of `role`/`action` is given, `action` comes only with the
+            `ADMIN` role, `READ_QUERY_TEXT` is not on the instance, or the fields do not match
+            `kind`.
+        NotFoundError
+            If the environment, namespace or table does not exist.
+        """
+        if (role is None) == (action is None):
+            raise ValidationError("Exactly one of 'role' or 'action' must be given.")
+        if action in ADMIN_ONLY_ACTIONS:
+            raise ValidationError(
+                f"{action.value} comes only with the ADMIN role on the instance; grant that "
+                "role instead, or nothing."
+            )
+        if action is Action.READ_QUERY_TEXT and kind is not SecurableKind.INSTANCE:
+            raise ValidationError(
+                "READ_QUERY_TEXT is granted on the instance only, like the audit log it opens: "
+                "lakana grant create --kind INSTANCE --principal NAME --action READ_QUERY_TEXT"
+            )
+        _validate_securable_fields(kind, environment, namespace, table)
+        return self._resolve_securable_ids(kind, environment, namespace, table)
+
     def grant(
         self,
         p: PrincipalRef,
@@ -310,22 +369,16 @@ class GrantService:
         authorize_admin_only(self._session, self._authz, p, Action.MANAGE_GRANT)
         if (principal is None) == (group is None):
             raise ValidationError("Exactly one of 'principal' or 'group' must be given.")
-        if (role is None) == (action is None):
-            raise ValidationError("Exactly one of 'role' or 'action' must be given.")
-        if action in ADMIN_ONLY_ACTIONS:
-            raise ValidationError(
-                f"{action.value} comes only with the ADMIN role on the instance; grant that "
-                "role instead, or nothing."
-            )
-        if action is Action.READ_QUERY_TEXT and kind is not SecurableKind.INSTANCE:
-            raise ValidationError(
-                "READ_QUERY_TEXT is granted on the instance only, like the audit log it opens: "
-                "lakana grant create --kind INSTANCE --principal NAME --action READ_QUERY_TEXT"
-            )
-        _validate_securable_fields(kind, environment, namespace, table)
+        environment_id, table_id = self.check_target(
+            role=role,
+            action=action,
+            kind=kind,
+            environment=environment,
+            namespace=namespace,
+            table=table,
+        )
         principal_id = self._get_principal(principal).id if principal is not None else None
         group_id = self._get_group(group).id if group is not None else None
-        environment_id, table_id = self._resolve_securable_ids(kind, environment, namespace, table)
         row = Grant(
             id=uuid.uuid4(),
             principal_id=principal_id,

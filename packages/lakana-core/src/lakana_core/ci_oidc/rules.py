@@ -162,7 +162,7 @@ def condition_mismatches(
     return found
 
 
-def _resolve_issuer(value: str, issuers: Sequence[str]) -> str:
+def resolve_issuer(value: str, issuers: Sequence[str]) -> str:
     """Resolve an issuer as given (a preset or a URL) to one of the configured issuers.
 
     Parameters
@@ -314,6 +314,31 @@ def rule_problem(issuer: str, conditions: Mapping[str, object]) -> str | None:
     except ValidationError as exc:
         return str(exc)
     return None
+
+
+@dataclass(frozen=True)
+class CheckedRule:
+    """A rule's fields as `CiTrustRuleService.check_rule` checked them (#46).
+
+    Parameters
+    ----------
+    issuer
+        The configured issuer URL.
+    kinds
+        The kinds, sorted, without repeats.
+    conditions
+        The claim conditions.
+    environment_id
+        The environment's id.
+    repository_id
+        The repository's id.
+    """
+
+    issuer: str
+    kinds: list[str]
+    conditions: dict[str, str]
+    environment_id: uuid.UUID
+    repository_id: uuid.UUID
 
 
 @dataclass(frozen=True)
@@ -617,6 +642,52 @@ class CiTrustRuleService:
             },
         )
 
+    def check_rule(
+        self,
+        *,
+        issuer: str,
+        environment: str,
+        repository: str,
+        kinds: Sequence[str],
+        conditions: Mapping[str, str],
+    ) -> CheckedRule:
+        """Run every check `create` runs on a rule apart from its account, writing nothing.
+
+        `create` calls it after authorizing; an access file plan (#46) calls it after its own
+        authorization, so a planned rule is refused exactly as its single route would be.
+
+        Parameters
+        ----------
+        issuer
+            ``github``, ``gitlab`` or a configured issuer URL.
+        environment
+            The environment the rule is for.
+        repository
+            The registered repository.
+        kinds
+            ``deploy`` and/or ``dry_run``.
+        conditions
+            Claim name to the exact text the claim must have.
+
+        Returns
+        -------
+        CheckedRule
+            The values `create` stores.
+
+        Raises
+        ------
+        NotFoundError
+            If the environment or repository does not exist.
+        ValidationError
+            If a field breaks the rules of this module's docstring.
+        """
+        resolved = resolve_issuer(issuer, self._issuers)
+        allowed = _validate_kinds(kinds)
+        pinned = _validate_conditions(resolved, conditions)
+        env = environment_by_name(self._session, environment)
+        repo = repository_by_name(self._session, repository)
+        return CheckedRule(resolved, allowed, pinned, env.id, repo.id)
+
     def create(
         self,
         p: PrincipalRef,
@@ -666,21 +737,23 @@ class CiTrustRuleService:
             If a field breaks the rules of this module's docstring.
         """
         authorize_admin_only(self._session, self._authz, p, Action.MANAGE_TOKEN)
-        resolved = _resolve_issuer(issuer, self._issuers)
-        allowed = _validate_kinds(kinds)
-        pinned = _validate_conditions(resolved, conditions)
+        checked = self.check_rule(
+            issuer=issuer,
+            environment=environment,
+            repository=repository,
+            kinds=kinds,
+            conditions=conditions,
+        )
         account = self._service_account(principal)
-        env = environment_by_name(self._session, environment)
-        repo = repository_by_name(self._session, repository)
         now = utcnow()
         row = CiTrustRule(
             id=uuid.uuid4(),
-            issuer=resolved,
+            issuer=checked.issuer,
             principal_id=account.id,
-            environment_id=env.id,
-            repository_id=repo.id,
-            kinds=allowed,
-            conditions=pinned,
+            environment_id=checked.environment_id,
+            repository_id=checked.repository_id,
+            kinds=checked.kinds,
+            conditions=checked.conditions,
             enabled=True,
             start_on_deploy_jobs=start_on_deploy_jobs,
             revision=1,

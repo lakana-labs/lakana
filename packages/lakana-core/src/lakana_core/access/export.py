@@ -92,7 +92,8 @@ def export_document(state: AccessState, scopes: Scopes) -> str:
     """Write the entries of some scopes as an access file.
 
     Defaults are left out (`kinds: [deploy]`, `enabled: true`, `start_on_deploy_jobs: false`),
-    entries are sorted by `sort_key`, and the text starts with a comment naming the scopes.
+    entries are sorted by `sort_key`, and the text starts with a comment saying how to review
+    and apply it; ``manages`` names the scopes.
 
     Parameters
     ----------
