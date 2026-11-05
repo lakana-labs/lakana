@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import dataclasses
+import datetime as dt
 import logging
 import uuid
 from collections.abc import Sequence
 from pathlib import Path
 from types import SimpleNamespace
+from typing import NoReturn
 
 import pyarrow as pa
 import pytest
@@ -23,6 +25,7 @@ from sqlalchemy.orm import Session
 from lakana_core.auth import Action, AllowAllAuthorization, BoundTask, PrincipalRef, TaskScope
 from lakana_core.catalog.append import build_transaction
 from lakana_core.catalog.attempt_stamp import CLAIM_PROPERTY, TASK_RUN_PROPERTY
+from lakana_core.catalog.files_read import FileRead, FilesReadReport
 from lakana_core.catalog.service import CatalogService, LoadedTable
 from lakana_core.catalog.writes import parse_expected_snapshot
 from lakana_core.config import StorageConfig
@@ -34,6 +37,7 @@ from lakana_core.models import (
     AuditEventType,
     Connection,
     Environment,
+    IncrementalFileRead,
     LineageEdge,
     TableType,
     WriteMode,
@@ -668,3 +672,223 @@ def test_a_commit_cannot_claim_the_write_of_a_task_attempt(
     assert current.summary.get(TASK_RUN_PROPERTY) is None
     assert current.summary.get(CLAIM_PROPERTY) is None
     assert current.summary.get("added-records") == "1"
+
+
+def _report(*names: str) -> FilesReadReport:
+    """Build a run's record of the files it read from the connection `exports`.
+
+    Parameters
+    ----------
+    *names
+        The files' paths.
+
+    Returns
+    -------
+    FilesReadReport
+        The record, without a watermark.
+    """
+    stamp = dt.datetime(2026, 11, 1, tzinfo=dt.UTC)
+    return FilesReadReport(None, tuple(FileRead("exports", name, 4, stamp, None) for name in names))
+
+
+def _recorded(session: Session) -> list[tuple[str, int]]:
+    """List the recorded files, by name, with the snapshot each was recorded with.
+
+    Parameters
+    ----------
+    session
+        Database session.
+
+    Returns
+    -------
+    list of tuple of str and int
+        ``(name, snapshot_id)``, sorted by name.
+    """
+    rows = session.scalars(select(IncrementalFileRead).order_by(IncrementalFileRead.name))
+    return [(row.name, row.snapshot_id) for row in rows]
+
+
+def test_an_append_records_its_files_with_its_snapshot(
+    session: Session, principal: PrincipalRef, catalog: CatalogService
+) -> None:
+    """#344: the files a run read are recorded with the snapshot its append commits.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    principal
+        The acting principal.
+    catalog
+        The catalog.
+    """
+    result = catalog.append(
+        principal, _ref("gold.t"), _ids([2]), files_read=_report("a.csv", "b.csv")
+    )
+    assert result.snapshot_id is not None
+    assert _recorded(session) == [("a.csv", result.snapshot_id), ("b.csv", result.snapshot_id)]
+
+
+def test_an_append_of_no_rows_records_nothing(
+    session: Session, principal: PrincipalRef, catalog: CatalogService
+) -> None:
+    """No snapshot, no transaction, so nothing to record the files with.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    principal
+        The acting principal.
+    catalog
+        The catalog.
+    """
+    catalog.append(principal, _ref("gold.t"), _ids([]), files_read=_report("a.csv"))
+    assert _recorded(session) == []
+
+
+@pytest.mark.parametrize("method", ["append", "replace", "merge"])
+def test_files_read_are_written_in_the_commits_transaction(
+    session: Session,
+    principal: PrincipalRef,
+    catalog: CatalogService,
+    monkeypatch: pytest.MonkeyPatch,
+    method: str,
+) -> None:
+    """A commit that loses its race at the pointer swap records nothing, and keeps the old record.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    principal
+        The acting principal.
+    catalog
+        The catalog.
+    monkeypatch
+        Makes the commit lose.
+    method
+        The write.
+    """
+    kept = catalog.append(principal, _ref("gold.t"), _ids([2]), files_read=_report("kept.csv"))
+    assert kept.snapshot_id is not None
+
+    def losing(*args: object, **kwargs: object) -> NoReturn:
+        """Lose the race, as a writer that landed first makes the commit do.
+
+        Parameters
+        ----------
+        *args
+            Ignored.
+        **kwargs
+            Ignored.
+
+        Raises
+        ------
+        ConflictError
+            Always.
+        """
+        raise ConflictError("gold.t changed")
+
+    monkeypatch.setattr(catalog, "commit_table", losing)
+    extra: dict[str, object] = {"key": ("id",)} if method == "merge" else {}
+    with pytest.raises(ConflictError):
+        getattr(catalog, method)(
+            principal, _ref("gold.t"), _ids([3]), files_read=_report("a.csv"), **extra
+        )
+    assert _recorded(session) == [("kept.csv", kept.snapshot_id)]
+
+
+def test_a_replace_creating_the_table_records_its_files(
+    session: Session, principal: PrincipalRef, catalog: CatalogService
+) -> None:
+    """The first run of an append asset creates its table through the replace route.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    principal
+        The acting principal.
+    catalog
+        The catalog.
+    """
+    result = catalog.replace(
+        principal,
+        _ref("gold.new"),
+        _ids([1]),
+        expected_snapshot_id="none",
+        files_read=_report("a.csv"),
+    )
+    assert result.snapshot_id is not None
+    assert _recorded(session) == [("a.csv", result.snapshot_id)]
+
+
+def test_a_replace_keeps_only_the_files_of_its_own_rows(
+    session: Session, principal: PrincipalRef, catalog: CatalogService
+) -> None:
+    """A replaced table holds none of the old files' rows, so their record goes with them.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    principal
+        The acting principal.
+    catalog
+        The catalog.
+    """
+    catalog.append(principal, _ref("gold.t"), _ids([2]), files_read=_report("old.csv"))
+    result = catalog.replace(principal, _ref("gold.t"), _ids([5]), files_read=_report("a.csv"))
+    assert result.snapshot_id is not None
+    assert _recorded(session) == [("a.csv", result.snapshot_id)]
+
+    catalog.replace(principal, _ref("gold.t"), _ids([6]))
+    assert _recorded(session) == []
+
+
+def test_a_merge_records_its_files(
+    session: Session, principal: PrincipalRef, catalog: CatalogService
+) -> None:
+    """A merge commits through `_commit_one_snapshot`, and records there.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    principal
+        The acting principal.
+    catalog
+        The catalog.
+    """
+    result = catalog.merge(
+        principal, _ref("gold.t"), _ids([1, 2]), key=("id",), files_read=_report("late.csv")
+    )
+    assert result.snapshot_id is not None
+    assert _recorded(session) == [("late.csv", result.snapshot_id)]
+
+
+def test_a_merge_creating_the_table_records_its_files(
+    session: Session, principal: PrincipalRef, catalog: CatalogService
+) -> None:
+    """A merge asset's first run creates its table through `write_batches(CREATE)`.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    principal
+        The acting principal.
+    catalog
+        The catalog.
+    """
+    result = catalog.merge(
+        principal,
+        _ref("gold.new"),
+        _ids([1]),
+        key=("id",),
+        expected_snapshot_id="none",
+        files_read=_report("a.csv"),
+    )
+    assert result.created and result.snapshot_id is not None
+    assert _recorded(session) == [("a.csv", result.snapshot_id)]

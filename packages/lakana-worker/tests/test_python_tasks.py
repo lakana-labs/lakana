@@ -31,6 +31,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from importlib.metadata import version as package_version
 from pathlib import Path
+from types import SimpleNamespace
 from typing import NoReturn, cast
 from unittest import mock
 
@@ -61,6 +62,8 @@ import lakana_worker.python_tasks as python_tasks_module
 import lakana_worker.task_checks as task_checks_module
 import lakana_worker.task_lease as task_lease_module
 import lakana_worker.tasks as tasks_module
+from lakana import context
+from lakana.ingest import _connections, files
 from lakana_core.artifacts.service import ArtifactService
 from lakana_core.auth import (
     Action,
@@ -70,7 +73,9 @@ from lakana_core.auth import (
     RunContext,
     Securable,
 )
+from lakana_core.catalog import files_read
 from lakana_core.catalog.attempt_stamp import CLAIM_PROPERTY, TASK_RUN_PROPERTY
+from lakana_core.catalog.files_read import parse_files_read, split_files_read
 from lakana_core.catalog.json_schema import ColumnSpec
 from lakana_core.catalog.metadata import read_metadata
 from lakana_core.catalog.query_service import QueryService
@@ -104,6 +109,7 @@ from lakana_core.models import (
     DeployStatus,
     Environment,
     EnvironmentDeployment,
+    IncrementalFileRead,
     JobVersion,
     Namespace,
     PackageIndex,
@@ -8694,3 +8700,300 @@ def test_a_merging_python_asset_gets_no_history(py: PyWorld) -> None:
     run_claimed(engine, py.claim_python(engine))
     (task,) = py.runner.tasks
     assert task.history is None
+
+
+# --- The record of files read (#344) ------------------------------------------------------
+
+
+def _touch(path: Path, data: bytes, modified: datetime) -> None:
+    """Write a file and set its modification time to the microsecond.
+
+    Parameters
+    ----------
+    path
+        Where.
+    data
+        Its content.
+    modified
+        Its modification time.
+    """
+    path.write_bytes(data)
+    stamp = (modified - datetime(1970, 1, 1, tzinfo=UTC)) // timedelta(microseconds=1)
+    os.utime(path, ns=(stamp * 1000, stamp * 1000))
+
+
+def _reads_exports(world: World) -> Script:
+    """Build a script that reads `exports/*.csv` with the real `files.read` and commits.
+
+    The task's record, watermark and routing are what the worker sent; the record of files read
+    goes through the SDK's payload and core's parse, as over REST. A run that reads no row on
+    a table that exists uploads nothing, as the harness does.
+
+    Parameters
+    ----------
+    world
+        The world.
+
+    Returns
+    -------
+    Script
+        The script.
+    """
+    body = {
+        "name": "exports",
+        "kind": "directory",
+        "address": {"root": "shared", "path": "in"},
+        "settings": {},
+        "endpoints": [],
+        "secret": None,
+    }
+
+    def script(task: PythonTask, on_log: Callable[[bytes], None], stop: StopSignal) -> RunOutcome:
+        mark = None if task.watermark is None else context.decode_watermark(task.watermark)
+        context._set(
+            context._TaskState(
+                client=SimpleNamespace(task_connections=SimpleNamespace(get=lambda name: body)),  # ty: ignore[invalid-argument-type]
+                environment="dev",
+                asset=task.table,
+                declared=frozenset({"exports"}),
+                connections=task.connections,
+                recorded=None
+                if task.files_read is None
+                else frozenset(context.ReadFile.from_json(dict(f)) for f in task.files_read),
+                target_watermark=mark if isinstance(mark, datetime) else None,
+                record_horizon=None
+                if task.files_read_horizon is None
+                else datetime.fromisoformat(task.files_read_horizon),
+            )
+        )
+        try:
+            data = files.read(
+                "exports", "*.csv", since=mark if isinstance(mark, datetime) else None
+            )
+            payload = context.files_read_payload()
+        finally:
+            context._set(None)
+            _connections.clear()
+        expected = cast("ExpectedSnapshot", task.expected_snapshot_id)
+        if data.num_rows == 0 and expected != "none":
+            return RunOutcome(succeeded=True, snapshot_id=None, rows=0)
+        if payload is not None:
+            data = data.replace_schema_metadata({context.FILES_READ_KEY.encode(): payload})
+        rows, raw = split_files_read(data)
+        parsed = parse_token(task.token, "lakana_task")
+        assert parsed is not None
+        with world.session() as session:
+            principal = TaskTokenService(session, AllowAllAuthorization()).verify(*parsed).principal
+            report = None if raw is None else parse_files_read(raw, principal)
+            catalog = CatalogService(session, StorageResolver(session), AllowAllAuthorization())
+            ref = TableRef.from_dotted("dev", task.table)
+            if expected == "none":
+                written = catalog.replace(
+                    principal, ref, rows, expected_snapshot_id="none", files_read=report
+                )
+            else:
+                written = catalog.append(
+                    principal, ref, rows, expected_snapshot_id=expected, files_read=report
+                )
+        return RunOutcome(succeeded=True, snapshot_id=written.snapshot_id, rows=written.rows)
+
+    return script
+
+
+def _exports(py: PyWorld, tmp_path: Path) -> tuple[Path, RunEngine]:
+    """Deploy an append asset over a directory connection `exports` and build its engine.
+
+    Parameters
+    ----------
+    py
+        The world.
+    tmp_path
+        The test's directory, which holds the ingestion root.
+
+    Returns
+    -------
+    tuple
+        The connection's directory and the engine.
+    """
+    shared = tmp_path / "shared"
+    (shared / "in").mkdir(parents=True)
+    _connection(py, "exports", ConnectionKind.DIRECTORY, {"root": "shared", "path": "in"}, {})
+    py.deploy(
+        write="append", watermark="_source_modified", write_mode="append", connections=["exports"]
+    )
+    return shared / "in", py.engine(
+        _reads_exports(py.world), ingestion_roots={"shared": str(shared)}
+    )
+
+
+_T = datetime(2026, 11, 2, 12, tzinfo=UTC)
+
+
+def test_an_s3_style_late_file_is_read_exactly_once(py: PyWorld, tmp_path: Path) -> None:
+    """A file dated before a newer file that was already read appears afterwards."""
+    folder, engine = _exports(py, tmp_path)
+    _touch(folder / "a.csv", b"id\n1\n", _T)
+    run_claimed(engine, py.claim_python(engine))
+    _touch(folder / "c.csv", b"id\n3\n", _T + timedelta(hours=2))
+    _rerun(py, engine)
+    _touch(folder / "b.csv", b"id\n2\n", _T + timedelta(hours=1))
+    _rerun(py, engine)
+    _rerun(py, engine)
+
+    assert _ids(py.world, "gold.scores") == [1, 2, 3]
+    assert _task(py.world, "gold.scores").status is TaskStatus.SUCCEEDED
+
+
+def test_a_file_moved_in_with_an_older_time_is_read_exactly_once(
+    py: PyWorld, tmp_path: Path
+) -> None:
+    """`mv` keeps a file's time: one five hours older than the watermark is still read once."""
+    folder, engine = _exports(py, tmp_path)
+    _touch(folder / "a.csv", b"id\n1\n", _T)
+    run_claimed(engine, py.claim_python(engine))
+    _touch(folder / "moved.csv", b"id\n2\n", _T - timedelta(hours=5))
+    _rerun(py, engine)
+    _rerun(py, engine)
+
+    assert _ids(py.world, "gold.scores") == [1, 2]
+
+
+def test_the_first_runs_after_an_upgrade_duplicate_nothing(py: PyWorld, tmp_path: Path) -> None:
+    """The seeding run records the window, so the run after it reads no old file."""
+    folder, engine = _exports(py, tmp_path)
+    _touch(folder / "a.csv", b"id\n1\n", _T)
+    _touch(folder / "b.csv", b"id\n2\n", _T - timedelta(hours=1))
+    run_claimed(engine, py.claim_python(engine))
+    with py.world.session() as session:  # the upgrade: a table with rows and no record
+        session.execute(sqlalchemy_delete(IncrementalFileRead))
+        session.commit()
+    _touch(folder / "c.csv", b"id\n3\n", _T + timedelta(hours=1))
+    _rerun(py, engine)
+    _touch(folder / "d.csv", b"id\n4\n", _T + timedelta(hours=2))
+    _rerun(py, engine)
+
+    assert _ids(py.world, "gold.scores") == [1, 2, 3, 4]
+    first, seeding, after = py.runner.tasks
+    assert (first.files_read, seeding.files_read) == (None, ())
+    assert sorted(str(f["name"]) for f in after.files_read or ()) == ["a.csv", "b.csv", "c.csv"]
+
+
+def test_the_task_gets_the_record_of_its_target(py: PyWorld, tmp_path: Path) -> None:
+    folder, engine = _exports(py, tmp_path)
+    _touch(folder / "a.csv", b"id\n1\n", _T)
+    run_claimed(engine, py.claim_python(engine))
+    _rerun(py, engine)
+
+    first, second = py.runner.tasks
+    assert first.files_read is None  # the table did not exist yet
+    assert [f["name"] for f in second.files_read or ()] == ["a.csv"]
+
+
+def test_a_replace_asset_gets_no_record(py: PyWorld) -> None:
+    py.deploy()
+    engine = py.engine(_harness_writes(py.world, [1], [2]))
+    run_claimed(engine, py.claim_python(engine))
+    _rerun(py, engine)
+    assert [task.files_read for task in py.runner.tasks] == [None, None]
+
+
+def test_an_append_without_a_watermark_value_gets_no_record(py: PyWorld) -> None:
+    """A table with no rows has no watermark: `files.read` reads every file, so no record."""
+    py.deploy(write="append", watermark="id", write_mode="append")
+    engine = py.engine(_harness_writes(py.world, [], [1]))
+    run_claimed(engine, py.claim_python(engine))
+    _rerun(py, engine)
+    first, second = py.runner.tasks
+    assert (second.table_exists, second.watermark) == (True, None)
+    assert [first.files_read, second.files_read] == [None, None]
+
+
+def test_an_append_with_a_watermark_that_is_no_time_gets_no_record(py: PyWorld) -> None:
+    """Nothing is loaded for an integer watermark: the record is pruned by a time only."""
+    py.deploy(write="append", watermark="id", write_mode="append")
+    engine = py.engine(_harness_writes(py.world, [1], [2]))
+    run_claimed(engine, py.claim_python(engine))
+    _rerun(py, engine)
+    first, second = py.runner.tasks
+    assert second.watermark == "long:1"
+    assert [first.files_read, second.files_read] == [None, None]
+
+
+def test_a_record_past_the_cap_loads_its_newest_files_and_the_asset_keeps_running(
+    py: PyWorld, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Past the cap the worker sends a horizon: nothing is read twice, nothing stops the asset.
+
+    A late file at or before the horizon is not caught: the documented price.
+    """
+    folder, engine = _exports(py, tmp_path)
+    for n in range(3):
+        _touch(folder / f"{n}.csv", f"id\n{n}\n".encode(), _T - timedelta(hours=2 - n))
+    run_claimed(engine, py.claim_python(engine))
+    monkeypatch.setattr(files_read, "MAX_FILES_READ", 2)
+    monkeypatch.setattr(files_read, "CONNECTION_RESERVE", 0)
+    _touch(folder / "late.csv", b"id\n3\n", _T - timedelta(hours=3))
+    _touch(folder / "new.csv", b"id\n4\n", _T + timedelta(hours=1))
+    _rerun(py, engine)
+
+    assert _task(py.world, "gold.scores").status is TaskStatus.SUCCEEDED
+    assert _ids(py.world, "gold.scores") == [0, 1, 2, 4]
+    second = py.runner.tasks[1]
+    assert [f["name"] for f in second.files_read or ()] == ["1.csv", "2.csv"]
+    assert second.files_read_horizon == (_T - timedelta(hours=1)).isoformat()
+
+
+def test_a_first_run_past_the_cap_succeeds_and_the_next_reads_nothing_twice(
+    py: PyWorld, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A backfill of more files than the record takes is never refused (scaled: a cap of 2).
+
+    The run records its newest files; the next load is full, so its horizon takes the older
+    ones as read.
+    """
+    monkeypatch.setattr(files_read, "MAX_FILES_READ", 2)
+    monkeypatch.setattr(context, "MAX_FILES_READ", 2)
+    monkeypatch.setattr(files_read, "CONNECTION_RESERVE", 0)
+    monkeypatch.setattr(context, "CONNECTION_RESERVE", 0)
+    folder, engine = _exports(py, tmp_path)
+    for n in range(3):
+        _touch(folder / f"{n}.csv", f"id\n{n}\n".encode(), _T - timedelta(hours=2 - n))
+    run_claimed(engine, py.claim_python(engine))
+    _touch(folder / "new.csv", b"id\n3\n", _T + timedelta(hours=1))
+    _rerun(py, engine)
+
+    assert _task(py.world, "gold.scores").status is TaskStatus.SUCCEEDED
+    assert _ids(py.world, "gold.scores") == [0, 1, 2, 3]
+    second = py.runner.tasks[1]
+    assert second.files_read_horizon == (_T - timedelta(hours=1)).isoformat()
+
+
+def test_a_run_of_long_names_past_the_byte_budget_is_accepted_and_reads_nothing_twice(
+    py: PyWorld, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A record of long names is trimmed to its newest, never refused (scaled: a tiny budget).
+
+    The server takes it, and the next run's load passes the byte threshold, so its horizon
+    takes the dropped older files as read.
+    """
+    folder, engine = _exports(py, tmp_path)
+    long = "日" * 80
+    stamps = [_T - timedelta(hours=2 - n) for n in range(3)]
+    for n, stamp in enumerate(stamps):
+        _touch(folder / f"{long}{n}.csv", f"id\n{n}\n".encode(), stamp)
+    line = len(
+        context._line(
+            context.ReadFile("exports", f"{long}0.csv", 4, stamps[0]).to_json()  # "id\n0\n"
+        )
+    )
+    monkeypatch.setattr(context, "RECORD_BUDGET_BYTES", 2 * line + 10)
+    monkeypatch.setattr(files_read, "RECORD_BUDGET_BYTES", 2 * line + 10)
+    monkeypatch.setattr(files_read, "MAX_LINE_BYTES", line + 50)
+    monkeypatch.setattr(files_read, "MAX_RECORD_BYTES", 2 * line + 210)  # three lines would not fit
+    run_claimed(engine, py.claim_python(engine))
+    _touch(folder / "new.csv", b"id\n3\n", _T + timedelta(hours=1))
+    _rerun(py, engine)
+
+    assert _task(py.world, "gold.scores").status is TaskStatus.SUCCEEDED
+    assert _ids(py.world, "gold.scores") == [0, 1, 2, 3]
+    assert py.runner.tasks[1].files_read_horizon is not None

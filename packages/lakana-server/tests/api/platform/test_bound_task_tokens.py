@@ -8,6 +8,7 @@ the token's binding, not from a missing grant.
 from __future__ import annotations
 
 import io
+import json
 import uuid
 from dataclasses import dataclass
 
@@ -15,6 +16,7 @@ import pyarrow as pa
 import pyarrow.ipc
 import pytest
 from fastapi.testclient import TestClient
+from httpx import Response
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
@@ -25,6 +27,7 @@ from lakana_core.models import (
     AuditEvent,
     AuditEventType,
     Environment,
+    IncrementalFileRead,
     JobVersion,
     Namespace,
     Principal,
@@ -867,3 +870,186 @@ def test_a_task_of_a_reading_and_writing_principal_merges(bound: Bound) -> None:
     status, body = _merge(bound, "gold.scores")
 
     assert status == 200, body
+
+
+_RECORD: list[dict[str, object]] = [
+    {"version": 1, "watermark": None},
+    {
+        "connection": "exports",
+        "name": "a.csv",
+        "size": 4,
+        "modified": "2026-11-01T00:00:00+00:00",
+        "etag": None,
+    },
+]
+
+
+def _ipc_with(ids: list[int], metadata: dict[bytes, bytes]) -> bytes:
+    """Serialize a non-nullable `id` column with schema metadata as an Arrow IPC stream.
+
+    Parameters
+    ----------
+    ids
+        The ids.
+    metadata
+        The schema metadata.
+
+    Returns
+    -------
+    bytes
+        The stream.
+    """
+    schema = pa.schema([pa.field("id", pa.int64(), nullable=False)]).with_metadata(metadata)
+    table = pa.table({"id": pa.array(ids, pa.int64())}, schema=schema)
+    sink = io.BytesIO()
+    with pyarrow.ipc.new_stream(sink, table.schema) as writer:
+        writer.write_table(table)
+    return sink.getvalue()
+
+
+def _record(lines: list[dict[str, object]]) -> dict[bytes, bytes]:
+    """Encode a record of files read as the harness sends it: newline-delimited JSON.
+
+    Parameters
+    ----------
+    lines
+        The header, then one object per file.
+
+    Returns
+    -------
+    dict of bytes to bytes
+        The schema metadata carrying it.
+    """
+    return {b"lakana.files_read": "\n".join(json.dumps(line) for line in lines).encode()}
+
+
+def _send(bound: Bound, method: str, path: str, body: bytes, headers: dict[str, str]) -> Response:
+    """Send an Arrow upload to `gold.scores`.
+
+    Parameters
+    ----------
+    bound
+        The attempt.
+    method
+        The HTTP method.
+    path
+        ``data`` or ``merge?key=id``.
+    body
+        The stream.
+    headers
+        The caller's `Authorization`.
+
+    Returns
+    -------
+    Response
+        The answer.
+    """
+    return bound.client.request(
+        method,
+        f"/api/v1/environments/dev/namespaces/gold/tables/scores/{path}",
+        content=body,
+        headers={**headers, "Content-Type": _ARROW},
+    )
+
+
+def _recorded(bound: Bound) -> list[tuple[str, str, int]]:
+    """List the recorded files read.
+
+    Parameters
+    ----------
+    bound
+        The attempt.
+
+    Returns
+    -------
+    list of tuple
+        ``(connection, name, snapshot_id)`` of each row.
+    """
+    with bound.session() as session:
+        rows = session.scalars(select(IncrementalFileRead)).all()
+        return [(row.connection, row.name, row.snapshot_id) for row in rows]
+
+
+@pytest.mark.parametrize(
+    ("method", "path"), [("POST", "data"), ("PUT", "data"), ("POST", "merge?key=id")]
+)
+def test_a_tasks_upload_records_the_files_it_read(bound: Bound, method: str, path: str) -> None:
+    """#344: append, replace and merge each record the task's files with their commit.
+
+    Parameters
+    ----------
+    bound
+        The attempt.
+    method
+        The HTTP method.
+    path
+        The route.
+    """
+    _declare_connections(bound, ["exports"])
+    response = _send(bound, method, path, _ipc_with([2], _record(_RECORD)), bound.headers)
+    assert response.status_code == 200, response.text
+    assert _recorded(bound) == [("exports", "a.csv", response.json()["snapshot_id"])]
+
+
+def test_a_user_upload_with_a_record_is_refused_naming_the_cause(bound: Bound) -> None:
+    """Only a token bound to a task attempt may send a record.
+
+    Parameters
+    ----------
+    bound
+        The attempt.
+    """
+    response = _send(bound, "POST", "data", _ipc_with([1], _record(_RECORD)), AUTH_HEADER)
+    assert response.status_code == 422
+    assert "Only a run of a deployed asset may send a record of the files it read" in response.text
+    assert _recorded(bound) == []
+
+
+@pytest.mark.parametrize(
+    ("raw", "cause"),
+    [
+        (b"\xff\xfe", "line 1 is not JSON"),
+        (b'{"version": 1}\n[]', "malformed"),
+        (None, "which the asset does not declare"),
+    ],
+)
+def test_a_bad_record_is_a_422_naming_the_cause_and_writes_nothing(
+    bound: Bound, raw: bytes | None, cause: str
+) -> None:
+    """No record is a 500: the parser refuses it before anything else reads it.
+
+    Parameters
+    ----------
+    bound
+        The attempt.
+    raw
+        The record; `None` sends a well-formed one naming an undeclared connection.
+    cause
+        What the refusal must name.
+    """
+    _declare_connections(bound, ["other"])
+    metadata = _record(_RECORD) if raw is None else {b"lakana.files_read": raw}
+    before = bound.client.get(
+        "/api/v1/environments/dev/namespaces/gold/tables/scores", headers=AUTH_HEADER
+    ).json()["snapshot_id"]
+    response = _send(bound, "POST", "data", _ipc_with([2], metadata), bound.headers)
+    assert response.status_code == 422, response.text
+    assert cause in response.text
+    assert _recorded(bound) == []
+    after = bound.client.get(
+        "/api/v1/environments/dev/namespaces/gold/tables/scores", headers=AUTH_HEADER
+    ).json()["snapshot_id"]
+    assert after == before
+
+
+def test_other_schema_metadata_still_writes(bound: Bound) -> None:
+    """Metadata other than the record is no record, and the write goes through as before.
+
+    Parameters
+    ----------
+    bound
+        The attempt.
+    """
+    response = _send(bound, "POST", "data", _ipc_with([1], {b"pandas": b"{}"}), bound.headers)
+    assert response.status_code == 200, response.text
+    assert _recorded(bound) == []

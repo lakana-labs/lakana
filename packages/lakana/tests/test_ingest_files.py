@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import io
+import json
 import os
 import zipfile
 from collections.abc import Iterator, Mapping
@@ -15,7 +16,16 @@ import pyarrow as pa
 import pytest
 
 from lakana import context
-from lakana.ingest import CapExceeded, IngestError, SourceError, _connections, _formats, files
+from lakana.ingest import (
+    CapExceeded,
+    FileShapeError,
+    IngestError,
+    SourceError,
+    UsageError,
+    _connections,
+    _formats,
+    files,
+)
 from lakana.ingest._directory import DirectoryError, DirectoryIOError, RootUnavailable
 
 _UTC = dt.UTC
@@ -1341,3 +1351,343 @@ def test_json_in_another_encoding_than_utf_8_is_a_shape_error(format: str, encod
 
     with pytest.raises(_formats.FileShapeError, match=r"`exports/a\.json`: "):
         _formats.parse(text.encode(encoding), name="exports/a.json", format=format)
+
+
+_MARK = dt.datetime(2026, 11, 2, 12, tzinfo=_UTC)
+
+
+def _record(*files: context.ReadFile, watermark: dt.datetime | None = _MARK) -> None:
+    """Give the running task's state a record of files read and the target's watermark.
+
+    Parameters
+    ----------
+    *files
+        The files the target recorded as read.
+    watermark
+        The target's watermark.
+    """
+    state = context.current()
+    state.recorded = frozenset(files)
+    state.target_watermark = watermark
+
+
+def _read(path: Path, modified: dt.datetime, connection: str = "exports") -> context.ReadFile:
+    """Describe a written file as `files.read` records it.
+
+    Parameters
+    ----------
+    path
+        The file.
+    modified
+        Its time.
+    connection
+        Its connection.
+
+    Returns
+    -------
+    ReadFile
+        The file.
+    """
+    return context.ReadFile(connection, path.name, path.stat().st_size, modified)
+
+
+def test_a_late_file_inside_the_lookback_is_read_once(
+    root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _write(root / "a.csv", b"id\n1\n", _MARK)
+    _write(root / "late.csv", b"id\n2\n", _MARK - dt.timedelta(hours=3))
+    _write(root / "old.csv", b"id\n3\n", _MARK - dt.timedelta(hours=25))
+    _write(root / "new.csv", b"id\n4\n", _MARK + dt.timedelta(seconds=1))
+    _record(_read(root / "a.csv", _MARK))
+
+    table = files.read("exports", "*.csv", since=_MARK)
+
+    assert sorted(table.column("id").to_pylist()) == [2, 4]
+    assert capsys.readouterr().err.splitlines()[-1] == (
+        "files.read: `exports`: 1 new file, 1 late file inside the 24 h lookback, 1 already read"
+    )
+    assert {f.name for f in context.current().files_read} == {"late.csv", "new.csv"}
+
+
+def test_lookback_zero_reads_only_after_since(root: Path) -> None:
+    _write(root / "late.csv", b"id\n2\n", _MARK - dt.timedelta(hours=3))
+    _record(context.ReadFile("exports", "x.csv", 1, _MARK))
+    assert files.read("exports", "*.csv", since=_MARK, lookback=dt.timedelta(0)).num_rows == 0
+
+
+def test_the_same_name_with_a_new_time_or_size_is_a_new_file(root: Path) -> None:
+    _write(root / "a.csv", b"id\n1\n", _MARK - dt.timedelta(hours=1))
+    _write(root / "b.csv", b"id\n2\n", _MARK - dt.timedelta(hours=1))
+    _record(
+        context.ReadFile("exports", "a.csv", 5, _MARK - dt.timedelta(hours=2)),
+        context.ReadFile("exports", "b.csv", 4, _MARK - dt.timedelta(hours=1)),
+    )
+    assert files.read("exports", "*.csv", since=_MARK).column("id").to_pylist() == [1, 2]
+
+
+def test_a_connection_without_records_is_seeded_and_reports_its_window(root: Path) -> None:
+    """Ruling 4: the first run after the upgrade reads nothing at or before the watermark."""
+    _write(root / "before.csv", b"id\n1\n", _MARK - dt.timedelta(hours=1))
+    _write(root / "month.csv", b"id\n2\n", _MARK - dt.timedelta(days=29))
+    _write(root / "ancient.csv", b"id\n3\n", _MARK - dt.timedelta(days=31))
+    _write(root / "new.csv", b"id\n4\n", _MARK + dt.timedelta(hours=1))
+    _record(context.ReadFile("other", "x.csv", 1, _MARK))  # another connection's record
+
+    table = files.read("exports", "*.csv", since=_MARK)
+
+    assert table.column("id").to_pylist() == [4]
+    # month.csv is taken as read but not recorded: only the call's 24 h window is.
+    assert {f.name for f in context.current().files_read} == {"before.csv", "new.csv"}
+
+
+def test_seeding_stops_at_an_earlier_since_so_a_late_file_is_still_read(root: Path) -> None:
+    """I1: an asset with its own margin reads what it read before, and records it."""
+    _write(root / "late.csv", b"id\n2\n", _MARK - dt.timedelta(minutes=30))
+    _write(root / "before.csv", b"id\n1\n", _MARK - dt.timedelta(hours=2))
+    _record()
+
+    table = files.read("exports", "*.csv", since=_MARK - dt.timedelta(hours=1))
+
+    assert table.column("id").to_pylist() == [2]
+    assert {f.name for f in context.current().files_read} == {"before.csv", "late.csv"}
+
+
+def test_the_window_never_starts_before_the_record_does(root: Path) -> None:
+    """A file older than the worker's record (30 days before the watermark) is not read again."""
+    _write(root / "pruned.csv", b"id\n1\n", _MARK - dt.timedelta(days=33))
+    _write(root / "late.csv", b"id\n2\n", _MARK - dt.timedelta(days=29))
+    _record(context.ReadFile("exports", "x.csv", 1, _MARK))
+
+    table = files.read(
+        "exports", "*.csv", since=_MARK - dt.timedelta(days=7), lookback=dt.timedelta(days=30)
+    )
+
+    assert table.column("id").to_pylist() == [2]
+
+
+def test_seeding_treats_a_naive_watermark_as_utc(root: Path) -> None:
+    """Review Focus 5."""
+    _write(root / "before.csv", b"id\n1\n", _MARK - dt.timedelta(hours=1))
+    _record(watermark=_MARK.replace(tzinfo=None))
+    assert files.read("exports", "*.csv", since=_MARK).num_rows == 0
+
+
+def test_without_a_record_from_the_worker_it_reads_as_before(
+    root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Ruling 9: an older worker, or a watermark that is no time."""
+    _write(root / "late.csv", b"id\n2\n", _MARK - dt.timedelta(hours=3))
+    assert files.read("exports", "*.csv", since=_MARK).num_rows == 0
+    assert capsys.readouterr().err.splitlines()[-1] == (
+        "files.read: `exports`: 0 new files, 0 already read"
+    )
+
+
+def test_since_none_reads_everything_and_reports_it(root: Path) -> None:
+    _write(root / "a.csv", b"id\n1\n", _MARK)
+    files.read("exports", "*.csv", since=None)
+    assert [f.name for f in context.current().files_read] == ["a.csv"]
+    assert context.files_read_payload() == (
+        b'{"version": 1, "watermark": null}\n'
+        b'{"connection": "exports", "name": "a.csv", "size": 5, "modified": "'
+        + _MARK.isoformat().encode()
+        + b'", "etag": null}\n'
+    )
+
+
+def test_since_none_reads_even_the_recorded_files(root: Path) -> None:
+    """F4: `since=None` filters nothing; the record applies only with a time."""
+    _write(root / "a.csv", b"id\n1\n", _MARK)
+    _record(_read(root / "a.csv", _MARK))
+    assert files.read("exports", "*.csv", since=None).column("id").to_pylist() == [1]
+
+
+def test_without_since_nothing_is_reported(root: Path) -> None:
+    _write(root / "a.csv", b"id\n1\n", _MARK)
+    files.read("exports", "*.csv")
+    assert context.files_read_payload() is None
+
+
+def test_a_file_is_recorded_only_once_its_read_succeeded(root: Path) -> None:
+    """F6: an asset that catches the error and returns rows anyway records no unread file."""
+    _write(root / "a.csv", b"id\n1\n", _MARK + dt.timedelta(hours=1))
+    _write(root / "b.csv", b"id\nx\n", _MARK + dt.timedelta(hours=2))
+    _record(context.ReadFile("exports", "x.csv", 1, _MARK))
+    with pytest.raises(FileShapeError):
+        files.read("exports", "*.csv", since=_MARK, schema={"id": pl.Int64})
+    assert context.current().files_read == []
+
+
+def test_a_seeded_call_without_a_file_to_read_still_reports_them(root: Path) -> None:
+    _write(root / "before.csv", b"id\n1\n", _MARK - dt.timedelta(hours=1))
+    _record()
+    assert files.read("exports", "*.csv", since=_MARK).num_rows == 0
+    assert [f.name for f in context.current().files_read] == ["before.csv"]
+
+
+def test_an_hourly_asset_is_not_refused_for_the_files_it_already_read(root: Path) -> None:
+    """An hourly asset with a 24 h lookback: max_files counts the files to read, not the window.
+
+    Scaled down from 500 files an hour (12,500 already read, 500 new, `max_files=10_000`):
+    50 an hour, 1,250 already read, 50 new and `max_files=50`, the same ratio.
+    """
+    hour = dt.timedelta(hours=1)
+    recorded = []
+    for n in range(25 * 50):
+        modified = _MARK - (n // 50) * hour - dt.timedelta(seconds=n % 50)
+        _write(root / f"{n}.csv", b"id\n1\n", modified)
+        recorded.append(_read(root / f"{n}.csv", modified))
+    for n in range(50):
+        _write(root / f"new{n}.csv", b"id\n2\n", _MARK + dt.timedelta(seconds=n + 1))
+    _record(*recorded)
+    table = files.read("exports", "*.csv", since=_MARK, max_files=50)
+    assert table.num_rows == 50
+
+
+def test_more_files_to_read_than_max_files_names_the_window_and_the_cap(root: Path) -> None:
+    for n in range(3):
+        _write(root / f"{n}.csv", b"id\n1\n", _MARK - dt.timedelta(hours=1))
+    _record(_read(root / "0.csv", _MARK - dt.timedelta(hours=1)))
+    files.read("exports", "*.csv", since=_MARK, max_files=2)  # 2 to read, 1 already read
+    _record(context.ReadFile("exports", "x.csv", 1, _MARK))
+    with pytest.raises(CapExceeded) as caught:
+        files.read("exports", "*.csv", since=_MARK, max_files=2)
+    assert str(caught.value) == (
+        "`exports`: 3 files matching '*.csv' are new or late inside the 24 h lookback window, "
+        "more than max_files (2); raise max_files= or narrow the pattern"
+    )
+
+
+def test_a_run_whose_names_pass_the_byte_budget_keeps_the_newest_that_fit(
+    root: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Long names never make the server refuse the record: the newest that fit are kept."""
+    long = "日" * 80
+    for n in range(3):
+        _write(root / f"{long}{n}.csv", b"id\n1\n", _MARK + dt.timedelta(seconds=n))
+    files.read("exports", "*.csv", since=None)
+    line = len(context._line(context.current().files_read[0].to_json()))
+    monkeypatch.setattr(context, "RECORD_BUDGET_BYTES", 2 * line + 10)
+    payload = context.files_read_payload()
+    assert payload is not None
+    names = [json.loads(entry).get("name") for entry in payload.splitlines()[1:]]
+    assert names == [f"{long}1.csv", f"{long}2.csv"]
+    assert capsys.readouterr().err.splitlines()[-1] == (
+        "files.read: this run read 3 files with since=; Lakana records the newest 2 (at most "
+        "100000 files and 0 MiB of names), and the next run takes the older ones as read; see "
+        "'A busy table'"
+    )
+
+
+@pytest.mark.parametrize(
+    ("lookback", "window", "advice"),
+    [
+        (
+            dt.timedelta(hours=2),
+            "inside the 2 h lookback window",
+            "pass a shorter lookback= or narrow the pattern",
+        ),
+        (None, "after since=", "narrow the pattern"),
+    ],
+)
+def test_more_files_inside_the_window_than_a_call_checks_names_the_lookback(
+    root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    lookback: dt.timedelta | None,
+    window: str,
+    advice: str,
+) -> None:
+    monkeypatch.setattr(context, "MAX_FILES_READ", 2)
+    monkeypatch.setattr(files, "_INSIDE_FACTOR", 1)
+    for n in range(3):
+        _write(root / f"{n}.csv", b"id\n1\n", _MARK + dt.timedelta(seconds=n + 1))
+    if lookback is not None:
+        _record(*(_read(root / f"{n}.csv", _MARK + dt.timedelta(seconds=n + 1)) for n in range(3)))
+    with pytest.raises(CapExceeded) as caught:
+        if lookback is None:
+            files.read("exports", "*.csv", since=_MARK, max_files=1)
+        else:
+            files.read("exports", "*.csv", since=_MARK, max_files=1, lookback=lookback)
+    assert str(caught.value) == (
+        f"`exports`: 3 files match '*.csv' {window} (already read or not), more than the 2 a "
+        f"call checks; {advice}"
+    )
+
+
+def test_a_run_that_reads_more_than_the_record_takes_keeps_the_newest(
+    root: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A big first run or backfill is never refused: the record keeps the newest files."""
+    monkeypatch.setattr(context, "MAX_FILES_READ", 2)
+    monkeypatch.setattr(context, "CONNECTION_RESERVE", 0)
+    for n in range(3):
+        _write(root / f"{n}.csv", b"id\n1\n", _MARK + dt.timedelta(seconds=n))
+    assert files.read("exports", "*.csv", since=None).num_rows == 3
+    files.read("exports", "0.csv", since=None)  # the same file again counts once
+    payload = context.files_read_payload()
+    assert payload is not None
+    names = [json.loads(line).get("name") for line in payload.splitlines()[1:]]
+    assert names == ["1.csv", "2.csv"]
+    assert capsys.readouterr().err.splitlines()[-1] == (
+        "files.read: this run read 3 files with since=; Lakana records the newest 2 (at most 2 "
+        "files and 60 MiB of names), and the next run takes the older ones as read; see "
+        "'A busy table'"
+    )
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"lookback": dt.timedelta(hours=1)}, "lookback= needs since=; pass since=ctx.watermark()"),
+        (
+            {"since": _MARK, "lookback": 24},
+            "lookback= takes a datetime.timedelta, such as timedelta(hours=24), not int",
+        ),
+        (
+            {"since": _MARK, "lookback": dt.timedelta(hours=-1)},
+            "lookback= cannot be negative; pass timedelta(0) to turn the lookback off",
+        ),
+        (
+            {"since": _MARK, "lookback": dt.timedelta(days=31)},
+            "lookback= is at most 30 days, not 31 days, 0:00:00; for a file later than that, copy "
+            "it into the folder again so that it gets a new time",
+        ),
+    ],
+)
+def test_a_wrong_lookback_is_refused_naming_the_fix(
+    root: Path, kwargs: dict[str, object], message: str
+) -> None:
+    with pytest.raises(UsageError) as caught:
+        files.read("exports", "*.csv", **kwargs)  # ty: ignore[invalid-argument-type]
+    assert str(caught.value) == message
+
+
+def test_the_lookback_is_named_in_minutes_or_seconds(
+    root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _record(context.ReadFile("exports", "x.csv", 1, _MARK))
+    files.read("exports", "*.csv", since=_MARK, lookback=dt.timedelta(minutes=90))
+    files.read("exports", "*.csv", since=_MARK, lookback=dt.timedelta(seconds=1.5))
+    lines = capsys.readouterr().err.splitlines()
+    assert "inside the 90 min lookback" in lines[-2]
+    assert "inside the 1.5 s lookback" in lines[-1]
+
+
+def test_a_name_lakana_cannot_store_is_refused_before_any_file_is_read(root: Path) -> None:
+    """Non-UTF-8 bytes in a local name arrive as lone surrogates; the record cannot hold them.
+
+    APFS (macOS) refuses such a name, so there the test is skipped;
+    `test_ingest_read_set.py` covers the refusal itself on every platform.
+    """
+    try:
+        with open(os.fsencode(root) + b"/bad\xff.csv", "wb") as handle:
+            handle.write(b"id\n1\n")
+    except OSError as exc:  # EILSEQ on APFS
+        pytest.skip(f"this filesystem refuses a name that is not UTF-8 ({exc.strerror})")
+    with pytest.raises(FileShapeError) as caught:
+        files.read("exports", "*.csv", since=None)
+    assert str(caught.value) == (
+        "`exports`: names a file Lakana cannot store ('bad\\udcff.csv'): its name holds a NUL "
+        "character or is not valid UTF-8; rename the file; Lakana stores file names as UTF-8 text"
+    )
+    assert files.read("exports", "*.csv").num_rows == 1  # without since= nothing is recorded

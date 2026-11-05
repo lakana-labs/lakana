@@ -44,6 +44,7 @@ from lakana_worker.runners import (
     child_environment,
     token_secrets,
     unpack_code,
+    write_files_read,
 )
 
 _TOKEN = "lakana_task_k1abc_s3cr3t_part-x"
@@ -981,6 +982,88 @@ def test_the_sdk_accepts_a_key_that_only_identifies_a_row(
     harness.fields = fields
     parsed = _real_parse(harness)
     assert (parsed.write, parsed.key) == (fields["write"], ())
+
+
+_RECORDED = {
+    "connection": "exports",
+    "name": "a.csv",
+    "size": 4,
+    "modified": "2026-11-01T00:00:00+00:00",
+    "etag": None,
+}
+
+
+def test_a_task_with_a_record_names_its_file_in_the_work_directory(harness: Harness) -> None:
+    fields = {"write": "append", "watermark_column": "at", "watermark": "timestamptz:x"}
+    plain = _description(harness, **fields)
+    recorded = _description(harness, **fields, files_read=(_RECORDED,))
+    assert "files_read_path" not in plain
+    assert recorded.pop("files_read_path") == "/r/files-read.json"
+    assert recorded == plain
+
+
+def test_the_sdk_reads_the_record_the_local_runner_wrote(harness: Harness) -> None:
+    """The worker writes the record beside the description; the harness reads it back."""
+    harness.fields = {
+        "write": "append",
+        "watermark_column": "at",
+        "watermark": "timestamptz:2026-11-02T00:00:00+00:00",
+        "expected_snapshot_id": 17,
+        "table_exists": True,
+        "files_read": (_RECORDED,),
+    }
+    parsed = _real_parse(harness)
+    assert [f.to_json() for f in parsed.recorded or ()] == [_RECORDED]
+    assert stat.S_IMODE((harness.attempt / "files-read.json").stat().st_mode) == 0o600
+
+
+def test_the_record_file_is_written_private_and_replaces_a_stale_one(
+    harness: Harness, tmp_path: Path
+) -> None:
+    directory = tmp_path / "work"
+    directory.mkdir()
+    (directory / "files-read.json").write_text("stale")
+    write_files_read(directory, harness.task(files_read=(_RECORDED,)))
+    path = directory / "files-read.json"
+    assert json.loads(path.read_text()) == {"files": [_RECORDED]}
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    write_files_read(directory, harness.task())
+    assert not path.exists()
+    write_files_read(directory, harness.task())  # nothing to remove
+
+
+def test_the_record_file_keeps_names_unescaped_and_carries_a_horizon(
+    harness: Harness, tmp_path: Path
+) -> None:
+    """Unescaped UTF-8, so a record of long non-ASCII names stays within the harness's bound."""
+    directory = tmp_path / "work"
+    directory.mkdir()
+    named = {**_RECORDED, "name": "日本.csv"}
+    horizon = "2026-10-30T00:00:00+00:00"
+    write_files_read(
+        directory,
+        harness.task(
+            files_read=(named,), files_read_horizon=horizon, files_read_connections=("exports",)
+        ),
+    )
+    raw = (directory / "files-read.json").read_bytes()
+    assert "日本".encode() in raw
+    assert json.loads(raw) == {"files": [named], "horizon": horizon, "connections": ["exports"]}
+
+
+def test_the_record_file_is_not_written_through_a_planted_link(
+    harness: Harness, tmp_path: Path
+) -> None:
+    directory = tmp_path / "work"
+    directory.mkdir()
+    target = tmp_path / "target"
+    target.write_text("untouched")
+    (directory / "files-read.json").symlink_to(target)
+    write_files_read(directory, harness.task(files_read=(_RECORDED,)))
+    assert target.read_text() == "untouched"
+    path = directory / "files-read.json"
+    assert not path.is_symlink()
+    assert json.loads(path.read_text()) == {"files": [_RECORDED]}
 
 
 def test_the_secret_values_to_hide_stay_out_of_the_repr(harness: Harness) -> None:

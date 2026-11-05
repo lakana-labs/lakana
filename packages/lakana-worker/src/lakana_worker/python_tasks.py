@@ -56,6 +56,7 @@ from sqlalchemy.orm import Session
 from lakana_core.artifacts.store import attempt_version, kind_of, run_input_version
 from lakana_core.auth import PrincipalRef, RunContext
 from lakana_core.catalog.attempt_stamp import created_by_task_run, written_by_attempt
+from lakana_core.catalog.files_read import TaskRecord, files_read_for_task
 from lakana_core.catalog.identity import resolve_table_id
 from lakana_core.catalog.metadata import read_metadata
 from lakana_core.catalog.service import CatalogService
@@ -1464,6 +1465,7 @@ class PythonRuntime:
             if claimed.asset in prepared.inputs.values():
                 self._refuse_missing_self(claimed, before)
             shown.watermark = self._watermark(session, engine, prepared, before)
+            record = self._files_read(session, prepared, before, shown.watermark)
             _refuse_if_stopped(session, keeper, claimed.run_id)
             hidden = _connection_secrets(session, engine.key_provider, prepared)
             token, key_id = self._mint(session, tokens, keeper, claimed, prepared)
@@ -1503,6 +1505,11 @@ class PythonRuntime:
                     root_users=prepared.plan.root_users,
                     evolve_schema=prepared.evolve_schema,
                     history=prepared.history,
+                    files_read=None if record is None else tuple(record.files),
+                    files_read_horizon=None
+                    if record is None or record.horizon is None
+                    else record.horizon.isoformat(),
+                    files_read_connections=None if record is None else tuple(record.connections),
                 ),
                 sink,
                 stop,
@@ -2750,6 +2757,44 @@ class PythonRuntime:
                 KeptSeen(row.kept_run_id, row.kept_task_run_id, row.kept_snapshot_id),
                 metadata,
             )
+        finally:
+            session.rollback()
+
+    @staticmethod
+    def _files_read(
+        session: Session, prepared: _Prepared, before: _TargetState, watermark: str | None
+    ) -> TaskRecord | None:
+        """Load the files the target recorded as read, for an incremental append or merge.
+
+        Parameters
+        ----------
+        session
+            The supervisor's session; rolled back before and after.
+        prepared
+            The prepared attempt.
+        before
+            The target's state as the worker read it.
+        watermark
+            The encoded watermark sent to the task.
+
+        Returns
+        -------
+        TaskRecord or None
+            The record (`files_read_for_task`: at most the newest `MAX_FILES_READ` files, with
+            a horizon past that); `None` for a replace or history asset, one without a
+            watermark, a table that does not exist yet or has no watermark (an empty table:
+            `files.read` then reads every file), or a watermark that is no time.
+        """
+        if (
+            prepared.write not in ("append", "merge")
+            or prepared.watermark_column is None
+            or before.table_id is None
+            or watermark is None
+        ):
+            return None
+        session.rollback()
+        try:
+            return files_read_for_task(session, before.table_id, watermark)
         finally:
             session.rollback()
 

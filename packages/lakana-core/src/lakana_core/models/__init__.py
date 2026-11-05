@@ -22,6 +22,7 @@ from lakana_core.models.text_translation import TextTranslation
 from lakana_core.models.table_location import TableLocation, TableLocationState
 from lakana_core.models.table_health_signal import TableHealthSignal
 from lakana_core.models.table_read import TableRead
+from lakana_core.models.incremental_file_read import IncrementalFileRead
 from lakana_core.models.artifact import ArtifactBlob, ArtifactUpload, ArtifactVersion
 from lakana_core.models.row_filter import RowFilter
 from lakana_core.models.secret import Secret, SecretUseKind
@@ -101,6 +102,7 @@ __all__ = [
     "Grant",
     "Group",
     "GroupMembership",
+    "IncrementalFileRead",
     "JobFire",
     "JobSchedule",
     "JobVersion",

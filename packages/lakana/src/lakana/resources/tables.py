@@ -9,9 +9,11 @@ distinct path parameters.
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import enum
 import io
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Generator, Iterator, Mapping, Sequence
 from datetime import date, datetime
 from typing import Any, Protocol
 
@@ -55,6 +57,7 @@ from lakana._models import (
     known_fields,
 )
 from lakana._routes import ROUTES
+from lakana.context import FILES_READ_KEY
 from lakana.errors import Conflict, LakanaConnectionError, LakanaError, ValidationError
 from lakana.resources.queries import QueryRun
 
@@ -703,6 +706,38 @@ _POLARS_SCHEMA_TOO_OLD = (
     "cannot hand its schema to Arrow. Upgrade Polars, or pass `pyarrow.schema(...)` or a list of "
     "columns instead."
 )
+
+
+_FILES_READ: contextvars.ContextVar[bytes | None] = contextvars.ContextVar(
+    "lakana_files_read", default=None
+)
+"""The record of files read the task harness sends with its upload (`_sending_files_read`)."""
+_RECORDING_ROUTES = frozenset({"tables.append", "tables.replace", "tables.merge"})
+
+
+@contextlib.contextmanager
+def _sending_files_read(record: bytes | None) -> Generator[None]:
+    """Have the writes made inside the block carry the task's record of the files it read.
+
+    For the task harness only: the record rides as the schema metadata `FILES_READ_KEY` of an
+    append, a replace or a merge, and the server accepts it only from a run of a deployed asset.
+    A context variable keeps it out of the public signatures and away from any other thread.
+
+    Parameters
+    ----------
+    record
+        The encoded record (`lakana.context.files_read_payload`), or `None` for none.
+
+    Yields
+    ------
+    None
+        While the writes run.
+    """
+    token = _FILES_READ.set(record)
+    try:
+        yield
+    finally:
+        _FILES_READ.reset(token)
 
 
 class Tables:
@@ -1414,6 +1449,7 @@ class Tables:
             that still holds; otherwise `Conflict` is raised and nothing is
             retried.
 
+
         Returns
         -------
         AppendResult
@@ -1495,6 +1531,7 @@ class Tables:
             that still holds; otherwise `Conflict` is raised and nothing is
             retried. On `replace`, ``"none"`` also creates a missing
             table from `data`.
+
 
         Returns
         -------
@@ -1685,6 +1722,7 @@ class Tables:
             for "no snapshot yet". The merge commits only while that still holds; otherwise
             `Conflict` is raised and nothing is retried. ``"none"`` also creates a missing
             table from `data`.
+
 
         Returns
         -------
@@ -2008,6 +2046,14 @@ class Tables:
         table = normalize_view_columns(
             cast_timestamp_ns_columns_to_us(_coerce_to_table(data))
         ).combine_chunks()
+        # A key of the record's name the caller's table carried is dropped, so no one sends a
+        # record by accident; only the harness's append, replace or merge carries one.
+        metadata = dict(table.schema.metadata or {})
+        metadata.pop(FILES_READ_KEY.encode(), None)
+        files_read = _FILES_READ.get() if route in _RECORDING_ROUTES else None
+        if files_read is not None:
+            metadata[FILES_READ_KEY.encode()] = files_read
+        table = table.replace_schema_metadata(metadata or None)
         body = _serialize_ipc_stream(table)
         path_params = {"env": environment, "path": namespace, "name": name}
         headers = {"Content-Type": _APPEND_CONTENT_TYPE}

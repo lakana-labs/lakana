@@ -609,7 +609,7 @@ def test_twenty_removals_with_much_downstream_report_the_declarations_well_withi
     def timed(
         self: GraphService, p: PrincipalRef, environment: str, removed: Sequence[str]
     ) -> dict[str, tuple[tuple[GraphNode, tuple[str, ...]], ...]]:
-        """Run the deploy's check three times and keep the fastest, which is its cost.
+        """Run the deploy's check three times, untimed by its budget, and keep the fastest.
 
         `breakage` only reads. One run on a loaded CI runner can stall for a second (1.55 s
         on 3.11 against about 27 ms locally, the same on `main`); a stall does not hit three
@@ -633,6 +633,10 @@ def test_twenty_removals_with_much_downstream_report_the_declarations_well_withi
         """
         found = None
         runs = []
+        # The cost is asserted on the fastest run below, so the deploy's wall-clock budget must
+        # not end a run that a loaded runner stalled: macOS CI tripped the 2 s budget that way,
+        # and the deploy then said it could not check in time.
+        self._clock = lambda: 0.0
         for _ in range(3):
             started = time.perf_counter()
             result = breakage(self, p, environment, removed)

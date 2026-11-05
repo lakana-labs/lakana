@@ -33,6 +33,7 @@ from starlette.requests import ClientDisconnect
 
 from lakana_core.auth import PrincipalRef
 from lakana_core.catalog.descriptions import KEEP, Keep
+from lakana_core.catalog.files_read import FilesReadReport, parse_files_read, split_files_read
 from lakana_core.catalog.history import HistoryResult
 from lakana_core.catalog.json_schema import ColumnSpec, from_iceberg_schema, to_iceberg_schema
 from lakana_core.catalog.lineage_graph import LineageDirection, LineageService
@@ -777,6 +778,101 @@ def _arrow_write_target(
 
 
 _T = TypeVar("_T")
+
+
+def _taking_record(
+    principal: PrincipalRef, write: Callable[[pa.Table, FilesReadReport | None], _T]
+) -> Callable[[pa.Table], _T]:
+    """Take a task's record of the files it read off an upload, check it, then write (#344).
+
+    The record (the schema metadata `lakana.files_read`) is checked by `parse_files_read`
+    before anything else reads it, so a malformed or oversized record is a 422 naming the
+    cause, never a 500, and nothing is written.
+
+    Parameters
+    ----------
+    principal
+        The caller; only a token bound to a task attempt may send a record, naming only the
+        connections its asset declares.
+    write
+        The catalog write, given the rows without the record and the checked record, or
+        `None` when the upload carries none.
+
+    Returns
+    -------
+    Callable
+        The write `_governed_arrow_write` runs on the decoded upload.
+    """
+
+    def run(data: pa.Table) -> _T:
+        """Split the record off, check it, and write.
+
+        Parameters
+        ----------
+        data
+            The decoded upload.
+
+        Returns
+        -------
+        object
+            Whatever `write` returns.
+
+        Raises
+        ------
+        lakana_core.errors.ValidationError
+            Mapped to 422: a record from a caller that is not a task's bound token, one that
+            is malformed or over its caps, or one naming a connection the asset does not
+            declare.
+        """
+        rows, raw = split_files_read(data)
+        return write(rows, None if raw is None else parse_files_read(raw, principal))
+
+    return run
+
+
+_RECORD_NOT_TAKEN = (
+    "This route takes no record of the files read (the schema metadata `lakana.files_read`): "
+    "only an append, a replace or a merge records one. Send the rows without it."
+)
+
+
+def _refusing_record(write: Callable[[pa.Table], _T]) -> Callable[[pa.Table], _T]:
+    """Refuse an upload that carries a record of files read, on a route that keeps none (#344).
+
+    Parameters
+    ----------
+    write
+        The catalog write.
+
+    Returns
+    -------
+    Callable
+        The write `_governed_arrow_write` runs on the decoded upload.
+    """
+
+    def run(data: pa.Table) -> _T:
+        """Refuse a record, else write.
+
+        Parameters
+        ----------
+        data
+            The decoded upload.
+
+        Returns
+        -------
+        object
+            Whatever `write` returns.
+
+        Raises
+        ------
+        lakana_core.errors.ValidationError
+            Mapped to 422 when the upload carries a record; nothing is written.
+        """
+        if split_files_read(data)[1] is not None:
+            raise ValidationError(_RECORD_NOT_TAKEN)
+        return write(data)
+
+    return run
 
 
 async def _governed_arrow_write(
@@ -2065,6 +2161,10 @@ async def append_table_data(
 ) -> AppendOut:
     """Append rows to a table.
 
+    A run of a deployed asset may send its record of the files it read as the schema
+    metadata `lakana.files_read`; it is recorded with the commit, and a malformed one, or one
+    from any other caller, is a 422.
+
     Adds the rows of an Arrow IPC stream, sent as the request body, to a managed table. Each
     `source` (repeatable) names a table the rows were derived from; it must exist and be
     readable by the caller, and records a lineage edge. Needs `WRITE_TABLE` on the table.
@@ -2126,15 +2226,19 @@ async def append_table_data(
         catalog,
         session,
         ref,
-        lambda data: catalog.append(
-            principal,
-            ref,
-            data,
-            sources=source or [],
-            source_versions=versions,
-            expected_snapshot_id=expected,
-        ),
         precheck=lambda: catalog.check_can_append(principal, ref, expected_snapshot_id=expected),
+        write=_taking_record(
+            principal,
+            lambda data, files_read: catalog.append(
+                principal,
+                ref,
+                data,
+                sources=source or [],
+                source_versions=versions,
+                expected_snapshot_id=expected,
+                files_read=files_read,
+            ),
+        ),
     )
     return AppendOut(rows=result.rows, files=result.files, snapshot_id=result.snapshot_id)
 
@@ -2157,6 +2261,10 @@ async def replace_table_data(
     session: Session = Depends(get_session),
 ) -> ReplaceOut:
     """Replace all rows of a table.
+
+    A run of a deployed asset may send its record of the files it read as the schema
+    metadata `lakana.files_read`; it is recorded with the commit, and a malformed one, or one
+    from any other caller, is a 422.
 
     Replaces every row of a managed table with the rows of an Arrow IPC stream, sent as the
     request body, in one snapshot; the table keeps its history. Takes the same `source` and
@@ -2226,16 +2334,20 @@ async def replace_table_data(
         catalog,
         session,
         ref,
-        lambda data: catalog.replace(
-            principal,
-            ref,
-            data,
-            evolve_schema=evolve_schema,
-            sources=source or [],
-            source_versions=versions,
-            expected_snapshot_id=expected,
-        ),
         precheck=lambda: catalog.check_can_replace(principal, ref, expected_snapshot_id=expected),
+        write=_taking_record(
+            principal,
+            lambda data, files_read: catalog.replace(
+                principal,
+                ref,
+                data,
+                evolve_schema=evolve_schema,
+                sources=source or [],
+                source_versions=versions,
+                expected_snapshot_id=expected,
+                files_read=files_read,
+            ),
+        ),
     )
     return ReplaceOut(
         rows=result.rows,
@@ -2263,6 +2375,10 @@ async def merge_table_data(
     session: Session = Depends(get_session),
 ) -> MergeOut:
     """Merge rows into a table on a key.
+
+    A run of a deployed asset may send its record of the files it read as the schema
+    metadata `lakana.files_read`; it is recorded with the commit, and a malformed one, or one
+    from any other caller, is a 422.
 
     Sends the rows of an Arrow IPC stream as the request body. A row whose `key` (repeatable,
     required: one or more columns) matches a row of the table replaces it; any other row is
@@ -2341,16 +2457,20 @@ async def merge_table_data(
         catalog,
         session,
         ref,
-        lambda data: catalog.merge(
-            principal,
-            ref,
-            data,
-            key=key,
-            sources=source or [],
-            source_versions=versions,
-            expected_snapshot_id=expected,
-        ),
         precheck=lambda: catalog.check_can_merge(principal, ref, expected_snapshot_id=expected),
+        write=_taking_record(
+            principal,
+            lambda data, files_read: catalog.merge(
+                principal,
+                ref,
+                data,
+                key=key,
+                sources=source or [],
+                source_versions=versions,
+                expected_snapshot_id=expected,
+                files_read=files_read,
+            ),
+        ),
     )
     return MergeOut(
         snapshot_id=result.snapshot_id,
@@ -2393,6 +2513,9 @@ async def write_table_history(
     `expected_snapshot_id` no longer matches or another writer committed first, 413/408/503 as
     the merge, and 422 for what the history write refuses (counts, never values), including more
     open versions than `LAKANA_RUN__MAX_HISTORY_OPEN_VERSIONS` allows.
+
+    An upload that carries a record of files read (the schema metadata `lakana.files_read`)
+    is a 422: only an append, a replace or a merge records one.
 
     Parameters
     ----------
@@ -2492,7 +2615,7 @@ async def write_table_history(
         catalog,
         session,
         ref,
-        write,
+        _refusing_record(write),
         precheck=lambda: catalog.check_can_history(principal, ref, expected_snapshot_id=expected),
         history=True,
     )
@@ -2534,6 +2657,9 @@ async def load_table_data(
     the snapshot moved,
     413 for a body over the server's limit, 408 when it arrives too slowly and 503 when the
     server is busy with other uploads.
+
+    An upload that carries a record of files read (the schema metadata `lakana.files_read`)
+    is a 422: only an append, a replace or a merge records one.
 
     Parameters
     ----------
@@ -2614,5 +2740,5 @@ async def load_table_data(
         )
 
     return await _governed_arrow_write(
-        request, principal, catalog, session, ref, load, precheck=precheck
+        request, principal, catalog, session, ref, _refusing_record(load), precheck=precheck
     )

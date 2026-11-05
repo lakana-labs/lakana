@@ -26,6 +26,11 @@ form) and ``connections`` (each declared connection's name to an object with at 
 document replaces. Version 4 is version 3 with ``write`` ``"history"``, a ``key`` (the
 natural key) and ``history`` (``{"valid_from": str | null, "close_missing": bool}``); the
 worker sends it only to a history asset.
+A version 3 or 4 document may carry ``files_read_path``: the absolute path of a JSON file
+``{"files": [...]}`` the worker wrote, the files the asset's table recorded as read within
+30 days of its watermark (`lakana.ingest.files.read` reads late files against it). An append
+or a merge sends what its `files.read` calls read with the upload, as the schema metadata
+``lakana.files_read``.
 Every version may carry ``evolve_schema`` (``true`` when the asset says
 ``@asset(evolve_schema=True)``; the worker sends it only then): a replace then lets the table
 take the result's schema.
@@ -63,6 +68,7 @@ from __future__ import annotations
 import ast
 import contextlib
 import ctypes
+import datetime as dt
 import errno
 import importlib.util
 import inspect
@@ -101,7 +107,15 @@ from lakana._artifact_manifest import (
 from lakana._models import ArtifactVersion
 from lakana.assets import ASSET_ATTRIBUTE, DECIMALS_MODES, WRITE_CHOICES, AssetSpec, _unsafe
 from lakana.client import Client
-from lakana.context import WATERMARK_TAGS, AssetContext, WatermarkValue, decode_watermark
+from lakana.context import (
+    MAX_ETAG,
+    MAX_FILES_READ,
+    WATERMARK_TAGS,
+    AssetContext,
+    ReadFile,
+    WatermarkValue,
+    decode_watermark,
+)
 from lakana.errors import (
     AuthenticationError,
     Conflict,
@@ -114,6 +128,8 @@ from lakana.errors import (
 )
 from lakana.ingest import _connections
 from lakana.ingest._errors import IngestError
+from lakana.ingest._read_set import MAX_NAME_LENGTH
+from lakana.resources.tables import _sending_files_read
 
 if TYPE_CHECKING:
     import polars as pl  # lazy: the SDK works without the assets extra
@@ -398,6 +414,15 @@ class TaskDescription:
         A history asset's `valid_from` column, or `None`.
     close_missing
         Whether a history asset closes the keys it no longer returns.
+    recorded
+        The files the target recorded as read within 30 days of its watermark, from the
+        worker's ``files_read_path``; `None` when the worker sent none.
+    record_horizon
+        The horizon of a record the worker loaded only in part: every file at or before it
+        counts as read. `None` otherwise.
+    recorded_connections
+        The connections with any file in the record's window, from the worker; `None` when it
+        sent none.
     """
 
     server_url: str
@@ -424,6 +449,9 @@ class TaskDescription:
     evolve_schema: bool = False
     valid_from: str | None = None
     close_missing: bool = False
+    recorded: frozenset[ReadFile] | None = None
+    record_horizon: dt.datetime | None = None
+    recorded_connections: frozenset[str] | None = None
 
 
 def _text(document: dict[str, object], key: str) -> str:
@@ -606,6 +634,12 @@ class _Writes:
         A history asset's `valid_from` column, or `None`.
     close_missing
         Whether a history asset closes the keys it no longer returns.
+    recorded
+        The files the target recorded as read, from ``files_read_path``; `None` without one.
+    record_horizon
+        The record's horizon, if the worker set one.
+    recorded_connections
+        The connections with any file in the record's window, if the worker sent them.
     """
 
     write: str = "replace"
@@ -616,6 +650,76 @@ class _Writes:
     table_exists: bool = False
     valid_from: str | None = None
     close_missing: bool = False
+    recorded: frozenset[ReadFile] | None = None
+    record_horizon: dt.datetime | None = None
+    recorded_connections: frozenset[str] | None = None
+
+
+_RECORD_ENTRY_BYTES = (MAX_NAME_LENGTH + MAX_ETAG + 63) * 6 + 256
+"""The most bytes one file of the worker's record takes: every character of its connection (at
+most 63), name and ETag escaped as ``\\u00XX``, and the fixed fields."""
+_RECORD_MAX_BYTES = MAX_FILES_READ * _RECORD_ENTRY_BYTES + 1024
+_RECORD_REFUSED = "task description: files_read_path must name the worker's record of files read"
+_RECORD_TOO_LARGE = (
+    "task description: the worker's record of files read (files_read_path) is larger than "
+    f"{_RECORD_MAX_BYTES} bytes, more than {MAX_FILES_READ} files can take; the worker and the "
+    "task image's lakana do not match: upgrade the worker"
+)
+
+
+def _recorded_files(
+    path: object,
+) -> tuple[frozenset[ReadFile], dt.datetime | None, frozenset[str] | None]:
+    """Read the worker's record of the files the target has read (`files-read.json`).
+
+    Parameters
+    ----------
+    path
+        The description's ``files_read_path``.
+
+    Returns
+    -------
+    tuple
+        The files; the horizon the worker set when it loaded only the newest of them (`None`
+        otherwise); and the connections with any file in the window (`None` from a worker
+        that does not send them).
+
+    Raises
+    ------
+    ValueError
+        If the path is not absolute, the file is missing or not the record's JSON, or lists
+        more than `MAX_FILES_READ` files; or, with its own message, if it is larger than any
+        record can be. The message names the field and never a value.
+    """
+    try:
+        if not isinstance(path, str) or not os.path.isabs(path):
+            raise ValueError
+        with open(path, "rb") as source:
+            data = source.read(_RECORD_MAX_BYTES + 1)
+    except (OSError, ValueError):
+        raise ValueError(_RECORD_REFUSED) from None
+    if len(data) > _RECORD_MAX_BYTES:
+        raise ValueError(_RECORD_TOO_LARGE)
+    try:
+        document = json.loads(data)
+        files = document.get("files")
+        stamp = document.get("horizon")
+        horizon = None if stamp is None else dt.datetime.fromisoformat(stamp)
+        named = document.get("connections")
+        if (
+            not isinstance(files, list)
+            or len(files) > MAX_FILES_READ
+            or (horizon is not None and horizon.tzinfo is None)
+            or not (
+                named is None
+                or (isinstance(named, list) and all(isinstance(c, str) for c in named))
+            )
+        ):
+            raise ValueError
+        connections = None if named is None else frozenset(named)
+        return frozenset(ReadFile.from_json(item) for item in files), horizon, connections
+    except (ValueError, AttributeError, TypeError):
+        raise ValueError(_RECORD_REFUSED) from None
 
 
 def _write_fields(document: dict[str, object]) -> _Writes:
@@ -707,7 +811,16 @@ def _write_fields(document: dict[str, object]) -> _Writes:
         valid_from, close_missing = named, closing
     elif history is not None:
         raise ValueError("task description: history is for a history write only")
+    raw_path = document.get("files_read_path")
+    recorded: frozenset[ReadFile] | None = None
+    horizon: dt.datetime | None = None
+    with_files: frozenset[str] | None = None
+    if raw_path is not None:
+        recorded, horizon, with_files = _recorded_files(raw_path)
     return _Writes(
+        recorded=recorded,
+        record_horizon=horizon,
+        recorded_connections=with_files,
         table_exists=table_exists,
         write=write,
         key=tuple(key),
@@ -807,6 +920,9 @@ def parse_description(text: str) -> TaskDescription:
         evolve_schema=evolve_schema,
         valid_from=writes.valid_from,
         close_missing=writes.close_missing,
+        recorded=writes.recorded,
+        record_horizon=writes.record_horizon,
+        recorded_connections=writes.recorded_connections,
     )
 
 
@@ -2082,7 +2198,56 @@ def _takes_context(function: Callable[..., object], description: TaskDescription
     )
 
 
+def _files_read_record(description: TaskDescription, arrow: pa.Table) -> bytes | None:
+    """Encode what this attempt's `files.read` calls read, for the upload that records it.
+
+    Only an append or a merge whose watermark column is a timestamp sends one: the server prunes
+    the record by that time, so a record under any other watermark would never shrink.
+
+    Parameters
+    ----------
+    description
+        The task description.
+    arrow
+        The checked result, which holds the watermark column.
+
+    Returns
+    -------
+    bytes or None
+        `lakana.context.files_read_payload`, or `None`.
+    """
+    column = description.watermark_column
+    if description.write not in ("append", "merge") or column is None:
+        return None
+    if not pa.types.is_timestamp(arrow.schema.field(column).type):
+        return None
+    return context.files_read_payload()
+
+
 def _upload(client: Client, description: TaskDescription, arrow: pa.Table) -> dict[str, object]:
+    """Write the result to the asset's table, with the record of the files it read if any.
+
+    Parameters
+    ----------
+    client
+        The SDK client holding the task's token.
+    description
+        The task description.
+    arrow
+        The checked result.
+
+    Returns
+    -------
+    dict
+        What `_write_result` returns.
+    """
+    with _sending_files_read(_files_read_record(description, arrow)):
+        return _write_result(client, description, arrow)
+
+
+def _write_result(
+    client: Client, description: TaskDescription, arrow: pa.Table
+) -> dict[str, object]:
     """Write the result to the asset's table as its write mode says.
 
     Parameters
@@ -2418,6 +2583,12 @@ def _run_described(
                 asset=description.table,
                 declared=frozenset(description.connections),
                 connections=description.connections,
+                recorded=description.recorded,
+                record_horizon=description.record_horizon,
+                recorded_connections=description.recorded_connections,
+                target_watermark=description.watermark
+                if isinstance(description.watermark, dt.datetime)
+                else None,
             )
         )
         try:

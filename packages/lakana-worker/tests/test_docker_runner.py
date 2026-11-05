@@ -785,6 +785,19 @@ def test_a_work_directory_that_cannot_be_made_fails_before_the_launcher(tmp_path
     assert launcher.requests == []
 
 
+def test_the_record_of_files_read_goes_into_the_work_directory(tmp_path: Path) -> None:
+    """The container reads the record at ``/work/files-read.json``, beside its result."""
+    record = {"connection": "exports", "name": "a.csv", "size": 4, "modified": "x", "etag": None}
+    launcher = FakeLauncher(scripts={"run": _writes(None, _DONE)})
+
+    _run(tmp_path, launcher, write="append", files_read=(record,))
+
+    (request,) = launcher.requests
+    assert json.loads(request["stdin"])["files_read_path"] == "/work/files-read.json"
+    written = tmp_path / "attempt-abc_12" / "task" / "files-read.json"
+    assert json.loads(written.read_text()) == {"files": [record]}
+
+
 def test_an_exit_by_signal_reads_as_the_signal(tmp_path: Path) -> None:
     """The container's init reports 128 + the signal; the message names the signal."""
     result = {"exit": 137, "oom_killed": False, "timed_out": False, "stopped": False}

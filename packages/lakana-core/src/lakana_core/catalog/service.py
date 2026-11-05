@@ -97,6 +97,12 @@ from lakana_core.catalog.environment_deletion import (
 )
 from lakana_core.catalog.external_location import check_claim_free, parse_external_location
 from lakana_core.catalog.field_ids import check_added_files_have_field_ids
+from lakana_core.catalog.files_read import (
+    FilesReadReport,
+    forget_files_read,
+    forget_table_files_read,
+    record_files_read,
+)
 from lakana_core.catalog.glossary_read import TableTerms, TermRef, table_terms
 from lakana_core.catalog.health import (
     TableHealth,
@@ -118,7 +124,12 @@ from lakana_core.catalog.health_read import (
     signal_history,
     visibility_for,
 )
-from lakana_core.catalog.health_record import commit_observations, forget_set_back, signal_rows
+from lakana_core.catalog.health_record import (
+    commit_observations,
+    forget_set_back,
+    own_chain,
+    signal_rows,
+)
 from lakana_core.catalog.health_signals import SIGNALS, HealthEffects, never_judged
 from lakana_core.catalog.history import (
     EARLIEST_START,
@@ -2757,6 +2768,7 @@ class CatalogService:
         *,
         owner_id: uuid.UUID,
         run: RunContext | None = None,
+        files_read: FilesReadReport | None = None,
     ) -> LoadedTable:
         """Write a prepared table's metadata file and insert its catalog row.
 
@@ -2782,6 +2794,9 @@ class CatalogService:
             The principal who creates the table, who owns it.
         run
             The writing run's context (`PrincipalRef.run_context`); `None` outside a run.
+        files_read
+            The files the write's run read (#344), recorded with the first snapshot after the
+            row, for their foreign key; nothing when `metadata` has no snapshot.
 
         Returns
         -------
@@ -2848,6 +2863,10 @@ class CatalogService:
         try:
             self._session.flush()  # a name collision raises here, and SQLite's write lock is held
             self._add_health(health, messages)  # after the table row, for their foreign key
+            if files_read is not None and metadata.current_snapshot_id is not None:
+                record_files_read(
+                    self._session, prepared.table_id, metadata.current_snapshot_id, files_read
+                )
             if not lock_live_environment(self._session, prepared.environment_id):
                 self._session.rollback()
                 raise NotFoundError(
@@ -5722,7 +5741,8 @@ class CatalogService:
             """Mark, clear the stamp, restore the note and record: the statements after the swap.
 
             The health signals of the snapshots set back are marked as set back, or deleted
-            for a first build left not published (`forget_set_back`, #340). A set-back that
+            for a first build left not published (`forget_set_back`, #340), and the record of
+            the files they read is deleted, so the next run reads them again (#344). A set-back that
             makes the schema before current again also drops the task run's column change
             (`TaskRun.schema_change_json`): the columns and their field ids are the old ones
             again, so neither the note, the warnings nor the notification line may say
@@ -5742,13 +5762,9 @@ class CatalogService:
                     .values(unpublished_run_id=run_id)
                     .execution_options(synchronize_session=False)
                 )
-            forget_set_back(
-                self._session,
-                table_id,
-                current,
-                after=after,
-                until=None if written.publishes or before is None else before,
-            )
+            until = None if written.publishes or before is None else before
+            forget_set_back(self._session, table_id, current, after=after, until=until)
+            forget_files_read(self._session, table_id, own_chain(current, after, until))
             self._clear_stamp(task_run_id)
             restored = restore_kept(
                 self._session,
@@ -6370,6 +6386,7 @@ class CatalogService:
         sources: Sequence[str] = (),
         source_versions: Mapping[str, int] | None = None,
         expected_snapshot_id: ExpectedSnapshot | None = None,
+        files_read: FilesReadReport | None = None,
     ) -> AppendResult:
         """Append rows to a managed table.
 
@@ -6431,6 +6448,9 @@ class CatalogService:
             for "no snapshot yet"; the append commits only while that still
             holds, even for zero rows. A missing table is `NotFoundError`
             whatever is expected.
+        files_read
+            The files a run of a deployed asset read for these rows (#344), recorded with the
+            commit's snapshot in its transaction; nothing when no snapshot is committed.
 
         Returns
         -------
@@ -6535,6 +6555,8 @@ class CatalogService:
                 query_run_id=None,
                 connections=self._connection_sources(p, environment_id),
             )
+            if files_read is not None:
+                record_files_read(self._session, table_id, snapshot_id, files_read)
             self.commit_table(
                 p,
                 ref,
@@ -6568,6 +6590,7 @@ class CatalogService:
         sources: Sequence[str] = (),
         source_versions: Mapping[str, int] | None = None,
         expected_snapshot_id: ExpectedSnapshot | None = None,
+        files_read: FilesReadReport | None = None,
     ) -> WriteResult:
         """Replace every row of a managed table with Arrow data (`tables.replace`).
 
@@ -6597,6 +6620,10 @@ class CatalogService:
             The target's current snapshot as the caller read it, or ``none``;
             the write commits only while that still holds, and ``none`` on a
             missing table creates it from `data`.
+        files_read
+            The files a run of a deployed asset read for these rows (#344), recorded with the
+            commit's snapshot in its transaction. The table's earlier record is deleted in it,
+            sent or not: none of the old files' rows remain.
 
         Returns
         -------
@@ -6633,6 +6660,7 @@ class CatalogService:
                     schema=data.schema,
                     batches=data.to_batches(),
                     sources=lineage,
+                    files_read=files_read,
                 )
             except AlreadyExistsError as exc:
                 raise ConflictError(target_changed_message(ref.dotted())) from exc
@@ -6650,6 +6678,7 @@ class CatalogService:
             evolve_schema=evolve_schema,
             sources=lineage,
             pin=pin,
+            files_read=files_read,
         )
 
     @_arrow_memory_returned()
@@ -6667,6 +6696,7 @@ class CatalogService:
         query_run_id: uuid.UUID | None = None,
         watermark: str | None = None,
         advice: MergeAdvice = SDK_ADVICE,
+        files_read: FilesReadReport | None = None,
     ) -> MergeResult:
         """Update the rows whose key matches, insert the rest, in one commit (`tables.merge`).
 
@@ -6713,6 +6743,9 @@ class CatalogService:
         advice
             How a refusal of the rows tells the caller to fix them: `SDK_ADVICE` for a caller
             that sends batches, `SQL_ADVICE` for a SQL asset's run.
+        files_read
+            The files a run of a deployed asset read for these rows (#344), recorded with the
+            commit's snapshot in its transaction; nothing when no snapshot is committed.
 
         Returns
         -------
@@ -6762,6 +6795,7 @@ class CatalogService:
                     batches=data.to_batches(),
                     sources=lineage,
                     query_run_id=query_run_id,
+                    files_read=files_read,
                 )
             except AlreadyExistsError as exc:
                 raise ConflictError(target_changed_message(ref.dotted())) from exc
@@ -6815,6 +6849,7 @@ class CatalogService:
                 "rows_updated": counts.rows_updated,
                 "key": key,
             },
+            files_read=files_read,
         )
         if snapshot_id is None:
             return nothing
@@ -7184,6 +7219,7 @@ class CatalogService:
         query_run_id: uuid.UUID | None,
         watermark: str | None,
         detail: Mapping[str, object],
+        files_read: FilesReadReport | None = None,
     ) -> int | None:
         """Commit a staged single-snapshot write (a merge or a history write) with its evidence.
 
@@ -7226,6 +7262,8 @@ class CatalogService:
             The encoded watermark, if any.
         detail
             The event's own fields.
+        files_read
+            The files the write's run read, recorded with its snapshot (`_record_write`).
 
         Returns
         -------
@@ -7270,6 +7308,7 @@ class CatalogService:
                 snapshot_before=current.current_snapshot_id,
                 publishes=unpublished,
                 detail=detail,
+                files_read=files_read,
             )
             self.commit_table(
                 p, ref, requirements=requirements, updates=updates, own_data_files=True
@@ -7393,6 +7432,7 @@ class CatalogService:
         query_run_id: uuid.UUID | None = None,
         watermark: str | None = None,
         pin: SnapshotPin | None = None,
+        files_read: FilesReadReport | None = None,
     ) -> WriteResult:
         """Write a stream of record batches into a managed table, committing once.
 
@@ -7443,6 +7483,10 @@ class CatalogService:
             that snapshot. `create` ignores it: its target can't exist yet,
             so there is nothing a concurrent writer could make it duplicate
             or drop.
+        files_read
+            The files a run of a deployed asset read for these rows (#344), recorded with the
+            commit's snapshot in its transaction; nothing when no snapshot is committed. A
+            `replace` deletes the table's earlier record in it, sent or not.
 
         Returns
         -------
@@ -7477,6 +7521,7 @@ class CatalogService:
                 max_rows=max_rows,
                 sources=sources,
                 query_run_id=query_run_id,
+                files_read=files_read,
             )
         if mode not in (WriteMode.REPLACE, WriteMode.APPEND):
             raise ValidationError(f"{mode.value} is not a data write.")
@@ -7579,6 +7624,7 @@ class CatalogService:
                 publishes=unpublished,
                 policy_warnings=broken,
                 columns_changed=bool(changed),
+                files_read=files_read,
             )
             self.commit_table(
                 p,
@@ -8313,6 +8359,7 @@ class CatalogService:
         sources: Sequence[LineageSource],
         query_run_id: uuid.UUID | None,
         properties: Mapping[str, str] | None = None,
+        files_read: FilesReadReport | None = None,
     ) -> WriteResult:
         """Create a table from a result and publish it with its first snapshot, atomically.
 
@@ -8343,6 +8390,9 @@ class CatalogService:
             The run writing, if any.
         properties
             Table properties to create the table with (a history table's key), or `None`.
+        files_read
+            The files the write's run read, recorded with the first snapshot when the table's
+            row is published (`_publish_table`); nothing for zero rows.
 
         Returns
         -------
@@ -8406,7 +8456,9 @@ class CatalogService:
                 snapshot_before=None,
                 publishes=True,
             )
-            self._publish_table(prepared, metadata, owner_id=p.id, run=p.run_context)
+            self._publish_table(
+                prepared, metadata, owner_id=p.id, run=p.run_context, files_read=files_read
+            )
         except Exception as exc:
             landed = self._settle_failed_write(
                 exc,
@@ -8438,6 +8490,7 @@ class CatalogService:
         detail: Mapping[str, object] | None = None,
         policy_warnings: Sequence[BrokenPolicy] = (),
         columns_changed: bool = False,
+        files_read: FilesReadReport | None = None,
     ) -> None:
         """Add a write's `TABLE_WRITE` event and lineage edges to the session, uncommitted.
 
@@ -8481,6 +8534,10 @@ class CatalogService:
             Whether the write removed or replaced a column: the guard records that on the task run
             of a write in a run, with or without a policy, so that what a reader who manages no
             policies is shown does not tell whether one exists.
+        files_read
+            The files the write's run read, recorded with its snapshot; nothing when no snapshot
+            was committed. A committed `REPLACE` first deletes the table's earlier record, sent
+            or not: none of the old files' rows remain (#344).
         """
         stored = tuple(warning.to_json() for warning in policy_warnings)
         AuditService(self._session).record(
@@ -8513,6 +8570,10 @@ class CatalogService:
                 query_run_id=query_run_id,
                 connections=self._connection_sources(p, environment_id),
             )
+            if mode is WriteMode.REPLACE:
+                forget_table_files_read(self._session, result.table_id)
+            if files_read is not None:
+                record_files_read(self._session, result.table_id, result.snapshot_id, files_read)
         self._guard.note_result(
             ref.environment,
             table_target(ref),

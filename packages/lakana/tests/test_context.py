@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 from decimal import Decimal
 
 import pytest
@@ -79,3 +80,108 @@ def test_the_harness_state_is_shared_and_collects_secrets() -> None:
         context._set(None)
     context.register_secret("ignored-outside-a-task")
     assert state.secrets == {"s3cr3t-value"}
+
+
+_MARK = dt.datetime(2026, 11, 2, 12, tzinfo=dt.UTC)
+
+
+def _state(**fields: object) -> context._TaskState:
+    """Build a task state without a client.
+
+    Parameters
+    ----------
+    **fields
+        Fields to set besides the required ones.
+
+    Returns
+    -------
+    _TaskState
+        The state.
+    """
+    return context._TaskState(
+        client=object(),  # ty: ignore[invalid-argument-type]
+        environment="dev",
+        asset="bronze.orders",
+        declared=frozenset({"exports"}),
+        connections={},
+        **fields,  # ty: ignore[invalid-argument-type]
+    )
+
+
+def test_a_file_read_survives_its_json() -> None:
+    plus_two = dt.timezone(dt.timedelta(hours=2))
+    file = context.ReadFile("exports", "a/b.csv", 5, _MARK.astimezone(plus_two), '"x"')
+    back = context.ReadFile.from_json(file.to_json())
+    assert back == file
+    assert back.modified.utcoffset() == dt.timedelta(0)
+    assert context.ReadFile.from_json({**file.to_json(), "etag": None}).etag is None
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        [],
+        {"connection": "", "name": "a", "size": 1, "modified": _MARK.isoformat()},
+        {"connection": "e", "name": "", "size": 1, "modified": _MARK.isoformat()},
+        {"connection": "e", "name": "a", "size": 1, "modified": "2026-11-02T12:00:00"},
+        {"connection": "e", "name": "a", "size": 1, "modified": 7},
+        {"connection": "e", "name": "a", "size": 1, "modified": "yesterday"},
+        {"connection": "e", "name": "a", "size": -1, "modified": _MARK.isoformat()},
+        {"connection": "e", "name": "a", "size": True, "modified": _MARK.isoformat()},
+        {
+            "connection": "e",
+            "name": "a",
+            "size": 1,
+            "modified": _MARK.isoformat(),
+            "etag": "x" * 513,
+        },
+        {"connection": "e", "name": "a", "size": 1, "modified": _MARK.isoformat(), "etag": 3},
+    ],
+)
+def test_what_is_no_file_read_is_refused_without_its_value(value: object) -> None:
+    with pytest.raises(ValueError) as caught:
+        context.ReadFile.from_json(value)
+    assert str(caught.value) == "not a file read"
+
+
+def test_no_state_or_nothing_read_gives_no_record() -> None:
+    context._set(None)
+    assert context.files_read_payload() is None
+    context._set(_state())
+    try:
+        assert context.files_read_payload() is None
+    finally:
+        context._set(None)
+
+
+def test_the_record_is_newline_delimited_json_with_a_utc_watermark() -> None:
+    """F3: a naive `timestamp` watermark is UTC; each file once; text kept as UTF-8."""
+    one = context.ReadFile("exports", "naïve.csv", 5, _MARK, '"e"')
+    two = context.ReadFile("exports", "b.csv", 0, _MARK)
+    context._set(_state(target_watermark=_MARK.replace(tzinfo=None), files_read=[one, two, one]))
+    try:
+        payload = context.files_read_payload()
+    finally:
+        context._set(None)
+    assert payload is not None
+    assert payload.endswith(b"\n")
+    lines = payload.decode().splitlines()
+    assert [json.loads(line) for line in lines] == [
+        {"version": 1, "watermark": "2026-11-02T12:00:00+00:00"},
+        one.to_json(),
+        two.to_json(),
+    ]
+    assert "naïve.csv" in lines[1]
+
+
+def test_an_aware_watermark_is_sent_in_utc_and_none_as_null() -> None:
+    plus_two = dt.timezone(dt.timedelta(hours=2))
+    file = context.ReadFile("exports", "a.csv", 5, _MARK)
+    for mark, sent in ((_MARK.astimezone(plus_two), _MARK.isoformat()), (None, None)):
+        context._set(_state(target_watermark=mark, files_read=[file]))
+        try:
+            payload = context.files_read_payload()
+        finally:
+            context._set(None)
+        assert payload is not None
+        assert json.loads(payload.splitlines()[0]) == {"version": 1, "watermark": sent}

@@ -147,6 +147,18 @@ def test_a_first_load_creates_the_bronze_table(client: TestClient) -> None:
     assert table["snapshot_id"] == body["snapshot_id"]
 
 
+def test_a_load_with_a_record_of_files_read_is_422_and_writes_nothing(client: TestClient) -> None:
+    """#344: only an append, a replace or a merge records the files a task read."""
+    create_environment(client)
+    record = _ROWS.replace_schema_metadata({b"lakana.files_read": b'{"version":1}\n'})
+
+    response = _load(client, "bronze.customers", _ipc(record), expected_snapshot_id="none")
+
+    assert response.status_code == 422, response.text
+    assert "takes no record of the files read" in response.text
+    assert _writes(client) == 0
+
+
 def test_a_deeper_bronze_namespace_is_accepted(client: TestClient) -> None:
     """`bronze.raw.x` is bronze too."""
     create_environment(client)

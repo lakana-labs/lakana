@@ -33,6 +33,7 @@ from sqlalchemy.orm import Session
 from lakana_core.audit.service import AuditService
 from lakana_core.auth import Action, AllowAllAuthorization, PrincipalRef, RunContext, Securable
 from lakana_core.catalog import service as service_module
+from lakana_core.catalog.files_read import FileRead, FilesReadReport, record_files_read
 from lakana_core.catalog.health_record import own_chain
 from lakana_core.catalog.json_schema import ColumnSpec
 from lakana_core.catalog.service import CatalogService, Rollback, failed_snapshot_tag
@@ -48,6 +49,7 @@ from lakana_core.models import (
     CheckOutcome,
     CheckResult,
     Environment,
+    IncrementalFileRead,
     QueryRun,
     QueryRunStatus,
     RollbackOutcome,
@@ -591,6 +593,81 @@ def test_a_first_build_that_is_set_back_keeps_no_health_signals(
     assert _roll_back(catalog, principal, task, written).outcome is RollbackOutcome.UNPUBLISHED
     assert _health_snapshots(session) == set()
     assert _health_snapshots(session, set_back=True) == set()
+
+
+def _record_files(session: Session, table_id: uuid.UUID, files: dict[int, str]) -> None:
+    """Record one file read with each snapshot, as the commits of a run would, and commit.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    table_id
+        The table.
+    files
+        The file's name, by snapshot.
+    """
+    stamp = datetime(2026, 11, 1, tzinfo=UTC)
+    for snapshot_id, name in files.items():
+        report = FilesReadReport(None, (FileRead("exports", name, 4, stamp, None),))
+        record_files_read(session, table_id, snapshot_id, report)
+    session.commit()
+
+
+def test_a_set_back_forgets_the_files_its_snapshots_recorded(
+    session: Session, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    """#344: the files of the snapshots set back are read again by the next run.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    principal
+        The writer.
+    tmp_path
+        Storage root.
+    """
+    catalog = _catalog(session, principal, tmp_path)
+    before = _write(catalog, principal, _orders([1], ["eu"]), WriteMode.CREATE).snapshot_id
+    middle = _write(catalog, principal, _orders([2], ["eu"]), WriteMode.APPEND).snapshot_id
+    after = _write(catalog, principal, _orders([3], ["us"]), WriteMode.APPEND).snapshot_id
+    assert before is not None and middle is not None and after is not None
+    table_id = _row(session).id
+    _record_files(session, table_id, {before: "kept.csv", middle: "b.csv", after: "c.csv"})
+    task = _task(session, principal)
+    written = Written(table_id, before, after, publishes=False)
+    _stamp(session, task, written)
+
+    assert _roll_back(catalog, principal, task, written).outcome is RollbackOutcome.ROLLED_BACK
+    assert session.scalars(select(IncrementalFileRead.name)).all() == ["kept.csv"]
+
+
+def test_a_first_build_set_back_forgets_all_its_files(
+    session: Session, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    """A first build left not published reads its files again when it is built again.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    principal
+        The writer.
+    tmp_path
+        Storage root.
+    """
+    catalog = _catalog(session, principal, tmp_path)
+    after = _write(catalog, principal, _orders([1, 1], ["eu", "eu"]), WriteMode.CREATE).snapshot_id
+    assert after is not None
+    table_id = _row(session).id
+    _record_files(session, table_id, {after: "a.csv"})
+    task = _task(session, principal)
+    written = Written(table_id, None, after, publishes=True)
+    _stamp(session, task, written)
+
+    assert _roll_back(catalog, principal, task, written).outcome is RollbackOutcome.UNPUBLISHED
+    assert session.scalars(select(IncrementalFileRead)).all() == []
 
 
 def test_a_second_writers_commit_is_never_discarded(
