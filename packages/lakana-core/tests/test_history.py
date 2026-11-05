@@ -613,7 +613,7 @@ def test_a_nested_column_is_refused_with_the_cast_to_write() -> None:
     ids=["sql", "python"],
 )
 def test_an_empty_result_with_close_missing_is_refused(advice: MergeAdvice, text: str) -> None:
-    """A SQL asset says `close_missing:` in its header, a Python asset or the SDK `=True` (#434)."""
+    """SQL says `close_missing:` in its header; the SDK and REST say `close_missing` (#434)."""
     with pytest.raises(ValidationError) as info:
         check_history_batch(
             _batch([]),
