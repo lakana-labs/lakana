@@ -37,6 +37,7 @@ from lakana_core.models import (
     Repository,
     RowFilter,
 )
+from lakana_core.models.environment import LIVE_ENVIRONMENT
 from lakana_core.policy.shown import shown_policies
 
 
@@ -216,11 +217,14 @@ def read_live(
         if as_stored != entry and as_stored not in stored[entry]:
             stored[entry].append(as_stored)
 
-    environments = {row.id: row.name for row in session.execute(select(Environment)).scalars()}
+    environments = {
+        row.id: row.name
+        for row in session.execute(select(Environment).where(LIVE_ENVIRONMENT)).scalars()
+    }
     repositories = {row.id: row.name for row in session.execute(select(Repository)).scalars()}
     for rule in session.execute(select(CiTrustRule)).scalars():
         account = principals.get(rule.principal_id)
-        if account is None:
+        if account is None or rule.environment_id not in environments:
             continue
         entry = CiTrustEntry(
             rule.issuer,

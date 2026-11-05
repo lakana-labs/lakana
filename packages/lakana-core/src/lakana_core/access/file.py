@@ -75,6 +75,33 @@ class AccessFileError(ValidationError):
         super().__init__("\n".join(self.problems))
 
 
+def cap_problems(file_name: str, problems: Sequence[str], count: int | None = None) -> list[str]:
+    """Cap a list of problems at the most one answer lists.
+
+    Parameters
+    ----------
+    file_name
+        The file's name, for the closing line.
+    problems
+        The problems kept so far.
+    count
+        How many problems there were in all; `len(problems)` when omitted.
+
+    Returns
+    -------
+    list of str
+        At most `_MAX_PROBLEMS` problems and a closing line when there were more.
+    """
+    total = len(problems) if count is None else count
+    if total <= _MAX_PROBLEMS:
+        return list(problems)
+    more = total - _MAX_PROBLEMS
+    return [
+        *problems[:_MAX_PROBLEMS],
+        f"{file_name}: and {more} more problems; fix these first, then check again",
+    ]
+
+
 def validate_file_name(name: str) -> str:
     """Check the base name a file is announced under.
 
@@ -301,13 +328,7 @@ class _Reader:
         list of str
             At most `_MAX_PROBLEMS` problems and a closing line when there were more.
         """
-        if self.count > _MAX_PROBLEMS:
-            more = self.count - _MAX_PROBLEMS
-            return [
-                *self.problems,
-                f"{self.file_name}: and {more} more problems; fix these first, then check again",
-            ]
-        return self.problems
+        return cap_problems(self.file_name, self.problems, self.count)
 
     def mapping(
         self, value: object, path: Path, allowed: Sequence[str] | None, hint: str = ""

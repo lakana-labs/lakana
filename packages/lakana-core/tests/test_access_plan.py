@@ -558,6 +558,31 @@ def test_admin_through_a_group_or_a_removed_account_counts_as_it_should(session:
     assert any("leaves no active ADMIN" in p for p in to_removed.problems), to_removed.problems
 
 
+def test_a_service_account_the_file_creates_is_no_remaining_administrator(
+    session: Session,
+) -> None:
+    """Moving ADMIN to a brand-new service account leaves nobody to issue its token."""
+    world = access_world(session)
+    plan = _service(session, world).plan(
+        world.admin,
+        "version: 1\nmanages: [instance]\nservice_accounts: [new-bot]\n"
+        "grants:\n  - {to: service:new-bot, role: ADMIN, on: instance}\n",
+        allow_lockout=True,
+    )
+    assert any("leaves no active ADMIN" in p for p in plan.problems), plan.problems
+
+
+def test_a_plan_lists_at_most_fifty_problems_and_counts_the_rest(session: Session) -> None:
+    """The plan's problems are capped like the parser's."""
+    world = access_world(session)
+    grants = "".join(f"  - {{to: user:ghost{i}, role: VIEWER, on: instance}}\n" for i in range(60))
+    plan = _service(session, world).plan(
+        world.admin, "version: 1\nmanages: [instance]\ngrants:\n" + grants
+    )
+    assert len(plan.problems) == 51
+    assert plan.problems[-1].endswith("and 11 more problems; fix these first, then check again")
+
+
 def test_a_removal_in_a_managed_scope_is_not_drift() -> None:
     """F7: once a scope is managed, a removal there is a plain removal."""
     grant = GrantEntry(Subject("user", "bob"), "VIEWER", None, Target("prod"))

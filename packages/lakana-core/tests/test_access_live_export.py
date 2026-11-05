@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from functools import partial
 
 import yaml
 from access_test_helpers import AccessWorld, access_world, seed_every_kind
+from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from lakana_core.access.export import export_document
@@ -25,7 +27,10 @@ from lakana_core.access.model import (
     Target,
 )
 from lakana_core.auth import AllowAllAuthorization
+from lakana_core.ci_oidc.config import GITHUB_ISSUER
+from lakana_core.ci_oidc.rules import CiTrustRuleService
 from lakana_core.identity.principals import PrincipalService
+from lakana_core.models import Environment
 from lakana_core.policy.row_filters import RowFilterService
 
 
@@ -178,3 +183,28 @@ def test_the_export_header_points_at_plan_not_at_apply() -> None:
     text = export_document(AccessState(frozenset()), Scopes(frozenset({"instance"})))
     assert "plan with lakana access plan" in text.splitlines()[0]
     assert "apply" not in text.splitlines()[0]
+
+
+def test_a_deleted_environments_ci_rule_is_not_live_access(session: Session) -> None:
+    """A CI trust rule of a soft-deleted environment is neither exported nor planned."""
+    world = access_world(session)
+    seed_every_kind(session, world)
+    CiTrustRuleService(session, AllowAllAuthorization(), issuers=[GITHUB_ISSUER]).create(
+        world.admin,
+        issuer="github",
+        principal="etl-bot",
+        environment="staging",
+        repository="etl",
+        kinds=["deploy"],
+        conditions={"ref": "refs/heads/main", "repository_id": "123456", "event_name": "push"},
+    )
+    on = {e.on for e in _read(session, world).state.entries if isinstance(e, CiTrustEntry)}
+    assert on == {"prod", "staging"}
+    session.execute(
+        update(Environment)
+        .where(Environment.name == "staging")
+        .values(deleted_at=datetime.now(UTC))
+    )
+    session.commit()
+    on = {e.on for e in _read(session, world).state.entries if isinstance(e, CiTrustEntry)}
+    assert on == {"prod"}

@@ -22,6 +22,7 @@ from lakana_core.access.export import export_document
 from lakana_core.access.file import (
     AccessFile,
     AccessFileError,
+    cap_problems,
     parse_access_file,
     validate_file_name,
 )
@@ -378,7 +379,7 @@ class AccessService:
             changes=changes,
             releases=(),
             drift=drift(changes, scopes, frozenset()),
-            problems=tuple(problems),
+            problems=tuple(cap_problems(parsed.file_name, problems)),
             fingerprint=fingerprint(live.state.owned(scopes)),
         )
 
@@ -396,11 +397,13 @@ def _active_after(live: LiveAccess, changes: Sequence[PlannedChange]) -> frozens
     Returns
     -------
     frozenset of str
-        The active principals, without the service accounts removed and with those created.
+        The principals already active, without the service accounts the file removes. A service
+        account the file creates is not counted: it has no token yet and nobody would be left to
+        issue one.
     """
-    removed: set[str] = set()
-    created: set[str] = set()
-    for change in changes:
-        if isinstance(change.entry, ServiceAccountEntry):
-            (removed if change.op == "remove" else created).add(change.entry.name)
-    return frozenset((live.active - removed) | created)
+    removed = {
+        change.entry.name
+        for change in changes
+        if change.op == "remove" and isinstance(change.entry, ServiceAccountEntry)
+    }
+    return frozenset(live.active - removed)
