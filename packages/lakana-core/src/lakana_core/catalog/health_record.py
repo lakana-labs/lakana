@@ -308,7 +308,10 @@ def _observe(
         files = _read_added_files(added, before or after, file_io, table, compactions)
     history = {} if table_id is None else recent_observations(session, table_id)
     newest = counted[-1].summary
-    found = [volume_signal(newest, history.get(("volume", None), [])), found_schema]
+    found = [
+        volume_signal(newest, history.get(("volume", None), []), no_data_files=files == []),
+        found_schema,
+    ]
     if files is None:
         found += [
             Observation(signal, None, "no_metrics", {"reason": "unreadable"}, None)

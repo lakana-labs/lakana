@@ -263,6 +263,46 @@ def _values_withheld(session: Session, row: TableHealthSignal) -> bool:
     return masked is not None
 
 
+def _unjudged_siblings(session: Session, signal: TableHealthSignal) -> list[str]:
+    """Name the other blocking columns of a commit's signal that could not be judged either.
+
+    One message is sent per signal (`lakana_worker.task_checks._tell_unjudged`), of one column's
+    row; the others of its commit are named in it.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    signal
+        The told row.
+
+    Returns
+    -------
+    list of str
+        The other columns, sorted, whose row at the same snapshot is ``no_metrics`` for any
+        reason but ``no_rows`` and records ``block``; empty for a table-level row.
+    """
+    if signal.column_name is None:
+        return []
+    found = session.execute(
+        select(TableHealthSignal.column_name, TableHealthSignal.observed).where(
+            TableHealthSignal.table_id == signal.table_id,
+            TableHealthSignal.snapshot_id == signal.snapshot_id,
+            TableHealthSignal.signal == signal.signal,
+            TableHealthSignal.state == "no_metrics",
+            TableHealthSignal.effect == "block",
+            TableHealthSignal.column_name.is_not(None),
+            TableHealthSignal.id != signal.id,
+        )
+    )
+    return sorted(
+        column
+        for column, observed in found
+        if column is not None
+        and not (isinstance(observed, dict) and observed.get("reason") == "no_rows")
+    )
+
+
 def facts_for_health(
     session: Session, row: NotificationDelivery, environment: str, delivery_id: UUID | str
 ) -> Facts:
@@ -311,6 +351,7 @@ def facts_for_health(
             reason if isinstance(reason, str) else "unstorable",
             table,
             environment,
+            others=_unjudged_siblings(session, signal),
         )
     elif not _values_withheld(session, signal):
         try:

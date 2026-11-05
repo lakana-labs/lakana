@@ -614,6 +614,20 @@ def _tell_unjudged(
         )
         if tells:
             rows.append(row)
+    # One message per signal: the table-level row, else the first column of the oldest commit;
+    # its alert names the signal's other columns that could not be judged (`facts_for_health`).
+    order = {snapshot: index for index, snapshot in enumerate(reversed(chain))}
+    rows.sort(
+        key=lambda row: (
+            row.signal,
+            row.column_name is not None,
+            order.get(row.snapshot_id or 0, 0),
+            row.column_name or "",
+        )
+    )
+    rows = [
+        row for index, row in enumerate(rows) if index == 0 or rows[index - 1].signal != row.signal
+    ]
     if not rows:
         session.rollback()
         return

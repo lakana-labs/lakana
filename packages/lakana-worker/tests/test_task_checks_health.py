@@ -33,7 +33,7 @@ import lakana_worker.task_checks as task_checks_module
 from lakana_core.catalog.attempt_stamp import CLAIM_PROPERTY, TASK_RUN_PROPERTY
 from lakana_core.catalog.health_read import Visibility, current_signals
 from lakana_core.catalog.health_record import recent_observations
-from lakana_core.catalog.health_signals import unjudged_text
+from lakana_core.catalog.health_signals import unjudged_text, volume_signal
 from lakana_core.catalog.identity import resolve_table_id
 from lakana_core.catalog.metadata import apply_updates, build_table_metadata
 from lakana_core.models import (
@@ -1028,3 +1028,76 @@ def test_an_own_row_without_metrics_is_told_like_an_unreadable_commit(
             session, environment_id, "bronze.events", table_id, [30], checks
         )
     assert sorted(told, key=repr) == [("range", "price"), ("volume", None)]
+
+
+def test_a_commit_that_added_no_data_files_is_judged_and_not_told() -> None:
+    """A real pyiceberg delete summary: volume is an observation of 0 rows, columns are skipped."""
+    summary = Summary(
+        Operation.DELETE,
+        **{"deleted-records": "5", "deleted-data-files": "1", "total-records": "0"},
+    )
+    seen = volume_signal(summary, [])
+    volume = _row("volume", None, seen.state, seen.observed)
+    schema = _row("schema", None, "ok", {}, effect="warn")
+    rows = cast("list[Any]", [volume, schema])
+    assert task_checks_module._unjudged(rows, "range", "price", [20]) is None
+    assert task_checks_module._unjudged(rows, "volume", None, [20]) is None
+    assert task_checks_module._judges(cast("Any", volume), "volume", None)
+    assert seen.state != "no_metrics"  # nothing for `_tell_unjudged` to name
+
+
+def test_one_message_per_check_names_its_columns(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`null_rate: block` with 200 columns not recorded: one row is told, not 200.
+
+    Parameters
+    ----------
+    world
+        The world.
+    monkeypatch
+        Records what is queued.
+    """
+    _outside_table(world, "bronze.events", [1])
+    for index in range(200):
+        _signal(
+            world,
+            "bronze.events",
+            "null_rate",
+            snapshot=40,
+            column=f"c{index:03}",
+            state="no_metrics",
+            observed={"reason": "not_recorded"},
+            effect="block",
+        )
+    told: list[tuple[str, str | None]] = []
+
+    def queue(session: object, **kwargs: list[TableHealthSignal]) -> list[object]:
+        """Record the rows a message would tell of.
+
+        Parameters
+        ----------
+        session
+            Ignored.
+        **kwargs
+            The call's arguments; ``rows`` is read.
+
+        Returns
+        -------
+        list
+            No deliveries.
+        """
+        told.extend((r.signal, r.column_name) for r in kwargs["rows"])
+        return []
+
+    monkeypatch.setattr(task_checks_module, "queue_health_notifications", queue)
+    with world.session() as session:
+        table_id = resolve_table_id(session, "dev", "bronze", "events")
+        assert table_id is not None
+        environment_id = session.scalars(
+            select(Environment.id).where(Environment.name == "dev")
+        ).one()
+        task_checks_module._tell_unjudged(
+            session, environment_id, "bronze.events", table_id, [40], [("null_rate", None)]
+        )
+    assert told == [("null_rate", "c000")]

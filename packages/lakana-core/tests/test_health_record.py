@@ -400,12 +400,14 @@ def test_an_unexpected_error_records_no_metrics_and_the_write_lands(
         Captures the warning.
     """
 
-    def broken(*args: object) -> None:
+    def broken(*args: object, **kwargs: object) -> None:
         """Fail like a bug.
 
         Parameters
         ----------
         *args
+            Ignored.
+        **kwargs
             Ignored.
 
         Raises

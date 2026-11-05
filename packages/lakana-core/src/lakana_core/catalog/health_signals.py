@@ -319,9 +319,16 @@ def _mad(values: Sequence[float]) -> float:
 
 
 def volume_signal(
-    summary: Mapping[str, Any] | None, history: Sequence[Mapping[str, Any]]
+    summary: Mapping[str, Any] | None,
+    history: Sequence[Mapping[str, Any]],
+    *,
+    no_data_files: bool = False,
 ) -> Observation:
     """Compare the rows a snapshot added with the usual.
+
+    pyiceberg writes ``added-records`` and ``added-data-files`` only when they are above 0, so a
+    commit that adds no data file (a delete of whole files, a merge-on-read commit that adds
+    only delete files) has neither: it added 0 rows, an observation like any other.
 
     Parameters
     ----------
@@ -329,14 +336,22 @@ def volume_signal(
         The snapshot's summary.
     history
         Past observed values of this signal, newest first.
+    no_data_files
+        Whether the commit is known to have added no data file (its added files were read).
 
     Returns
     -------
     Observation
-        `no_metrics` without an added-records count or when the band overflows (reason
-        ``not_finite``), `no_history` without a band.
+        `no_metrics` when data files were added without an added-records count (reason
+        ``not_recorded``) or when the band overflows (``not_finite``), `no_history` without a
+        band.
     """
-    added = _whole((summary or {}).get("added-records"))
+    raw = (summary or {}).get("added-records")
+    added = _whole(raw)
+    if raw is None and summary is not None:
+        files = summary.get("added-data-files")
+        if no_data_files or files is None or _whole(files) == 0:
+            added = 0
     if added is None:
         return Observation("volume", None, "no_metrics", {"reason": "not_recorded"}, None)
     band = learn_band(_numbers(history, "added"), floor=VOLUME_FLOOR_ROWS, share=VOLUME_FLOOR_SHARE)
@@ -1191,8 +1206,19 @@ _UNJUDGED_CAUSE = {
 }
 
 
+_LISTED_COLUMNS = 10
+"""The most columns an alert of signals that could not be judged names."""
+
+
 def unjudged_text(
-    signal: str, column: str | None, snapshot: int, reason: str, table: str, environment: str
+    signal: str,
+    column: str | None,
+    snapshot: int,
+    reason: str,
+    table: str,
+    environment: str,
+    *,
+    others: Sequence[str] = (),
 ) -> str:
     """Word why a blocking health signal could not be judged at a snapshot, and what to do.
 
@@ -1214,6 +1240,9 @@ def unjudged_text(
         The table.
     environment
         The environment's name.
+    others
+        The other columns of the signal that the commit could not judge, for one message per
+        signal; the first `_LISTED_COLUMNS` of all are named, then how many more.
 
     Returns
     -------
@@ -1223,6 +1252,12 @@ def unjudged_text(
     col = None if column is None else shown(column)
     what = signal if col is None else f"{signal} of {col}"
     warn = f"{{{signal}: warn}}" if col is None else f"{{{signal}: {{{col}: warn}}}}"
+    if col is not None and others:
+        names = [col, *(shown(other) for other in others)]
+        listed = ", ".join(names[:_LISTED_COLUMNS])
+        more = len(names) - _LISTED_COLUMNS
+        what = f"{signal} of {listed}" + (f" and {more} more" if more > 0 else "")
+        warn = f"{{{signal}: warn}}"
     if reason == "unreadable":
         step = f"commit fewer, larger files, or set health: {warn} to stop blocking on it"
     elif reason == "error":

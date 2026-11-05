@@ -13,6 +13,7 @@ import pytest
 from pyiceberg.conversions import to_bytes
 from pyiceberg.manifest import DataFile
 from pyiceberg.schema import Schema
+from pyiceberg.table.snapshots import Operation, Summary
 from pyiceberg.types import (
     DateType,
     DecimalType,
@@ -127,7 +128,8 @@ def test_volume_with_short_rising_and_noisy_histories(history: list, state: str)
 
 
 def test_volume_without_a_count_has_no_metrics() -> None:
-    missing = volume_signal({"total-records": "9"}, _volumes(*[9] * 8))
+    """Data files were added, but the summary does not say how many rows."""
+    missing = volume_signal({"added-data-files": "2", "total-records": "9"}, _volumes(*[9] * 8))
     assert (missing.state, missing.observed) == ("no_metrics", {"reason": "not_recorded"})
     assert volume_signal(None, []).state == "no_metrics"
     assert volume_signal({"added-records": "-3"}, []).state == "no_metrics"
@@ -986,3 +988,35 @@ def test_a_value_that_could_not_be_judged_says_why(reason: str, cause: str) -> N
         "went on: the next commit is judged again, and `lakana table health gold.t --env prod "
         "--signals` shows what was recorded"
     )
+
+
+@pytest.mark.parametrize(
+    "properties",
+    [
+        # A pyiceberg delete that drops whole files: it omits every count that is 0.
+        {"deleted-records": "5", "deleted-data-files": "1", "total-records": "0"},
+        # A merge-on-read commit that adds only delete files.
+        {
+            "added-delete-files": "1",
+            "added-position-delete-files": "1",
+            "added-position-deletes": "3",
+            "total-records": "10",
+            "total-position-deletes": "3",
+        },
+    ],
+)
+def test_a_commit_that_added_no_data_files_added_no_rows(properties: dict[str, str]) -> None:
+    """Pyiceberg writes `added-records` only above 0: no data files added is 0 rows, judged.
+
+    Parameters
+    ----------
+    properties
+        The snapshot summary's properties, as pyiceberg writes them.
+    """
+    summary = Summary(Operation.DELETE, **properties)
+    seen = volume_signal(summary, _volumes(*[9] * 8))
+    assert seen.state in ("ok", "fired")
+    assert seen.observed is not None and seen.observed["added"] == 0
+    # Known from the commit itself: no data file was read.
+    told = volume_signal({"added-data-files": "1"}, [], no_data_files=True)
+    assert (told.state, told.observed) == ("no_history", {"added": 0, "total": None})

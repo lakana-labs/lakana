@@ -920,3 +920,48 @@ def test_a_value_that_did_not_fit_is_told_without_values(
         "silver.orders: health signal volume could not be judged: its value did not fit what is "
         "stored (snapshot 7)"
     )
+
+
+def test_one_message_names_up_to_ten_columns_of_a_check(
+    catalog: CatalogService, session: Session
+) -> None:
+    """The told row's alert lists the other blocking columns of its commit not judged.
+
+    Parameters
+    ----------
+    catalog
+        The catalog, which creates `silver.orders`.
+    session
+        Database session.
+    """
+    delivery = _fired(
+        session, "null_rate", "c000", {"reason": "not_recorded"}, None, state="no_metrics"
+    )
+    told = session.get(TableHealthSignal, delivery.health_signal_id)
+    assert told is not None
+    told.effect = "block"
+    for index in range(1, 200):
+        session.add(
+            TableHealthSignal(
+                id=uuid.uuid4(),
+                environment_id=told.environment_id,
+                table_id=told.table_id,
+                signal="null_rate",
+                column_name=f"c{index:03}",
+                snapshot_id=told.snapshot_id,
+                sequence_number=told.sequence_number,
+                observed={"reason": "not_recorded"},
+                band=None,
+                state="no_metrics",
+                effect="block",
+                observed_at=told.observed_at,
+            )
+        )
+    session.commit()
+    alert = facts_for_health(session, delivery, "dev", delivery.id).alert
+    assert alert.startswith(
+        "silver.orders: health signal null_rate of c000, c001, c002, c003, c004, c005, c006, "
+        "c007, c008, c009 and 190 more could not be judged: the commit's files carry no counts "
+        "or bounds for it (snapshot 7)"
+    )
+    assert "set health: {null_rate: warn}" not in alert  # the step names the history
