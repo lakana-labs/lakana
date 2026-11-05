@@ -655,3 +655,94 @@ def test_the_freshness_lock_asks_postgres_with_two_keys(
     assert health_sweep._lock_table(session, uuid.UUID(int=1 << 120)) is expected
     (statement,) = session.scalar.call_args.args
     assert "pg_try_advisory_xact_lock" in str(statement)
+
+
+def _runs_of_commits(session: Session, runs: int, commits: int) -> None:
+    """Record the volume rows of daily runs that each commit several times, seconds apart.
+
+    Parameters
+    ----------
+    session
+        Database session; commits.
+    runs
+        How many runs, one a day from 2026-10-01.
+    commits
+        How many commits each run makes.
+    """
+    table_id, environment_id = _table_id(session), _environment_id(session)
+    number = 0
+    for run in range(runs):
+        for commit in range(commits):
+            number += 1
+            session.add(
+                TableHealthSignal(
+                    id=uuid.uuid4(),
+                    environment_id=environment_id,
+                    table_id=table_id,
+                    signal="volume",
+                    column_name=None,
+                    snapshot_id=number,
+                    sequence_number=number,
+                    observed=_ADDED,
+                    band=None,
+                    state="ok",
+                    effect="warn",
+                    observed_at=datetime(2026, 10, 1, tzinfo=UTC)
+                    + timedelta(days=run, seconds=5 * commit),
+                )
+            )
+    session.commit()
+
+
+def test_a_table_whose_runs_commit_several_times_builds_a_history(
+    catalog: CatalogService, session: Session
+) -> None:
+    """Eight runs of five commits are 40 commits but eight data points: the history rule holds.
+
+    Retention then keeps the newest commit of each run, so the table keeps its history.
+
+    Parameters
+    ----------
+    catalog
+        The catalog.
+    session
+        Database session.
+    """
+    _deployed(session, _MANIFEST_WITHOUT_SCHEDULE)
+    _runs_of_commits(session, 8, 5)
+    last = datetime(2026, 10, 8, 0, 0, 20, tzinfo=UTC)
+    _sweep(session, last + timedelta(hours=2))
+    (row,) = _freshness(session)
+    assert row.observed is not None
+    assert (row.state, row.observed["source"], row.band) == ("ok", "history", {"high": 259_200.0})
+    _sweep(session, datetime(2027, 3, 1, tzinfo=UTC))
+    kept = session.scalars(
+        select(TableHealthSignal.snapshot_id)
+        .where(TableHealthSignal.signal == "volume")
+        .order_by(TableHealthSignal.snapshot_id)
+    ).all()
+    assert kept == [5, 10, 15, 20, 25, 30, 35, 40]  # the newest commit of each run
+    newest = _freshness(session)[-1].observed
+    assert newest is not None and newest["source"] == "history"
+
+
+def test_freshness_reads_at_most_its_cap_of_volume_rows(
+    catalog: CatalogService, session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The read is bounded however many commits there are: past the cap, no more points.
+
+    Parameters
+    ----------
+    catalog
+        The catalog.
+    session
+        Database session.
+    monkeypatch
+        Lowers the cap.
+    """
+    monkeypatch.setattr(health_sweep, "FRESHNESS_ROW_CAP", 35)
+    _deployed(session, _MANIFEST_WITHOUT_SCHEDULE)
+    _runs_of_commits(session, 8, 5)  # the newest 35 rows hold seven runs
+    _sweep(session, datetime(2026, 10, 8, 2, tzinfo=UTC))
+    (row,) = _freshness(session)
+    assert row.state == "no_history"

@@ -236,9 +236,9 @@ observations, newest first.
 The answer is `{"items": [...], "next_cursor": ...}`; `next_cursor` is `null` on the last page.
 `LAKANA_HEALTH__RETENTION_DAYS` (90 by default, at least 7) is how far back `days` may reach. The
 workers' hourly sweep (`LAKANA_RUN__SWEEP_INTERVAL`) deletes older observations, but keeps the
-newest of each signal and column, so the current state never goes, and the last 31 commits of
-each table that added data, so freshness keeps the history it is judged from however long ago
-they were. Each sweep handles at most
+newest of each signal and column, so the current state never goes, and the newest commit of
+each of the table's last 31 writes that added data (commits less than 10 minutes apart are one
+write), so freshness keeps the history it is judged from however long ago they were. Each sweep handles at most
 500 tables and the next sweep the next 500, so with more tables the deletion takes several hours
 to come round. A message still waiting to be delivered when its signal is deleted is dropped with
 it.
@@ -330,8 +330,9 @@ after its last snapshot has passed, so a weekday job is not late over the weeken
 such jobs, the shortest limit counts. A table without one is late after 3 times the median gap
 between its writes, and at least 1 hour; a schedule that cannot be read counts as none. For that
 median, snapshots less than 10 minutes apart count as one write: a run that commits three times is
-one, so a table written in bursts is not late an hour after each run. It reads the last 31
-snapshots, and with fewer than 8 writes among them the table shows `no_history`. A table whose
+one, so a table written in bursts is not late an hour after each run. It reads the last 31 writes,
+from at most the last 1,000 snapshots that added data, and with fewer than 8 writes the table
+shows `no_history`. A table whose
 building jobs are all scheduled and paused shows `off` with `observed.reason` `paused`: it is not
 expected to change, and nothing is sent. When a job without a schedule builds it too (one that CI
 or another tool starts), that job can write at any time, so the table is judged by its history.

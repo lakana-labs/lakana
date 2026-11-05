@@ -48,6 +48,7 @@ from lakana_core.catalog.health_signals import (
     HISTORY,
     HealthEffects,
     Observation,
+    data_point_indexes,
     freshness_signal,
     schedule_threshold,
 )
@@ -57,6 +58,10 @@ from lakana_core.models import JobSchedule, Namespace, Table, TableHealthSignal
 from lakana_core.runs.pools import on_postgres
 
 logger = logging.getLogger(__name__)
+
+FRESHNESS_ROW_CAP = 1_000
+"""The most ``volume`` rows of one table that freshness and its retention read: the newest
+`HISTORY` + 1 data points of a table whose runs commit many times, within a bound."""
 
 MAX_SWEEP_TABLES = 500
 """The most tables one sweep looks at; the next sweep takes the next slice."""
@@ -147,8 +152,9 @@ def _data_commits(table_id: uuid.UUID) -> Select[uuid.UUID, datetime, int | None
     Returns
     -------
     Select
-        ``id``, ``observed_at`` and ``snapshot_id`` of the newest `HISTORY` + 1 ``volume`` rows
-        that no set-back marked, newest first (`NEWEST_COMMIT`).
+        ``id``, ``observed_at`` and ``snapshot_id`` of the newest `FRESHNESS_ROW_CAP` ``volume``
+        rows that no set-back marked, newest first (`NEWEST_COMMIT`): enough for `HISTORY` + 1
+        data points of a table whose runs commit several times (`data_point_indexes`).
     """
     return (
         select(TableHealthSignal.id, TableHealthSignal.observed_at, TableHealthSignal.snapshot_id)
@@ -159,7 +165,7 @@ def _data_commits(table_id: uuid.UUID) -> Select[uuid.UUID, datetime, int | None
             NOT_SET_BACK,
         )
         .order_by(*NEWEST_COMMIT)
-        .limit(HISTORY + 1)
+        .limit(FRESHNESS_ROW_CAP)
     )
 
 
@@ -198,9 +204,10 @@ def _delete_old(
     """Delete a table's rows from before the kept period, but its current state.
 
     A row goes when it is older than `cutoff` and either a set-back marked it, or a newer row of
-    the same signal and column that no set-back marked exists. The newest `HISTORY` + 1 commits
-    that added data (`_data_commits`) keep their ``volume`` rows however old, so the freshness of
-    a table that stopped being written keeps its history. Commits after each batch.
+    the same signal and column that no set-back marked exists. The newest commit of each of the
+    newest `HISTORY` + 1 data points (`data_point_indexes` of `_data_commits`) keeps its
+    ``volume`` row however old, so the freshness of a table that stopped being written keeps its
+    history. Commits after each batch.
 
     Parameters
     ----------
@@ -232,7 +239,9 @@ def _delete_old(
             and_(newer.observed_at == old.observed_at, newer.id > old.id),
         ),
     )
-    spared = list(session.scalars(select(_data_commits(table_id).subquery().c.id)))
+    commits = session.execute(_data_commits(table_id)).all()
+    points = data_point_indexes([at for _, at, _ in commits])[: HISTORY + 1]
+    spared = [commits[index][0] for index in points]
     batch = (
         select(old.id)
         .where(
