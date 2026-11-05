@@ -1103,17 +1103,25 @@ def too_many_open_bytes_message(
         if holder == "worker"
         else "the memory the server has"
     )
-    reading = {
-        "open": f"the open versions of {table}",
-        "ends": f"the closed versions of the keys that return to {table}",
-    }[what]
     shown_cap = _mib(cap).replace(" (", ", ").rstrip(")")
+    stopped = (
+        f"passed {_mib(read)} of Arrow data, more than {setting} ({shown_cap}) allows, so the read "
+        "stopped and nothing was written."
+    )
+    if what == "ends":
+        # Only the key columns and `valid_to` are read, one row per returning key once folded:
+        # the dimension's other columns do not count, so narrowing them would not help.
+        return (
+            f"Reading the closed versions of the keys that return to {table} {stopped} A history "
+            f"write holds the key and the latest end of each key that returns in the {holder}'s "
+            f"memory. Ask an operator to raise {setting} if {memory} allows it, or write fewer "
+            "returning keys at once."
+        )
     return (
-        f"Reading {reading} passed {_mib(read)} of Arrow data, more than {setting} "
-        f"({shown_cap}) allows, so the read stopped and nothing was written. A history write "
-        f"holds every open version in the {holder}'s memory. Ask an operator to raise {setting} "
-        f"if {memory} allows it, or narrow the dimension's columns: keep wide text such as "
-        "descriptions in a table of its own and join it by the key."
+        f"Reading the open versions of {table} {stopped} A history write holds every open "
+        f"version in the {holder}'s memory. Ask an operator to raise {setting} if {memory} "
+        "allows it, or narrow the dimension's columns: keep wide text such as descriptions in a "
+        "table of its own and join it by the key."
     )
 
 
@@ -1405,8 +1413,11 @@ def _read_capped(
     byte_cap
         Most bytes of Arrow data (`nbytes`) to hold, with its refusal, or `None`.
     fold
-        Reduces what is held, applied after each batch to the rows held so far and the batch's
-        (so that only its result is held), or `None` to hold every row kept.
+        Reduces what is held to its result, or `None` to hold every row kept. It is applied to
+        the folded rows and the batches after them once those batches hold more rows than the
+        folded result (so the work stays proportional to the rows read, #433; an empty batch
+        never folds), before the byte cap refuses, and at the end: at most about twice the
+        folded result and one batch is held.
 
     Returns
     -------
@@ -1424,6 +1435,7 @@ def _read_capped(
     parts = [held]
     rows = 0
     size = 0
+    folded = 0  # the rows of `parts[0]`, the folded result, when `fold` is given
     for batch in _stream_batches(scan):
         part = pa.Table.from_batches([batch])
         if keep is not None:
@@ -1431,15 +1443,36 @@ def _read_capped(
         rows += part.num_rows
         if max_rows is not None and rows > max_rows:
             raise ValidationError(message(max_rows))
-        if fold is None:
-            parts.append(part)
-            size += part.nbytes
-        else:
-            parts = [fold(pa.concat_tables([*parts, part]))]
-            size = parts[0].nbytes
+        if part.num_rows == 0:
+            continue
+        parts.append(part)
+        size += part.nbytes
+        if fold is not None and (
+            _rows_after(parts) > folded or (byte_cap is not None and size > byte_cap.cap)
+        ):
+            parts = [fold(pa.concat_tables(parts))]
+            folded, size = parts[0].num_rows, parts[0].nbytes
         if byte_cap is not None and size > byte_cap.cap:
             raise ValidationError(byte_cap.message(size, byte_cap.cap))
+    if fold is not None and len(parts) > 1:
+        parts = [fold(pa.concat_tables(parts))]
     return pa.concat_tables(parts)
+
+
+def _rows_after(parts: Sequence[pa.Table]) -> int:
+    """Count the rows held past the first part (`_read_capped`'s batches not folded yet).
+
+    Parameters
+    ----------
+    parts
+        The folded result, then the batches read after it.
+
+    Returns
+    -------
+    int
+        Their rows.
+    """
+    return sum(part.num_rows for part in parts[1:])
 
 
 def read_open_versions(

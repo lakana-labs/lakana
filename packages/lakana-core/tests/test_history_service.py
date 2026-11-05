@@ -7,10 +7,11 @@ import inspect
 import json
 import re
 import uuid
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest import mock
 
 import pyarrow as pa
@@ -22,7 +23,7 @@ from pyiceberg.expressions import EqualTo
 from pyiceberg.manifest import DataFileContent
 from pyiceberg.schema import Schema
 from pyiceberg.table import DataScan, StaticTable
-from pyiceberg.types import BooleanType, NestedField, StringType, TimestamptzType
+from pyiceberg.types import BooleanType, LongType, NestedField, StringType, TimestamptzType
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from test_merge import _bound_task
@@ -1064,10 +1065,107 @@ def test_the_ends_of_returning_keys_have_the_byte_cap_as_a_backstop(hist: Hist) 
             holder="server",
         )
 
-    assert str(info.value).startswith(
-        "Reading the closed versions of the keys that return to gold.dim_customer passed "
+    assert re.fullmatch(
+        r"Reading the closed versions of the keys that return to gold\.dim_customer passed \d+ "
+        r"bytes \(0\.0 MiB\) of Arrow data, more than LAKANA_RUN__MAX_HISTORY_OPEN_BYTES \(1 "
+        r"bytes, 0\.0 MiB\) allows, so the read stopped and nothing was written\. A history write "
+        r"holds the key and the latest end of each key that returns in the server's memory\. Ask "
+        r"an operator to raise LAKANA_RUN__MAX_HISTORY_OPEN_BYTES if the memory the server has "
+        r"allows it, or write fewer returning keys at once\.",
+        str(info.value),
+    ), str(info.value)
+
+
+def _batched_ends(
+    monkeypatch: pytest.MonkeyPatch, batches: list[list[int]]
+) -> tuple[Any, list[int], Callable[[pa.Table], pa.Table]]:
+    """Stand a scan of key-only ends in for `_read_capped`, and count the folds.
+
+    Parameters
+    ----------
+    monkeypatch
+        Patches `_stream_batches` to yield `batches`.
+    batches
+        The keys of each batch; a key's `valid_to` is its batch's position.
+
+    Returns
+    -------
+    tuple
+        The scan, the row count of each fold's input, and the fold.
+    """
+    schema = Schema(
+        NestedField(1, "k", LongType(), required=False),
+        NestedField(2, "valid_to", LongType(), required=False),
     )
-    assert "LAKANA_RUN__MAX_HISTORY_OPEN_BYTES (1 bytes, 0.0 MiB) allows" in str(info.value)
+    monkeypatch.setattr(
+        history_module,
+        "_stream_batches",
+        lambda scan: iter(
+            pa.RecordBatch.from_pydict(
+                {"k": pa.array(keys, pa.int64()), "valid_to": pa.array([i] * len(keys), pa.int64())}
+            )
+            for i, keys in enumerate(batches)
+        ),
+    )
+    folds: list[int] = []
+
+    def fold(held: pa.Table) -> pa.Table:
+        """Keep each key's largest `valid_to`, and record the size of what was held.
+
+        Parameters
+        ----------
+        held
+            The rows held.
+
+        Returns
+        -------
+        pa.Table
+            One row per key.
+        """
+        folds.append(held.num_rows)
+        latest = held.group_by(["k"]).aggregate([("valid_to", "max")])
+        return pa.table({"k": latest.column("k"), "valid_to": latest.column("valid_to_max")})
+
+    return SimpleNamespace(projection=lambda: schema), folds, fold
+
+
+def test_the_ends_are_folded_only_when_the_unfolded_rows_pass_the_folded_ones(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Folding after every batch cost about 66 s of CPU for 1M returning keys (#433)."""
+    keys = 1_000
+    batches = [
+        [] if i % 3 == 2 else list(range(i * 50 % keys, i * 50 % keys + 50)) for i in range(300)
+    ]
+    scan, folds, fold = _batched_ends(monkeypatch, batches)
+
+    ends = history_module._read_capped(scan, None, str, fold=fold)
+
+    last = {k: i for i, batch in enumerate(batches) for k in batch}
+    assert (
+        dict(zip(ends.column("k").to_pylist(), ends.column("valid_to").to_pylist(), strict=True))
+        == last
+    )
+    assert len(folds) <= 15  # 200 batches with rows, 100 empty: one fold each before
+    assert max(folds) <= 2 * keys + 50  # what is held stays about twice the folded ends
+
+
+def test_the_ends_are_folded_before_the_byte_cap_refuses_them(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scan, _, fold = _batched_ends(monkeypatch, [list(range(100))] * 4)
+    one = pa.table(
+        {"k": pa.array(range(100), pa.int64()), "valid_to": pa.array([0] * 100, pa.int64())}
+    )
+    cap = history_module.ByteCap(fold(one).nbytes + 64, lambda read, cap: f"{read} > {cap}")
+
+    ends = history_module._read_capped(scan, None, str, fold=fold, byte_cap=cap)
+
+    assert ends.num_rows == 100 and ends.nbytes <= cap.cap  # held unfolded, it would pass the cap
+    with pytest.raises(ValidationError, match=r"> 100$"):
+        history_module._read_capped(
+            scan, None, str, fold=fold, byte_cap=history_module.ByteCap(100, cap.message)
+        )
 
 
 def test_no_key_filter_is_built_when_the_table_has_no_closed_version(hist: Hist) -> None:

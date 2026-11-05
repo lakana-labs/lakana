@@ -352,9 +352,13 @@ time. The first run, which creates the table, records the event of a create.
   holds. Both apply to SQL assets (in the worker) and Python assets (in the server). A key that
   comes back after it was closed makes the run read the key's closed versions too (all of them
   with an old `valid_from:`); only each key's latest end is kept while they are read, so that
-  read holds about one row per returning key, and the byte cap applies to it as well (the
-  message then starts ``Reading the closed versions of the keys that return to
-  gold.dim_customer passed …``).
+  read holds about one row per returning key, and the byte cap applies to it as well. Only the
+  key columns and the end are read, so the refusal then says ``Reading the closed versions of
+  the keys that return to gold.dim_customer passed … allows, so the read stopped and nothing was
+  written. A history write holds the key and the latest end of each key that returns in the
+  worker's memory. Ask an operator to raise LAKANA_RUN__MAX_HISTORY_OPEN_BYTES if the worker's
+  memory limit (LAKANA_WORKER__MEMORY_LIMIT) allows it, or write fewer returning keys at
+  once.``
 - On the REST path (a Python asset) the server holds the open versions, and
   `LAKANA_APPEND__MAX_CONCURRENT_HISTORY` (1 by default) bounds how many such writes run at once.
   A request takes the slot once its authorization is checked, before its body is read; one past

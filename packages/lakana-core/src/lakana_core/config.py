@@ -478,7 +478,7 @@ class RunConfig(BaseModel):
         Most bytes of Arrow data a history write may read the open versions of its table into,
         512 MiB by default. The open-versions cap counts rows; this bounds their width too, since
         a version holds whatever columns the dimension has: the worker's memory for a SQL asset,
-        the server's for a Python asset. The bytes are counted file by file while the open
+        the server's for a Python asset. The bytes are counted batch by batch while the open
         versions are read; as soon as they pass it, the read stops and the run is refused, and
         nothing is written, so at most this plus one data file is held (a file holds one write's
         new versions: one request body over REST, `LAKANA_APPEND__MAX_BYTES`, or one SQL run's).
