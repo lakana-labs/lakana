@@ -643,6 +643,11 @@ def test_a_block_signal_that_could_not_be_judged_warns(world: World) -> None:
     assert judge(_health_spec("null_rate", "price"), 14) == (CheckOutcome.PASSED, None, 14)
     assert judge(_health_spec("range"), 14) == (CheckOutcome.PASSED, None, 14)
     assert judge(_health_spec("volume"), 99) == warned("volume", None, 99, "missing", 99)
+    # `range: off` for the table and `{name: block}` on a string column: the table-level off row
+    # does not judge the column, which records nothing (R4).
+    _signal(world, "bronze.events", "volume", snapshot=15)
+    _signal(world, "bronze.events", "range", snapshot=15, state="off", effect="off")
+    assert judge(_health_spec("range", "name"), 15) == warned("range", "name", 15, "missing", 15)
 
 
 def test_a_run_whose_block_signal_could_not_be_judged_goes_on_and_says_so(

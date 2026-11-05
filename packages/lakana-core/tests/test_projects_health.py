@@ -184,6 +184,25 @@ def test_a_blocking_column_past_the_200th_is_refused() -> None:
     )
 
 
+def test_the_judged_columns_are_counted_in_the_tables_schema_order_when_known() -> None:
+    """An append keeps the table's schema: its columns first, then the new ones (R4).
+
+    `c0` is the first column of the SELECT but the 201st of the table, and `c200` the other way
+    round.
+    """
+    columns = tuple(f"c{i}" for i in range(201))
+    table = _with(
+        make_asset("gold.t", columns=columns),
+        write="append",
+        watermark="c1",
+        health={"range": {"c0": "block", "c200": "block"}},
+    )
+    order = {"gold.t": [*(f"old{i}" for i in range(199)), "c200", "c1", "c0"]}
+    [issue] = health_issues([table], order)
+    assert issue.message.startswith("health: range of c0 can never block: only the first 200 ")
+    assert "c0 is column 202;" in issue.message
+
+
 def test_a_history_asset_has_its_added_columns() -> None:
     """The columns a history write adds count as the table's columns, `valid_from` does not."""
     table = _with(

@@ -187,13 +187,20 @@ def entry_effects(entry: object) -> HealthEffects:
     return HealthEffects.from_flat(entry.get("health"))
 
 
-def health_issues(assets: Sequence[ParsedAsset]) -> list[ProjectIssue]:
+def health_issues(
+    assets: Sequence[ParsedAsset], orders: Mapping[str, Sequence[str]] | None = None
+) -> list[ProjectIssue]:
     """Check each asset's `health:` against what the asset is.
 
     Parameters
     ----------
     assets
         The parsed assets.
+    orders
+        The current columns, in the Iceberg schema's order, of the existing tables whose write
+        keeps the schema (an append, merge or history write): a commit judges the first
+        `MAX_HEALTH_COLUMNS` of the table, its own columns first and then those the write adds.
+        Without one, the columns are counted in the asset's own order.
 
     Returns
     -------
@@ -201,8 +208,8 @@ def health_issues(assets: Sequence[ParsedAsset]) -> list[ProjectIssue]:
         One per asset that is a view and has `health:`, one per column entry that names a
         column the table does not have (the exact name; a history table's added columns count,
         its `valid_from:` column does not), and one per ``block`` entry on a column past the
-        `MAX_HEALTH_COLUMNS`-th, which no commit judges; columns are not checked for a star or a
-        Python asset. In path order.
+        `MAX_HEALTH_COLUMNS`-th (by `orders` when given), which no commit judges; columns are
+        not checked for a star or a Python asset. In path order.
     """
     from lakana_core.catalog.health_signals import MAX_HEALTH_COLUMNS
 
@@ -234,6 +241,8 @@ def health_issues(assets: Sequence[ParsedAsset]) -> list[ProjectIssue]:
             for signal, _, column in (key.partition(".") for key in health if "." in key)
             if column not in has
         )
+        current = list((orders or {}).get(asset.table, ()))
+        judged = [*current, *(c for c in has if c not in current)]
         issues.extend(
             ProjectIssue(
                 asset.path,
@@ -242,11 +251,11 @@ def health_issues(assets: Sequence[ParsedAsset]) -> list[ProjectIssue]:
                     signal=signal,
                     column=shown_key(column),
                     most=MAX_HEALTH_COLUMNS,
-                    position=has.index(column) + 1,
+                    position=judged.index(column) + 1,
                 ),
             )
             for key, effect in health.items()
             for signal, _, column in (key.partition("."),)
-            if effect == "block" and column in has[MAX_HEALTH_COLUMNS:]
+            if effect == "block" and column in has and column in judged[MAX_HEALTH_COLUMNS:]
         )
     return issues

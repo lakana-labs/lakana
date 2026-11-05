@@ -673,7 +673,9 @@ def _unjudged(
         if not any(row.signal == "volume" for row in here):
             continue  # a compaction, or nothing recorded here: no data to judge
         if column is not None:
-            judged = any(row.column_name in (column, None) for row in own)
+            # Only the column's own row judges it: a table-level row (`range: off` beside
+            # `{name: block}`) says nothing of a column that records no value.
+            judged = any(row.column_name == column for row in own)
         elif signal in COLUMN_SIGNALS:
             judged = True  # which columns there are is the commit's to say
         else:

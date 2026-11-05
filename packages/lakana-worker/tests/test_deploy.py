@@ -4024,3 +4024,107 @@ def test_a_deploy_refuses_a_hand_written_check_that_takes_a_health_check_name(
         "A check named `health_volume` is generated for `silver.orders`; rename "
         "`checks/silver/orders/health_volume.sql`." in run.error_message
     )
+
+
+def test_a_deploy_counts_the_judged_columns_in_the_existing_tables_order(
+    session: Session, principal: PrincipalRef, world: World
+) -> None:
+    """An append into an existing table keeps its schema, so its order decides the 200 (R4).
+
+    Parameters
+    ----------
+    session
+        Database session.
+    principal
+        The deploying principal.
+    world
+        The world.
+    """
+    catalog = CatalogService(session, StorageResolver(session), AllowAllAuthorization())
+    catalog.create_table(
+        principal,
+        TableRef("dev", NamespacePath.from_parts(["bronze"]), "wide"),
+        schema=Schema(
+            *(NestedField(i + 1, f"f{i}", LongType(), required=False) for i in range(200)),
+            NestedField(201, "x", LongType(), required=False),
+        ),
+    )
+    commit(
+        world.repo_path,
+        {
+            "assets/bronze/wide.sql": (
+                "/* lakana\nwrite: append\nwatermark: x\nhealth: {range: {x: block}}\n*/\n"
+                "SELECT 1 AS x\n"
+            ),
+        },
+    )
+    run = _submit_and_run(session, principal, world)
+    assert run.status is DeployStatus.FAILED
+    assert run.error_message is not None
+    assert (
+        "health: range of x can never block: only the first 200 columns of a table are judged, "
+        "and x is column 201;" in run.error_message
+    )
+
+
+def test_a_table_whose_columns_cannot_be_read_is_counted_in_its_assets_order(
+    session: Session,
+    principal: PrincipalRef,
+    world: World,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """No table yet, or storage that does not answer: the `SELECT`'s order, and the deploy goes on.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    principal
+        The deploying principal.
+    world
+        The world.
+    monkeypatch
+        Breaks the metadata read.
+    caplog
+        The log.
+    """
+    files = {
+        "assets/bronze/wide.sql": (
+            "/* lakana\nwrite: append\nwatermark: x\nhealth: {range: {x: block}}\n*/\n"
+            "SELECT 1 AS x\n"
+        ),
+    }
+    commit(world.repo_path, files)
+    assert _submit_and_run(session, principal, world).status is DeployStatus.SUCCEEDED
+
+    catalog = CatalogService(session, StorageResolver(session), AllowAllAuthorization())
+    catalog.create_table(
+        principal,
+        TableRef("dev", NamespacePath.from_parts(["bronze"]), "wide"),
+        schema=Schema(NestedField(1, "x", LongType(), required=False)),
+    )
+
+    def unreadable(*args: object, **kwargs: object) -> object:
+        """Fail as storage that does not answer.
+
+        Parameters
+        ----------
+        *args
+            Ignored.
+        **kwargs
+            Ignored.
+
+        Raises
+        ------
+        OSError
+            Always.
+        """
+        raise OSError("the storage did not answer")
+
+    monkeypatch.setattr(deploy_module, "current_columns", unreadable)
+    files["assets/bronze/wide.sql"] += "-- again\n"
+    commit(world.repo_path, files)
+    with caplog.at_level(logging.WARNING, logger="lakana_worker.deploy"):
+        assert _submit_and_run(session, principal, world).status is DeployStatus.SUCCEEDED
+    assert any("Could not read the columns of bronze.wide" in r.message for r in caplog.records)

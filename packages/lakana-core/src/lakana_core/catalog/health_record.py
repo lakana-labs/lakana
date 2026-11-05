@@ -47,6 +47,7 @@ from lakana_core.db import db_now
 from lakana_core.errors import StorageUnavailableError, ValidationError
 from lakana_core.identifiers import shown
 from lakana_core.models import TableHealthSignal
+from lakana_core.secrets.keys import KeyProvider
 
 logger = logging.getLogger(__name__)
 
@@ -569,3 +570,47 @@ def forget_set_back(
             update(TableHealthSignal).where(*rows, NOT_SET_BACK).values(set_back_at=db_now(session))
         )
     session.execute(statement.execution_options(synchronize_session=False))
+
+
+def current_columns(
+    session: Session, key_provider: KeyProvider | None, environment: str, table: str
+) -> list[str] | None:
+    """Read the names of a managed table's columns, in its current schema's order.
+
+    A deploy counts the columns a commit judges (`MAX_HEALTH_COLUMNS`) in this order for a
+    write that keeps the table's schema. Names only: no rows, no files, no statistics.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    key_provider
+        Decrypts the storage secret.
+    environment
+        The environment's name.
+    table
+        The dotted table name.
+
+    Returns
+    -------
+    list of str or None
+        The names; `None` for a table that does not exist, is not a managed table, or has no
+        metadata yet.
+
+    Raises
+    ------
+    Exception
+        Whatever reading the storage raises; the caller decides.
+    """
+    from lakana_core.catalog.identity import resolve_table_id
+    from lakana_core.catalog.metadata import read_metadata
+    from lakana_core.models import Table, TableType
+    from lakana_core.storage.resolver import StorageResolver
+
+    table_id = resolve_table_id(session, environment, *table.split("."))
+    row = None if table_id is None else session.get(Table, table_id)
+    if row is None or row.table_type is not TableType.ICEBERG or not row.metadata_location:
+        return None
+    resolved = StorageResolver(session, key_provider).for_environment(environment)
+    metadata = read_metadata(resolved.file_io, row.metadata_location)
+    return [field.name for field in metadata.schema().fields]

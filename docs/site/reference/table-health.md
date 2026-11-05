@@ -294,7 +294,7 @@ jobs that build the table get a `health` message with the same text when the com
 (`no_metrics` with reason `unreadable` or `error`), once until the signal is judged again. A column
 that never records a value can never be judged: `range` of a column without a range (text,
 boolean, a nested type) and any column past the 200th. A deploy that knows the columns refuses
-`block` on a column past the 200th; for the rest, `lakana table get` marks the entry, as in
+`block` on a column past the 200th (counted as the refusal table below says); for the rest, `lakana table get` marks the entry, as in
 `range of note block (never judged: a string column has no range)`. Use `null_rate` for such a
 column, or set it to `warn` or `off`. Which
 signals block comes from the deployment the run started with; for `null_rate: block` and
@@ -324,7 +324,7 @@ Write `off` unquoted or quoted; `on`, `yes` and `true` are not effects. A deploy
 | ``health: null_rate takes warn, block or off in lakana.yaml; name single columns in an asset's header`` | Columns in `lakana.yaml`. |
 | ``health: range names column price, which gold.orders does not have (columns: order_id); fix the name or remove it`` | A column the table's `SELECT` does not return. |
 | ``health: does not apply to a view, which has no snapshots to watch; remove it, or materialize the asset as a table`` | `health:` on a view. |
-| ``health: range of c200 can never block: only the first 200 columns of a table are judged, and c200 is column 201; move it among the first 200, or set it to warn or off`` | `block` on a column past the 200th of the `SELECT`. |
+| ``health: range of c200 can never block: only the first 200 columns of a table are judged, and c200 is column 201; move it among the first 200, or set it to warn or off`` | `block` on a column past the 200th of the table: in the `SELECT`'s order, or, for an `append`, `merge` or `history` write to a table that exists, in the table's own order (its columns first, then those the `SELECT` adds), which is the order its commits judge. If that table's metadata cannot be read, the `SELECT`'s order counts. |
 
 The deploy checks a column only when it knows the asset's columns: from a SQL asset's column
 list. For a `SELECT *` and for a Python asset it cannot; an entry for a column the table does not
