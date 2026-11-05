@@ -204,7 +204,7 @@ def _delete_old(
     """Delete a table's rows from before the kept period, but its current state.
 
     A row goes when it is older than `cutoff` and either a set-back marked it, or a newer row of
-    the same signal and column that no set-back marked exists. The newest commit of each of the
+    the same signal and column that no set-back marked exists. The first commit of each of the
     newest `HISTORY` + 1 data points (`data_point_indexes` of `_data_commits`) keeps its
     ``volume`` row however old, so the freshness of a table that stopped being written keeps its
     history. Commits after each batch.

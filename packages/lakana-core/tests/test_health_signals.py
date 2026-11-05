@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import itertools
 import sys
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -927,3 +928,36 @@ def test_a_column_block_that_can_never_be_judged_is_named_with_the_reason() -> N
         "range.name": "a string column has no range",
         f"null_rate.{late}": "only the first 200 columns are judged",
     }
+
+
+@pytest.mark.parametrize("every", [5, 9])
+def test_a_table_written_every_few_minutes_builds_a_history_and_fires_after_a_stall(
+    every: int,
+) -> None:
+    """A group of commits ends ten minutes after its first, never chained (R2).
+
+    Commits 5 or 9 minutes apart give a data point every 10 or 18 minutes, so the limit is the
+    1 h floor and an hour's stall fires.
+
+    Parameters
+    ----------
+    every
+        Minutes between commits.
+    """
+    commits = _commits(1_000, timedelta(minutes=every))
+    points = health_signals.data_point_indexes(commits)
+    # The first commit of each group stands for it, oldest first in time, so a group spans
+    # less than ten minutes and the next starts at least ten minutes after it.
+    times = [commits[i] for i in points]
+    assert all(
+        (newer - older) >= timedelta(minutes=10) for newer, older in itertools.pairwise(times)
+    )
+    assert len(points) > MIN_HISTORY
+    soon = freshness_signal(
+        now=_FRIDAY + timedelta(minutes=30), commit_times=commits, thresholds=[], paused=False
+    )
+    assert (soon.state, soon.band) == ("ok", {"high": 3_600.0})
+    stalled = freshness_signal(
+        now=_FRIDAY + timedelta(minutes=61), commit_times=commits, thresholds=[], paused=False
+    )
+    assert stalled.state == "fired"

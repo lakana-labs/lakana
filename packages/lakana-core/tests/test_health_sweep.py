@@ -699,7 +699,7 @@ def test_a_table_whose_runs_commit_several_times_builds_a_history(
 ) -> None:
     """Eight runs of five commits are 40 commits but eight data points: the history rule holds.
 
-    Retention then keeps the newest commit of each run, so the table keeps its history.
+    Retention then keeps the first commit of each run, so the table keeps its history.
 
     Parameters
     ----------
@@ -721,7 +721,8 @@ def test_a_table_whose_runs_commit_several_times_builds_a_history(
         .where(TableHealthSignal.signal == "volume")
         .order_by(TableHealthSignal.snapshot_id)
     ).all()
-    assert kept == [5, 10, 15, 20, 25, 30, 35, 40]  # the newest commit of each run
+    # The first commit of each run, and the newest commit, which is the current state.
+    assert kept == [1, 6, 11, 16, 21, 26, 31, 36, 40]
     newest = _freshness(session)[-1].observed
     assert newest is not None and newest["source"] == "history"
 

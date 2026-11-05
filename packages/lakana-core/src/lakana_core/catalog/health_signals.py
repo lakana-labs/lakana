@@ -63,8 +63,9 @@ FRESHNESS_HISTORY_FACTOR = 3.0
 FRESHNESS_MIN_SECONDS = 3_600.0
 """The least limit of the history rule, so commits a few minutes apart do not fire at once."""
 FRESHNESS_BURST_SECONDS = 600.0
-"""Data commits less than this apart are one data point of the history rule: one run that commits
-several times is one, so the median gap is between runs, not seconds."""
+"""Data commits less than this after the first of their group are one data point of the history
+rule: one run that commits several times is one, so the median gap is between runs, not
+seconds."""
 
 _RANGE_KINDS: tuple[tuple[tuple[type[PrimitiveType], ...], str], ...] = (
     ((IntegerType, LongType), "integer"),
@@ -663,8 +664,11 @@ def schedule_threshold(cron: str, timezone: str, last_commit_at: datetime) -> fl
 def data_point_indexes(commit_times: Sequence[datetime]) -> list[int]:
     """Find the commit that stands for each data point of the history rule.
 
-    Commits less than `FRESHNESS_BURST_SECONDS` apart are one data point: a run that commits
-    three times is one. Each point is stood for by its newest commit.
+    A data point is a group of commits within `FRESHNESS_BURST_SECONDS` of the group's first
+    commit: a run that commits three times is one. The group is anchored at its first commit and
+    never chained, so a table written every five minutes has a point every ten. The first commit
+    stands for its group, so after retention keeps only those, the points stay the same: each is
+    at least `FRESHNESS_BURST_SECONDS` after the one before.
 
     Parameters
     ----------
@@ -674,13 +678,16 @@ def data_point_indexes(commit_times: Sequence[datetime]) -> list[int]:
     Returns
     -------
     list of int
-        The index in `commit_times` of the newest commit of each point, newest first.
+        The index in `commit_times` of the first commit of each group, newest group first.
     """
-    indexes = [0] if commit_times else []
-    for index, (newer, older) in enumerate(itertools.pairwise(commit_times), start=1):
-        if (newer - older).total_seconds() >= FRESHNESS_BURST_SECONDS:
-            indexes.append(index)
-    return indexes
+    firsts: list[int] = []
+    anchor: datetime | None = None
+    for index in range(len(commit_times) - 1, -1, -1):  # oldest first
+        at = commit_times[index]
+        if anchor is None or (at - anchor).total_seconds() >= FRESHNESS_BURST_SECONDS:
+            anchor = at
+            firsts.append(index)
+    return firsts[::-1]
 
 
 def freshness_signal(
@@ -694,8 +701,9 @@ def freshness_signal(
 
     The limit is the smallest of `thresholds`, the schedules of the jobs that build the table;
     without one, `FRESHNESS_HISTORY_FACTOR` times the median gap between the newest `HISTORY` + 1
-    data points, at least `FRESHNESS_MIN_SECONDS`. A data point is a commit, or several less than
-    `FRESHNESS_BURST_SECONDS` apart (`data_point_indexes`): a run that commits three times is one.
+    data points, at least `FRESHNESS_MIN_SECONDS`. A data point is a group of commits within
+    `FRESHNESS_BURST_SECONDS` of its first (`data_point_indexes`): a run that commits three times
+    is one.
     Either way a table with fewer than `MIN_HISTORY` commits (by the history rule, data points)
     is not judged, and a table whose building jobs are all scheduled and paused is not expected
     to change.
