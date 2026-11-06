@@ -2273,3 +2273,150 @@ def test_the_local_task_process_trusts_the_workers_bundle(harness: Harness, tmp_
         .keys()
         .isdisjoint({"SSL_CERT_FILE", "LAKANA_CA_BUNDLE"})
     )
+
+
+# --- the figures of a Python task ------------------------------------------------------------
+
+_OWN_PEAK = (
+    "import re\n"
+    "peak = int(re.search(r'VmHWM:\\s+(\\d+)', open('/proc/self/status').read()).group(1)) * 1024\n"
+)
+_LINUX = sys.platform.startswith("linux")
+
+
+@pytest.mark.skipif(not _LINUX, reason="the peak comes from /proc")
+def test_a_task_gets_the_peak_it_reported_and_not_the_workers(harness: Harness) -> None:
+    """The kernel folds the parent's high-water mark into a child's `ru_maxrss` at exec (F1)."""
+    held = bytearray(64 * 2**20)
+    for offset in range(0, len(held), 4096):
+        held[offset] = 1  # the parent's own mark is now above 64 MiB
+    outcome = harness.run(
+        _OWN_PEAK + "write({'status': 'succeeded', 'snapshot_id': 3, 'rows': 2, "
+        "'bytes_read': 1000, 'peak_memory_bytes': peak})\n"
+    )
+    resources = outcome.resources
+    assert resources.bytes_read == 1000
+    assert resources.cpu_seconds is not None and resources.cpu_seconds >= 0
+    assert resources.peak_memory_bytes is not None
+    assert 0 < resources.peak_memory_bytes < len(held)
+
+
+def test_a_record_without_figures_leaves_them_unknown_but_for_the_processor_time(
+    harness: Harness,
+) -> None:
+    outcome = harness.run("write({'status': 'succeeded', 'snapshot_id': 3, 'rows': 2})\n")
+    assert outcome == RunOutcome(succeeded=True, snapshot_id=3, rows=2)
+    assert outcome.resources.peak_memory_bytes is None
+    assert outcome.resources.bytes_read is None
+    assert outcome.resources.cpu_seconds is not None
+
+
+@pytest.mark.parametrize("value", [-1, 2**63, True, "7", 1.5, None, [1]])
+def test_a_figure_the_record_cannot_have_is_dropped_and_the_record_stands(
+    tmp_path: Path, value: object
+) -> None:
+    path = tmp_path / "result.json"
+    path.write_text(
+        json.dumps(
+            {
+                "status": "succeeded",
+                "snapshot_id": 1,
+                "rows": 1,
+                "bytes_read": value,
+                "peak_memory_bytes": value,
+            }
+        )
+    )
+    record = runners_module._read_record(path, "table")
+    assert record == {"status": "succeeded", "snapshot_id": 1, "rows": 1}
+
+
+def test_valid_figures_stay_in_the_record(tmp_path: Path) -> None:
+    path = tmp_path / "result.json"
+    path.write_text(
+        json.dumps({"status": "failed", "message": "x", "bytes_read": 0, "peak_memory_bytes": 5})
+    )
+    assert runners_module._read_record(path, "table") == {
+        "status": "failed",
+        "message": "x",
+        "bytes_read": 0,
+        "peak_memory_bytes": 5,
+    }
+
+
+def test_a_failed_record_gives_the_bytes_read_before_the_failure(harness: Harness) -> None:
+    outcome = harness.run(
+        "write({'status': 'failed', 'message': 'boom', 'bytes_read': 42})\nsys.exit(1)\n"
+    )
+    assert outcome.succeeded is False
+    assert outcome.resources.bytes_read == 42
+
+
+def test_a_timed_out_task_has_processor_time_and_nothing_it_did_not_report(
+    harness: Harness,
+) -> None:
+    outcome = harness.run("time.sleep(60)\n", timeout=0.3)
+    assert outcome.timed_out is True
+    assert outcome.resources.cpu_seconds is not None
+    assert outcome.resources.bytes_read is None
+    assert outcome.resources.peak_memory_bytes is None
+
+
+@pytest.mark.skipif(not _LINUX, reason="the peak comes from /proc")
+def test_a_task_the_watchdog_killed_has_the_last_size_it_measured(harness: Harness) -> None:
+    seen = threading.Event()
+
+    def sink(data: bytes) -> None:
+        harness.log.append(data)
+        if b"working" in data:
+            seen.set()
+
+    def watchdog() -> None:
+        assert seen.wait(20)
+        (handle,) = harness.registry.running()
+        handle.note_resident(123456)
+        handle.kill_for_memory("ended for memory")
+
+    harness.sink = sink
+    threading.Thread(target=watchdog, daemon=True).start()
+    outcome = harness.run("print('working', flush=True)\ntime.sleep(60)\n")
+    assert outcome.failure_code is FailureCode.MEMORY
+    assert outcome.resources.peak_memory_bytes == 123456
+    assert outcome.resources.bytes_read is None
+    assert outcome.resources.cpu_seconds is not None
+
+
+def test_reap_gives_the_exit_status_and_the_usage() -> None:
+    process = subprocess.Popen(
+        [sys.executable, "-c", "raise SystemExit(3)"], start_new_session=True
+    )
+    handle = RunningTask(process, StopSignal(), "a.b", None)
+    assert handle.reap() == 3
+    assert handle.usage is not None
+    assert process.returncode == 3
+
+
+def test_reap_gives_a_negative_status_for_a_signal() -> None:
+    process = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(60)"], start_new_session=True
+    )
+    handle = RunningTask(process, StopSignal(), "a.b", None)
+    os.killpg(process.pid, signal.SIGKILL)
+    assert handle.reap() == -signal.SIGKILL
+
+
+def test_reap_of_a_process_somebody_reaped_gives_its_status_and_no_figures() -> None:
+    process = subprocess.Popen([sys.executable, "-c", "pass"], start_new_session=True)
+    handle = RunningTask(process, StopSignal(), "a.b", None)
+    process.wait()
+    assert handle.reap() == 0
+    assert handle.usage is None
+
+
+def test_reap_after_another_reap_does_not_reap_twice() -> None:
+    process = subprocess.Popen([sys.executable, "-c", "pass"], start_new_session=True)
+    handle = RunningTask(process, StopSignal(), "a.b", None)
+    assert handle.reap() == 0
+    first = handle.usage
+    assert handle.reap() == 0
+    assert handle.usage is first

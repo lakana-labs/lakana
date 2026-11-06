@@ -326,8 +326,14 @@ same name, and the environment with `--env`. `--output json` prints every figure
 A `—`, or a missing part, means nobody measured it. Figures are recorded only for attempts that
 ran after the upgrade that brought them, so older attempts show `—`. A task in a container on a
 host whose control groups the launcher cannot read has no memory figure, and a Python task that
-was killed has no count of bytes read. A task the project declares that has not run yet has no attempts: the command says so and
-suggests starting the job. The command answers 404 only for a job or task name the project does
+was killed has no count of bytes read.
+
+For a Python task, `read` counts what it took in through `lakana`: the files, REST pages and
+database results of `lakana.ingest` and the tables it reads with the SDK. A task that reads with
+its own library (its own HTTP client, `pandas.read_csv` on a path) shows no bytes read, and `0 B`
+means a Lakana reader ran and found nothing. Its memory is the task process's own peak on Linux;
+on macOS a Python task shows no memory figure. A task the project declares that has not run yet
+has no attempts: the command says so and suggests starting the job. The command answers 404 only for a job or task name the project does
 not declare and no run has attempted: check both names (`lakana job list` shows the jobs).
 
 Past the newest `--last` attempts, the command prints a `--cursor` that continues after them;

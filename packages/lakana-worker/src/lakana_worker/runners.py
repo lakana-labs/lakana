@@ -23,6 +23,7 @@ caller checks, never a fact.
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import enum
 import errno
 import hashlib
@@ -31,10 +32,12 @@ import json
 import math
 import os
 import re
+import resource
 import selectors
 import signal
 import stat
 import subprocess  # nosec B404 -- starts the task's own interpreter, fixed argv, no shell
+import sys
 import tarfile
 import threading
 import time
@@ -47,6 +50,7 @@ from typing import Protocol
 
 from lakana_core.projects.history_columns import HistorySpec
 from lakana_core.runs.failures import FailureCode
+from lakana_core.runs.resources import AttemptResources, valid_count
 from lakana_worker.git import HFS_IGNORABLE, fold_name
 from lakana_worker.launcher.requests import EGRESS_MISSING, EGRESS_TOKEN_TOO_LONG, allowed_roots
 from lakana_worker.launcher_client import (
@@ -64,6 +68,7 @@ from lakana_worker.processes import (
     remove_private_tree,
     signal_group,
 )
+from lakana_worker.resources import from_rusage, peak_memory
 from lakana_worker.trust import install_trust
 
 MAX_ERROR_MESSAGE_CHARS = 2000
@@ -331,6 +336,9 @@ class RunOutcome:
         `error_type` is never consulted.
     failure_code
         Why the process failed; `None` for a success. Every failure sets one.
+    resources
+        The process's peak memory, processor time and bytes read; unknown figures are `None`. Not
+        part of a comparison: two outcomes of the same kind are equal whatever they measured.
     """
 
     succeeded: bool
@@ -343,6 +351,7 @@ class RunOutcome:
     retryable: bool = True
     conflict: bool = False
     failure_code: FailureCode | None = None
+    resources: AttemptResources = field(default_factory=AttemptResources, compare=False)
 
 
 class Runner(Protocol):
@@ -472,6 +481,39 @@ def _is_count(value: object) -> bool:
 
 
 def _read_record(path: Path, expected_output: str) -> dict[str, object] | None:
+    """Read the harness's result record as untrusted input, with its figures checked.
+
+    The task reports its own ``bytes_read`` and ``peak_memory_bytes``; user code can write any
+    value there, so each is kept only if it is a non-negative integer below 2**63
+    (`valid_count`) and is dropped from the record otherwise. The rest of the record is judged
+    by `_validated_record`.
+
+    Parameters
+    ----------
+    path
+        The result file.
+    expected_output
+        What the task produces, ``table`` or ``artifact``.
+
+    Returns
+    -------
+    dict or None
+        The record without a figure that is not a count, or `None` as `_validated_record` says.
+    """
+    record = _validated_record(path, expected_output)
+    if record is None:
+        return None
+    for key in _FIGURE_KEYS:
+        if key in record and valid_count(record[key]) is None:
+            del record[key]
+    return record
+
+
+_FIGURE_KEYS = ("bytes_read", "peak_memory_bytes")
+"""What a task process reports about itself in its result record."""
+
+
+def _validated_record(path: Path, expected_output: str) -> dict[str, object] | None:
     """Read the harness's result record as untrusted input.
 
     Parameters
@@ -917,6 +959,10 @@ class RunningTask:
         self.task_run_id = task_run_id
         self.detail: str | None = None
         """Why the watchdog ended the process; `None` when it did not."""
+        self.usage: resource.struct_rusage | None = None
+        """The leader's resource usage from ``wait4``, set by `reap`; `None` if it was not ours."""
+        self.watched: int | None = None
+        """The last resident size the memory watchdog measured, for a task it killed."""
 
     @property
     def pid(self) -> int:
@@ -955,8 +1001,22 @@ class RunningTask:
             self._stop.set(StopReason.MEMORY)
             return True
 
+    def note_resident(self, size: int) -> None:
+        """Keep the size the memory watchdog measured, for a task it is about to kill.
+
+        Parameters
+        ----------
+        size
+            The resident bytes of the task's process tree.
+        """
+        self.watched = size
+
     def reap(self) -> int:
         """Wait for the leader to end and reap it, under the lock the kill takes.
+
+        The leader is reaped with ``wait4`` so that its resource usage (`usage`) comes with its
+        status. A leader somebody else already reaped has its status from the process object and
+        no usage; a second call changes nothing.
 
         Returns
         -------
@@ -966,9 +1026,46 @@ class RunningTask:
         with contextlib.suppress(ChildProcessError):
             os.waitid(os.P_PID, self._process.pid, os.WEXITED | os.WNOWAIT)
         with self._lock:
-            code = self._process.wait()
-            self._reaped = True
-        return code
+            if not self._reaped:
+                try:
+                    _, status, self.usage = os.wait4(self._process.pid, 0)
+                except ChildProcessError:  # reaped elsewhere: no figures
+                    code = self._process.wait()
+                else:
+                    code = os.waitstatus_to_exitcode(status)
+                    self._process.returncode = code
+                self._reaped = True
+            return self._process.returncode
+
+
+def task_resources(running: RunningTask, record: dict[str, object] | None) -> AttemptResources:
+    """Make the figures of a Python task process that has been reaped.
+
+    Processor time comes from ``wait4``. Peak memory is what the task reported about itself in its
+    record (its own ``VmHWM``: the kernel's ``ru_maxrss`` of a child includes the worker's own
+    high-water mark), else the memory watchdog's last reading of a task it killed, else unknown.
+    Bytes read is what the task's readers counted, if it got to say.
+
+    Parameters
+    ----------
+    running
+        The reaped task.
+    record
+        The validated result record, or `None`.
+
+    Returns
+    -------
+    AttemptResources
+        The figures; any may be `None`.
+    """
+    told = record or {}
+    measured = from_rusage(running.usage) if running.usage is not None else AttemptResources()
+    peak = peak_memory(
+        sys.platform,
+        reported=valid_count(told.get("peak_memory_bytes")),
+        watched=running.watched,
+    )
+    return AttemptResources(peak, measured.cpu_seconds, valid_count(told.get("bytes_read")))
 
 
 class TaskRegistry:
@@ -1230,15 +1327,18 @@ class LocalProcessRunner:
                 sink.close()
             except Exception:  # as above
                 sink_failed = True
+        record = _read_record(result_path, task.output)
+        resources = task_resources(running, record)
         if supervise_error is not None:
             return RunOutcome(
                 succeeded=False,
                 error_message=f"could not supervise the task process: {supervise_error}",
                 killed=True,
                 failure_code=FailureCode.INTERNAL,
+                resources=resources,
             )
         outcome = _outcome_from(
-            _read_record(result_path, task.output),
+            record,
             code=code,
             stopped=stopped or sink_killed or running.detail is not None,
             timed_out=timed_out,
@@ -1254,8 +1354,9 @@ class LocalProcessRunner:
                 killed=sink_killed,
                 retryable=False,
                 failure_code=FailureCode.INTERNAL,
+                resources=resources,
             )
-        return outcome
+        return dataclasses.replace(outcome, resources=resources)
 
 
 _MAX_KILL_GRACE_SECONDS = 300

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -102,3 +103,14 @@ def test_a_collector_is_fresh_in_a_nested_block() -> None:
             inner.add(AttemptResources(1, 1.0, 1))
         assert current_collector() is outer
         assert not outer.resources.known
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="settles whether macOS inherits ru_maxrss")
+def test_a_macos_child_of_a_big_parent_reports_a_peak_below_the_parents_buffer() -> None:
+    """If this fails, macOS folds the parent's mark into the child's, so its peak stays unknown."""
+    held = bytearray(64 * 2**20)
+    for offset in range(0, len(held), 4096):
+        held[offset] = 1
+    child = subprocess.Popen([sys.executable, "-I", "-c", "pass"])  # nosec B603 -- fixed argv
+    _, _, usage = os.wait4(child.pid, 0)
+    assert 0 < usage.ru_maxrss < len(held)  # bytes on macOS

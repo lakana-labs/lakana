@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 import threading
 import uuid
 from pathlib import Path
@@ -27,6 +28,7 @@ from lakana_core.models import (
 from lakana_core.runs.resources import AttemptResources
 from lakana_core.storage.resolver import StorageResolver
 from lakana_worker import pipeline
+from lakana_worker.executor import QueryCancelRequested
 from lakana_worker.pipeline import run_one
 from lakana_worker.resources import current_collector
 
@@ -111,7 +113,11 @@ def _figures(session: Session, run_id: uuid.UUID) -> AttemptResources:
     return AttemptResources(run.peak_memory_bytes, run.cpu_seconds, run.bytes_read)
 
 
-def _measuring(monkeypatch: pytest.MonkeyPatch, figures: AttemptResources) -> list[object]:
+def _measuring(
+    monkeypatch: pytest.MonkeyPatch,
+    figures: AttemptResources,
+    failure: Exception | None = None,
+) -> list[object]:
     """Make `execute_query` stand in for a child that measured ``figures``.
 
     Parameters
@@ -120,6 +126,8 @@ def _measuring(monkeypatch: pytest.MonkeyPatch, figures: AttemptResources) -> li
         Patches the executor.
     figures
         What the pretend child adds to the current collector.
+    failure
+        What it then raises; bad SQL by default.
 
     Returns
     -------
@@ -140,14 +148,14 @@ def _measuring(monkeypatch: pytest.MonkeyPatch, figures: AttemptResources) -> li
 
         Raises
         ------
-        ValueError
-            Always, to end the run as failed.
+        Exception
+            Always, to end the run: as failed, or as the `failure` given.
         """
         collector = current_collector()
         seen.append(collector)
         assert collector is not None
         collector.add(figures)
-        raise ValueError("bad sql")
+        raise failure or ValueError("bad sql")
 
     monkeypatch.setattr(pipeline, "execute_query", execute)
     return seen
@@ -162,6 +170,20 @@ def test_a_run_that_failed_after_its_child_started_keeps_what_was_measured(
     assert seen
     assert _figures(file_session, run_id) == AttemptResources(4096, 0.5, None)
     assert current_collector() is None
+
+
+def test_a_cancelled_run_keeps_what_was_measured_as_a_failed_one_does(
+    file_session: Session, principal: PrincipalRef, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _measuring(
+        monkeypatch, AttemptResources(2048, 0.25, 9), failure=QueryCancelRequested("cancelled")
+    )
+    run_id = _queued(file_session, principal, "SELECT 1")
+    run_one(file_session, run_id, AllowAllAuthorization())
+    file_session.expire_all()
+    run = file_session.get(QueryRun, run_id)
+    assert run is not None and run.status is QueryRunStatus.CANCELLED
+    assert _figures(file_session, run_id) == AttemptResources(2048, 0.25, 9)
 
 
 def test_a_run_that_never_started_a_child_keeps_null(
@@ -202,7 +224,9 @@ def test_a_succeeded_run_keeps_the_figures_of_its_real_child(
     assert run_one(file_session, run_id, AllowAllAuthorization()) is None
     stored = _figures(file_session, run_id)
     assert stored.cpu_seconds is not None and stored.cpu_seconds >= 0
-    assert (stored.peak_memory_bytes or 1) > 0
+    if sys.platform.startswith("linux"):
+        assert stored.peak_memory_bytes is not None and stored.peak_memory_bytes > 0
+    assert stored.bytes_read is not None and stored.bytes_read >= 0
 
 
 def test_a_sql_task_attempt_carries_the_figures_of_its_write_run(world: World) -> None:

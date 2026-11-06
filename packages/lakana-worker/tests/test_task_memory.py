@@ -661,7 +661,10 @@ def test_a_task_the_watchdog_ended_that_is_still_in_flight_is_recorded_once_as_t
 def test_the_attempt_of_a_task_the_watchdog_ended_keeps_the_size_it_was_ended_at(
     world: World,
 ) -> None:
-    """Only the ended task gets the peak; the other attempt in the same call stays `NULL`."""
+    """The ended task's attempt gets the size it was ended at; no other figure is made up.
+
+    A peak recorded for another task run (one that is not ended here) changes nothing.
+    """
     from lakana_worker.activity import Activity, TaskClaim
 
     _start(world)

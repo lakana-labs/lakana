@@ -53,6 +53,9 @@ def reset() -> None:
         _total = None
 
 
+# jscpd:ignore-start
+# A copy of `lakana_worker.own_peak.read_peak_bytes`: this runs in the task's own environment, which
+# has the SDK and nothing of the worker, and the worker's query child may import no SDK either.
 def read_peak_bytes(status: Path) -> int | None:
     """Read the high-water mark of resident memory from a ``/proc/<pid>/status`` file.
 
@@ -71,6 +74,9 @@ def read_peak_bytes(status: Path) -> int | None:
     except (OSError, ValueError):
         return None
     return None if match is None else int(match.group(1)) * 1024
+
+
+# jscpd:ignore-end
 
 
 def record_fields() -> dict[str, int]:

@@ -21,6 +21,7 @@ from lakana_core.kept_mark import KeptSeen
 from lakana_core.models import QueryErrorCause, WriteMode
 from lakana_core.runs.failures import FailureCode
 from lakana_core.runs.lockdown import WriteFenceRefused
+from lakana_core.runs.resources import AttemptResources
 from lakana_core.runs.tasks import FailureKind, Written
 from lakana_core.sql_syntax import SQL_SYNTAX_ERRORS
 from lakana_worker.executor import QueryCancelled, QueryTimeout, TransientQueryError
@@ -303,6 +304,10 @@ class TaskOutcome:
         (`CheckMessageState.to_json`); `None` for a message the check phase did not build. It is
         stored with the message, so that the message can be built again for a reader from whom a
         result is withheld.
+    resources
+        The attempt's peak memory, processor time and bytes read, when the attempt measured them
+        itself (a Python task's process). `None` for an attempt that did not: a SQL task's figures
+        are those of its write run, which `record_attempt` then reads.
     """
 
     kind: FailureKind | None
@@ -322,3 +327,4 @@ class TaskOutcome:
     failure_code: FailureCode | None = None
     wrote_nothing: bool = False
     check_state: dict[str, Any] | None = None
+    resources: AttemptResources | None = None
