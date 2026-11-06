@@ -1315,6 +1315,38 @@ def test_a_translated_name_or_definition_finds_the_term_in_the_reader_language(
     assert search.search(world.bob, "dev", "fortschritt").results == []
 
 
+def test_a_translated_name_the_term_view_does_not_show_does_not_match(world: World) -> None:
+    """#445: with languages de, fr the term shows the main-language name (de has a definition).
+
+    The fr name is in a language the view does not show it in, so it finds neither the term nor
+    the tables and columns the term links; in fr alone it is the shown name and matches.
+    """
+    term = _linked("Net revenue", [], {"silver.orders": ["status"]})
+    term["translations"] = {
+        "de": {"definition": "Umsatz nach Abzug."},
+        "fr": {"name": "Chiffre net"},
+    }
+    _deploy(world, {"nrv": term})
+    search = CatalogSearch(world.session, GrantAuthorization(world.session))
+    terms = GlossaryService(world.session, GrantAuthorization(world.session))
+    shown = terms.get(world.bob, "dev", "nrv", languages=("de", "fr"))
+    assert (shown.name, shown.language) == ("Net revenue", "de")
+    assert search.search(world.bob, "dev", "chiffre", languages=("de", "fr")).results == []
+    (definition,) = search.search(
+        world.bob, "dev", "umsatz", kind=SearchKind.TERM, languages=("de", "fr")
+    ).results
+    assert (definition.matched, definition.language) == ("definition", "de")
+    (name,) = search.search(
+        world.bob, "dev", "chiffre", kind=SearchKind.TERM, languages=("fr",)
+    ).results
+    assert (name.matched, name.language) == ("name", "fr")
+    by_name = search.search(world.bob, "dev", "chiffre", languages=("fr",)).results
+    assert {(h.kind, h.matched) for h in by_name} == {
+        ("term", "name"),
+        ("column", "term"),
+    }
+
+
 def test_without_read_environment_there_are_no_terms_and_no_term_matches(world: World) -> None:
     _glossary(world)
     carol = _person(world.session, "carol")
