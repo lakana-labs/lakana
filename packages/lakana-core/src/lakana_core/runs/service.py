@@ -286,6 +286,28 @@ class TaskAttemptView:
 
 
 @dataclass(frozen=True)
+class AttemptResourcesView:
+    """What one attempt used, as the run detail shows it.
+
+    Parameters
+    ----------
+    attempt
+        Attempt number.
+    peak_memory_bytes
+        Peak resident memory in bytes; `None` if it was not measured.
+    cpu_seconds
+        Processor time in seconds; `None` if it was not measured.
+    bytes_read
+        Bytes read from tables, files and sources; `None` if they were not counted.
+    """
+
+    attempt: int
+    peak_memory_bytes: int | None = None
+    cpu_seconds: float | None = None
+    bytes_read: int | None = None
+
+
+@dataclass(frozen=True)
 class TaskRunView:
     """One task run, as the API shows it.
 
@@ -349,6 +371,8 @@ class TaskRunView:
         measures, checks, glossary terms, assets), or that it could not be checked; only what
         the reader may see: `READ_ENVIRONMENT` and `READ_TABLE` on every table a use names
         (`lakana_core.catalog.retype_impact.impact_for_reader`, #446).
+    attempts
+        What each attempt used, oldest first.
     """
 
     asset: str
@@ -372,6 +396,7 @@ class TaskRunView:
     schema_note: str | None = None
     policy_warnings: tuple[PolicyWarningView, ...] = ()
     impact_warnings: tuple[ImpactWarningView, ...] = ()
+    attempts: tuple[AttemptResourcesView, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -1079,6 +1104,22 @@ class RunService:
                     .order_by(TaskAttempt.attempt)
                 )
             }
+            figures: dict[uuid.UUID, list[AttemptResourcesView]] = {}
+            for attempt_row in self._session.execute(
+                select(
+                    TaskAttempt.task_run_id,
+                    TaskAttempt.attempt,
+                    TaskAttempt.peak_memory_bytes,
+                    TaskAttempt.cpu_seconds,
+                    TaskAttempt.bytes_read,
+                )
+                .join(TaskRun, TaskRun.id == TaskAttempt.task_run_id)
+                .where(TaskRun.run_id == run.id)
+                .order_by(TaskAttempt.attempt)
+            ):
+                figures.setdefault(attempt_row[0], []).append(
+                    AttemptResourcesView(*attempt_row[1:])
+                )
             reasons = self._waiting(run, [task for task, _ in rows], reader, env.name)
             built = set(manifest_assets(version.manifest_json)) if version is not None else set()
             run_as = self._name(run.run_as_principal_id)
@@ -1147,6 +1188,7 @@ class RunService:
                     schema_note=schema_changes[task.id][0],
                     policy_warnings=schema_changes[task.id][1],
                     impact_warnings=impacts.get(task.id, ()),
+                    attempts=tuple(figures.get(task.id, ())),
                 )
                 for task, rows_written in rows
             )

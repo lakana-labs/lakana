@@ -569,6 +569,12 @@ class QueryStatusOut(BaseModel):
         or `internal`.
         `null` for a run that did not end that way and for a failure recorded without one
         (a run from before the field existed).
+    peak_memory_bytes
+        Highest resident memory of the query's process in bytes; `null` if not measured.
+    cpu_seconds
+        Processor time the query used, in seconds; `null` if not measured.
+    bytes_read
+        Bytes DuckDB read (a query) or the SDK readers read (a Python task); `null` if unknown.
     waiting_for
         Why a `QUEUED` query has not started, or `null` for any other status: a stable `code`
         (`no_worker`, `no_worker_of_kind`, `user_limit`, `lock_timeout`, `starting` or
@@ -597,6 +603,27 @@ class QueryStatusOut(BaseModel):
     schema_diff: dict[str, list[dict[str, str]]] | None = None
     maintenance: dict | None = None
     error_cause: str | None = None
+    peak_memory_bytes: int | None = Field(
+        default=None,
+        description=(
+            "Highest resident memory of the attempt's process in bytes; null if not measured "
+            "(for a container task: the container's cgroup peak)."
+        ),
+    )
+    cpu_seconds: float | None = Field(
+        default=None,
+        description=(
+            "Processor time (user plus system) the attempt used, in seconds; null if not measured."
+        ),
+    )
+    bytes_read: int | None = Field(
+        default=None,
+        description=(
+            "Bytes DuckDB read for a query (its `io.total_bytes_read` metric, null when DuckDB "
+            "answered from file metadata); for a Python task the bytes the SDK readers "
+            "downloaded or read; null if unknown."
+        ),
+    )
     waiting_for: dict[str, Any] | None = Field(
         default=None,
         description=(
@@ -3511,6 +3538,45 @@ class ImpactWarningOut(BaseModel):
     message: str
 
 
+class TaskAttemptResourcesOut(BaseModel):
+    """What one attempt of a task used, in the run detail.
+
+    Parameters
+    ----------
+    attempt
+        Attempt number.
+    peak_memory_bytes
+        Highest resident memory of the attempt's process in bytes; `null` if not measured.
+    cpu_seconds
+        Processor time the attempt used, in seconds; `null` if not measured.
+    bytes_read
+        Bytes DuckDB read (a query) or the SDK readers read (a Python task); `null` if unknown.
+    """
+
+    attempt: int
+    peak_memory_bytes: int | None = Field(
+        default=None,
+        description=(
+            "Highest resident memory of the attempt's process in bytes; null if not measured "
+            "(for a container task: the container's cgroup peak)."
+        ),
+    )
+    cpu_seconds: float | None = Field(
+        default=None,
+        description=(
+            "Processor time (user plus system) the attempt used, in seconds; null if not measured."
+        ),
+    )
+    bytes_read: int | None = Field(
+        default=None,
+        description=(
+            "Bytes DuckDB read for a query (its `io.total_bytes_read` metric, null when DuckDB "
+            "answered from file metadata); for a Python task the bytes the SDK readers "
+            "downloaded or read; null if unknown."
+        ),
+    )
+
+
 class TaskRunOut(BaseModel):
     """One task run.
 
@@ -3588,6 +3654,9 @@ class TaskRunOut(BaseModel):
         what the caller may see: READ_ENVIRONMENT, and READ_TABLE on the retyped table and on
         every table a use names; a use the caller may not see is left out without a count. Empty
         for a task without a retyped column that others use.
+    attempts
+        What each attempt used (`TaskAttemptResourcesOut`), oldest first; empty before the first
+        attempt.
     """
 
     asset: str
@@ -3617,6 +3686,7 @@ class TaskRunOut(BaseModel):
     schema_note: str | None = None
     policy_warnings: list[PolicyWarningOut] = Field(default_factory=list)
     impact_warnings: list[ImpactWarningOut] = Field(default_factory=list)
+    attempts: list[TaskAttemptResourcesOut] = Field(default_factory=list)
 
 
 class NotificationOut(BaseModel):
@@ -3973,6 +4043,12 @@ class TaskAttemptOut(BaseModel):
     failure
         The code, cause and next step of an attempt that did not succeed (`FailureOut`);
         `null` for an attempt that succeeded or is running.
+    peak_memory_bytes
+        Highest resident memory of the attempt's process in bytes; `null` if not measured.
+    cpu_seconds
+        Processor time the attempt used, in seconds; `null` if not measured.
+    bytes_read
+        Bytes DuckDB read (a query) or the SDK readers read (a Python task); `null` if unknown.
     """
 
     attempt: int
@@ -3983,6 +4059,27 @@ class TaskAttemptOut(BaseModel):
     rows_written: int | None
     error_message: str | None
     failure: FailureOut | None = None
+    peak_memory_bytes: int | None = Field(
+        default=None,
+        description=(
+            "Highest resident memory of the attempt's process in bytes; null if not measured "
+            "(for a container task: the container's cgroup peak)."
+        ),
+    )
+    cpu_seconds: float | None = Field(
+        default=None,
+        description=(
+            "Processor time (user plus system) the attempt used, in seconds; null if not measured."
+        ),
+    )
+    bytes_read: int | None = Field(
+        default=None,
+        description=(
+            "Bytes DuckDB read for a query (its `io.total_bytes_read` metric, null when DuckDB "
+            "answered from file metadata); for a Python task the bytes the SDK readers "
+            "downloaded or read; null if unknown."
+        ),
+    )
 
 
 class TaskLogOut(BaseModel):
