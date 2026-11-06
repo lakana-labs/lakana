@@ -696,7 +696,8 @@ class GraphService:
             If the environment does not exist: `NO_ENVIRONMENT` for a caller who may read
             environments, the start's `NO_NODE` for anyone else (as search answers).
         GraphBusyError
-            If loading the graph or deciding what the reader may see ran past the time budget.
+            If loading the graph (read after its rows and after each repository's part) or
+            deciding what the reader may see ran past the time budget.
         """
         budget = _Budget(self._clock, self._budget_seconds, self._max_steps)
         environment_id = self._session.scalar(
@@ -720,6 +721,7 @@ class GraphService:
                 if sees_masks and self._fields_of is not None
                 else None
             ),
+            check=budget.check,
         )
         budget.check()
         visible = _Visibility(self._authz, p, graph)

@@ -10,6 +10,9 @@ import pyarrow as pa
 import pytest
 from core_test_helpers import _prepared_catalog, python_task_run
 from graph_test_helpers import TABLES, Grants, StarWorld, point, sales_manifest
+from pyiceberg.schema import Schema
+from pyiceberg.table.update import AddSchemaUpdate, AssertCurrentSchemaId, SetCurrentSchemaUpdate
+from pyiceberg.types import LongType, NestedField
 from sqlalchemy import select
 
 from lakana_core.auth import AllowAllAuthorization, PrincipalRef, RunContext
@@ -24,7 +27,9 @@ from lakana_core.runs.service import RunCaps, RunService
 _DIM = "gold.dim_store"
 
 
-def _retype_the_store_name(star: StarWorld, principal: PrincipalRef, tmp_path: Path) -> uuid.UUID:
+def _retype_the_store_name(
+    star: StarWorld, principal: PrincipalRef, tmp_path: Path, *, commit: bool = False
+) -> uuid.UUID:
     """Let `sales` read `store_name`, then retype it (string to long) in a run of `stores`.
 
     `gold.fact_sales` lists its columns and traces `net_amount` to `gold.dim_store.store_name`,
@@ -38,6 +43,9 @@ def _retype_the_store_name(star: StarWorld, principal: PrincipalRef, tmp_path: P
         The run principal.
     tmp_path
         The storage root.
+    commit
+        Retype through an Iceberg commit (`commit_table`, as a Python task's PyIceberg does)
+        rather than a write of the catalog's own (`write_batches`).
 
     Returns
     -------
@@ -58,6 +66,22 @@ def _retype_the_store_name(star: StarWorld, principal: PrincipalRef, tmp_path: P
     run.repository_id = star.repos["stores"].id
     star.session.commit()
     bound = dataclasses.replace(principal, run_context=RunContext(task_run_id=task.id, claim=1))
+    if commit:
+        ref = TableRef.from_dotted("dev", _DIM)
+        metadata = catalog.load_table(principal, ref).metadata
+        retyped = NestedField(metadata.last_column_id + 1, "store_name", LongType(), required=False)
+        kept = [f for f in metadata.schema().fields if f.name != "store_name"]
+        next_id = max(s.schema_id for s in metadata.schemas) + 1
+        catalog.commit_table(
+            bound,
+            ref,
+            requirements=[AssertCurrentSchemaId(current_schema_id=metadata.current_schema_id)],
+            updates=[
+                AddSchemaUpdate(schema_=Schema(*kept, retyped, schema_id=next_id)),
+                SetCurrentSchemaUpdate(schema_id=-1),
+            ],
+        )
+        return task.run_id
     rows = pa.table(
         {"store_id": pa.array([1], pa.int64()), "store_name": pa.array([7], pa.int64())}
     )
@@ -99,10 +123,11 @@ def _warnings(
     return task.schema_note, task.impact_warnings
 
 
+@pytest.mark.parametrize("commit", [False, True], ids=["write", "iceberg_commit"])
 def test_a_retyping_run_names_what_other_repositories_use_the_column_for(
-    star: StarWorld, principal: PrincipalRef, tmp_path: Path
+    star: StarWorld, principal: PrincipalRef, tmp_path: Path, commit: bool
 ) -> None:
-    run_id = _retype_the_store_name(star, principal, tmp_path)
+    run_id = _retype_the_store_name(star, principal, tmp_path, commit=commit)
 
     note, (warning,) = _warnings(star, principal, run_id, Grants(others=True))
     assert note == COLUMNS_CHANGED_NOTE

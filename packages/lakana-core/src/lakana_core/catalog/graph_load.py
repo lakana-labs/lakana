@@ -853,6 +853,7 @@ def load_graph(
     *,
     part: Callable[[uuid.UUID, str, object], ManifestPart] | None = None,
     fields_of: Callable[[uuid.UUID], Sequence[NestedField] | None] | None = None,
+    check: Callable[[], None] | None = None,
 ) -> EnvironmentGraph:
     """Load an environment's graph.
 
@@ -873,6 +874,9 @@ def load_graph(
         current name, resolved through the same field-id binding a query uses
         (`policy.shown.shown_policies`); with no reader, an unbound mask, or a column that is
         gone, it stays linked to the name it was made with.
+    check
+        Called after the database rows are read and after each repository's part, so a time
+        budget can end the load between those steps (it raises); `None` checks nothing.
 
     Returns
     -------
@@ -981,6 +985,9 @@ def load_graph(
             )
         )
     read = part or (lambda _version, repository, manifest: manifest_part(repository, manifest))
+    looked = check or (lambda: None)
+    looked()
     for version_id, repository, manifest in current_manifests(session, environment_id):
         graph.add_part(read(version_id, repository, manifest))
+        looked()
     return graph

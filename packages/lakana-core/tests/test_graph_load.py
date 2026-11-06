@@ -28,6 +28,7 @@ from lakana_core.catalog.graph_load import (
     CheckRecord,
     EnvironmentGraph,
     JobRecord,
+    ManifestPart,
     load_graph,
     manifest_part,
 )
@@ -42,6 +43,7 @@ from lakana_core.catalog.graph_model import (
     table_node,
 )
 from lakana_core.catalog.graph_service import GraphService
+from lakana_core.errors import GraphBusyError
 from lakana_core.models import (
     ColumnMask,
     GlossaryTerm,
@@ -611,3 +613,39 @@ def test_a_failing_mask_field_reader_keeps_the_stored_names(
     )
     page = service.neighbours(principal, "dev", mask)
     assert column_node(dim, "store_name") in {n.id for n in page.nodes}
+
+
+def test_the_graph_load_stops_at_the_budget_between_repositories(
+    star: StarWorld, principal: PrincipalRef
+) -> None:
+    """Batch B review M1: the budget is read during the load, after each repository's part."""
+    now = [0.0]
+    read: list[str] = []
+
+    def slow(version: uuid.UUID, repository: str, manifest: object) -> ManifestPart:
+        """Take three seconds per repository, past a 2 s budget after the first.
+
+        Parameters
+        ----------
+        version
+            The project version.
+        repository
+            The repository.
+        manifest
+            Its manifest.
+
+        Returns
+        -------
+        ManifestPart
+            Its part.
+        """
+        read.append(repository)
+        now[0] += 3.0
+        return manifest_part(repository, manifest)
+
+    service = GraphService(
+        star.session, Grants(), "en", clock=lambda: now[0], budget_seconds=2.0, part=slow
+    )
+    with pytest.raises(GraphBusyError):
+        service.breakage(principal, "dev", ["gold.dim_store"])
+    assert len(read) == 1  # stopped after the first part, not after loading both

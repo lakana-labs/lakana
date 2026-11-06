@@ -236,8 +236,8 @@ repositories that use it, each with its repository. The how-to shows one:
   declared assets cover every table it names. See it as a person with
   `lakana deploys get DEPLOY_ID --env ENV`.
 - At most 20 removed tables and columns are checked; one more line says how many were not. The
-  check has a budget of 2 seconds and 200,000 edges. The time is read between its steps (after
-  loading the graph, after deciding what the deployer may see, after each removed table or column,
+  check has a budget of 2 seconds and 200,000 edges. The time is read between its steps (while
+  loading the graph, after each repository's project, after deciding what the deployer may see, after each removed table or column,
   and after building the lines), so a check can run past 2 seconds by the length of one step. A
   check past either budget ends, the deploy goes on, and one line says Lakana could not check in
   time.

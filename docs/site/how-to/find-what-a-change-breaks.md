@@ -104,7 +104,9 @@ shown it. A CI token is not shown it either, so it stays out of CI logs: look th
 The warning also names the assets of other repositories that read what the deploy removes: every
 asset that reads a table the deploy stops building, and, for a removed column, every asset that
 lists its columns (a `SELECT` with named columns) and takes one of them from it, with the measures
-and glossary terms on the columns it takes. Their next run fails, so their owners need to know.
+and glossary terms on the columns it takes. A table the deploy stops building stays, so its readers
+keep running on data that no longer changes; a reader of a removed column fails at its next run.
+Either way their owners need to know.
 
 The warning covers removed tables and columns only. Lakana cannot tell from a project that a
 column's type changed, because types come from the first run; the run that changes it warns
@@ -131,9 +133,12 @@ aggregation or a reference.
 - The SDK has the same in `RunTask.impact_warnings`, the REST API in `impact_warnings` on each task
   of `GET /api/v1/environments/{env}/runs/{id}`: per column its table, its name, the uses (kind,
   name, repository) and the paragraph.
-- Lakana gives itself 2 seconds for this. When it cannot finish in time, or the graph cannot be
-  read, the run still writes, and the paragraph says that Lakana could not check in time and names
-  the `lakana graph impact` command to run yourself.
+- Lakana gives itself 2 seconds for this. The time is read between the steps of the check (while
+  it reads the environment's projects, one repository at a time, after deciding what can be seen,
+  after each column and after building the paragraphs), so it can run past 2 seconds by the length
+  of one step. When it cannot finish in time, or the graph cannot be read, the run still writes,
+  and the paragraph says that Lakana could not check in time and names the `lakana graph impact`
+  command to run yourself.
 - A write outside a run (`lakana query --evolve-schema`, an upload) is not checked: it has no run to
   show it on.
 
